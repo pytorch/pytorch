@@ -8,7 +8,7 @@ import shutil
 import tempfile
 import textwrap
 import time
-from typing import cast, Any, Optional
+from typing import cast, Any
 from collections.abc import Iterable, Iterator
 import uuid
 
@@ -34,10 +34,10 @@ class TaskSpec:
     stmt: str
     setup: str
     global_setup: str = ""
-    label: Optional[str] = None
-    sub_label: Optional[str] = None
-    description: Optional[str] = None
-    env: Optional[str] = None
+    label: str | None = None
+    sub_label: str | None = None
+    description: str | None = None
+    env: str | None = None
     num_threads: int = 1
 
     @property
@@ -82,7 +82,7 @@ class Measurement:
     number_per_run: int
     raw_times: list[float]
     task_spec: TaskSpec
-    metadata: Optional[dict[Any, Any]] = None  # Reserved for user payloads.
+    metadata: dict[Any, Any] | None = None  # Reserved for user payloads.
 
     def __post_init__(self) -> None:
         self._sorted_times: tuple[float, ...] = ()
@@ -297,7 +297,7 @@ def set_torch_threads(n: int) -> Iterator[None]:
         torch.set_num_threads(prior_num_threads)
 
 
-def _make_temp_dir(prefix: Optional[str] = None, gc_dev_shm: bool = False) -> str:
+def _make_temp_dir(prefix: str | None = None, gc_dev_shm: bool = False) -> str:
     """Create a temporary directory. The caller is responsible for cleanup.
 
     This function is conceptually similar to `tempfile.mkdtemp`, but with

@@ -364,9 +364,9 @@ void f8f8bf16_grouped_gemm_impl_sm90(
   //       reinterpret_cast<ProblemShape::UnderlyingProblemShape*>(
   //           stride_output_h + group_count);
 
-  //   std::cout << "PTRS " << mat_a.data_ptr() << " " << mat_b.data_ptr() << "
+  //   std::cout << "PTRS " << mat_a.data_ptr() << ' ' << mat_b.data_ptr() << "
   //   "
-  //             << out.data_ptr() << " " << scale_a.data_ptr() << " "
+  //             << out.data_ptr() << ' ' << scale_a.data_ptr() << ' '
   //             << scale_b.data_ptr() << "\n";
   //   for (int i = 0; i < group_count; i++) {
   //     std::cout << "A " << (void*)inputA_ptrs_h[i] << "\n";

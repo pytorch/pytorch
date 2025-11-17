@@ -264,13 +264,14 @@ def _run_pre_dispatch_passes(
                 f"[Pre grad(predispatch IR)] Apply {pass_name} pass",
             )
 
-    # Remove noops at the end, which may be generated other passes.
-    pass_execution_and_save(
-        remove_noop_pass,
-        gm,
-        example_inputs,
-        "[Pre grad(predispatch IR)]Apply remove_noop pass",
-    )
+    if "remove_noop" not in remove_passes_list:
+        # Remove noops at the end, which may be generated other passes.
+        pass_execution_and_save(
+            remove_noop_pass,
+            gm,
+            example_inputs,
+            "[Pre grad(predispatch IR)]Apply remove_noop pass",
+        )
     shape_prop(gm)
 
 
