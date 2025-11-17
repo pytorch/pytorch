@@ -1582,6 +1582,19 @@ def relu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha):
     match.replace_by_example(replacement, [inp, mat1, mat2, beta, alpha])
 
 
+@register_graph_pattern(
+    CallFunction(aten.gelu, Arg(), approximate=KeywordArg("approximate")),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[2],
+)
+def gelu_decomposition(match: Match, inp, *, approximate):
+    # NOTE: get_decompositions is experimental
+    from torch._decomp import get_decompositions
+    gelu_decomp = get_decompositions([aten.gelu])[aten.gelu.default]
+
+    match.replace_by_example(gelu_decomp, [inp, approximate])
+
+
 def is_valid_addmm_fusion(match):
     mat1, mat2 = match.args
     inp = match.kwargs["inp"]
