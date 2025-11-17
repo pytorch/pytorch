@@ -1,6 +1,14 @@
 # mypy: allow-untyped-defs
+import sys
+
+import torch._C
 import torch.cuda
 
+from torch.backends import (
+    _get_fp32_precision_getter,
+    _set_fp32_precision_setter,
+    PropModule,
+)
 
 try:
     from torch._C import _cudnn
@@ -9,8 +17,7 @@ except ImportError:
     # so it's safe to not emit any checks here.
     _cudnn = None  # type: ignore[assignment]
 
-
-def get_cudnn_mode(mode):
+def _get_cudnn_mode(mode):
     if mode == "RNN_RELU":
         # pyrefly: ignore [missing-attribute]
         return int(_cudnn.RNNMode.rnn_relu)
@@ -46,24 +53,53 @@ class Unserializable:
         self.inner = None
 
 
-def init_dropout_state(dropout, train, dropout_seed, dropout_state):
-    dropout_desc_name = "desc_" + str(torch.cuda.current_device())
-    dropout_p = dropout if train else 0
-    if (dropout_desc_name not in dropout_state) or (
-        dropout_state[dropout_desc_name].get() is None
-    ):
-        if dropout_p == 0:
-            dropout_state[dropout_desc_name] = Unserializable(None)
-        else:
-            dropout_state[dropout_desc_name] = Unserializable(
-                torch._cudnn_init_dropout_state(  # type: ignore[call-arg]
-                    dropout_p,
-                    train,
-                    dropout_seed,
-                    # pyrefly: ignore [unexpected-keyword]
-                    self_ty=torch.uint8,
-                    device=torch.device("cuda"),
+# we would like to use ContextProp from backends here but the
+# frozen flags appears to be overzealous
+class ContextProp:
+    def __init__(self, getter, setter):
+        self.getter = getter
+        self.setter = setter
+
+    def __get__(self, obj, objtype):
+        return self.getter()
+
+    def __set__(self, obj, val):
+        self.setter(val)
+ 
+
+class CudnnRNNModule(PropModule):
+    def __init__(self, m, name):
+        super().__init__(m, name)
+        m.Unserializable = Unserializable
+        self.get_cudnn_mode = _get_cudnn_mode
+        self.m.get_cudnn_mode = _get_cudnn_mode
+
+    @staticmethod
+    def init_dropout_state(dropout, train, dropout_seed, dropout_state):
+        dropout_desc_name = "desc_" + str(torch.cuda.current_device())
+        dropout_p = dropout if train else 0
+        if (dropout_desc_name not in dropout_state) or (
+            dropout_state[dropout_desc_name].get() is None
+        ):
+            if dropout_p == 0:
+                dropout_state[dropout_desc_name] = Unserializable(None)
+            else:
+                dropout_state[dropout_desc_name] = Unserializable(
+                    torch._cudnn_init_dropout_state(  # type: ignore[call-arg]
+                        dropout_p,
+                        train,
+                        dropout_seed,
+                        # pyrefly: ignore [unexpected-keyword]
+                        self_ty=torch.uint8,
+                        device=torch.device("cuda"),
+                    )
                 )
-            )
-    dropout_ts = dropout_state[dropout_desc_name].get()
-    return dropout_ts
+        dropout_ts = dropout_state[dropout_desc_name].get()
+        return dropout_ts
+
+    fp32_precision = ContextProp(
+        _get_fp32_precision_getter("cuda", "rnn"),
+        _set_fp32_precision_setter("cuda", "rnn"),
+    )
+
+sys.modules[__name__] = CudnnRNNModule(sys.modules[__name__], __name__)
