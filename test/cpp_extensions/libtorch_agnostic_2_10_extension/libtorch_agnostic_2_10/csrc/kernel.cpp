@@ -185,10 +185,6 @@ Tensor my_empty(
   return empty(size, dtype, device, pin_memory);
 }
 
-Tensor my_flatten(Tensor t, int64_t start_dim, int64_t end_dim) {
-  return flatten(t, start_dim, end_dim);
-}
-
 Tensor my_reshape(Tensor t, torch::headeronly::HeaderOnlyArrayRef<int64_t> shape) {
   return reshape(t, shape);
 }
@@ -200,14 +196,12 @@ Tensor my_view(Tensor t, torch::headeronly::HeaderOnlyArrayRef<int64_t> size) {
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_10, m) {
   m.def(
       "my_empty(int[] size, ScalarType? dtype=None, Device? device=None, bool? pin_memory=None) -> Tensor");
-  m.def("my_flatten(Tensor t, int start_dim=0, int end_dim=-1) -> Tensor");
   m.def("my_reshape(Tensor t, int[] shape) -> Tensor");
   m.def("my_view(Tensor t, int[] size) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_10, CompositeExplicitAutograd, m) {
   m.impl("my_empty", TORCH_BOX(&my_empty));
-  m.impl("my_flatten", TORCH_BOX(&my_flatten));
   m.impl("my_reshape", TORCH_BOX(&my_reshape));
   m.impl("my_view", TORCH_BOX(&my_view));
 }
