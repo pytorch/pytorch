@@ -29,7 +29,7 @@ static ze_module_handle_t _createModule(
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclContext);
 
   const char* buildFlags = "";
-  const ze_module_format_t format = ZE_MODULE_FORMAT_IL_SPIRV;
+  const ze_module_format_t format = ZE_MODULE_FORMAT_NATIVE;
   ze_module_desc_t moduleDescription = {};
   moduleDescription.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
   moduleDescription.format = format;
