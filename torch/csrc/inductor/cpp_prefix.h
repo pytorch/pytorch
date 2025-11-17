@@ -74,6 +74,22 @@ template <typename T, int N>
 struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
 #endif
 
+template <typename T>
+struct GetScalarType {
+  using type = T;
+};
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+struct GetScalarType<at::vec::Vectorized<T>> {
+  using type = T;
+};
+template <typename T, int N>
+struct GetScalarType<at::vec::VectorizedN<T, N>> {
+  using type = T;
+};
+#endif
+
 template <typename T, uint64_t kChunkSize>
 struct CascadeSumHelper {
   // A data struct to help cascade summation:
@@ -139,7 +155,7 @@ struct WelfordHelper {
   // 1. Save the reciprocal of weights to avoid redundant divisions.
   // 2. Save the welford stack, which is used to combine welford reduction
   //    with cascade summation to improve numerical stability.
-  static std::vector<typename T::value_type> weight_recps;
+  static std::vector<typename GetScalarType<T>::type> weight_recps;
   std::vector<Welford<T>> welford_stk{};
   uint64_t depth{0}; // depth of welford_stk.
   uint64_t num_chunks{0}; // number of chunks stored in welford_stk.
@@ -154,9 +170,9 @@ struct WelfordHelper {
 };
 
 template <typename T, uint64_t kChunkSize>
-std::vector<typename T::value_type> WelfordHelper<T, kChunkSize>::weight_recps =
-    []() {
-      using scalar_t = typename T::value_type;
+std::vector<typename GetScalarType<T>::type>
+    WelfordHelper<T, kChunkSize>::weight_recps = []() {
+      using scalar_t = typename GetScalarType<T>::type;
       std::vector<scalar_t> temp(kChunkSize);
       for (const auto i : c10::irange(kChunkSize)) {
         temp[i] = scalar_t(static_cast<double>(1) / static_cast<double>(i + 1));
@@ -202,21 +218,19 @@ Welford<T> welford_combine(
   // stability.
   // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
   // https://en.wikipedia.org/wiki/Pairwise_summation
-  if constexpr (IsVecType<T>::value) {
-    if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
-      w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
-      w->num_chunks += 1;
-      acc.mean = T(0);
-      acc.m2 = T(0);
-      acc.weight = T(0);
-      acc.index = 0;
-      uint64_t mask = w->num_chunks;
-      for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
-        w->welford_stk[j] =
-            welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
-        w->welford_stk[j - 1] = Welford<T>();
-        mask >>= 1;
-      }
+  if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
+    w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
+    w->num_chunks += 1;
+    acc.mean = T(0);
+    acc.m2 = T(0);
+    acc.weight = T(0);
+    acc.index = 0;
+    uint64_t mask = w->num_chunks;
+    for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
+      w->welford_stk[j] =
+          welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
+      w->welford_stk[j - 1] = Welford<T>();
+      mask >>= 1;
     }
   }
   // Add a single data point
@@ -224,22 +238,18 @@ Welford<T> welford_combine(
   auto new_weight = acc.weight + T(1);
   auto delta = data - acc.mean;
   T new_mean;
-  if constexpr (!IsVecType<T>::value) {
-    new_mean = acc.mean + delta / new_weight;
-  } else {
-    // use new_index to fecth 1 / new_weight to avoid divisions
-    new_mean = acc.mean +
-        ((w == nullptr || acc.index >= w->weight_recps.size())
-             ? delta / new_weight
-             : delta * T(w->weight_recps[acc.index]));
-  }
+  // use new_index to fecth 1 / new_weight to avoid divisions
+  new_mean = acc.mean +
+      ((w == nullptr || acc.index >= w->weight_recps.size())
+           ? delta / new_weight
+           : delta * T(w->weight_recps[acc.index]));
   auto new_delta = data - new_mean;
   auto result =
       Welford<T>{new_mean, acc.m2 + delta * new_delta, new_weight, new_index};
   return result;
 }
 
-template <typename T, uint64_t kChunkSize = 0>
+template <typename T, uint64_t kChunkSize>
 Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, kChunkSize>* w) {
   for (const auto i : c10::irange(w->depth)) {
     acc = welford_combine(acc, w->welford_stk[i]);
@@ -256,7 +266,7 @@ struct IndexValue {
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T, uint64_t kChunkSize>
+template <typename T, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
