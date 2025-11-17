@@ -30,6 +30,7 @@ from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 from torch._dynamo.utils import counters, get_runtime_metrics_context
+from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
@@ -51,6 +52,7 @@ from torch._inductor.utils import (
 )
 from torch.autograd.profiler import record_function
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -720,12 +722,13 @@ class CompiledFxGraph(OutputCode):
         # Apply inductor_compiled_code HOP wrapper if configured
         # This is done in post_compile to ensure it works with cached artifacts
         if self._wrap_compiled_regions and self.current_callable is not None:
-            from torch._higher_order_ops.wrap import inductor_compiled_code
-
             original_callable = self.current_callable
 
             def wrapped_callable(inputs):
-                return inductor_compiled_code(original_callable, inputs)
+                if is_in_torch_dispatch_mode():
+                    return inductor_compiled_code(original_callable, inputs)
+                else:
+                    return original_callable(inputs)
 
             self.current_callable = wrapped_callable
 

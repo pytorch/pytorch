@@ -845,6 +845,229 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         self.assertIsNotNone(k.grad)
         self.assertIsNotNone(v.grad)
 
+    @requires_cuda_and_triton
+    def test_sac_outer_compile_inner_basic(self):
+        """
+        Test SAC(compile(foo)) pattern - SAC on eager code with inner compiled region.
+
+        This is different from compile(SAC(foo)) - here the checkpoint region itself
+        is NOT compiled, but it contains a compiled function inside it.
+
+        The inner compiled function should be wrapped when wrap_inductor_compiled_regions
+        is enabled, making it visible to SAC's dispatch modes.
+        """
+
+        # Inner compiled function with wrapping enabled
+        @torch.compile(
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+        )
+        def inner_compiled_matmul(x, y):
+            return torch.matmul(x, y)
+
+        # SAC policy: save matmul operations
+        def policy_fn(ctx, op, *args, **kwargs):
+            # When the compiled region is wrapped in inductor_compiled_code HOP,
+            # SAC should be able to see it and apply policy
+            from torch._higher_order_ops.wrap import inductor_compiled_code
+
+            if op == inductor_compiled_code:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        # Eager checkpointed function that calls compiled code
+        def checkpointed_fn(x, y):
+            # This compiled call should be wrapped in inductor_compiled_code HOP
+            a = inner_compiled_matmul(x, y)
+            b = torch.relu(a)
+            return b
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        # Clone for comparison
+        x_eager = x.detach().clone().requires_grad_(True)
+        y_eager = y.detach().clone().requires_grad_(True)
+
+        # SAC(compile(foo)) - checkpoint the eager function with inner compiled region
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+
+        # Test with DebugMode to verify the HOP is visible
+        with DebugMode() as debug_mode:
+            output = checkpoint(
+                checkpointed_fn,
+                x,
+                y,
+                use_reentrant=False,
+                context_fn=context_fn,
+            )
+            loss = output.sum()
+            loss.backward()
+
+        debug_string = debug_mode.debug_string()
+
+        # inductor_compiled_code HOP should be visible to DebugMode
+        self.assertIn(
+            "inductor_compiled_code",
+            debug_string,
+            "inductor_compiled_code HOP should be visible when inner compiled function "
+            "is called from eager checkpoint region",
+        )
+
+        # Verify correctness against eager
+        a_eager = torch.matmul(x_eager, y_eager)
+        b_eager = torch.relu(a_eager)
+        loss_eager = b_eager.sum()
+        loss_eager.backward()
+
+        self.assertEqual(output, b_eager)
+        self.assertEqual(x.grad, x_eager.grad)
+        self.assertEqual(y.grad, y_eager.grad)
+
+    @requires_cuda_and_triton
+    def test_wrap_no_dispatch_mode_no_hop_invoked(self):
+        """
+        Test that without TorchDispatchMode, the HOP is NOT invoked.
+
+        Even when wrap_inductor_compiled_regions=True, if there's no active
+        TorchDispatchMode, the wrapper should not invoke the HOP (optimization).
+        This verifies that we're not paying the HOP overhead unnecessarily.
+        """
+        from unittest.mock import patch
+
+        from torch._higher_order_ops.wrap import inductor_compiled_code
+
+        # Patch it in the output_code module where it's imported and used
+        patch_path = "torch._inductor.output_code.inductor_compiled_code"
+
+        # Test WITHOUT dispatch mode - HOP should NOT be called
+        with patch(patch_path, wraps=inductor_compiled_code) as mock_hop:
+
+            @torch.compile(
+                backend="inductor",
+                options={"wrap_inductor_compiled_regions": True},
+                fullgraph=True,
+            )
+            def fn(x, y):
+                return torch.matmul(x, y)
+
+            x = torch.randn(4, 4, device="cuda")
+            y = torch.randn(4, 4, device="cuda")
+            expected = torch.matmul(x, y)
+
+            result_without = fn(x, y)
+
+            # Verify HOP was NOT called
+            mock_hop.assert_not_called()
+            self.assertEqual(result_without, expected)
+
+        # Test WITH DebugMode - HOP SHOULD be called
+        with patch(patch_path, wraps=inductor_compiled_code) as mock_hop:
+
+            @torch.compile(
+                backend="inductor",
+                options={"wrap_inductor_compiled_regions": True},
+                fullgraph=True,
+            )
+            def fn2(x, y):
+                return torch.matmul(x, y)
+
+            x2 = torch.randn(4, 4, device="cuda")
+            y2 = torch.randn(4, 4, device="cuda")
+            expected2 = torch.matmul(x2, y2)
+
+            with DebugMode():
+                result_with = fn2(x2, y2)
+
+            # Verify HOP WAS called
+            mock_hop.assert_called()
+            self.assertEqual(result_with, expected2)
+
+    @requires_cuda_and_triton
+    @skipIfRocm
+    def test_sac_outer_compile_inner_flex_attention(self):
+        """
+        Test SAC(compile(foo)) with flex_attention - the key motivating use case.
+
+        Pattern: Eager checkpoint region containing compiled flex_attention.
+        This is the pattern where users want SAC to control compiled flex_attention.
+        """
+
+        def score_mod(score, b, h, q_idx, k_idx):
+            return score
+
+        # Policy: save the compiled flex_attention region
+        def policy_fn(ctx, op, *args, **kwargs):
+            from torch._higher_order_ops.wrap import inductor_compiled_code
+
+            # When flex_attention is compiled with wrapping, its compiled kernel
+            # should be wrapped in inductor_compiled_code HOP
+            if op == inductor_compiled_code:
+                return CheckpointPolicy.MUST_SAVE
+            # Also handle the flex_attention_hop itself
+            if op == flex_attention_hop:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        # Eager function that calls flex_attention (which internally compiles)
+        def checkpointed_flex_fn(q, k, v):
+            # flex_attention internally uses torch.compile, so with
+            # wrap_inductor_compiled_regions enabled, its compiled regions
+            # should be wrapped in the HOP
+            output = flex_attention(q, k, v, score_mod=score_mod)
+            return output
+
+        B, H, S, D = 2, 4, 128, 64
+        q = torch.randn(
+            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+        )
+        k = torch.randn(
+            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+        )
+        v = torch.randn(
+            B, H, S, D, device="cuda", dtype=torch.float16, requires_grad=True
+        )
+
+        # Enable wrapping at the inductor config level so that flex_attention's
+        # internal compilation will wrap compiled regions
+        with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts, policy_fn
+            )
+
+            # SAC(compile(foo)) - eager checkpoint with inner compiled flex_attention
+            output = checkpoint(
+                checkpointed_flex_fn,
+                q,
+                k,
+                v,
+                use_reentrant=False,
+                context_fn=context_fn,
+            )
+            loss = output.sum()
+            loss.backward()
+
+        # Verify gradients exist
+        self.assertIsNotNone(q.grad)
+        self.assertIsNotNone(k.grad)
+        self.assertIsNotNone(v.grad)
+
+        # Verify correctness by comparing with non-checkpointed version
+        q2 = q.detach().clone().requires_grad_(True)
+        k2 = k.detach().clone().requires_grad_(True)
+        v2 = v.detach().clone().requires_grad_(True)
+
+        with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
+            output2 = flex_attention(q2, k2, v2, score_mod=score_mod)
+            loss2 = output2.sum()
+            loss2.backward()
+
+        torch.testing.assert_close(output, output2, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(q.grad, q2.grad, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
+        torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
