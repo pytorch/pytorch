@@ -128,8 +128,13 @@ struct InterpreterContinuation {
       std::optional<at::ThreadLocalState> tls_state = std::nullopt)
       : state(std::move(state_)),
         stack(std::move(stack_)),
-        tls_state_(std::move(tls_state)),
-        dist_autograd_context_id_(dist_autograd_context_id) {}
+        tls_state_(std::move(tls_state))
+#ifdef USE_DISTRIBUTED
+        ,
+        dist_autograd_context_id_(dist_autograd_context_id)
+#endif
+  {
+  }
 
   void operator()();
 
@@ -137,10 +142,9 @@ struct InterpreterContinuation {
   InterpreterState state;
   Stack stack;
   std::optional<at::ThreadLocalState> tls_state_ = std::nullopt;
-#ifndef USE_RPC
-  [[maybe_unused]]
-#endif
+#ifdef USE_DISTRIBUTED
   int64_t dist_autograd_context_id_;
+#endif
 };
 
 // what is the tensors type, including state from the current execution context

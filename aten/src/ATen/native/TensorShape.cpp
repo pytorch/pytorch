@@ -1,3 +1,6 @@
+#include <ATen/core/ATen_fwd.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/SymInt.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -1708,11 +1711,37 @@ Tensor narrow_symint(
       "], but got ",
       start,
       ")")
-  if (start < 0) {
-    start = start + cur_size;
+
+  auto cond1 = TORCH_GUARD_OR_FALSE(start.sym_lt(0));
+  auto cond2 = TORCH_GUARD_OR_FALSE(start.sym_ge(0));
+
+  if (cond1 || cond2) {
+    if (cond1) {
+      start = start + cur_size;
+    }
+
+    TORCH_SYM_CHECK(
+        start.sym_le(cur_size - length),
+        "start (",
+        start,
+        ") + length (",
+        length,
+        ") exceeds dimension size (",
+        cur_size,
+        ").");
+    return at::slice_symint(self, dim, start, start + length, 1);
   }
+
+  // Unbacked start handling!
+
+  // Bounds check without converting start:
+  // - If start < 0: need (start + cur_size) + length <= cur_size, i.e., start +
+  // length <= 0
+  // - If start >= 0: need start + length <= cur_size
+  auto end = start + length;
   TORCH_SYM_CHECK(
-      start.sym_le(cur_size - length),
+      (start.sym_lt(0).sym_and((end).sym_le(0)))
+          .sym_or(start.sym_ge(0).sym_and((end).sym_le(cur_size))),
       "start (",
       start,
       ") + length (",
@@ -1720,7 +1749,28 @@ Tensor narrow_symint(
       ") exceeds dimension size (",
       cur_size,
       ").");
-  return at::slice_symint(self, dim, start, start + length, 1);
+
+  if (TORCH_GUARD_OR_FALSE(end.sym_ne(0))) {
+    return at::slice_symint(self, dim, start, end, 1);
+  } else {
+    // Cannot statically determine the condition due to unbacked.
+    // This is an interesting situation; when start is negative and
+    // start + length == 0, slice and narrow do different things.
+    // i.e., x.narrow(0, -2, 2) != x[-2:0]; in that case, we want to
+    // pass curr_size instead of 0. Otherwise, they would do the same thing.
+    // This says at runtime: if start < 0 and end == 0, then pass curr_size
+    // instead of 0.
+
+    auto use_different = start.sym_lt(0).sym_and(end.sym_eq(0)).toSymInt();
+    auto result =
+        at::slice_symint(self, dim, start, end + use_different * cur_size, 1);
+
+    // Ensure slice allocated unbacked size is specialized to length.
+    SymInt new_size = result.sym_size(dim);
+    TORCH_SYM_CHECK(new_size.sym_eq(length), "")
+
+    return result;
+  }
 }
 
 // This overload exists purely for XLA, because they wanted to pass in
@@ -1734,8 +1784,8 @@ Tensor narrow_tensor_symint(
       start.dim() == 0 &&
           isIntegralType(start.scalar_type(), /*includeBool=*/false),
       "start must be an 0-dim integral Tensor.");
-  int64_t st = start.item<int64_t>();
-  return at::narrow_symint(self, dim, c10::SymInt(st), std::move(length));
+  c10::SymInt st = start.item().toSymInt();
+  return at::narrow_symint(self, dim, std::move(st), std::move(length));
 }
 
 std::
@@ -1878,19 +1928,18 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
 
   Tensor xtensor = self.expand(padded_size);
 
-  Tensor result;
+  Tensor urtensor;
   if (self.is_quantized()) {
-    result = at::empty_quantized(target_size, self);
+    urtensor = at::empty_quantized(target_size, self);
   } else {
-    result = at::empty(target_size, self.options());
+    urtensor = at::empty(target_size, self.options());
   }
 
   // return an empty tensor if one of the repeat dimensions is zero
   if (zero_tensor) {
-    return result;
+    return urtensor;
   }
 
-  Tensor urtensor = at::alias(result);
   for (const auto i : c10::irange(xtensor.dim())) {
     // can't unfold with step 0, so make sure step is at least 1
     // (it doesn't matter what it is in that case, because the size is 0).
@@ -1900,7 +1949,22 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
 
   urtensor.copy_(xtensor.expand_as(urtensor));
 
-  return result;
+  // Combine the dimensions to produce the target_size.
+  // xtensor dims: [a0, ..., ad-1]
+  // urtensor dims: [a0, ..., ad-1, b0, ..., bd-1]
+  // b dims are produced by unfold.
+  // Transform urtensor to [a0 * b0, ..., ad-1 * bd-1]
+  const int64_t n_dims = xtensor.dim();
+  auto range_a = at::arange(xtensor.dim(), at::TensorOptions(at::kLong));
+  auto range_b = range_a + n_dims;
+  auto stacked = stack({std::move(range_a), std::move(range_b)}, 1).flatten();
+  auto permutation = IntArrayRef(stacked.data_ptr<int64_t>(), n_dims * 2);
+  // Permute from [a0, ..., ad-1, b0, ..., bd-1] to [a0, b0, ..., ad-1, bd-1]
+  urtensor = urtensor.permute(permutation);
+  // Reshape from [a0, b0, ..., ad-1, bd-1] to [a0 * b0, ..., ad-1 * bd-1]
+  urtensor = urtensor.reshape(target_size);
+
+  return urtensor;
 }
 
 Tensor tile_symint(const Tensor& self, SymIntArrayRef reps) {
@@ -2051,7 +2115,7 @@ Tensor _reshape_copy_symint(
     TORCH_CHECK(0, "_reshape_copy not implemented for mkldnn tensors");
   }
 
-  if (self.is_contiguous()) {
+  if (self.is_contiguous_or_false()) {
     return self.view_symint(shape).clone(at::MemoryFormat::Contiguous);
   } else {
     return at::_unsafe_view_symint(
@@ -3625,7 +3689,7 @@ Tensor& transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 namespace {
 // Transpose implementation for sparse compressed layouts
 // NB: We assume that dim1,dim0 have already been wrapped
-static inline Tensor sparse_compressed_transpose(
+inline Tensor sparse_compressed_transpose(
     const Tensor& self,
     int64_t dim0,
     int64_t dim1) {

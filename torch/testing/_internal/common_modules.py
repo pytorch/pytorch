@@ -24,7 +24,7 @@ from torch.testing._internal.common_nn import (
     marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
-    freeze_rng_state, skipIfMPS, skipIfMPSOnMacOS13, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
+    freeze_rng_state, skipIfMPS, GRADCHECK_NONDET_TOL, TEST_WITH_ROCM, IS_WINDOWS,
     skipIfTorchDynamo)
 from types import ModuleType
 import operator
@@ -432,15 +432,18 @@ def module_inputs_torch_nn_GaussianNLLLoss(module_info, device, dtype, requires_
         ('reduction_sum', {'reduction': 'sum'}),
         ('reduction_mean', {'reduction': 'mean'}),
         ('reduction_none', {'reduction': 'none'}),
+        ('homoscedastic', {'homoscedastic': True}),
     ]
 
     module_inputs = []
     for desc, constructor_kwargs in cases:
+        homoscedastic = constructor_kwargs.pop('homoscedastic', False)
+        var_input = make_input(1, 3).abs() if homoscedastic else make_input(4, 1).abs()
         module_inputs.append(
             ModuleInput(constructor_input=FunctionInput(**constructor_kwargs),
-                        forward_input=FunctionInput(make_input(3),
-                                                    make_target(3),
-                                                    make_input(1).abs()),
+                        forward_input=FunctionInput(make_input(4, 3),
+                                                    make_target(4, 3),
+                                                    var_input),
                         desc=desc,
                         reference_fn=no_batch_dim_reference_fn)
         )
@@ -958,6 +961,38 @@ def module_inputs_torch_nn_BatchNorm3d(module_info, device, dtype, requires_grad
                     desc='zero_batch')]
 
 
+def module_error_inputs_torch_nn_BatchNorm1d_2d_3d(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    if module_info.module_cls == torch.nn.BatchNorm1d:
+        input_shape = (2, 10)
+    elif module_info.module_cls == torch.nn.BatchNorm2d:
+        input_shape = (2, 10, 5, 5)
+    else:
+        input_shape = (2, 10, 4, 4, 4)
+
+    return [
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(10, eps=-1.0),
+                forward_input=FunctionInput(make_input(input_shape)),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex="eps must be positive"
+        ),
+        ErrorModuleInput(
+            ModuleInput(
+                constructor_input=FunctionInput(10, eps=0.0),
+                forward_input=FunctionInput(make_input(input_shape)),
+            ),
+            error_on=ModuleErrorEnum.FORWARD_ERROR,
+            error_type=ValueError,
+            error_regex="eps must be positive"
+        ),
+    ]
+
+
 def module_inputs_torch_nn_ConvNd(module_info, device, dtype, requires_grad, training, **kwargs):
     N = kwargs['N']
     lazy = kwargs.get('lazy', False)
@@ -1410,7 +1445,7 @@ def module_inputs_torch_nn_L1Loss(module_info, device, dtype, requires_grad, tra
                     forward_input=FunctionInput(make_input((2, 3, 4)),
                                                 make_input((2, 3, 4))),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * sum((a - b).abs().sum()
-                                                                         for a, b in zip(i, t))),
+                                                                         for a, b in zip(i, t, strict=True))),
         ModuleInput(constructor_input=FunctionInput(),
                     forward_input=FunctionInput(make_input(()), make_input(())),
                     reference_fn=lambda m, p, i, t: 1. / i.numel() * (i - t).abs().sum(),
@@ -3413,11 +3448,8 @@ module_db: list[ModuleInfo] = [
                        'TestModule',
                        'test_memory_format',
                        active_if=operator.itemgetter('training'),
-                       device_type='cuda',
-                   ),
-                   # error: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
-                   DecorateInfo(skipIfMPSOnMacOS13, 'TestModule', dtypes=[torch.float16], device_type='mps',),),
-               ),
+                       device_type='cuda',),
+               ),),
     ModuleInfo(torch.nn.AvgPool3d,
                module_inputs_func=module_inputs_torch_nn_AvgPool3d,
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -3430,6 +3462,7 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.BatchNorm1d,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm1d,
+               module_error_inputs_func=module_error_inputs_torch_nn_BatchNorm1d_2d_3d,
                skips=(
                    # tracking here rather than in the list in test_aotdispatch.py as eval mode passes
                    # RuntimeError: tried to get Double out of SymInt
@@ -3448,6 +3481,7 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.BatchNorm2d,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm2d,
+               module_error_inputs_func=module_error_inputs_torch_nn_BatchNorm1d_2d_3d,
                skips=(
                    # See https://github.com/pytorch/pytorch/issues/134580
                    DecorateInfo(expectedFailureMPS, 'TestModule', 'test_memory_format', active_if=operator.itemgetter('training')),
@@ -3468,6 +3502,7 @@ module_db: list[ModuleInfo] = [
     ModuleInfo(torch.nn.BatchNorm3d,
                train_and_eval_differ=True,
                module_inputs_func=module_inputs_torch_nn_BatchNorm3d,
+               module_error_inputs_func=module_error_inputs_torch_nn_BatchNorm1d_2d_3d,
                skips=(
                    # not supported on MPS backend
                    DecorateInfo(skipMPS),
@@ -3496,14 +3531,6 @@ module_db: list[ModuleInfo] = [
                module_inputs_func=partial(module_inputs_torch_nn_ConvNd, N=1, lazy=False),
                gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
                module_memformat_affects_out=True,
-               skips=(
-                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
-                                device_type='mps', dtypes=[torch.float16]),
-               ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                )),
@@ -3516,15 +3543,6 @@ module_db: list[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='cuda', dtypes=[torch.float64]),
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32, torch.float16]),
-                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
-                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3552,12 +3570,7 @@ module_db: list[ModuleInfo] = [
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
-                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
-                                device_type='mps', dtypes=[torch.float16]),),
+               ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
                    DecorateInfo(precisionOverride({torch.chalf: 5e-03}), 'TestModule', 'test_memory_format'),
@@ -3575,18 +3588,9 @@ module_db: list[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.float64, torch.complex128]),
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16, torch.float32]),
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
-                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
-                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3665,12 +3669,6 @@ module_db: list[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
-                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
-                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3687,15 +3685,6 @@ module_db: list[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
                                 device_type='cuda', dtypes=[torch.float64]),
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32, torch.float16]),
-                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
-                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3725,12 +3714,6 @@ module_db: list[ModuleInfo] = [
                    # Lazy modules don't currently play well with ModuleInfo tests on the meta device.
                    # See https://github.com/pytorch/pytorch/issues/70505 for more info.
                    DecorateInfo(skipMeta),
-                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
-                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3747,15 +3730,6 @@ module_db: list[ModuleInfo] = [
                    # See https://github.com/pytorch/pytorch/issues/80247
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format", device_type='cuda',
                                 dtypes=[torch.float64]),
-                   # Fails with channels last test on MPS backend
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float32, torch.float16]),
-                   # See #119108: MPSNDArrayConvolutionA14.mm:3976: failed assertion `destination datatype must be fp32'
-                   # xfail does not work due to Fatal Python error: Aborted
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_memory_format",
-                                device_type='mps', dtypes=[torch.float16]),
-                   DecorateInfo(skipIfMPSOnMacOS13, "TestModule", "test_non_contiguous_tensors",
-                                device_type='mps', dtypes=[torch.float16]),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3853,9 +3827,6 @@ module_db: list[ModuleInfo] = [
                skips=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),
-                   # See #119108: input types 'tensor<f32>' and 'tensor<15x10xf16>' are not broadcast compatible
-                   DecorateInfo(skipIfMPSOnMacOS13, 'TestModule', 'test_non_contiguous_tensors',
-                                device_type='mps', dtypes=[torch.float16],),
                    # See #119108: tolerance issue
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward",
                                 device_type='mps', dtypes=[torch.float16]),)

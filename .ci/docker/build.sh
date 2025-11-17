@@ -84,8 +84,8 @@ fi
 _UCX_COMMIT=7836b165abdbe468a2f607e7254011c07d788152
 _UCC_COMMIT=430e241bf5d38cbc73fc7a6b89155397232e3f96
 if [[ "$image" == *rocm* ]]; then
-  _UCX_COMMIT=cc312eaa4655c0cc5c2bcd796db938f90563bcf6
-  _UCC_COMMIT=0c0fc21559835044ab107199e334f7157d6a0d3d
+  _UCX_COMMIT=29831d319e6be55cb8c768ca61de335c934ca39e
+  _UCC_COMMIT=9f4b242cbbd8b1462cbc732eb29316cdfa124b77
 fi
 
 tag=$(echo $image | awk -F':' '{print $2}')
@@ -113,6 +113,7 @@ case "$tag" in
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
+    INSTALL_MINGW=yes
     ;;
   pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11)
     CUDA_VERSION=13.0.0
@@ -167,6 +168,18 @@ case "$tag" in
     VISION=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-py3.11-clang12)
+    ANACONDA_PYTHON_VERSION=3.11
+    CLANG_VERSION=12
+    VISION=no
+    TRITON=no
+    ;;
+  pytorch-linux-jammy-py3.12-clang12)
+    ANACONDA_PYTHON_VERSION=3.12
+    CLANG_VERSION=12
+    VISION=no
+    TRITON=no
+    ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
       ANACONDA_PYTHON_VERSION=3.10
@@ -175,27 +188,16 @@ case "$tag" in
     fi
     GCC_VERSION=11
     VISION=yes
-    ROCM_VERSION=6.4
-    NINJA_VERSION=1.9.0
-    TRITON=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    if [[ $tag =~ "benchmarks" ]]; then
-      INDUCTOR_BENCHMARKS=yes
-    fi
-    ;;
-  pytorch-linux-noble-rocm-alpha-py3)
-    ANACONDA_PYTHON_VERSION=3.12
-    GCC_VERSION=11
-    VISION=yes
     ROCM_VERSION=7.0
     NINJA_VERSION=1.9.0
     TRITON=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
     UCC_COMMIT=${_UCC_COMMIT}
-    PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950"
+    PYTORCH_ROCM_ARCH="gfx90a;gfx942;gfx950;gfx1100"
+    if [[ $tag =~ "benchmarks" ]]; then
+      INDUCTOR_BENCHMARKS=yes
+    fi
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
@@ -205,13 +207,16 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-  pytorch-linux-jammy-xpu-n-py3)
+  pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
+    GCC_VERSION=13
     VISION=yes
     XPU_VERSION=2025.2
     NINJA_VERSION=1.9.0
     TRITON=yes
+    if [[ $tag =~ "benchmarks" ]]; then
+      INDUCTOR_BENCHMARKS=yes
+    fi
     ;;
   pytorch-linux-jammy-py3-gcc11-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
@@ -255,6 +260,12 @@ case "$tag" in
     HALIDE=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-cuda12.8-py3.12-pallas)
+    CUDA_VERSION=12.8.1
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    PALLAS=yes
+    ;;
   pytorch-linux-jammy-py3.12-triton-cpu)
     CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
@@ -262,18 +273,15 @@ case "$tag" in
     TRITON_CPU=yes
     ;;
   pytorch-linux-jammy-linter)
-    # TODO: Use 3.9 here because of this issue https://github.com/python/mypy/issues/13627.
-    # We will need to update mypy version eventually, but that's for another day. The task
-    # would be to upgrade mypy to 1.0.0 with Python 3.11
-    PYTHON_VERSION=3.9
+    PYTHON_VERSION=3.10
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3.9-linter)
-    PYTHON_VERSION=3.9
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter)
+    PYTHON_VERSION=3.10
     CUDA_VERSION=12.8.1
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc11)
+  pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
+    GCC_VERSION=13
     ACL=yes
     VISION=yes
     OPENBLAS=yes
@@ -281,9 +289,19 @@ case "$tag" in
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks)
+  pytorch-linux-jammy-aarch64-py3.10-clang21)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
+    CLANG_VERSION=21
+    ACL=yes
+    VISION=yes
+    OPENBLAS=yes
+    # snadampal: skipping llvm src build install because the current version
+    # from pytorch/llvm:9.0.1 is x86 specific
+    SKIP_LLVM_SRC_BUILD_INSTALL=yes
+    ;;
+  pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=13
     ACL=yes
     VISION=yes
     OPENBLAS=yes
@@ -358,7 +376,7 @@ docker build \
        --build-arg "NINJA_VERSION=${NINJA_VERSION:-}" \
        --build-arg "KATEX=${KATEX:-}" \
        --build-arg "ROCM_VERSION=${ROCM_VERSION:-}" \
-       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH:-gfx90a;gfx942}" \
+       --build-arg "PYTORCH_ROCM_ARCH=${PYTORCH_ROCM_ARCH}" \
        --build-arg "IMAGE_NAME=${IMAGE_NAME}" \
        --build-arg "UCX_COMMIT=${UCX_COMMIT}" \
        --build-arg "UCC_COMMIT=${UCC_COMMIT}" \
@@ -369,12 +387,14 @@ docker build \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "HALIDE=${HALIDE}" \
+       --build-arg "PALLAS=${PALLAS}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
        --build-arg "OPENBLAS=${OPENBLAS:-}" \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
+       --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
@@ -453,14 +473,5 @@ if [[ -n "$TRITON" || -n "$TRITON_CPU" ]]; then
   fi
 elif [ "$HAS_TRITON" = "yes" ]; then
   echo "expecting triton to not be installed, but it is"
-  exit 1
-fi
-
-# Sanity check cmake version.  Executorch reinstalls cmake and I'm not sure if
-# they support 4.0.0 yet, so exclude them from this check.
-CMAKE_VERSION=$(drun cmake --version)
-if [[ "$EXECUTORCH" != *yes* && "$CMAKE_VERSION" != *4.* ]]; then
-  echo "CMake version is not 4.0.0:"
-  drun cmake --version
   exit 1
 fi

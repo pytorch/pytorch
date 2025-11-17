@@ -143,7 +143,8 @@ case $desired_python in
         RENAME_WHEEL=false
         ;;
     3.13t)
-        echo "Using 3.13 deps"
+        echo "Using 3.13t deps"
+        mac_version='macosx-11.0-arm64'
         NUMPY_PINNED_VERSION="==2.1.0"
         RENAME_WHEEL=false
         ;;
@@ -177,8 +178,7 @@ source ~/${desired_python}-build/bin/activate
 retry pip install "${PINNED_PACKAGES[@]}" -r "${pytorch_rootdir}/requirements.txt"
 retry brew install libomp
 
-# For USE_DISTRIBUTED=1 on macOS, this enables gloo, which needs libuv, which
-# is build as part of tensorpipe submodule
+# For USE_DISTRIBUTED=1 on macOS, need libuv, which is build as part of tensorpipe submodule
 export USE_DISTRIBUTED=1
 
 export USE_MKLDNN=OFF
@@ -186,11 +186,11 @@ export USE_QNNPACK=OFF
 export BUILD_TEST=OFF
 
 pushd "$pytorch_rootdir"
-echo "Calling setup.py bdist_wheel at $(date)"
+echo "Calling -m build --wheel --no-isolation at $(date)"
 
-_PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python setup.py bdist_wheel -d "$whl_tmp_dir" --plat-name "${mac_version//[-.]/_}"
+_PYTHON_HOST_PLATFORM=${mac_version} ARCHFLAGS="-arch arm64" python -m build --wheel --no-isolation --outdir "$whl_tmp_dir" -C--plat-name="${mac_version//[-.]/_}"
 
-echo "Finished setup.py bdist_wheel at $(date)"
+echo "Finished -m build --wheel --no-isolation at $(date)"
 
 if [[ $package_type != 'libtorch' ]]; then
     echo "delocating wheel dependencies"

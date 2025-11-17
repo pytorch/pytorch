@@ -14,7 +14,7 @@ __all__ = [
     "ONNXProgram",
 ]
 
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._C import _onnx as _C_onnx
@@ -37,7 +37,7 @@ from ._internal.torchscript_exporter._type_utils import (
 )
 from ._internal.torchscript_exporter.utils import (  # Deprecated members that are excluded from __all__
     register_custom_op_symbolic,
-    select_model_mode_for_export,
+    select_model_mode_for_export,  # pyrefly: ignore  # deprecated
     unregister_custom_op_symbolic,
 )
 from .errors import OnnxExporterError
@@ -45,7 +45,7 @@ from .errors import OnnxExporterError
 
 if TYPE_CHECKING:
     import os
-    from collections.abc import Collection, Mapping, Sequence
+    from collections.abc import Callable, Collection, Mapping, Sequence
 
 # Set namespace for exposed private names
 ONNXProgram.__module__ = "torch.onnx"
@@ -324,12 +324,10 @@ def export(
 
         warnings.warn(
             "You are using the legacy TorchScript-based ONNX export. Starting in PyTorch 2.9, "
-            "the new torch.export-based ONNX exporter will be the default. To switch now, set "
-            "dynamo=True in torch.onnx.export. This new exporter supports features like exporting "
-            "LLMs with DynamicCache. We encourage you to try it and share feedback to help improve "
-            "the experience. Learn more about the new export logic: "
-            "https://pytorch.org/docs/stable/onnx_dynamo.html. For exporting control flow: "
-            "https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html.",
+            "the new torch.export-based ONNX exporter has become the default. "
+            "Learn more about the new export logic: https://docs.pytorch.org/docs/stable/onnx_export.html. "
+            "For exporting control flow: "
+            "https://pytorch.org/tutorials/beginner/onnx/export_control_flow_model_to_onnx_tutorial.html",
             category=DeprecationWarning,
             stacklevel=2,
         )

@@ -8,9 +8,9 @@
 namespace torch::nn {
 class ParameterListImpl : public Cloneable<ParameterListImpl> {
  public:
-  using Iterator = typename std::vector<
-      OrderedDict<std::string, torch::Tensor>::Item>::iterator;
-  using ConstIterator = typename std::vector<
+  using Iterator =
+      std::vector<OrderedDict<std::string, torch::Tensor>::Item>::iterator;
+  using ConstIterator = std::vector<
       OrderedDict<std::string, torch::Tensor>::Item>::const_iterator;
 
   ParameterListImpl() = default;
@@ -36,13 +36,13 @@ class ParameterListImpl : public Cloneable<ParameterListImpl> {
   void pretty_print(std::ostream& stream) const override {
     stream << "torch::nn::ParameterList(" << '\n';
     for (const auto& pair : parameters_) {
-      stream << "(" << pair.key() << ")"
-             << ": Parameter containing: [" << pair.value().scalar_type()
-             << " of size " << pair.value().sizes() << "]";
+      stream << '(' << pair.key() << ')' << ": Parameter containing: ["
+             << pair.value().scalar_type() << " of size "
+             << pair.value().sizes() << ']';
       ;
       stream << '\n';
     }
-    stream << ")";
+    stream << ')';
   }
 
   /// push the a given parameter at the end of the list
