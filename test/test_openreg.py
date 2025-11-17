@@ -28,10 +28,10 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 def install_cpp_extensions(extensions_dir):
     """
     Install C++ extensions for testing.
-    
+
     Args:
         extensions_dir: Directory containing the C++ extension to build
-        
+
     Returns:
         Tuple of (install_directory, return_code)
     """
@@ -51,7 +51,7 @@ def install_cpp_extensions(extensions_dir):
         "--root",
         "./install",
     ]
-    
+
     result = subprocess.run(
         cmd,
         cwd=extensions_dir,
@@ -59,9 +59,9 @@ def install_cpp_extensions(extensions_dir):
         capture_output=True,
         text=True,
     )
-    
+
     if result.returncode != 0:
-        print(f"Failed to install C++ extensions:", file=sys.stderr)
+        print("Failed to install C++ extensions:", file=sys.stderr)
         print(result.stdout, file=sys.stderr)
         print(result.stderr, file=sys.stderr)
         return None, result.returncode
@@ -80,7 +80,7 @@ def install_cpp_extensions(extensions_dir):
 class TestOpenReg(TestCase):
     """
     Test case for OpenReg backend functionality.
-    
+
     This test builds and installs the torch_openreg C++ extension and runs
     all tests contained within it using unittest discovery.
     """
@@ -89,7 +89,7 @@ class TestOpenReg(TestCase):
     def setUpClass(cls):
         """Set up the OpenReg extension before running tests."""
         super().setUpClass()
-        
+
         # Locate the torch_openreg directory
         test_directory = REPO_ROOT / "test"
         cls.openreg_dir = (
@@ -98,18 +98,20 @@ class TestOpenReg(TestCase):
             / "open_registration_extension"
             / "torch_openreg"
         )
-        
+
         # Install the C++ extension
         cls.install_dir, return_code = install_cpp_extensions(str(cls.openreg_dir))
-        
+
         if return_code != 0:
             raise RuntimeError(
                 f"Failed to install torch_openreg extension (exit code: {return_code})"
             )
-        
+
         # Add to PYTHONPATH for the test session
         cls.original_python_path = os.environ.get("PYTHONPATH", "")
-        os.environ["PYTHONPATH"] = os.pathsep.join([cls.install_dir, cls.original_python_path])
+        os.environ["PYTHONPATH"] = os.pathsep.join(
+            [cls.install_dir, cls.original_python_path]
+        )
 
     @classmethod
     def tearDownClass(cls):
@@ -120,12 +122,12 @@ class TestOpenReg(TestCase):
     def test_openreg_extension(self):
         """
         Run all OpenReg extension tests using unittest discovery.
-        
+
         This test discovers and runs all tests in the torch_openreg/tests directory.
         """
         test_directory = REPO_ROOT / "test"
         tests_dir = self.openreg_dir / "tests"
-        
+
         # Use unittest discovery to find and run all tests
         cmd = [
             sys.executable,
@@ -136,7 +138,7 @@ class TestOpenReg(TestCase):
             str(tests_dir),
             "-v",
         ]
-        
+
         result = subprocess.run(
             cmd,
             cwd=str(test_directory),
@@ -144,13 +146,13 @@ class TestOpenReg(TestCase):
             capture_output=True,
             text=True,
         )
-        
+
         # Print output for debugging
         if result.stdout:
             print(result.stdout)
         if result.stderr:
             print(result.stderr, file=sys.stderr)
-        
+
         # Assert that the tests passed
         self.assertEqual(
             result.returncode,
