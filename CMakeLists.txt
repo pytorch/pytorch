@@ -34,6 +34,7 @@ else()
 endif()
 
 set(CMAKE_INSTALL_MESSAGE NEVER)
+set(CMAKE_VERBOSE_MAKEFILE ON)
 
 # check and set CMAKE_CXX_STANDARD
 string(FIND "${CMAKE_CXX_FLAGS}" "-std=c++" env_cxx_standard)
@@ -425,6 +426,9 @@ if(USE_CCACHE)
     set(CMAKE_CUDA_COMPILER_LAUNCHER
         "${CCACHE_PROGRAM}"
         CACHE STRING "CUDA compiler launcher")
+    set(CMAKE_SYCL_COMPILER_LAUNCHER
+        "${CCACHE_PROGRAM}"
+        CACHE STRING "SYCL compiler launcher")
   else()
     message(
       STATUS
