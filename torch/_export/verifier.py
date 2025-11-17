@@ -216,6 +216,7 @@ class Verifier(metaclass=_VerifierMeta):
                 torch.sym_not,
                 torch.sym_sqrt,
                 torch.sym_sum,
+                torch.export.custom_ops._call_custom_autograd_function_in_pre_dispatch,
                 # TODO (tmanlaibaatar)
                 # Predispatch export is able to contain autograd ops.
                 # These will be modeled as HOO later
@@ -280,6 +281,13 @@ class Verifier(metaclass=_VerifierMeta):
                             return isinstance(getattr(attr, name, None), ty)
 
                         if type(attr).__name__ == "LoweredBackendModule":
+                            if (
+                                _is_type("backend_id", str)
+                                and hasattr(attr, "original_module")
+                                and hasattr(attr, "module_name")
+                                and getattr(attr, "backend_id", None) == "aoti"
+                            ):
+                                continue
                             if (
                                 _is_type("backend_id", str)
                                 and _is_type("processed_bytes", bytes)

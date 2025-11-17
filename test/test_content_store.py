@@ -7,7 +7,6 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     run_tests,
-    skipIfRocm,
     TemporaryDirectoryName,
     TestCase,
 )
@@ -70,7 +69,6 @@ class TestContentStore(TestCase):
         for _ in range(4):
             hash_storage(torch.tensor(2, device=device).untyped_storage())
 
-    @skipIfRocm
     def test_load_tensor(self, device):
         with TemporaryDirectoryName() as loc:
             writer = ContentStoreWriter(loc)

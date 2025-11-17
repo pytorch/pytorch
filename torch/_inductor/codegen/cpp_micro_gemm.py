@@ -2,8 +2,9 @@
 import dataclasses
 import operator
 import sys
+from collections.abc import Callable
 from enum import Enum
-from typing import Callable, Optional
+from typing import Optional
 
 import torch
 
@@ -965,7 +966,7 @@ def check_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
 
 def check_int8_bf16_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
     # We need avx512_bf16 to dequant int8 to bf16
-    vec_isa = kwargs.get("vec_isa", None)
+    vec_isa = kwargs.get("vec_isa")
     assert vec_isa is not None
     return vec_isa.is_avx512_bf16_supported() and check_amx_extra(
         config, m, n, k, alpha, num_threads, **kwargs
@@ -975,7 +976,7 @@ def check_int8_bf16_amx_extra(config, m, n, k, alpha, num_threads, **kwargs):
 # amx_fp16 need to be checked separately since it is not always supported when amx is supported
 def check_amx_fp16_extra(config, m, n, k, alpha, num_threads, **kwargs):
     assert config.input_dtype == torch.float16 and config.output_dtype == torch.float
-    vec_isa = kwargs.get("vec_isa", None)
+    vec_isa = kwargs.get("vec_isa")
     assert vec_isa is not None
     vnni_size = 2
     return vec_isa.is_amx_fp16_supported() and k % vnni_size == 0 and alpha == 1
@@ -1049,17 +1050,16 @@ class CppMicroGemmAMX(CppMicroGemm):
         {{input2_t}}* base_addr = const_cast<{{input2_t}}*>(B) + base_idx;
         for (int idx_dq = 0, idx_q = 0; idx_dq < buf_size; idx_q += ldb, idx_dq += {{block_n}}) {
         {%- for vec_idx in range(0, block_n, 32) %}
+            _mm_prefetch(base_addr + idx_q + 64 * ldb, _MM_HINT_T0);
             {%- if (block_n - vec_idx) >= 32 %}
             // 1) Load 32 x int8
             __m256i v8  = _mm256_loadu_si256((const __m256i*)(base_addr + idx_q + {{vec_idx}}));
-            // 2) Widen: 32 x i8 -> 32 x i16
-            __m512i v16 = _mm512_cvtepi8_epi16(v8);  // sign-extend. Use _mm512_cvtepu8_epi16 for unsigned
-            // Split the 32 x i16 into two 16-lane halves
-            __m256i v16_lo = _mm512_castsi512_si256(v16);
-            __m256i v16_hi = _mm512_extracti64x4_epi64(v16, 1);
+            // 2) Extract two halves
+            __m128i v8_lo = _mm256_extracti128_si256(v8, 0);
+            __m128i v8_hi = _mm256_extracti128_si256(v8, 1);
             // 3) Widen each half to i32
-            __m512i v32_lo = _mm512_cvtepi16_epi32(v16_lo);
-            __m512i v32_hi = _mm512_cvtepi16_epi32(v16_hi);
+            __m512i v32_lo = _mm512_cvtepi8_epi32(v8_lo);
+            __m512i v32_hi = _mm512_cvtepi8_epi32(v8_hi);
             // 4) Convert to f32
             __m512 f_lo = _mm512_cvtepi32_ps(v32_lo);
             __m512 f_hi = _mm512_cvtepi32_ps(v32_hi);
@@ -1071,16 +1071,13 @@ class CppMicroGemmAMX(CppMicroGemm):
             {%- elif (block_n - vec_idx) >= 16 %}
             // 1) Load 16 x int8 (128 bits)
             __m128i v8 = _mm_loadu_si128((const __m128i*)(base_addr + idx_q + {{vec_idx}}));
-            // 2) Widen: 16 x i8 -> 16 x i16
-            __m256i v16 = _mm256_cvtepi8_epi16(v8);   // for signed
-            // use _mm256_cvtepu8_epi16 for unsigned
-            // 3) Widen further: 16 x i16 -> 16 x i32
-            __m512i v32 = _mm512_cvtepi16_epi32(v16);
-            // 4) Convert to f32
+            // 2) Widen: 16 x i8 -> 16 x i32
+            __m512i v32 = _mm512_cvtepi8_epi32(v8);
+            // 3) Convert to f32
             __m512 f32 = _mm512_cvtepi32_ps(v32);
-            // 5) Convert f32 -> bf16 (round-to-nearest-even)
+            // 4) Convert f32 -> bf16 (round-to-nearest-even)
             __m256i bf16 = (__m256i)_mm512_cvtneps_pbh(f32);
-            // 6) Store 16 x bf16 (256 bits)
+            // 5) Store 16 x bf16 (256 bits)
             _mm256_storeu_si256((__m256i*)(dequantized_B_buf + idx_dq + {{vec_idx}}), bf16);
             {%- else %}
             auto b_int8_tail = at::vec::Vectorized<int8_t>::loadu(
@@ -1414,7 +1411,7 @@ class CppMicroBrgemm(CppMicroGemm):
 def check_woq_int4_extra(config, m, n, k, alpha, num_threads, **kwargs):
     if alpha != 1:
         return False
-    q_group_size = kwargs.get("q_group_size", None)
+    q_group_size = kwargs.get("q_group_size")
     assert q_group_size is not None
     if (
         q_group_size not in [32, 64, 128]

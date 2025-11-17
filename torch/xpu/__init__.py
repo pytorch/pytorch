@@ -9,8 +9,9 @@ This package is lazily initialized, so you can always import it, and use
 
 import threading
 import traceback
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch._C
@@ -77,12 +78,23 @@ def is_bf16_supported(including_emulation: bool = True) -> bool:
     )
 
 
+def is_tf32_supported() -> bool:
+    r"""Return a bool indicating if the current XPU device supports dtype tf32."""
+    if not is_available():
+        return False
+    # On Intel Xe architecture and newer, TF32 operations can be accelerated
+    # through DPAS (Dot Product Accumulate Systolic) instructions. Therefore,
+    # TF32 support can be determined by checking whether the device supports
+    # subgroup matrix multiply-accumulate operations.
+    return torch.xpu.get_device_properties().has_subgroup_matrix_multiply_accumulate
+
+
 def is_initialized():
     r"""Return whether PyTorch's XPU state has been initialized."""
     return _initialized and not _is_in_bad_fork()
 
 
-def _lazy_call(callable, **kwargs):
+def _lazy_call(callable, **kwargs) -> None:
     if is_initialized():
         callable()
     else:
@@ -96,7 +108,7 @@ def _lazy_call(callable, **kwargs):
             _queued_calls.append((callable, traceback.format_stack()))
 
 
-def init():
+def init() -> None:
     r"""Initialize PyTorch's XPU state.
     This is a Python API about lazy initialization that avoids initializing
     XPU until the first time it is accessed. Does nothing if the XPU state is
@@ -105,7 +117,7 @@ def init():
     _lazy_init()
 
 
-def _lazy_init():
+def _lazy_init() -> None:
     global _initialized, _queued_calls
     if is_initialized() or hasattr(_tls, "is_initializing"):
         return
@@ -146,7 +158,7 @@ def _lazy_init():
 
 
 class _DeviceGuard:
-    def __init__(self, index: int):
+    def __init__(self, index: int) -> None:
         self.idx = index
         self.prev_idx = -1
 
@@ -166,7 +178,7 @@ class device:
             this argument is a negative integer or ``None``.
     """
 
-    def __init__(self, device: Any):
+    def __init__(self, device: Any) -> None:
         self.idx = _get_device_index(device, optional=True)
         self.prev_idx = -1
 
@@ -188,7 +200,7 @@ class device_of(device):
         obj (Tensor or Storage): object allocated on the selected device.
     """
 
-    def __init__(self, obj):
+    def __init__(self, obj) -> None:
         idx = obj.get_device() if obj.is_xpu else -1
         super().__init__(idx)
 
@@ -233,7 +245,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
             (default).
 
     Returns:
-        Dict[str, Any]: the xpu capability dictionary of the device
+        dict[str, Any]: the xpu capability dictionary of the device
     """
     props = get_device_properties(device)
     # Only keep attributes that are safe for dictionary serialization.
@@ -246,7 +258,9 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
     }
 
 
-def get_device_properties(device: Optional[_device_t] = None) -> _XpuDeviceProperties:
+def get_device_properties(
+    device: Optional[_device_t] = None,
+) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
     r"""Get the properties of a device.
 
     Args:
@@ -280,6 +294,22 @@ def _get_device(device: Union[int, str, torch.device]) -> torch.device:
     return device
 
 
+def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
+    r"""Query whether a device can access a peer device's memory.
+
+    Args:
+        device (torch.device or int or str): selected device.
+        peer (torch.device or int or str): peer device to query access to.
+
+    Returns:
+        bool: ``True`` if ``device`` can access ``peer``, ``False`` otherwise.
+    """
+    _lazy_init()
+    device = _get_device_index(device, optional=True)
+    peer = _get_device_index(peer, optional=True)
+    return torch._C._xpu_canDeviceAccessPeer(device, peer)
+
+
 class StreamContext:
     r"""Context-manager that selects a given stream.
 
@@ -294,11 +324,11 @@ class StreamContext:
 
     cur_stream: Optional["torch.xpu.Stream"]
 
-    def __init__(self, stream: Optional["torch.xpu.Stream"]):
+    def __init__(self, stream: Optional["torch.xpu.Stream"]) -> None:
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
-            self.idx = -1
+            self.idx = -1  # pyrefly: ignore [bad-assignment]
 
     def __enter__(self):
         cur_stream = self.stream
@@ -332,7 +362,7 @@ def stream(stream: Optional["torch.xpu.Stream"]) -> StreamContext:
     return StreamContext(stream)
 
 
-def _set_stream_by_id(stream_id, device_index, device_type):
+def _set_stream_by_id(stream_id, device_index, device_type) -> None:
     r"""set stream specified by the stream id, device index and device type
 
     Args: stream_id (int): not visible to the user, used to assigned to the specific stream.
@@ -346,7 +376,7 @@ def _set_stream_by_id(stream_id, device_index, device_type):
     )
 
 
-def set_stream(stream: Stream):
+def set_stream(stream: Stream) -> None:
     r"""Set the current stream.This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
@@ -465,7 +495,7 @@ def _set_rng_state_offset(
     """
     final_device = _get_device(device)
 
-    def cb():
+    def cb() -> None:
         default_generator = _get_generator(final_device)
         default_generator.set_offset(offset)
 
@@ -491,6 +521,7 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
 # import here to avoid circular import
 from .memory import (
     empty_cache,
+    get_per_process_memory_fraction,
     max_memory_allocated,
     max_memory_reserved,
     mem_get_info,
@@ -500,6 +531,7 @@ from .memory import (
     memory_stats_as_nested_dict,
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
+    set_per_process_memory_fraction,
 )
 from .random import (
     get_rng_state,
@@ -518,6 +550,7 @@ __all__ = [
     "Event",
     "Stream",
     "StreamContext",
+    "can_device_access_peer",
     "current_device",
     "current_stream",
     "default_generators",
@@ -530,6 +563,7 @@ __all__ = [
     "get_device_name",
     "get_device_properties",
     "get_gencode_flags",
+    "get_per_process_memory_fraction",
     "get_rng_state",
     "get_rng_state_all",
     "get_stream_from_external",
@@ -538,6 +572,7 @@ __all__ = [
     "is_available",
     "is_bf16_supported",
     "is_initialized",
+    "is_tf32_supported",
     "manual_seed",
     "manual_seed_all",
     "max_memory_allocated",
@@ -552,6 +587,7 @@ __all__ = [
     "seed",
     "seed_all",
     "set_device",
+    "set_per_process_memory_fraction",
     "set_rng_state",
     "set_rng_state_all",
     "set_stream",

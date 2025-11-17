@@ -50,12 +50,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
         device: ["cuda", "rocm", "xpu", "aarch64"]
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
           - device: "rocm"
-            rocm_version: "6.4"
+            rocm_version: "7.1"
             runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
           - device: "cuda"
             rocm_version: ""
@@ -108,9 +108,6 @@ jobs:
 
           # Determine python executable for given version
           case $PY_VERS in
-          3.9)
-            PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
-            ;;
           3.10)
             PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
             ;;
@@ -162,12 +159,7 @@ jobs:
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
 
-          if [[ "${BUILD_DEVICE}" == xpu ]]; then
-            docker exec -t "${container_name}" bash -c "dnf install -y gcc-toolset-13-gcc-c++"
-            docker exec -t "${container_name}" bash -c "source /opt/rh/gcc-toolset-13/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
-          else
-            docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
-          fi
+          docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "xpu") ]]; then
             docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
@@ -194,7 +186,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
         device: ["xpu"]
     timeout-minutes: 40
     env:

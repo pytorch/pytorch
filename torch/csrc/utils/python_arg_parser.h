@@ -89,7 +89,7 @@ inline bool THPUtils_checkScalar(PyObject* obj) {
   }
 #endif
   return PyFloat_Check(obj) || PyLong_Check(obj) || PyComplex_Check(obj) ||
-      torch::is_symint(py::handle(obj)) ||
+      torch::is_symint(py::handle(obj)) || torch::is_dynint(py::handle(obj)) ||
       torch::is_symfloat(py::handle(obj)) || torch::is_symbool(py::handle(obj));
 }
 
@@ -565,8 +565,16 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     return std::vector<c10::SymInt>(size1, si);
   }
 
+  if (size1 > 0 && THPVariable_Check(args[i])) {
+    return std::vector<c10::SymInt>(
+        size1, THPVariable_Unpack(args[i]).item().toSymInt());
+  }
+
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
+  if (!tuple) {
+    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
+  }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<c10::SymInt> res;
@@ -612,6 +620,8 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
         try {
           if (is_symint(py::handle(obj))) {
             res.push_back(py::handle(obj).cast<c10::SymInt>());
+          } else if (is_dynint(py::handle(obj))) {
+            res.push_back(py::handle(obj).cast<int>());
           } else {
             res.emplace_back(THPUtils_unpackIndex(obj));
           }
@@ -640,7 +650,16 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
         size1,
         py::handle(arg).cast<c10::SymInt>().guard_int(__FILE__, __LINE__));
   }
+  if (size1 > 0 && torch::is_dynint(py::handle(arg))) {
+    return std::vector<int64_t>(size1, py::handle(arg).cast<int>());
+  }
+  if (size1 > 0 && THPVariable_Check(arg)) {
+    return std::vector<int64_t>(size1, THPVariable_Unpack(arg).item<int64_t>());
+  }
   auto tuple = PyTuple_Check(arg);
+  if (!tuple) {
+    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
+  }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<int64_t> res(size2);
@@ -672,6 +691,8 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
       } else if (torch::is_symint(py::handle(obj))) {
         res[idx] = py::cast<c10::SymInt>(py::handle(obj))
                        .guard_int(__FILE__, __LINE__);
+      } else if (torch::is_dynint(py::handle(obj))) {
+        res[idx] = py::handle(obj).cast<int>();
       } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
@@ -709,6 +730,9 @@ inline c10::OptionalArray<c10::SymInt> PythonArgs::symintlistOptional(int i) {
 inline std::vector<double> PythonArgs::getDoublelist(int i) {
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
+  if (!tuple) {
+    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
+  }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<double> res(size);
@@ -846,6 +870,10 @@ inline at::Device toDevice(PyObject* obj) {
         py::cast<c10::SymInt>(py::handle(obj)).guard_int(__FILE__, __LINE__);
     return deviceFromLong(device_index);
   }
+  if (torch::is_dynint(py::handle(obj))) {
+    auto device_index = py::cast<int>(py::handle(obj));
+    return deviceFromLong(device_index);
+  }
   const std::string& device_str = THPUtils_unpackString(obj);
   return at::Device(device_str);
 }
@@ -878,6 +906,9 @@ inline at::Dimname PythonArgs::dimname(int i) {
 
 inline std::vector<at::Dimname> parseDimnameList(PyObject* arg) {
   auto tuple = PyTuple_Check(arg);
+  if (!tuple) {
+    TORCH_INTERNAL_ASSERT(PyList_Check(arg), "expected tuple or list");
+  }
   // NOLINTNEXTLINE(bugprone-branch-clone)
   auto size = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
   std::vector<at::Dimname> res;
@@ -982,6 +1013,9 @@ inline int64_t PythonArgs::toInt64(int i) {
     return py::cast<c10::SymInt>(py::handle(args[i]))
         .guard_int(__FILE__, __LINE__);
   }
+  if (torch::is_dynint(py::handle(args[i]))) {
+    return py::cast<int>(py::handle(args[i]));
+  }
   return THPUtils_unpackLong(args[i]);
 }
 
@@ -1054,6 +1088,9 @@ inline double PythonArgs::toDouble(int i) {
   if (torch::is_symint(py::handle(args[i]))) {
     return static_cast<double>(py::cast<c10::SymInt>(py::handle(args[i]))
                                    .guard_int(__FILE__, __LINE__));
+  }
+  if (torch::is_dynint(py::handle(args[i]))) {
+    return static_cast<double>(py::cast<int>(py::handle(args[i])));
   }
   return THPUtils_unpackDouble(args[i]);
 }
@@ -1247,6 +1284,18 @@ auto TORCH_PYTHON_API handle_torch_function_no_python_arg_parser(
     const char* func_name,
     PyObject* torch_api_function,
     const char* module_name,
+    TorchFunctionName torch_function_name = TorchFunctionName::TorchFunction)
+    -> PyObject*;
+
+auto handle_torch_function_no_python_arg_parser(
+    at::ArrayRef<PyObject*> overloaded_args,
+    PyObject* args,
+    PyObject* kwargs,
+    const char* func_name,
+    PyObject* torch_api_function,
+    const char* module_name,
+    const c10::OperatorHandle* opt_op,
+    torch::jit::Stack* opt_stack,
     TorchFunctionName torch_function_name = TorchFunctionName::TorchFunction)
     -> PyObject*;
 

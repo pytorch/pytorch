@@ -9,7 +9,7 @@ from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 13)
+SCHEMA_VERSION = (8, 14)
 TREESPEC_VERSION = 1
 
 
@@ -156,7 +156,7 @@ class TokenArgument:
 
 # This is use for storing the contents of a list which contain optional tensors
 # (Tensor?[], ex. [Tensor, None, ...]), where the list will be serialized to the
-# type List[OptionalTensorArgument], with tensor values seiralized to the
+# type List[OptionalTensorArgument], with tensor values serialized to the
 # "as_tensor" field, and None values serialized to the "as_none" field.
 @_union_dataclass
 class OptionalTensorArgument(_Union):
@@ -449,6 +449,7 @@ class ExportedProgram:
     schema_version: Annotated[SchemaVersion, 60]
     verifiers: Annotated[list[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"
+    guards_code: Annotated[list[str], 90] = field(default_factory=list)
 
 
 #########################################################################
