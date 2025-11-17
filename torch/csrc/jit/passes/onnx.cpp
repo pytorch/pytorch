@@ -292,7 +292,7 @@ void NodeToONNX(
       std::ostringstream ss;
       ss << "symbolic for " << op_name
          << " produced an incorrect number of outputs (expected ";
-      ss << num_old_outputs << ", but got " << outputs.size() << ")";
+      ss << num_old_outputs << ", but got " << outputs.size() << ')';
       throw std::runtime_error(ss.str());
     }
     // For const node, it does not need params_dict info, so set it to {}.

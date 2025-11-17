@@ -205,9 +205,9 @@ UnionType::UnionType(std::vector<TypePtr> reference, TypeKind kind) : SharedType
     for (const auto i : c10::irange(reference.size())) {
       msg << reference[i]->repr_str();
       if (i > 0) {
-        msg << ",";
+        msg << ',';
       }
-      msg << " ";
+      msg << ' ';
     }
     msg << "} has the single type " << types_[0]->repr_str()
          << ". Use the common supertype instead of creating a Union"
