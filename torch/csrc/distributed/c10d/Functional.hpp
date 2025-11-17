@@ -60,8 +60,8 @@ C10_EXPORT at::Tensor reduce_scatter_tensor(
 
 C10_EXPORT at::Tensor all_to_all_single(
     const at::Tensor& input,
-    std::vector<int64_t> output_split_sizes,
-    std::vector<int64_t> input_split_sizes,
+    at::SymIntArrayRef output_split_sizes,
+    at::SymIntArrayRef input_split_sizes,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string group_name);
 

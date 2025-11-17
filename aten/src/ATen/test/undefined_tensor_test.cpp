@@ -9,7 +9,7 @@ using namespace at;
 TEST(TestUndefined, UndefinedTest) {
   manual_seed(123);
 
-  // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.
+  // mainly test ops on undefined tensors don't segfault and give a reasonable error message.
   Tensor und;
   Tensor ft = ones({1}, CPU(kFloat));
 

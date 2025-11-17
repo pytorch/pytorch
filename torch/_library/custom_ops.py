@@ -3,9 +3,9 @@ import collections
 import inspect
 import logging
 import weakref
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Literal, Optional, overload, Union
+from typing import Any, Optional, overload, Union
 
 import torch
 from torch import _C, _ops, Tensor
@@ -13,6 +13,7 @@ from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
+from .effects import EffectType
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -22,12 +23,13 @@ log = logging.getLogger(__name__)
 @overload
 def custom_op(
     name: str,
-    fn: Literal[None] = None,
+    fn: None = None,
     /,
     *,
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> Callable[[Callable[..., object]], "CustomOpDef"]: ...
 
 
@@ -40,6 +42,7 @@ def custom_op(
     mutates_args: Union[str, Iterable[str]],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
+    tags: Optional[Sequence[_C.Tag]] = None,
 ) -> "CustomOpDef": ...
 
 
@@ -210,6 +213,7 @@ class CustomOpDef:
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher(self._tags)
         self._disabled_kernel: set = set()
+        self._used_triton_kernels: list[Any] = list()
         OPDEFS[self._qualname] = self
 
     @property
@@ -345,13 +349,15 @@ class CustomOpDef:
                             fn = self._backend_fns[device_type]
                             return inspect.getmodule(fn)
 
-                        utils._c_check_aliasing_constraint(
-                            self._name,
-                            args,
-                            kwargs,
-                            result,
-                            get_module,
-                        )
+                        schema = self._opoverload._schema
+                        if not schema._is_view_op():
+                            utils._c_check_aliasing_constraint(
+                                self._name,
+                                args,
+                                kwargs,
+                                result,
+                                get_module,
+                            )
                         return result
 
                     if device_type is None:
@@ -403,7 +409,7 @@ class CustomOpDef:
         (sizes/strides/storage_offset/device), it specifies what the properties of
         the output Tensors are.
 
-        Please see :func:`torch.library.impl_abstract` for more details.
+        Please see :func:`torch.library.register_fake` for more details.
 
         Args:
             fn (Callable): The function to register as the FakeTensor
@@ -465,6 +471,9 @@ class CustomOpDef:
         """
         self._abstract_fn = fn
         return fn
+
+    def register_effect(self, effect: Optional[EffectType]) -> None:
+        self._lib._register_effectful_op(self._qualname, effect)
 
     def register_torch_dispatch(
         self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /
@@ -584,7 +593,7 @@ class CustomOpDef:
 
         """
         schema = self._opoverload._schema
-        if not utils.is_functional_schema(schema):
+        if not utils.is_functional_schema(schema, allow_valid_view=True):
             raise RuntimeError(
                 f"Cannot register autograd formula for non-functional operator "
                 f"{self} with schema {schema}. Please create "
@@ -595,10 +604,6 @@ class CustomOpDef:
         self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self, tags: Sequence[_C.Tag]) -> None:
-        if torch._running_with_deploy():
-            utils.warn_deploy(stacklevel=5)
-            return
-
         lib = self._lib
         schema_str = self._name + self._schema
         cpp_schema = _C.parse_schema(schema_str)
@@ -633,20 +638,27 @@ class CustomOpDef:
 
         autograd_impl = autograd.make_autograd_impl(self._opoverload, self)
         lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
-
         schema = self._opoverload._schema
+
+        if schema._is_view_op() or schema.is_mutable:
+            lib.m.register_ad_inplace_or_view_fallback(self._name)  # type: ignore[union-attr]
+
         if schema.is_mutable:
             mutated_idxs, mutated_keys = utils.mutated_args_kwargs(schema)
 
+            original_kernel = torch._C._dispatch_get_computed_kernel_for_dispatch_key(
+                f"{lib.ns}::{self._name}", "ADInplaceOrView"
+            )
+
             def adinplaceorview_impl(keyset, *args, **kwargs):
+                # Handle the mutated idx the user gave us explicitly
+
                 for idx in mutated_idxs:
                     increment_version(args[idx])
                 for key in mutated_keys:
                     increment_version(kwargs[key])
-                with _C._AutoDispatchBelowADInplaceOrView():
-                    return self._opoverload.redispatch(
-                        keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
-                    )
+                # Handle view + mutation that are in the schema
+                return original_kernel.call_boxed(keyset, *args, **kwargs)
 
             lib.impl(
                 self._name,

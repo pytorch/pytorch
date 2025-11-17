@@ -96,7 +96,7 @@ def _concat_cast_helper(tensors, out=None, dtype=None, casting="same_kind"):
     else:
         out_dtype = _dtypes_impl.result_type_impl(*tensors)
 
-    # cast input arrays if necessary; do not broadcast them agains `out`
+    # cast input arrays if necessary; do not broadcast them against `out`
     tensors = _util.typecast_tensors(tensors, out_dtype, casting)
 
     return tensors
@@ -1290,7 +1290,7 @@ def cross(a: ArrayLike, b: ArrayLike, axisa=-1, axisb=-1, axisc=-1, axis=None):
 
 def einsum(*operands, out=None, dtype=None, order="K", casting="safe", optimize=False):
     # Have to manually normalize *operands and **kwargs, following the NumPy signature
-    # We have a local import to avoid poluting the global space, as it will be then
+    # We have a local import to avoid polluting the global space, as it will be then
     # exported in funcs.py
     from ._ndarray import ndarray
     from ._normalizations import (
@@ -1449,7 +1449,7 @@ def rollaxis(a: ArrayLike, axis, start=0):
         # numpy returns a view, here we try returning the tensor itself
         # return tensor[...]
         return a
-    axes = list(range(0, n))
+    axes = list(range(n))
     axes.remove(axis)
     axes.insert(start, axis)
     return a.view(axes)
@@ -1867,7 +1867,7 @@ def common_type(*tensors: ArrayLike):
         if not (t.is_floating_point or t.is_complex):
             p = 2  # array_precision[_nx.double]
         else:
-            p = array_precision.get(t, None)
+            p = array_precision.get(t)
             if p is None:
                 raise TypeError("can't get common type for non-numeric array")
         precision = builtins.max(precision, p)

@@ -27,8 +27,6 @@ return (%x)
   std::advance(it, 1);
   const Node& node = *it;
 
-  c10::Device device = torch::Device(torch::kCPU, 0);
-
   auto a = at::randn({6, 6, 6});
   auto b = at::randn({6, 6, 6});
 
@@ -36,7 +34,7 @@ return (%x)
   frame.setIValue(graph->getValue("a")->id(), a);
   frame.setIValue(graph->getValue("b")->id(), b);
 
-  auto kernel = C10Kernel(&node, device);
+  auto kernel = C10Kernel(&node);
 
   kernel.computeInternal(frame);
 

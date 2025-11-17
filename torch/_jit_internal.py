@@ -52,15 +52,7 @@ from torch.futures import Future
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
-IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
-
-BuiltinUnionType: Union[type, tuple[type, ...]]
-if sys.version_info >= (3, 10):
-    # NOTE: IS_PY310_PLUS doesn't work with mypy.
-    # cf. https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
-    BuiltinUnionType = types.UnionType
-else:
-    BuiltinUnionType = ()  # trick: this makes isinstance short circuit.
+BuiltinUnionType: Union[type, tuple[type, ...]] = types.UnionType
 
 LockType: type
 try:
@@ -155,7 +147,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
     # If the module is actually a torchbind module, then we should short circuit
     if module_name == "torch._classes":
-        return obj.qualified_name
+        return obj.qualified_name  # pyrefly: ignore [missing-attribute]
 
     # The Python docs are very clear that `__module__` can be None, but I can't
     # figure out when it actually would be.
@@ -171,7 +163,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
     # torch.package and TorchScript have separate mangling schemes to avoid
     # name collisions from multiple packages. To avoid them interfering with
-    # each other, normalize the package manging here.
+    # each other, normalize the package managing here.
     if package_mangling.is_mangled(module_name):
         module_name = module_name.replace("<", "_")
         module_name = module_name.replace(">", "_")
@@ -382,7 +374,7 @@ def get_closure(fn):
 # values global in the function.
 # In Python 3.9 declaring class as global will make it invisible to
 # `inspect.getsource`, see https://bugs.python.org/issue42666 .
-# This could be worked around by manualy adding it to `global()` dictionary.
+# This could be worked around by manually adding it to `global()` dictionary.
 
 
 def createResolutionCallbackFromClosure(fn):
@@ -451,7 +443,7 @@ def get_callable_argument_names(fn) -> list[str]:
     for name, param in callable_signature.parameters.items():
         # All four other types of arguments do not map to individual values
         # with a keyword as name.
-        if not param.kind == param.POSITIONAL_OR_KEYWORD:
+        if param.kind != param.POSITIONAL_OR_KEYWORD:
             continue
 
         argument_names.append(name)
@@ -469,7 +461,7 @@ def get_annotation_str(annotation):
     elif isinstance(annotation, ast.Attribute):
         return ".".join([get_annotation_str(annotation.value), annotation.attr])
     elif isinstance(annotation, ast.Subscript):
-        # In Python3.9+ subscript indicies are not wrapped in ast.Index
+        # In Python3.9+ subscript indices are not wrapped in ast.Index
         subscript_slice = annotation.slice
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
@@ -767,7 +759,7 @@ def unused(fn: Callable[_P, _R]) -> Callable[_P, _R]:
                 prop.fset, "_torchscript_modifier", FunctionModifiers.UNUSED
             )
 
-        return prop
+        return prop  # pyrefly: ignore [bad-return]
 
     fn._torchscript_modifier = FunctionModifiers.UNUSED  # type: ignore[attr-defined]
     return fn
@@ -852,6 +844,7 @@ def ignore(drop=False, **kwargs):
         #   @torch.jit.ignore
         #   def fn(...):
         fn = drop
+        # pyrefly: ignore [missing-attribute]
         fn._torchscript_modifier = FunctionModifiers.IGNORE
         return fn
 
@@ -866,6 +859,7 @@ def ignore(drop=False, **kwargs):
         warnings.warn(
             "ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
             "call on compilation. Use torch.jit.unused now. {}",
+            stacklevel=2,
             category=FutureWarning,
         )
 
@@ -874,6 +868,7 @@ def ignore(drop=False, **kwargs):
         warnings.warn(
             "ignore(True) has been deprecated. TorchScript will now drop the function "
             "call on compilation. Use torch.jit.unused now. {}",
+            stacklevel=2,
             category=FutureWarning,
         )
 
@@ -999,7 +994,8 @@ def _check_overload_body(func):
         # Parsing the function definition can raise an OSError if source is unavailable.
         # Since this is just an initial check, just raise a warning if this is the case.
         warnings.warn(
-            f"Unable to retrieve source for @torch.jit._overload function: {func}."
+            f"Unable to retrieve source for @torch.jit._overload function: {func}.",
+            stacklevel=2,
         )
         return
 
@@ -1081,13 +1077,13 @@ def _overload_method(func):
     _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_methods
-    class_name_map = _overloaded_methods.get(qual_name, None)
+    class_name_map = _overloaded_methods.get(qual_name)
     if class_name_map is None:
         class_name_map = {}
         _overloaded_methods[qual_name] = class_name_map
 
     class_name, line_no = get_class_name_lineno(func)
-    method_overloads = class_name_map.get(class_name, None)
+    method_overloads = class_name_map.get(class_name)
     if method_overloads is None:
         method_overloads = []
         class_name_map[class_name] = method_overloads
@@ -1109,7 +1105,7 @@ def _get_overloaded_methods(method, mod_class):
     if not hasattr(method, "__name__"):
         return None
     qual_name = _qualified_name(method)
-    class_name_map = _overloaded_methods.get(qual_name, None)
+    class_name_map = _overloaded_methods.get(qual_name)
     if class_name_map is None:
         return None
     overloads = class_name_map.get(mod_class.__name__, None)
@@ -1121,7 +1117,7 @@ def _get_overloaded_methods(method, mod_class):
     mod_end_fileno = mod_class_fileno + len(get_source_lines_and_file(mod_class)[0])
     if not (method_line_no >= mod_class_fileno and method_line_no <= mod_end_fileno):
         raise AssertionError(
-            "Overloads are not useable when a module is redeclared within the same file: "
+            "Overloads are not usable when a module is redeclared within the same file: "
             + str(method)
         )
     return overloads
@@ -1255,14 +1251,13 @@ def _get_named_tuple_properties(
         ]
     else:
         defaults = []
-    # In 3.10 recommended way to get annotations is to call `inspect.get_annotations` function
-    # Also, annotations from base class are not inherited so they need to be queried explicitly
-    if sys.version_info[:2] < (3, 10):
-        obj_annotations = getattr(obj, "__annotations__", {})
-    else:
-        obj_annotations = inspect.get_annotations(obj)
-        if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
-            obj_annotations = inspect.get_annotations(obj.__base__)
+
+    obj_annotations = inspect.get_annotations(obj)
+    if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
+        obj_annotations = inspect.get_annotations(
+            # pyrefly: ignore [bad-argument-type]
+            obj.__base__
+        )
 
     annotations = []
     for field in obj._fields:
@@ -1271,7 +1266,7 @@ def _get_named_tuple_properties(
             # [Note: ForwardRef annotations in NamedTuple attributes]
             # NamedTuple types are slightly different from normal types.
             #
-            # Normally, annotations are evaluted like this (during jit.script):
+            # Normally, annotations are evaluated like this (during jit.script):
             # 1. Load strings of python code into c++ and parse.
             # 2. Get annotations as strings
             # 3. Use the PythonResolver's resolution callback (rcb) to convert
@@ -1393,7 +1388,8 @@ def check_empty_containers(obj) -> None:
             "calling torch.jit.isinstance in eager mode. For "
             "example, List[int] would become list and "
             "therefore falsely return True for List[float] or"
-            " List[str]."
+            " List[str].",
+            stacklevel=2,
         )
 
 
@@ -1451,7 +1447,9 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Union or issubclass(
-        origin_type, BuiltinUnionType
+        # pyrefly: ignore [bad-argument-type]
+        origin_type,
+        BuiltinUnionType,
     ):  # also handles Optional
         if obj is None:  # check before recursion because None is always fine
             return True
@@ -1503,7 +1501,7 @@ class _TensorExtractor(pickle.Pickler):
         # unpicklable if it doesn't contain tensors, as we can just ignore/skip
         # it. To play it safe, we only do so for common objects that we're sure
         # don't contain tensors. Feel free to add new types here. Note also that
-        # even if a type isn't listed here this won't block users, since thet
+        # even if a type isn't listed here this won't block users, since they
         # can just add a __getstate__ or __reduce__ method to their class.
         if isinstance(obj, LockType):
             return ""

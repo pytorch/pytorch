@@ -59,6 +59,8 @@ TORCH_META_FUNC(topk)
       "selected index k out of range");
   int64_t sliceSize = self.dim() == 0 ? 1 : self.size(dim);
   TORCH_CHECK(k >= 0 && k <= sliceSize, "k not in range for dimension");
+  TORCH_CHECK(!self.is_complex(), " topk does not support complex dtypes on CPU");
+  TORCH_CHECK(!(self.scalar_type() == kBool), "topk does not support bool dtypes on CPU");
 
   // Build the output size, which is the dim being selected set to
   // size k
@@ -74,11 +76,7 @@ TORCH_META_FUNC2(sort, stable)
 (const Tensor& self, std::optional<bool> stable, int64_t dim, bool descending) {
   maybe_wrap_dim(dim, self.dim());
 
-  const auto self_dtype = self.dtype();
-  TORCH_CHECK_VALUE(
-    self_dtype != ScalarType::ComplexFloat &&
-    self_dtype != ScalarType::ComplexDouble,
-    "Sort currently does not support complex dtypes on CPU.");
+  TORCH_CHECK(!self.is_complex(), " Sort does not support complex dtypes on CPU");
 
   // See issue: https://github.com/pytorch/pytorch/issues/65863
   // Strides should be dense, so as not to allocate too much memory.

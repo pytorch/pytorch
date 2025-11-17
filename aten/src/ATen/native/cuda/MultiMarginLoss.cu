@@ -121,6 +121,7 @@ __global__ void MultiMarginLoss_backward_kernel(
     gradInput_k[target_k] = static_cast<scalar_t>(gradInput_target_k);
   }
 
+  __syncthreads();
   for (int i=i_start; i<i_end; i+= i_step) {
     gradInput_k[i] *= * gradOutput_k;
   }

@@ -68,7 +68,7 @@ namespace threadblock {
 /// ForwardTileIterator
 ///
 template <
-    typename ThreadMap_, ///< Thread map (conept: OutputTileThreadMap)
+    typename ThreadMap_, ///< Thread map (concept: OutputTileThreadMap)
     typename Element_, ///< Element data type
     bool ScatterD = false, ///< Scatter D operand or not
     bool UseCUDAStore = false>

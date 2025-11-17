@@ -71,14 +71,7 @@ export PYTORCH_BUILD_NUMBER=1
 
 # Set triton version as part of PYTORCH_EXTRA_INSTALL_REQUIREMENTS
 TRITON_VERSION=$(cat $PYTORCH_ROOT/.ci/docker/triton_version.txt)
-
-# Here PYTORCH_EXTRA_INSTALL_REQUIREMENTS is already set for the all the wheel builds hence append TRITON_CONSTRAINT
-TRITON_CONSTRAINT="platform_system == 'Linux' and platform_machine == 'x86_64'"
-
-# CUDA 12.9 builds have triton for Linux and Linux aarch64 binaries.
-if [[ "$DESIRED_CUDA" == "cu129" ]]; then
-  TRITON_CONSTRAINT="platform_system == 'Linux'"
-fi
+TRITON_CONSTRAINT="platform_system == 'Linux'"
 
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* &&  -n "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" && ! "$PYTORCH_BUILD_VERSION" =~ .*xpu.* ]]; then
   TRITON_REQUIREMENT="triton==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
@@ -134,7 +127,6 @@ export DESIRED_PYTHON="${DESIRED_PYTHON:-}"
 export DESIRED_CUDA="$DESIRED_CUDA"
 export LIBTORCH_VARIANT="${LIBTORCH_VARIANT:-}"
 export BUILD_PYTHONLESS="${BUILD_PYTHONLESS:-}"
-export USE_SPLIT_BUILD="${USE_SPLIT_BUILD:-}"
 if [[ "${OSTYPE}" == "msys" ]]; then
   export LIBTORCH_CONFIG="${LIBTORCH_CONFIG:-}"
   if [[ "${LIBTORCH_CONFIG:-}" == 'debug' ]]; then
@@ -171,8 +163,13 @@ if [[ "$(uname)" != Darwin ]]; then
   MEMORY_LIMIT_MAX_JOBS=12
   NUM_CPUS=$(( $(nproc) - 2 ))
 
-  # Defaults here for **binary** linux builds so they can be changed in one place
-  export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
+  if [[ "$(uname)" == Linux ]]; then
+    # Defaults here for **binary** linux builds so they can be changed in one place
+    export MAX_JOBS=${MAX_JOBS:-$(( ${NUM_CPUS} > ${MEMORY_LIMIT_MAX_JOBS} ? ${MEMORY_LIMIT_MAX_JOBS} : ${NUM_CPUS} ))}
+  else
+    # For other builds
+    export MAX_JOBS=${NUM_CPUS}
+  fi
 
   cat >>"$envfile" <<EOL
   export MAX_JOBS="${MAX_JOBS}"

@@ -1,11 +1,7 @@
 #include <sstream>
 
 #ifndef ROCM_ON_WINDOWS
-#ifdef TORCH_CUDA_USE_NVTX3
 #include <nvtx3/nvtx3.hpp>
-#else
-#include <nvToolsExt.h>
-#endif
 #else // ROCM_ON_WINDOWS
 #include <c10/util/Exception.h>
 #endif // ROCM_ON_WINDOWS
@@ -36,7 +32,7 @@ static void cudaCheck(cudaError_t result, const char* file, int line) {
     } else {
       ss << cudaGetErrorString(result);
     }
-    throw std::runtime_error(ss.str());
+    TORCH_CHECK(false, ss.str());
   }
 }
 #define TORCH_CUDA_CHECK(result) cudaCheck(result, __FILE__, __LINE__);

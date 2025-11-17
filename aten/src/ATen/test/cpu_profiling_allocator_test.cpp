@@ -199,7 +199,7 @@ int main(int argc, char* argv[]) {
 
   #ifdef C10_MOBILE
   // Need to disable mkldnn for this test since it allocated memory
-  // via raw_allocate inteface which requires context pointer and raw
+  // via raw_allocate interface which requires context pointer and raw
   // pointer to be the same. Tis is not true for mobile allocator.
   at::globalContext().setUserEnabledMkldnn(false);
   #endif

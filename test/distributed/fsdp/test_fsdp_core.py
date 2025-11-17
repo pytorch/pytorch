@@ -4,7 +4,8 @@ import functools
 import itertools
 import sys
 import unittest
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 from unittest import mock
 
 import torch

@@ -62,7 +62,7 @@ class TORCH_API StoreCollectives : public ControlCollectives {
   int rank_;
   int worldSize_;
 
-  c10::FastSet<std::string> seenKeys_{};
+  c10::FastSet<std::string> seenKeys_;
 };
 
 } // namespace c10d

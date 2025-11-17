@@ -186,10 +186,8 @@ inline T val_at_offs(constant void* ptr, long offs, ScalarType type) {
       return cast_to<T>(val_at_offs<float>(ptr, offs));
     case ScalarType::Half:
       return cast_to<T>(val_at_offs<half>(ptr, offs));
-#if __METAL_VERSION__ >= 310
     case ScalarType::BFloat16:
       return cast_to<T>(val_at_offs<bfloat>(ptr, offs));
-#endif
       // Complex
     case ScalarType::ComplexHalf:
       return cast_to<T>(val_at_offs<half2>(ptr, offs));

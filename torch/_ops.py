@@ -6,19 +6,19 @@ import importlib
 import inspect
 import sys
 import types
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from functools import cached_property
 from typing import (
     Any,
-    Callable,
     ClassVar,
+    Concatenate,
     final,
     Generic,
     Optional,
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import Concatenate, ParamSpec, TypeVar
+from typing_extensions import ParamSpec, TypeVar
 
 import torch
 import torch.utils._pytree as pytree
@@ -85,7 +85,7 @@ class OperatorBase:
 
         # This table allows you to override the behavior of a particular
         # dispatch key to call a custom Python function, rather than the
-        # ordinary C++ configured behavior.  This is the raison d'etre of
+        # ordinary C++ configured behavior.  This is the raison d'etre of  # codespell:ignore
         # Python dispatcher: to let you program the dispatcher from Python
         # in case you need something unusual, and don't want to clobber
         # the existing registrations using the Python operator registration
@@ -267,6 +267,7 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
     DispatchKey.BackendSelect,
     DispatchKey.AutocastCPU,  # type: ignore[attr-defined]
     DispatchKey.AutocastCUDA,  # type: ignore[attr-defined]
+    DispatchKey.AutocastXPU,  # type: ignore[attr-defined]
 ]
 
 
@@ -297,7 +298,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
             self.fallthrough(dispatch_key)
 
         # [NOTE] We have to register pre-dispatch key implementation
-        # because sometimes HOP use aot-dispatch tracing to detect certaion
+        # because sometimes HOP use aot-dispatch tracing to detect certain
         # mutations. This is problematic when we are functionalizing HOP
         # during pre-dispatch because when the inner tracer starts, it will see
         # that PreDispatch key is still active. In that case, we just redispatch
@@ -415,10 +416,19 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                         # TODO(rzou): we should support torch_dispatch calling convention too.
                         result = handler(mode, *args, **kwargs)
                 else:
-                    raise NotImplementedError(
-                        f"There was no rule registered for HOP {self._name} and mode {curr_mode}. "
-                        f"We recommend filing an issue."
-                    )
+                    if curr_mode.supports_higher_order_operators:
+                        with _pop_mode_temporarily() as mode:
+                            return curr_mode.__torch_dispatch__(self, [], args, kwargs)
+                    else:
+                        raise NotImplementedError(
+                            f"There was no rule registered for HigherOrderOperator {self._name} and mode {curr_mode}."
+                            f"Hint: set {curr_mode}'s supports_higher_order_operators to True."
+                            f" This causes all higher order operators to pass through {curr_mode}'s __torch_dispatch__,"
+                            f" so handle them accordingly by"
+                            f" adding support for HigerOrderOperators (in this case, {self._name}) in"
+                            f" {curr_mode}.__torch_dispatch__ or"
+                            f" returning NotImplemented when not supported."
+                        )
                 if result is not NotImplemented:
                     return result
 
@@ -427,7 +437,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
                 subclass_type = type(arg)
                 if (
                     subclass_type.__torch_dispatch__
-                    == torch._C._disabled_torch_dispatch_impl
+                    is torch._C._disabled_torch_dispatch_impl
                 ):
                     continue
 
@@ -457,10 +467,12 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
             # All handlers returned NotImplemented
             raise TypeError(
-                f"Multiple dispatch failed for {self._name}. There was no registered that "
-                f"did not return NotImplemented. Use HOP.py_impl to register some. "
-                f"Tried mode: {curr_mode}) and subclasses: "
-                f"{[type(a) for a in overloaded_args]}"
+                f"HigherOrderOperator '{self._name}' is not supported for the given input types. "
+                f"This typically happens when using custom tensor types or dispatch modes that don't "
+                f"have implementations for this operation.\n\n"
+                f"Current mode: {curr_mode}\n"
+                f"Input types: {[type(a).__name__ for a in overloaded_args]}\n\n"
+                f"To fix this, can add support for '{self._name}' in {curr_mode}'s __torch_dispatch__\n"
             )
 
         functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
@@ -509,21 +521,16 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
     @abc.abstractmethod
     def __call__(self, /, *args, **kwargs):
-        def wrapper():
-            flat_args = _to_flat_tuple(args, kwargs)
-            if torch.overrides.has_torch_function(flat_args):
-                return torch.overrides.handle_torch_function(
-                    self, flat_args, *args, **kwargs
-                )
-
-            dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-            return self.dispatch(
-                dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
+        flat_args = _to_flat_tuple(args, kwargs)
+        if torch.overrides.has_torch_function(flat_args):
+            return torch.overrides.handle_torch_function(
+                self, flat_args, *args, **kwargs
             )
 
-        return wrapper()
+        dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+        return self.dispatch(dispatch_key_set.highestPriorityTypeId(), *args, **kwargs)
 
-    # NOTE [HigherOrderOprator Schema]
+    # NOTE [HigherOrderOperator Schema]
     # Each invocation of a HigherOrderOperator (hop) should have its own schema because
     # the subgraphs and the arguments can be different even for the same hop.
     #
@@ -621,11 +628,13 @@ def unset_mode_pre_dispatch(mode_key, schema_check=False):
         assert mode_key is None
 
     def _unset_mode():
-        if mode_key == torch._C._TorchDispatchModeKey.PROXY:
+        # NOTE: Using `is` rather than `==` to work around slow enum comparison in
+        # pybind11.
+        if mode_key is torch._C._TorchDispatchModeKey.PROXY:
             current_mode = current_mode_stack_pre_dispatch.get(0)
             mode_stack_state_for_pre_dispatch().set(0, None)
             return current_mode
-        elif mode_key == torch._C._TorchDispatchModeKey.FUNCTIONAL:
+        elif mode_key is torch._C._TorchDispatchModeKey.FUNCTIONAL:
             current_mode = current_mode_stack_pre_dispatch.get(1)
             mode_stack_state_for_pre_dispatch().set(1, None)
             return current_mode
@@ -706,13 +715,11 @@ def _len_torch_dispatch_stack_pre_dispatch():
 
 
 def _get_dispatch_mode_pre_dispatch(mode_key):
-    assert mode_key in (
-        torch._C._TorchDispatchModeKey.PROXY,
-        torch._C._TorchDispatchModeKey.FUNCTIONAL,
-    )
-    if mode_key == torch._C._TorchDispatchModeKey.PROXY:
+    # NOTE: Using `is` rather than `==` to work around slow enum comparison in pybind11.
+    if mode_key is torch._C._TorchDispatchModeKey.PROXY:
         return mode_stack_state_for_pre_dispatch().get(0)
     else:
+        assert mode_key is torch._C._TorchDispatchModeKey.FUNCTIONAL
         return mode_stack_state_for_pre_dispatch().get(1)
 
 
@@ -791,7 +798,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         # Logic replicated from aten/src/ATen/native/MathBitsFallback.h
         is_write = None
-        for a in self._schema.arguments:
+        for a in self._schema.arguments:  # pyrefly: ignore  # bad-assignment
             if a.alias_info is None:
                 continue
             if is_write is None:
@@ -873,7 +880,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         elif torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), dk):
             return self._op_dk(dk, *args, **kwargs)
         else:
-            return NotImplemented
+            return NotImplemented  # pyrefly: ignore [bad-return]
 
     # Remove a dispatch key from the dispatch cache.  This will force it to get
     # recomputed the next time.  Does nothing
@@ -919,7 +926,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
                         return self._op_dk(key, *args, **kwargs)
 
                 with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
-                    return self.python_key_table[curr_mode](mode, *args, **kwargs)
+                    return self.python_key_table[curr_mode](mode, *args, **kwargs)  # type: ignore[index]
 
             self._dispatch_cache[key] = handler
             add_cached_op(self)
@@ -978,9 +985,9 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
 
         r = self.py_kernels.get(final_key, final_key)
         if cache_result:
-            self._dispatch_cache[key] = r
+            self._dispatch_cache[key] = r  # pyrefly: ignore [unsupported-operation]
             add_cached_op(self)
-        return r
+        return r  # pyrefly: ignore [bad-return]
 
     def name(self):
         return self._name
@@ -1016,6 +1023,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             DispatchKey.BackendSelect,
             DispatchKey.PythonTLSSnapshot,
             DispatchKey.PythonDispatcher,
+            DispatchKey.Functionalize,
         ]
 
         def _may_use_fallthrough_instead_of_fallback(key: DispatchKey):
@@ -1039,17 +1047,23 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
     def _register_as_effectful_op_temporarily(self):
         from torch._higher_order_ops.effects import (
             _EffectType,
+            _get_effect,
             _register_effectful_op,
-            SIDE_EFFECTS,
         )
 
         try:
-            if self not in SIDE_EFFECTS:
-                _register_effectful_op(self, _EffectType.ORDERED)
+            # We don't want to register the effect if there already exists a
+            # registration, especially if the registration is None (explicitly
+            # no effect)
+            register_tmp_effect = _get_effect(self) is None
+            handle = None
+            if register_tmp_effect:
+                handle = _register_effectful_op(self, _EffectType.ORDERED)
             yield
         finally:
-            if self in SIDE_EFFECTS:
-                del SIDE_EFFECTS[self]
+            if register_tmp_effect:
+                assert handle is not None
+                handle.destroy()
 
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
@@ -1104,13 +1118,13 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
                 f" but no python implementation is found."
                 f" Please file an issue on this when you encounter this error."
                 f" This error can happen when you export or compile the model."
-                f" It can still happpen even if a C++ implementation for {dispatch_key}. "
+                f" It can still happen even if a C++ implementation for {dispatch_key}. "
                 f" has been registered. That's because FakeScriptObject purely lives in python and cannot work "
                 f" with a C++ implementation."
             )
 
         assert isinstance(handler, Callable)  # type: ignore[arg-type]
-        return handler(*args, **kwargs)
+        return handler(*args, **kwargs)  # pyrefly: ignore [bad-return]
 
 
 def _must_dispatch_in_python(args, kwargs):
@@ -1239,6 +1253,7 @@ class OpOverloadPacket(Generic[_P, _T]):
         # the schema and cause an error for torchbind op when inputs consist of FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
         if self._has_torchbind_op_overload and _must_dispatch_in_python(args, kwargs):
+            # pyrefly: ignore [bad-argument-type]
             return _call_overload_packet_from_python(self, *args, **kwargs)
         return self._op(*args, **kwargs)
 
@@ -1252,7 +1267,7 @@ class OpOverloadPacket(Generic[_P, _T]):
 def _call_overload_packet_from_python(
     op: OpOverloadPacket[_P, _T], *args: _P.args, **kwargs: _P.kwargs
 ) -> _T:
-    # Re-use the torch function handling logic in cpp
+    # Reuse the torch function handling logic in cpp
     torch_function_called, ret = torch._C._maybe_call_torch_function_for_op_packet(
         op, *args, **kwargs
     )
@@ -1401,7 +1416,7 @@ class _HigherOrderNamespace(types.ModuleType):
 
     def __getattr__(self, name: str) -> HigherOrderOperator:
         # Following _OpNamespace.__getattr__, we cache the op on this object.
-        op = _higher_order_ops.get(name, None)
+        op = _higher_order_ops.get(name)
         if op is None:
             raise AttributeError(
                 f"'_HigherOrderNamespace' 'torch.ops.higher_order' object has no attribute '{name}'"
@@ -1467,15 +1482,15 @@ class _Ops(types.ModuleType):
         Args:
             path (str): A path to a shared library to load.
         """
-        if torch._running_with_deploy():
-            return
-
         path = _utils_internal.resolve_library_path(path)
         with dl_open_guard():
             # Import the shared library into the process, thus running its
             # static (global) initialization code in order to register custom
             # operators with the JIT.
-            ctypes.CDLL(path)
+            try:
+                ctypes.CDLL(path)
+            except Exception as e:
+                raise OSError(f"Could not load this library: {path}") from e
         self.loaded_libraries.add(path)
 
 

@@ -195,16 +195,12 @@ std::optional<std::string> NCCLComm::getNcclCommFailureReason() const {
   return commFailureReason_;
 }
 
-// TODO: why do we have `!defined(FBCODE_CAFFE2)` here?
-#if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
-// last argument to split() API is not used to support
-// multiple implementations
+#if defined(NCCL_HAS_COMM_SPLIT)
 std::shared_ptr<NCCLComm> NCCLComm::split(
     NCCLComm* source,
     int color_id,
     int rank,
-    ncclConfig_t& config,
-    std::vector<uint64_t>& ranks_ull) {
+    ncclConfig_t& config) {
   TORCH_CHECK(
       color_id >= NCCL_SPLIT_NOCOLOR,
       "Color must be a non-negative value or NCCL_SPLIT_NOCOLOR (-1)"
@@ -259,6 +255,65 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
       std::to_string(source->ncclCommSplitCounter_));
   LOG(INFO) << "Rank " << source->rank_ << ": created child comm "
             << comm->repr() << " with color_id " << color_id;
+  return comm;
+}
+#endif
+
+#ifdef NCCL_HAS_COMM_SHRINK
+std::shared_ptr<NCCLComm> NCCLComm::shrink(
+    NCCLComm* source,
+    std::vector<int>& ranks_to_exclude,
+    ncclConfig_t* config,
+    int shrinkFlags) {
+  // Preconditions are validated in ProcessGroupNCCL::shrink
+
+  LOG(INFO) << "Rank " << source->rank_ << ": shrinking comm " << source->repr()
+            << " excluding " << ranks_to_exclude.size() << " ranks";
+
+  at::cuda::OptionalCUDAGuard gpuGuard(source->deviceIndex_);
+  auto comm = std::make_shared<NCCLComm>();
+
+  // This call will block until the source communicator is initialized
+  auto sourceComm = source->getNcclComm();
+
+  C10D_NCCL_CHECK_NONBLOCKING(
+      ncclCommShrink(
+          sourceComm,
+          ranks_to_exclude.data(),
+          ranks_to_exclude.size(),
+          reinterpret_cast<ncclComm_t*>(&(comm->ncclComm_)),
+          config,
+          shrinkFlags),
+      source->getNcclCommFailureReason());
+
+  // Wait for the child communicator to be ready
+  source->waitReady(true);
+  comm->initialized_ = true;
+
+  // NCCL automatically assigns rank during shrink - query it efficiently
+  int assigned_rank;
+  try {
+    C10D_NCCL_CHECK(
+        ncclCommUserRank(comm->ncclComm_, &assigned_rank), std::nullopt);
+    comm->rank_ = assigned_rank;
+  } catch (const std::exception& e) {
+    // Fallback: if ncclCommUserRank fails, we can't determine the rank
+    LOG(ERROR) << "Failed to query NCCL-assigned rank: " << e.what();
+    throw;
+  }
+
+  // Child comm should be on the same device as parent comm
+  comm->deviceIndex_ = source->deviceIndex_;
+  if (config != nullptr) {
+    comm->nonBlocking_ = config->blocking == 0;
+  } else {
+    // Inherit parent behavior if no config provided
+    comm->nonBlocking_ = source->nonBlocking_;
+  }
+
+  LOG(INFO) << "Rank " << source->rank_ << ": created shrunken comm "
+            << comm->repr() << " with NCCL-assigned rank " << assigned_rank;
+
   return comm;
 }
 #endif
@@ -575,6 +630,27 @@ size_t hashTensors(const std::vector<at::Tensor>& tensors) {
     }
   }
   return hash;
+}
+
+// NCCL uses Non-negative int to represent in-group according to API
+// requirement. We take a list of ranks and generate a hash value based on the
+// list and ensure its range of 32-bit int.
+int genNcclSplitColor(const std::vector<int>& ranks) {
+  // Combine the hash values using a simple reducer (std::hash + fold)
+  std::size_t combined_hash = std::accumulate(
+      ranks.begin(),
+      ranks.end(),
+      std::size_t(0),
+      [](std::size_t acc, int rank) {
+        return acc ^
+            (std::hash<int>{}(rank) + 0x9e3779b9 + (acc << 6) + (acc >> 2));
+      });
+
+  // max positive value of int32_t
+  constexpr int32_t max_c_int = std::numeric_limits<int32_t>::max();
+  int color = static_cast<int>(
+      std::abs(static_cast<int64_t>(combined_hash)) % max_c_int);
+  return color;
 }
 
 // Default value: 30 minutes

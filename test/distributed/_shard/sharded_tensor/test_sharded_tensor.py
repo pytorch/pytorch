@@ -1733,7 +1733,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
             self.assertEqual(str(remote_device_after.device()), "cpu")
 
-        # ensure metdata also get changed to CPU
+        # ensure metadata also get changed to CPU
         metas = new_st.metadata().shards_metadata
         for meta in metas:
             self.assertEqual(str(meta.placement.device()), "cpu")
@@ -1764,7 +1764,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
             self.assertEqual(str(remote_device_after.device()), "cpu")
 
-        # ensure metdata also get changed to CPU
+        # ensure metadata also get changed to CPU
         metas = new_st.metadata().shards_metadata
         for meta in metas:
             self.assertEqual(str(meta.placement.device()), "cpu")
@@ -1820,7 +1820,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             self.assertEqual(str(remote_device_before.device().type), "cpu")
             self.assertEqual(str(remote_device_after.device().type), "cuda")
 
-        # ensure metdata also get changed to GPU
+        # ensure metadata also get changed to GPU
         metas = new_st_gpu.metadata().shards_metadata
         for meta in metas:
             self.assertEqual(str(meta.placement.device().type), "cuda")
@@ -3074,7 +3074,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 wrong_dtype_shards, [10, 10], init_rrefs=True
             )
 
-        tensor_requires_grad = True if self.rank == 0 else False
+        tensor_requires_grad = self.rank == 0
         wrong_requires_grad_shards = [
             sharded_tensor.Shard(
                 torch.randn(
@@ -3121,7 +3121,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 wrong_pin_memory_local_shards, [10, 10], init_rrefs=True
             )
 
-        tensor_pin_memory = True if self.rank == 0 else False
+        tensor_pin_memory = self.rank == 0
         wrong_pin_memory_shards_cross_ranks = [
             sharded_tensor.Shard(
                 torch.randn(5, 5, pin_memory=tensor_pin_memory), local_shard_metadata

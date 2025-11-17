@@ -142,6 +142,7 @@ class MaxPool1d(_MaxPoolNd):
     dilation: _size_1_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.max_pool1d(
             input,
             self.kernel_size,
@@ -221,6 +222,7 @@ class MaxPool2d(_MaxPoolNd):
     dilation: _size_2_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.max_pool2d(
             input,
             self.kernel_size,
@@ -296,7 +298,7 @@ class MaxPool3d(_MaxPoolNd):
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
-    """  # noqa: E501
+    """
 
     kernel_size: _size_3_t
     stride: _size_3_t
@@ -304,6 +306,7 @@ class MaxPool3d(_MaxPoolNd):
     dilation: _size_3_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.max_pool3d(
             input,
             self.kernel_size,
@@ -397,6 +400,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
     def forward(
         self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
+        """Runs the forward pass."""
         return F.max_unpool1d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size
         )
@@ -492,6 +496,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
     def forward(
         self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
+        """Runs the forward pass."""
         return F.max_unpool2d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size
         )
@@ -570,6 +575,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
     def forward(
         self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
+        """Runs the forward pass."""
         return F.max_unpool3d(
             input, indices, self.kernel_size, self.stride, self.padding, output_size
         )
@@ -662,6 +668,7 @@ class AvgPool1d(_AvgPoolNd):
         self.count_include_pad = count_include_pad
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.avg_pool1d(
             input,
             self.kernel_size,
@@ -770,6 +777,7 @@ class AvgPool2d(_AvgPoolNd):
         self.divisor_override = divisor_override
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.avg_pool2d(
             input,
             self.kernel_size,
@@ -886,6 +894,7 @@ class AvgPool3d(_AvgPoolNd):
         self.divisor_override = divisor_override
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.avg_pool3d(
             input,
             self.kernel_size,
@@ -1005,7 +1014,8 @@ class FractionalMaxPool3d(Module):
 
     Args:
         kernel_size: the size of the window to take a max over.
-                     Can be a single number k (for a square kernel of k x k x k) or a tuple `(kt x kh x kw)`
+                     Can be a single number `k` (for a square kernel of `k x k x k`) or a tuple `(kt x kh x kw)`,
+                     `k` must greater than 0.
         output_size: the target output size of the image of the form `oT x oH x oW`.
                      Can be a tuple `(oT, oH, oW)` or a single number oH for a square image `oH x oH x oH`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
@@ -1046,6 +1056,11 @@ class FractionalMaxPool3d(Module):
         _random_samples=None,
     ) -> None:
         super().__init__()
+        if (isinstance(kernel_size, int) and kernel_size <= 0) or (
+            isinstance(kernel_size, (tuple, list))
+            and not all(k > 0 for k in kernel_size)
+        ):
+            raise ValueError(f"kernel_size must greater than 0, but got {kernel_size}")
         self.kernel_size = _triple(kernel_size)
         self.return_indices = return_indices
         self.register_buffer("_random_samples", _random_samples)
@@ -1126,6 +1141,10 @@ class LPPool1d(_LPPoolNd):
         stride: a single int, the stride of the window. Default value is :attr:`kernel_size`
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
+    Note:
+        When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
+        left padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     Shape:
         - Input: :math:`(N, C, L_{in})` or :math:`(C, L_{in})`.
         - Output: :math:`(N, C, L_{out})` or :math:`(C, L_{out})`, where
@@ -1144,6 +1163,7 @@ class LPPool1d(_LPPoolNd):
     stride: _size_1_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.lp_pool1d(
             input, float(self.norm_type), self.kernel_size, self.stride, self.ceil_mode
         )
@@ -1174,6 +1194,10 @@ class LPPool2d(_LPPoolNd):
         stride: the stride of the window. Default value is :attr:`kernel_size`
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
+    Note:
+        When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
+        left padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
         - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
@@ -1199,6 +1223,7 @@ class LPPool2d(_LPPoolNd):
     stride: _size_2_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.lp_pool2d(
             input, float(self.norm_type), self.kernel_size, self.stride, self.ceil_mode
         )
@@ -1229,6 +1254,10 @@ class LPPool3d(_LPPoolNd):
         stride: the stride of the window. Default value is :attr:`kernel_size`
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
+    Note:
+        When :attr:`ceil_mode` is ``True``, sliding windows may go off-bounds if they start within the
+        left padding or the input. Sliding windows that would start in the right padded region are ignored.
+
     Shape:
         - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or
@@ -1258,6 +1287,7 @@ class LPPool3d(_LPPoolNd):
     stride: _size_3_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.lp_pool3d(
             input, float(self.norm_type), self.kernel_size, self.stride, self.ceil_mode
         )
@@ -1309,6 +1339,7 @@ class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
     output_size: _size_1_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.adaptive_max_pool1d(input, self.output_size, self.return_indices)
 
 
@@ -1351,6 +1382,7 @@ class AdaptiveMaxPool2d(_AdaptiveMaxPoolNd):
     output_size: _size_2_opt_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.adaptive_max_pool2d(input, self.output_size, self.return_indices)
 
 
@@ -1394,6 +1426,7 @@ class AdaptiveMaxPool3d(_AdaptiveMaxPoolNd):
     output_size: _size_3_opt_t
 
     def forward(self, input: Tensor):
+        """Runs the forward pass."""
         return F.adaptive_max_pool3d(input, self.output_size, self.return_indices)
 
 
@@ -1433,6 +1466,9 @@ class AdaptiveAvgPool1d(_AdaptiveAvgPoolNd):
     output_size: _size_1_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.adaptive_avg_pool1d(input, self.output_size)
 
 
@@ -1472,6 +1508,7 @@ class AdaptiveAvgPool2d(_AdaptiveAvgPoolNd):
     output_size: _size_2_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.adaptive_avg_pool2d(input, self.output_size)
 
 
@@ -1511,4 +1548,5 @@ class AdaptiveAvgPool3d(_AdaptiveAvgPoolNd):
     output_size: _size_3_opt_t
 
     def forward(self, input: Tensor) -> Tensor:
+        """Runs the forward pass."""
         return F.adaptive_avg_pool3d(input, self.output_size)

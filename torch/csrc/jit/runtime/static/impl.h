@@ -29,7 +29,7 @@ TORCH_API std::string dumpValueSet(
     const c10::FastSet<const Value*>& value_set,
     const char* set_name = "");
 
-TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
+inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
   switch (type.kind()) {
     // NOTE: NumberType may allocate because it includes complex.
     case TypeKind::NoneType:
@@ -44,11 +44,11 @@ TORCH_API inline bool doesNotHeapAllocateWhenStoredInIValue(const Type& type) {
   }
 }
 
-TORCH_API inline c10::Symbol getStaticRuntimeMetadataSymbol() {
+inline c10::Symbol getStaticRuntimeMetadataSymbol() {
   return Symbol::attr("static_runtime::metadata");
 }
 
-TORCH_API inline bool borrowsOutputs(c10::Symbol kind) {
+inline bool borrowsOutputs(c10::Symbol kind) {
   static const std::array<c10::Symbol, 4> symbols_with_borrowed_outputs = {
       c10::Symbol::fromQualString("static_runtime::select_tensor"),
       c10::Symbol::fromQualString("static_runtime::dict_unpack"),
@@ -142,9 +142,9 @@ class TORCH_API ManagedTensorRanges {
 
   // Maps Node* to the set of managed tensors that are now available
   // for reuse after this node.
-  c10::FastMap<Node*, std::vector<const Value*>> node_to_newly_free_tensors_{};
+  c10::FastMap<Node*, std::vector<const Value*>> node_to_newly_free_tensors_;
   // Maps each Value* to its lifetime (start node index, end node index)
-  c10::FastMap<const Value*, Lifetime> value_lifetimes_{};
+  c10::FastMap<const Value*, Lifetime> value_lifetimes_;
 };
 
 struct TORCH_API StaticModuleOptions {
@@ -395,7 +395,7 @@ class BlockInfo {
   c10::FastSet<const Value*> managed_output_tensor_values_;
   c10::FastSet<const Value*> leaked_values_;
 
-  ManagedTensorRanges managed_tensor_ranges_{};
+  ManagedTensorRanges managed_tensor_ranges_;
 
   // The index of this block's inputs in the shared values_ array.
   const uint16_t input_idx_;
@@ -549,7 +549,7 @@ class TORCH_API StaticModule {
   // IValue table (defined by prim::Constant nodes)
   std::vector<IValue> constants_;
   // The functions to be called by corresponding ProcessedNode.
-  std::vector<ProcessedFunction> functions_{};
+  std::vector<ProcessedFunction> functions_;
   // A list of pre-processed nodes from which ProcessedNode are created per
   // StaticRuntime instance.
   std::vector<StaticNodeInfo> nodes_;

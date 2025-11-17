@@ -24,14 +24,12 @@ struct vectypes<half> {
   using type2 = half2;
 };
 
-#if __METAL_VERSION__ >= 310
 template <>
 struct vectypes<bfloat> {
   using type4 = bfloat4;
   using type3 = bfloat3;
   using type2 = bfloat2;
 };
-#endif
 
 template <>
 struct vectypes<short> {
@@ -79,12 +77,10 @@ struct OpMathType<uchar> {
   using type = int;
 };
 
-#if __METAL_VERSION__ >= 310
 template <>
 struct OpMathType<bfloat> {
   using type = float;
 };
-#endif
 
 // Type promotion structure for higher precision accumulation
 template <typename T>
@@ -98,13 +94,11 @@ struct AccumulationType<half> {
   using type = float;
 };
 
-#if __METAL_VERSION__ >= 310
 // Specialization for bfloat - promote to float for accumulation
 template <>
 struct AccumulationType<bfloat> {
   using type = float;
 };
-#endif
 
 } // namespace detail
 
@@ -130,7 +124,6 @@ min(T a, U b) {
   return ::metal::min(a, static_cast<T>(b));
 }
 
-#if __METAL_VERSION__ >= 310
 template <>
 inline bfloat min(bfloat a, bfloat b) {
   return bfloat(
@@ -142,7 +135,6 @@ inline bfloat max(bfloat a, bfloat b) {
   return bfloat(
       ::metal::isunordered(a, b) ? NAN : ::metal::max(float(a), float(b)));
 }
-#endif
 
 template <typename T>
 using vec2type_t = typename detail::vectypes<T>::type2;
@@ -329,6 +321,61 @@ inline float log1p(float x) {
   }
   return rc;
 }
+
+// The function is ported from mlx
+inline float2 log1p(float2 in) {
+  float x = in.x;
+  float y = in.y;
+  float zabs = ::metal::precise::sqrt(x * x + y * y);
+  float theta = ::metal::atan2(y, x + 1);
+  if (zabs < 0.5f) {
+    float r = x * (2 + x) + y * y;
+    if (r == 0) { // handle underflow
+      return {x, theta};
+    }
+    return {0.5f * log1p(r), theta};
+  } else {
+    auto z0 = ::metal::sqrt((x + 1) * (x + 1) + y * y);
+    return {::metal::log(z0), theta};
+  }
+}
+
+template <typename T1, typename T2 = T1>
+struct pair {
+  T1 first;
+  T2 second;
+};
+
+template <typename T>
+inline T conj(T a) {
+  return a;
+}
+
+template <>
+inline half2 conj(half2 a) {
+  return half2(a.x, -a.y);
+}
+
+template <>
+inline float2 conj(float2 a) {
+  return float2(a.x, -a.y);
+}
+
+#define INSTANTIATE_FOR_ALL_TYPES(MACRO) \
+  MACRO(float);                          \
+  MACRO(half);                           \
+  MACRO(bfloat);                         \
+  MACRO(float2);                         \
+  MACRO(long);                           \
+  MACRO(char);                           \
+  MACRO(uchar);                          \
+  MACRO(short);                          \
+  MACRO(int);
+
+#define INSTANTIATE_FOR_FLOAT_TYPES(MACRO) \
+  MACRO(float);                            \
+  MACRO(half);                             \
+  MACRO(bfloat);
 
 } // namespace metal
 } // namespace c10

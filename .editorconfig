@@ -1,14 +1,36 @@
 root = true
 
 [*]
+charset = utf-8
 end_of_line = lf
 insert_final_newline = true
 
 # Python
-[*.py]
+[*.{py,pyi,py.in,pyi.in}]
 indent_style = space
 indent_size = 4
+
+# C/C++/CUDA
+[*.{cpp,hpp,cxx,cc,c,h,cu,cuh}]
+indent_style = space
+indent_size = 2
+
+# Objective-C
+[*.{mm,m,M}]
+indent_style = space
+indent_size = 2
+
+# Clang tools
+[.clang-{format,tidy}]
+indent_style = space
+indent_size = 2
 
 # Make
 [Makefile]
 indent_style = tab
+
+# Batch file
+[*.bat]
+indent_style = space
+indent_size = 2
+end_of_line = crlf

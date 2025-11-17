@@ -220,6 +220,12 @@ class TestCppExtensionJIT(common.TestCase):
 
         self.assertEqual(cpu_output, mps_output.to("cpu"))
 
+        # Regression test for https://github.com/pytorch/pytorch/issues/163721
+        lib = torch.mps.compile_shader("void kernel noop(device float *x) {}")
+        lib.noop(mps_output)
+        module.mps_add_one_new_context(mps_output)
+        self.assertEqual(cpu_output + 1.0, mps_output.to("cpu"))
+
     def _run_jit_cuda_archflags(self, flags, expected):
         # Compile an extension with given `flags`
         def _check_cuobjdump_output(expected_values, is_ptx=False):
@@ -322,12 +328,15 @@ class TestCppExtensionJIT(common.TestCase):
                 [f"{capability[0]}{capability[1]}" for capability in capabilities],
                 None,
             ),
-            "Maxwell+Tegra;6.1": (["53", "61"], None),
-            "Volta": (["70"], ["70"]),
         }
         archflags["7.5+PTX"] = (["75"], ["75"])
-        archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
-        if int(torch.version.cuda.split(".")[0]) < 12:
+        major, minor = map(int, torch.version.cuda.split(".")[:2])
+        if major < 12 or (major == 12 and minor <= 9):
+            # Compute capability <= 7.0 is only supported up to CUDA 12.9
+            archflags["Maxwell+Tegra;6.1"] = (["53", "61"], None)
+            archflags["Volta"] = (["70"], ["70"])
+            archflags["5.0;6.0+PTX;7.0;7.5"] = (["50", "60", "70", "75"], ["60"])
+        if major < 12:
             # CUDA 12 drops compute capability < 5.0
             archflags["Pascal 3.5"] = (["35", "60", "61"], None)
 
@@ -1031,7 +1040,7 @@ class TestCppExtensionJIT(common.TestCase):
         t = torch.rand(2).double()
         cpp_tensor_name = r"CPUDoubleType"
 
-        # Without error handling, the warnings cannot be catched
+        # Without error handling, the warnings cannot be caught
         warn_mod = torch.utils.cpp_extension.load_inline(
             name="warn_mod",
             cpp_sources=[source],
@@ -1065,23 +1074,23 @@ class TestCppExtensionJIT(common.TestCase):
         )
 
         with warnings.catch_warnings(record=True) as w:
-            # Catched with no error should be detected
+            # Caught with no error should be detected
             warn_mod.foo(t, 0)
             self.assertEqual(len(w), 1)
 
-            # Catched with cpp error should also be detected
+            # Caught with cpp error should also be detected
             with self.assertRaisesRegex(TypeError, t.type()):
                 warn_mod.foo(t, 1)
             self.assertEqual(len(w), 2)
 
-            # Catched with python error should also be detected
+            # Caught with python error should also be detected
             with self.assertRaisesRegex(
                 SystemError, "bad argument to internal function"
             ):
                 warn_mod.foo(t, 2)
             self.assertEqual(len(w), 3)
 
-            # Catched with pybind error should also be detected
+            # Caught with pybind error should also be detected
             # Note that there is no type name translation for pybind errors
             with self.assertRaisesRegex(KeyError, cpp_tensor_name):
                 warn_mod.foo(t, 3)
@@ -1224,25 +1233,25 @@ class TestCppExtensionJIT(common.TestCase):
         #include <torch/csrc/inductor/aoti_runtime/utils.h>
         #include <torch/csrc/inductor/aoti_torch/utils.h>
         #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-        #include <torch/csrc/stable/library.h>
+        #include <torch/csrc/stable/stableivalue_conversions.h>
 
         using RAIIATH = torch::aot_inductor::RAIIAtenTensorHandle;
 
         at::Tensor my_abs(at::Tensor x) {
         StableIValue stack[1];
         RAIIATH raii(torch::aot_inductor::new_tensor_handle(std::move(x)));
-        stack[0] = from(raii.release());
+        stack[0] = torch::stable::detail::from(raii.release());
         aoti_torch_call_dispatcher("aten::abs", "", stack);
-        RAIIATH res(to<AtenTensorHandle>(stack[0]));
+        RAIIATH res(torch::stable::detail::to<AtenTensorHandle>(stack[0]));
         return *reinterpret_cast<at::Tensor*>(res.release());
         }
 
         at::Tensor my_floor(at::Tensor x) {
         StableIValue stack[1];
         RAIIATH raii(torch::aot_inductor::new_tensor_handle(std::move(x)));
-        stack[0] = from(raii.release());
+        stack[0] = torch::stable::detail::from(raii.release());
         aoti_torch_call_dispatcher("aten::floor", "", stack);
-        RAIIATH res(to<AtenTensorHandle>(stack[0]));
+        RAIIATH res(torch::stable::detail::to<AtenTensorHandle>(stack[0]));
         return *reinterpret_cast<at::Tensor*>(res.release());
         }
         """
@@ -1299,6 +1308,40 @@ class TestCppExtensionJIT(common.TestCase):
 
         # test if build was successful
         self.assertEqual(success, True)
+
+    @unittest.skipIf(
+        not IS_LINUX or not check_compiler_is_gcc(get_cxx_compiler()),
+        "PCH is only available on Linux with GCC",
+    )
+    def test_pch_command_injection(self):
+        """Tests that PCH compilation is not vulnerable to command injection."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exploit_file = os.path.join(tmpdir, "pch_exploit")
+            # If executed by shell, this would create exploit_file
+            payload = f'; echo vulnerable > "{exploit_file}"'
+            cpp_source = "void foo() {}"
+
+            # Try to compile with malicious payload in extra_cflags
+            # The compilation may succeed or fail, but the key test is whether
+            # the shell command in the payload gets executed
+            try:
+                torch.utils.cpp_extension.load_inline(
+                    name="test_pch_injection",
+                    cpp_sources=cpp_source,
+                    functions=["foo"],
+                    extra_cflags=[payload],
+                    use_pch=True,
+                    verbose=True,
+                )
+            except RuntimeError:
+                # Compilation failure is expected since payload is not a valid flag
+                pass
+
+            # The critical security check: verify the shell command was NOT executed
+            self.assertFalse(
+                os.path.exists(exploit_file),
+                "Command injection vulnerability detected!",
+            )
 
 
 if __name__ == "__main__":

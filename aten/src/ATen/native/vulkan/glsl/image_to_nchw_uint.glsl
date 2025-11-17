@@ -57,7 +57,7 @@ void main() {
     // out CxHxW plane.
 
   ivec4 c_index = pos_in_batch / uBlock.in_extents.w;
-    // we devide pos_in_batch by HxW, to compute the channel index
+    // we divide pos_in_batch by HxW, to compute the channel index
 
   ivec4 pos_in_hw = pos_in_batch % uBlock.in_extents.w;
     // we compute the reminder mod HxW, to find the positions in the flatten

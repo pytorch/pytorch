@@ -23,7 +23,7 @@ def _remove_effect_tokens_from_graph_helper(
     output_node = None
     with_effect_nodes: list[torch.fx.Node] = []
 
-    # Output node need to check its args agianst output_token_names (collected from output_spec)
+    # Output node need to check its args against output_token_names (collected from output_spec)
     # Therefore, we only need to find the top-levele output node
     output_node = next(reversed(ep.graph_module.graph.find_nodes(op="output")))
     for module in ep.graph_module.modules():
@@ -52,7 +52,7 @@ def _remove_effect_tokens_from_graph_helper(
         func = node.args[1]
         assert isinstance(func, (torch._ops.OpOverload, torch._ops.HigherOrderOperator))
 
-        if func == torch.ops.higher_order.call_torchbind:
+        if func is torch.ops.higher_order.call_torchbind:
             custom_obj_meta = node.args[2].meta["val"]  # type: ignore[union-attr]
             assert isinstance(custom_obj_meta, CustomObjArgument)
             if custom_obj_meta.fake_val:
@@ -83,7 +83,7 @@ def _remove_effect_tokens_from_graph_helper(
 
         # Update user getitem nodes
         for user in list(new_node.users.keys()):
-            assert user.target == operator.getitem
+            assert user.target is operator.getitem
             # getitem(with_effects, 0) == token
             if user.args[1] == 0:
                 ep.graph.erase_node(user)
@@ -126,7 +126,7 @@ def _remove_effect_tokens_from_graph_helper(
 
 def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
     """
-    Removes the existance of tokens from the exported program, including:
+    Removes the existence of tokens from the exported program, including:
     - Removes the input and output tokens
     - Replaces with_effects(token, func, args) with just func(args)
 

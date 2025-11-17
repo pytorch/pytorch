@@ -1,9 +1,6 @@
-# AOTInductor: Ahead-Of-Time Compilation for Torch.Export-ed Models
+(torch.compiler_aot_inductor)=
 
-```{warning}
-AOTInductor and its related features are in prototype status and are
-subject to backwards compatibility breaking changes.
-```
+# AOTInductor: Ahead-Of-Time Compilation for Torch.Export-ed Models
 
 AOTInductor is a specialized version of
 [TorchInductor](https://dev-discuss.pytorch.org/t/torchinductor-a-pytorch-native-compiler-with-define-by-run-ir-and-symbolic-shapes/747),
@@ -25,7 +22,7 @@ relies on.
 
 We will then use {func}`torch._inductor.aoti_compile_and_package` to compile the
 exported program using TorchInductor, and save the compiled artifacts into one
-package.
+package. The package is in the format of a {ref}`PT2 Archive Spec <export.pt2_archive>`.
 
 ```{note}
 If you have a CUDA-enabled device on your machine and you installed PyTorch with CUDA support,
@@ -71,6 +68,10 @@ with torch.no_grad():
         # [Optional] Specify the generated shared library path. If not specified,
         # the generated artifact is stored in your system temp directory.
         package_path=os.path.join(os.getcwd(), "model.pt2"),
+        # [Optional] Specify Inductor configs
+        # This specific max_autotune option will turn on more extensive kernel autotuning for
+        # better performance.
+        inductor_configs={"max_autotune": True,},
     )
 ```
 
@@ -200,6 +201,7 @@ Below are some useful tools for debugging AOT Inductor.
 
 logging
 torch.compiler_aot_inductor_minifier
+torch.compiler_aot_inductor_debugging_guide
 ```
 
 To enable runtime checks on inputs, set the environment variable `AOTI_RUNTIME_CHECK_INPUTS` to 1. This will raise a `RuntimeError` if the inputs to the compiled model differ in size, data type, or strides from those used during export.

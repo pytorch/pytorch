@@ -22,11 +22,13 @@ ThreadPoolExecutor::~ThreadPoolExecutor() {
 }
 
 C10_ALWAYS_INLINE moodycamel::ProducerToken& ThreadPoolExecutor::ptok() {
+  // NOLINTNEXTLINE(misc-use-internal-linkage)
   thread_local moodycamel::ProducerToken ptok(*work_);
   return ptok;
 }
 
 C10_ALWAYS_INLINE moodycamel::ConsumerToken& ThreadPoolExecutor::ctok() {
+  // NOLINTNEXTLINE(misc-use-internal-linkage)
   thread_local moodycamel::ConsumerToken ctok(*work_);
   return ctok;
 }
@@ -39,7 +41,7 @@ void ThreadPoolExecutor::execute_inline(SessionState* session, WorkUnit* unit) {
 void ThreadPoolExecutor::start(int32_t numThreads) {
   stopped_ = false;
   for (int32_t i = 0; i < numThreads; ++i) {
-    threads_.emplace_back(std::thread(&ThreadPoolExecutor::loop, this));
+    threads_.emplace_back(&ThreadPoolExecutor::loop, this);
   }
 }
 
@@ -62,16 +64,17 @@ void ThreadPoolExecutor::loop() {
 
 void ThreadPoolExecutor::add(SessionState* session, WorkUnit* unit) {
   session->addWork();
-  work_->enqueue(ptok(), std::bind(&WorkUnit::run, unit, this, session));
+  work_->enqueue(ptok(), [unit, this, session] { unit->run(this, session); });
   sem_->release();
 }
 
 void ThreadPoolExecutor::add(
     SessionState* session,
-    std::vector<WorkUnit*>::const_iterator&& begin,
-    const std::vector<WorkUnit*>::const_iterator&& end) {
+    std::vector<WorkUnit*>::const_iterator begin,
+    const std::vector<WorkUnit*>::const_iterator& end) {
   const auto count = end - begin;
 
+  // NOLINTNEXTLINE(bugprone-switch-missing-default-case)
   switch (count) {
     case 0: {
       return;
@@ -86,16 +89,17 @@ void ThreadPoolExecutor::add(
   std::vector<Work> runnables;
   runnables.reserve(count);
   for (; begin != end; ++begin) {
-    runnables.push_back(std::bind(&WorkUnit::run, *begin, this, session));
+    runnables.emplace_back(
+        [capture0 = *begin, this, session] { capture0->run(this, session); });
   }
 
   work_->enqueue_bulk(ptok(), runnables.begin(), count);
-  sem_->release(count);
+  sem_->release(static_cast<int32_t>(count));
 }
 
 void ThreadPoolExecutor::stop() {
   stopped_ = true;
-  sem_->release(threads_.size());
+  sem_->release(static_cast<int32_t>(threads_.size()));
 
   std::for_each(threads_.begin(), threads_.end(), [](auto& t) { t.join(); });
   threads_.clear();
@@ -136,10 +140,10 @@ void ThreadPoolExecutor::run(
 }
 
 void WorkUnit::run(ThreadPoolExecutor* executor, SessionState* session) {
-  thread_local std::vector<WorkUnit*> newWorkUnits;
-  thread_local c10::InferenceMode mode;
+  /* thread_local */ std::vector<WorkUnit*> newWorkUnits;
+  /* thread_local */ c10::InferenceMode mode;
 
-  WorkUnit* unit = this;
+  /* thread_local */ WorkUnit* unit = this;
 
   while (true) {
     unit->kernel->compute(session->frame());
@@ -219,7 +223,7 @@ ParallelGraphExecutor::ParallelGraphExecutor(
     }
   }
 
-  executor_.start(executorConfig.maxParallelOps);
+  executor_.start(static_cast<int32_t>(executorConfig.maxParallelOps));
 }
 
 std::vector<c10::IValue> ParallelGraphExecutor::execute(

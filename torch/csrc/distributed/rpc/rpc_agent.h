@@ -24,6 +24,7 @@ constexpr auto kDefaultInitMethod = "env://";
 constexpr float kSecToMsConversion = 1000;
 constexpr auto kRpcTimeoutErrorStr =
     "RPC ran for more than set timeout ({} ms) and will now be marked with an error";
+constexpr auto kDefaultNumWorkerThreads = 16;
 
 using steady_clock_time_point =
     std::chrono::time_point<std::chrono::steady_clock>;
@@ -239,7 +240,7 @@ class TORCH_API RpcAgent {
   // should be profiled or not.
   void enableGILProfiling(bool flag);
 
-  // Retrieve wheher we should profile GIL wait times or not.
+  // Retrieve whether we should profile GIL wait times or not.
   bool isGILProfilingEnabled();
 
   // Set type resolver that will be passed to JIT pickler to resolver type Ptr

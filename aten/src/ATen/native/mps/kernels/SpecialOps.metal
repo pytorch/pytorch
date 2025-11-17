@@ -89,6 +89,4 @@ REGISTER_SPECIAL(short, float);
 REGISTER_SPECIAL(int, float);
 REGISTER_SPECIAL(long, float);
 REGISTER_SPECIAL(half, half);
-#if __METAL_VERSION__ >= 310
 REGISTER_SPECIAL(bfloat, bfloat);
-#endif
