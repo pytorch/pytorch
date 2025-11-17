@@ -36,7 +36,7 @@ jobs:
     runs-on: linux.9xlarge.ephemeral
     strategy:
       matrix:
-        tag: ["cuda12.6", "cuda12.8", "cuda12.9", "cuda13.0", "rocm6.4", "rocm7.0", "cpu"]
+        tag: ["cuda12.6", "cuda12.8", "cuda12.9", "cuda13.0", "rocm7.0", "rocm7.1", "cpu"]
     steps:
       - name: Build docker image
         uses: pytorch/pytorch/.github/actions/binary-docker-build@main
