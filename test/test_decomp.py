@@ -604,7 +604,7 @@ class TestDecomp(TestCase):
     @ops(op_db)
     def test_comprehensive(self, device, dtype, op):
         # Skip torch._scaled_mm with float8 on CUDA
-        if "cuda" in device and _get_torch_cuda_version() >= (13, 0) anddtype == torch.float8_e4m3fn:
+        if "cuda" in device and _get_torch_cuda_version() >= (13, 0) and dtype == torch.float8_e4m3fn:
             if op.name in ("torch._scaled_mm"):
                 self.skipTest("Skip _scaled_mm with FP8 on CUDA due to known issues")
         self.do_cross_ref(device, dtype, op, run_all=True)
