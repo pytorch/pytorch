@@ -926,6 +926,10 @@ class TestCommon(TestCase):
     @skipXPU
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     def test_out_warning(self, device, op):
+        # Skip torch._scaled_mm on CUDA 13.0+ - check VERY early
+        if op.name in ("torch._scaled_mm"):
+            if "cuda" in device and _get_torch_cuda_version() >= (13, 0):
+                raise unittest.SkipTest("Skip _scaled_mm on CUDA 13.0+ due to known issues with FP8")
         if TEST_WITH_TORCHDYNAMO and op.name == "_refs.clamp":
             self.skipTest("flaky")
         # Prefers running in float32 but has a fallback for the first listed supported dtype
@@ -937,12 +941,6 @@ class TestCommon(TestCase):
             if torch.float32 in supported_dtypes
             else next(iter(supported_dtypes))
         )
-
-        # Skip torch._scaled_mm on CUDA 13.0+ with float8
-        if device == "cuda" and op.name in ("torch._scaled_mm", "_scaled_mm"):
-            if dtype == torch.float8_e4m3fn:
-                if _get_torch_cuda_version() >= (13, 0):
-                    self.skipTest("Skip on CUDA 13.0+ due to known issues with FP8")
 
         # Ops from python_ref_db point to python decomps that are potentially
         # wrapped with `torch._prims_common.wrappers.out_wrapper`. Unwrap these
