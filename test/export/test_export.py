@@ -8835,7 +8835,6 @@ def forward(self, x):
         )
 
     @testing.expectedFailureStrictV2
-    # STRICT_V2_FAILURE: Guard constraint failed - expects x.item() >= 0 but gets -1
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -9832,7 +9831,6 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
     @testing.expectedFailureStrictV2
-    # STRICT_V2_FAILURE: Zero-argument tensor attribute access fails in strict export
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
