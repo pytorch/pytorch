@@ -777,8 +777,7 @@ class TritonTemplateKernel(TritonKernel):
             val = self.output_node.get_stride()
         else:
             assert isinstance(name, str)
-            self.named_input_nodes[name].data.freeze_layout()
-            val = self.named_input_nodes[name].get_stride()
+            val = self.get_stride_and_maybe_freeze_layout(self.named_input_nodes[name])
 
         if isinstance(index, int):
             return texpr(self.rename_indexing(val[index]))
@@ -1412,7 +1411,7 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(indices, (list, tuple))
         assert isinstance(name, str)
         assert isinstance(mask, str)
-        stride = self.named_input_nodes[name].get_stride()
+        stride = self.get_stride_and_maybe_freeze_layout(self.named_input_nodes[name])
         indices = list(map(OpOverrides.paren, indices))
         assert len(indices) == len(stride)
         index = " + ".join(
@@ -1501,6 +1500,10 @@ class TritonTemplateKernel(TritonKernel):
                 *V.graph.sizevars.size_hints(self.call_sizes), self.meta
             )
         ]
+
+    def get_stride_and_maybe_freeze_layout(self, node) -> list[int]:
+        node.data.freeze_layout()
+        return node.get_stride()
 
 
 @functools.cache
