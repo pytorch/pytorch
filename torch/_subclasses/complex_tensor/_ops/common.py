@@ -302,6 +302,7 @@ class ComplexTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        # TODO (hameerabbasi): Test perf with `_compile` set to `True`
         if self._compile:
             func = torch.compile(func)  # type: ignore[bad-assignment]
 

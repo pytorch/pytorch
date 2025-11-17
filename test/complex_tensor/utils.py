@@ -198,6 +198,9 @@ non_tested_ops = {
     op for op in COMPLEX_OPS_TABLE if _get_op_name(op) not in tested_op_names
 }
 
+
+# TODO (hameerabbasi): There are a number of ops that don't have any associated
+# OpInfos. We still need to write tests for those ops.
 if len(non_tested_ops) != 0:
     import textwrap
     import warnings
