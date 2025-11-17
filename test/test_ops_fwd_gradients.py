@@ -102,7 +102,7 @@ class TestFwdGradients(TestGradients):
         )
 
 
-instantiate_device_type_tests(TestFwdGradients, globals())
+instantiate_device_type_tests(TestFwdGradients, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True

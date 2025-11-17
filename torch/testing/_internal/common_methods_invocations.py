@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, MACOS_VERSION,
+    TEST_WITH_TORCHINDUCTOR, MACOS_VERSION, skipIfXpu,
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -12406,6 +12406,8 @@ op_db: list[OpInfo] = [
            dtypesIfROCM=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           # https://github.com/intel/torch-xpu-ops/issues/2360
+           backward_dtypesIfXPU=complex_types_and(torch.float16, torch.float32, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12427,6 +12429,7 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           backward_dtypesIfXPU=complex_types_and(torch.float16, torch.float32, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12448,6 +12451,8 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.complex64, torch.complex128,
                                            torch.bfloat16),
+           backward_dtypesIfXPU=custom_types(torch.float32, torch.float16, torch.bfloat16,
+                                             torch.complex64, torch.complex128,),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            decorators=[
@@ -12469,6 +12474,7 @@ op_db: list[OpInfo] = [
                                                        *[torch.bfloat16]
                                                        if SM53OrLater or TEST_WITH_ROCM else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           backward_dtypesIfXPU=complex_types_and(torch.float32, torch.float16, torch.bfloat16),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -12512,6 +12518,8 @@ op_db: list[OpInfo] = [
            backward_dtypesIfCUDA=floating_types_and(torch.float16,
                                                     *[torch.bfloat16] if SM53OrLater or TEST_WITH_ROCM else [],
                                                     torch.complex64, torch.complex128),
+           backward_dtypesIfXPU=custom_types(torch.float32, torch.float16, torch.bfloat16,
+                                             torch.complex64, torch.complex128,),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
            gradcheck_fast_mode=True,
@@ -12600,12 +12608,14 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           backward_dtypesIfXPU=complex_types_and(torch.float32, torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_mv),
     OpInfo('addr',
            dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16),
+           backward_dtypesIfXPU=complex_types_and(torch.bool, torch.int, torch.float32, torch.float16, torch.bfloat16),
            # Reference: https://github.com/pytorch/pytorch/issues/50747
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -12944,6 +12954,7 @@ op_db: list[OpInfo] = [
            )),
     OpInfo('cdist',
            dtypes=floating_types(),
+           backward_dtypesIfXPU=custom_types(torch.float32, torch.float16, torch.bfloat16),
            supports_out=False,
            supports_gradgrad=False,
            assert_autodiffed=False,
@@ -14419,6 +14430,7 @@ op_db: list[OpInfo] = [
                                                        *[torch.bfloat16]
                                                        if SM53OrLater or TEST_WITH_ROCM else []),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           backward_dtypesIfXPU=complex_types_and(torch.float32, torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            assert_jit_shape_analysis=True,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -15413,6 +15425,8 @@ op_db: list[OpInfo] = [
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
+               # https://github.com/intel/torch-xpu-ops/issues/1898
+               skipIfXpu,
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
@@ -15461,6 +15475,7 @@ op_db: list[OpInfo] = [
            gradcheck_fast_mode=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
+               skipIfXpu,
                DecorateInfo(
                    toleranceOverride({torch.float16: tol(atol=5e-2, rtol=5e-2), }),
                    'TestInductorOpInfo', 'test_comprehensive', device_type='cuda'),
@@ -17855,6 +17870,7 @@ op_db: list[OpInfo] = [
            dtypesIfCUDA=floating_and_complex_types_and(torch.float16,
                                                        *[torch.bfloat16]
                                                        if SM53OrLater or TEST_WITH_ROCM else []),
+           backward_dtypesIfXPU=complex_types_and(torch.float32, torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            sample_inputs_func=partial(sample_inputs_matmul, is_rmatmul=True),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -18797,6 +18813,8 @@ op_db: list[OpInfo] = [
     *(OpInfo('index_reduce',
              variant_test_name=reduction_type,
              dtypes=all_types_and(torch.float16, torch.bfloat16),
+             # https://github.com/intel/torch-xpu-ops/issues/2359
+             backward_dtypesIfXPU=complex_types_and(torch.bool, torch.int32, torch.float32, torch.float16, torch.bfloat16),
              skips=(
                  DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
                               'TestInductorOpInfo', 'test_comprehensive'),
@@ -20193,6 +20211,8 @@ op_db: list[OpInfo] = [
     OpInfo('logsumexp',
            aliases=('special.logsumexp',),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           backward_dtypesIfXPU=custom_types(torch.float32, torch.float64, torch.half, torch.bfloat16,
+                                             torch.complex64, torch.float16, torch.bfloat16),
            assert_autodiffed=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -21159,6 +21179,7 @@ op_db: list[OpInfo] = [
         op=lambda input, *args, **kwargs:
             wrapper_set_seed(torch.nn.functional.multi_head_attention_forward, input, *args, **kwargs),
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        backward_dtypesIfXPU=(torch.float32, torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_multi_head_attention_forward,
         skips=(
             # Tensor-likes are not close

@@ -769,7 +769,11 @@ class OpInfo:
     # backward dtypes this function is expected to work with on ROCM
     backward_dtypesIfROCM: _dispatch_dtypes = None
 
+    # backward dtypes this function is expected to work with on HPU
     backward_dtypesIfHpu: _dispatch_dtypes = None
+
+    # backward dtypes this function is expected to work with on XPU
+    backward_dtypesIfXPU: _dispatch_dtypes = None
 
     # the following metadata describes the operators out= support
 
@@ -995,7 +999,11 @@ class OpInfo:
                 else self.dtypes
             )
         )
-
+        self.backward_dtypesIfXPU = (
+            set(self.backward_dtypesIfXPU)
+            if self.backward_dtypesIfXPU is not None
+            else self.backward_dtypesIfCUDA
+        )
         self.backward_dtypes = (
             set(self.backward_dtypes)
             if self.backward_dtypes is not None
@@ -1555,6 +1563,8 @@ def test_foo(self, device, dtype, op):
             )
         elif device_type == "hpu":
             backward_dtypes = self.backward_dtypesIfHpu
+        elif device_type == "xpu":
+            backward_dtypes = self.backward_dtypesIfXPU
         elif device_type == "mps":
             backward_dtypes = self.backward_dtypes - {torch.double, torch.cdouble}
         else:
