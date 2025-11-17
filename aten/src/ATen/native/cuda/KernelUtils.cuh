@@ -5,69 +5,11 @@
 #include <cuda_bf16.h>
 #endif
 
-// ROCm 6.3 is planned to have these functions, but until then here they are.
 #if defined(USE_ROCM)
 #include <device_functions.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
-
-__device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
-#if (defined(__gfx942__)) && \
-  __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16)
-  typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
-  static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
-  union {
-    __hip_bfloat162_raw bf162_raw;
-    vec_short2 vs2;
-  } u{static_cast<__hip_bfloat162_raw>(value)};
-  u.vs2 = __builtin_amdgcn_flat_atomic_fadd_v2bf16((vec_short2*)address, u.vs2);
-  return static_cast<__hip_bfloat162>(u.bf162_raw);
-#else
-  static_assert(sizeof(unsigned int) == sizeof(__hip_bfloat162_raw));
-  union u_hold {
-    __hip_bfloat162_raw h2r;
-    unsigned int u32;
-  };
-  u_hold old_val, new_val;
-  old_val.u32 = __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-  do {
-    new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__hip_atomic_compare_exchange_strong(
-        (unsigned int*)address, &old_val.u32, new_val.u32,
-        __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
-  return old_val.h2r;
-#endif
-}
-
-__device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 value) {
-#if (defined(__gfx942__)) && \
-  __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2f16)
-  // The api expects an ext_vector_type of half
-  typedef _Float16 __attribute__((ext_vector_type(2))) vec_fp162;
-  static_assert(sizeof(vec_fp162) == sizeof(__half2_raw));
-  union {
-    __half2_raw h2r;
-    vec_fp162 fp16;
-  } u {static_cast<__half2_raw>(value)};
-  u.fp16 = __builtin_amdgcn_flat_atomic_fadd_v2f16((vec_fp162*)address, u.fp16);
-  return static_cast<__half2>(u.h2r);
-#else
-  static_assert(sizeof(__half2_raw) == sizeof(unsigned int));
-  union u_hold {
-    __half2_raw h2r;
-    unsigned int u32;
-  };
-  u_hold old_val, new_val;
-  old_val.u32 = __hip_atomic_load((unsigned int*)address, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
-  do {
-    new_val.h2r = __hadd2(old_val.h2r, value);
-  } while (!__hip_atomic_compare_exchange_strong(
-        (unsigned int*)address, &old_val.u32, new_val.u32,
-        __ATOMIC_RELAXED, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT));
-  return old_val.h2r;
-#endif
-}
-#define ATOMICADD preview_unsafeAtomicAdd
+#define ATOMICADD unsafeAtomicAdd
 #define NATIVE_ZERO_BF16 __float2bfloat16(0.0f)
 #else
 #define ATOMICADD atomicAdd
