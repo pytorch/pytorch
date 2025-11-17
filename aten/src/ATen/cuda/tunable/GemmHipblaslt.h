@@ -506,7 +506,7 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       }
 
       hipblasComputeType_t computeType = HIPBLAS_COMPUTE_32F;
-      if (at::globalContext().float32Precision("cuda", "matmul") == "tf32") {
+      if (at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
         computeType = HIPBLAS_COMPUTE_32F_FAST_TF32;
       }
       HipBlasLtMatmulDescriptor matmul(computeType, HIP_R_32F);

@@ -28,7 +28,7 @@ namespace at::native {
 
 namespace {
 
-static Tensor compute_columns3d(
+Tensor compute_columns3d(
     const Tensor& input_,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -108,7 +108,7 @@ static Tensor compute_columns3d(
   return columns;
 }
 
-static inline void slow_conv3d_shape_check(
+inline void slow_conv3d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -273,7 +273,7 @@ static inline void slow_conv3d_shape_check(
   }
 }
 
-static Tensor view_weight_2d(const Tensor& weight_) {
+Tensor view_weight_2d(const Tensor& weight_) {
   Tensor weight = weight_.contiguous();
   if (weight.dim() == 5) {
     const int64_t s1 = weight.size(0);
@@ -286,7 +286,7 @@ static Tensor view_weight_2d(const Tensor& weight_) {
 }
 
 template <typename scalar_t>
-static void slow_conv3d_update_output_frame(
+void slow_conv3d_update_output_frame(
     TensorAccessor<const scalar_t, 4> input,
     TensorAccessor<scalar_t, 4> output,
     TensorAccessor<const scalar_t, 2> weight,
@@ -515,7 +515,7 @@ void slow_conv3d_backward_weight_frame(
       grad_weight.data(), ldc, grad_weight.stride(0) * n);
 }
 
-static void slow_conv3d_backward_parameters_out_cpu_template(
+void slow_conv3d_backward_parameters_out_cpu_template(
     Tensor& grad_weight,
     const Tensor& input,
     const Tensor& grad_output,
