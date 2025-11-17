@@ -1101,6 +1101,19 @@ _scaled_mxfp8_mxfp8(
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 }
 
+void
+_check_mxfp4_support() {
+#ifndef USE_ROCM
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  // Only on B200 GPUs
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    // B200 = 10.0, B300 = 10.3
+    dprops->major == 10,
+    "MXFP4 scaling only supported in CUDA for B200/B300"
+  );
+#endif
+}
+
 
 Tensor&
 _scaled_mxfp4_mxfp4(
@@ -1113,6 +1126,7 @@ _scaled_mxfp4_mxfp4(
 #if defined(_WIN32) || (!defined(USE_ROCM) && !defined(USE_FBGEMM_GENAI))
   TORCH_CHECK_NOT_IMPLEMENTED(false, "MXFP4 scaling supported on ROCM and CUDA+FBGEMM_GENAI only");
 #else
+  _check_mxfp4_support();
   // Restrictions:
   // A, B are FP4, scales are e8m0, A: shape K//32, B: K, N//32
   TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2 && mat_b.scalar_type() == at::kFloat4_e2m1fn_x2, "mat_a and mat_b must be fp4 types, got: ",

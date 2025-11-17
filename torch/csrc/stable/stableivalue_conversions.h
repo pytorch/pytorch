@@ -238,10 +238,10 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
       TORCH_ERROR_CODE_CHECK(
           torch_new_list_reserve_size(val.size(), &new_list_handle));
       for (const auto& elem : val) {
-        TORCH_ERROR_CODE_CHECK(
-            torch_list_push_back(new_list_handle, from(elem)));
+        TORCH_ERROR_CODE_CHECK(torch_list_push_back(
+            new_list_handle, torch::stable::detail::from(elem)));
       }
-      return from(new_list_handle);
+      return torch::stable::detail::from(new_list_handle);
     } catch (const std::runtime_error& e) {
       if (new_list_handle != nullptr) {
         // clean up memory if an error was thrown

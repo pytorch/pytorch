@@ -310,7 +310,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
   m.def("my_amax(Tensor a) -> Tensor");
   m.def("my_amax_vec(Tensor a) -> Tensor");
   m.def("my_is_cpu(Tensor t) -> bool");
-   m.def("test_default_constructor(bool undefined) -> bool");
+  m.def("test_default_constructor(bool undefined) -> bool");
 }
 
 bool test_default_constructor(bool defined) {
@@ -332,12 +332,47 @@ bool test_default_constructor(bool defined) {
   return out.defined();
 }
 
+uint64_t get_any_data_ptr(Tensor t, bool mutable_) {
+  if (mutable_) {
+    return reinterpret_cast<uint64_t>(t.mutable_data_ptr());
+  } else {
+    return reinterpret_cast<uint64_t>(t.const_data_ptr());
+  }
+}
+
+uint64_t get_template_any_data_ptr(Tensor t, c10::ScalarType dtype, bool mutable_) {
+#define DEFINE_CASE(T, name)                                            \
+  case torch::headeronly::ScalarType::name: {                           \
+    if (mutable_) {                                                     \
+      return reinterpret_cast<uint64_t>(t.mutable_data_ptr<T>());       \
+    } else {                                                            \
+      return reinterpret_cast<uint64_t>(t.const_data_ptr<T>());         \
+    }                                                                   \
+  }
+  switch (dtype) {
+    // per aten/src/ATen/templates/TensorMethods.cpp:
+    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CASE)
+    DEFINE_CASE(uint16_t, UInt16)
+    DEFINE_CASE(uint32_t, UInt32)
+    DEFINE_CASE(uint64_t, UInt64)
+  default:
+      return 0;
+  }
+#undef DEFINE_CASE
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic, m) {
+  m.def("get_any_data_ptr(Tensor t, bool mutable_) -> int");
+  m.def("get_template_any_data_ptr(Tensor t, ScalarType dtype, bool mutable_) -> int");
+}
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic, CompositeExplicitAutograd, m) {
   m.impl("my_zero_", TORCH_BOX(&my_zero_));
   m.impl("my_amax", TORCH_BOX(&my_amax));
   m.impl("my_amax_vec", TORCH_BOX(&my_amax_vec));
   m.impl("test_default_constructor", TORCH_BOX(&test_default_constructor));
+  m.impl("get_any_data_ptr", TORCH_BOX(&get_any_data_ptr));
+  m.impl("get_template_any_data_ptr", TORCH_BOX(&get_template_any_data_ptr));
 }
 
 std::vector<Tensor> my__foreach_mul(torch::headeronly::HeaderOnlyArrayRef<Tensor> self, torch::headeronly::HeaderOnlyArrayRef<Tensor> other) {
