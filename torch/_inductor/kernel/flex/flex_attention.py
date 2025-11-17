@@ -7,7 +7,7 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -49,6 +49,8 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 Expr = sympy.Expr
+
+ForceImpl = Literal["DEFAULT", "DECODE", "FLASH", "TRITON"]
 
 
 @SymbolicGridFn
@@ -93,7 +95,7 @@ def flex_attention(
     subgraph,
     block_mask,
     scale,
-    kernel_options,
+    kernel_options: dict[str, Any],
     score_mod_other_buffers,
     mask_mod_other_buffers,
 ):
@@ -180,7 +182,25 @@ def flex_attention(
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
-    if _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa):
+
+    # Read and remove FORCE_IMPL selector (dispatch-time only, not passed to kernels)
+    force_impl = cast(ForceImpl, kernel_options.pop("FORCE_IMPL", "DEFAULT"))
+
+    # Check if we should use flex_decoding
+    can_use_decode = _use_flex_decoding(
+        query, kv_indices, value, kernel_options, enable_gqa
+    )
+    use_decode = (force_impl == "DECODE") or (
+        force_impl == "DEFAULT" and can_use_decode
+    )
+
+    if force_impl == "DECODE" and not can_use_decode:
+        raise RuntimeError(
+            "FORCE_IMPL='DECODE' was specified but flex_decoding cannot be used for this input. "
+            "flex_decoding is only available for short sequence lengths with specific configurations."
+        )
+
+    if use_decode:
         return create_flex_decoding_kernel(
             query,
             key,
@@ -227,6 +247,7 @@ def flex_attention(
         mask_graph,
         kernel_options,
         num_score_mod_placeholders=len(placeholder_inps),
+        force_impl=force_impl,
     ):
         return create_flex_flash_attention_kernel(
             query,
