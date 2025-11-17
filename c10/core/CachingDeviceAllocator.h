@@ -96,6 +96,13 @@ struct C10_API DeviceAllocator : public c10::Allocator {
 
   // Resets peak memory usage statistics for the specified device
   virtual void resetPeakStats(c10::DeviceIndex device) = 0;
+
+  // Return the free memory size and total memory size in bytes for the
+  // specified device.
+  virtual std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "getMemoryInfo is not implemented for this allocator yet.");
+  }
 };
 
 // This function is used to get the DeviceAllocator for a specific device type

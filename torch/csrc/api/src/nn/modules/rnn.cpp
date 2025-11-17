@@ -374,7 +374,7 @@ void RNNImplBase<Derived>::pretty_print(std::ostream& stream) const {
   if (options_base.proj_size() > 0) {
     stream << ", proj_size=" << options_base.proj_size();
   }
-  stream << ")";
+  stream << ')';
 }
 
 template <typename Derived>
@@ -837,7 +837,7 @@ template <typename Derived>
 void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
   const std::string name = this->name();
   const std::string name_without_impl = name.substr(0, name.size() - 4);
-  stream << name_without_impl << "(" << options_base.input_size() << ", "
+  stream << name_without_impl << '(' << options_base.input_size() << ", "
          << options_base.hidden_size();
   if (!options_base.bias()) {
     stream << ", bias=" << std::boolalpha << false;
@@ -846,7 +846,7 @@ void RNNCellImplBase<Derived>::pretty_print(std::ostream& stream) const {
   if (!nonlinearity_str.empty() && nonlinearity_str != "kTanh") {
     stream << ", nonlinearity=" << nonlinearity_str;
   }
-  stream << ")";
+  stream << ')';
 }
 
 template <typename Derived>
