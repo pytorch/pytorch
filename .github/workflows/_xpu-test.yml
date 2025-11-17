@@ -38,6 +38,10 @@ on:
         default: ""
         description: |
           List of tests to include (empty string implies default list)
+      dashboard-tag:
+        required: false
+        type: string
+        default: ""
       disable-monitor:
         description: |
           [Experimental] Disable utilization monitoring for tests.
@@ -58,6 +62,11 @@ on:
         required: false
         type: number
         default: 1
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
 permissions:
   id-token: write
   contents: read
@@ -196,6 +205,8 @@ jobs:
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
+          DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
         timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
         run: |
           # Fetch aws credential from IMDs
@@ -246,6 +257,8 @@ jobs:
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
             -e TESTS_TO_INCLUDE \
             -e ZE_AFFINITY_MASK \
+            -e HUGGING_FACE_HUB_TOKEN \
+            -e DASHBOARD_TAG \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
             --ulimit stack=10485760:83886080 \
             --ulimit core=0 \
@@ -330,6 +343,22 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
           path: ./**/core.[1-9]*
+
+      - name: Authenticate with AWS
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_upload-benchmark-results
+          # The max duration enforced by the server side
+          role-duration-seconds: 18000
+          aws-region: us-east-1
+
+      - name: Upload the benchmark results
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        with:
+          benchmark-results-dir: test/test-reports
+          dry-run: false
+          schema-version: v3
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Teardown XPU
         uses: ./.github/actions/teardown-xpu
