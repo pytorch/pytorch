@@ -1,5 +1,3 @@
-#include "kernel.h"
-
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/device.h>
