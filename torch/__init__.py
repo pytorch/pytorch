@@ -33,7 +33,11 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
+from typing_extensions import (
+    deprecated as _deprecated,
+    ParamSpec as _ParamSpec,
+    TypeIs as _TypeIs,
+)
 
 
 # As a bunch of torch.packages internally still have this check
@@ -1148,19 +1152,32 @@ def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]]:
+def is_storage(obj: _Any, /) -> builtins.bool:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
         obj (Object): Object to test
     Example::
 
-        >>> x = torch.tensor([1, 2, 3])
-        >>> torch.is_storage(x)
-        False
-        >>> torch.is_storage(x.untyped_storage())
+        >>> import torch
+        >>> # UntypedStorage (recommended)
+        >>> tensor = torch.tensor([1, 2, 3])
+        >>> storage = tensor.untyped_storage()
+        >>> torch.is_storage(storage)
         True
-
+        >>>
+        >>> # TypedStorage (legacy)
+        >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
+        >>> torch.is_storage(typed_storage)
+        True
+        >>>
+        >>> # regular tensor (should return False)
+        >>> torch.is_storage(tensor)
+        False
+        >>>
+        >>> # non-storage object
+        >>> torch.is_storage([1, 2, 3])
+        False
     """
     return type(obj) in _storage_classes
 
@@ -1722,7 +1739,10 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-# TODO add deprecation annotation
+@_deprecated(
+    "_check_is_size will be removed in a future PyTorch release along with guard_size_oblivious. \
+    Use _check(i >= 0) instead."
+)
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
