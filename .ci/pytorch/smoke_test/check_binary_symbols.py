@@ -221,7 +221,10 @@ int main() { return 0; }
                 )
 
             stderr = result.stderr
-            expected_error_msg = "This file should not be included when either TORCH_STABLE_ONLY or TORCH_TARGET_VERSION is defined."
+            expected_error_msg = (
+                "This file should not be included when either TORCH_STABLE_ONLY "
+                "or TORCH_TARGET_VERSION is defined."
+            )
 
             if expected_error_msg not in stderr:
                 raise RuntimeError(
