@@ -1635,6 +1635,7 @@ def gelu_decomposition(match: Match, inp, *, approximate):
     def get_gelu_decomposition() -> Callable:
         # NOTE: get_decompositions is experimental
         from torch._decomp import get_decompositions
+
         gelu_decomp = get_decompositions([aten.gelu])[aten.gelu.default]
         return gelu_decomp
 
