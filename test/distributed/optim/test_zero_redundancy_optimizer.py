@@ -7,7 +7,7 @@
 
 import copy
 import sys
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 from typing import Any, cast
 
 import numpy as np
@@ -40,6 +40,7 @@ from torch.testing._internal.common_distributed import (
     skip_if_rocm_multiprocess,
     skip_if_win32,
 )
+from torch.testing._internal.common_fsdp import get_devtype
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -56,17 +57,7 @@ except ImportError:
     HAS_TORCHVISION = False
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
-
-
-@contextmanager
-def deterministic_algorithms(enabled=True):
-    prev_state = torch.are_deterministic_algorithms_enabled()
-    torch.use_deterministic_algorithms(enabled)
-    try:
-        yield
-    finally:
-        torch.use_deterministic_algorithms(prev_state)
+device_type = str(get_devtype())
 
 
 class TestZeroRedundancyOptimizer(DistributedTestBase):
@@ -1250,7 +1241,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                     enabled=True, deterministic=True, benchmark=False
                 )
                 if "cuda" in device
-                else deterministic_algorithms(True)
+                else torch.use_deterministic_algorithms(True)
             )
             with det_ctx:
                 device_ids = [rank] if requires_ddp_rank(device) else None
