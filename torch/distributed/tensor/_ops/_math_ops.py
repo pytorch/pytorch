@@ -360,6 +360,9 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.amax.out: "max",
     aten.amin.default: "min",
     aten.amin.out: "min",
+    # argmax and argmin is only linear when reduction is done on replicated dim
+    aten.argmax.default: "max",
+    aten.argmin.default: "min",
 }
 
 
@@ -387,6 +390,28 @@ def linear_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
         reduction_linear=True,
         reduction_op=reduction_op,
     )
+
+# @register_op_strategy([aten.argmax.default], schema_info=RuntimeSchemaInfo(1))
+# def argmax_stategy(op_schema: OpSchema) -> OpStrategy:
+#     args_schema = op_schema.args_schema
+#     input_strategy = args_schema[0]
+#     if not isinstance(input_strategy, OpStrategy):
+#         raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+    
+#     # Grab the dim argument. None means reduce all
+#     dims = None
+#     if len(op_schema.args_schema) > 1:
+#         dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
+    
+#     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+#     keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
+#     return common_reduction_strategy(
+#         input_strategy,
+#         reduce_dims,
+#         keep_dim=keep_dim,
+#         reduction_linear=False,
+#         reduction_op="max"
+#     )
 
 
 @register_op_strategy(aten.cumsum.default, schema_info=RuntimeSchemaInfo(1))

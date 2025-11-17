@@ -12,6 +12,7 @@ import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._nonlinear_reduce import argmax_handler
 from torch.distributed.tensor._op_schema import OpInfo, OpSchema, OutputSpecType
 from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
@@ -140,6 +141,7 @@ class OpDispatcher:
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
+            aten.argmax.default: argmax_handler
         }
 
     # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
