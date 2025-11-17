@@ -100,7 +100,9 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   std::string data(OSS.str());
 
   auto mod = _createModule(
-      reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), buildFlags.c_str());
+      reinterpret_cast<const uint8_t*>(data.c_str()),
+      data.size(),
+      buildFlags.c_str());
 
   return _createKernel(mod, funcName.c_str());
 }
@@ -115,7 +117,8 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   size_t size = reinterpret_cast<const uint8_t*>(end) -
       reinterpret_cast<const uint8_t*>(start);
 
-  auto mod = _createModule(reinterpret_cast<const uint8_t*>(start), size, buildFlags.c_str());
+  auto mod = _createModule(
+      reinterpret_cast<const uint8_t*>(start), size, buildFlags.c_str());
 
   return _createKernel(mod, funcName.c_str());
 }
