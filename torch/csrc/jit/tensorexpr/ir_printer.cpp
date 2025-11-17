@@ -71,21 +71,21 @@ static void visitBinaryOp(
   int rhs_prec = getPrecedence(v->rhs()->expr_type());
 
   if (lhs_prec >= self_prec) {
-    os << "(";
+    os << '(';
   }
   v->lhs()->accept(printer);
   if (lhs_prec >= self_prec) {
-    os << ")";
+    os << ')';
   }
 
-  os << " " << op_str << " ";
+  os << ' ' << op_str << ' ';
 
   if (rhs_prec >= self_prec) {
-    os << "(";
+    os << '(';
   }
   v->rhs()->accept(printer);
   if (rhs_prec >= self_prec) {
-    os << ")";
+    os << ')';
   }
 }
 
@@ -129,7 +129,7 @@ void IRPrinter::visit(const ModPtr& v) {
   if (v->dtype().is_integral()) {
     visitBinaryOp(v, "%", this);
   } else if (v->dtype().is_floating_point()) {
-    os() << "mod(" << *v->lhs() << ", " << *v->rhs() << ")";
+    os() << "mod(" << *v->lhs() << ", " << *v->rhs() << ')';
   } else {
     throw std::runtime_error("invalid dtype: " + std::to_string(v->dtype()));
   }
@@ -140,7 +140,7 @@ void IRPrinter::visit(const MaxPtr& v) {
   v->lhs()->accept(this);
   os() << ", ";
   v->rhs()->accept(this);
-  os() << ", " << (unsigned int)v->propagate_nans() << ")";
+  os() << ", " << (unsigned int)v->propagate_nans() << ')';
 }
 
 void IRPrinter::visit(const MinPtr& v) {
@@ -148,7 +148,7 @@ void IRPrinter::visit(const MinPtr& v) {
   v->lhs()->accept(this);
   os() << ", ";
   v->rhs()->accept(this);
-  os() << ", " << (unsigned int)v->propagate_nans() << ")";
+  os() << ", " << (unsigned int)v->propagate_nans() << ')';
 }
 
 void IRPrinter::visit(const CompareSelectPtr& v) {
@@ -158,32 +158,32 @@ void IRPrinter::visit(const CompareSelectPtr& v) {
   int rhs_prec = getPrecedence(v->rhs()->expr_type());
 
   if (lhs_prec >= self_prec) {
-    os() << "(";
+    os() << '(';
   }
   v->lhs()->accept(this);
   if (lhs_prec >= self_prec) {
-    os() << ")";
+    os() << ')';
   }
 
   os() << to_string(cmp_op);
 
   if (rhs_prec >= self_prec) {
-    os() << "(";
+    os() << '(';
   }
   v->rhs()->accept(this);
   if (rhs_prec >= self_prec) {
-    os() << ")";
+    os() << ')';
   }
   os() << " ? ";
 
   auto withParens = [&](const ExprPtr& e) {
     auto prec = getPrecedence(e->expr_type());
     if (prec >= self_prec) {
-      os() << "(";
+      os() << '(';
     }
     e->accept(this);
     if (prec >= self_prec) {
-      os() << ")";
+      os() << ')';
     }
   };
   withParens(v->ret_val1());
@@ -237,16 +237,16 @@ AT_FORALL_SCALAR_TYPES_AND3(Bool, Half, BFloat16, IMM_PRINT_VISIT)
 
 void IRPrinter::visit(const CastPtr& v) {
   auto dtype = v->dtype();
-  os() << dtypeToCppString(dtype) << "(";
+  os() << dtypeToCppString(dtype) << '(';
   v->src_value()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void IRPrinter::visit(const BitCastPtr& v) {
   auto dtype = v->dtype();
   os() << "BitCast<" << dtype.ToCppString() << ">(";
   v->src_value()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void IRPrinter::visit(const VarPtr& v) {
@@ -273,7 +273,7 @@ void IRPrinter::visit(const BufPtr& v) {
     }
     s->accept(this);
   }
-  os() << "]";
+  os() << ']';
   os() << ", strides=[";
   i = 0;
   for (const ExprPtr& s : v->strides()) {
@@ -282,14 +282,14 @@ void IRPrinter::visit(const BufPtr& v) {
     }
     s->accept(this);
   }
-  os() << "]";
+  os() << ']';
 
-  os() << ")";
+  os() << ')';
 }
 
 void IRPrinter::visit(const RampPtr& v) {
   os() << "Ramp(" << *v->base() << ", " << *v->stride() << ", " << v->lanes()
-       << ")";
+       << ')';
 }
 
 void IRPrinter::visit(const LoadPtr& v) {
@@ -297,7 +297,7 @@ void IRPrinter::visit(const LoadPtr& v) {
   if (v->indices().empty()) {
     os() << *v->base_handle();
   } else {
-    os() << *v->base_handle() << "[";
+    os() << *v->base_handle() << '[';
     size_t i = 0;
     for (const ExprPtr& ind : v->indices()) {
       if (i++) {
@@ -306,40 +306,40 @@ void IRPrinter::visit(const LoadPtr& v) {
       ind->accept(this);
     }
     if (v->indices().empty()) {
-      os() << "0";
+      os() << '0';
     }
-    os() << "]";
+    os() << ']';
   }
 }
 
 void IRPrinter::visit(const BroadcastPtr& v) {
-  os() << "Broadcast(" << *v->value() << ", " << v->lanes() << ")";
+  os() << "Broadcast(" << *v->value() << ", " << v->lanes() << ')';
 }
 
 void IRPrinter::visit(const IfThenElsePtr& v) {
   os() << "IfThenElse(" << *v->condition() << ", " << *v->true_value() << ", "
-       << *v->false_value() << ")";
+       << *v->false_value() << ')';
 }
 
 void IRPrinter::visit(const IntrinsicsPtr& v) {
-  os() << v->func_name() << "(";
+  os() << v->func_name() << '(';
   for (const auto i : c10::irange(v->nparams())) {
     if (i > 0) {
       os() << ", ";
     }
     os() << *v->param(i);
   }
-  os() << ")";
+  os() << ')';
 }
 
 void IRPrinter::visit(const TermPtr& v) {
   os() << "Term(";
   v->scalar()->accept(this);
   for (const auto& t : v->variables()) {
-    os() << ",";
+    os() << ',';
     t->accept(this);
   }
-  os() << ")";
+  os() << ')';
 }
 
 void IRPrinter::visit(const PolynomialPtr& v) {
@@ -357,7 +357,7 @@ void IRPrinter::visit(const PolynomialPtr& v) {
     os() << " + ";
   }
   v->scalar()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void IRPrinter::visit(const RoundOffPtr& v) {
@@ -365,7 +365,7 @@ void IRPrinter::visit(const RoundOffPtr& v) {
   v->lhs()->accept(this);
   os() << ", ";
   v->rhs()->accept(this);
-  os() << ")";
+  os() << ')';
 }
 
 void IRPrinter::visit(const MaxTermPtr& v) {
@@ -380,7 +380,7 @@ void IRPrinter::visit(const MaxTermPtr& v) {
       os() << ", ";
     }
   }
-  os() << ")";
+  os() << ')';
 }
 
 void IRPrinter::visit(const MinTermPtr& v) {
@@ -395,7 +395,7 @@ void IRPrinter::visit(const MinTermPtr& v) {
       os() << ", ";
     }
   }
-  os() << ")";
+  os() << ')';
 }
 
 void IRPrinter::visit(const ReduceOpPtr& v) {
@@ -423,11 +423,11 @@ void IRPrinter::visit(const ReduceOpPtr& v) {
 void IRPrinter::visit(const StorePtr& v) {
   // TODO: handle the mask
   if (v->indices().empty()) {
-    os() << *v->base_handle() << " = " << *v->value() << ";";
+    os() << *v->base_handle() << " = " << *v->value() << ';';
     return;
   }
 
-  os() << *v->base_handle() << "[";
+  os() << *v->base_handle() << '[';
   size_t i = 0;
   for (const ExprPtr& ind : v->indices()) {
     if (i++) {
@@ -436,15 +436,15 @@ void IRPrinter::visit(const StorePtr& v) {
     ind->accept(this);
   }
   if (v->indices().empty()) {
-    os() << "0";
+    os() << '0';
   }
-  os() << "] = " << *v->value() << ";";
+  os() << "] = " << *v->value() << ';';
 }
 
 void IRPrinter::visit(const ForPtr& v) {
   VarPtr var = v->var();
   VarHandle vv(var);
-  os() << "for (" << dtypeToCppString(var->dtype()) << " " << vv << " = "
+  os() << "for (" << dtypeToCppString(var->dtype()) << ' ' << vv << " = "
        << ExprHandle(v->start()) << "; " << vv << " < " << ExprHandle(v->stop())
        << "; " << vv << "++) ";
   std::string loop_options_str = v->loop_options().ToString();
@@ -464,11 +464,11 @@ void IRPrinter::visit(const BlockPtr& v) {
 
   for (const StmtPtr& s : *v) {
     emitIndent();
-    os() << *s << "\n";
+    os() << *s << '\n';
   }
   indent_--;
   emitIndent();
-  os() << "}";
+  os() << '}';
 }
 
 void IRPrinter::visit(const AllocatePtr& v) {
@@ -482,7 +482,7 @@ void IRPrinter::visit(const AllocatePtr& v) {
     }
     os() << *dims[i];
   }
-  os() << "]";
+  os() << ']';
 }
 
 void IRPrinter::visit(const FreePtr& v) {
@@ -503,13 +503,13 @@ void IRPrinter::visit(const FreeExtPtr& v) {
 }
 
 void IRPrinter::visit(const PlacementAllocatePtr& v) {
-  os() << "Alias(" << *v->buf()->base_handle() << ","
+  os() << "Alias(" << *v->buf()->base_handle() << ','
        << *v->buf_to_reuse()->base_handle() << ");";
 }
 
 void IRPrinter::visit(const LetPtr& v) {
-  os() << dtypeToCppString(v->var()->dtype()) << " " << *v->var();
-  os() << " = " << *v->value() << ";";
+  os() << dtypeToCppString(v->var()->dtype()) << ' ' << *v->var();
+  os() << " = " << *v->value() << ';';
 }
 
 void IRPrinter::visit(const CondPtr& v) {
@@ -530,7 +530,7 @@ void IRPrinter::visit(const CondPtr& v) {
 }
 
 void IRPrinter::visit(const AtomicAddPtr& v) {
-  os() << "atomicAdd(&" << *v->base_handle() << "[";
+  os() << "atomicAdd(&" << *v->base_handle() << '[';
   size_t i = 0;
   for (const ExprPtr& ind : v->indices()) {
     if (i++) {
@@ -539,7 +539,7 @@ void IRPrinter::visit(const AtomicAddPtr& v) {
     ind->accept(this);
   }
   if (v->indices().empty()) {
-    os() << "0";
+    os() << '0';
   }
   os() << "], " << *v->value() << ");";
 }
@@ -549,7 +549,7 @@ void IRPrinter::visit(const SyncThreadsPtr& v) {
 }
 
 void IRPrinter::visit(const ExternalCallPtr& v) {
-  os() << *v->buf() << " = " << v->func_name() << "(";
+  os() << *v->buf() << " = " << v->func_name() << '(';
 
   os() << "buf_args={";
   int i = 0;
@@ -580,7 +580,7 @@ void IRPrinter::visit(const ExternalCallWithAllocPtr& v) {
     os() << *buf_out_arg;
   }
 
-  os() << " := " << v->func_name() << "(";
+  os() << " := " << v->func_name() << '(';
 
   os() << "buf_args={";
   i = 0;
@@ -657,7 +657,7 @@ void print(const ExprPtr& expr) {
   } else {
     std::cout << "(null expr)";
   }
-  std::cout << "\n";
+  std::cout << '\n';
 }
 
 void print(const StmtPtr& stmt) {
@@ -691,14 +691,14 @@ std::string to_string(const StmtPtr& stmt) {
 std::string to_string(const Tensor& t) {
   std::ostringstream oss;
   // TODO: move this to Buf printer
-  oss << "Tensor " << t.buf()->name_hint() << "[";
+  oss << "Tensor " << t.buf()->name_hint() << '[';
   for (const auto i : c10::irange(t.buf()->ndim())) {
     if (i != 0) {
       oss << ", ";
     }
     oss << *t.buf()->dim(i);
   }
-  oss << "]:\n" << *t.stmt() << "\n";
+  oss << "]:\n" << *t.stmt() << '\n';
   return oss.str();
 }
 } // namespace std
