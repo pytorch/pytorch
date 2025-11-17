@@ -52,8 +52,8 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
+    has_uses_tagged_as,
     is_gpu,
-    is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V
@@ -1524,8 +1524,10 @@ def should_prefer_unfused_addmm(match):
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
-    output = match.output_node()
-    return all(is_pointwise_use(use) for use in output.users)
+    return has_uses_tagged_as(
+        match.output_node(),
+        (torch.Tag.pointwise, torch.Tag.reduction),
+    )
 
 
 @register_graph_pattern(
@@ -1552,6 +1554,58 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
 
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
+
+
+def is_valid_addmm_activation_fusion(match: Match) -> bool:
+    if not is_gpu(match.kwargs["inp"].meta["val"].device.type):
+        return False
+
+    # Only beta == 1 so far implies activation epilogue in addmm
+    if match.kwargs["beta"] not in (1, 1.0, 1 + 0j, 1 - 0j):
+        return False
+
+    return not has_uses_tagged_as(
+        match.output_node(),
+        (torch.Tag.pointwise, torch.Tag.reduction),
+    )
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.relu,
+        CallFunction(
+            aten.addmm,
+            KeywordArg("inp"),
+            Arg(),
+            Arg(),
+            beta=KeywordArg("beta"),
+            alpha=KeywordArg("alpha"),
+        ),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[1],
+    extra_check=is_valid_addmm_activation_fusion,
+)
+def relu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha):
+    def replacement(inp, mat1, mat2, beta, alpha):
+        return aten._addmm_activation(inp, mat1, mat2, beta=beta, alpha=alpha)
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(replacement, [inp, mat1, mat2, beta, alpha])
+
+
+@register_graph_pattern(
+    CallFunction(aten.gelu, Arg(), approximate=KeywordArg("approximate")),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=pass_patterns[2],
+)
+def gelu_decomposition(match: Match, inp, *, approximate):
+    # NOTE: get_decompositions is experimental
+    from torch._decomp import get_decompositions
+    gelu_decomp = get_decompositions([aten.gelu])[aten.gelu.default]
+
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(gelu_decomp, [inp, approximate])
 
 
 def is_valid_addmm_fusion(match):
