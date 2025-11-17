@@ -1208,7 +1208,7 @@ class HierRouter(nn.Module):
     def forward(self, x):
         seq_len = x.size(0)
         # scores = self.lin(x)
-        scores = torch.rand(seq_len, self.n_experts, device=x.device)
+        scores = torch.rand(seq_len, self.n_experts, dtype=x.dtype, device=x.device)
         group_scores = (
             scores.view(seq_len, self.n_groups, -1)
             .topk(self.topk_groups, dim=-1)[0]
@@ -1230,6 +1230,7 @@ class HierRouter(nn.Module):
         return group_idx, topk_idx, topk_weight
 
 
+@instantiate_parametrized_tests
 @requires_nvshmem()
 @requires_cuda_p2p_access()
 class HierarchicalA2ATest(MultiProcContinuousTest):
@@ -1406,19 +1407,22 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
         self.assertTrue(torch.all(expert_in_range))
         self.assertTrue(topk_weight.shape == (seqlen, topk_experts))
 
-    def test_dedup_a2a(self) -> None:
+    @parametrize("dtype", [torch.bfloat16])
+    def test_dedup_a2a(self, dtype: torch.dtype) -> None:
         """
         Test "Deduplicated All-To-All" aka "Hierachical All-To-All"
         """
+        from torch.nn.moe._combine import dedup_combine
+        from torch.nn.moe._dispatch import dedup_dispatch
+
         self._init_device()
         self.init_mesh()
         torch.manual_seed(self.rank + 42)
-        dtype = torch.float
         # Alignment of output expert chunks, group GEMM requirement
         align = 8
 
         seqlen = 1024
-        hid_dim = 256
+        hid_dim = 512
         inp = torch.rand((seqlen, hid_dim), dtype=dtype, device=self.device)
 
         nnodes = self.inter_group.size()
@@ -1442,10 +1446,6 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
 
         allocator = symm_mem.get_mempool_allocator(self.device)
         mempool = torch.cuda.MemPool(allocator)
-
-        # Dedup dispatch
-        from torch.nn.moe._combine import dedup_combine
-        from torch.nn.moe._dispatch import dedup_dispatch
 
         # A ratio between worst-case output buffer size versus input seqlen
         out_len_ratio = n_experts
