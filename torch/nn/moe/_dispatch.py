@@ -52,6 +52,7 @@ def dedup_dispatch(
     torch.Tensor,
     symm_mem.ExchangePlan,
     symm_mem.ExchangePlan,
+    torch.Tensor,
     Optional[torch.Tensor],
     torch.Tensor,  # for debug
     torch.Tensor,  # for debug
@@ -298,6 +299,7 @@ def dedup_dispatch(
         topk_indices_intranode_out,
         inter_plan,
         intra_plan,  # necessary
+        occurrences,
         topk_weights_out,  # if topk_weights is provided
         inter_out,  # for debug
         intra_in_splits,  # for debug
