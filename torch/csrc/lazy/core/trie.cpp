@@ -19,7 +19,7 @@ void TraverseTrie(TrieNode* node, std::stringstream& ss) {
        << ", " << node->hit_counter << " hits\"]\n";
   }
   for (auto& successor : node->successors) {
-    ss << node->unique_id << " -> " << successor->unique_id << "\n";
+    ss << node->unique_id << " -> " << successor->unique_id << '\n';
     TraverseTrie(successor.get(), ss);
   }
 }

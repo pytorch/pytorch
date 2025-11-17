@@ -1415,8 +1415,12 @@ class MetaConverter(Generic[_TensorT]):
                     # tensor graph input that is a view of a strided NT.
                     from torch._dynamo.exc import unimplemented
 
+                    # NOTE this graph break will NOT be present in Dynamo's graph break registry
                     unimplemented(
-                        "strided nested tensors are not supported by meta conversion"
+                        gb_type="attempted to apply meta conversion to strided nested tensor",
+                        context=str(t),
+                        explanation="This is not supported.",
+                        hints=[],
                     )
                 elif t.is_mkldnn:
                     is_leaf = t.is_leaf
@@ -1453,7 +1457,10 @@ class MetaConverter(Generic[_TensorT]):
                         from torch._dynamo.exc import unimplemented
 
                         unimplemented(
-                            "view functorch tensors are not supported by meta conversion"
+                            gb_type="attempted to apply meta conversion to view functorch tensor",
+                            context=str(t),
+                            explanation="This is not supported.",
+                            hints=[],
                         )
 
                     # Wraps a functorch tensor class (BatchedTensor, GradTrackingTensor)
