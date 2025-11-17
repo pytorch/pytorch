@@ -1,0 +1,10 @@
+# NOTE: Please don't disable inheritance from the parent to make sure that common checks get propagated.
+
+# This configuration prevents global namespace pollution in headers.
+---
+InheritParentConfig: true
+Checks: '
+google-global-names-in-headers,
+misc-definitions-in-headers,
+'
+...

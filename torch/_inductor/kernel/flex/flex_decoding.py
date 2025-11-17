@@ -20,8 +20,9 @@ from ...select_algorithm import (
 from .common import (
     create_indices_fake,
     create_num_blocks_fake_generator,
+    freeze_irnodes,
     get_fwd_subgraph_outputs,
-    load_template,
+    load_flex_template,
     maybe_realize,
     set_head_dim_values,
 )
@@ -34,7 +35,7 @@ prims = torch.ops.prims
 def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> bool:
     """Decide which kernel to use, return true if use flex decoding kernel.
     Note:
-       Since the number of splits is calculated based of the the number of batch and head dims
+       Since the number of splits is calculated based of the number of batch and head dims
        we need to ensure that the batch and head dims are statically known. Otherwise we just
        use the main flex_attention kernel.
     """
@@ -71,6 +72,7 @@ def _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa) -> 
 
     return (
         not force_flex
+        and not kernel_options.get("OUTPUT_MAX", False)
         and short_query_length
         and static_batch
         and static_num_heads
@@ -95,9 +97,9 @@ def flex_decoding_grid(batch_size, kv_heads, gqa_group_size, n_keys, d_model, me
 flex_decoding_template = TritonTemplate(
     name="flex_decoding",
     grid=flex_decoding_grid,
-    source=load_template("flex_decode")
-    + load_template("utilities")
-    + load_template("common"),
+    source=load_flex_template("flex_decode")
+    + load_flex_template("utilities")
+    + load_flex_template("common"),
 )
 
 
@@ -206,6 +208,9 @@ def create_flex_decoding_kernel(*args, **kwargs):
     )
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
+
+    freeze_irnodes(score_mod_other_buffers)
+    freeze_irnodes(mask_mod_other_buffers)
 
     choices: list[Any] = []
     dtype = key.get_dtype()
@@ -362,6 +367,7 @@ def create_flex_decoding_kernel(*args, **kwargs):
     ]
 
     inputs_for_flex_decoding = (
+        # pyrefly: ignore [unsupported-operation]
         [
             query,
             key,

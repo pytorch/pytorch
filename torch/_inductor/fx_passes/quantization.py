@@ -43,6 +43,7 @@ _VIEW_OPS = [
     aten.transpose.int,
     aten.permute.default,
     aten.view.default,
+    aten.reshape.default,
 ]
 
 """
@@ -530,7 +531,7 @@ def _register_quantized_linear_unary_lowering(
         )
 
         # bias
-        b = kwargs["b"] if "b" in kwargs else None
+        b = kwargs.get("b")
 
         # Output QParams
         o_inv_scale = kwargs["output_scale"]
@@ -592,7 +593,7 @@ def _register_quantized_linear_binary_lowering(
             kwargs["w_zp"],
         )
         # bias
-        b = kwargs["b"] if "b" in kwargs else None
+        b = kwargs.get("b")
         # Output QParams
         o_inv_scale = kwargs["output_scale"]
         o_zero_point = kwargs["output_zero_point"]
@@ -884,10 +885,10 @@ def _register_quantized_maxpool2d_lowering(
     def qmaxpool2d(match: Match, *args, **kwargs):
         x = kwargs["x"]
         kernel_size = kwargs["kernel_size"]
-        stride = kwargs["stride"] if ("stride" in kwargs) else None
-        padding = kwargs["padding"] if ("padding" in kwargs) else 0
-        dilation = kwargs["dilation"] if ("dilation" in kwargs) else 1
-        ceil_mode = kwargs["ceil_mode"] if ("ceil_mode" in kwargs) else False
+        stride = kwargs.get("stride")
+        padding = kwargs.get("padding", 0)
+        dilation = kwargs.get("dilation", 1)
+        ceil_mode = kwargs.get("ceil_mode", False)
 
         if padding == 0:
             padding = [0, 0]
@@ -1104,12 +1105,6 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
         w1_cols = match.kwargs["w1"].meta["val"].size()[0]
         w2_cols = match.kwargs["w2"].meta["val"].size()[0]
         w3_cols = match.kwargs["w3"].meta["val"].size()[0]
-        # Technically, the shapes of the three weights need not be equal.
-        # But currently, we only enable replacement in this case.
-        if w1_cols != w2_cols or w2_cols != w3_cols:
-            return False
-        if 3 * w1_cols != num_scales:
-            return False
         return (
             # For now, we only support woq mm kernels
             # with x.type=bfloat16 and w.type=int8
@@ -1118,13 +1113,12 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
             and w2.dtype == torch.int8
             and w3.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            # _weight_int8pack_mm kernel only supports cpu now
-            # TODO: add cuda kernel support instead of calling mul+sum
-            and x.device.type == "cpu"
+            and x.device.type in ("cpu", "cuda")
             and x.device == w1.device
             and w1.device == w2.device
             and w2.device == w3.device
             and x.device == scales.device
+            and num_scales == w1_cols + w2_cols + w3_cols
         )
 
     return fn
@@ -1146,9 +1140,7 @@ def _is_valid_woq_optimization_pattern():
             x.dtype == torch.bfloat16
             and weight.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            # _weight_int8pack_mm kernel only supports cpu now
-            # TODO: add cuda kernel support instead of calling mul+sum
-            and x.device.type == "cpu"
+            and x.device.type in ("cpu", "cuda")
             and x.device == weight.device
             and x.device == scales.device
         )
@@ -1164,7 +1156,7 @@ def _register_concat_linear_int8_woq_lowering(
         extra_check=_is_valid_concat_linear_int8_woq_optimization_pattern(),
         pass_number=4,
     )
-    def woq(match: Match, *args, **kwargs):
+    def woq_int8(match: Match, *args, **kwargs):
         x = kwargs["x"]
         w1 = kwargs["w1"]
         w2 = kwargs["w2"]
@@ -1183,8 +1175,8 @@ def _register_concat_linear_int8_woq_lowering(
         mm_node_of_x = None
         for candidate in iter(x.users.keys()):
             if (
-                candidate.target == aten.mm.default
-                and list(candidate._input_nodes)[1].target == aten.cat.default
+                candidate.target is aten.mm.default
+                and list(candidate._input_nodes)[1].target is aten.cat.default
             ):
                 mm_node_of_x = candidate
                 break
@@ -1220,7 +1212,7 @@ def _register_concat_linear_int8_woq_lowering(
             match.graph.erase_node(cat_wgt_node)
             match.graph.lint()
 
-    return woq
+    return woq_int8
 
 
 def _register_woq_lowering(pattern, computation_woq, computation_reshape):
@@ -1228,7 +1220,7 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape):
         pattern,
         extra_check=_is_valid_woq_optimization_pattern(),
     )
-    def woq(match: Match, *args, **kwargs):
+    def woq_int8(match: Match, *args, **kwargs):
         x = kwargs["x"]
         weight = kwargs["weight"]
         scales = kwargs["scales"]
@@ -1244,7 +1236,7 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape):
         func2 = L[computation_woq](func1, weight, scales)
         return L[computation_reshape](func2, out_shape)
 
-    return woq
+    return woq_int8
 
 
 def _register_woq_mm_int8_pattern1():
@@ -1984,7 +1976,7 @@ def _register_qlinear_weight_prepack_pass(
         )
 
         # Params
-        bias = kwargs["b"] if "b" in kwargs else None
+        bias = kwargs.get("b")
 
         x_shape = qx.meta.get("tensor_meta").shape
         if has_free_symbols(x_shape):
@@ -2459,7 +2451,7 @@ def _register_linear_dynamic_fp16_weight_prepack_pass(
         # find params
         x = kwargs["x"]
         w = kwargs["w"]
-        bias = kwargs["b"] if "b" in kwargs else None
+        bias = kwargs.get("b")
 
         # find linear node
         nodes_to_find = [aten.addmm.default, aten.mm.default, aten.bmm.default]
@@ -2735,7 +2727,7 @@ def _register_smooth_quant_int_mm_pattern():
             pass_number=pass_number,
         )
         def _int_mm_weight_prepack(match: Match, *args, **kwargs):
-            bias = kwargs.get("bias", None)
+            bias = kwargs.get("bias")
             x = kwargs["a"]
             weight = kwargs["b"]
             dtype = kwargs["dtype"]
@@ -2802,7 +2794,7 @@ def _register_smooth_quant_int_mm_pattern():
                 else:
                     # onednn.qlinear does not support per-channel quantization of x
                     # so in this case, we have to apply x scale and add bias ourselves after qlinear
-                    in_shape = kwargs.get("in_shape", None)
+                    in_shape = kwargs.get("in_shape")
                     if in_shape is None:
                         x_reshaped = x
                     else:
@@ -2834,8 +2826,8 @@ def _register_smooth_quant_int_mm_pattern():
 
                     # Add bias and reshape
                     has_outer_reshape = (
-                        kwargs.get("out_shape_with_bias", None) is not None
-                        or kwargs.get("out_shape_no_bias", None) is not None
+                        kwargs.get("out_shape_with_bias") is not None
+                        or kwargs.get("out_shape_no_bias") is not None
                     )
 
                     if has_outer_reshape:
@@ -3284,7 +3276,7 @@ def _register_qlinear_post_op_fusion_pass(
         )
 
         # bias
-        b = kwargs["b"] if "b" in kwargs else None
+        b = kwargs.get("b")
 
         # Output QParams
         o_inv_scale = (
@@ -3876,7 +3868,7 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
         ADD
       SOFTMAX
 
-    We want to lift up the the quant nodes from matmul before view like nodes
+    We want to lift up the quant nodes from matmul before view like nodes
     as the output of Linear node.
 
              DQ
@@ -3926,6 +3918,7 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
 
             # Further check the input node of the first view node has only 1 user node
             if could_lift_up and len(input_node.users) == 1:
+                counters["inductor"]["quant_lift_up_count"] += 1
                 # Replace dequant's input from quant to quant's input
                 quant_node.replace_all_uses_with(input_node_of_quant)
                 # Insert the new quant node

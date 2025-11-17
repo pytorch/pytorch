@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Iterable, Iterator, Sequence, Sized
-from typing import Generic, Optional, TypeVar, Union
+from typing import Generic, TypeVar
 
 import torch
 
@@ -31,10 +31,6 @@ class Sampler(Generic[_T_co]):
     Every Sampler subclass has to provide an :meth:`__iter__` method, providing a
     way to iterate over indices or lists of indices (batches) of dataset elements,
     and may provide a :meth:`__len__` method that returns the length of the returned iterators.
-
-    Args:
-        data_source (Dataset): This argument is not used and will be removed in 2.2.0.
-            You may still have custom implementation that utilizes it.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -66,15 +62,6 @@ class Sampler(Generic[_T_co]):
               :class:`~torch.utils.data.DataLoader`, but is expected in any
               calculation involving the length of a :class:`~torch.utils.data.DataLoader`.
     """
-
-    def __init__(self, data_source: Optional[Sized] = None) -> None:
-        if data_source is not None:
-            import warnings
-
-            warnings.warn(
-                "`data_source` argument is not used and will be removed in 2.2.0."
-                "You may still have custom implementation that utilizes it."
-            )
 
     def __iter__(self) -> Iterator[_T_co]:
         raise NotImplementedError
@@ -111,7 +98,7 @@ class SequentialSampler(Sampler[int]):
     r"""Samples elements sequentially, always in the same order.
 
     Args:
-        data_source (Dataset): dataset to sample from
+        data_source (Sized): data source to sample from. Must implement __len__.
     """
 
     data_source: Sized
@@ -132,7 +119,7 @@ class RandomSampler(Sampler[int]):
     If with replacement, then user can specify :attr:`num_samples` to draw.
 
     Args:
-        data_source (Dataset): dataset to sample from
+        data_source (Sized): data source to sample from. Must implement __len__.
         replacement (bool): samples are drawn on-demand with replacement if ``True``, default=``False``
         num_samples (int): number of samples to draw, default=`len(dataset)`.
         generator (Generator): Generator used in sampling.
@@ -145,7 +132,7 @@ class RandomSampler(Sampler[int]):
         self,
         data_source: Sized,
         replacement: bool = False,
-        num_samples: Optional[int] = None,
+        num_samples: int | None = None,
         generator=None,
     ) -> None:
         self.data_source = data_source
@@ -320,7 +307,7 @@ class BatchSampler(Sampler[list[int]]):
 
     def __init__(
         self,
-        sampler: Union[Sampler[int], Iterable[int]],
+        sampler: Sampler[int] | Iterable[int],
         batch_size: int,
         drop_last: bool,
     ) -> None:
@@ -348,7 +335,7 @@ class BatchSampler(Sampler[list[int]]):
         if self.drop_last:
             # Create multiple references to the same iterator
             args = [sampler_iter] * self.batch_size
-            for batch_droplast in zip(*args):
+            for batch_droplast in zip(*args, strict=False):
                 yield [*batch_droplast]
         else:
             batch = [*itertools.islice(sampler_iter, self.batch_size)]

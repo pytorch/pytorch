@@ -43,7 +43,8 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     else:
         # TODO: Logs way too much
         warnings.warn(
-            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh"
+            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh",
+            stacklevel=2,
         )
         return False
 
@@ -72,7 +73,8 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     if not is_rng_supported_mesh(device_mesh):
         warnings.warn(
             "DTensor manual_seed() may not have complete support "
-            f"on {device_mesh.device_type} device mesh"
+            f"on {device_mesh.device_type} device mesh",
+            stacklevel=2,
         )
         return
 
@@ -82,7 +84,7 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     #     "DTensor manual_seed() is deprecated, since DTensor no longer maintains a separate copy of generator state. "
     #     "Use `torch.manual_seed` instead"
     # )
-    # Note: we still need to ensure setting `run_state_sync=False` to support the the pp case
+    # Note: we still need to ensure setting `run_state_sync=False` to support the pp case
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
@@ -150,6 +152,7 @@ class _RNGStateTracker:
     """
 
     def __init__(self, device: torch.device):
+        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(self._device.type)
         if not (self._device_handle and self._device_handle.is_available()):
