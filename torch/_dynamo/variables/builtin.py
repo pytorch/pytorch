@@ -2646,6 +2646,7 @@ class BuiltinVariable(VariableTracker):
                 variables.TensorVariable,
                 variables.NamedTupleVariable,
                 variables.ConstantVariable,
+                variables.DefaultDictVariable,
                 variables.DistributedVariable,
                 variables.UserDefinedClassVariable,
                 variables.UserDefinedObjectVariable,
@@ -2738,6 +2739,7 @@ class BuiltinVariable(VariableTracker):
         if isinstance(
             obj,
             (
+                variables.DefaultDictVariable,
                 variables.PlacementVariable,
                 variables.NamedTupleVariable,
                 variables.UserDefinedObjectVariable,

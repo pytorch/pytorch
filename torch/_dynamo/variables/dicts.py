@@ -756,36 +756,43 @@ class ConstDictVariable(VariableTracker):
             # defaultdict.
 
             # TODO(guilhermeleobas): this check should be on builtin.py::call_or_
-            if not istype(
-                other, (ConstDictVariable, variables.UserDefinedDictVariable)
+            if isinstance(
+                other,
+                (
+                    ConstDictVariable,
+                    variables.UserDefinedDictVariable,
+                    variables.DefaultDictVariable,
+                ),
             ):
+                # Always return the specialized dictionary, and in the case
+                # both are specialized, take the first to be the type of the
+                # new dictionary
+                if self.user_cls is not dict:
+                    user_cls = self.user_cls
+                    to_cpy = self
+                else:
+                    user_cls = other.user_cls
+                    to_cpy = other
+
+                to_cpy.install_dict_keys_match_guard()
+                new_dict_vt = to_cpy.clone(
+                    items=self.items.copy(),
+                    mutation_type=ValueMutationNew(),
+                    source=None,
+                    user_cls=user_cls,
+                )
+
+                # NB - Guard on all the keys of the other dict to ensure
+                # correctness.
+                args[0].install_dict_keys_match_guard()  # type: ignore[attr-defined]
+                new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
+                return new_dict_vt
+            else:
                 err_msg = (
                     f"unsupported operand type(s) for |: '{self.python_type().__name__}'"
                     f"and '{other.python_type().__name__}'"
                 )
                 raise_observed_exception(TypeError, tx, args=[err_msg])
-
-            # OrderedDict overloads __ror__
-            ts = {self.user_cls, other.user_cls}  # type: ignore[attr-defined]
-            user_cls = (
-                collections.OrderedDict
-                if any(issubclass(t, collections.OrderedDict) for t in ts)
-                else dict
-            )
-
-            self.install_dict_keys_match_guard()
-            new_dict_vt = self.clone(
-                items=self.items.copy(),
-                mutation_type=ValueMutationNew(),
-                source=None,
-                user_cls=user_cls,
-            )
-
-            # NB - Guard on all the keys of the other dict to ensure
-            # correctness.
-            args[0].install_dict_keys_match_guard()  # type: ignore[attr-defined]
-            new_dict_vt.items.update(args[0].items)  # type: ignore[attr-defined]
-            return new_dict_vt
         elif name == "__ior__":
             self.call_method(tx, "update", args, kwargs)
             return self
@@ -993,8 +1000,34 @@ class DefaultDictVariable(ConstDictVariable):
                         tx, "__setitem__", [args[0], default_var], kwargs
                     )
                     return default_var
+        elif name == "__setattr__" and self.is_mutable:
+            if len(args) != 2:
+                raise_args_mismatch(tx, name, "2 args", f"{len(args)} args")
+            # Setting a default factory must be a callable or None type
+            if (
+                istype(args[0], ConstantVariable) and args[0].value == "default_factory"
+            ) and (
+                (istype(args[1], ConstantVariable) and args[1].value is None)
+                or hasattr(args[1], "fn")
+            ):
+                tx.output.side_effects.mutation(self)
+                self.default_factory = args[1]
+                return ConstantVariable.create(None)
+            return super().call_method(tx, name, args, kwargs)
+        elif name == "__eq__":
+            if len(args) != 1:
+                raise_args_mismatch(tx, name, "1 args", f"{len(args)} args")
+
+            return variables.UserFunctionVariable(polyfills.dict___eq__).call_function(
+                tx, [self, args[0]], {}
+            )
         else:
             return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name) -> VariableTracker:
+        if name == "default_factory":
+            return self.default_factory
+        return super().var_getattr(tx, name)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # emit `defaultdict(default_factory, new_dict)`
