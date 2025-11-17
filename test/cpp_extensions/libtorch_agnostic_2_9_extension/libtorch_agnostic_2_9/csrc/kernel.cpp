@@ -422,3 +422,15 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
 }
 
 #endif // LAE_USE_CUDA
+
+Tensor my_flatten(Tensor t, int64_t start_dim, int64_t end_dim) {
+  return flatten(t, start_dim, end_dim);
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
+  m.def("my_flatten(Tensor t, int start_dim=0, int end_dim=-1) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
+  m.impl("my_flatten", TORCH_BOX(&my_flatten));
+}

@@ -173,20 +173,6 @@ def my_empty(size, dtype=None, device=None, pin_memory=None) -> Tensor:
     )
 
 
-def my_flatten(t, start_dim=0, end_dim=-1) -> Tensor:
-    """
-    Flattens the input tensor from start_dim to end_dim into a single dimension.
-
-    Args:
-        t: Tensor - tensor to flatten
-        start_dim: int - first dimension to flatten (default: 0)
-        end_dim: int - last dimension to flatten (default: -1)
-
-    Returns: Tensor - flattened tensor
-    """
-    return torch.ops.libtorch_agnostic_2_10.my_flatten.default(t, start_dim, end_dim)
-
-
 def my_reshape(t, shape) -> Tensor:
     """
     Returns a tensor with the same data but different shape.
