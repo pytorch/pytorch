@@ -3476,7 +3476,7 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_non_traceable_module(self):
         class NonTraceable(torch.nn.Module):
             def forward(self, x):
-                for k in x.keys():
+                for k in x:
                     print(x[k])
                 return x
 
@@ -5000,7 +5000,7 @@ class TestQuantizeFx(QuantizationTestCase):
             self.assertTrue(all(arg.target == "dequantize" for arg in node.args))
             # Match following quantize with the specific qparams and dtypes
             expected_scale, expected_zp, expected_dtype = node_name_to_expected_quantize_args[node.name]
-            for user in node.users.keys():
+            for user in node.users:
                 self.assertEqual(user.target, torch.quantize_per_tensor)
                 if expected_scale is not None:
                     self.assertEqual(getattr(cell, user.args[1].target), expected_scale)

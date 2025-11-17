@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import json
 import logging
-import os
 import struct
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import numpy as np
@@ -249,7 +248,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             ssi.hparams[k].number_value = v
 
             if k in hparam_domain_discrete:
-                domain_discrete: Optional[struct_pb2.ListValue] = struct_pb2.ListValue(
+                domain_discrete: struct_pb2.ListValue | None = struct_pb2.ListValue(
                     values=[
                         struct_pb2.Value(number_value=d)
                         for d in hparam_domain_discrete[k]
@@ -695,27 +694,23 @@ def make_video(tensor, fps):
     # encode sequence of images into gif string
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
 
-    filename = tempfile.NamedTemporaryFile(suffix=".gif", delete=False).name
-    try:  # newer version of moviepy use logger instead of progress_bar argument.
-        clip.write_gif(filename, verbose=False, logger=None)
-    except TypeError:
-        try:  # older version of moviepy does not support progress_bar argument.
-            clip.write_gif(filename, verbose=False, progress_bar=False)
+    with tempfile.NamedTemporaryFile(suffix=".gif") as f:
+        filename = f.name
+        try:  # newer version of moviepy use logger instead of progress_bar argument.
+            clip.write_gif(filename, verbose=False, logger=None)
         except TypeError:
-            clip.write_gif(filename, verbose=False)
+            try:  # older version of moviepy does not support progress_bar argument.
+                clip.write_gif(filename, verbose=False, progress_bar=False)
+            except TypeError:
+                clip.write_gif(filename, verbose=False)
 
-    with open(filename, "rb") as f:
+        f.seek(0)
         tensor_string = f.read()
 
-    try:
-        os.remove(filename)
-    except OSError:
-        logger.warning("The temporary file used by moviepy cannot be deleted.")
-
-    # pyrefly: ignore [missing-attribute]
-    return Summary.Image(
-        height=h, width=w, colorspace=c, encoded_image_string=tensor_string
-    )
+        # pyrefly: ignore [missing-attribute]
+        return Summary.Image(
+            height=h, width=w, colorspace=c, encoded_image_string=tensor_string
+        )
 
 
 def audio(tag, tensor, sample_rate=44100):

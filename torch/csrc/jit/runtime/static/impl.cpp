@@ -145,9 +145,9 @@ std::string dumpValueSet(
   std::ostringstream oss;
   oss << set_name << ": {";
   for (const auto* val : value_set) {
-    oss << "%" << val->debugName() << ", ";
+    oss << '%' << val->debugName() << ", ";
   }
-  oss << "}";
+  oss << '}';
   return oss.str();
 }
 
@@ -1521,7 +1521,7 @@ void BlockRunner::benchmark(
     } else if (results.native_nodes.count(kind)) {
       std::cout << ", native)" << '\n';
     } else {
-      std::cout << ")" << '\n';
+      std::cout << ')' << '\n';
     }
 
     if (generate_ai_pep_output) {
@@ -1566,13 +1566,13 @@ void BlockRunner::benchmark(
   auto unsupported_nodes_count = results.total_nodes_count -
       results.out_nodes_count - results.native_nodes.size();
   std::cout << "Total number of 'out' variant nodes/total number of nodes: "
-            << results.out_nodes_count << "/" << results.total_nodes_count
+            << results.out_nodes_count << '/' << results.total_nodes_count
             << " ("
             << 100.0 * static_cast<float>(results.out_nodes_count) /
           static_cast<float>(results.total_nodes_count)
             << "%)" << '\n';
   std::cout << "Total number of nodes not covered by SR/total number of nodes: "
-            << unsupported_nodes_count << "/" << results.total_nodes_count
+            << unsupported_nodes_count << '/' << results.total_nodes_count
             << " ("
             << 100.0 * static_cast<float>(unsupported_nodes_count) /
           static_cast<float>(results.total_nodes_count)
