@@ -18,7 +18,7 @@ IF(NOT MKLDNN_FOUND)
 
   SET(IDEEP_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep")
   SET(MKLDNN_ROOT "${PROJECT_SOURCE_DIR}/third_party/ideep/mkl-dnn")
-  SET(ONEDNN_AARCH64_TAG "v3.10-rc")
+  SET(IDEEP_AARCH64_TAG "ideep_for_arm")
 
   if(USE_XPU) # Build oneDNN GPU library
     if(WIN32)
@@ -95,16 +95,33 @@ IF(NOT MKLDNN_FOUND)
   ENDIF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
 
   FIND_PACKAGE(BLAS)
+
+  # Checkout the ideep version defined by IDEEP_AARCH64_TAG for CPU_AARCH64
+  IF(CPU_AARCH64)
+    MESSAGE(STATUS "Configuring ideep/oneDNN for AArch64")
+    EXECUTE_PROCESS(
+      COMMAND git${CMAKE_EXECUTABLE_SUFFIX} checkout ${IDEEP_AARCH64_TAG}
+      WORKING_DIRECTORY ${IDEEP_ROOT}
+      OUTPUT_QUIET
+      RESULT_VARIABLE IDEEP_AARCH64_CHECKOUT_RESULT
+    )
+    if (IDEEP_AARCH64_CHECKOUT_RESULT)
+      MESSAGE(FATAL_ERROR "Failed to checkout ideep submodule for AArch64")
+    endif()
+    EXECUTE_PROCESS(
+      COMMAND git${CMAKE_EXECUTABLE_SUFFIX} submodule update --init ${MKLDNN_ROOT}
+      WORKING_DIRECTORY ${IDEEP_ROOT}
+      OUTPUT_QUIET
+      RESULT_VARIABLE ONEDNN_AARCH64_UPDATE_RESULT
+    )
+    if (ONEDNN_AARCH64_UPDATE_RESULT)
+      MESSAGE(FATAL_ERROR "Failed to update oneDNN submodule for AArch64")
+    endif()
+  ENDIF(CPU_AARCH64)
+
   FIND_PATH(IDEEP_INCLUDE_DIR ideep.hpp PATHS ${IDEEP_ROOT} PATH_SUFFIXES include)
   FIND_PATH(MKLDNN_INCLUDE_DIR dnnl.hpp dnnl.h dnnl_ukernel.hpp dnnl_ukernel.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include/oneapi/dnnl)
-  # Checkout the oneDNN version defined by ONEDNN_AARCH64_TAG for CPU_AARCH64
-  IF(CPU_AARCH64)
-  EXECUTE_PROCESS(
-    COMMAND git${CMAKE_EXECUTABLE_SUFFIX} checkout ${ONEDNN_AARCH64_TAG}
-    WORKING_DIRECTORY ${MKLDNN_ROOT}
-  )
-  FIND_PATH(MKLDNN_INCLUDE_DIR dnnl.hpp dnnl.h dnnl_ukernel.hpp dnnl_ukernel.h PATHS ${MKLDNN_ROOT} PATH_SUFFIXES include)
-  ENDIF(CPU_AARCH64)
+
   IF(NOT MKLDNN_INCLUDE_DIR)
     MESSAGE("MKLDNN_INCLUDE_DIR not found")
     EXECUTE_PROCESS(COMMAND git${CMAKE_EXECUTABLE_SUFFIX} submodule update --init mkl-dnn WORKING_DIRECTORY ${IDEEP_ROOT})
