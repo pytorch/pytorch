@@ -1128,7 +1128,7 @@ class TestCutlassBackend(TestCase):
 
     # TODO: Enable dynamic test cases when dynamic support is added.
     @skipIfXpu(msg="sparse semi-structured not supported on xpu cutlass backend yet.")
-    @skipCUDAIf(not SM80OrLater or SM90OrLater, "need sm_8x exactly")
+    @skipCUDAIf((not SM80OrLater) or (SM90OrLater), "need sm_8x exactly")
     @parametrize("dynamic", (False,))
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_max_autotune_cutlass_backend_sparse_semi_structured_mm(
