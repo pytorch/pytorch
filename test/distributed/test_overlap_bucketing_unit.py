@@ -660,9 +660,12 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             scheduled,
         )
         bucketer.bucket_collectives()
+
         FileCheck().check_count(
             "all_gather_into_tensor_out", 1, exactly=False
-        ).check_count("%mm", 3, exactly=True).run(str(traced.graph))
+        ).check_count("torch.ops.aten.mm.default", 3, exactly=True).run(
+            str(traced.graph)
+        )
 
 
 if __name__ == "__main__":
