@@ -254,7 +254,7 @@ To toggle the reduced precision reduction flags in C++, one can do
 
 .. _fp16accumulation:
 
-Full FP16 Accmumulation in FP16 GEMMs
+Full FP16 Accumulation in FP16 GEMMs
 -------------------------------------
 
 Certain GPUs have increased performance when doing _all_ FP16 GEMM accumulation

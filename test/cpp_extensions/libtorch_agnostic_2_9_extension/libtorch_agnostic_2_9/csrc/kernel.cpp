@@ -1,5 +1,6 @@
+#include "kernel.h"
+
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/stable/accelerator.h>
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/csrc/stable/ops.h>
@@ -8,6 +9,7 @@
 
 #ifdef LAE_USE_CUDA
 #include <cuda_runtime.h>
+#include <torch/csrc/stable/accelerator.h>
 #endif
 
 #include <optional>
@@ -65,7 +67,6 @@ Tensor sgd_out_of_place(
   return out;
 }
 
-
 STABLE_TORCH_LIBRARY(libtorch_agnostic_2_9, m) {
   m.def("sgd_out_of_place(Tensor param, Tensor grad, float weight_decay, float lr, bool maximize) -> Tensor");
 }
@@ -99,7 +100,6 @@ Tensor my_abs(Tensor t) {
   return torch::stable::detail::to<Tensor>(stack[0]);
 }
 
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("my_abs(Tensor t) -> Tensor");
 }
@@ -125,7 +125,6 @@ Tensor my_ones_like(Tensor t, StableIValue device) {
 
   return torch::stable::detail::to<Tensor>(stack[0]);
 }
-
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("my_ones_like(Tensor t, Device d) -> Tensor");
@@ -154,7 +153,6 @@ std::tuple<Tensor, Tensor, bool> exp_neg_is_leaf(Tensor t1, Tensor t2, Tensor t3
     torch::stable::detail::to<bool>(stack_is_leaf[0]));
 }
 
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("exp_neg_is_leaf(Tensor t1, Tensor t2, Tensor t3) -> (Tensor, Tensor, bool)");
 }
@@ -170,7 +168,6 @@ Tensor neg_exp(Tensor t) {
   aoti_torch_call_dispatcher("aten::neg", "", stack);
   return torch::stable::detail::to<Tensor>(stack[0]);
 }
-
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("neg_exp(Tensor t) -> Tensor");
@@ -196,7 +193,6 @@ Tensor divide_neg_exp(Tensor t) {
   return torch::stable::detail::to<Tensor>(stack_div[0]);
 }
 
-
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("divide_neg_exp(Tensor t) -> Tensor");
 }
@@ -208,7 +204,6 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
 bool is_contiguous(Tensor t) {
   return t.is_contiguous();
 }
-
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("is_contiguous(Tensor t) -> bool");
@@ -222,50 +217,52 @@ Tensor my_transpose(Tensor t, int64_t dim0, int64_t dim1) {
   return transpose(t, dim0, dim1);
 }
 
-
 Tensor my_empty_like(Tensor t) {
   return empty_like(t);
 }
 
-
 bool my_is_cpu(Tensor t) {
   return t.is_cpu();
 }
-
-
 
 Tensor fill_infinity(Tensor t) {
   auto value = std::numeric_limits<float>::infinity();
   return fill_(t, value);
 }
 
-
 Tensor my_pad(Tensor t) {
-  std::vector<int64_t> padding = {1, 2, 2, 1};
   std::string mode = "constant";
   double value = 0.0;
-  return pad(t, padding, mode, value);
+  return pad(t, {1, 2, 2, 1}, mode, value);
 }
-
 
 Tensor my_narrow(Tensor t, int64_t dim, int64_t start, int64_t length) {
   return narrow(t, dim, start, length);
 }
 
-
 Tensor my_new_empty_dtype_variant(Tensor t) {
+  // Still using a std::vector below even though people can just pass in an
+  // initializer list (which will be implicitly converted to an HeaderOnlyArrayRef)
+  // directly.
+  // This is to test that passing in a std::vector works for BC. (It gets
+  // implicitly converted to HeaderOnlyArrayRef too!)
   std::vector<int64_t> sizes = {2, 5};
   auto dtype = std::make_optional(torch::headeronly::ScalarType::BFloat16);
   return new_empty(t, sizes, dtype);
 }
 
-
 Tensor my_new_zeros_dtype_variant(Tensor t) {
-  std::vector<int64_t> sizes = {2, 5};
   auto dtype = std::make_optional(at::ScalarType::Float);
-  return new_zeros(t, sizes, dtype);
+  return new_zeros(t, {2, 5}, dtype);
 }
 
+Tensor my_copy_(Tensor dst, Tensor src, bool non_blocking) {
+  return copy_(dst, src, non_blocking);
+}
+
+Tensor my_clone(Tensor t) {
+  return clone(t);
+}
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("my_transpose(Tensor t, int dim0, int dim1) -> Tensor");
@@ -275,6 +272,8 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("my_narrow(Tensor t, int dim, int start, int length) -> Tensor");
   m.def("my_new_empty_dtype_variant(Tensor t) -> Tensor");
   m.def("my_new_zeros_dtype_variant(Tensor t) -> Tensor");
+  m.def("my_copy_(Tensor dst, Tensor src, bool non_blocking) -> Tensor");
+  m.def("my_clone(Tensor t) -> Tensor");
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
@@ -284,6 +283,8 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
   m.impl("my_is_cpu", TORCH_BOX(&my_is_cpu));
   m.impl("my_new_empty_dtype_variant", TORCH_BOX(&my_new_empty_dtype_variant));
   m.impl("my_new_zeros_dtype_variant", TORCH_BOX(&my_new_zeros_dtype_variant));
+  m.impl("my_copy_", TORCH_BOX(&my_copy_));
+  m.impl("my_clone", TORCH_BOX(&my_clone));
 }
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeImplicitAutograd, m) {
@@ -295,28 +296,20 @@ Tensor my_zero_(Tensor t) {
   return zero_(t);
 }
 
-
 Tensor my_amax(Tensor t) {
   return amax(t, 0, false);
 }
 
-
 Tensor my_amax_vec(Tensor t) {
-  std::vector<int64_t> v = {0,1};
-  return amax(t, v, false);
+  return amax(t, {0,1}, false);
 }
-
-
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("my_zero_(Tensor(a!) t) -> Tensor(a!)");
   m.def("my_amax(Tensor a) -> Tensor");
   m.def("my_amax_vec(Tensor a) -> Tensor");
   m.def("my_is_cpu(Tensor t) -> bool");
-}
-
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CPU, m) {
-  m.impl("my_zero_", TORCH_BOX(&my_zero_));
+   m.def("test_default_constructor(bool undefined) -> bool");
 }
 
 bool test_default_constructor(bool defined) {
@@ -339,14 +332,37 @@ bool test_default_constructor(bool defined) {
 }
 
 
-STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
-  m.def("test_default_constructor(bool undefined) -> bool");
-}
-
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
-  m.impl("test_default_constructor", TORCH_BOX(&test_default_constructor));
+  m.impl("my_zero_", TORCH_BOX(&my_zero_));
   m.impl("my_amax", TORCH_BOX(&my_amax));
   m.impl("my_amax_vec", TORCH_BOX(&my_amax_vec));
+  m.impl("test_default_constructor", TORCH_BOX(&test_default_constructor));
+}
+
+Tensor mv_tensor_accessor_cpu(Tensor m, Tensor v) {
+  STD_TORCH_CHECK(m.dim() == 2, "m must be 2D");
+  STD_TORCH_CHECK(v.dim() == 1, "v must be 1D");
+  STD_TORCH_CHECK(m.size(1) == v.size(0), "m.shape[1] == v.shape[0] must hold");
+  STD_TORCH_CHECK(m.scalar_type() == v.scalar_type(), "m and v must have the same dtype");
+  STD_TORCH_CHECK(m.device() == v.device(), "m and v must be on the same device");
+  Tensor res = new_empty(m, {m.size(0)});
+  THO_DISPATCH_V2(m.scalar_type(), "mv_tensor_accessor_cpu",
+                  AT_WRAP(([&]() {
+                    auto resa = Accessor_cpu<scalar_t, 1>(reinterpret_cast<scalar_t*>(res.data_ptr()), res.sizes().data(), res.strides().data());
+                    auto ma = Accessor_cpu<scalar_t, 2>(reinterpret_cast<scalar_t*>(m.data_ptr()), m.sizes().data(), m.strides().data());
+                    auto va = Accessor_cpu<scalar_t, 1>(reinterpret_cast<scalar_t*>(v.data_ptr()), v.sizes().data(), v.strides().data());
+                    mv_tensor_accessor_kernel<Accessor_cpu, scalar_t>(resa, ma, va);
+                  })),
+                  AT_FLOATING_TYPES);
+  return res;
+}
+
+STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
+  m.def("mv_tensor_accessor(Tensor m, Tensor v) -> Tensor");
+}
+
+STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CPU, m) {
+  m.impl("mv_tensor_accessor", TORCH_BOX(&mv_tensor_accessor_cpu));
 }
 
 // Test functions for torch::stable::accelerator APIs
@@ -367,7 +383,6 @@ int64_t test_device_guard(int64_t device_index) {
   return currentDevice;
 }
 
-
 int64_t test_device_guard_set_index() {
   using torch::stable::accelerator::DeviceGuard;
 
@@ -379,7 +394,6 @@ int64_t test_device_guard_set_index() {
   return currentDevice;
 }
 
-
 int64_t test_stream(int32_t device_index) {
   STD_TORCH_CHECK(
       device_index >= std::numeric_limits<int32_t>::min() &&
@@ -389,11 +403,9 @@ int64_t test_stream(int32_t device_index) {
   return torch::stable::accelerator::getCurrentStream(device_index).id();
 }
 
-
 int64_t test_get_current_device_index() {
   return torch::stable::accelerator::getCurrentDeviceIndex();
 }
-
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("test_device_guard(int device_index) -> int");
@@ -408,4 +420,5 @@ STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
   m.impl("test_stream", TORCH_BOX(&test_stream));
   m.impl("test_get_current_device_index", TORCH_BOX(&test_get_current_device_index));
 }
+
 #endif // LAE_USE_CUDA

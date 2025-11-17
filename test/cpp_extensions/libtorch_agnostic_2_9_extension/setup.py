@@ -39,14 +39,18 @@ def get_extension():
             "-DTORCH_TARGET_VERSION=0x0209000000000000",
         ],
     }
+    sources = list(CSRC_DIR.glob("**/*.cpp"))
 
     extension = CppExtension
     # allow including <cuda_runtime.h>
     if torch.cuda.is_available():
         extra_compile_args["cxx"].append("-DLAE_USE_CUDA")
+        extra_compile_args["nvcc"] = [
+            "-O2",
+            "-DTORCH_TARGET_VERSION=0x0209000000000000",
+        ]
         extension = CUDAExtension
-
-    sources = list(CSRC_DIR.glob("**/*.cpp"))
+        sources.extend(CSRC_DIR.glob("**/*.cu"))
 
     return [
         extension(
@@ -63,7 +67,7 @@ setup(
     name="libtorch_agnostic_2_9",
     version="0.0",
     author="PyTorch Core Team",
-    description="Example of libtorch agnostic extension for PyTorch 2.9.0",
+    description="Example of libtorch agnostic extension for PyTorch 2.9",
     packages=find_packages(exclude=("test",)),
     package_data={"libtorch_agnostic_2_9": ["*.dll", "*.dylib", "*.so"]},
     install_requires=[

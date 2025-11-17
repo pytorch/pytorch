@@ -161,6 +161,7 @@ COMPILE_TIME_MAX_DEVICE_TYPES
 NumScalarTypes
 ScalarType
 # dummy_int1_7_t, dummy_uint1_7_t tested through ScalarType
+CppTypeToScalarType
 ScalarTypeToCPPTypeT
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_EXCEPT_COMPLEX_HALF_F8NZ
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX
@@ -196,3 +197,10 @@ AT_ALL_TYPES
 AT_ALL_TYPES_AND_COMPLEX
 THO_DISPATCH_V2
 # THO_EMPTY, THO_DISPATCH_CASE, THO_DISPATCH_SWITCH, THO_PRIVATE_CASE_TYPE_USING_HINT are tested through THO_DISPATCH_V2
+
+# torch/headeronly/core/TensorAccessor.h
+HeaderOnlyTensorAccessor
+HeaderOnlyGenericPackedTensorAccessor
+# HeaderOnlyTensorAccessorBase and
+# HeaderOnlyGenericPackedTensorAccessorBase are tested through
+# HeaderOnlyTensorAccessor and HeaderOnlyGenericPackedTensorAccessor
