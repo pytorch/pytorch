@@ -777,6 +777,7 @@ class TritonTemplateKernel(TritonKernel):
             val = self.output_node.get_stride()
         else:
             assert isinstance(name, str)
+            self.named_input_nodes[name].data.freeze_layout()
             val = self.named_input_nodes[name].get_stride()
 
         if isinstance(index, int):
@@ -955,7 +956,6 @@ class TritonTemplateKernel(TritonKernel):
             self.template_mask = mask if mask is not None else "None"
             self.template_out_shape = index_shape if index_shape else "xindex"
             self.template_indices = indices
-            self.named_input_nodes[input_name].data.freeze_layout()
             self.cse.invalidate(OrderedSet())
 
             template_mask = self.template_mask

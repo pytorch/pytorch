@@ -2483,6 +2483,24 @@ class TestMaxAutotune(TestCase):
         finally:
             clear_preprocessing_fns(clear_defaults=False)
 
+    @config.patch(
+        {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "ATEN,TRITON"}
+    )
+    def test_fixed_layout_at_lowering(self):
+        def f(a, b) -> torch.Tensor:
+            a_t = torch.permute(a, [1, 0]).to(torch.bfloat16)
+            b_dtype = b.to(torch.bfloat16)
+            # Add .to() to make sure that mm could be potentially padded
+            # Strides for output are not padded
+            return (a_t @ b_dtype).to(torch.float32)
+
+        a = torch.randn((4608, 512), device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn((4608, 1490), device=GPU_TYPE)
+
+        f(a, b)
+        c_f = torch.compile(f, mode="max-autotune-no-cudagraphs")
+        out, code = run_and_get_code(c_f, a, b)
+
 
 class TestMaxAutotunePrecompile(TestCase):
     def test_precompilation_threads(self):
