@@ -22,7 +22,7 @@ void argmin_kernel_cuda_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, int64_t>(
       iter,
       ArgMinOps<acc_t>{},
-      thrust::pair<acc_t, int64_t>(
+      ::cuda::std::pair<acc_t, int64_t>(
           at::numeric_limits<acc_t>::upper_bound(), 0));
 };
 

@@ -4,6 +4,8 @@
 #include <tuple>
 #include <type_traits>
 
+#include <cuda/std/utility>
+
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -63,7 +65,7 @@ __global__ void RowwiseMomentsCUDAKernel(
     T_ACC* rstd) {
   using WelfordType = WelfordData<T_ACC, int64_t>;
   using WelfordOp =
-      WelfordOps<T_ACC, T_ACC, int64_t, thrust::pair<T_ACC, T_ACC>>;
+      WelfordOps<T_ACC, T_ACC, int64_t, ::cuda::std::pair<T_ACC, T_ACC>>;
 
   __shared__
       typename std::aligned_storage<sizeof(WelfordType), alignof(WelfordType)>::

@@ -3,7 +3,7 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/native/quantized/FakeQuantAffine.h>
 #include <ATen/native/cuda/Loops.cuh>
-#include <thrust/tuple.h>
+#include <cuda/std/tuple>
 #include <cmath>
 
 /* Fake quantize a tensor
@@ -39,7 +39,7 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
     AT_DISPATCH_REDUCED_FLOATING_TYPES(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
       gpu_kernel_multiple_outputs(
         iter,
-        [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
+        [=] GPU_LAMBDA (scalar_t input_val) -> ::cuda::std::tuple<scalar_t, bool> {
           const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + zero_point);
           return {
             // fake_quantized value
@@ -54,7 +54,7 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
       gpu_kernel_multiple_outputs(
         iter,
-        [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
+        [=] GPU_LAMBDA (scalar_t input_val) -> ::cuda::std::tuple<scalar_t, bool> {
           const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + zero_point);
           return {
             // fake_quantized value
@@ -91,7 +91,7 @@ void fake_quantize_tensor_cachemask_tensor_qparams_kernel_cuda(
     AT_DISPATCH_REDUCED_FLOATING_TYPES(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
       gpu_kernel_multiple_outputs(
         iter,
-        [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
+        [=] GPU_LAMBDA (scalar_t input_val) -> ::cuda::std::tuple<scalar_t, bool> {
           if (*fake_quant_on == 0) {
             return {input_val, 1};
           }
@@ -110,7 +110,7 @@ void fake_quantize_tensor_cachemask_tensor_qparams_kernel_cuda(
     AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "fake_quantize_tensor_cachemask_kernel_types", [&] {
       gpu_kernel_multiple_outputs(
         iter,
-        [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
+        [=] GPU_LAMBDA (scalar_t input_val) -> ::cuda::std::tuple<scalar_t, bool> {
           if (*fake_quant_on == 0) {
             return {input_val, 1};
           }
@@ -139,7 +139,7 @@ void _fake_quantize_grad_learnable_tensor_kernel_cuda(
   float dscale_small = quant_min - zero_point;
   float dscale_big = quant_max - zero_point;
   gpu_kernel_multiple_outputs(
-    iter, [=] GPU_LAMBDA (float XInput, float dYInput) -> thrust::tuple<float, float, float> {
+    iter, [=] GPU_LAMBDA (float XInput, float dYInput) -> ::cuda::std::tuple<float, float, float> {
       float dXOutput, dZeroPointOutput, dScaleOutput;
       int64_t xq = std::nearbyint(XInput * inv_scale) + zero_point;
       dXOutput = dYInput * (xq >= quant_min && xq <= quant_max);
@@ -234,7 +234,7 @@ void fake_quant_per_channel_cachemask_cuda(
 
 void _fake_quantize_grad_learnable_channel_kernel_cuda(TensorIterator &iter, int64_t quant_min, int64_t quant_max, float grad_factor) {
   gpu_kernel_multiple_outputs(iter,
-    [=] GPU_LAMBDA (float x_input, float dy_input, float scale_input, float zero_point_input) -> thrust::tuple<float, float, float> {
+    [=] GPU_LAMBDA (float x_input, float dy_input, float scale_input, float zero_point_input) -> ::cuda::std::tuple<float, float, float> {
       float dx_output, dscale_output, dzero_point_output;
       float inv_scale = 1.0f / scale_input;
       float dscale_small = quant_min - zero_point_input;

@@ -11,7 +11,7 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/thread_constants.h>
 
-#include <thrust/tuple.h>
+#include <cuda/std/tuple>
 
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
@@ -106,8 +106,8 @@ struct multi_outputs_store_helper {
   C10_HOST_DEVICE static void apply(
       const data_t& data,
       const offsets_t& offsets,
-      thrust::tuple<Args...> ret) {
-    using T = typename thrust::tuple_element<current, thrust::tuple<Args...>>::type;
+      ::cuda::std::tuple<Args...> ret) {
+    using T = typename ::cuda::std::tuple_element_t<current, ::cuda::std::tuple<Args...>>;
     T *to = reinterpret_cast<T *>(data[current]) + offsets[current];
     *to = thrust::get<current>(ret);
   }

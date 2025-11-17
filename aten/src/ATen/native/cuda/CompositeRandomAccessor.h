@@ -2,13 +2,13 @@
 
 #include <ATen/native/CompositeRandomAccessorCommon.h>
 #include <thrust/swap.h>
-#include <thrust/tuple.h>
+#include <cuda/std/tuple>
 
 namespace at { namespace native {
 
 struct TupleInfoCPU {
   template <typename ...Types>
-  using tuple = thrust::tuple<Types...>;
+  using tuple = ::cuda::std::tuple<Types...>;
 
   template <typename ...Types>
   static constexpr auto tie(Types&... args) noexcept {

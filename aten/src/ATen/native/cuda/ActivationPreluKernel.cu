@@ -5,7 +5,7 @@
 
 #include <cmath>
 
-#include <thrust/tuple.h>
+#include <cuda/std/tuple>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
@@ -33,7 +33,7 @@ void prelu_kernel(TensorIterator &iter) {
 void prelu_backward_kernel(TensorIterator &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "prelu_backward_cuda", [&] {
     gpu_kernel_multiple_outputs(iter,
-      [] GPU_LAMBDA (scalar_t input, scalar_t weight, scalar_t grad) -> thrust::tuple<scalar_t, scalar_t> {
+      [] GPU_LAMBDA (scalar_t input, scalar_t weight, scalar_t grad) -> ::cuda::std::tuple<scalar_t, scalar_t> {
         auto mask = input > 0;
         auto grad_input = mask ? grad : weight * grad;
         auto grad_weight = mask ? scalar_t{0} : input * grad;

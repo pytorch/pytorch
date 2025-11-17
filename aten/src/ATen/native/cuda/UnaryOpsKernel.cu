@@ -267,7 +267,7 @@ void frexp_kernel_cuda(TensorIteratorBase& iter) {
     // It's a floating point type and must be the same as the input's dtype.
     iter.dtype(),
     "frexp_cuda", [&]() {
-      gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t a) -> thrust::tuple<scalar_t, int32_t> {
+      gpu_kernel_multiple_outputs(iter, [=] GPU_LAMBDA (scalar_t a) -> ::cuda::std::tuple<scalar_t, int32_t> {
         int32_t exponent;
         scalar_t mantissa = std::frexp(a, &exponent);
         return {mantissa, exponent};

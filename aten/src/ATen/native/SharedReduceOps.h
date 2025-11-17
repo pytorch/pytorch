@@ -16,7 +16,7 @@
 #include <ATen/native/hip/DeviceSqrt.cuh>
 #endif
 #if defined(__CUDACC__) || defined(__HIPCC__)
-#include <thrust/pair.h>
+#include <cuda/std/utility>
 #else
 #include <cmath>
 #define device_sqrt std::sqrt
@@ -68,7 +68,7 @@ namespace at::native {
 namespace detail {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
+template <typename T1, typename T2> using pair = ::cuda::std::pair<T1, T2>;
 #else
 template <typename T1, typename T2> using pair = std::pair<T1, T2>;
 #endif
