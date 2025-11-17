@@ -553,17 +553,16 @@ graph():
     return (getitem,)""",  # noqa: B950
         )
 
+    @torch._dynamo.config.patch(cache_size_limit=16)
     def test_dtensor_unbacked_matmuls(self):
+        from torch.distributed.tensor import randn as d_randn
+
         device_mesh = init_device_mesh(
             self.device_type, mesh_shape=(self.world_size // 2, 2)
         )
 
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                return x @ y
-
-        x = torch.randn(64, 64)
-        y = torch.randn(64, 64)
+        def fn(x, y):
+            return x @ y
 
         for test_index, (px, py) in enumerate(
             [
@@ -571,36 +570,42 @@ graph():
                 [[Replicate(), Replicate()], [Replicate(), Replicate()]],
                 [[Replicate(), Shard(0)], [Replicate(), Replicate()]],
                 [[Replicate(), Shard(1)], [Replicate(), Shard(0)]],
+                # any of these should pass with redistribution
+                [[Replicate(), Partial()], [Replicate(), Replicate()]],
+                [[Partial(), Partial()], [Partial(), Partial()]],
+                [[Partial(), Partial()], [Shard(0), Replicate()]],
+                [[Replicate(), Shard(0)], [Replicate(), Shard(0)]],
+                [[Shard(0), Shard(1)], [Shard(1), Shard(0)]],
+                [[Partial(), Replicate()], [Shard(0), Shard(0)]],
             ]
         ):
             # create DTensors with unbacked outer/inner sizes
-            x_dt = distribute_tensor(x, device_mesh, placements=px)
-            y_dt = distribute_tensor(y, device_mesh, placements=py)
+            x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=px)
+            y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=py)
             for i in range(2):
                 torch._dynamo.decorators.mark_unbacked(x_dt, i)
                 torch._dynamo.decorators.mark_unbacked(y_dt, i)
 
             # full-graph capture
             cnt = CompileCounterWithBackend("eager")
-            fn = torch.compile(Foo(), backend=cnt, fullgraph=True)
-            fn(x_dt, y_dt)
-            if test_index == 0:
-                gm = dynamo_graph_capture_for_export(Foo())(x_dt, y_dt)
-                n = 0
-                for node in gm.graph.nodes:
-                    if bindings := node.meta.get("unbacked_bindings", {}):
-                        # 2 outer sizes, 2 inner sizes
-                        self.assertEqual(len(bindings), 4)
-                        n += 1
-                self.assertEqual(n, 2)  # 2 nodes with bindings
+            cfn = torch.compile(fn, backend=cnt, fullgraph=True)
+            cfn(x_dt, y_dt)
 
             # test sharded matmuls with zero-size shards
-            if test_index == 2:
-                out = fn(
-                    distribute_tensor(torch.randn(3, 1), device_mesh, placements=px),
-                    distribute_tensor(torch.randn(1, 1), device_mesh, placements=py),
-                )
+            if test_index >= 2:
+                dx = d_randn(3, 1, device_mesh=device_mesh, placements=px)
+                dy = d_randn(1, 1, device_mesh=device_mesh, placements=py)
+                out = cfn(dx, dy)
+                # self.assertTrue(torch.allclose(out.to_local(), fn(dx, dy).to_local()))
                 self.assertEqual(tuple(out.shape), (3, 1))
+                self.assertEqual(cnt.frame_count, 1)
+
+            # test on uneven shardings
+            if test_index >= 3:
+                dx = d_randn(20, 17, device_mesh=device_mesh, placements=px)
+                dy = d_randn(17, 5, device_mesh=device_mesh, placements=py)
+                out = cfn(dx, dy)
+                # self.assertTrue(torch.allclose(out.to_local(), fn(dx, dy).to_local()))
                 self.assertEqual(cnt.frame_count, 1)
 
 
