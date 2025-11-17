@@ -5,11 +5,13 @@ from typing_extensions import Self
 
 import torch
 from torch import Tensor
+from torch.autograd import Function
 
 
 if TYPE_CHECKING:
     from torch._ops import OpOverload
     from torch._prims_common import DeviceLikeType
+    from torch.autograd.function import FunctionCtx
 
 
 class ComplexTensor(Tensor):
@@ -54,7 +56,6 @@ class ComplexTensor(Tensor):
         storage_offset = real.storage_offset()
         strides = real.stride()
         layout = real.layout
-        requires_grad = real.requires_grad
         pin_memory = real.is_pinned()
 
         assert shape == imag.shape, f"Expected imag shape {shape}, got {imag.shape}"
@@ -64,15 +65,10 @@ class ComplexTensor(Tensor):
         assert real.dtype == imag.dtype, (
             f"Expected imag dtype {real.dtype}, got {imag.dtype}"
         )
-        assert layout == imag.layout, (
-            f"Expected imag layout {layout}, got {imag.layout}"
-        )
         assert pin_memory == imag.is_pinned(), (
             f"Expected imag pinning {pin_memory}, got {imag.is_pinned()}"
         )
-        assert requires_grad == imag.requires_grad, (
-            f"Expected imag requires_grad {requires_grad}, got {imag.requires_grad}"
-        )
+
         res = Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
             shape,
@@ -84,8 +80,8 @@ class ComplexTensor(Tensor):
             layout=layout,
             requires_grad=False,
         )
-        res._re = real
-        res._im = imag
+        res._re = real.clone().detach()
+        res._im = imag.clone().detach()
 
         return res
 
@@ -117,12 +113,12 @@ class ComplexTensor(Tensor):
 
     @staticmethod
     def from_interleaved(t: Tensor) -> ComplexTensor:
-        t_real = t.real
-        t_imag = t.imag if t.dtype.is_complex else torch.zeros_like(t_real)
-        return ComplexTensor(t_real, t_imag)
+        t_real = torch.real(t)
+        t_imag = torch.imag(t) if t.dtype.is_complex else torch.zeros_like(t_real)
+        return Complex.apply(t_real, t_imag)
 
     def as_interleaved(self) -> Tensor:
-        return torch.complex(self.re, self.im)
+        return torch.complex(self.real, self.imag)
 
     @staticmethod
     def __tensor_unflatten__(
@@ -143,3 +139,13 @@ class ComplexTensor(Tensor):
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
         return self.re.is_pinned(device)
+
+
+class Complex(Function):
+    @staticmethod
+    def forward(ctx: FunctionCtx, real: Tensor, imag: Tensor) -> ComplexTensor:  # type: ignore[bad-override]
+        return ComplexTensor(real, imag)
+
+    @staticmethod
+    def backward(ctx: FunctionCtx, grad_output: ComplexTensor) -> tuple[Tensor, Tensor]:  # type: ignore[bad-override]
+        return grad_output.real, grad_output.imag
