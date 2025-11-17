@@ -30,7 +30,9 @@ if TEST_WITH_DEV_DBG_ASAN:
     )
     sys.exit(0)
 
-
+# NB: this iterable needs to be orderd as otherwise different ranks may run with
+# conflicting settings when e.g., @parametrize(_DISTRIBUTED_STATE_DICT_IMPLS) is
+# used to decorate tests
 _DISTRIBUTED_STATE_DICT_IMPLS = (
     StateDictType.LOCAL_STATE_DICT,
     StateDictType.SHARDED_STATE_DICT,
