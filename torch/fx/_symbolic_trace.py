@@ -13,6 +13,7 @@ from collections.abc import Callable
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
 from typing import Any, get_args, NamedTuple, Optional, TypeAlias, Union
+import threading
 
 import torch
 import torch.utils._pytree as pytree
@@ -1166,26 +1167,40 @@ class _Patcher:
         self.visited.clear()
 
 
-CURRENT_PATCHER: Optional[_Patcher] = None
+_current_patcher_tls = threading.local()
+
+def _get_current_patcher() -> Optional[_Patcher]:
+    return getattr(_current_patcher_tls, "patcher", None)
+
+def _set_current_patcher(patcher: Optional[_Patcher]) -> None:
+    if patcher is None:
+        if hasattr(_current_patcher_tls, "patcher"):
+            delattr(_current_patcher_tls, "patcher")
+    else:
+        _current_patcher_tls.patcher = patcher
+
 
 
 @contextlib.contextmanager
 def _new_patcher():
-    global CURRENT_PATCHER
-    prior_patcher = CURRENT_PATCHER
+    prior_patcher = _get_current_patcher()
     try:
-        CURRENT_PATCHER = _Patcher()
-        yield CURRENT_PATCHER
+        patcher = _Patcher()
+        _set_current_patcher(patcher)
+        yield patcher
+        
     finally:
         # Clear all the patches made by when using current patcher.
-        assert CURRENT_PATCHER is not None
-        CURRENT_PATCHER.revert_all_patches()
-        CURRENT_PATCHER = prior_patcher
+        current = _get_current_patcher()
+        assert current is not None
+        current.revert_all_patches()
+        _set_current_patcher(prior_patcher)
+
 
 
 @contextlib.contextmanager
 def _maybe_revert_all_patches():
-    current_patcher = CURRENT_PATCHER
+    current_patcher = _get_current_patcher()
     patches_made = None
     patches_removed = None
     try:
