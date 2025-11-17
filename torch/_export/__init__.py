@@ -16,7 +16,8 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from functools import lru_cache
 
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
 from unittest.mock import patch
 
 import torch
