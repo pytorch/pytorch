@@ -69,7 +69,8 @@ class LintResult:
 
     def apply(self, lines: list[str]) -> None:
         if not (
-            self.char is None
+            self.is_recursive
+            or self.char is None
             or self.length is None
             or self.line is None
             or self.replacement is None
