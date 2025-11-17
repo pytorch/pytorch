@@ -362,6 +362,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         res = dt + 1
         self.assertEqual(res, 7)
+        self.assertTrue(res._spec.placements[0].is_replicate())
 
         local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
         dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
@@ -370,6 +371,31 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         norm = norm + 1
 
         self.assertEqual(norm, 11)
+        self.assertTrue(norm._spec.placements[0].is_replicate())
+
+    def test_mult_div_scalar(self):
+        aten = torch.ops.aten
+
+        mesh = self.build_device_mesh()
+        rank = self.rank
+
+        local_tensor = torch.tensor([rank])
+
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        res = aten.mul.Scalar(dt, 2)
+        self.assertEqual(res, 2 * rank)
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 12)
+
+        res = aten.div.Scalar(dt, 2)
+        self.assertEqual(res, rank / 2)
+        self.assertTrue(res._spec.placements[0].is_partial())
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 3)
 
 
 if __name__ == "__main__":
