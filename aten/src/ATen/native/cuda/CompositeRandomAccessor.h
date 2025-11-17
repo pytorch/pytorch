@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/native/CompositeRandomAccessorCommon.h>
-#include <thrust/swap.h>
 #include <cuda/std/tuple>
+#include <cuda/std/utility>
 
 namespace at { namespace native {
 
@@ -12,7 +12,7 @@ struct TupleInfoCPU {
 
   template <typename ...Types>
   static constexpr auto tie(Types&... args) noexcept {
-    return thrust::tie(args...);
+    return ::cuda::std::tie(args...);
   }
 };
 
@@ -25,12 +25,12 @@ void swap(
   references_holder<Values, References> rh1,
   references_holder<Values, References> rh2
 ) {
-  return thrust::swap(rh1.data(), rh2.data());
+  return ::cuda::std::swap(rh1.data(), rh2.data());
 }
 
 template <int N, typename Values, typename References>
-auto get(references_holder<Values, References> rh) -> decltype(thrust::get<N>(rh.data())) {
-  return thrust::get<N>(rh.data());
+auto get(references_holder<Values, References> rh) -> decltype(::cuda::std::get<N>(rh.data())) {
+  return ::cuda::std::get<N>(rh.data());
 }
 
 }} // namespace at::native

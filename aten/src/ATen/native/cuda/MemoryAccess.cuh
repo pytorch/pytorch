@@ -109,7 +109,7 @@ struct multi_outputs_store_helper {
       ::cuda::std::tuple<Args...> ret) {
     using T = typename ::cuda::std::tuple_element_t<current, ::cuda::std::tuple<Args...>>;
     T *to = reinterpret_cast<T *>(data[current]) + offsets[current];
-    *to = thrust::get<current>(ret);
+    *to = ::cuda::std::get<current>(ret);
   }
 };
 
