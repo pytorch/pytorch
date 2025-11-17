@@ -646,7 +646,8 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense(masked_grad=gradcheck.masked)
             x.requires_grad_(True)
-            gradcheck(fn, (x,), eps=1e-4)
+            eps = 1e-4 if device == "mps:0" else 1e-5
+            gradcheck(fn, (x,), eps=eps)
 
         i = self.index_tensor([
             [0, 1, 2, 2],
@@ -3917,7 +3918,6 @@ class TestSparse(TestSparseBase):
             self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
 
     @coalescedonoff
-    @expectedFailureMPS
     # NOTE: addcmul_out is not implemented for bool.
     @dtypes(*all_types_and_complex_and(torch.bfloat16, torch.float16))
     @dtypesIfMPS(*all_mps_types())
