@@ -38,7 +38,7 @@ import threading
 import types
 import warnings
 import weakref
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -2212,10 +2212,21 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+    def __init__(
+        self,
+        value,
+        tuple_vt=None,
+        init_args=None,
+        **kwargs,
+    ):
         super().__init__(value, init_args=init_args, **kwargs)
-        self._tuple_vt = tuple_vt
-        if self._tuple_vt is None:
+
+        if TYPE_CHECKING:
+            from .lists import TupleVariable
+
+            tuple_vt: Optional[TupleVariable]
+
+        if tuple_vt is None:
             assert self.source is None, (
                 "tuple_vt must be constructed by builder.py when source is present"
             )
@@ -2230,6 +2241,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )
+
+        else:
+            self._tuple_vt = tuple_vt
 
     def call_method(
         self,
