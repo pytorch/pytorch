@@ -14,6 +14,21 @@
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 
+// Helper variable templates to detect 2.10+ types for better compile-time error
+// messages
+template <typename T>
+inline constexpr bool is_header_only_array_ref_v = false;
+
+template <typename T>
+inline constexpr bool
+    is_header_only_array_ref_v<torch::headeronly::HeaderOnlyArrayRef<T>> = true;
+
+template <typename T>
+inline constexpr bool is_std_vector_v = false;
+
+template <typename T>
+inline constexpr bool is_std_vector_v<std::vector<T>> = true;
+
 // forward declare so that the from/to() implementations in the detail
 // namespace of library.h where the real work is done can compile.
 template <typename T>
@@ -35,6 +50,17 @@ struct FromImpl {
       T val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
+    // Ensure 2.10+ types don't accidentally use the base case - provide clear
+    // compile-time errors.
+    static_assert(
+        !std::is_same_v<T, torch::stable::Device>,
+        "torch::stable::Device requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_header_only_array_ref_v<T>,
+        "HeaderOnlyArrayRef<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_std_vector_v<T>,
+        "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
@@ -237,6 +263,11 @@ struct FromImpl<torch::stable::Tensor> {
   }
 };
 
+// =============================================================================
+// FROM CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+// =============================================================================
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // Specialization for torch::headeronly::HeaderOnlyArrayRef<T> => StableIValue
 // Returns a new owning reference of the underlying list.
 template <typename T>
@@ -245,9 +276,6 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
       const torch::headeronly::HeaderOnlyArrayRef<T>& val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    static_assert(
-        TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0,
-        "HeaderOnlyArrayRef conversion requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     StableListHandle new_list_handle;
     try {
       TORCH_ERROR_CODE_CHECK(
@@ -291,9 +319,6 @@ struct FromImpl<torch::stable::Device> {
       const torch::stable::Device& val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    static_assert(
-        TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0,
-        "torch::stable::Device conversion requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     // Convert DeviceType to shim representation (int32_t)
     StableIValue device_type_shim = from(val.type());
     // Pack: lower 32 bits = device index, upper 32 bits = device type (shim)
@@ -304,6 +329,8 @@ struct FromImpl<torch::stable::Device> {
     return device_index_bits | device_type_bits;
   }
 };
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // =============================================================================
 // TO CONVERSIONS (StableIValue -> T)
@@ -317,6 +344,12 @@ struct ToImpl {
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
     static_assert(std::is_trivially_copyable_v<T>);
+    // Ensure 2.10+ types don't accidentally use the base case - provide clear
+    // compile-time errors. Device is the only 2.10+ type that would silently
+    // pass the trivial copyability check.
+    static_assert(
+        !std::is_same_v<T, torch::stable::Device>,
+        "torch::stable::Device requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     // T may not have a default constructor. (For example, it might be
     // c10::Device.) However, std::memcpy implicitly creates a T at the
     // destination. So, we can use a union to work around this lack of
@@ -486,6 +519,11 @@ struct ToImpl<torch::stable::Tensor> {
   }
 };
 
+// =============================================================================
+// TO CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+// =============================================================================
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // Specialization for StableIValue => std::vector<T>
 // std::vector<T> should be represented as a StableListHandle
 // filled with StableIValues
@@ -497,9 +535,6 @@ struct ToImpl<std::vector<T>> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    static_assert(
-        TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0,
-        "std::vector conversion requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     auto list_handle = to<StableListHandle>(val);
     size_t size;
     try {
@@ -531,9 +566,6 @@ struct ToImpl<torch::stable::Device> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    static_assert(
-        TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0,
-        "torch::stable::Device conversion requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     // Unpack: lower 32 bits = device index, upper 32 bits = device type (shim)
     int32_t device_index = static_cast<int32_t>(val & 0xFFFFFFFF);
     StableIValue device_type_shim = (val >> 32) & 0xFFFFFFFF;
@@ -541,6 +573,8 @@ struct ToImpl<torch::stable::Device> {
     return torch::stable::Device(device_type, device_index);
   }
 };
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // =============================================================================
 //  end to helpers for converting between StableIValue and T
