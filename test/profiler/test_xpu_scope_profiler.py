@@ -1,14 +1,14 @@
 # Owner(s): ["oncall: profiler"]
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
 from torch._C._profiler import _ExperimentalConfig
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class XpuScopeProfilerTest(TestCase):
     def test_scope_profiler(self):
         if not torch.xpu.is_available():
-            pytest.skip("XPU not available")
+            self.skipTest("XPU not available")
 
         a = torch.rand([100, 200]).to("xpu")
         b = torch.rand([200, 300]).to("xpu")
