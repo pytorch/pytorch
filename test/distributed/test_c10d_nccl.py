@@ -92,6 +92,9 @@ BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
     torch.version.cuda is not None or torch.version.hip is not None
 )
 
+CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
+    torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
+)
 
 _start_time = time.time()
 _logger = logging.getLogger(__name__)
@@ -345,7 +348,11 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # These tests are expected to throw SIGABRT(6);
         # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
-        TEST_NAN_ASSERT_RETURN = 0 if IS_SANDCASTLE else signal.SIGABRT
+        TEST_NAN_ASSERT_RETURN = (
+            0
+            if (IS_SANDCASTLE and not (TEST_MULTIGPU and CUDA_12_AND_ABOVE))
+            else signal.SIGABRT
+        )
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
             self.test_nan_assert_float32.__wrapped__: TEST_NAN_ASSERT_RETURN,
@@ -536,10 +543,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # reset ENV
         os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "0"
-
-    CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
-        torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
-    )
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
