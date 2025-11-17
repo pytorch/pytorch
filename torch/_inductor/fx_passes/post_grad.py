@@ -1631,12 +1631,15 @@ def gelu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha, approximate
     pass_dict=pass_patterns[2],
 )
 def gelu_decomposition(match: Match, inp, *, approximate):
-    # NOTE: get_decompositions is experimental
-    from torch._decomp import get_decompositions
-    gelu_decomp = get_decompositions([aten.gelu])[aten.gelu.default]
+    @functools.cache
+    def get_gelu_decomposition() -> Callable:
+        # NOTE: get_decompositions is experimental
+        from torch._decomp import get_decompositions
+        gelu_decomp = get_decompositions([aten.gelu])[aten.gelu.default]
+        return gelu_decomp
 
     # pyrefly: ignore [bad-argument-type]
-    match.replace_by_example(gelu_decomp, [inp, approximate])
+    match.replace_by_example(get_gelu_decomposition(), [inp, approximate])
 
 
 def is_valid_addmm_fusion(match):
