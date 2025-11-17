@@ -2548,13 +2548,11 @@ class GraphModuleDeserializer(metaclass=Final):
                 "Identity": torch.utils._sympy.functions.Identity,
             }
             self.symbol_name_to_symbol: dict[str, sympy.Symbol] = {}
-            self.constants = deserialize_torch_artifact(constants)
-            self.signature = self.deserialize_signature(
-                serialized_graph_module.signature
-            )
 
             # deserialization does analysis with checks on 0/1, so we create fake range constraints and
             # restore the original range constraints afterwards
+            # NOTE: This must be initialized BEFORE deserialize_torch_artifact is called, as it may
+            # trigger fake tensor reconstruction which needs access to symbol_name_to_range
             self.symbol_name_to_range = {}
             # we also need to bump unbacked sym[float,int] counters in the
             # shape env to accommodate unbacked symbols in the exported program
@@ -2582,6 +2580,11 @@ class GraphModuleDeserializer(metaclass=Final):
                 self.shape_env.unbacked_symfloat_counter += 1
             for _ in range(count_unbacked_symint + 1):
                 self.shape_env.unbacked_symint_counter += 1
+
+            self.constants = deserialize_torch_artifact(constants)
+            self.signature = self.deserialize_signature(
+                serialized_graph_module.signature
+            )
 
             if example_inputs is not None and len(example_inputs) > 0:
                 self.example_inputs = deserialize_torch_artifact(example_inputs)
