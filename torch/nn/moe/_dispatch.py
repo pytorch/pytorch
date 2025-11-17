@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
@@ -44,11 +46,13 @@ def dedup_dispatch(
     intra_node_group: dist.ProcessGroup,
     out_len_ratio: int,
     align: int,
+    topk_weights: Optional[torch.Tensor] = None,
 ) -> tuple[
     torch.Tensor,
     torch.Tensor,
     symm_mem.ExchangePlan,
     symm_mem.ExchangePlan,
+    Optional[torch.Tensor],
     torch.Tensor,  # for debug
     torch.Tensor,  # for debug
 ]:
@@ -71,6 +75,10 @@ def dedup_dispatch(
             the chunk each expert receives. This can be used to satisfy the
             alignment requirement of group GEMM. If not specified, the alignment
             is set to 1.
+        topk_weights (class:`torch.Tensor`, optional): the topk weights for each
+            token. The weights are exchanged inter-node only. When combining the
+            tokens from intra-node group, you can apply the weights to the
+            combined result.
 
     Returns:
         A tuple containing the following tensors:
@@ -79,6 +87,9 @@ def dedup_dispatch(
               indices for each token after intra-node communication.
             - inter_plan (class:`symm_mem.ExchangePlan`): the exchange plan used for inter-node communication.
             - intra_plan (class:`symm_mem.ExchangePlan`): the exchange plan used for intra-node communication.
+            - topk_weights_out (class:`torch.Tensor`, optional): the topk
+              weights after inter-node exchange. If `topk_weights` is not
+              provided as input to this API, `None` is returned for this field.
             - inter_out (class:`torch.Tensor`): the output tensor containing the
               dispatched tokens after inter-node communication. (for debug)
             - recv_intra_inp_splits (class:`torch.Tensor`): the input splits for the intra-node exchange plan. (for debug)
@@ -98,6 +109,7 @@ def dedup_dispatch(
                 topk_indices_intranode_out,
                 inter_plan,
                 intra_plan,
+                topk_weights_out,
                 *_,
             ) = dedup_dispatch(
                 inp,
@@ -108,6 +120,7 @@ def dedup_dispatch(
                 intra_group,
                 out_len_ratio,
                 align,
+                topk_weights,
             )
         ```
     """
@@ -171,14 +184,12 @@ def dedup_dispatch(
     # Ready signal for each CUDA block. In this test we set all tokens as ready in one shot
     b_head = torch.full((n_blocks,), -1, dtype=torch.int64, device=device)
 
-    # Inter-node token exchange can start as soon as inter_plan is ready and signals are created
-    # Record an event to indicate the above
-    inter_plan_ready = torch.Event(device=device)
-    inter_plan_ready.record()
-
     # Create side stream for inter-node data exchange
     inter_node_stream = torch.Stream(device=device)
-    inter_node_stream.wait_event(inter_plan_ready)
+    # Inter-node token exchange can start as soon as inter_plan is ready and signals are created
+    current_stream = torch.accelerator.current_stream(device)
+    inter_node_stream.wait_stream(current_stream)
+
     with inter_node_stream:
         # Fire up inter-node token exchange
         # inp: (expanded_seqlen, hid_dim)
@@ -191,6 +202,25 @@ def dedup_dispatch(
             b_len,
             b_head,
         )
+
+    # Exchange topk weights inter-node if provided, no need to exchange it intra-node
+    topk_weights_out = None
+    if topk_weights is not None:
+        expanded_topk_weights = topk_weights[sorted_indices // topk_nodes]
+        topk_weights_out = torch.empty(
+            max_out_len,
+            *topk_weights.shape[1:],
+            dtype=topk_weights.dtype,
+            device=device,
+        )
+        inter_node_stream.wait_stream(current_stream)
+        with inter_node_stream:
+            symm_mem.all_to_all_v(
+                expanded_topk_weights,
+                topk_weights_out,
+                inter_plan,
+                inter_node_group.group_name,
+            )
 
     # On default stream, we continue to prepare for intra-node exchange
 
@@ -224,10 +254,8 @@ def dedup_dispatch(
 
     # Create intra-node exchange plan on a side stream, to overlap with the
     # occurrence calculation
-    intra_splits_received = torch.Event(device=device)
-    intra_splits_received.record()
     intra_plan_stream = torch.Stream(device=device)
-    intra_plan_stream.wait_event(intra_splits_received)
+    intra_plan_stream.wait_stream(current_stream)
     with intra_plan_stream:
         intra_plan = symm_mem.make_a2a_2d_exchange_plan(
             intra_in_splits,
@@ -244,7 +272,6 @@ def dedup_dispatch(
     )
 
     # Wait for completion of intra-node exchange plan
-    current_stream = torch.accelerator.current_stream(device)
     current_stream.wait_stream(intra_plan_stream)
 
     # Now let's fire up intra-node exchange
@@ -271,6 +298,7 @@ def dedup_dispatch(
         topk_indices_intranode_out,
         inter_plan,
         intra_plan,  # necessary
+        topk_weights_out,  # if topk_weights is provided
         inter_out,  # for debug
         intra_in_splits,  # for debug
     )
