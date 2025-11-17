@@ -858,7 +858,10 @@ class PallasKernel(SIMDKernel):
             code.writeline(
                 "out_dtypes = ("
                 + ", ".join(
-                    [f"torch_dtype_to_jax_runtime({name}.dtype)" for name in output_params]
+                    [
+                        f"torch_dtype_to_jax_runtime({name}.dtype)"
+                        for name in output_params
+                    ]
                 )
                 + ",)"
             )

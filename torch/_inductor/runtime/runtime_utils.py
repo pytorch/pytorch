@@ -202,10 +202,7 @@ def torch_dtype_to_jax_runtime(dtype: torch.dtype) -> Any:
     Returns:
         JAX dtype object (e.g., jnp.float32 object itself)
     """
-    try:
-        import jax.numpy as jnp
-    except ImportError:
-        raise ImportError("JAX is required for Pallas backend")
+    import jax.numpy as jnp
 
     dtype_map = {
         torch.float32: jnp.float32,
