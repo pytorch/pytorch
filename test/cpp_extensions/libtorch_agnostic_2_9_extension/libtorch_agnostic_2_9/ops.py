@@ -361,3 +361,19 @@ def my_flatten(t, start_dim=0, end_dim=-1) -> Tensor:
     Returns: Tensor - flattened tensor
     """
     return torch.ops.libtorch_agnostic_2_9.my_flatten.default(t, start_dim, end_dim)
+
+
+def test_device_constructor(is_cuda, index, use_str) -> torch.device:
+    """
+    Tests Device construction with different constructors.
+
+    Args:
+        is_cuda: bool - whether to create a CUDA device (True) or CPU device (False)
+        index: int - device index for CUDA devices
+        use_str: bool - whether to use string-based constructor (True) or enum-based (False)
+
+    Returns: torch.device - constructed device
+    """
+    return torch.ops.libtorch_agnostic_2_9.test_device_constructor.default(
+        is_cuda, index, use_str
+    )

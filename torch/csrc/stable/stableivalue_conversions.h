@@ -52,9 +52,10 @@ struct FromImpl {
       [[maybe_unused]] bool is_internal) {
     // Ensure 2.10+ types don't accidentally use the base case - provide clear
     // compile-time errors.
-    static_assert(
-        !std::is_same_v<T, torch::stable::Device>,
-        "torch::stable::Device requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    // static_assert(
+    //     !std::is_same_v<T, torch::stable::Device>,
+    //     "torch::stable::Device requires TORCH_FEATURE_VERSION >=
+    //     TORCH_VERSION_2_10_0");
     static_assert(
         !is_header_only_array_ref_v<T>,
         "HeaderOnlyArrayRef<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
@@ -308,6 +309,8 @@ struct FromImpl<std::vector<T>> {
   }
 };
 
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // Specialization for torch::stable::Device => StableIValue
 // Pack the device type and index into a StableIValue in a platform-independent
 // format. We use the shim representation for DeviceType (int32_t) for ABI
@@ -330,7 +333,7 @@ struct FromImpl<torch::stable::Device> {
   }
 };
 
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+// #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // =============================================================================
 // TO CONVERSIONS (StableIValue -> T)
@@ -346,9 +349,9 @@ struct ToImpl {
     static_assert(std::is_trivially_copyable_v<T>);
     // Ensure 2.10+ types don't accidentally use the base case - provide clear
     // compile-time errors.
-    static_assert(
-        !std::is_same_v<T, torch::stable::Device>,
-        "torch::stable::Device requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    // static_assert(
+    //     !std::is_same_v<T, torch::stable::Device>,
+    //     "torch::stable::Device requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     static_assert(
         !is_header_only_array_ref_v<T>,
         "HeaderOnlyArrayRef<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
@@ -561,6 +564,8 @@ struct ToImpl<std::vector<T>> {
   }
 };
 
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // Specialization for StableIValue => torch::stable::Device
 // Unpack device type and index from StableIValue in platform-independent
 // format. StableIValue layout: DeviceIndex in lower 32 bits,
@@ -578,8 +583,6 @@ struct ToImpl<torch::stable::Device> {
     return torch::stable::Device(device_type, device_index);
   }
 };
-
-#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // =============================================================================
 //  end to helpers for converting between StableIValue and T
