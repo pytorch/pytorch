@@ -15,6 +15,7 @@
 #endif
 #include <c10/core/SymNodeImpl.h>
 #include <torch/csrc/jit/frontend/ir_emitter.h>
+#include <torch/csrc/jit/frontend/schema_type_parser.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 #include <torch/csrc/jit/ir/irparser.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -1255,11 +1256,6 @@ void initJITBindings(PyObject* module) {
             return a->expect_true(file, line);
           })
       .def(
-          "expect_size",
-          [](const c10::SymNode& a, const char* file, int64_t line) {
-            return a->expect_size(file, line);
-          })
-      .def(
           "guard_size_oblivious",
           [](const c10::SymNode& a, const char* file, int64_t line) {
             return a->guard_size_oblivious(file, line);
@@ -1697,7 +1693,7 @@ void initJITBindings(PyObject* module) {
       [](const std::string& op_name, const std::string& overload_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          const auto& operations = getAllOperatorsFor(symbol);
+          auto operations = getAllOperatorsFor(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
               return op->schema();
@@ -1718,7 +1714,7 @@ void initJITBindings(PyObject* module) {
          const std::string& overload_name) -> std::optional<py::tuple> {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          const auto& operations = getAllOperatorsFor(symbol);
+          auto operations = getAllOperatorsFor(symbol);
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
@@ -1895,6 +1891,18 @@ void initJITBindings(PyObject* module) {
         customObj->setPayload(std::move(payload));
       },
       R"doc(Sets the payload of the given opaque object with the given Python object.)doc");
+  m.def(
+      "_register_opaque_type",
+      [](const std::string& type_name) {
+        torch::jit::registerOpaqueType(type_name);
+      },
+      R"doc(Registers a type name to be treated as an opaque type (PyObject) in schema parsing.)doc");
+  m.def(
+      "_is_opaque_type_registered",
+      [](const std::string& type_name) -> bool {
+        return torch::jit::isRegisteredOpaqueType(type_name);
+      },
+      R"doc(Checks if a type name is registered as an opaque type.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
@@ -2130,7 +2138,7 @@ void initJITBindings(PyObject* module) {
   m.def("_jit_get_custom_class_schemas", customClassSchemasForBCCheck);
   m.def("_jit_get_schemas_for_operator", [](const std::string& qualified_name) {
     auto symbol = Symbol::fromQualString(qualified_name);
-    const auto& operations = getAllOperatorsFor(symbol);
+    auto operations = getAllOperatorsFor(symbol);
     return fmap(operations, [](const std::shared_ptr<Operator>& op) {
       return op->schema();
     });

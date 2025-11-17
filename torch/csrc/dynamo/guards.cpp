@@ -19,6 +19,7 @@
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
+#include <cstdint>
 
 #include <torch/csrc/dynamo/debug_macros.h>
 
@@ -120,6 +121,16 @@ typedef struct {
 #endif // IS_PYTHON_3_12_PLUS
 
 namespace torch::dynamo {
+
+thread_local bool tls_is_in_mode_without_ignore_compile_internals = false;
+
+void set_is_in_mode_without_ignore_compile_internals(bool value) {
+  tls_is_in_mode_without_ignore_compile_internals = value;
+}
+
+bool get_is_in_mode_without_ignore_compile_internals() {
+  return tls_is_in_mode_without_ignore_compile_internals;
+}
 
 // Macro to skip addition of duplicate guards like EQUALS_MATCH
 #define SKIP_IF_GUARD_ALREADY_PRESENT(name) \
@@ -703,8 +714,10 @@ struct GlobalStateGuard {
     json_j["deterministic_algorithms_warn_only"] =
         json_t._deterministic_algorithms_warn_only;
     json_j["allow_tf32"] = json_t._allow_tf32;
-    json_j["allow_fp16_reduce"] = json_t._allow_fp16_reduce;
-    json_j["allow_bf16_reduce"] = json_t._allow_bf16_reduce;
+    json_j["allow_fp16_reduce"] =
+        static_cast<int64_t>(json_t._allow_fp16_reduce);
+    json_j["allow_bf16_reduce"] =
+        static_cast<int64_t>(json_t._allow_bf16_reduce);
     json_j["num_threads"] = json_t._num_threads;
     json_j["default_dtype"] = json_t._default_dtype.toScalarType();
   }
@@ -720,8 +733,10 @@ struct GlobalStateGuard {
     json_t._deterministic_algorithms_warn_only =
         json_j.at("deterministic_algorithms_warn_only");
     json_t._allow_tf32 = json_j.at("allow_tf32");
-    json_t._allow_fp16_reduce = json_j.at("allow_fp16_reduce");
-    json_t._allow_bf16_reduce = json_j.at("allow_bf16_reduce");
+    json_t._allow_fp16_reduce = static_cast<at::CuBLASReductionOption>(
+        static_cast<int64_t>(json_j.at("allow_fp16_reduce")));
+    json_t._allow_bf16_reduce = static_cast<at::CuBLASReductionOption>(
+        static_cast<int64_t>(json_j.at("allow_bf16_reduce")));
     json_t._num_threads = json_j.at("num_threads");
     json_t._default_dtype =
         caffe2::TypeMeta::fromScalarType(json_j.at("default_dtype"));
@@ -734,8 +749,8 @@ struct GlobalStateGuard {
   bool _deterministic_algorithms;
   bool _deterministic_algorithms_warn_only;
   bool _allow_tf32;
-  bool _allow_fp16_reduce;
-  bool _allow_bf16_reduce;
+  at::CuBLASReductionOption _allow_fp16_reduce;
+  at::CuBLASReductionOption _allow_bf16_reduce;
   int _num_threads;
   caffe2::TypeMeta _default_dtype;
   // TODO(jansel): we should guard on more state as inductor starts using it
@@ -3529,7 +3544,7 @@ class RootGuardManager : public GuardManager {
 
   void add_no_tensor_aliasing_guard(
       std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard) {
-    // stash a pointer to the _no_tensor_alising_guard
+    // stash a pointer to the _no_tensor_aliasing_guard
     _no_tensor_aliasing_guard = no_tensor_aliasing_guard;
     this->add_relational_guard_resetter(std::move(no_tensor_aliasing_guard));
   }
@@ -7825,6 +7840,11 @@ PyObject* torch_c_dynamo_guards_init() {
       "Failed to install dict_recursive_tag_watch_callback");
 
 #endif
+
+  py_m.def(
+      "set_is_in_mode_without_ignore_compile_internals",
+      &set_is_in_mode_without_ignore_compile_internals,
+      "Set the thread-local cache for whether we're in a mode with ignore_compile_internals=False");
 
   return m;
 }

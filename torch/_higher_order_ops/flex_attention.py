@@ -112,7 +112,7 @@ flex_attention = FlexAttentionHOP()
 
 class FlexAttentionBackwardHOP(HigherOrderOperator):
     def __init__(self) -> None:
-        super().__init__("flex_attention_backward")
+        super().__init__("flex_attention_backward", cacheable=True)
 
     def __call__(
         self,
@@ -354,12 +354,18 @@ def trace_flex_attention(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    # pyrefly: ignore [missing-attribute]
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", flex_attention, proxy_args, {}
-    )
+    with torch.fx.experimental.proxy_tensor.set_original_aten_op(flex_attention):
+        out_proxy = proxy_mode.tracer.create_proxy(
+            "call_function", flex_attention, proxy_args, {}
+        )
     return track_tensor_tree(
-        example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
+        example_out,
+        out_proxy,
+        constant=None,
+        # pyrefly: ignore [bad-argument-type]
+        tracer=proxy_mode.tracer,
     )
 
 
@@ -621,6 +627,7 @@ def create_fw_bw_graph(
 
 class FlexAttentionAutogradOp(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx: Any,
         query: Tensor,
@@ -896,9 +903,15 @@ def sdpa_dense_backward(
 
     grad_value = softmax_scores.to(query.dtype).transpose(-2, -1) @ grad_out
 
-    grad_softmax_scores = grad_out @ value.transpose(-2, -1)
+    grad_softmax_scores = grad_out.to(dtype=softmax_scores.dtype) @ value.to(
+        dtype=softmax_scores.dtype
+    ).transpose(-2, -1)
 
-    sum_scores = torch.sum(out * grad_out, -1, keepdim=True)
+    sum_scores = torch.sum(
+        out.to(dtype=softmax_scores.dtype) * grad_out.to(dtype=softmax_scores.dtype),
+        -1,
+        keepdim=True,
+    )
     grad_score_mod = softmax_scores * (
         grad_softmax_scores - sum_scores + grad_logsumexp.unsqueeze(-1)
     )
@@ -1063,6 +1076,7 @@ def trace_flex_attention_backward(
         score_mod_other_buffers,
         mask_mod_other_buffers,
     )
+    # pyrefly: ignore [missing-attribute]
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function",
@@ -1072,7 +1086,11 @@ def trace_flex_attention_backward(
         name="flex_attention_backward",
     )
     return track_tensor_tree(
-        example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
+        example_out,
+        out_proxy,
+        constant=None,
+        # pyrefly: ignore [bad-argument-type]
+        tracer=proxy_mode.tracer,
     )
 
 
@@ -1097,23 +1115,26 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
-    return trace_flex_attention_backward(
-        mode,
-        query,
-        key,
-        value,
-        out,
-        logsumexp,
-        grad_out,
-        grad_logsumexp,
-        fw_graph,
-        joint_graph,
-        block_mask,
-        scale,
-        kernel_options,
-        score_mod_other_buffers,
-        mask_mod_other_buffers,
-    )
+    with torch.fx.experimental.proxy_tensor.set_original_aten_op(
+        flex_attention_backward
+    ):
+        return trace_flex_attention_backward(
+            mode,
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            grad_logsumexp,
+            fw_graph,
+            joint_graph,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
 
 
 @flex_attention_backward.py_functionalize_impl

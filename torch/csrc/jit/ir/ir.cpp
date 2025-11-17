@@ -1088,7 +1088,7 @@ const FunctionSchema* Node::maybeSchema() const {
 
 const Operator* Node::maybeOperator() const {
   if (!op_) {
-    const auto& candidates = getAllOperatorsFor(kind());
+    auto candidates = getAllOperatorsFor(kind());
     for (const auto& candidate : candidates) {
       if (matches(candidate->schema())) {
         op_ = candidate.get();
@@ -1175,12 +1175,10 @@ bool Node::hasSideEffects() const {
     case prim::rpc_sync: // It represents RPC message sent.
     case prim::rpc_remote: // It represents RPC message sent.
     case aten::wait: // It can represent RPC message received.
-#if !defined(USE_ROCM)
     case cuda::set_stream:
     case cuda::_set_device:
     case cuda::_current_device:
     case cuda::synchronize:
-#endif
     case prim::Enter:
     case prim::Exit:
       return true;

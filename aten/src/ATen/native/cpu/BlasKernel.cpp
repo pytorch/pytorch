@@ -369,7 +369,7 @@ void gemm_notrans_(
 #endif // defined(__aarch64__) && !defined(C10_MOBILE)
 
 #if !defined(C10_MOBILE)
-static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
+float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
   return at::native::CPU_CAPABILITY::fp16_dot_with_fp32_arith(
       a, b, len);
 }
@@ -406,7 +406,7 @@ void gemm_transa_(
   });
 }
 
-static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
+float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
   return at::native::CPU_CAPABILITY::bf16_dot_with_fp32_arith(a, b, len);
 }
 
