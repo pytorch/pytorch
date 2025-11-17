@@ -184,6 +184,11 @@ psutil
 #Pinned versions:
 #test that import: test_profiler.py, test_openmp.py, test_dataloader.py
 
+pyright>=1.1.407
+#Description: linter that identifies untyped Python symbols
+#Pinned versions:
+#test that import:
+
 pytest==7.3.2
 #Description: testing framework
 #Pinned versions:
