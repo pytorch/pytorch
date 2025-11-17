@@ -121,7 +121,7 @@ class TestOpaqueObject(TestCase):
         def size_impl_fake(q: OpaqueQueue) -> int:
             ctx = torch._custom_op.impl.get_ctx()
             u0 = ctx.new_dynamic_size()
-            torch._check_is_size(u0)
+            torch._check(u0 >= 0)
             return u0
 
         torch.library.define(
