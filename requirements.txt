@@ -14,6 +14,7 @@ lintrunner ; platform_machine != "s390x" and platform_machine != "riscv64"
 networkx>=2.5.1
 optree>=0.13.0
 psutil
+spin
 sympy>=1.13.3
 typing-extensions>=4.13.2
 wheel

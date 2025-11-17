@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import (
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir("/dev/shm")
@@ -58,7 +58,7 @@ class SubProcess(mp.Process):
 
 
 def _test_cuda_ipc_deadlock_actor(queue, iterations):
-    for i in range(iterations):
+    for _ in range(iterations):
         if not queue.empty():
             queue.get()
         time.sleep(0.01)
@@ -66,7 +66,7 @@ def _test_cuda_ipc_deadlock_actor(queue, iterations):
 
 def _test_cuda_ipc_deadlock_learner(queue, iterations):
     net = torch.nn.LSTM(1, 1).cuda()
-    for i in range(iterations):
+    for _ in range(iterations):
         if not queue.full():
             queue.put(copy.deepcopy(net.state_dict()))
         time.sleep(0.01)
@@ -138,7 +138,7 @@ def send_tensor_with_untyped_storage(queue, event):
 
 def receive_and_send_sum(queue, out_queue, event, device, dtype, count, size=5):
     s = torch.full([size], 0, device=device, dtype=dtype)
-    for i in range(count):
+    for _ in range(count):
         t = queue.get()
         s += t
     out_queue.put(s)
@@ -146,7 +146,7 @@ def receive_and_send_sum(queue, out_queue, event, device, dtype, count, size=5):
 
 
 def receive_and_send(queue, out_queue, event, count):
-    for i in range(count):
+    for _ in range(count):
         t = queue.get()
         out_queue.put(t.clone())
     event.wait()
@@ -211,9 +211,9 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     is_ok &= var.grad is None
     is_ok &= not var._backward_hooks
     if is_parameter:
-        is_ok &= type(var) == Parameter
+        is_ok &= type(var) is Parameter
     else:
-        is_ok &= type(var) == torch.Tensor
+        is_ok &= type(var) is torch.Tensor
     var._grad = torch.ones(5, 5, device=device)
 
     queue.put(is_ok)

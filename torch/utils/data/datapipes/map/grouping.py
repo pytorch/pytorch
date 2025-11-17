@@ -45,7 +45,8 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
         drop_last: bool = False,
         wrapper_class: type[DataChunk] = DataChunk,
     ) -> None:
-        assert batch_size > 0, "Batch size is required to be larger than 0!"
+        if batch_size <= 0:
+            raise AssertionError("Batch size is required to be larger than 0!")
         super().__init__()
         self.datapipe = datapipe
         self.batch_size = batch_size
