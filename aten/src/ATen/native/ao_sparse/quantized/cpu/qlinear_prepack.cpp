@@ -20,7 +20,7 @@
 
 namespace ao::sparse {
 
-int register_linear_params();
+
 
 #ifdef USE_FBGEMM
 namespace {

@@ -43,10 +43,12 @@ from torch.testing._internal.common_utils import (
     _TestParametrizer,
     skipIfMPS,
     skipIfTorchDynamo,
-    skipIfXpu,
     TEST_WITH_TORCHDYNAMO,
 )
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
+
+
+CUDA_CONFIG_GPUS = ["cuda", "xpu"]
 
 
 class OptimizerInput:
@@ -369,7 +371,7 @@ def optim_inputs_func_adadelta(device, dtype=None):
         OptimizerInput(
             params=None, kwargs={"rho": 0.95, "weight_decay": 0.9}, desc="rho"
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_adadelta(device, dtype):
@@ -528,7 +530,7 @@ def optim_inputs_func_adam(device, dtype=None):
             params=None,
             kwargs={
                 "lr": torch.tensor(0.001),
-                "betas": (torch.tensor(0.9), torch.tensor(0.99)),
+                "betas": (torch.tensor([[[0.9]]]), torch.tensor([[0.99]])),
                 "amsgrad": True,
                 "capturable": True,
             },
@@ -569,10 +571,14 @@ def optim_inputs_func_adam(device, dtype=None):
                 desc="amsgrad",
             ),
         ]
-        + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+        + (
+            cuda_supported_configs
+            if _get_device_type(device) in CUDA_CONFIG_GPUS
+            else []
+        )
         + (mps_supported_configs if _get_device_type(device) == "mps" else [])
     )
-    if dtype in (torch.float16,):
+    if dtype == torch.float16:
         for input in total:
             """
             Too small eps will make denom to be zero for low precision dtype
@@ -650,7 +656,7 @@ def optim_error_inputs_func_adam(device, dtype):
                 error_regex=r"betas\[0\] as a Tensor is not supported for capturable=False and foreach=True",
             ),
         ]
-    if _get_device_type(device) == "cuda":
+    if _get_device_type(device) in CUDA_CONFIG_GPUS:
         sample_tensor = torch.empty((), device=device, dtype=dtype)
         error_inputs += [
             ErrorOptimizerInput(
@@ -721,7 +727,7 @@ def optim_inputs_func_adamax(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize, weight_decay",
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_adamax(device, dtype):
@@ -792,7 +798,7 @@ def optim_inputs_func_asgd(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize, nonzero weight_decay",
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_asgd(device, dtype):
@@ -974,7 +980,7 @@ def optim_inputs_func_nadam(device, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_nadam(device, dtype):
@@ -1052,7 +1058,7 @@ def optim_inputs_func_radam(device=None, dtype=None):
             kwargs={"weight_decay": 0.1, "maximize": True},
             desc="maximize",
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_radam(device, dtype):
@@ -1137,7 +1143,7 @@ def optim_inputs_func_rmsprop(device, dtype=None):
             },
             desc="maximize, centered, weight_decay, w/ momentum",
         ),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_rmsprop(device, dtype):
@@ -1179,7 +1185,7 @@ def optim_inputs_func_rprop(device, dtype=None):
             desc="non-default step_sizes",
         ),
         OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
-    ] + (cuda_supported_configs if _get_device_type(device) == "cuda" else [])
+    ] + (cuda_supported_configs if _get_device_type(device) in CUDA_CONFIG_GPUS else [])
 
 
 def optim_error_inputs_func_rprop(device, dtype):
@@ -1671,7 +1677,7 @@ optim_db: list[OptimizerInfo] = [
             "maximize",
             "capturable",
         ),
-        supports_fused_on=("cpu", "cuda", "mps"),
+        supports_fused_on=("cpu", "cuda", "xpu", "mps"),
         decorators=(
             # Expected floating point error between fused and compiled forloop
             DecorateInfo(
@@ -1955,7 +1961,7 @@ optim_db: list[OptimizerInfo] = [
         supports_complex=False,
         skips=(
             # Note on numerical differences: `compile` applies different matmul tuning,
-            # which leads to deviations compared to eager mode. In the Newton–Schulz
+            # which leads to deviations compared to eager mode. In the Newton-Schulz
             # iteration for orthogonalization, computations are done in bfloat16, further
             # amplifying these numerical differences.
             DecorateInfo(
@@ -2161,6 +2167,7 @@ optim_db: list[OptimizerInfo] = [
         supports_fused_on=(
             "cpu",
             "cuda",
+            "xpu",
             "mps",
         ),
         skips=(
@@ -2200,9 +2207,6 @@ optim_db: list[OptimizerInfo] = [
                 skipIfMPS,  # SparseAdam does not support MPS
                 "TestOptimRenewed",
                 device_type="mps",
-            ),
-            DecorateInfo(
-                skipIfXpu(msg="SparseAdam is not yet supported on the XPU stack"),
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
