@@ -131,7 +131,7 @@ class DeterministicTest(TestCase):
 
         # set to false if you want to check how the test fails without
         # the deterministic mode
-        enable_determinism = True
+        enable_determinism = False
         with tempfile.TemporaryDirectory() as tmpdir:
             saved_pkl = os.path.join(tmpdir, "saved.pkl")
             cmd = (
