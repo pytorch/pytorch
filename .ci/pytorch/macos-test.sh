@@ -393,6 +393,9 @@ elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
   test_torchbench_smoketest "${SHARD_NUMBER}"
 elif [[ $TEST_CONFIG == *"aot_inductor_perf_smoketest"* ]]; then
   test_aoti_torchbench_smoketest "${SHARD_NUMBER}"
+elif [[ $TEST_CONFIG == *"openreg"* ]]; then
+  setup_test_python
+  python test/run_test.py --verbose -i test_openreg
 elif [[ $TEST_CONFIG == *"mps"* ]]; then
   test_python_mps
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then

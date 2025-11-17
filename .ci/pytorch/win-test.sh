@@ -49,6 +49,12 @@ run_tests() {
         fi
     done
 
+    # OpenReg test configuration
+    if [[ "$TEST_CONFIG" = "openreg" ]]; then
+        python test/run_test.py --verbose -i test_openreg
+        return
+    fi
+
     if [[ $NUM_TEST_SHARDS -eq 1 ]]; then
         "$SCRIPT_HELPERS_DIR"/test_python_shard.bat
         "$SCRIPT_HELPERS_DIR"/test_custom_script_ops.bat

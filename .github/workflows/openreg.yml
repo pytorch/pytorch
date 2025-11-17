@@ -6,9 +6,6 @@ on:
     branches:
       - main
       - release/*
-    tags:
-      - ciflow/pull/*
-      - ciflow/trunk/*
   workflow_dispatch:
 
 concurrency:
@@ -30,19 +27,17 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  # Linux CPU-only build and test for OpenReg
   linux-jammy-py3_10-gcc11-openreg-build:
-    name: linux-openreg-cpu-py3.10
+    name: linux-jammy-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      build-environment: linux-jammy-py3.10-gcc11-openreg
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.10-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
-      runner: linux.2xlarge
       test-matrix: |
         { include: [
-          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" }
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
     secrets: inherit
 
@@ -51,78 +46,59 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: linux-jammy-py3_10-gcc11-openreg-build
     with:
-      build-environment: linux-jammy-py3.10-gcc11-openreg
+      build-environment: linux-jammy-py3.10-gcc11
       docker-image: ${{ needs.linux-jammy-py3_10-gcc11-openreg-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-openreg-build.outputs.test-matrix }}
     secrets: inherit
 
-  # Windows CPU-only build and test for OpenReg
   windows-vs2022-openreg-build:
-    name: win-openreg-cpu-py3
+    name: win-vs2022-cpu-openreg
     uses: ./.github/workflows/_win-build.yml
+    needs: get-label-type
     if: github.repository_owner == 'pytorch'
     with:
-      build-environment: win-vs2022-cpu-py3-openreg
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
-      vc-year: '2022'
+      runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
       test-matrix: |
         { include: [
-          { config: "openreg", shard: 1, num_shards: 1, runner: "windows.4xlarge.nonephemeral" }
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
         ]}
     secrets: inherit
 
   windows-vs2022-openreg-test:
-    name: win-openreg-cpu-py3
+    name: win-vs2022-cpu-openreg
     uses: ./.github/workflows/_win-test.yml
     needs: windows-vs2022-openreg-build
     if: github.repository_owner == 'pytorch'
     with:
-      build-environment: win-vs2022-cpu-py3-openreg
+      build-environment: win-vs2022-cpu-py3
       cuda-version: cpu
       test-matrix: ${{ needs.windows-vs2022-openreg-build.outputs.test-matrix }}
     secrets: inherit
 
-  # macOS CPU-only build and test for OpenReg
-  macos-14-py3-arm64-openreg:
-    name: macos-openreg-cpu-py3
-    runs-on: macos-14-xlarge
+  macos-py3-arm64-openreg-build:
+    name: macos-py3-arm64-openreg
+    uses: ./.github/workflows/_mac-build.yml
     if: github.repository_owner == 'pytorch'
-    timeout-minutes: 240
-    env:
-      BUILD_ENVIRONMENT: macos-14-py3-arm64-openreg
-      JOB_BASE_NAME: macos-14-py3-arm64-openreg
-      # Force CPU-only build
-      USE_CUDA: '0'
-      USE_ROCM: '0'
-      USE_XPU: '0'
-    steps:
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+    with:
+      build-environment: macos-py3-arm64
+      runner-type: macos-m1-stable
+      build-generates-artifacts: true
+      python-version: 3.12.7
+      test-matrix: |
+        { include: [
+          { config: "openreg", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
+        ]}
+    secrets: inherit
 
-      - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.10'
-          cache: pip
-
-      - name: Install dependencies
-        run: |
-          set -x
-          python3 -m pip install --upgrade pip
-          python3 -m pip install -r requirements.txt
-
-      - name: Build PyTorch (CPU-only)
-        env:
-          USE_CUDA: '0'
-          USE_ROCM: '0'
-          USE_XPU: '0'
-          BUILD_TEST: '0'
-          MAX_JOBS: 3
-        run: |
-          set -x
-          python3 -m pip install --no-build-isolation -v -e .
-
-      - name: Test OpenReg
-        run: |
-          set -x
-          python3 test/run_test.py -v test_openreg
+  macos-py3-arm64-openreg-test:
+    name: macos-py3-arm64-openreg
+    uses: ./.github/workflows/_mac-test.yml
+    needs: macos-py3-arm64-openreg-build
+    if: github.repository_owner == 'pytorch'
+    with:
+      build-environment: macos-py3-arm64
+      python-version: 3.12.7
+      test-matrix: ${{ needs.macos-py3-arm64-openreg-build.outputs.test-matrix }}
+    secrets: inherit
