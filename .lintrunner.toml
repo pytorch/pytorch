@@ -1751,3 +1751,17 @@ command = [
   "python3",
   "tools/linter/adapters/gb_registry_linter.py",
 ]
+
+# pyright_linter reports on regressions in typing
+[[linter]]
+code = 'PYRIGHT_LINTER'
+command = [
+    'python3',
+    'tools/linter/adapters/pyright_linter.py',
+    '--lintrunner',
+]
+include_patterns = [
+    'torch/**/*.py',
+    'torch/**/*.pyi',
+]
+is_formatter = false
