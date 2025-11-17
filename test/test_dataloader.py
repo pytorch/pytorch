@@ -3024,6 +3024,31 @@ except RuntimeError as e:
         finally:
             _utils.worker._worker_info = old
 
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_collate_non_writeable_numpy(self):
+        import warnings
+
+        import numpy as np
+
+        # test that non-writeable numpy arrays don't raise warnings
+        # since default_collate creates a copy
+        arr = np.arange(5.0)
+        arr.flags.writeable = False
+
+        # this should not raise a UserWarning
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", UserWarning)
+            result = dataloader.default_collate([arr])
+
+        # verify the result is correct
+        self.assertEqual(
+            result, torch.tensor([[0.0, 1.0, 2.0, 3.0, 4.0]], dtype=torch.float64)
+        )
+
+        # verify that modifying the result doesn't affect the original
+        result[0][0] = 99
+        self.assertEqual(arr[0], 0.0)
+
     def test_excessive_thread_creation_warning(self):
         with self.assertWarnsRegex(
             UserWarning,
