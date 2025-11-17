@@ -60,14 +60,16 @@ EOF
         DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated rocm-llvm-dev
     fi
 
-    # precompiled miopen kernels added in ROCm 3.5, renamed in ROCm 5.5
-    # search for all unversioned packages
-    # if search fails it will abort this script; use true to avoid case where search fails
-    MIOPENHIPGFX=$(apt-cache search --names-only miopen-hip-gfx | awk '{print $1}' | grep -F -v . || true)
-    if [[ "x${MIOPENHIPGFX}" = x ]]; then
-      echo "miopen-hip-gfx package not available" && exit 1
-    else
-      DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENHIPGFX}
+    if [[ $(ver $ROCM_VERSION) -lt $(ver 7.1) ]]; then
+      # precompiled miopen kernels added in ROCm 3.5, renamed in ROCm 5.5, removed in ROCm 7.1
+      # search for all unversioned packages
+      # if search fails it will abort this script; use true to avoid case where search fails
+      MIOPENHIPGFX=$(apt-cache search --names-only miopen-hip-gfx | awk '{print $1}' | grep -F -v . || true)
+      if [[ "x${MIOPENHIPGFX}" = x ]]; then
+        echo "miopen-hip-gfx package not available" && exit 1
+      else
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-unauthenticated ${MIOPENHIPGFX}
+      fi
     fi
 
     # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
