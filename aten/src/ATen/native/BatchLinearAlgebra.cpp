@@ -7,6 +7,7 @@
 #include <ATen/TensorOperators.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 
+#include <climits>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
@@ -1610,8 +1611,16 @@ void _linalg_check_errors(
       TORCH_CHECK_LINALG(info != -4, api_name, batch_str,
           ": The algorithm failed to converge because the input matrix contained non-finite values.");
     }
-    TORCH_INTERNAL_ASSERT(false, api_name, batch_str,
-        ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
+    if (api_name.find("eigh") != api_name.npos || api_name.find("syevd") != api_name.npos) {
+      TORCH_CHECK_LINALG(false, api_name, batch_str,
+          ": The LAPACK backend reported an illegal argument (argument ", -info, "). "
+          "This may happen when the matrix size exceeds the 32-bit integer limit supported by LAPACK "
+          "(approximately 46,000–50,000 for square matrices). "
+          "Try using a smaller matrix or running on a GPU build with cuSolver.");
+    } else {
+      TORCH_INTERNAL_ASSERT(false, api_name, batch_str,
+          ": Argument ", -info, " has illegal value. Most certainly there is a bug in the implementation calling the backend library.");
+    }
   } else if (info > 0) {
     if (api_name.find("inv") != api_name.npos) {
       // inv, inverse, cholesky_inverse, etc.
