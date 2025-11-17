@@ -632,9 +632,8 @@ if not IS_WINDOWS:
             finally:
                 torch.use_deterministic_algorithms(deterministic)
 
-        @skipIfTorchVersionLessThan(2, 10)
         def test_my_flatten(self, device):
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+            import libtorch_agnostic_2_9 as libtorch_agnostic
 
             t = torch.randn(2, 3, 4, device=device)
             result = libtorch_agnostic.ops.my_flatten(t)
