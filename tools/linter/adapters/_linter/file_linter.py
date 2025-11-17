@@ -133,7 +133,7 @@ class FileLinter:
         # Because of recursive replacements, we need to repeat replacing and reparsing
         # from the inside out until all possible replacements are complete
         previous_result_count = float("inf")
-        first_results = None
+        first_results: list[LintResult] | None = None
         original = replacement = pf.contents
         results: list[LintResult] = []
 
