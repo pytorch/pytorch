@@ -398,6 +398,20 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
     def _nccl_estimate() -> Optional[float]:
         # TODO: Refactor with estimate_nccl_collective_runtime_nccl_estimator
+        from torch.distributed.distributed_c10d import (
+            _get_pg_default_device,
+            _resolve_process_group,
+        )
+
+        pg = _resolve_process_group(group_name)
+        if torch.distributed.distributed_c10d.get_backend(pg) == "fake":
+            # nccl estimator requires real process group
+            return None
+
+        device = _get_pg_default_device(pg)
+        backend = pg._get_backend(device)
+        if not backend.supports_time_estimate:
+            return None
 
         flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
@@ -421,13 +435,6 @@ def estimate_nccl_collective_runtime_from_fx_node(
         flat_args = [to_real_tensor(a) for a in flat_args]
         real_args, real_kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
 
-        from torch.distributed.distributed_c10d import _resolve_process_group
-
-        pg = _resolve_process_group(group_name)
-        if torch.distributed.distributed_c10d.get_backend(pg) == "fake":
-            # nccl estimator requires real process group
-            return None
-
         fn = fx_node.target
         assert isinstance(fn, torch._ops.OpOverload)
         with torch.distributed._time_estimator(group=pg) as time_estimator:
@@ -441,7 +448,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
         est_time_ms = est_time_us / 1e3
         return est_time_ms
 
-    if torch.distributed.is_nccl_available() and use_nccl_estimator:
+    if use_nccl_estimator:
         est_time_ms = _nccl_estimate()
         if est_time_ms is not None:
             return est_time_ms
