@@ -75,9 +75,11 @@ if [[ "$ARCH" == "aarch64" ]]; then
     # ARM system libraries
     DEPS_LIST+=(
         "/usr/lib64/libgfortran.so.5"
+        "/opt/OpenBLAS/lib/libopenblas.so.0"
     )
     DEPS_SONAME+=(
         "libgfortran.so.5"
+        "libopenblas.so.0"
     )
 fi
 
