@@ -207,7 +207,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto buffer_size_map =
         storeExchange.all_gather(group_info.store, group_info.rank, group_info.world_size, it->second->buffer_size);
 
-    LOG(INFO) << "[rank " << group_info.rank << "]"
+    LOG(INFO) << "[rank " << group_info.rank << ']'
               << "buffer_size_map: " << buffer_size_map;
     // NCCL window registration api requires all ranks to have the same buffer size
     // we have this check to make sure all ranks have the same buffer size.
