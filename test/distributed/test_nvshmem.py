@@ -1418,7 +1418,7 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
         align = 8
 
         seqlen = 1024
-        hid_dim = 1024
+        hid_dim = 256
         inp = torch.rand((seqlen, hid_dim), dtype=dtype, device=self.device)
 
         nnodes = self.inter_group.size()
@@ -1508,9 +1508,15 @@ class HierarchicalA2ATest(MultiProcContinuousTest):
                 self.intra_group,
                 self.inter_group,
                 seqlen,
+                topk_weight_out,
             )
 
-        expected = inp * topk_experts
+        # Expand input tokens into top_k copies, each multiplied with
+        # corresponding top_k weight
+        inp_expanded = inp.unsqueeze(2).expand(-1, -1, topk_experts)
+        topk_weight_expanded = topk_weight.unsqueeze(1).expand(-1, hid_dim, -1)
+        expected = torch.mul(inp_expanded, topk_weight_expanded).sum(2)
+
         torch.testing.assert_close(
             condensed_out,
             expected,

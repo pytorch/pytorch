@@ -62,6 +62,7 @@ def dedup_combine(
             b_start,
             b_len,
             b_head,
+            topk_weights,
         )
 
     # Combine the tokens inter node

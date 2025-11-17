@@ -524,7 +524,7 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "_all_to_all_v_2d_index_push(Tensor input, Tensor(a!) out, Tensor topk_indices, Tensor occurrences, Tensor dst_offsets, str group_name, Tensor b_start, Tensor b_len, Tensor b_head) -> ()");
   m.def(
-      "_all_to_all_v_2d_index_reduce(Tensor input, Tensor(a!) out, Tensor topk_indices, Tensor occurrences, Tensor src_offsets, Tensor out_offsets, Tensor out_splits, str group_name, Tensor b_start, Tensor b_len, Tensor b_head) -> ()");
+      "_all_to_all_v_2d_index_reduce(Tensor input, Tensor(a!) out, Tensor topk_indices, Tensor occurrences, Tensor src_offsets, Tensor out_offsets, Tensor out_splits, str group_name, Tensor b_start, Tensor b_len, Tensor b_head, Tensor? topk_weights) -> ()");
   m.def(
       "_all_to_all_put_signal_in(Tensor input, Tensor(a!) out, Tensor src_offsets, Tensor dst_offsets, str group_name, Tensor b_start, Tensor b_len, Tensor b_head) -> ()");
 }
