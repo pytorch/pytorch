@@ -219,6 +219,189 @@ class PallasKernelOverrides(OpOverrides):
             return "True" if val else "False"
         return f"jnp.array({val}, dtype={jax_dtype})"
 
+    @staticmethod
+    def real(x: str) -> str:
+        return f"jnp.real({x})"
+
+    @staticmethod
+    def imag(x: str) -> str:
+        return f"jnp.imag({x})"
+
+    @staticmethod
+    def conj(x: str) -> str:
+        return f"jnp.conj({x})"
+
+    @staticmethod
+    def angle(x: str) -> str:
+        return f"jnp.angle({x})"
+
+    @staticmethod
+    def view_as_real(x: str) -> str:
+        """View complex tensor as real tensor with extra dimension."""
+        return f"jnp.stack([jnp.real({x}), jnp.imag({x})], axis=-1)"
+
+    @staticmethod
+    def view_as_complex(x: str) -> str:
+        """View real tensor as complex tensor."""
+        return f"({x}[..., 0] + 1j * {x}[..., 1])"
+
+    # Comparison operations
+    @staticmethod
+    def eq(a: str, b: str) -> str:
+        return f"({a} == {b})"
+
+    @staticmethod
+    def ne(a: str, b: str) -> str:
+        return f"({a} != {b})"
+
+    @staticmethod
+    def lt(a: str, b: str) -> str:
+        return f"({a} < {b})"
+
+    @staticmethod
+    def le(a: str, b: str) -> str:
+        return f"({a} <= {b})"
+
+    @staticmethod
+    def gt(a: str, b: str) -> str:
+        return f"({a} > {b})"
+
+    @staticmethod
+    def ge(a: str, b: str) -> str:
+        return f"({a} >= {b})"
+
+    # Logical operations
+    @staticmethod
+    def logical_and(a: str, b: str) -> str:
+        return f"jnp.logical_and({a}, {b})"
+
+    @staticmethod
+    def logical_or(a: str, b: str) -> str:
+        return f"jnp.logical_or({a}, {b})"
+
+    @staticmethod
+    def logical_not(x: str) -> str:
+        return f"jnp.logical_not({x})"
+
+    @staticmethod
+    def logical_xor(a: str, b: str) -> str:
+        return f"jnp.logical_xor({a}, {b})"
+
+    # Math operations
+    @staticmethod
+    def atan2(a: str, b: str) -> str:
+        return f"jnp.arctan2({a}, {b})"
+
+    @staticmethod
+    def hypot(a: str, b: str) -> str:
+        return f"jnp.hypot({a}, {b})"
+
+    @staticmethod
+    def fmod(a: str, b: str) -> str:
+        return f"jnp.fmod({a}, {b})"
+
+    @staticmethod
+    def remainder(a: str, b: str) -> str:
+        return f"jnp.remainder({a}, {b})"
+
+    @staticmethod
+    def clamp(x: str, min_val: str, max_val: str) -> str:
+        return f"jnp.clip({x}, {min_val}, {max_val})"
+
+    @staticmethod
+    def clip(x: str, min_val: str, max_val: str) -> str:
+        return f"jnp.clip({x}, {min_val}, {max_val})"
+
+    # Sign operations
+    @staticmethod
+    def sign(x: str) -> str:
+        return f"jnp.sign({x})"
+
+    @staticmethod
+    def signbit(x: str) -> str:
+        return f"jnp.signbit({x})"
+
+    # Special math functions
+    @staticmethod
+    def erf(x: str) -> str:
+        return f"jax.scipy.special.erf({x})"
+
+    @staticmethod
+    def erfc(x: str) -> str:
+        return f"jax.scipy.special.erfc({x})"
+
+    @staticmethod
+    def erfinv(x: str) -> str:
+        return f"jax.scipy.special.erfinv({x})"
+
+    @staticmethod
+    def lgamma(x: str) -> str:
+        return f"jax.scipy.special.gammaln({x})"
+
+    @staticmethod
+    def digamma(x: str) -> str:
+        return f"jax.scipy.special.digamma({x})"
+
+    # Reciprocal and square
+    @staticmethod
+    def reciprocal(x: str) -> str:
+        return f"jnp.reciprocal({x})"
+
+    @staticmethod
+    def square(x: str) -> str:
+        return f"jnp.square({x})"
+
+    # Additional operations
+    @staticmethod
+    def fma(a: str, b: str, c: str) -> str:
+        """Fused multiply-add: a * b + c"""
+        return f"jnp.fma({a}, {b}, {c})"
+
+    @staticmethod
+    def copysign(a: str, b: str) -> str:
+        return f"jnp.copysign({a}, {b})"
+
+    @staticmethod
+    def nextafter(a: str, b: str) -> str:
+        return f"jnp.nextafter({a}, {b})"
+
+    @staticmethod
+    def ldexp(a: str, b: str) -> str:
+        return f"jnp.ldexp({a}, {b})"
+
+    @staticmethod
+    def frexp(x: str) -> str:
+        return f"jnp.frexp({x})"
+
+    @staticmethod
+    def modf(x: str) -> str:
+        return f"jnp.modf({x})"
+
+    # Bitwise operations
+    @staticmethod
+    def bitwise_and(a: str, b: str) -> str:
+        return f"jnp.bitwise_and({a}, {b})"
+
+    @staticmethod
+    def bitwise_or(a: str, b: str) -> str:
+        return f"jnp.bitwise_or({a}, {b})"
+
+    @staticmethod
+    def bitwise_xor(a: str, b: str) -> str:
+        return f"jnp.bitwise_xor({a}, {b})"
+
+    @staticmethod
+    def bitwise_not(x: str) -> str:
+        return f"jnp.bitwise_not({x})"
+
+    @staticmethod
+    def left_shift(a: str, b: str) -> str:
+        return f"jnp.left_shift({a}, {b})"
+
+    @staticmethod
+    def right_shift(a: str, b: str) -> str:
+        return f"jnp.right_shift({a}, {b})"
+
 
 class PallasKernel(SIMDKernel):
     """
@@ -643,6 +826,7 @@ class PallasKernel(SIMDKernel):
             import jax
             import jax.numpy as jnp
             from jax.experimental import pallas as pl
+            from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
             """
             + (
                 "\n            from jax.experimental.pallas import triton as pltriton"
@@ -823,16 +1007,6 @@ class PallasKernel(SIMDKernel):
                     )
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
-            code.writeline("# Map PyTorch dtype to JAX dtype")
-            code.writeline("_torch_dtype_to_jax = {")
-            code.writeline(
-                "    torch.float32: jnp.float32, torch.float64: jnp.float64, torch.float16: jnp.float16,"
-            )
-            code.writeline(
-                "    torch.int32: jnp.int32, torch.int64: jnp.int64, torch.int16: jnp.int16, torch.int8: jnp.int8,"
-            )
-            code.writeline("    torch.uint8: jnp.uint8, torch.bool: jnp.bool_,")
-            code.writeline("}")
             code.writeline(
                 "out_shapes = ("
                 + ", ".join([f"tuple({name}.shape)" for name in output_params])
@@ -841,7 +1015,10 @@ class PallasKernel(SIMDKernel):
             code.writeline(
                 "out_dtypes = ("
                 + ", ".join(
-                    [f"_torch_dtype_to_jax[{name}.dtype]" for name in output_params]
+                    [
+                        f"torch_dtype_to_jax_runtime({name}.dtype)"
+                        for name in output_params
+                    ]
                 )
                 + ",)"
             )
