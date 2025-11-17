@@ -216,6 +216,18 @@ namespace warptopk {
 constexpr int MAX_WARP_TOPK_SLICE = 1024;
 constexpr int WARPS_PER_BLOCK = 4;
 
+// Helper function to get sentinel values for sorting (valid for both integral and floating types)
+template <typename scalar_t>
+__device__ __forceinline__ scalar_t getSentinelValue(bool largest) {
+  if constexpr (std::is_integral_v<scalar_t>) {
+    // For integral types, use min/max values
+    return largest ? std::numeric_limits<scalar_t>::lowest() : std::numeric_limits<scalar_t>::max();
+  } else {
+    // For floating-point types, use -inf/inf
+    return largest ? -INFINITY : INFINITY;
+  }
+}
+
 template <typename scalar_t>
 struct WarpEntry {
   using Bitwise = typename TopKTypeConfig<scalar_t>::RadixType;
@@ -286,19 +298,26 @@ __global__ void tinyTopKKernel(
   int64_t* indicesSliceStart = &indices.data[indicesSliceStartIndex];
 
   // LDS arrays sized for MaxSize (64 or 256)
+  using Bitwise = typename TopKTypeConfig<scalar_t>::RadixType;
   __shared__ scalar_t s_values[MaxSize];
+  __shared__ Bitwise s_keys[MaxSize];
   __shared__ int s_indices[MaxSize];
+  __shared__ unsigned char s_valid[MaxSize];
 
   const int tid = threadIdx.x;
 
   // Load data into LDS (coalesced when stride=1, one element per thread)
   if (tid < MaxSize) {
     bool valid = (tid < inputSliceSize);
+    s_valid[tid] = static_cast<unsigned char>(valid);
     if (valid) {
-      s_values[tid] = doLdg(&inputSliceStart[tid * inputWithinSliceStride]);
+      scalar_t value = doLdg(&inputSliceStart[tid * inputWithinSliceStride]);
+      s_values[tid] = value;
+      s_keys[tid] = TopKTypeConfig<scalar_t>::convert(value);
       s_indices[tid] = tid;
     } else {
-      s_values[tid] = largest ? -INFINITY : INFINITY;
+      s_values[tid] = scalar_t(0);
+      s_keys[tid] = TopKTypeConfig<scalar_t>::convert(static_cast<scalar_t>(0));
       s_indices[tid] = -1;
     }
   }
@@ -314,19 +333,29 @@ __global__ void tinyTopKKernel(
       if (tid < MaxSize) {
         int partner = tid ^ stride;
         if (partner > tid && partner < MaxSize) {
-          scalar_t v1 = s_values[tid];
-          scalar_t v2 = s_values[partner];
           bool ascending = ((tid & size) == 0);
-          // Conditional move instead of branch to reduce divergence
-          bool swap = ascending ? (v1 > v2) : (v1 < v2);
-          scalar_t new_v1 = swap ? v2 : v1;
-          scalar_t new_v2 = swap ? v1 : v2;
-          int new_i1 = swap ? s_indices[partner] : s_indices[tid];
-          int new_i2 = swap ? s_indices[tid] : s_indices[partner];
-          s_values[tid] = new_v1;
-          s_values[partner] = new_v2;
-          s_indices[tid] = new_i1;
-          s_indices[partner] = new_i2;
+          // Use entry_greater for proper NaN handling and validity checks
+          bool swap = ascending
+              ? entry_greater(s_keys[tid], s_keys[partner], s_valid[tid], s_valid[partner])
+              : entry_greater(s_keys[partner], s_keys[tid], s_valid[partner], s_valid[tid]);
+          if (swap) {
+            // Swap all fields
+            scalar_t tmp_v = s_values[tid];
+            s_values[tid] = s_values[partner];
+            s_values[partner] = tmp_v;
+
+            Bitwise tmp_k = s_keys[tid];
+            s_keys[tid] = s_keys[partner];
+            s_keys[partner] = tmp_k;
+
+            int tmp_i = s_indices[tid];
+            s_indices[tid] = s_indices[partner];
+            s_indices[partner] = tmp_i;
+
+            unsigned char tmp_valid = s_valid[tid];
+            s_valid[tid] = s_valid[partner];
+            s_valid[partner] = tmp_valid;
+          }
         }
       }
     }
@@ -336,7 +365,7 @@ __global__ void tinyTopKKernel(
   // Write top-k results (coalesced)
   if (tid < k) {
     int src = largest ? (inputSliceSize - 1 - tid) : tid;
-    if (src >= 0 && src < inputSliceSize && s_indices[src] >= 0) {
+    if (src >= 0 && src < MaxSize && s_valid[src] && s_indices[src] >= 0) {
       topKSliceStart[tid * topKWithinSliceStride] = s_values[src];
       indicesSliceStart[tid * indicesWithinSliceStride] = static_cast<int64_t>(s_indices[src]);
     }
@@ -448,7 +477,7 @@ __global__ void blockBitonicTopKKernel(
   }
   __syncthreads();
 
-  IndexType valid_count = min<IndexType>(inputSliceSize, static_cast<IndexType>(SortSize));
+  IndexType valid_count = std::min<IndexType>(inputSliceSize, static_cast<IndexType>(SortSize));
   if (tid < k && tid < valid_count) {
     IndexType src = largest ? (valid_count - 1 - tid) : tid;
     const auto& entry = shared_entries[src];
@@ -654,7 +683,8 @@ __global__ void computeBlockDigitCounts(
   }
 }
 
-// compute global histogram and cumsum for each row
+#if !defined(USE_ROCM)
+// CUDA path: compute global histogram and cumsum for each row
 __global__ void computeDigitCumSum(
   short* counts,
   uint32_t* digit_cum_sum,
@@ -692,7 +722,138 @@ __global__ void computeDigitCumSum(
   }
 }
 
-// Assumption: k can not be larger than UINT32_MAX
+// CUDA path: Assumption: k can not be larger than UINT32_MAX
+template <typename Bitwise, typename T>
+C10_LAUNCH_BOUNDS_1(RADIX_DIGITS)  // one thread per digit
+__global__ void computeBlockwiseWithinKCounts(
+  Bitwise* desires_in,          // size: num_slices
+  short* counts,                // size: num_slices * blocks_per_slice * radix_digits
+  uint32_t* digit_cum_sum,      // CUDA: reads pre-computed cumsum
+  uint32_t* ks_to_find_in,      // size: num_slices
+  uint32_t blocks_per_slice,
+  int current_bit,
+  bool largest,
+  // outputs:
+  uint32_t* withinKCounts,      // size: num_slices * blocks_per_slice == num_blocks
+  T* kthValues,                 // size: num_slices, only write when current_bit reaches 0
+  uint32_t* ks_to_find_out,
+  Bitwise* desires_out,
+  uint32_t num_blocks
+) {
+  // This kernel should be launched with the same number of blocks as the `computeBlockDigitCounts` kernel.
+  int tidx = threadIdx.x;
+  uint32_t block_idx = getLinearBlockId<uint32_t>();
+  uint32_t slice_idx = block_idx / blocks_per_slice;
+
+  // The grid is computed from `getGridFromTiles`, when there are lots of
+  // elements, we will use both blockIdx.x and blockIdx.y, and maybe blockIdx.z
+  // when this is the case, the number of blocks that we are launching can be
+  // more than the number of blocks we need. So we need to check the range of
+  // `block_idx`.
+  if (block_idx >= num_blocks) {
+    return;
+  }
+
+
+  __shared__ Bitwise desired;
+  uint32_t k_to_find = ks_to_find_in[slice_idx];
+
+  if (tidx < RADIX_DIGITS) {
+    uint32_t position = slice_idx * RADIX_DIGITS + tidx;
+    uint32_t digit_count_cumsum = digit_cum_sum[position];
+    uint32_t digit_count_cumsum_left = (tidx == 0) ? 0 : digit_cum_sum[position - 1];
+
+    // if not the last pass: update desired and ks_to_find
+    // if last pass: write out the kth value
+    // only one thread in block enters this condition
+    if (digit_count_cumsum_left < k_to_find && k_to_find <= digit_count_cumsum) {
+      desired = desires_in[slice_idx];
+      desired = at::cuda::Bitfield<Bitwise>::setBitfield(desired, tidx, current_bit, RADIX_BITS);
+      // let a single block per slice update the values
+      if (block_idx == slice_idx * blocks_per_slice) {
+        desires_out[slice_idx] = desired;
+        if (current_bit > 0) {
+          ks_to_find_out[slice_idx] = k_to_find - digit_count_cumsum_left;
+        } else {
+          kthValues[slice_idx] = TopKTypeConfig<T>::deconvert(desired);
+        }
+      }
+    }
+  }
+  __syncthreads();
+
+  Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, current_bit, RADIX_BITS);
+
+  // if largest, then only threads that has tidx > desired_digit are active
+  // if !largest, then only threads that has tidx < desired_digit are active
+  // each active thread will read the count for its corresponding, and
+  // do warp reduction followed by shared memory reduction to get the total count
+  // non-active thread should not load, and non-active warp should not do reduction.
+  bool warp_is_active, thread_is_active;
+  int warp = tidx / C10_WARP_SIZE;
+  if (largest) {
+    int end_of_warp = warp * C10_WARP_SIZE + C10_WARP_SIZE - 1;
+    warp_is_active = end_of_warp > desired_digit;
+    thread_is_active = tidx > desired_digit;
+  } else {
+    int start_of_warp = warp * C10_WARP_SIZE;
+    warp_is_active = start_of_warp < desired_digit;
+    thread_is_active = tidx < desired_digit;
+  }
+  uint32_t count = 0;
+  if (warp_is_active) {
+    if (thread_is_active) {
+      count = doLdg(counts + block_idx * RADIX_DIGITS + tidx);
+    }
+    for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2) {
+      count += WARP_SHFL_DOWN(count, offset);
+    }
+  }
+
+  constexpr int num_warps = RADIX_DIGITS / C10_WARP_SIZE;
+  __shared__ uint32_t warp_counts[num_warps];
+  if (tidx % C10_WARP_SIZE == 0) {
+    warp_counts[warp] = count;
+  }
+  __syncthreads();
+  static_assert(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE,
+    "Assuming only 1 warp is needed for final reduction");
+  if (warp != 0) {
+    return;
+  }
+  count = 0;
+  if (tidx < num_warps) {
+    count = warp_counts[tidx];
+  }
+  for (int offset = num_warps / 2; offset > 0; offset /= 2) {
+    count += WARP_SHFL_DOWN(count, offset);
+  }
+  if (tidx == 0) {
+    withinKCounts[block_idx] += count;
+  }
+}
+
+// CUDA path: Assumption: slice_size can not be larger than UINT32_MAX
+template <typename Bitwise>
+__global__ void computeBlockwiseKthCounts(
+  Bitwise* desires,            // size: num_slices
+  short* counts,               // size: num_slices * blocks_per_slice * radix_digits
+  uint32_t num_blocks,         // the number of blocks used by `computeBlockDigitCounts` kernel
+  uint32_t blocks_per_slice,
+  // outputs:
+  uint32_t* kthCounts          // size: num_slices * blocks_per_slice == num_blocks
+) {
+  CUDA_KERNEL_LOOP_TYPE(idx, num_blocks, uint32_t) {
+    uint32_t slice_idx = idx / blocks_per_slice;
+    Bitwise desired = doLdg(desires + slice_idx);
+    Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, 0, RADIX_BITS);
+    kthCounts[idx] = doLdg(counts + idx * RADIX_DIGITS + desired_digit);
+  }
+}
+
+#else // USE_ROCM
+
+// ROCm path: Assumption: k can not be larger than UINT32_MAX
 template <typename Bitwise, typename T>
 C10_LAUNCH_BOUNDS_1(RADIX_DIGITS)  // one thread per digit
 __global__ void computeBlockwiseWithinKCounts(
@@ -707,7 +868,7 @@ __global__ void computeBlockwiseWithinKCounts(
   T* kthValues,                 // size: num_slices, only write when current_bit reaches 0
   uint32_t* ks_to_find_out,
   Bitwise* desires_out,
-  uint32_t* kthCounts,          // size: num_slices * blocks_per_slice == num_blocks
+  uint32_t* kthCounts,          // ROCm: added kthCounts output
   uint32_t num_blocks
 ) {
   // This kernel should be launched with the same number of blocks as the `computeBlockDigitCounts` kernel.
@@ -856,23 +1017,7 @@ __global__ void computeBlockwiseWithinKCounts(
   }
 }
 
-// Assumption: slice_size can not be larger than UINT32_MAX
-template <typename Bitwise>
-__global__ void computeBlockwiseKthCounts(
-  Bitwise* desires,            // size: num_slices
-  short* counts,               // size: num_slices * blocks_per_slice * radix_digits
-  uint32_t num_blocks,         // the number of blocks used by `computeBlockDigitCounts` kernel
-  uint32_t blocks_per_slice,
-  // outputs:
-  uint32_t* kthCounts          // size: num_slices * blocks_per_slice == num_blocks
-) {
-  CUDA_KERNEL_LOOP_TYPE(idx, num_blocks, uint32_t) {
-    uint32_t slice_idx = idx / blocks_per_slice;
-    Bitwise desired = doLdg(desires + slice_idx);
-    Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, 0, RADIX_BITS);
-    kthCounts[idx] = doLdg(counts + idx * RADIX_DIGITS + desired_digit);
-  }
-}
+#endif // USE_ROCM
 
 template <typename T, typename IndexType, int Dim>
 C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
@@ -935,6 +1080,18 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   const auto kthValueConverted = at::native::TopKTypeConfig<T>::convert(kthValue);
 
   // Find the start index in output tensor of this block
+#if !defined(USE_ROCM)
+  // CUDA path: Use pre-computed prefix sums from CUB
+  uint32_t startWithinK = 0;
+  if (blk_idx_in_slice > 0) {
+    startWithinK = withinKCounts[block_idx - 1];
+  }
+  uint32_t startKth = withinKCounts[slice_idx * blocks_per_slice + blocks_per_slice - 1];
+  if (blk_idx_in_slice > 0) {
+    startKth += kthCounts[block_idx - 1];
+  }
+#else
+  // ROCm path: Compute prefix sums inline with unrolled loop
   __shared__ uint32_t slice_prefix_within;
   __shared__ uint32_t slice_prefix_kth;
   __shared__ uint32_t slice_total_within;
@@ -943,7 +1100,6 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     uint32_t prefix_kth = 0;
     uint32_t total_within = 0;
     uint32_t slice_offset = slice_idx * blocks_per_slice;
-#if defined(USE_ROCM)
     // AMD optimization: Unroll prefix sum loop to improve ILP
     // This loop iterates up to 245 times for 1M case, causing memory latency
     const uint32_t* within_ptr = withinKCounts + slice_offset;
@@ -985,17 +1141,6 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
       }
       kth_ptr++;
     }
-#else
-    // Original code for CUDA
-    for (uint32_t blk = 0; blk < blocks_per_slice; ++blk) {
-      uint32_t within_val = withinKCounts[slice_offset + blk];
-      total_within += within_val;
-      if (blk < blk_idx_in_slice) {
-        prefix_within += within_val;
-        prefix_kth += kthCounts[slice_offset + blk];
-      }
-    }
-#endif
     slice_prefix_within = prefix_within;
     slice_prefix_kth = prefix_kth;
     slice_total_within = total_within;
@@ -1004,6 +1149,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
   uint32_t startWithinK = slice_prefix_within;
   uint32_t startKth = slice_total_within + slice_prefix_kth;
+#endif // USE_ROCM
 
   // Read input, select topk out and write
   typedef cub::BlockScan<uint32_t, BLOCK_THREADS> BlockScan;
@@ -1157,7 +1303,14 @@ void launch(
   static_assert(MAX_ITEMS_PER_THREAD * BLOCK_THREADS < std::numeric_limits<short>::max(),
     "blockwise counter too large");
 
-  // No separate digit cumsum buffer; fused into computeBlockwiseWithinKCounts
+#if !defined(USE_ROCM)
+  // CUDA path: Allocate digit_cum_sum buffer
+  auto digit_cum_sum_buffer = allocator.allocate(numInputSlices * RADIX_DIGITS * sizeof(uint32_t));
+  uint32_t* digit_cum_sum = reinterpret_cast<uint32_t*>(digit_cum_sum_buffer.get());
+  AT_CUDA_CHECK(cudaMemsetAsync(digit_cum_sum, 0, numInputSlices * RADIX_DIGITS * sizeof(uint32_t), stream));
+#else
+  // ROCm path: No separate digit cumsum buffer; fused into computeBlockwiseWithinKCounts
+#endif
 
   auto withinKCounts_buffer = allocator.allocate(num_blocks * sizeof(uint32_t));
   uint32_t* withinKCounts = reinterpret_cast<uint32_t*>(withinKCounts_buffer.get());
@@ -1192,12 +1345,25 @@ void launch(
         counts);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
+#if !defined(USE_ROCM)
+    // CUDA path: Separate kernel for digit cumsum
+    computeDigitCumSum<<<numInputSlices, RADIX_DIGITS, 0, stream>>>(counts, digit_cum_sum, blocks_per_slice);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    // CUDA path: Call computeBlockwiseWithinKCounts with digit_cum_sum, without kthCounts
+    computeBlockwiseWithinKCounts<Bitwise, T><<<grid, RADIX_DIGITS, 0, stream>>>(
+      desired_in, counts, digit_cum_sum, ks_to_find_in, blocks_per_slice, current_bit, largest,
+      withinKCounts, kthValues, ks_to_find_out, desired_out, num_blocks);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+#else
+    // ROCm path: Fused version (no digit_cum_sum kernel, includes kthCounts)
     // we unconditionally call this kernel to update desired/ks_to_find/kthValues
     // if cub supports scan_by_key we additionally do k counts
     computeBlockwiseWithinKCounts<Bitwise, T><<<grid, RADIX_DIGITS, 0, stream>>>(
       desired_in, counts, ks_to_find_in, blocks_per_slice, current_bit, largest,
       withinKCounts, kthValues, ks_to_find_out, desired_out, kthCounts, num_blocks);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
+#endif
     // swap desired/ks_to_find in and out for next iter
     auto tmp_desired = desired_in;
     desired_in = desired_out;
@@ -1209,7 +1375,23 @@ void launch(
   }
   desired = desired_in;
 
-  // kthCounts already produced in computeBlockwiseWithinKCounts at last pass
+#if !defined(USE_ROCM)
+  // CUDA path: Separate kernel for kthCounts
+  computeBlockwiseKthCounts<Bitwise><<<std::min(((int64_t)numInputSlices + 255) / 256, (int64_t)1073741824), 256, 0, stream>>>(
+    desired, counts, num_blocks, blocks_per_slice, kthCounts);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+  // CUDA path: Do a prefix scan of withinKCounts and kthCounts using slice_idx as keys to get the starting index of each block
+  using counting_iter_t = ATEN_CUB_COUNTING_ITERATOR(uint32_t, uint32_t);
+  using slice_idx_iter_t = ATEN_CUB_TRANSFORM_ITERATOR(uint32_t, BlockIdxToKey, counting_iter_t);
+  slice_idx_iter_t slice_idx_iter(counting_iter_t(0), BlockIdxToKey(blocks_per_slice));
+  at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, withinKCounts, withinKCounts, num_blocks);
+  at::cuda::cub::inclusive_sum_by_key(slice_idx_iter, kthCounts, kthCounts, num_blocks);
+#else
+  // ROCm path: kthCounts already produced in computeBlockwiseWithinKCounts at last pass
+  // No CUB scans; prefix computation fused into gatherTopK
+#endif
+
   // copy topk values to output tensor
   gatherTopK<T, IndexType, Dim><<<grid, block, 0, stream>>>(
     input, inputSliceSize, outputSliceSize, largest, numInputSlices, inputWithinSliceStride,
