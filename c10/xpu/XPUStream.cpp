@@ -12,7 +12,6 @@ namespace c10::xpu {
 namespace {
 
 // Global stream state and constants
-c10::once_flag init_flag;
 DeviceIndex num_gpus = -1;
 constexpr int kStreamsPerPoolBits = 5;
 constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
@@ -163,7 +162,10 @@ void initDeviceStreamState(DeviceIndex device) {
 }
 
 void initXPUStreamsOnce() {
-  c10::call_once(init_flag, initGlobalStreamState);
+  auto static init_flag [[maybe_unused]] = [] {
+    initGlobalStreamState();
+    return true;
+  }();
 
   if (current_streams) {
     return;
