@@ -172,7 +172,7 @@ at::Tensor nvshmem_all_to_all(
 }
 
 // This is an exclusive prefix sum function that calculates read (or write) offsets for each peer.
-__device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
+__device__ int64_t prefixSum(int64_t *odata, const int64_t *idata, int n) {
   // Specialize BlockScan for a 1D block of threads, of type int64_t.
   // - `BLOCK_SCAN_WARP_SCANS` is a low-latency scan algorithm (instead of high
   // throughput which we don't need here).
@@ -199,19 +199,16 @@ __device__ int64_t prefixSum(int64_t *odata, int64_t *idata, int n) {
 }
 
 // This kernel is used to exchange output splits and source offsets between peers.
-// `in_out_splits` is of size (3, npes) and contains:
 // - input splits (IN)
 // - output splits (OUT) and
 // - source offsets (OUT).
-__global__ void exchangeSplitAndOffset(int64_t* input_splits, int64_t* out_splits_offsets, nvshmem_team_t team) {
+__device__ void exchangeSplitAndOffset(const int64_t* input_splits, int64_t* source_offsets, int64_t* output_splits, nvshmem_team_t team) {
 #ifndef _NVSHMEM_DEVICELIB_SUPPORTED
   CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
 #else
   CUDA_KERNEL_ASSERT(team != NVSHMEM_TEAM_INVALID);
   int mype = nvshmem_team_my_pe(team);
   int npes = nvshmem_team_n_pes(team);
-  auto output_splits = out_splits_offsets;
-  auto source_offsets = out_splits_offsets + npes;
   int tid = threadIdx.x;
 
   CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
@@ -230,6 +227,15 @@ __global__ void exchangeSplitAndOffset(int64_t* input_splits, int64_t* out_split
   }
   // This barrier ensures that all remote PEs see the updated values
   nvshmemx_barrier_block(team);
+#endif
+}
+
+// This is a kernel wrapper for `exchangeSplitAndOffset`.
+__global__ void exchangeSplitAndOffsetKernel(int64_t* in_splits, int64_t* src_offsets, int64_t* out_splits, nvshmem_team_t team) {
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  exchangeSplitAndOffset(in_splits, src_offsets, out_splits, team);
 #endif
 }
 
@@ -333,13 +339,16 @@ void all_to_all_vdev(
   auto stream = at::cuda::getCurrentCUDAStream(device.index());
 
   // Exchange output splits and source offsets
-  // Use collective launch because kernel involves nvshmem barrier
+  // Borrowing the space of out_offsets as a temporary exchange pad for source offsets.
+  auto tmp_src_offsets_ptr = out_splits_offsets_ptr + world_size;
   void* args0[] = {
       &in_splits_ptr,
+      &tmp_src_offsets_ptr,
       &out_splits_offsets_ptr,
       &team};
+  // Use collective launch because kernel involves nvshmem barrier
   nvshmemx_collective_launch(
-      (const void*)exchangeSplitAndOffset,
+      (const void*)exchangeSplitAndOffsetKernel,
       dim3(1),
       dim3(THREADS_PER_BLOCK),
       args0,
@@ -1069,6 +1078,82 @@ void multi_root_tile_reduce(
   });
 }
 
+/* End of Tiled Communication */
+
+/* Deduplicated Token Shuffle for Mixture of Experts */
+
+// This kernel is used to exchange output splits and source offsets between peers.
+__global__ void makeExchangePlan(const int64_t* in_splits, int64_t* src_offsets, int64_t* out_splits, int64_t* dst_offsets, nvshmem_team_t team) {
+#ifndef _NVSHMEM_DEVICELIB_SUPPORTED
+  CUDA_KERNEL_ASSERT_MSG(false, "SM arch unsupported for NVSHMEM");
+#else
+  // Given input splits, exchange the input offsets output splits
+  exchangeSplitAndOffset(in_splits, src_offsets, out_splits, team);
+
+  // Calculate the output offsets
+  int npes = nvshmem_team_n_pes(team);
+  CUDA_KERNEL_ASSERT(npes <= THREADS_PER_BLOCK);
+  __shared__ int64_t out_offsets[THREADS_PER_BLOCK];
+  prefixSum(out_offsets, out_splits, npes);
+  __syncthreads();
+
+  // Write out the output offsets
+  int tid = threadIdx.x;
+  if (tid < npes) {
+    dst_offsets[tid] = out_offsets[tid];
+  }
+#endif
+}
+
+void _make_a2a_exchange_plan(
+    at::Tensor& in_splits,
+    at::Tensor& src_offsets,
+    at::Tensor& out_splits,
+    at::Tensor& dst_offsets,
+    std::string group_name) {
+  // Make an exchange plan for a 1D AllToAllv shuffle operation.
+  // So far there is no symmetric requirement on `in_splits`
+  auto src_offsets_hdl = c10d::symmetric_memory::rendezvous(src_offsets, group_name);
+  auto out_splits_hdl = c10d::symmetric_memory::rendezvous(out_splits, group_name);
+  auto dst_offsets_hdl = c10d::symmetric_memory::rendezvous(dst_offsets, group_name);
+
+  // Verify inputs
+  auto npes = out_splits_hdl->get_world_size();
+  TORCH_CHECK_VALUE(npes <= THREADS_PER_BLOCK, "Number of peers must be smaller than THREADS_PER_BLOCK", THREADS_PER_BLOCK);
+  TORCH_CHECK_VALUE(in_splits.size(0) == npes && src_offsets.size(0) == npes && out_splits.size(0) == npes && dst_offsets.size(0) == npes,
+      "in_splits, src_offsets, out_splits and dst_offsets must have the same size as world_size");
+  TORCH_CHECK_VALUE(in_splits.scalar_type() == at::kLong && src_offsets.scalar_type() == at::kLong
+      && out_splits.scalar_type() == at::kLong && dst_offsets.scalar_type() == at::kLong,
+      "splits and offsets must be int64");
+
+  auto in_splits_ptr = in_splits.const_data_ptr<int64_t>();
+  auto src_offsets_ptr = src_offsets.mutable_data_ptr<int64_t>();
+  auto out_splits_ptr = out_splits.mutable_data_ptr<int64_t>();
+  auto dst_offsets_ptr = dst_offsets.mutable_data_ptr<int64_t>();
+
+  auto device = in_splits.device();
+  c10::cuda::CUDAGuard guard(device);
+  auto& team_manager = TeamManager::get(device);
+  auto team = team_manager.get_team(group_name, out_splits_hdl->get_rank_to_global_rank());
+  auto stream = at::cuda::getCurrentCUDAStream(device.index());
+
+  // Exchange output splits and source offsets
+  // Use collective launch because kernel involves nvshmem barrier
+  void* args0[] = {
+      &in_splits_ptr,
+      &src_offsets_ptr,
+      &out_splits_ptr,
+      &dst_offsets_ptr,
+      &team};
+  nvshmemx_collective_launch(
+      (const void*)makeExchangePlan,
+      dim3(1),
+      dim3(THREADS_PER_BLOCK),
+      args0,
+      0,
+      stream);
+}
+
 } // namespace c10d::nvshmem_extension
 
 
@@ -1084,4 +1169,5 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("all_to_all_vdev_2d_offset", c10d::nvshmem_extension::all_to_all_vdev_2d_offset);
   m.impl("tile_reduce", c10d::nvshmem_extension::tile_reduce);
   m.impl("multi_root_tile_reduce", c10d::nvshmem_extension::multi_root_tile_reduce);
+  m.impl("_make_a2a_exchange_plan", c10d::nvshmem_extension::_make_a2a_exchange_plan);
 }
