@@ -48,14 +48,14 @@ class EtcdServerTest(unittest.TestCase):
 
             rdzv = EtcdRendezvous(
                 client=client,
-                prefix="test",
+                prefix="/test",
                 run_id=1,
                 num_min_workers=1,
                 num_max_workers=1,
                 timeout=60,
                 last_call_timeout=30,
             )
-            rdzv_handler = EtcdRendezvousHandler(rdzv)
+            rdzv_handler = EtcdRendezvousHandler(rdzv, local_addr=None)
             rdzv_info = rdzv_handler.next_rendezvous()
             self.assertIsNotNone(rdzv_info.store)
             self.assertEqual(0, rdzv_info.rank)

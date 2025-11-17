@@ -253,7 +253,7 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
         )
 
         mock_datetime = self._datetime_patch.start()
-        mock_datetime.utcnow.return_value = self._now
+        mock_datetime.now.return_value = self._now
 
     def tearDown(self) -> None:
         self._datetime_patch.stop()
@@ -566,7 +566,7 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
         )
 
         mock_datetime = self._datetime_patch.start()
-        mock_datetime.utcnow.return_value = self._now
+        mock_datetime.now.return_value = self._now
 
     def tearDown(self) -> None:
         self._datetime_patch.stop()
@@ -879,7 +879,7 @@ class AbstractTestRendezvousOp(ABC):
         )
 
         mock_datetime = self._datetime_patch.start()
-        mock_datetime.utcnow.return_value = self._now
+        mock_datetime.now.return_value = self._now
 
         self._time_patch = patch(
             "torch.distributed.elastic.rendezvous.dynamic_rendezvous.time"
@@ -1412,7 +1412,7 @@ class DynamicRendezvousHandlerTest(TestCase):
     def test_keep_alive_updates_last_heartbeat(self, mock_datetime) -> None:
         now = datetime(2000, 1, 1, hour=0, minute=0)
 
-        mock_datetime.utcnow.return_value = now
+        mock_datetime.now.return_value = now
 
         self._state.last_heartbeats[self._node] = now - (self._keep_alive_interval * 2)
 
@@ -1761,7 +1761,7 @@ class IntegrationTest(TestCase):
         handler2 = self._create_handler(
             min_nodes=1,
             max_nodes=2,
-            keep_alive_interval=timedelta(seconds=1),
+            keep_alive_interval=1,
         )
         handler3 = self._create_handler(
             min_nodes=1,
@@ -1829,7 +1829,7 @@ class IntegrationTest(TestCase):
             def set(self, key, value):
                 pass
 
-        prefix_store = CustomPrefixStore(spec=dist.PrefixStore)
+        prefix_store = CustomPrefixStore()
         prefix_store_class_mock.return_value = prefix_store
         tcp_store = Mock(spec=dist.TCPStore)
         original_addr = "original_addr"
