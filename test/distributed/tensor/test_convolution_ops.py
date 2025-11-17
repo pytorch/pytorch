@@ -14,7 +14,11 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+)
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
@@ -235,6 +239,8 @@ DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistConvolutionOpsTest,
     # Send / recv ops are not supported
     skipped_tests=[
+        "test_conv1d",
+        "test_conv3d",
         "test_conv_backward_none_grad_inp",
         "test_depthwise_convolution",
         "test_downsampling_convolution",

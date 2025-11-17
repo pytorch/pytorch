@@ -26,7 +26,7 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
 
     assert isinstance(input_spec, DTensorSpec)
     assert isinstance(weight_spec, DTensorSpec)
-    assert isinstance(bias_spec, DTensorSpec)
+    assert bias_spec is None or isinstance(bias_spec, DTensorSpec)
     assert input_spec.tensor_meta is not None
     assert weight_spec.tensor_meta is not None
     in_shape = input_spec.tensor_meta.shape
