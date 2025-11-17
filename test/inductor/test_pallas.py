@@ -564,6 +564,132 @@ class PallasTestsMixin:
         expected = fn(x, y)
         self.assertEqual(result, expected)
 
+    def test_where(self):
+        """Test torch.where operation."""
+
+        def fn(x, y):
+            return torch.where(x > 0, x, y)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        y = torch.randn(16, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_clamp(self):
+        """Test torch.clamp operation."""
+
+        def fn(x):
+            return torch.clamp(x, -1.0, 1.0)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE) * 2
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_comparison_ops(self):
+        """Test comparison operations."""
+
+        def fn(a, b):
+            gt = a > b
+            lt = a < b
+            eq = a == b
+            return gt.float() + lt.float() + eq.float()
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, device=self.DEVICE)
+        b = torch.randn(16, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_logical_ops(self):
+        """Test logical operations."""
+
+        def fn(a, b):
+            return torch.logical_and(a > 0, b > 0).float()
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, device=self.DEVICE)
+        b = torch.randn(16, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_sign(self):
+        """Test sign operation."""
+
+        def fn(x):
+            return torch.sign(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_reciprocal(self):
+        """Test reciprocal operation."""
+
+        def fn(x):
+            return torch.reciprocal(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE) + 1.0  # Avoid zeros
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_square(self):
+        """Test square operation."""
+
+        def fn(x):
+            return torch.square(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_erf(self):
+        """Test erf operation."""
+        if self.DEVICE == "cuda":
+            self.skipTest("erf not supported in Pallas GPU (Triton) backend")
+
+        def fn(x):
+            return torch.erf(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_atan2(self):
+        """Test atan2 operation."""
+
+        def fn(a, b):
+            return torch.atan2(a, b)
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, device=self.DEVICE)
+        b = torch.randn(16, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
 
 @unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
 class PallasTestsCUDA(PallasTestsMixin, TestCase):
