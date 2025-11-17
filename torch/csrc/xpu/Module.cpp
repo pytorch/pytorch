@@ -261,7 +261,7 @@ static PyObject* THXPModule_resetAccumulatedMemoryStats(
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
-  // Add _xpuDevicePropertires class to torch._C
+  // Add _xpuDeviceProperties class to torch._C
   using namespace c10::xpu;
   auto get_device_type = [](const DeviceProp& prop) {
     std::ostringstream stream;
@@ -386,23 +386,8 @@ static void bindGetDeviceProperties(PyObject* module) {
 static void initXpuMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
-#if SYCL_COMPILER_VERSION >= 20250000
-    auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
-    auto& device = c10::xpu::get_raw_device(device_index);
-    TORCH_CHECK(
-        device.has(sycl::aspect::ext_intel_free_memory),
-        "The device (",
-        at::xpu::getDeviceProperties(device_index)->name,
-        ") doesn't support querying the available free memory. ",
-        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
-        "to help us prioritize its implementation.");
-    auto free = device.get_info<sycl::ext::intel::info::device::free_memory>();
-    return std::make_tuple(free, total);
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "torch.xpu.mem_get_info requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
-#endif
+    py::gil_scoped_release no_gil;
+    return at::getDeviceAllocator(at::kXPU)->getMemoryInfo(device_index);
   });
   m.def(
       "_xpu_getStreamFromExternal",
@@ -420,6 +405,12 @@ static void initXpuMethodBindings(PyObject* module) {
       [](c10::DeviceIndex device, c10::DeviceIndex peer) {
         return at::xpu::canDeviceAccessPeer(device, peer);
       });
+  m.def("_xpu_getMemoryFraction", [](c10::DeviceIndex device) {
+    return c10::xpu::XPUCachingAllocator::getMemoryFraction(device);
+  });
+  m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
+    c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
+  });
 }
 
 // Callback for python part. Used for additional initialization of python

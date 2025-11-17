@@ -131,7 +131,7 @@ def default_args_generator(seed_value):
         yield new_args
 
 
-class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
+class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -249,7 +249,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
 
         # when testing with dynamic shape, symbols are lifted as input
         arg_count = ifdynstaticdefault(2, 3)
-        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count)
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 1)
 
     def test_return_captured_vars(self):
         freevar1 = torch.randn(3)
@@ -267,7 +267,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         # be the input.
         # when testing with dynamic shape, a symbol is lifted as input
         arg_count = ifdynstaticdefault(3, 4)
-        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 4)
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 1)
 
     def test_return_captured_var_used_multiple_times(self):
         freevar = torch.randn(3)
@@ -282,7 +282,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(3)
         # when testing with dynamic shape, a symbol is lifted as input
         arg_count = ifdynstaticdefault(3, 4)
-        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 3)
+        self._test_wrap_simple(fn, default_args_generator((x,)), arg_count, 2)
 
     def test_capture_untracked_global(self):
         def f(x):
@@ -762,15 +762,15 @@ class GraphModule(torch.nn.Module):
         def forward(self, s77: "Sym(s77)", l_x_: "f32[s77]", u0: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
             wrap = torch.ops.higher_order.wrap(wrap_body_0, s77, l_x_, u0, c);  wrap_body_0 = s77 = l_x_ = u0 = c = None
-            child: "f32[s77]" = wrap[0]
-            child_1: "f32[u0, 1]" = wrap[1];  wrap = None
-            return (child, child_1)
+            getitem: "f32[s77]" = wrap[0]
+            getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
+            return (getitem, getitem_1)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, s77: "Sym(s77)", l_x_: "f32[s77]", u0: "Sym(u0)", c: "i64[u0, 1]"):
-                child: "f32[s77]" = l_x_.sin();  l_x_ = None
-                child_1: "f32[u0, 1]" = c.sin();  c = None
-                return (child, child_1)
+                sin: "f32[s77]" = l_x_.sin();  l_x_ = None
+                sin_1: "f32[u0, 1]" = c.sin();  c = None
+                return (sin, sin_1)
 """,
             )
         else:
@@ -801,15 +801,15 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]", u0: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
             wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, u0, c);  wrap_body_0 = l_x_ = u0 = c = None
-            child: "f32[3]" = wrap[0]
-            child_1: "f32[u0, 1]" = wrap[1];  wrap = None
-            return (child, child_1)
+            getitem: "f32[3]" = wrap[0]
+            getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
+            return (getitem, getitem_1)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, l_x_: "f32[3]", u0: "Sym(u0)", c: "i64[u0, 1]"):
-                child: "f32[3]" = l_x_.sin();  l_x_ = None
-                child_1: "f32[u0, 1]" = c.sin();  c = None
-                return (child, child_1)
+                sin: "f32[3]" = l_x_.sin();  l_x_ = None
+                sin_1: "f32[u0, 1]" = c.sin();  c = None
+                return (sin, sin_1)
 """,
             )
 
@@ -922,16 +922,16 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[3]", size: "Sym(u0)", c: "i64[u0, 1]"):
             wrap_body_0 = self.wrap_body_0
             wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_, size, c);  wrap_body_0 = l_x_ = size = c = None
-            child: "f32[3]" = wrap[0]
-            child_1: "f32[u0, 1]" = wrap[1];  wrap = None
-            return (child, child_1)
+            getitem: "f32[3]" = wrap[0]
+            getitem_1: "f32[u0, 1]" = wrap[1];  wrap = None
+            return (getitem, getitem_1)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, l_x_: "f32[3]", size: "Sym(u0)", c: "i64[u0, 1]"):
                 sin: "f32[3]" = l_x_.sin();  l_x_ = None
-                child: "f32[3]" = sin + size;  sin = size = None
-                child_1: "f32[u0, 1]" = c.sin();  c = None
-                return (child, child_1)
+                add: "f32[3]" = sin + size;  sin = size = None
+                sin_1: "f32[u0, 1]" = c.sin();  c = None
+                return (add, sin_1)
 """,
             )
 
@@ -2458,10 +2458,10 @@ class GraphModule(torch.nn.Module):
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_arg1_0_: "f32[3]", l_arg2_0_: "f32[3]"):
-            child: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
+            add: "f32[3]" = l_arg1_0_ + 1;  l_arg1_0_ = None
 
-            child_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
-            return (child, child_1)
+            add_1: "f32[3]" = l_arg2_0_ + 1;  l_arg2_0_ = None
+            return (add, add_1)
 """,
         )
 
@@ -2655,9 +2655,9 @@ class GraphModule(torch.nn.Module):
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[2, 3]"):
-            child: "f32[2, 3]" = l_x_.sin()
-            child_1: "f32[2, 3]" = l_x_.cos();  l_x_ = None
-            return (child, child_1)
+            sin: "f32[2, 3]" = l_x_.sin()
+            cos: "f32[2, 3]" = l_x_.cos();  l_x_ = None
+            return (sin, cos)
 """,
         )
 
@@ -2687,13 +2687,13 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         wrap = torch.ops.higher_order.wrap(wrap_body_0, l_x_);  wrap_body_0 = l_x_ = None
-        value: "f32[3]" = wrap[0];  wrap = None
-        return (value,)
+        getitem: "f32[3]" = wrap[0];  wrap = None
+        return (getitem,)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3]"):
-            child: "f32[3]" = -l_x_;  l_x_ = None
-            return (child,)
+            neg: "f32[3]" = -l_x_;  l_x_ = None
+            return (neg,)
 """,
         )
 
@@ -2858,7 +2858,7 @@ class GraphModule(torch.nn.Module):
         def fn(x):
             return wrap(lambda x: model(x), x)
 
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             activations.clear()
@@ -3318,17 +3318,17 @@ class GraphModule(torch.nn.Module):
 
         hints_wrapper_body_1 = self.hints_wrapper_body_1
         hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_1, (x, l_y_), {}, hints = {'outer_body': True});  hints_wrapper_body_1 = x = l_y_ = None
-        res: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
-        return (res,)
+        getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+        return (getitem,)
 
     class hints_wrapper_body_1(torch.nn.Module):
         def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
             hints_wrapper_body_0 = self.hints_wrapper_body_0
             hints_wrapper = torch.ops.higher_order.hints_wrapper(hints_wrapper_body_0, (x, l_y_), {}, hints = {'inner_body': True});  hints_wrapper_body_0 = x = l_y_ = None
-            x_1: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
+            getitem: "f32[2, 4]" = hints_wrapper[0];  hints_wrapper = None
 
-            x_2: "f32[2, 4]" = torch.abs(x_1);  x_1 = None
-            return (x_2,)
+            x_1: "f32[2, 4]" = torch.abs(getitem);  getitem = None
+            return (x_1,)
 
         class hints_wrapper_body_0(torch.nn.Module):
             def forward(self, x: "f32[2, 4]", l_y_: "f32[4]"):
@@ -3354,7 +3354,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 4)
         y = torch.ones(4)
 
-        msg = "hints_wrapper - key hints not provided"
+        msg = "hints_wrapper: improper args/kwargs"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn_with_hints, backend=cnt)(x, y)
 
@@ -3396,7 +3396,9 @@ class GraphModule(torch.nn.Module):
             fn_with_hints(x, y)
 
 
-class HigherOrderOpVmapGuardTests(LoggingTestCase):
+class HigherOrderOpVmapGuardTests(
+    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks, LoggingTestCase
+):
     @make_logging_test(recompiles=True)
     def test_vmap_grad_guard_ok(self, records):
         vmap = torch.vmap
@@ -3665,7 +3667,9 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
 
 
-class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
+class FuncTorchHigherOrderOpTests(
+    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
+):
     def tearDown(self):
         # Ensure that in the case of a test failure, the next test won't fail
         # because of a previous call to _vmap_increment_nesting that wasn't undone
@@ -3802,7 +3806,6 @@ class GraphModule(torch.nn.Module):
         dual: "f32[4, 3, 4, 3]" = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten: "f32[4, 3, 4, 3]" = torch._C._functorch._unwrap_for_grad(primal, 2);  primal = primals_out_unflatten = None
-
         tangents_out_unflatten: "f32[4, 3, 4, 3]" = torch._C._functorch._unwrap_for_grad(dual, 2);  dual = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
@@ -3933,7 +3936,6 @@ class GraphModule(torch.nn.Module):
         tangent: "f32[4, 3, 3, 4]" = torch.zeros_like(primal)
 
         child_8: "f32[4, 3, 3, 4]" = torch._C._functorch._unwrap_for_grad(primal, 2);  primal = child_8 = None
-
         child_9: "f32[4, 3, 3, 4]" = torch._C._functorch._unwrap_for_grad(tangent, 2);  tangent = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
@@ -4146,7 +4148,6 @@ class GraphModule(torch.nn.Module):
         primals_out: "f32[3, 4]" = diff_primals.sin()
 
         aux_1: "f32[4, 3]" = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
-
         results: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(primals_out, 1)
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -4381,7 +4382,6 @@ class GraphModule(torch.nn.Module):
         primals_out: "f32[]" = sin.sum();  sin = None
 
         aux: "f32[5]" = torch._C._functorch._unwrap_for_grad(child, 1);  child = aux = None
-
         results: "f32[]" = torch._C._functorch._unwrap_for_grad(primals_out, 1);  primals_out = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -4520,12 +4520,9 @@ class GraphModule(torch.nn.Module):
             model, params, inputs, targets
         )
         self.assertEqual(len(counters["graph_break"]), 1)
-        self.assertEqual(
-            {
-                "torch.func.functional_call capture is disabled, it can be "
-                "turned on by setting `torch._dynamo.config.inline_inbuilt_nn_modules=True`": 1,
-            },
-            dict(counters["graph_break"]),
+        self.assertIn(
+            "torch.func.functional_call capture is disabled",
+            next(iter(counters["graph_break"].keys())),
         )
         self.assertEqual(actual, expected)
 
@@ -4571,7 +4568,6 @@ class GraphModule(torch.nn.Module):
         grad_input: "f32[3, 3, 3]" = _autograd_grad[0];  _autograd_grad = None
 
         grad_input_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
-
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -4639,7 +4635,6 @@ class GraphModule(torch.nn.Module):
         grad_input: "f32[3, 3, 3]" = _autograd_grad[0];  _autograd_grad = None
 
         grad_input_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
-
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -4696,7 +4691,6 @@ class GraphModule(torch.nn.Module):
         grad_input: "f32[3, 3, 3]" = _autograd_grad[0];  _autograd_grad = None
 
         grad_input_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
-
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -4753,7 +4747,6 @@ class GraphModule(torch.nn.Module):
         grad_input: "f32[3, 3, 3]" = _autograd_grad[0];  _autograd_grad = None
 
         grad_input_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
-
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -4808,9 +4801,7 @@ class GraphModule(torch.nn.Module):
         grad_input: "f32[3, 3, 3]" = _autograd_grad[0];  _autograd_grad = None
 
         grad_input_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
-
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
-
         aux_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -4866,9 +4857,7 @@ class GraphModule(torch.nn.Module):
         grad_input: "f32[3, 3, 3]" = _autograd_grad[0];  _autograd_grad = None
 
         grad_input_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
-
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
-
         aux_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -4942,9 +4931,7 @@ class GraphModule(torch.nn.Module):
 
         _unwrap_for_grad: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(child_2, 1);  child_2 = None
         _unwrap_for_grad_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(child_3, 1);  child_3 = None
-
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
-
         aux_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -4988,9 +4975,7 @@ class GraphModule(torch.nn.Module):
 
         _unwrap_for_grad: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(child_2, 1);  child_2 = None
         _unwrap_for_grad_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(child_3, 1);  child_3 = None
-
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
-
         aux_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -5050,7 +5035,6 @@ class GraphModule(torch.nn.Module):
         grad_input: "f32[]" = _autograd_grad[0];  _autograd_grad = None
 
         grad_input_1: "f32[]" = torch._C._functorch._unwrap_for_grad(grad_input, 2);  grad_input = None
-
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 2);  output = output_1 = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -5060,7 +5044,6 @@ class GraphModule(torch.nn.Module):
         grad_input_2: "f32[]" = _autograd_grad_1[0];  _autograd_grad_1 = None
 
         grad_input_3: "f32[]" = torch._C._functorch._unwrap_for_grad(grad_input_2, 1);  grad_input_2 = None
-
         output_2: "f32[]" = torch._C._functorch._unwrap_for_grad(grad_input_1, 1);  grad_input_1 = output_2 = None
 
         _grad_decrement_nesting_1 = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting_1 = None
@@ -5166,7 +5149,6 @@ class GraphModule(torch.nn.Module):
         grad_input: "f32[3, 3, 3]" = _autograd_grad[0];  _autograd_grad = None
 
         grad_input_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(grad_input, 1);  grad_input = None
-
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -5245,7 +5227,6 @@ class GraphModule(torch.nn.Module):
         dual: "f32[4, 3]" = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten: "f32[4, 3]" = torch._C._functorch._unwrap_for_grad(primal, 2);  primal = primals_out_unflatten = None
-
         tangents_out_unflatten: "f32[4, 3]" = torch._C._functorch._unwrap_for_grad(dual, 2);  dual = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
@@ -5327,7 +5308,6 @@ class GraphModule(torch.nn.Module):
         dual: "f32[3, 4]" = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(primal, 2);  primal = primals_out_unflatten = None
-
         tangents_out_unflatten: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(dual, 2);  dual = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
@@ -5411,7 +5391,6 @@ class GraphModule(torch.nn.Module):
         dual: "f32[3, 4]" = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(primal, 2);  primal = primals_out_unflatten = None
-
         tangents_out_unflatten: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(dual, 2);  dual = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
@@ -5502,7 +5481,6 @@ class GraphModule(torch.nn.Module):
 
         child_4: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(primal, 2);  primal = child_4 = None
         child_5: "f32[4, 3]" = torch._C._functorch._unwrap_for_grad(primal_1, 2);  primal_1 = child_5 = None
-
         child_6: "f32[3, 4]" = torch._C._functorch._unwrap_for_grad(tangent, 2);  tangent = None
         child_7: "f32[4, 3]" = torch._C._functorch._unwrap_for_grad(dual, 2);  dual = None
 
@@ -5572,7 +5550,6 @@ class GraphModule(torch.nn.Module):
         dual: "f32[]" = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten: "f32[]" = torch._C._functorch._unwrap_for_grad(primal, 1);  primal = None
-
         tangents_out_unflatten: "f32[]" = torch._C._functorch._unwrap_for_grad(dual, 1);  dual = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
@@ -5626,7 +5603,6 @@ class GraphModule(torch.nn.Module):
         dual: "f32[]" = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten: "f32[]" = torch._C._functorch._unwrap_for_grad(primal, 1);  primal = None
-
         tangents_out_unflatten: "f32[]" = torch._C._functorch._unwrap_for_grad(dual, 1);  dual = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
@@ -5688,7 +5664,6 @@ class GraphModule(torch.nn.Module):
         dual: "f32[3, 3]" = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten: "f32[3, 3]" = torch._C._functorch._unwrap_for_grad(primal, 1);  primal = None
-
         tangents_out_unflatten: "f32[3, 3]" = torch._C._functorch._unwrap_for_grad(dual, 1);  dual = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
@@ -5742,7 +5717,6 @@ class GraphModule(torch.nn.Module):
         dual: "f32[]" = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten: "f32[]" = torch._C._functorch._unwrap_for_grad(primal, 1);  primal = None
-
         tangents_out_unflatten: "f32[]" = torch._C._functorch._unwrap_for_grad(dual, 1);  dual = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
@@ -5810,7 +5784,6 @@ class GraphModule(torch.nn.Module):
         dual: "f32[]" = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten: "f32[]" = torch._C._functorch._unwrap_for_grad(primal, 1);  primal = None
-
         tangents_out_unflatten: "f32[]" = torch._C._functorch._unwrap_for_grad(dual, 1);  dual = None
 
         _exit_dual_level = torch._C._exit_dual_level(0);  _exit_dual_level = None
@@ -5887,7 +5860,6 @@ class GraphModule(torch.nn.Module):
         dual: "f32[3, 3, 3]" = _unpack_dual[1];  _unpack_dual = None
 
         primals_out_unflatten: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(primal, 2);  primal = None
-
         tangents_out_unflatten: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(dual, 2);  dual = None
 
         _set_fwd_grad_enabled_2 = torch._C._set_fwd_grad_enabled(True);  _set_fwd_grad_enabled_2 = None
@@ -5902,7 +5874,6 @@ class GraphModule(torch.nn.Module):
 
         _unwrap_for_grad_2: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(primal_1, 1);  primal_1 = None
         _unwrap_for_grad_3: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(primal_2, 1);  primal_2 = None
-
         _unwrap_for_grad_4: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(dual_1, 1);  dual_1 = None
         _unwrap_for_grad_5: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(dual_2, 1);  dual_2 = None
 
@@ -6815,7 +6786,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, actual)
 
 
-class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
+class ActivationCheckpointingTests(
+    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
+):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
         cloned_args = []
         for arg in args:
@@ -7206,7 +7179,7 @@ xfail_hops_compile = {
 }
 
 
-class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
+class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @requires_cuda_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
