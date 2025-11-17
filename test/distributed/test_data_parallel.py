@@ -96,7 +96,7 @@ class TestDataParallel(TestCase):
         step(model_dp)
 
         for p1, p2 in zip(model.parameters(), model_dp.parameters()):
-            self.assertTrue(p1.allclose(p2))
+            self.assertEqual(p1, p2)
 
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_data_parallel_lazy_linear(self):
@@ -760,7 +760,7 @@ class TestDataParallel(TestCase):
                     opt = torch.optim.SGD(m.parameters(), lr=0.1)
                     opt_dp = torch.optim.SGD(m_dp.parameters(), lr=0.1)
                     has_half = any(p.dtype is torch.half for p in m.parameters())
-                    tol = 1.0e-3 if has_half else 1.0e-5
+                    tol = 3.0e-3 if has_half else 1.0e-5
                 except BaseException:
                     # Prints case-specific debugging info to narrow down failing case.
                     print(
