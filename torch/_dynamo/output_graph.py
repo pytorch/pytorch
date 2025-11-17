@@ -56,6 +56,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
@@ -793,6 +794,7 @@ class OutputGraph(OutputGraphCommon):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GLOBAL_STATE))
         self.guards.add(
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
@@ -2605,6 +2607,8 @@ class OutputGraph(OutputGraphCommon):
                                     fake_attr_val,
                                 )
                         continue
+                    if is_opaque_type(type(node.meta["grapharg"].example)):
+                        continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
@@ -2778,6 +2782,7 @@ class DynamoTracerOutput:
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
     closure: Optional[tuple[Any, ...]]
+    f_globals: dict[str, Any]
 
     def __init__(
         self, tracer: "InstructionTranslatorBase", error: Optional[Any] = None
@@ -2785,6 +2790,7 @@ class DynamoTracerOutput:
         self.error_on_graph_break = tracer.error_on_graph_break
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
         self.closure = tracer.closure
+        self.f_globals = tracer.f_globals
         if error:
             self.output_graph = None
         else:

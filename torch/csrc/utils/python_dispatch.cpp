@@ -692,7 +692,7 @@ void initDispatchBindings(PyObject* module) {
       std::stringstream ss;
       ss << op.name;
       if (!op.overload_name.empty()) {
-        ss << "." << op.overload_name;
+        ss << '.' << op.overload_name;
       }
       names.emplace_back(std::move(ss).str());
     }
