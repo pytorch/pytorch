@@ -604,6 +604,118 @@ def normalize_graph_module(gm):
             node.meta["val"] = node.meta["example_value"]
 
 
+def _setup_graph_module_metadata(
+    graph_module: torch.fx.GraphModule,
+    fake_mode: Any,
+    tensor_to_context: Any,
+    module_call_specs: Any,
+) -> None:
+    """Set up metadata for a graph module (shared by both paths)."""
+    graph_module.meta["fake_mode"] = fake_mode  # type: ignore[attr-defined]
+    if fake_mode is not None:
+        graph_module.meta["fake_mode"].allow_non_fake_inputs = True
+    graph_module.meta["module_call_specs"] = module_call_specs
+    tracing_context = TracingContext(fake_mode)
+    tracing_context.tensor_to_context = tensor_to_context
+    graph_module.meta["tracing_context"] = tracing_context
+
+
+def _setup_graph_module_codegen(
+    graph_module: torch.fx.GraphModule,
+    mod: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    in_spec: Any,
+    out_spec: Any,
+    in_shuffle_graph: torch.fx.GraphModule,
+    out_shuffle_graph: torch.fx.GraphModule,
+    num_flat_args: int,
+    root: Any,
+) -> None:
+    """Set up codegen for a graph module (shared by both paths)."""
+    tree_leaf_names = [
+        graph_module.graph._graph_namespace.create_name(f"_tree_leaf_{i}", None)
+        for i in range(num_flat_args)
+    ]
+    sig = inspect.signature(mod.forward if isinstance(mod, torch.nn.Module) else mod)
+    graph_module.graph._codegen = _ExportCodeGen(
+        _PyTreeInfo(
+            argument_names(sig, args, kwargs),
+            in_spec,
+            out_spec,
+        ),
+        in_shuffle_graph,
+        out_shuffle_graph,
+        tree_leaf_names,
+        graph_module if isinstance(root, torch.nn.Module) else root,
+    )  # type: ignore[attr-defined]
+
+
+def _create_graph_module_for_no_tensor_computation(
+    mod: Callable[..., Any],
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    fake_mode: Any,
+    tensor_to_context: Any,
+    module_call_specs: Any,
+) -> torch.fx.GraphModule:
+    """Create a graph module when backend_input is None (no tensor computation)."""
+    # Get input/output specs (do NOT include module in flattening, matches pytreeify)
+    flat_args, in_spec = pytree.tree_flatten((args, kwargs))
+    result = mod(*args, **kwargs)
+    flat_results, out_spec = pytree.tree_flatten(result)
+
+    # Create graph module with placeholders for all flat_args
+    graph_module = torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
+    placeholders = []
+    for i in range(len(flat_args)):
+        placeholder = graph_module.graph.placeholder(f"arg_{i}")
+        # Set metadata for both scalar and tensor values
+        placeholder.meta["val"] = flat_args[i]
+        placeholder.meta["example_value"] = flat_args[i]
+        placeholders.append(placeholder)
+
+    # Map output objects to their corresponding input placeholders by identity
+    output_nodes = []
+    for result_item in flat_results:
+        # Try to find if this result object is the same as any input
+        found = False
+        for i, arg in enumerate(flat_args):
+            if result_item is arg:
+                output_nodes.append(placeholders[i])
+                found = True
+                break
+        if not found:
+            # If not found in inputs, just use the result value directly
+            output_nodes.append(result_item)
+
+    graph_module.graph.output(tuple(output_nodes) if output_nodes else None)
+    graph_module.recompile()
+
+    # Set up specs
+    graph_module._in_spec = in_spec
+    graph_module._out_spec = out_spec
+
+    # For no-computation case, use simple PyTreeCodeGen without shuffle graphs
+    sig = inspect.signature(mod.forward if isinstance(mod, torch.nn.Module) else mod)
+    from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+
+    graph_module.graph._codegen = _PyTreeCodeGen(
+        _PyTreeInfo(
+            argument_names(sig, args, kwargs),
+            in_spec,
+            out_spec,
+        )
+    )
+
+    # Use shared utilities for metadata
+    _setup_graph_module_metadata(
+        graph_module, fake_mode, tensor_to_context, module_call_specs
+    )
+
+    return graph_module
+
+
 def dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
     constraints: Optional[list[Constraint]] = None,
@@ -621,61 +733,66 @@ def dynamo_graph_capture_for_export(
                 constraints=constraints,
             )
 
-        # TODO filter out side effects.
-        pyt = pytreeify(out, mod, args, kwargs)
+        if out.backend_input is not None:
+            # Normal path with tensor computation
+            # TODO filter out side effects.
+            pyt = pytreeify(out, mod, args, kwargs)
 
-        graph_module = pyt.graph_module
-        tree_leaf_names = [
-            graph_module.graph._graph_namespace.create_name(f"_tree_leaf_{i}", None)
-            for i in range(pyt.num_flat_args)
-        ]
-        # Get the proper signature - for nn.Module use forward method
-        if isinstance(mod, torch.nn.Module):
-            sig = inspect.signature(mod.forward)
-        else:
-            sig = inspect.signature(mod)
+            graph_module = pyt.graph_module
 
-        graph_module.graph._codegen = _ExportCodeGen(
-            _PyTreeInfo(
-                argument_names(sig, args, kwargs),
+            # Set up codegen using shared utility
+            _setup_graph_module_codegen(
+                graph_module,
+                mod,
+                args,
+                kwargs,
                 pyt.in_spec,
                 pyt.out_spec,
-            ),
-            pyt.in_shuffle_graph,
-            pyt.out_shuffle_graph,
-            tree_leaf_names,
-            graph_module if isinstance(pyt.root, torch.nn.Module) else pyt.root,
-        )  # type: ignore[attr-defined]
-        normalize_graph_module(graph_module)
-        if pyt.root is not None:
-            graph_module._parameters = pyt.root._parameters.copy()
-            graph_module._buffers = pyt.root._buffers.copy()
-            assert all(not hasattr(graph_module, m) for m in pyt.root._modules)
-            graph_module._modules.update(pyt.root._modules)
-            graph_module._non_persistent_buffers_set = (
-                pyt.root._non_persistent_buffers_set.copy()
+                pyt.in_shuffle_graph,
+                pyt.out_shuffle_graph,
+                pyt.num_flat_args,
+                pyt.root,
             )
-            annotations = torch.nn.Module.__dict__.get("__annotations__", None)
-            for name, value in pyt.root.__dict__.items():
-                if annotations and name not in annotations:
-                    graph_module.__dict__[name] = value
-        graph_module._in_spec = pyt.in_spec
-        graph_module._out_spec = pyt.out_spec
-        assert not hasattr(graph_module, "_in_shuffle_graph")
-        assert not hasattr(graph_module, "_out_shuffle_graph")
-        graph_module._in_shuffle_graph = pyt.in_shuffle_graph
-        graph_module._out_shuffle_graph = pyt.out_shuffle_graph
-        delattr(graph_module, "_param_name_to_source")
-        graph_module.recompile()
-        graph_module.meta["module_call_specs"] = (
-            out.graph_capture_output.output_graph.export_metadata.module_call_spec
-        )
-        assert out.backend_input is not None
-        graph_module.meta["fake_mode"] = out.backend_input.fake_mode  # type: ignore[attr-defined]
-        graph_module.meta["fake_mode"].allow_non_fake_inputs = True
-        tracing_context = TracingContext(graph_module.meta["fake_mode"])
-        tracing_context.tensor_to_context = out.backend_input.tensor_to_context  # type: ignore[attr-defined]
-        graph_module.meta["tracing_context"] = tracing_context
+
+            normalize_graph_module(graph_module)
+            if pyt.root is not None:
+                graph_module._parameters = pyt.root._parameters.copy()
+                graph_module._buffers = pyt.root._buffers.copy()
+                assert all(not hasattr(graph_module, m) for m in pyt.root._modules)
+                graph_module._modules.update(pyt.root._modules)
+                graph_module._non_persistent_buffers_set = (
+                    pyt.root._non_persistent_buffers_set.copy()
+                )
+                annotations = torch.nn.Module.__dict__.get("__annotations__", None)
+                for name, value in pyt.root.__dict__.items():
+                    if annotations and name not in annotations:
+                        graph_module.__dict__[name] = value
+            graph_module._in_spec = pyt.in_spec
+            graph_module._out_spec = pyt.out_spec
+            assert not hasattr(graph_module, "_in_shuffle_graph")
+            assert not hasattr(graph_module, "_out_shuffle_graph")
+            graph_module._in_shuffle_graph = pyt.in_shuffle_graph
+            graph_module._out_shuffle_graph = pyt.out_shuffle_graph
+            delattr(graph_module, "_param_name_to_source")
+            graph_module.recompile()
+
+            # Set up metadata using shared utility
+            _setup_graph_module_metadata(
+                graph_module,
+                out.backend_input.fake_mode,
+                out.backend_input.tensor_to_context,
+                out.graph_capture_output.output_graph.export_metadata.module_call_spec,
+            )
+        else:
+            graph_module = _create_graph_module_for_no_tensor_computation(
+                mod,
+                args,
+                kwargs,
+                None,  # fake_mode
+                None,  # tensor_to_context
+                out.graph_capture_output.output_graph.export_metadata.module_call_spec,
+            )
+
         return graph_module
 
     return inner

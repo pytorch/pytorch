@@ -1023,7 +1023,7 @@ graph():
         dynamic_shapes = {"x": (dim0_x, dim1_x)}
         export(Foo(), inputs, dynamic_shapes=dynamic_shapes)
 
-    @testing.expectedFailureStrictV2
+    # @testing.expectedFailureStrictV2
     def test_no_tensor_computation(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -1377,7 +1377,6 @@ graph():
     return (x,)""",
         )
 
-    @testing.expectedFailureStrictV2
     def test_no_tensor_computation_3(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -1396,7 +1395,6 @@ graph():
     return (5,)""",
         )
 
-    @testing.expectedFailureStrictV2
     def test_no_tensor_computation_4(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
