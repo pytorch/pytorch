@@ -894,14 +894,14 @@ class TestPruningNN(NNTestCase):
         prune.l1_unstructured(l, "weight_ih_l0", 0.5)
         assert sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights) == 3
 
-        # Removing the pruning reparametrization restores the Parameter
+        # Removing the pruning reparameterization restores the Parameter
         prune.remove(l, "weight_ih_l0")
         assert sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights) == 4
 
-        # Make sure that, upon removal of the reparametrization, the
+        # Make sure that, upon removal of the reparameterization, the
         # `._parameters` and `.named_parameters` contain the right params.
         # Specifically, the original weight ('weight_ih_l0') should be placed
-        # back in the parameters, while the reparametrization component
+        # back in the parameters, while the reparameterization component
         # ('weight_ih_l0_orig') should be removed.
         assert "weight_ih_l0" in l._parameters
         assert l._parameters["weight_ih_l0"] is not None

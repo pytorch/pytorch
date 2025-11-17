@@ -11,7 +11,6 @@
 #include <unistd.h>
 
 #include <atomic>
-#include <chrono>
 #include <condition_variable>
 #include <cstdint>
 #include <cstdio>
