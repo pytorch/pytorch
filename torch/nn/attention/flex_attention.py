@@ -219,7 +219,7 @@ class FlexKernelOptions(TypedDict, total=False):
     """ROCm-specific waves per execution unit."""
 
     # pyrefly: ignore [invalid-annotation]
-    FORCE_IMPL: NotRequired[Literal["DEFAULT", "TRITON", "FLASH", "DECODE", "CUDNN"]]
+    FORCE_IMPL: NotRequired[Literal["DEFAULT", "TRITON", "FLASH", "DECODE"]]
     """Forces a specific kernel implementation instead of using heuristics.
 
     Options:

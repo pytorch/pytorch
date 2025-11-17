@@ -183,10 +183,9 @@ def flex_attention(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
 
-    # Read and remove FORCE_IMPL selector (dispatch-time only, not passed to kernels)
+    # pop so it doesnt get thread through to Triton constexpr dict
     force_impl = cast(ForceImpl, kernel_options.pop("FORCE_IMPL", "DEFAULT"))
 
-    # Check if we should use flex_decoding
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
     )
