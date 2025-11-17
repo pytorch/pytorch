@@ -211,6 +211,16 @@ x = add_1, y = add_2);  getitem = None
         )
         self.assertEqual(orig_out, opt_out)
 
+        x_new = torch.randn(2, 2)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            opt_out = opt_f(x_new)
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(
+            printed_output,
+            f"moo {x_new * 2}\nmoo {x_new * 2 * x_new * 2}",
+        )
+
     @parametrize("backend", ["eager", "aot_eager"])
     def test_constant_mutation(self, backend):
         def f(x):
