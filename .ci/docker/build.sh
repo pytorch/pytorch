@@ -188,7 +188,7 @@ case "$tag" in
     fi
     GCC_VERSION=11
     VISION=yes
-    ROCM_VERSION=7.0
+    ROCM_VERSION=7.1
     NINJA_VERSION=1.9.0
     TRITON=yes
     KATEX=yes
