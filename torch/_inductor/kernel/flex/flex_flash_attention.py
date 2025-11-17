@@ -5,7 +5,7 @@ import functools
 import importlib
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import sympy
 from sympy import Expr, Integer
@@ -171,20 +171,34 @@ def _use_flex_flash_attention(
     mask_graph: Subgraph,
     kernel_options: dict[str, Any],
     num_score_mod_placeholders: int,
+    force_impl: Literal["DEFAULT", "TRITON", "FLASH", "DECODE"],
 ) -> bool:
-    """Determine if we should use flex flash attention for the given inputs."""
-    force_flash = kernel_options.get("FORCE_FLASH", False)
+    """Determine if we should use flex flash attention for the given inputs.
+
+    Args:
+        subgraph: The score modification subgraph
+        mask_graph: The mask modification subgraph
+        kernel_options: Kernel configuration options
+        num_score_mod_placeholders: Number of placeholders in score_mod
+        force_impl: Implementation selector (DEFAULT, TRITON, FLASH, DECODE)
+
+    Returns:
+        True if flash attention should be used, False otherwise
+    """
+    # Flash is experimental and must be explicitly requested
+    if force_impl != "FLASH":
+        return False
 
     can_use, reason = _can_use_flex_flash_attention(
         subgraph, mask_graph, num_score_mod_placeholders
     )
 
-    if force_flash and not can_use:
+    if not can_use:
         raise RuntimeError(
-            f"FORCE_FLASH=True but flash attention cannot be used: {reason}"
+            f"FORCE_IMPL='FLASH' but flash attention cannot be used: {reason}"
         )
 
-    return force_flash and can_use
+    return True
 
 
 def create_flex_flash_attention_kernel(
