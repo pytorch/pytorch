@@ -431,6 +431,7 @@ __host__ __device__
            0);                                                        \
   }
 #ifdef __SYCL_DEVICE_ONLY__
+#include <CL/__spirv/spirv_vars.hpp>
 // SYCL Device assertions on Windows do not work properly so we define these
 // wrappers around the STL assertion headers cassert and assert.h where we
 // redefine the assert macro to call __devicelib_assert_fail directly and
