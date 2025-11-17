@@ -3625,6 +3625,61 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             flex_compiled(q, k, v, kernel_options={"FORCE_IMPL": "DECODE"})
 
     @supported_platform
+    @skip_on_cpu
+    def test_force_impl_decode_errors_with_non_power_of_two_gqa(self, device):
+        """FORCE_IMPL='DECODE' should fail when GQA ratio is not a power of two."""
+        q = torch.randn(
+            1, 3, 64, 64, device=device, dtype=torch.float16, requires_grad=False
+        )
+        k = torch.randn(
+            1, 1, 64, 64, device=device, dtype=torch.float16, requires_grad=False
+        )
+        v = torch.randn(
+            1, 1, 64, 64, device=device, dtype=torch.float16, requires_grad=False
+        )
+
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"FORCE_IMPL='DECODE' was specified but flex_decoding cannot be used",
+        ):
+            flex_compiled(
+                q,
+                k,
+                v,
+                enable_gqa=True,
+                kernel_options={"FORCE_IMPL": "DECODE"},
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    def test_force_impl_rejects_legacy_force_use_flag(self, device):
+        """Combining FORCE_IMPL with FORCE_USE_FLEX_ATTENTION should raise an error."""
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"FORCE_IMPL cannot be combined with legacy FORCE_USE_FLEX_ATTENTION",
+        ):
+            flex_compiled(
+                q,
+                k,
+                v,
+                kernel_options={
+                    "FORCE_IMPL": "TRITON",
+                    "FORCE_USE_FLEX_ATTENTION": True,
+                },
+            )
+
+    @supported_platform
     def test_block_mask_non_divisible(self, device):
         seq = torch.arange(1023, device=device) // 128
 
