@@ -12,8 +12,8 @@ import os
 import textwrap
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable, Iterable, Sequence
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -26,8 +26,9 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (  # pyrefly: ignore  # deprecated
+from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -482,9 +483,7 @@ def _register_lowering(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
         ):
             # explicitly assert for "out=" ops for better error messages
-            assert not any(x == "out" for x in kwargs.keys()), (
-                "out= ops aren't yet supported"
-            )
+            assert not any(x == "out" for x in kwargs), "out= ops aren't yet supported"
 
         args, kwargs = transform_args(
             args, kwargs, broadcast, type_promotion_kind, convert_input_to_bool
@@ -1302,8 +1301,11 @@ def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
     V.graph.register_operation(b_size)
     new_size = sym_size
 
-    if start_index is not None:
+    if x.maybe_get_layout() is None:
+        # realize tensor before accessing layout
         x.realize()
+
+    if start_index is not None:
         # we shouldn't have allocated storage offset symbol if start index was determinable
         assert sym_storage is None
         new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
@@ -2381,6 +2383,10 @@ fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
 
+# TODO: mlazos reevaluate if we want to codegen something different
+make_fallback(torch.ops.streams.record_event.default)
+make_fallback(torch.ops.streams.wait_event.default)
+
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
@@ -2699,15 +2705,15 @@ def require_channels_last(_, *args, **kwargs):
 
 
 def constrain_to_fake_tensor(arg, fake_arg):
+    if isinstance(fake_arg, FakeScriptObject):
+        return arg
     if isinstance(arg, ir.IRNode):
         meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
         ]
         return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
     if isinstance(arg, dict):
-        return {
-            key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg.keys()
-        }
+        return {key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg}
     elif isinstance(arg, (tuple, list)):
         return type(arg)(
             constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
@@ -2732,7 +2738,7 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
-            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg.keys()}
+            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg}
         return arg
 
     args = tuple(
@@ -3088,6 +3094,8 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
 make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
+
+make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
 
 
 # Register with type_promotion_kind None.
@@ -7096,30 +7104,19 @@ def sym_constrain_range(a, min=None, max=None):
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     val = V.graph.current_node.meta["val"]
-    # Note [Can val be an int?]
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~
-    # In principle, someone could construct an FX graph where
-    # a call to size/stride has a val that is a plain int (not
-    # SymInt).  However, we will maintain the invariant that
-    # this is not possible: if you are constructing an FX graph
-    # where there is a call to size/stride that returns an
-    # int, but you KNOW that int must always be a constant,
-    # then you do not need trace that call at all (and just
-    # constant propagate the integer as is.)
-    assert isinstance(val, torch.SymInt), (
-        f"Expect val to be torch.SymInt but got val={val}"
-    )
-    return val.node.expr
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
-    # See Note [Can val be an int?]
-    assert isinstance(val, torch.SymInt), (
-        f"Expect val to be torch.SymInt but got val={val}"
-    )
-    return val.node.expr
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
 
 
 @register_lowering(aten.sym_numel)
@@ -7307,6 +7304,35 @@ def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
 
 
+def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
+    """Process nodes from a FX graph by executing them through V.graph.
+
+    This is a common pattern for executing a subgraph's nodes:
+    - Placeholder nodes are mapped to the provided args
+    - Output nodes return their result
+    - Other nodes are executed via V.graph.run_node
+
+    """
+    output = None
+
+    for i, node in enumerate(graph_module.graph.nodes):
+        if node.op == "placeholder":
+            assert node not in V.graph.env
+            V.graph.env[node] = args[i]
+            continue
+        elif node.op == "output":
+            output_args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
+        else:
+            assert node not in V.graph.env
+            V.graph.env[node] = V.graph.run_node(node)
+
+    if output is None:
+        raise RuntimeError("No output node found in graph")
+
+    return output
+
+
 # Import the control_deps_op HOP for lowering
 from torch._inductor.fx_passes.control_dependencies import control_deps
 
@@ -7334,21 +7360,11 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     arg_offset = 2  # first two args (additional_deps, subgraph)
     assert len(args) + arg_offset == len(original_args)
 
-    output = None
-
     operation_len = len(V.graph.operations)
     assert len(subgraph_fn.graph_module.graph.find_nodes(op="placeholder")) == len(args)
-    for i, node in enumerate(subgraph_fn.graph_module.graph.nodes):
-        if node.op == "placeholder":
-            assert node not in V.graph.env
-            V.graph.env[node] = args[i]
-            continue
-        elif node.op == "output":
-            args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
-            output = torch.fx.Interpreter.output(V.graph, node, args, kwargs)
-        else:
-            assert node not in V.graph.env
-            V.graph.env[node] = V.graph.run_node(node)
+
+    # Process subgraph nodes using the shared helper
+    output = process_subgraph_nodes(subgraph_fn.graph_module, list(args))
 
     assert output is not None and additional_deps
 
@@ -7442,9 +7458,9 @@ def _sink_tokens(tokens):
 def with_effects(token, op, *args, **kwargs):
     result = ir.EffectfulKernel.create(op, *args, **kwargs)
 
-    from torch._higher_order_ops.effects import get_effect_key
+    from torch._higher_order_ops.effects import _get_effect
 
-    effect_type = get_effect_key(op, args, kwargs)
+    effect_type = _get_effect(op)
     assert effect_type is not None
     effectful_kernel = V.graph.effectful_ops[effect_type]
 

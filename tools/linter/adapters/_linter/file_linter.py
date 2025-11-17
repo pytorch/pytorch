@@ -73,6 +73,7 @@ class FileLinter:
     @cached_property
     def args(self) -> Namespace:
         args = self.parser.parse_args(self.argv)
+
         if args.fix and args.lintrunner:
             raise ValueError("--fix and --lintrunner are incompatible")
         return args
@@ -105,12 +106,6 @@ class FileLinter:
         assert shell == isinstance(cmd, str)
         p = subprocess.run(cmd, text=True, capture_output=True, **kwargs)
 
-        if self.args.verbose or (check and p.returncode):
-            # TODO: Fix this output for lintrunner mode
-            print(p.stdout[:MAX_ERROR_CHARS], file=sys.stderr)
-            error = p.stderr if p.returncode else p.stderr[:MAX_ERROR_CHARS]
-            print(error, file=sys.stderr)
-
         if check:
             p.check_returncode()
 
@@ -140,7 +135,7 @@ class FileLinter:
         previous_result_count = float("inf")
         first_results = None
         original = replacement = pf.contents
-        results = list[LintResult]()
+        results: list[LintResult] = []
 
         while True:
             try:

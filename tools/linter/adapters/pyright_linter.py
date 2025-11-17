@@ -4,7 +4,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any, Sequence, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 
 _PARENT = Path(__file__).parent.absolute()
@@ -16,18 +16,10 @@ else:
     import _linter
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
 
 
-GRANDFATHER = _PARENT / "pyright_linter-grandfather.txt"
-
-# What happens when a developer deletes a function or parameter of unknown type that's
-# in the grandfather file?
-#
-# If FORCE_DELETION_OF_SYMBOLS is True, we force the developer to edit the
-# grandfather file to delete those symbols; if it's False, we don't.
-
-FORCE_DELETION_OF_SYMBOLS = False
+GRANDFATHER = Path(__file__).parent / "pyright_linter-grandfather.txt"
 
 DESCRIPTION = """`pyright_linter` is a lintrunner linter which uses pyright to detect
 new symbols that have been created but have not been given a type.
@@ -68,15 +60,12 @@ class PyrightLinter(_linter.FileLinter):
                 elif m := PARAM_RE.match(d["message"]):
                     unknown[f"{name}({m.group(1)}=)"] = d
 
-        if not GRANDFATHER.exists() or self.args.write_grandfather:
-            with GRANDFATHER.open("w") as fp:
+        if not self.args.grandfather.exists() or self.args.write_grandfather:
+            with self.args.grandfather.open("w") as fp:
                 print(*sorted(unknown), file=fp, sep="\n")
             return True
 
-        if FORCE_DELETION_OF_SYMBOLS:
-            raise NotImplementedError
-
-        grandfather = set(GRANDFATHER.read_text().splitlines())
+        grandfather = set(self.args.grandfather.read_text().splitlines())
         if not (missing := [v for k, v in unknown.items() if k not in grandfather]):
             return True
 
