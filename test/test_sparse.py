@@ -646,7 +646,7 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense(masked_grad=gradcheck.masked)
             x.requires_grad_(True)
-            kawrgs = {"eps": 1e-4} if device == "mps:0" else {}
+            kwargs = {"eps": 1e-4} if device == "mps:0" else {}
             gradcheck(fn, (x,), **kwargs)
 
         i = self.index_tensor([
