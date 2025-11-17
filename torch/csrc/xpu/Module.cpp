@@ -261,7 +261,7 @@ static PyObject* THXPModule_resetAccumulatedMemoryStats(
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
-  // Add _xpuDevicePropertires class to torch._C
+  // Add _xpuDeviceProperties class to torch._C
   using namespace c10::xpu;
   auto get_device_type = [](const DeviceProp& prop) {
     std::ostringstream stream;
@@ -295,7 +295,22 @@ static void registerXpuDeviceProperties(PyObject* module) {
     return static_cast<int64_t>(prop.architecture);
   };
 #endif
+  // Wrapper class for XPU UUID
+  struct XPUuuid {
+    XPUuuid(const std::array<unsigned char, 16>& uuid) : bytes(uuid) {}
+    const std::array<unsigned char, 16>& bytes{};
+  };
   auto m = py::handle(module).cast<py::module>();
+
+  py::class_<XPUuuid>(m, "_XPUuuid")
+      .def_property_readonly(
+          "bytes",
+          [](const XPUuuid& uuid) {
+            return std::vector<uint8_t>(uuid.bytes.begin(), uuid.bytes.end());
+          })
+      .def("__str__", [](const XPUuuid& uuid) {
+        return uuid_to_string(reinterpret_cast<const char*>(uuid.bytes.data()));
+      });
 
 #define DEFINE_READONLY_MEMBER(member) \
   def_readonly(#member, &DeviceProp::member)
@@ -328,6 +343,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
       .def_property_readonly("architecture", get_device_architecture)
 #endif
       .def_property_readonly("type", get_device_type)
+      .def_property_readonly(
+          "uuid",
+          [](const DeviceProp& prop) -> XPUuuid { return XPUuuid(prop.uuid); })
       .def(
           "__repr__",
           [&get_device_type, &gpu_subslice_count](const DeviceProp& prop) {
@@ -335,7 +353,9 @@ static void registerXpuDeviceProperties(PyObject* module) {
             stream << "_XpuDeviceProperties(name='" << prop.name
                    << "', platform_name='" << prop.platform_name << "', type='"
                    << get_device_type(prop) << "', device_id=0x" << std::hex
-                   << std::uppercase << prop.device_id << std::dec
+                   << std::uppercase << prop.device_id << std::dec << ", uuid="
+                   << uuid_to_string(
+                          reinterpret_cast<const char*>(prop.uuid.data()))
                    << ", driver_version='" << prop.driver_version
                    << "', total_memory="
                    << prop.global_mem_size / (1024ull * 1024) << "MB"
@@ -347,7 +367,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << ", sub_group_sizes=[" << prop.sub_group_sizes
                    << "], has_fp16=" << prop.has_fp16
                    << ", has_fp64=" << prop.has_fp64
-                   << ", has_atomic64=" << prop.has_atomic64 << ")";
+                   << ", has_atomic64=" << prop.has_atomic64 << ')';
             return stream.str();
           });
 }
@@ -366,23 +386,8 @@ static void bindGetDeviceProperties(PyObject* module) {
 static void initXpuMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
-#if SYCL_COMPILER_VERSION >= 20250000
-    auto total = at::xpu::getDeviceProperties(device_index)->global_mem_size;
-    auto& device = c10::xpu::get_raw_device(device_index);
-    TORCH_CHECK(
-        device.has(sycl::aspect::ext_intel_free_memory),
-        "The device (",
-        at::xpu::getDeviceProperties(device_index)->name,
-        ") doesn't support querying the available free memory. ",
-        "You can file an issue at https://github.com/pytorch/pytorch/issues ",
-        "to help us prioritize its implementation.");
-    auto free = device.get_info<sycl::ext::intel::info::device::free_memory>();
-    return std::make_tuple(free, total);
-#else
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      false,
-      "torch.xpu.mem_get_info requires PyTorch to be built with SYCL compiler version 2025.0.0 or newer.");
-#endif
+    py::gil_scoped_release no_gil;
+    return at::getDeviceAllocator(at::kXPU)->getMemoryInfo(device_index);
   });
   m.def(
       "_xpu_getStreamFromExternal",
@@ -395,6 +400,17 @@ static void initXpuMethodBindings(PyObject* module) {
         return std::make_tuple(
             stream.id(), stream.device_index(), stream.device_type());
       });
+  m.def(
+      "_xpu_canDeviceAccessPeer",
+      [](c10::DeviceIndex device, c10::DeviceIndex peer) {
+        return at::xpu::canDeviceAccessPeer(device, peer);
+      });
+  m.def("_xpu_getMemoryFraction", [](c10::DeviceIndex device) {
+    return c10::xpu::XPUCachingAllocator::getMemoryFraction(device);
+  });
+  m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
+    c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
+  });
 }
 
 // Callback for python part. Used for additional initialization of python

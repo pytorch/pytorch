@@ -5,11 +5,12 @@ import logging
 import operator
 import re
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -27,7 +28,7 @@ from torch.export.exported_program import (
     SymIntArgument,
     TensorArgument,
 )
-from torch.fx._symbolic_trace import is_fx_tracing
+from torch.fx._symbolic_trace import is_fx_symbolic_tracing
 from torch.fx.graph_module import _get_attr, _get_attr_via_attr_list, _print_readable
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
@@ -134,6 +135,11 @@ class _SubmoduleBase:
     _ty: Optional[str]
 
     def type_name(self) -> Optional[str]:
+        """
+        Subclass of this class - InterpreterModule, InterpreterModuleDispatcher, represents
+        corresponding model in eager model. To get this type information for those modules
+        in eager model we need to use this method.
+        """
         return self._ty
 
 
@@ -158,7 +164,7 @@ class InterpreterModule(_SubmoduleBase, torch.nn.Module):
 
     def forward(self, *args, **kwargs):
         assert self.graph_module is not None, "Didn't finalize this InterpreterModule"
-        if not is_fx_tracing() and (
+        if not is_fx_symbolic_tracing() and (
             torch.compiler.is_dynamo_compiling() or not self._run_with_interpreter
         ):
             # Dynamo cannot trace through torch.fx.Interpreter, so fall back to
@@ -295,7 +301,7 @@ class FlatArgsAdapter(abc.ABC):
         return []
 
 
-class UnflattenedModule(torch.nn.Module):
+class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
     def __init__(
         self,
         export_module: ExportedProgram,
@@ -334,6 +340,7 @@ class UnflattenedModule(torch.nn.Module):
 
         _inplace_buffer_and_input_mutations(export_graph, self.graph_signature)
         _fix_nn_module_stacks(export_graph)
+        self._ty = _root_module_type(export_graph)
 
         self.ivals = _IVals()
         # for any intermediate value of a mutation that is read, track the mutation
@@ -595,7 +602,7 @@ class UnflattenedModule(torch.nn.Module):
         )
         flat_args = [x[1] for x in flat_args_with_path]
 
-        if is_fx_tracing():
+        if is_fx_symbolic_tracing():
             return flat_args
 
         if in_spec != signature.in_spec:
@@ -645,13 +652,10 @@ class UnflattenedModule(torch.nn.Module):
         return flat_args
 
     def forward(self, *args, **kwargs):
-        flat_args = torch._dynamo.disable(
-            self.process_forward_inputs,
-            reason="do not trace into preprocessing the inputs",
-        )(*args, **kwargs)
+        flat_args = self.process_forward_inputs(*args, **kwargs)
         signature = self.module_call_graph[0].signature
 
-        if is_fx_tracing():
+        if is_fx_symbolic_tracing():
             return_val = torch.fx.Interpreter(self, graph=self.graph).run(
                 *flat_args, enable_io_processing=False
             )
@@ -770,7 +774,17 @@ def unflatten(
         hierarchy as the original eager module pre-export.
     """
     module = _remove_effect_tokens(module)
-    return UnflattenedModule(module, flat_args_adapter)
+    m = UnflattenedModule(module, flat_args_adapter)
+
+    # Disable process_forward_inputs as the adapter has many
+    # non-dynamo-traceable behavior.
+    m.process_forward_inputs = torch._dynamo.disable(  # type: ignore[method-assign]
+        m.process_forward_inputs,
+        reason="do not trace into preprocessing the inputs",
+        recursive=True,
+    )
+
+    return m
 
 
 def _inplace_buffer_and_input_mutations(
@@ -843,6 +857,17 @@ def _inplace_buffer_and_input_mutations(
     # need to thread it through anymore.
     user_outputs = tuple(return_args[num_mutations:])
     output_node.args = ((user_outputs),)
+
+
+def _root_module_type(graph: torch.fx.Graph) -> Optional[str]:
+    for node in graph.nodes:
+        if "nn_module_stack" not in node.meta:
+            continue
+
+        for path, ty in node.meta["nn_module_stack"].values():
+            if not path:
+                return ty
+    return None
 
 
 def _fix_nn_module_stacks(graph):
@@ -924,6 +949,7 @@ def _check_graph_equivalence(x: torch.nn.Module, y: torch.nn.Module):
                 for key, value in pytree.tree_map(arg_dump, node.kwargs).items()
             ]
             target = node.target if node.op in ("call_function", "get_attr") else ""
+            # pyrefly: ignore [bad-argument-type]
             ret.append(f"{i}: {node.op}[{target}]({', '.join(args_dump)})")
             nodes_idx[id(node)] = i
         return "\n".join(ret)
@@ -1098,10 +1124,10 @@ class _ModuleFrame:
         signature = module_call_graph.get(self.child_fqn)
         if signature is not None and self.parent is not None:
             assert signature.in_spec.num_children == 2
-            args_spec = signature.in_spec.children_specs[0]
-            kwargs_spec = signature.in_spec.children_specs[1]
-            assert args_spec.context is None
-            assert kwargs_spec.context is not None
+            assert signature.in_spec.type is tuple
+            args_spec, kwargs_spec = signature.in_spec.children()
+            assert args_spec.type is tuple
+            assert kwargs_spec.type is dict
 
             with self.graph.inserting_after(None):
                 arg_nodes = [
@@ -1180,6 +1206,7 @@ class _ModuleFrame:
                     for k in kwargs_spec.context
                 }
             assert self.parent_call_module is not None
+            # pyrefly: ignore [bad-assignment]
             self.parent_call_module.args = tuple(arg_nodes)
             self.parent_call_module.kwargs = kwarg_nodes  # type: ignore[assignment]
 
@@ -1304,7 +1331,7 @@ class _ModuleFrame:
         else:
             graph_outputs = []
             # Iterate through nodes we have copied into self.graph.
-            for orig_node in self.node_map.keys():
+            for orig_node in self.node_map:
                 for user_node in orig_node.users:
                     if user_node.name not in self.seen_nodes:
                         # external user node, need to expose as an output
@@ -1367,6 +1394,7 @@ class _ModuleFrame:
 
     def print(self, *args, **kwargs):
         if self.verbose:
+            # pyrefly: ignore [not-iterable]
             print(*args, **kwargs)
 
     def run_from(self, node_idx):
@@ -1460,6 +1488,7 @@ class _ModuleFrame:
                 self.seen_attrs[self.child_fqn].add(node.target)
 
             self.copy_node(node)
+            # pyrefly: ignore [unsupported-operation]
             node_idx += 1
 
 

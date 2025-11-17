@@ -52,6 +52,7 @@ class TestCheckpointer(TestCase):
     """Parameterized tests that work with both sync and async checkpointers."""
 
     def setUp(self):
+        super().setUp()
         # Create a temporary directory for checkpoints
         self.temp_dir = tempfile.mkdtemp()
 
@@ -397,6 +398,7 @@ class TestAsyncCheckpointerSpecific(TestCase):
     """Tests specific to AsyncCheckpointer functionality."""
 
     def setUp(self):
+        super().setUp()
         # Create a temporary directory for checkpoints
         self.temp_dir = tempfile.mkdtemp()
 
@@ -560,6 +562,7 @@ class TestAsyncCheckpointerSpecific(TestCase):
 
             # Wait for all to complete
             for stage_future, write_future in futures:
+                stage_future.result()
                 write_future.result()
 
             # Verify all checkpoints exist and have correct content

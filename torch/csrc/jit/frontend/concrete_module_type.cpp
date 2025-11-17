@@ -204,7 +204,8 @@ std::shared_ptr<ConcreteModuleType> ConcreteModuleType::
       [&](const ConcreteModuleTypeBuilder::ModuleInfo& info) {
         return info.name_ == name;
       });
-  TORCH_INTERNAL_ASSERT(it != data_.modules_.end());
+  TORCH_INTERNAL_ASSERT(
+      it != data_.modules_.end(), "Cannot find submodule with name/key ", name);
   return it->meta_;
 }
 
@@ -304,39 +305,37 @@ void ConcreteModuleTypeBuilder::addIgnoredAttribute(std::string name) {
 
 void ConcreteModuleType::dump() const {
   std::cout << "ConcreteModuleType for: "
-            << py::getattr(data_.pyClass_, "__name__") << "\n";
+            << py::getattr(data_.pyClass_, "__name__") << '\n';
   std::cout << "Constants: \n";
   for (const auto& pr : data_.constants_) {
-    std::cout << "\t" << pr.first << ": " << pr.second << "\n";
+    std::cout << '\t' << pr.first << ": " << pr.second << '\n';
   }
   std::cout << "\nAttributes: \n";
   for (const auto& pr : data_.attributes_) {
-    std::cout << "\t" << pr.key() << ": " << pr.value().type_->annotation_str()
-              << "\n";
+    std::cout << '\t' << pr.key() << ": " << pr.value().type_->annotation_str()
+              << '\n';
   }
   std::cout << "\nSubmodules: \n";
   for (const auto& info : data_.modules_) {
-    std::cout << "\t" << info.name_ << ": "
-              << info.meta_->getJitType()->annotation_str() << "\n";
+    std::cout << '\t' << info.name_ << ": "
+              << info.meta_->getJitType()->annotation_str() << '\n';
   }
   std::cout << "\nForward Pre-Hooks: \n";
   for (const auto& pre_hook_id : data_.forwardPreHooks_) {
-    std::cout << "\t"
-              << "pre_hook id: " << pre_hook_id << "\n";
+    std::cout << '\t' << "pre_hook id: " << pre_hook_id << '\n';
   }
   std::cout << "\nForward Hooks: \n";
   for (const auto& hook_id : data_.forwardHooks_) {
-    std::cout << "\t"
-              << "hook id: " << hook_id << "\n";
+    std::cout << '\t' << "hook id: " << hook_id << '\n';
   }
   std::cout << "\nOverloads: \n";
   for (const auto& pr : data_.overloads_) {
-    std::cout << "\t" << pr.first << ": " << pr.second << "\n";
+    std::cout << '\t' << pr.first << ": " << pr.second << '\n';
   }
   std::string isPoisoned = data_.isPoisoned_ ? "true" : "false";
-  std::cout << "isPoisoned: " << isPoisoned << "\n";
+  std::cout << "isPoisoned: " << isPoisoned << '\n';
   if (jitType_) {
-    std::cout << "jit type: " << jitType_->annotation_str() << "\n";
+    std::cout << "jit type: " << jitType_->annotation_str() << '\n';
   }
 }
 

@@ -75,7 +75,7 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
 }
 
 bool can_use_flash_attention(sdp::sdp_params const& params, bool debug) {
-  // Currently, XPU fallbacks flash attention to overrideable
+  // Currently, XPU fallbacks flash attention to overridable
   return can_use_overrideable_attention(params, debug);
 }
 
@@ -115,7 +115,7 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
   // 1. Flash Attention
   // 2. Math fallback
   auto& ctx = at::globalContext();
-  // use overrideable linked to onednn as overrideable implementation
+  // use overridable linked to onednn as overridable implementation
   if (!ctx.userEnabledMathSDP() && !ctx.userEnabledOverrideableSDP() &&
       !ctx.userEnabledFlashSDP()) {
     return sdp::SDPBackend::error;
@@ -165,7 +165,7 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
     }
   }
   // If we have gotten to this point then two things have happened:
-  // 1. can_use_overrideable_attention did not satisfy the constraints to be ran
+  // 1. can_use_overridable_attention did not satisfy the constraints to be ran
   // 2. The user has explicitly disabled the math kernel
   // We then re-run the kernel checks with debug enabled to print out the
   // reason why the kernel was not selected
@@ -260,7 +260,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
   alloc_with_matching_layout(query, output, output_shape);
   at::Tensor logsumexp, debug_attn_mask; // not supported
 
-  at::native::onednn::gpu_float_sdpa(
+  at::native::onednn::sdpa(
       batch_size,
       seq_len_q,
       seq_len_kv,
@@ -274,7 +274,9 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       attn_bias,
       is_causal,
       scale.has_value() ? scale.value() : (1.0 / std::sqrt(head_dim_qk)),
-      output);
+      output,
+      false,
+      logsumexp);
 
   // rng not used
   auto philox_seed = at::empty({}, at::dtype(at::kLong));

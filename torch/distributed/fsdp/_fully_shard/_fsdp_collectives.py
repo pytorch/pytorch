@@ -1,7 +1,7 @@
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from itertools import chain
-from typing import Any, Callable, cast, NamedTuple, Optional, Union
+from typing import Any, cast, NamedTuple, Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -472,6 +472,7 @@ def foreach_reduce(
     ``unsharded_grads`` owns the references to the gradients computed by
     autograd, so clearing the list frees the gradients.
     """
+
     grad_dtypes = {grad.dtype for grad in unsharded_grads}
     if len(grad_dtypes) != 1:
         # Check this at runtime since it could be a real runtime error if e.g.
@@ -491,15 +492,27 @@ def foreach_reduce(
             force_sum_reduction_for_comms,
         )
     )
-    world_size = reduce_scatter_group.size()
-    for i, (fsdp_param, unsharded_grad) in enumerate(zip(fsdp_params, unsharded_grads)):
-        if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
-            continue
-        assert unsharded_grad.size(shard_dim) % world_size == 0, (
-            f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
-        )
-        chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
-        unsharded_grads[i] = torch.cat(chunks, dim=0)
+
+    if reduce_scatter_group is None:
+        world_size = 1
+    else:
+        world_size = reduce_scatter_group.size()
+    device_handle = _get_device_handle(device.type)
+    current_stream = device_handle.current_stream()
+
+    if world_size > 1:
+        for i, (fsdp_param, unsharded_grad) in enumerate(
+            zip(fsdp_params, unsharded_grads)
+        ):
+            if (shard_dim := fsdp_param.fsdp_placement.dim) == 0:
+                continue
+            if unsharded_grad.size(shard_dim) % world_size != 0:
+                raise AssertionError(
+                    f"Shard({shard_dim}) requires even sharding: {unsharded_grad.size()=} {world_size=}"
+                )
+            chunks = torch.chunk(unsharded_grad, world_size, dim=shard_dim)
+            unsharded_grads[i] = torch.cat(chunks, dim=0)
+
     padded_unsharded_sizes = tuple(
         _get_dim0_padded_size(grad.size(), world_size) for grad in unsharded_grads
     )
@@ -510,14 +523,15 @@ def foreach_reduce(
         dtype=reduce_dtype,
         device=device,
     )
-    device_handle = _get_device_handle(device.type)
+
     foreach_reduce_scatter_copy_in(unsharded_grads, reduce_scatter_input, world_size)
-    current_stream = device_handle.current_stream()
+
     # Only after the copy-in finishes can we free the gradients
     unsharded_grads.clear()
     reduce_scatter_stream.wait_stream(current_stream)
     all_reduce_input = None
     all_reduce_event = None
+
     with device_handle.stream(reduce_scatter_stream):
         reduce_output = reduce_scatter_comm.allocate(
             (reduce_scatter_output_numel,),
@@ -525,15 +539,19 @@ def foreach_reduce(
             device=device,
         )
         _div_if_needed(reduce_scatter_input, predivide_factor)
-        reduce_scatter_comm(
-            output_tensor=reduce_output,
-            input_tensor=reduce_scatter_input,
-            group=reduce_scatter_group,
-            op=reduce_scatter_op,
-        )
+        if world_size > 1:
+            reduce_scatter_comm(
+                output_tensor=reduce_output,
+                input_tensor=reduce_scatter_input,
+                group=reduce_scatter_group,
+                op=reduce_scatter_op,
+            )
+        else:
+            # For single GPU, just copy the input to output (no actual reduce-scatter needed)
+            reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
-        if all_reduce_group is not None:  # HSDP
+        if all_reduce_group is not None:  # HSDP or DDP/replicate
             # Accumulations must run in the reduce-scatter stream
             if not all_reduce_grads:
                 if partial_reduce_output is not None:
@@ -551,7 +569,10 @@ def foreach_reduce(
             if partial_reduce_output is not None:
                 reduce_output += partial_reduce_output
             post_reduce_stream = all_reduce_stream
-            all_reduce_stream.wait_stream(reduce_scatter_stream)
+            if world_size >= 1:
+                all_reduce_stream.wait_stream(reduce_scatter_stream)
+            else:
+                all_reduce_stream.wait_stream(current_stream)
             with device_handle.stream(all_reduce_stream):
                 dist.all_reduce(
                     reduce_output,
@@ -605,7 +626,10 @@ def foreach_reduce(
                     # ensure that the D2H copy finishes before the optimizer
                     fsdp_param.grad_offload_event = post_reduce_stream.record_event()
             if to_accumulate_grad:
-                assert isinstance(fsdp_param.sharded_param.grad, DTensor)
+                if not isinstance(fsdp_param.sharded_param.grad, DTensor):
+                    raise AssertionError(
+                        f"Expected fsdp_param.sharded_param.grad to be DTensor, got {type(fsdp_param.sharded_param.grad)}"
+                    )
                 fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
             else:
                 new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
@@ -670,7 +694,7 @@ def _get_all_gather_input_metadatas(
 
 
 def _get_gradient_divide_factors(
-    reduce_scatter_group: dist.ProcessGroup,
+    reduce_scatter_group: Optional[dist.ProcessGroup],
     all_reduce_group: Optional[dist.ProcessGroup],
     reduce_dtype: torch.dtype,
     device_type: str = "",
@@ -689,8 +713,11 @@ def _get_gradient_divide_factors(
     # For fp32/bf16, we do not need to worry about overflow/underflow, so we
     # use NCCL's built-in division to avoid separate div kernels
     overflow_risk = reduce_dtype not in (torch.float32, torch.bfloat16)
+    if reduce_scatter_group is not None:
+        data_parallel_size = reduce_scatter_group.size()
+    else:
+        data_parallel_size = 1
 
-    data_parallel_size = reduce_scatter_group.size()
     if all_reduce_group is not None:
         data_parallel_size *= all_reduce_group.size()
 

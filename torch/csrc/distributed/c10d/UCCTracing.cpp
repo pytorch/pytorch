@@ -1,5 +1,6 @@
 #ifdef USE_C10D_UCC
 
+#include <c10/util/FileSystem.h>
 #include <c10/util/env.h>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
@@ -10,7 +11,6 @@
 #include <sys/stat.h>
 #include <cstdlib>
 #include <ctime>
-#include <filesystem>
 #include <fstream>
 
 namespace c10d {
@@ -34,15 +34,15 @@ void ProcessGroupUCCLogger::flushComms(int rank, int world_size) {
         "_", (1 + ltm->tm_mon), "_", ltm->tm_mday, "_", (1900 + ltm->tm_year));
   }
 
-  std::filesystem::path fullpath = std::filesystem::path("/tmp") / dirname;
+  c10::filesystem::path fullpath = c10::filesystem::path("/tmp") / dirname;
   auto user_path = c10::utils::get_env("TORCH_UCC_COMMS_TRACE_OUTPUT_DIR");
   if (user_path.has_value()) {
     fullpath = std::move(user_path.value());
   }
-  std::filesystem::path trace_filename =
+  c10::filesystem::path trace_filename =
       fullpath / fmt::format("rank{}.json", rank);
   std::error_code ec{};
-  if (!std::filesystem::create_directories(fullpath, ec)) {
+  if (!c10::filesystem::create_directories(fullpath, ec)) {
     LOG(INFO) << getLogPrefix() << "[INFO] failed to mkdir " << fullpath
               << " with error " << ec.message();
     return;
@@ -51,7 +51,7 @@ void ProcessGroupUCCLogger::flushComms(int rank, int world_size) {
   _outfile.open(trace_filename, std::ofstream::out | std::ofstream::trunc);
   // flush the traced comms
   if (_outfile.is_open()) {
-    _outfile << "[" << c10::Join(",", trace_generator->getCommsTrace())
+    _outfile << '[' << c10::Join(",", trace_generator->getCommsTrace())
              << "\n]";
     _outfile.flush();
     _outfile.close();

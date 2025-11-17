@@ -1,6 +1,6 @@
 import enum
-from typing import Any, Callable, Optional
-from typing_extensions import TypeAlias
+from collections.abc import Callable
+from typing import Any, Optional, TypeAlias
 
 import torch
 
@@ -310,6 +310,19 @@ class GuardManager:
         item: Any,
         verbose_code_parts: list[str],
     ) -> None: ...
+    def add_dual_level_match_guard(
+        self,
+        level: int,
+        verbose_code_parts: list[str],
+    ) -> None: ...
+    def add_float_is_nan_guard(
+        self,
+        verbose_code_parts: list[str],
+    ) -> None: ...
+    def add_complex_is_nan_guard(
+        self,
+        verbose_code_parts: list[str],
+    ) -> None: ...
     def add_tuple_iterator_length_guard(
         self,
         length: int,
@@ -436,3 +449,4 @@ def dict_version(d: dict[Any, Any]) -> int: ...
 def compute_overlapping_tensors(
     tensors: list[torch.Tensor], symbolic: bool = True
 ) -> set[int]: ...
+def set_is_in_mode_without_ignore_compile_internals(value: bool) -> None: ...
