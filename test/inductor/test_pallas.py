@@ -690,6 +690,61 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    def test_sum_reduction(self):
+        """Test sum reduction."""
+
+        def fn(x):
+            return x.sum()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_max_reduction(self):
+        """Test max reduction."""
+
+        def fn(x):
+            return x.max()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_min_reduction(self):
+        """Test min reduction."""
+
+        def fn(x):
+            return x.min()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_prod_reduction(self):
+        """Test prod reduction."""
+        if self.DEVICE == "cuda":
+            self.skipTest("prod reduction not supported in Pallas GPU (Triton) backend")
+
+        def fn(x):
+            # Use smaller values to avoid overflow
+            return (x * 0.1).prod()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
 
 @unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
 class PallasTestsCUDA(PallasTestsMixin, TestCase):

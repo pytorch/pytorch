@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy  # noqa: TC002
 
@@ -22,6 +22,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ..ir import IRNode
+    from ..ops_handler import ReductionType
     from ..scheduler import BaseSchedulerNode
 
 
@@ -748,22 +749,95 @@ class PallasKernel(SIMDKernel):
         if self.use_masked_ops is None:
             self.use_masked_ops = self._determine_masked_ops_for_kernel()
 
-        index_str, needs_flatten = self._get_index_expr(index)
+        # Check if this is a scalar output (reduction to scalar)
+        # Only shape () is a true scalar, not (1,) which is a 1-element tensor
+        try:
+            buf = V.graph.get_buffer(name)
+            output_shape = buf.get_size()
+            is_scalar = len(output_shape) == 0
+        except Exception:
+            is_scalar = False
 
-        # Build store expression using string concatenation
-        use_masked = index_str == "..." and not needs_flatten and self.use_masked_ops
-
-        if use_masked:
-            # GPU masked store: flatten tensor and apply per-tensor mask
-            mask_var = self._get_or_create_mask(name)
-            store_expr = (
-                f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
-            )
+        if is_scalar:
+            # For scalar outputs, use [...] to assign the entire scalar
+            store_expr = f"{out}[...] = {value}"
         else:
-            # Direct indexed assignment
-            store_expr = f"{out}[{index_str}] = {value}"
+            index_str, needs_flatten = self._get_index_expr(index)
+
+            # Build store expression using string concatenation
+            use_masked = (
+                index_str == "..." and not needs_flatten and self.use_masked_ops
+            )
+
+            if use_masked:
+                # GPU masked store: flatten tensor and apply per-tensor mask
+                mask_var = self._get_or_create_mask(name)
+                store_expr = f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
+            else:
+                # Direct indexed assignment
+                store_expr = f"{out}[{index_str}] = {value}"
 
         self.stores.writeline(store_expr)
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:  # type: ignore[override]
+        """
+        Generate code for reduction operations in JAX/Pallas.
+
+        Reductions in Pallas work by:
+        1. Loading the input data into the kernel
+        2. Applying JAX reduction operations (jnp.sum, jnp.max, etc.)
+        3. Storing the reduced result
+
+        The reduction happens over the loaded block of data.
+        """
+        assert self.inside_reduction
+
+        if isinstance(value, tuple):
+            raise Unsupported(
+                "Tuple reductions (e.g., welford_combine) not supported in Pallas backend"
+            )
+
+        # Check if this reduction is already cached
+        cache_key = (src_dtype, reduction_type, value)
+        if cache_key in self.cse.reduction_cache:
+            return self.cse.reduction_cache[cache_key]
+
+        # Map reduction types to JAX functions
+        reduction_ops = {
+            "sum": "jnp.sum",
+            "prod": "jnp.prod",  # CPU only - not supported in Pallas GPU (Triton) backend
+            "max": "jnp.max",
+            "min": "jnp.min",
+            "any": "jnp.any",
+        }
+
+        if reduction_type == "xor_sum":
+            reduction_expr = f"jnp.bitwise_xor.reduce({value})"
+        elif reduction_type in reduction_ops:
+            # Apply reduction over all axes to get scalar result
+            reduction_expr = f"{reduction_ops[reduction_type]}({value})"
+        else:
+            raise Unsupported(
+                f"Reduction type '{reduction_type}' not yet supported in Pallas backend. "
+                f"Supported types: {list(reduction_ops.keys())}, xor_sum"
+            )
+
+        # Generate CSE variable for the reduction result
+        result = self.cse.generate(
+            self.compute,
+            reduction_expr,
+            dtype=dtype,
+        )
+
+        # Cache the result
+        self.cse.reduction_cache[cache_key] = result
+        return result
 
     @staticmethod
     def _buffer_is_contiguous(buffer_name: str) -> bool:
@@ -1075,8 +1149,9 @@ class PallasScheduling(SIMDScheduling):
 
     @classmethod
     def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
-        # Start minimal: no special features advertised
-        return OrderedSet()
+        # Pallas/JAX can handle reductions to single elements efficiently
+        # without requiring split reductions
+        return OrderedSet([BackendFeature.REDUCE_TO_SINGLE_ELEMENT])
 
     def define_kernel(
         self,
