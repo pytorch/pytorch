@@ -1164,25 +1164,24 @@ class TestPatternMatcher(TestPatternMatcherBase):
             quantization_with_autocast=quantization_with_autocast,
         )
 
-        if not int8_mixed_bf16 and not quantization_with_autocast:
-            if torch._inductor.config.cpp_wrapper:
-                self._test_code_common(
-                    mod,
-                    (v,),
-                    [f"aoti_torch_{device}__qconv_pointwise_tensor"],
-                    [],
-                    check_quantization=True,
-                    num_include_ops=[3],
-                )
-            else:
-                self._test_code_common(
-                    mod,
-                    (v,),
-                    ["torch.ops.onednn.qconv_pointwise.tensor"],
-                    [],
-                    check_quantization=True,
-                    num_include_ops=[3],
-                )
+        if torch._inductor.config.cpp_wrapper:
+            self._test_code_common(
+                mod,
+                (v,),
+                [f"aoti_torch_{device}__qconv_pointwise_tensor"],
+                [],
+                check_quantization=True,
+                num_include_ops=[3],
+            )
+        else:
+            self._test_code_common(
+                mod,
+                (v,),
+                ["torch.ops.onednn.qconv_pointwise.tensor"],
+                [],
+                check_quantization=True,
+                num_include_ops=[3],
+            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -1290,25 +1289,24 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_check_fn=matcher_check_fn,
         )
 
-        if not int8_mixed_bf16:
-            if torch._inductor.config.cpp_wrapper:
-                self._test_code_common(
-                    mod,
-                    (v,),
-                    [f"aoti_torch_{device}__qconv_pointwise_tensor"],
-                    [],
-                    check_quantization=True,
-                    num_include_ops=[2],
-                )
-            else:
-                self._test_code_common(
-                    mod,
-                    (v,),
-                    ["torch.ops.onednn.qconv_pointwise.tensor"],
-                    [],
-                    check_quantization=True,
-                    num_include_ops=[2],
-                )
+        if torch._inductor.config.cpp_wrapper:
+            self._test_code_common(
+                mod,
+                (v,),
+                [f"aoti_torch_{device}__qconv_pointwise_tensor"],
+                [],
+                check_quantization=True,
+                num_include_ops=[2],
+            )
+        else:
+            self._test_code_common(
+                mod,
+                (v,),
+                ["torch.ops.onednn.qconv_pointwise.tensor"],
+                [],
+                check_quantization=True,
+                num_include_ops=[2],
+            )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -1588,7 +1586,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             )
 
-            if not int8_mixed_bf16:
+            if not TEST_ACL:
                 if torch._inductor.config.cpp_wrapper:
                     self._test_code_common(
                         mod,
@@ -1711,7 +1709,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
             )
 
-            if not int8_mixed_bf16:
+            if not TEST_ACL:
                 if torch._inductor.config.cpp_wrapper:
                     self._test_code_common(
                         mod,
