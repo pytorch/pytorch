@@ -12025,6 +12025,31 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (torch.randn((16, 16, 16)),), check_lowp=False)
 
+    def test_fft_ifft_with_conv(self):
+        class FFTModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(3, 64, kernel_size=3, padding=1)
+            
+            def forward(self, x):
+                x = self.conv(x) 
+                x = torch.fft.ifft(x, n=256)
+                x = torch.real(x)
+                return x
+        
+        model = FFTModel()
+        x = torch.randn(4, 3, 32, 32)
+        
+        expected = model(x)
+        
+        compiled_model = torch.compile(model, backend="inductor")
+        output = compiled_model(x)
+        
+        self.assertEqual(output.shape, torch.Size([4, 64, 32, 256]))
+        self.assertEqual(output.stride(), (1048576, 16384, 512, 2))
+        
+        torch.testing.assert_close(output, expected)
+
     def test_searchsorted(self):
         def fn(sorted_sequence, values, out_int32, right, side, sorter):
             return torch.searchsorted(

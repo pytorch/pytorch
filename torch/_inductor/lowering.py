@@ -4508,6 +4508,7 @@ def inplace_constant_pad_nd(
 @register_lowering(aten.constant_pad_nd, type_promotion_kind=None)
 def constant_pad_nd(x, padding, fill_value=0):
     assert (len(padding) % 2) == 0
+    x = ir.ExternKernel.require_contiguous(x)
     if all(p == 0 for p in padding):
         return clone(x)
 
