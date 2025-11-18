@@ -20,6 +20,22 @@
     }                                                                      \
   } while (0)
 
+#define C10_CUDA_DRIVER_CHECK_GOTO(EXPR, NEXT)                             \
+  do {                                                                     \
+    CUresult __err = EXPR;                                                 \
+    if (__err != CUDA_SUCCESS) {                                           \
+      const char* err_str;                                                 \
+      CUresult get_error_str_err [[maybe_unused]] =                        \
+          c10::cuda::DriverAPI::get()->cuGetErrorString_(__err, &err_str); \
+      if (get_error_str_err != CUDA_SUCCESS) {                             \
+        TORCH_WARN("CUDA driver error: unknown error");                    \
+      } else {                                                             \
+        TORCH_WARN("CUDA driver error: ", err_str);                        \
+      }                                                                    \
+      goto NEXT;                                                           \
+    }                                                                      \
+  } while (0)
+
 // The integer in the second column specifies the requested CUDA Driver API
 // version. The dynamic loader will accept a driver with a newer version, but it
 // ensures that the requested symbol exists in *at least* the specified version
