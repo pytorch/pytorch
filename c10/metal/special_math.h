@@ -2021,9 +2021,9 @@ inline float special_ndtri(T p_input) {
   
   // Coefficients for the rational approximation
   // Low region: 0 < p < p_low
-  const float p_low = 0.02425f;
+  constexpr float p_low = 0.02425f;
   // High region: p_high < p < 1
-  const float p_high = 1.0f - p_low;
+  constexpr float p_high = 1.0f - p_low;
   
   float q, r, x;
   
