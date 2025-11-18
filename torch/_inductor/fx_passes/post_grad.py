@@ -755,16 +755,8 @@ def lazy_init():
         return decorated
 
 
-    for beta, alpha in itertools.product(betas, alphas):
-        @apply_activation(aten.relu)
-        @add_kwargs({**beta, **alpha})
-        def pattern(inp, m1, m2):
-            return aten.addmm(inp, m1, m2)
-
-        @add_kwargs({**beta, **alpha})
-        def replacement(inp, m1, m2):
-            return aten._addmm_activation(inp, m1, m2)
-
+    #for beta, alpha in itertools.product(betas, alphas):
+    for beta, alpha in itertools.product([{"beta": 1.2}], [{"alpha": 1.3}]):
         register_replacement(
             # pyrefly: ignore [bad-argument-type]
             lambda inp, m1, m2, beta, alpha: aten.relu(aten.addmm(inp, m1, m2, beta=beta, alpha=alpha)),

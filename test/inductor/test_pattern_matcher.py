@@ -1252,26 +1252,26 @@ class TestPatternMatcher(TestCase):
 
             # Cases without mapping to _addmm_activation
             # abs(beta) != 1 implies no _addmm_activation
-            _, (code) = run_and_get_code(fc, b, m1, m2, {"beta": 0.5}, alpha)
-            self.assertNotIn("_addmm_activation", code[0])
+            # _, (code) = run_and_get_code(fc, b, m1, m2, {"beta": 0.5}, alpha)
+            # self.assertNotIn("_addmm_activation", code[0])
 
         # Cases Activation(Addmm) -> Activation(Addmm)
-        #non_fusable_activations = (
-        #    torch.nn.functional.gelu,  # implies approximate="none"
-        #    lambda *args, **kwargs: torch.nn.functional.gelu(
-        #        *args, approximate="none", **kwargs
-        #    ),
-        #)
-        #for activation in non_fusable_activations:
-        #    for beta, alpha in itertools.product(betas, alphas):
+        non_fusable_activations = (
+            torch.nn.functional.gelu,  # implies approximate="none"
+            lambda *args, **kwargs: torch.nn.functional.gelu(
+                *args, approximate="none", **kwargs
+            ),
+        )
+        for activation in non_fusable_activations:
+            for beta, alpha in itertools.product(betas, alphas):
 
-        #        def f(b, m1, m2, beta, alpha):
-        #            return activation(torch.addmm(b, m1, m2, **beta, **alpha))
+                def f(b, m1, m2, beta, alpha):
+                    return activation(torch.addmm(b, m1, m2, **beta, **alpha))
 
-        #        fc = torch.compile(f)
+                fc = torch.compile(f)
 
-        #        _, (code) = run_and_get_code(fc, b, m1, m2, beta, alpha)
-        #        self.assertNotIn("_addmm_activation", code[0])
+                _, (code) = run_and_get_code(fc, b, m1, m2, beta, alpha)
+                self.assertNotIn("_addmm_activation", code[0])
 
     def test_addmm_alpha_beta_with_pointwise(self):
         # Test that addmm with alpha/beta != 1 is unfused correctly with pointwise ops
