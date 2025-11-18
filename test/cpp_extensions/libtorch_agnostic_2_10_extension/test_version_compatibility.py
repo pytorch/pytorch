@@ -22,8 +22,9 @@ import tempfile
 from pathlib import Path
 
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
-from torch.utils.cpp_extension import CUDA_HOME, include_paths as torch_include_paths
+from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME, include_paths as torch_include_paths
 
+GPU_HOME = CUDA_HOME or ROCM_HOME
 
 # TODO: Fix this error in Windows:
 # numba.cuda.cudadrv.driver:driver.py:384 Call to cuInit results in CUDA_ERROR_NO_DEVICE
@@ -42,8 +43,8 @@ if not IS_WINDOWS:
                 f"-I{path}" for path in torch_include_paths(device_type="cpu")
             ]
             cls.cuda_includes = []
-            if CUDA_HOME:
-                cuda_include_path = os.path.join(CUDA_HOME, "include")
+            if GPU_HOME:
+                cuda_include_path = os.path.join(GPU_HOME, "include")
                 if os.path.exists(cuda_include_path):
                     cls.cuda_includes = [f"-I{cuda_include_path}"]
 
@@ -105,17 +106,18 @@ if not IS_WINDOWS:
             Compile a CUDA file with TORCH_TARGET_VERSION=2.9.0.
             Returns (success, error_message).
             """
-            if not CUDA_HOME:
+            if not GPU_HOME:
                 return False, "CUDA_HOME not set"
 
             torch_version_2_9 = "0x0209000000000000"
 
             cmd = [
-                os.path.join(CUDA_HOME, "bin", "nvcc"),
+                os.path.join(GPU_HOME, "bin", "nvcc" if CUDA_HOME else "hipcc"),
                 "-c",
                 "-std=c++17",
                 f"-DTORCH_TARGET_VERSION={torch_version_2_9}",
                 f"-I{source_file.parent}",  # For includes in same directory
+                "-DUSE_ROCM=1" if ROCM_HOME else "",
                 *self.pytorch_includes,
                 *self.cuda_includes,
             ]
