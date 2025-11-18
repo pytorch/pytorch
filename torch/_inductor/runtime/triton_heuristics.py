@@ -17,7 +17,9 @@ import re
 import sys
 import threading
 import time
+import unittest.mock
 from collections import namedtuple
+from contextlib import ExitStack
 from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar, Union
 
 import torch
@@ -801,7 +803,22 @@ class CachingAutotuner(KernelInterface):
         }
 
         try:
-            binary = triton.compile(*compile_args, **compile_kwargs)
+            with ExitStack() as exit_stack:
+                if compile_meta.get("disable_ftz", True):
+                    exit_stack.enter_context(
+                        unittest.mock.patch(
+                            "triton._C.libtriton.nvidia.set_nvvm_reflect_ftz",
+                            lambda *_: None,
+                        )
+                    )
+                    original_hash = triton.backends.nvidia.compiler.CUDAOptions.hash
+                    exit_stack.enter_context(
+                        unittest.mock.patch(
+                            "triton.backends.nvidia.compiler.CUDAOptions.hash",
+                            lambda self: original_hash(self) + "-disable_ftz",
+                        )
+                    )
+                binary = triton.compile(*compile_args, **compile_kwargs)
         except Exception:
             log.exception(
                 "Triton compilation failed: %s\n%s\nmetadata: %s",
