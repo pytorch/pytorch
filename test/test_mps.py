@@ -647,6 +647,29 @@ class MatmulTest(TestCaseMPS):
 
         self.assertEqual(matmul_cpu, matmul_mps.to("cpu"))
 
+    def test_large_complex_matmul(self):
+        # See https://github.com/pytorch/pytorch/issues/167727
+        M, N, K = 64, 300, 3000
+        a = torch.rand((M, K), device='mps', dtype=torch.cfloat)
+        b = torch.rand((K, N), device='mps', dtype=torch.cfloat)
+        out = torch.mm(a, b)
+        out_cpu = torch.mm(a.cpu(), b.cpu())
+        # Operation order in large matmul can affect the results
+        # Float ulp is 1e-6, multiplied by inner dim results in 5e-3
+        self.assertEqual(out.cpu(), out_cpu, atol=5e-3, rtol=1e-5)
+
+    def test_large_complex_addmm(self):
+        # See https://github.com/pytorch/pytorch/issues/167727
+        M, N, K = 64, 300, 3000
+        a = torch.rand((M, N), device="mps", dtype=torch.cfloat)
+        b = torch.rand((M, K), device='mps', dtype=torch.cfloat)
+        c = torch.rand((K, N), device='mps', dtype=torch.cfloat)
+        out = torch.addmm(a, b, c, alpha=1.0, beta=0.5j)
+        out_cpu = torch.addmm(a.cpu(), b.cpu(), c.cpu(), alpha=1.0, beta=0.5j)
+        # Operation order in large matmul can affect the results
+        # Float ulp is 1e-6, multiplied by inner dim results in 5e-3
+        self.assertEqual(out.cpu(), out_cpu, atol=5e-3, rtol=2e-5)
+
     def test_empty_matmul_vec(self):
         tensor_1 = torch.rand((0, 100), device="mps")
         tensor_2 = torch.rand((100, ), device="mps")
@@ -3309,6 +3332,14 @@ class TestMPS(TestCaseMPS):
         helper(shape=(10, 15, 8), num_repeats=torch.randint(0, 100, (15, ), device="mps"), dim=1)
         helper(shape=(10, 15, 30), num_repeats=torch.randint(0, 100, (30, ), device="mps"), dim=2)
 
+    def test_repeat_interleave_offset(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167924
+        counts = torch.tensor([0, 1, 0], device="mps")
+        data = torch.arange(2, device="mps")
+        out_mps = data.repeat_interleave(counts[1:], dim=0)
+        out_cpu = data.cpu().repeat_interleave(counts.cpu()[1:], dim=0)
+        self.assertEqual(out_mps.cpu(), out_cpu)
+
     def test_count_nonzero(self):
         def helper(dtype):
             n = [
@@ -5593,7 +5624,6 @@ class TestMPS(TestCaseMPS):
         helper(2, 8, 4, 5)
 
     # Test clamp_max
-
     def test_clamp_max(self):
         def helper(n, c, h, w):
             cpu_x = torch.randn(n, c, h, w, device='cpu', dtype=torch.float, requires_grad=False)
@@ -5684,6 +5714,27 @@ class TestMPS(TestCaseMPS):
             self.assertEqual(cpu_x, x)
 
         helper(2, 8, 4, 5)
+
+    def test_clamp_tensor_bounds_broadcasting(self):
+        def helper(input_shape, bound_shape):
+            cpu_x = torch.randn(input_shape, device="cpu", dtype=torch.float32, requires_grad=False)
+            mps_x = cpu_x.detach().clone().to("mps")
+
+            cpu_min_t = torch.randn(bound_shape, device="cpu", dtype=cpu_x.dtype, requires_grad=False)
+            cpu_max_t = cpu_min_t + torch.rand_like(cpu_min_t).abs()
+
+            mps_min_t = cpu_min_t.detach().clone().to("mps")
+            mps_max_t = cpu_max_t.detach().clone().to("mps")
+
+            clamp_cpu = torch.clamp(cpu_x, min=cpu_min_t, max=cpu_max_t)
+            clamp_mps = torch.clamp(mps_x, min=mps_min_t, max=mps_max_t)
+
+            self.assertEqual(clamp_mps.cpu(), clamp_cpu)
+
+        helper((2, 3), (1, 2, 3))
+        helper((4, 2, 3), (1, 2, 3))
+        helper((2, 3), (2, 3))
+
 
     def test_divmode(self):
         def helper(shape, rounding_mode):

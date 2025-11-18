@@ -110,9 +110,7 @@ def _sdpa_kernel(backends: Iterable, set_priority: bool = False) -> None:
 
 
 @contextlib.contextmanager
-def sdpa_kernel(
-    backends: Union[list[SDPBackend], SDPBackend], set_priority: bool = False
-):
+def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = False):
     r"""
     Context manager to select which backend to use for scaled dot product attention.
 

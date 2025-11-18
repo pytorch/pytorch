@@ -52,10 +52,21 @@ def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
     )
 
 
+def _codegen_current_stream(device: torch.device, cg: "PyCodegen") -> None:
+    cg.add_push_null(
+        lambda: cg.load_import_from(
+            torch._dynamo.graph_bytecode_inputs.__name__,  # type: ignore[implicit-imports]
+            "stash_graph_created_object",
+        )
+    )
+    cg(CurrentStreamSource(device))
+    cg.extend_output(create_call_function(1, False))
+
+
 def get_current_stream(device: torch.device) -> int:
-    stream = torch.accelerator.current_stream()
+    stream = torch.accelerator.current_stream(device)
     return register_graph_created_object(
-        stream, lambda _, cg: cg(CurrentStreamSource(device))
+        stream, lambda _, cg: _codegen_current_stream(device, cg)
     )
 
 
@@ -364,12 +375,19 @@ class StreamVariable(StreamContextVariable):
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
                 lambda: codegen.load_import_from(
+                    torch._dynamo.graph_bytecode_inputs.__name__,  # type: ignore[implicit-imports]
+                    "stash_graph_created_object",
+                )
+            )
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
                     torch._dynamo.utils.__name__, "build_stream"
                 )
             )
             codegen(args)
             codegen(kwargs)
             codegen.extend_output(create_call_function(2, False))
+            codegen.extend_output(create_call_function(1, False))
 
         return fn
 
@@ -475,12 +493,19 @@ class EventVariable(VariableTracker):
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
                 lambda: codegen.load_import_from(
+                    torch._dynamo.graph_bytecode_inputs.__name__,  # type: ignore[implicit-imports]
+                    "stash_graph_created_object",
+                )
+            )
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
                     torch._dynamo.utils.__name__, "build_event"
                 )
             )
             codegen(args)
             codegen(kwargs)
             codegen.extend_output(create_call_function(2, False))
+            codegen.extend_output(create_call_function(1, False))
 
         return fn
 
