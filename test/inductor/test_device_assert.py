@@ -10,7 +10,10 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocm,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 @instantiate_parametrized_tests
@@ -55,14 +58,14 @@ class TestTorchDeviceAssertTrigger(TestCase):
         f_c = torch.compile(func_inline, backend=backend)
         f_c()
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @skipIfRocm
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_assert_fusion(self):
         torch._logging.set_logs(inductor_metrics=True)
 
         def func():
-            a = torch.tensor([1.0, 2.0], device="cuda")
+            a = torch.tensor([1.0, 2.0], device=device_type)
             result = torch.all(a > 0)
             assert result, "should throw"
 
@@ -74,13 +77,13 @@ class TestTorchDeviceAssertTrigger(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
         torch._logging.set_logs()
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @skipIfRocm
     @torch._inductor.config.patch(force_disable_caches=True)
     def test_run_assert_triton(self):
         @torch.compile(backend="inductor")
         def fn():
-            a = torch.tensor([1.0, 2.0], device="cuda")
+            a = torch.tensor([1.0, 2.0], device=device_type)
             result = torch.all(a > 0)
             assert result, "should throw"
 
