@@ -432,7 +432,7 @@ namespace {
     // Eg. Given `indexed_shape.size()` is 5 and
     // shape of `values` is (N, 2, 3), then following block
     // will reshape `values` to (N, 1, 1, 2, 3).
-    if ( (int64_t) indexed_shape.size() > values_.dim()) {
+    if ( static_cast<int64_t>(indexed_shape.size()) > values_.dim()) {
       auto values_sizes = values_.sym_sizes();
 
       // number of unit dims (for broadcasting value to indexed_shape)

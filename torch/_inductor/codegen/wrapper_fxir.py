@@ -4,8 +4,8 @@ import logging
 import operator
 import textwrap
 from collections import Counter
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -14,7 +14,6 @@ from torch._export.passes._node_metadata_hook import (
     _node_metadata_hook,
     _set_node_metadata_hook,
 )
-from torch._export.utils import _detect_fake_mode_from_gm
 from torch._higher_order_ops.triton_kernel_wrap import (
     TraceableTritonKernelWrapper,
     tracing_triton_hopifier_singleton,
@@ -23,7 +22,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor.codecache import LambdaFuture, PyCodeCache
 from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import extern_kernels  # noqa: F401
-from torch._inductor.utils import convert_shape_to_symint, convert_to_symint
+from torch._inductor.utils import convert_to_symint
 from torch._inductor.virtualized import V
 from torch._library.triton import wrap_triton
 from torch.fx import GraphModule
@@ -315,21 +314,6 @@ class FxConverter:
 
         return kernel
 
-    def _fake_tensor(
-        self,
-        size: tuple[Any, ...],
-        stride: tuple[Any, ...],
-        dtype: Optional[torch.dtype] = None,
-        device: Optional[torch.device] = None,
-    ) -> torch.Tensor:
-        with V.fake_mode:
-            return torch.empty_strided(
-                convert_shape_to_symint(size),
-                convert_shape_to_symint(stride),
-                dtype=dtype,
-                device=device,
-            )
-
     def _create_as_strided(
         self,
         input_node: torch.fx.Node,
@@ -606,11 +590,9 @@ class FxConverter:
         self._generate_graph_constants()
         self._generate_subgm_getattrs()
 
-        fake_mode = _detect_fake_mode_from_gm(self.gm)
-
         with _set_node_metadata_hook(
             self.gm,
-            functools.partial(_node_metadata_hook, fake_mode=fake_mode),
+            functools.partial(_node_metadata_hook, fake_mode=V.fake_mode),
         ):
             self._generate_graph_input_shapes()
 
@@ -696,6 +678,7 @@ class FxConverter:
         assert name not in V.graph.removed_buffers
 
         device = buffer.get_device()
+        assert device
         dtype = buffer.get_dtype()
         shape = self._generate_sym_nodes(buffer.get_size())
         stride = self._generate_sym_nodes(buffer.get_stride())
@@ -703,7 +686,7 @@ class FxConverter:
         node = self.gm.graph.call_function(
             torch.empty_strided,
             args=(shape, stride),
-            kwargs={"dtype": dtype, "device": device},
+            kwargs={"dtype": dtype, "device": device.type},
         )
         assert name
         node.name = name
@@ -967,7 +950,9 @@ class FxConverter:
             from triton.runtime import driver
 
             log.info("Autotuning Triton kernel %s at compile time.", kernel_name)
+            # pyrefly: ignore  # missing-attribute
             device = driver.active.get_current_device()
+            # pyrefly: ignore  # missing-attribute
             stream = driver.active.get_current_stream(device)
 
             def node_to_tuning_arg(arg: Any) -> Any:

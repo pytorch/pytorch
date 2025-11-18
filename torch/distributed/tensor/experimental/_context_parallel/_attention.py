@@ -29,7 +29,19 @@ from ._cp_custom_ops import flex_cp_allgather
 from ._load_balancer import _create_default_load_balancer, _LoadBalancer
 
 
-__all__ = ["context_parallel", "set_rotate_method"]
+__all__ = [
+    "_CausalBehavior",
+    "_context_parallel_shard",
+    "_ContextParallel",
+    "_cp_options",
+    "_disable_context_parallel_dispatcher",
+    "_enable_context_parallel_dispatcher",
+    "_is_causal_behavior",
+    "_RotateMethod",
+    "context_parallel",
+    "context_parallel_unshard",
+    "set_rotate_method",
+]
 
 
 class _CausalBehavior(Enum):
@@ -1020,9 +1032,7 @@ def _disable_context_parallel_dispatcher_impl() -> None:
     _disable_cp_dtensor_dispatcher()
 
 
-_compiled_create_block_mask = torch.compile(
-    create_block_mask, dynamic=False, fullgraph=True
-)
+_compiled_create_block_mask = None
 
 
 def _context_parallel_buffers(
@@ -1175,9 +1185,12 @@ def _create_cp_block_mask(
             f"BLOCK_SIZE {_DEFAULT_SPARSE_BLOCK_SIZE}. This is not supported yet. "
         )
 
-    compiled_create_block_mask = torch.compile(
-        create_block_mask, dynamic=False, fullgraph=True
-    )
+    global _compiled_create_block_mask
+    if _compiled_create_block_mask is None:
+        _compiled_create_block_mask = torch.compile(
+            create_block_mask, dynamic=False, fullgraph=True
+        )
+    compiled_create_block_mask = _compiled_create_block_mask
 
     def _rewrite_mask_mod(
         mask_mod: _mask_mod_signature,

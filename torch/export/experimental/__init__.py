@@ -52,7 +52,7 @@ def _remove_detach_pass(
             if (
                 node.target is torch.ops.aten.detach.default
                 and len(node.users) == 1
-                and next(iter(node.users)).target == torch.ops.aten.detach.default
+                and next(iter(node.users)).target is torch.ops.aten.detach.default
             ):
                 next(iter(node.users)).replace_all_uses_with(node)
 
@@ -420,13 +420,15 @@ class _ExportPackage:
                     path = Path(base_directory) / f"{name}_input_{i}.pt"
                     torch.save(t, path)
 
-        cmake_file_str = _get_make_file(package_name, model_names, use_cuda)
+        # Detect if ROCm is being used
+        is_hip = torch.version.hip is not None
+        cmake_file_str = _get_make_file(package_name, model_names, use_cuda, is_hip)
 
         with open(Path(base_directory) / "CMakeLists.txt", "w") as file:
             file.write(cmake_file_str)
 
         main_file_str = _get_main_cpp_file(
-            package_name, model_names, use_cuda, example_inputs_map
+            package_name, model_names, use_cuda, example_inputs_map, is_hip
         )
         with open(Path(base_directory) / "main.cpp", "w") as file:
             file.write(main_file_str)
