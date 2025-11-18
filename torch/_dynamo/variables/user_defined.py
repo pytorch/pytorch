@@ -113,6 +113,8 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
+    from .lists import TupleVariable
+
 
 def is_standard_setattr(val):
     return val in (object.__setattr__, BaseException.__setattr__)
@@ -2215,17 +2217,11 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     def __init__(
         self,
         value,
-        tuple_vt=None,
+        tuple_vt: Optional["TupleVariable"] = None,
         init_args=None,
         **kwargs,
     ):
         super().__init__(value, init_args=init_args, **kwargs)
-
-        if TYPE_CHECKING:
-            from .lists import TupleVariable
-
-            tuple_vt: Optional[TupleVariable]
-
         if tuple_vt is None:
             assert self.source is None, (
                 "tuple_vt must be constructed by builder.py when source is present"
