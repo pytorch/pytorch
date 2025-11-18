@@ -5,7 +5,7 @@ import types
 import typing
 import warnings
 from collections.abc import Callable
-from typing import cast, TypeAlias, TypeVar, Union
+from typing import cast, TypeAlias, TypeVar
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -24,10 +24,7 @@ __all__: list[str] = [
 ]
 
 
-_tensor_or_tensors: TypeAlias = Union[  # noqa: PYI042
-    torch.Tensor,
-    typing.Iterable[torch.Tensor],  # noqa: UP006 - needed until XLA's patch is updated
-]
+_tensor_or_tensors: TypeAlias = torch.Tensor | typing.Iterable[torch.Tensor]  # noqa: PYI042
 
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
