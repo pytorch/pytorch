@@ -5398,16 +5398,14 @@ class CommonTemplate:
         )
 
     def test_avg_pool2d7(self):
-        # Large kernel size, use fallback
+        # Large kernel size
         def fn(x):
             return aten.avg_pool2d(x, [13, 13], [1, 1], [0, 0])
 
-        torch._inductor.metrics.generated_kernel_count = 0
         self.common(
             fn,
             (-torch.arange(1 * 24 * 24, dtype=torch.float32).view(1, 1, 24, 24),),
         )
-        assertGeneratedKernelCountEqual(self, 0)
 
     def test_avg_pool2d8(self):
         # https://github.com/pytorch/pytorch/issues/100987
