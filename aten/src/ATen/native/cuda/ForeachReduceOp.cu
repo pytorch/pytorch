@@ -406,7 +406,9 @@ inline void check_foreach_norm_dtype(
 std::vector<Tensor> foreach_tensor_norm_cuda(
     TensorList tensors,
     const Scalar& ord,
-    std::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype,
+    at::OptionalIntArrayRef dim,
+    bool keepdim) {
   const auto p = [&]() -> double {
     if (ord.isIntegral(false)) {
       return ord.to<int64_t>();
@@ -427,7 +429,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   if (!can_use_fast_route(tensors) || has_int_or_complex ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2) ||
         p == std::numeric_limits<double>::infinity())) {
-    return foreach_tensor_norm_slow(tensors, ord, dtype);
+    return foreach_tensor_norm_slow(tensors, ord, dtype, dim, keepdim);
   }
   check_foreach_norm_dtype(
       dtype, tensors[0].scalar_type(), "_foreach_tensor_norm_cuda");
@@ -557,23 +559,6 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
     } else {
       result.emplace_back(at::zeros({}, res_option));
     }
-  }
-  return result;
-}
-
-std::vector<Tensor> foreach_tensor_norm_dim_cuda(
-    TensorList tensors,
-    const Scalar& ord,
-    OptionalIntArrayRef dim,
-    bool keepdim,
-    std::optional<ScalarType> dtype) {
-  // For the dim/keepdim variant, we fall back to slow path
-  // because the CUDA optimization is designed for full tensor reduction
-  // When reducing over specific dimensions, the tensor structure is different
-  std::vector<Tensor> result;
-  result.reserve(tensors.size());
-  for (const auto& t : tensors) {
-    result.push_back(t[0]);
   }
   return result;
 }
