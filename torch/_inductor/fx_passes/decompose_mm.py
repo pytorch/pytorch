@@ -49,6 +49,7 @@ def _mm_split_cat_rs_fn(
     orig_split_num_chunks: int,
     post_mm_ops,
 ):
+    assert isinstance(num_chunks, int)
     mm_i_a_args = [a] * num_chunks
     mm_i_b_args = [b] * num_chunks
     if scatter_dim == 0:
@@ -88,48 +89,6 @@ def _mm_split_cat_rs_fn(
     return (rs_out,)
 
 
-def _mm_pw_rs_fn(
-    a: torch.Tensor,
-    b: torch.Tensor,
-    num_chunks: int,
-    orig_out: torch.Tensor,
-    reduce_op: str,
-    group_size: int,
-    group_name: str,
-    scatter_dim: int,
-    orig_split_num_chunks: int,
-    post_mm_ops,
-):
-    a_flat = a.flatten(0, -2)
-    a_flat_chunks = a_flat.chunk(num_chunks)
-
-    # TODO: add reduce scatter into tensor and remove last cat
-    # out = torch.empty_strided(
-    #     size=orig_out.shape,
-    #     stride=orig_out.stride(),
-    #     dtype=orig_out.dtype,
-    #     device=orig_out.device,
-    # )
-    # out_flat = out.flatten(0, -2)
-    # out_flat_chunks = out_flat.chunk(num_chunks)
-
-    rs_outs = []
-    for i in range(num_chunks):
-        mm_i = torch.ops.aten.mm(a_flat_chunks[i], b)
-        for op in post_mm_ops:
-            mm_i = op.apply(mm_i, num_chunks)
-        mm_i_chunks = mm_i.chunk(orig_split_num_chunks)
-        cat = torch.cat(mm_i_chunks, dim=scatter_dim)
-        w = torch.ops._c10d_functional.reduce_scatter_tensor(
-            cat, reduce_op, group_size, group_name
-        )
-        rs_out_i = torch.ops._c10d_functional.wait_tensor(w)
-        rs_outs.append(rs_out_i)
-
-    rs_out = torch.cat(rs_outs)
-    return (rs_out,)
-
-
 def _size_hint(s: sympy.Expr) -> int:
     from torch.fx.experimental.symbolic_shapes import size_hint
 
@@ -143,12 +102,14 @@ def _is_contiguous(t) -> bool:
     return t.is_contiguous(memory_format=torch.contiguous_format)
 
 
-def split_mms(gm: torch.fx.GraphModule, min_m_size: int, num_chunks: int = 2):
+def split_mm(
+    gm: torch.fx.GraphModule, min_size_after_split: int, num_chunks: list[int] = [2]
+):
     g = gm.graph
     g.owning_module
 
     for n in g.nodes:
-        if n.op == "call_function" and n.target != torch.ops.aten.mm.default:
+        if not (n.op == "call_function" and n.target == torch.ops.aten.mm.default):
             continue
 
         mm_n = n
@@ -157,12 +118,21 @@ def split_mms(gm: torch.fx.GraphModule, min_m_size: int, num_chunks: int = 2):
 
         a_t = arg_a.meta["val"]
 
-        M = 1
+        size_before_split = 1
         for s in a_t.shape[:-1]:
-            M *= _size_hint(s)
+            size_before_split *= _size_hint(s)
 
-        if M < min_m_size:
-            continue
+        # Pick the greatest number from num_chunks,
+        # that satisfies min_size_after_split
+        sorted_num_chunks = sorted(num_chunks)
+        n_split = None
+        for _n in reversed(sorted_num_chunks):
+            if size_before_split // _n >= min_size_after_split:
+                n_split = _n
+                break
+
+        if n_split is None:
+            return
 
         arg_a_t = arg_a.meta["val"]
         arg_b_t = arg_b.meta["val"]
@@ -174,7 +144,7 @@ def split_mms(gm: torch.fx.GraphModule, min_m_size: int, num_chunks: int = 2):
 
         from torch._inductor.fx_passes.bucketing import _insert_fn_trace_before_node
 
-        trace_args = (arg_a_t, arg_b_t, num_chunks, mm_out_t)
+        trace_args = (arg_a_t, arg_b_t, n_split, mm_out_t)
         _insert_fn_trace_before_node(
             g,
             _fn,
@@ -199,7 +169,11 @@ class _ReduceScatterMatch:
     group_name: str
 
 
-def split_mm_rs(gm: torch.fx.GraphModule, min_m_size: int, num_chunks: int = 2):
+def split_mm_rs(
+    gm: torch.fx.GraphModule,
+    min_size_after_split: int = 2048,
+    num_chunks: list[int] = [2],
+):
     g = gm.graph
 
     def reduce_scatter_template(inp: PatternExpr, users: int):
@@ -274,7 +248,9 @@ def split_mm_rs(gm: torch.fx.GraphModule, min_m_size: int, num_chunks: int = 2):
 
     reduce_scatters = list(reversed(reduce_scatters))
     for reduce_scatter in reduce_scatters:
-        process_matmul_reduce_scatter(g, reduce_scatter, min_m_size, num_chunks)
+        _process_matmul_reduce_scatter(
+            g, reduce_scatter, min_size_after_split, num_chunks
+        )
 
 
 @dataclasses.dataclass
@@ -296,8 +272,8 @@ class _ViewOp(_PostMMOp):
         return self.n.target(t, shape)
 
 
-def process_matmul_reduce_scatter(
-    g, reduce_scatter: _ReduceScatterMatch, min_size_after_split, num_chunks
+def _process_matmul_reduce_scatter(
+    g, reduce_scatter: _ReduceScatterMatch, min_size_after_split, num_chunks: list[int]
 ) -> None:
     (
         input_node,
@@ -346,6 +322,7 @@ def process_matmul_reduce_scatter(
             out_shape = n.args[1]
             if in_shape[-1] != out_shape[-1]:
                 return
+            # TODO: Handle different views
             post_mm_ops.append(_ViewOp(n, chunk_dim=1))
             continue
 
@@ -358,18 +335,27 @@ def process_matmul_reduce_scatter(
     arg_a_t = arg_a.meta["val"]
     arg_b_t = arg_b.meta["val"]
 
-    size_after_split = 1
+    size_before_split = 1
     cont_check_t = arg_a_t
     if orig_scatter_dim == 0:
         # split B column wise
-        size_after_split *= _size_hint(arg_b_t.shape[-1])
+        size_before_split *= _size_hint(arg_b_t.shape[-1])
         cont_check_t = arg_b_t
     else:
         # split A row wise
         for s in arg_a_t.shape[:-1]:
-            size_after_split *= _size_hint(s)
+            size_before_split *= _size_hint(s)
 
-    if size_after_split < min_size_after_split:
+    # Pick the greatest number from num_chunks,
+    # that satisfies min_size_after_split
+    sorted_num_chunks = sorted(num_chunks)
+    n_split = None
+    for _n in reversed(sorted_num_chunks):
+        if size_before_split // _n >= min_size_after_split:
+            n_split = _n
+            break
+
+    if n_split is None:
         return
 
     rs_out_t = rs_wait_tensor_node.meta["val"]
@@ -383,7 +369,7 @@ def process_matmul_reduce_scatter(
     trace_args = (
         arg_a_t,
         arg_b_t,
-        num_chunks,
+        n_split,
         rs_out_t,
         reduce_op,
         group_size,
