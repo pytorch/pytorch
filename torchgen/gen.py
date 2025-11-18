@@ -2072,7 +2072,6 @@ def gen_headers(
     cpu_fm: FileManager,
     device_fms: dict[str, FileManager],
     ops_fm: FileManager,
-    headeronly_fm: FileManager,
     dispatch_keys: Sequence[DispatchKey],
     functions_keys: set[DispatchKey],
     rocm: bool,
@@ -2191,13 +2190,6 @@ def gen_headers(
         }
 
     core_fm.write("aten_interned_strings.h", gen_aten_interned_strings)
-
-    # Generate enum_tag.h in torch/headeronly/core
-    def gen_tags_enum() -> dict[str, str]:
-        return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
-
-    assert headeronly_fm is not None, "headeronly_fm must be provided to gen_headers"
-    headeronly_fm.write("enum_tag.h", gen_tags_enum)
 
     # Generate forwarding header at ATen/core/enum_tag.h for backward compatibility
     core_fm.write("enum_tag.h", dict)
@@ -2825,9 +2817,20 @@ def main() -> None:
         "--generate",
         type=str,
         nargs="*",
-        choices=["headers", "sources", "declarations_yaml", "headeronly"],
+        choices=["headers", "sources", "declarations_yaml"],
         default=["headers", "sources", "declarations_yaml"],
         help="Generate only a subset of files",
+    )
+    parser.add_argument(
+        "--headeronly",
+        action="store_true",
+        help="Generate only torch/headeronly generated files (e.g. enum_tag.h).",
+    )
+    parser.add_argument(
+        "--headeronly-install-dir",
+        "--headeronly_install_dir",
+        help="base output directory for headeronly files (core/ and templates/ will be derived from this)",
+        default="torch/headeronly",
     )
     parser.add_argument(
         "--update-aoti-c-shim",
@@ -2951,32 +2954,12 @@ def main() -> None:
     aoti_install_dir = f"{options.aoti_install_dir}"
     Path(aoti_install_dir).mkdir(parents=True, exist_ok=True)
 
-    # Create directory and file manager for torch/headeronly
-    # Derive headeronly_install_dir from install_dir (build output)
-    # Going up 3 levels from build/aten/src/ATen -> build, then to torch/headeronly/core
-    install_dir_parent = os.path.dirname(
-        os.path.dirname(os.path.dirname(options.install_dir))
-    )
-    headeronly_install_dir = f"{install_dir_parent}/torch/headeronly/core"
-    Path(headeronly_install_dir).mkdir(parents=True, exist_ok=True)
-    # Derive headeronly_template_dir from source_path (source tree)
-    # Going up 3 levels from aten/src/ATen -> root, then to torch/headeronly/templates
-    source_path_parent = os.path.dirname(
-        os.path.dirname(os.path.dirname(options.source_path))
-    )
-    headeronly_template_dir = f"{source_path_parent}/torch/headeronly/templates"
-
     core_fm = make_file_manager(options=options, install_dir=core_install_dir)
     cpu_fm = make_file_manager(options=options)
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
     aoti_fm = make_file_manager(options=options, install_dir=aoti_install_dir)
-    headeronly_fm = make_file_manager(
-        options=options,
-        install_dir=headeronly_install_dir,
-        template_dir=headeronly_template_dir,
-    )
     device_fms = {"cuda": cuda_fm}
     if options.xpu:
         device_fms["xpu"] = make_file_manager(options=options)
@@ -2991,6 +2974,37 @@ def main() -> None:
             dp_key = DispatchKey.parse(key)
             if dp_key not in functions_keys:
                 functions_keys.add(dp_key)
+
+    if options.headeronly:
+        # Generate only the headeronly files (enum_tag.h)
+        # Parse tags.yaml to get valid tags
+        headeronly_valid_tags = parse_tags_yaml(tags_yaml_path)
+
+        # Create a FileManager for headeronly output
+        # The install directory is derived from the base, but the template directory
+        # is always in the source tree at torch/headeronly/templates
+        headeronly_base_dir = options.headeronly_install_dir
+        headeronly_install_dir = f"{headeronly_base_dir}/core"
+        Path(headeronly_install_dir).mkdir(parents=True, exist_ok=True)
+        headeronly_template_dir = "torch/headeronly/templates"
+        headeronly_fm = make_file_manager(
+            options=options,
+            install_dir=headeronly_install_dir,
+            template_dir=headeronly_template_dir,
+        )
+
+        # Generate enum_tag.h
+        def gen_tags_enum() -> dict[str, str]:
+            return {"enum_of_valid_tags": (",\n".join(sorted(headeronly_valid_tags)))}
+
+        headeronly_fm.write("enum_tag.h", gen_tags_enum)
+
+        # Early return - write outputs for CMake dependency tracking
+        if options.output_dependencies:
+            headeronly_fm.write_outputs(
+                "headeronly_generated_headers", options.output_dependencies
+            )
+        return
 
     if "sources" in options.generate:
         gen_source_files(
@@ -3030,19 +3044,11 @@ def main() -> None:
             cpu_fm=cpu_fm,
             device_fms=device_fms,
             ops_fm=ops_fm,
-            headeronly_fm=headeronly_fm,
             dispatch_keys=dispatch_keys,
             functions_keys=functions_keys,
             rocm=options.rocm,
             per_operator_headers=options.per_operator_headers,
         )
-
-    if "headeronly" in options.generate:
-        # Generate only the headeronly files (enum_tag.h)
-        def gen_tags_enum() -> dict[str, str]:
-            return {"enum_of_valid_tags": (",\n".join(sorted(valid_tags)))}
-
-        headeronly_fm.write("enum_tag.h", gen_tags_enum)
 
     if "declarations_yaml" in options.generate:
         gen_declarations_yaml(native_functions=native_functions, cpu_fm=cpu_fm)

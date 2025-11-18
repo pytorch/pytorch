@@ -2,6 +2,7 @@
 # These load paths point to different files in internal and OSS environment
 
 load("@bazel_skylib//lib:paths.bzl", "paths")
+load("//tools/build_defs:cell_defs.bzl", "get_fbsource_cell")
 load("//tools/build_defs:fb_native_wrapper.bzl", "fb_native")
 load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:fb_xplat_genrule.bzl", "fb_xplat_genrule")
@@ -400,7 +401,6 @@ def get_aten_generated_files(enabled_backends):
         "core/aten_interned_strings.h",
         "core/enum_tag.h",
         "torch/csrc/inductor/aoti_torch/generated/c_shim_cpu.cpp",
-        "torch/headeronly/core/enum_tag.h",
     ] + get_aten_derived_type_srcs(enabled_backends)
 
     # This is tiresome.  A better strategy would be to unconditionally
@@ -591,6 +591,9 @@ def pt_operator_query_codegen(
         pt_allow_forced_schema_registration = True,
         compatible_with = [],
         apple_sdks = None):
+    if get_fbsource_cell() == "fbcode":
+        return
+
     oplist_dir_name = name + "_pt_oplist"
 
     # @lint-ignore BUCKLINT
@@ -866,6 +869,9 @@ def define_buck_targets(
         pt_xplat_cxx_library = fb_xplat_cxx_library,
         c2_fbandroid_xplat_compiler_flags = [],
         labels = []):
+    if get_fbsource_cell() == "fbcode":
+        return
+
     # @lint-ignore BUCKLINT
     fb_native.filegroup(
         name = "metal_build_srcs",
@@ -1210,6 +1216,9 @@ def define_buck_targets(
             "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
         }),
         labels = labels,
+        exported_deps = [
+            "{}torch/headeronly:enum_tag_h".format(ROOT_PATH),
+        ],
     )
 
     fb_xplat_cxx_library(

@@ -65,6 +65,7 @@ def define_targets(rules):
     gen_aten_srcs = [
         "aten/src/ATen/native/native_functions.yaml",
         "aten/src/ATen/native/tags.yaml",
+        "//torch/headeronly:enum_tag_h",
     ] + rules.glob(["aten/src/ATen/templates/*"])
 
     gen_aten_cmd = " ".join([
@@ -93,7 +94,7 @@ def define_targets(rules):
 
     rules.genrule(
         name = "gen_aten",
-        srcs = gen_aten_srcs + ["//torch/headeronly:enum_tag_h"],  # Depend on enum_tag.h from torch/headeronly
+        srcs = gen_aten_srcs,
         outs = gen_aten_outs,
         cmd = gen_aten_cmd,
         tools = ["//torchgen:gen"],
