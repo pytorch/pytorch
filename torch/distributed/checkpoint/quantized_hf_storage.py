@@ -6,9 +6,8 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from torch._subclasses.fake_tensor import TensorMetadata
 from torch.distributed.checkpoint._hf_utils import _metadata_fn
-from torch.distributed.checkpoint.metadata import MetadataIndex, TensorStorageMetadata
+from torch.distributed.checkpoint.metadata import TensorStorageMetadata
 from torch.distributed.checkpoint.planner import LoadPlanner, ReadItem
 
 from .hf_storage import HuggingFaceStorageReader
@@ -67,9 +66,9 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
             # Only process TensorStorageMetadata which has size attribute.
             if isinstance(tensor_metadata, TensorStorageMetadata):
                 # Check if this is a MXFP4 quantized tensor that needs shape correction.
-                if fqn.endswith('_blocks'):
+                if fqn.endswith("_blocks"):
                     # Save the quantized tensor shapes for lookup when dequantization.
-                    self._tensor_full_shapes[fqn + '_quantized'] = tensor_metadata.size
+                    self._tensor_full_shapes[fqn + "_quantized"] = tensor_metadata.size
                     *prefix_shape, G, B = tensor_metadata.size
                     dequantized_size = torch.Size([*prefix_shape, G * B * 2])
 
@@ -195,8 +194,22 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         """
         # FP4 lookup table
         FP4_VALUES = [
-            +0.0, +0.5, +1.0, +1.5, +2.0, +3.0, +4.0, +6.0,
-            -0.0, -0.5, -1.0, -1.5, -2.0, -3.0, -4.0, -6.0,
+            +0.0,
+            +0.5,
+            +1.0,
+            +1.5,
+            +2.0,
+            +3.0,
+            +4.0,
+            +6.0,
+            -0.0,
+            -0.5,
+            -1.0,
+            -1.5,
+            -2.0,
+            -3.0,
+            -4.0,
+            -6.0,
         ]
 
         # blocks: [a_slice, b_slice, groups_slice, B] uint8.
@@ -209,7 +222,11 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         dim1_start = req.storage_offsets[1]
         dim1_end = dim1_start + req.lengths[1]
         num_groups = blocks.shape[2]
-        scales = scales[dim0_start:dim0_end, dim1_start:dim1_end, group_start:group_start+num_groups]
+        scales = scales[
+            dim0_start:dim0_end,
+            dim1_start:dim1_end,
+            group_start : group_start + num_groups,
+        ]
 
         scales = scales.to(torch.int32) - 127
 
@@ -225,7 +242,9 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         blocks = blocks.reshape(rows_total, B)
         scales = scales.reshape(rows_total, 1)
 
-        out = torch.empty(rows_total, B * 2, dtype=self.target_dtype, device=blocks.device)
+        out = torch.empty(
+            rows_total, B * 2, dtype=self.target_dtype, device=blocks.device
+        )
 
         rows_per_chunk = 16384 * 512
 
@@ -352,7 +371,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
             False otherwise
         """
         # Skip scale tensors themselves
-        if tensor_fqn.endswith(".weight_scale_inv") or tensor_fqn.endswith("_scales"):
+        if tensor_fqn.endswith((".weight_scale_inv", "_scales")):
             return False
 
         # Check if this weight tensor has a corresponding scale tensor
@@ -378,7 +397,9 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         scale_fqn = self._weight_scale_mapping[tensor_fqn]
 
         try:
-            if tensor_fqn.endswith('_blocks'):
+            group_start = 0
+            offset_in_first_group = 0
+            if tensor_fqn.endswith("_blocks"):
                 # Full tensor is a 4D MXFP4 quantized tensor: [..., G, B].
                 # Each group G produces B * 2 dequantized values.
                 # Checkpoint [..., G, B] -> dequantized [..., G*B*2].
@@ -387,7 +408,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                 # Need to figure out which groups (dimension 2 in checkpoint) to read.
 
                 # Use the quantized checkpoint shape to get the correct B.
-                *prefix_shape, B = self._tensor_full_shapes[tensor_fqn + '_quantized']
+                *prefix_shape, B = self._tensor_full_shapes[tensor_fqn + "_quantized"]
                 values_per_group = B * 2  # Each byte has 2 nibbles (4-bit values).
 
                 # Calculate which groups we need based on the requested range in dim 2.
@@ -405,15 +426,23 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
 
                 # Read only the necessary groups from checkpoint.
                 weight_slices_4d = (
-                    slice(req.storage_offsets[0], req.storage_offsets[0] + req.lengths[0]),
-                    slice(req.storage_offsets[1], req.storage_offsets[1] + req.lengths[1]),
+                    slice(
+                        req.storage_offsets[0], req.storage_offsets[0] + req.lengths[0]
+                    ),
+                    slice(
+                        req.storage_offsets[1], req.storage_offsets[1] + req.lengths[1]
+                    ),
                     slice(group_start, group_end),
                     slice(None),  # Read all B values for each group.
                 )
-                quantized_tensor = safetensor_file.get_slice(tensor_fqn)[weight_slices_4d]
+                quantized_tensor = safetensor_file.get_slice(tensor_fqn)[
+                    weight_slices_4d
+                ]
 
                 # Also track the offset within the first group
-                offset_in_first_group = dim2_start_deq - (group_start * values_per_group)
+                offset_in_first_group = dim2_start_deq - (
+                    group_start * values_per_group
+                )
             else:
                 # 2D quantized tensor, use 2d block partition.
                 weight_slices = tuple(
@@ -421,7 +450,6 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                     for offset, length in zip(req.storage_offsets, req.lengths)
                 )
                 quantized_tensor = safetensor_file.get_slice(tensor_fqn)[weight_slices]
-                offset_in_first_group = 0
 
             # Load the corresponding scale inverse tensor (full tensor)
             scale_file_name = self._weight_map.get(scale_fqn)
@@ -469,7 +497,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
                     offset_in_first_group=offset_in_first_group,
                 )
             else:
-                raise ValueError(f"Unsupported quantization types")
+                raise ValueError("Unsupported quantization types")
 
             return dequantized_tensor
 
