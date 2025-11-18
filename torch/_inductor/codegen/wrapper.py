@@ -15,7 +15,7 @@ import re
 import tempfile
 from collections.abc import Callable
 from itertools import chain, count
-from typing import Any, Optional, TYPE_CHECKING, cast, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -66,7 +66,6 @@ from .common import (
     ArgName,
     CodeGen,
     DeferredLine,
-    get_scheduling_for_device,
     PythonPrinter,
     WorkspaceArg,
     WorkspaceZeroMode,
@@ -74,6 +73,7 @@ from .common import (
 from .cpp_utils import cexpr
 from .custom_extern_kernel_codegen import CUSTOM_EXTERN_KERNEL_CODEGEN
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
+
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -1077,7 +1077,7 @@ class PythonWrapperCodegen(CodeGen):
     Generate outer wrapper in Python that calls the kernels.
     """
 
-    supports_caching: bool= True  # Whether the output code is cacheable.
+    supports_caching: bool = True  # Whether the output code is cacheable.
 
     def __init__(self):
         super().__init__()
@@ -1184,8 +1184,8 @@ class PythonWrapperCodegen(CodeGen):
         if is_subgraph:
             assert subgraph_name is not None
             assert parent_wrapper is not None
-            return SubgraphPythonWrapperCodegen(
-                subgraph_name, parent_wrapper, partition_signatures
+            return PythonWrapperCodegen.create(
+                is_subgraph, subgraph_name, parent_wrapper, partition_signatures
             )
         return PythonWrapperCodegen()
 
@@ -2424,12 +2424,13 @@ class PythonWrapperCodegen(CodeGen):
         self.subgraph_definitions.splice(subgraph_code.value)
 
     @classmethod
-    def _get_triton_info_kernel_cls(cls) -> "TritonKernel":
+    def _get_triton_info_kernel_cls(cls):
         # Other inductor triton backends may be subclass from
         # the TritonKernel class. An override of this method
         # allows them to set which subclass to use to get information
         # such as common triton imports or inductor metadata
         from .triton import TritonKernel
+
         return TritonKernel
 
     def define_user_defined_triton_kernel(
@@ -2453,7 +2454,6 @@ class PythonWrapperCodegen(CodeGen):
             TensorArg,
             TMADescriptorArg,
         )
-        from .triton import TritonKernel, TritonScheduling
 
         original_name = kernel.__name__
         signature: list[KernelArgType] = []

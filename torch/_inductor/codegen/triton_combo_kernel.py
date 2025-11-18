@@ -347,9 +347,10 @@ class ComboKernel(Kernel):
                 code.splice(f"pid_offset = pid // {num_kernels}")
 
     def __init__(
-        self, enable_autotune: bool = False, mixed_sizes: bool = False
+        self, triton_kernel_cls: type[TritonKernel], enable_autotune: bool = False, mixed_sizes: bool = False,
     ) -> None:
         super().__init__()
+        self.triton_kernel_cls = triton_kernel_cls
         self.sub_kernels: list[TritonKernel] = []
         self.iter_vars_count = itertools.count()
         self.grids: list[list[int]] = []
@@ -383,12 +384,13 @@ class ComboKernel(Kernel):
         tiling: dict[str, sympy.Expr],
         features: SIMDKernelFeatures,
         optimize_mask: bool,
+        triton_kernel_cls: type[TritonKernel]
     ) -> TritonKernel:
         """
         Only allow optimize_mask=True when 1) sequential dispatch is used,
         2) numels except x dimension are the same for each sub kernel.
         """
-        return ComboKernel._get_triton_kernel_cls_type(
+        return triton_kernel_cls(
             tiling,
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
@@ -616,13 +618,12 @@ class ComboKernel(Kernel):
         dispatch = self.dispatch_class
         assert dispatch is not None
 
-        triton_kernel_cls = self._get_triton_kernel_cls_type()
         inductor_meta = {
             "grid_type": dispatch.grid_expr.__name__,
             "combo_grid_meta": self.combo_grid_meta(),
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
-            **triton_kernel_cls.inductor_meta_common(),
+            **self.triton_kernel_cls.inductor_meta_common(),
         }
 
         sub_kernel = selected_kernel
@@ -748,15 +749,6 @@ class ComboKernel(Kernel):
                     )
         return extra_args
 
-    @staticmethod
-    def _get_triton_kernel_cls_type() -> type[TritonKernel]:
-        triton_kernel_cls = TritonKernel
-        maybe_triton_scheduler = V.graph.scheduler
-        if issubclass(maybe_triton_scheduler, TritonScheduling) and issubclass(maybe_triton_scheduler.kernel_type, TritonKernel):
-            triton_kernel_cls = maybe_triton_scheduler.kernel_type
-            triton_kernel_cls = cast(type[TritonKernel], triton_kernel_cls)
-        return triton_kernel_cls
-
     def codegen_kernel(self, name: Optional[str] = None) -> str:
         """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
         # TODO: is it correct to use the first sub kernel's heuristics?
@@ -775,8 +767,7 @@ class ComboKernel(Kernel):
         )
         code = IndentedBuffer()
 
-        triton_kernel_cls = self._get_triton_kernel_cls_type()
-        code.splice(triton_kernel_cls.gen_common_triton_imports())
+        code.splice(self.triton_kernel_cls.gen_common_triton_imports())
         if config.benchmark_combo_kernel:
             code.splice(self.imports_for_benchmark_kernel())
 
