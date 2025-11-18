@@ -1,5 +1,6 @@
 import functools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
@@ -144,7 +145,9 @@ def register_unary_binary_patterns(
                             )
 
                     match.replace_by_example(
-                        repl, [arg_0, arg_1, arg_2, arg_3, is_weight_prepacked]
+                        # pyrefly: ignore [bad-argument-type]
+                        repl,
+                        [arg_0, arg_1, arg_2, arg_3, is_weight_prepacked],
                     )
 
                 replacement_fn.__name__ = (
@@ -195,7 +198,9 @@ def register_unary_binary_patterns(
                             )
 
                     match.replace_by_example(
-                        repl, [arg_0, arg_1, arg_2, is_weight_prepacked]
+                        # pyrefly: ignore [bad-argument-type]
+                        repl,
+                        [arg_0, arg_1, arg_2, is_weight_prepacked],
                     )
 
                 replacement_fn.__name__ = f"zendnn_linear_{unary_name}_{binary_name}_no_bias_replacement_{idx}"
@@ -206,7 +211,10 @@ def register_unary_binary_patterns(
             i, unary_post_op_name, binary_post_op_name, bias
         )
         register_graph_pattern(
-            pattern_lst[i], pass_dict=pass_pattern, extra_check=binary_dim_check(i)
+            pattern_lst[i],
+            # pyrefly: ignore [bad-argument-type]
+            pass_dict=pass_pattern,
+            extra_check=binary_dim_check(i),
         )(replacement_func)
 
 

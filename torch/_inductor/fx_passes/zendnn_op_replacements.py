@@ -1,5 +1,6 @@
 import functools
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters
@@ -29,6 +30,7 @@ aten = torch.ops.aten
         Arg(),
         Arg(),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_pattern,
 )
 def linear_replacement(match: Match, mat_1: Any, mat_2: Any, bias: Any) -> None:
@@ -36,6 +38,7 @@ def linear_replacement(match: Match, mat_1: Any, mat_2: Any, bias: Any) -> None:
         counters["zendnn"]["zendnn_linear"] += 1
         return aten.zendnn_linear_unary(mat_1, mat_2, bias)
 
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [mat_1, mat_2, bias])
 
 
@@ -45,6 +48,7 @@ def linear_replacement(match: Match, mat_1: Any, mat_2: Any, bias: Any) -> None:
         Arg(),
         Arg(),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_pattern,
 )
 def linear_replacement_no_bias(match: Match, mat_1: Any, mat_2: Any) -> None:
@@ -52,6 +56,7 @@ def linear_replacement_no_bias(match: Match, mat_1: Any, mat_2: Any) -> None:
         counters["zendnn"]["zendnn_linear"] += 1
         return aten.zendnn_linear_unary(mat_1, mat_2)
 
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [mat_1, mat_2])
 
 
@@ -91,6 +96,7 @@ def is_placeholder(
         Arg(),
         CallFunction(aten.permute, Arg(), Arg()),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_pattern,
     extra_check=is_placeholder(1),  # weight_idx = 1, bias = None
 )
@@ -99,6 +105,7 @@ def mm_linear_replacement_2d(match: Match, mat_1: Any, mat_2: Any, dims: Any) ->
         counters["zendnn"]["zendnn_linear"] += 1
         return aten.zendnn_linear_unary(mat_1, mat_2)
 
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [mat_1, mat_2, dims])
 
 
@@ -112,6 +119,7 @@ def mm_linear_replacement_2d(match: Match, mat_1: Any, mat_2: Any, dims: Any) ->
         ),
         Arg(),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_pattern,
     extra_check=is_placeholder(2),  # weight_idx = 2, bias = None
 )
@@ -131,6 +139,7 @@ def mm_linear_replacement_nd(
             counters["zendnn"]["zendnn_linear"] += 1
             return aten.zendnn_linear_unary(mat_1, mat_2)
 
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [mat_1, size, mat_2, dims, size_1])
 
 
@@ -143,6 +152,7 @@ def mm_linear_replacement_nd(
         beta=KeywordArg("beta"),
         alpha=KeywordArg("alpha"),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_pattern,
     extra_check=is_placeholder(2, 0),  # weight_idx = 2, bias_idx = 0
 )
@@ -162,6 +172,7 @@ def addmm_linear_replacement_2d(
         counters["zendnn"]["zendnn_linear"] += 1
         return aten.zendnn_linear_unary(mat_1, mat_2, bias)
 
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [bias, mat_1, mat_2, dims, beta, alpha])
 
 
@@ -178,6 +189,7 @@ def addmm_linear_replacement_2d(
         ),
         Arg(),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_pattern,
     extra_check=is_placeholder(3, 0),  # weight_idx = 3, bias_idx = 0
 )
@@ -214,7 +226,9 @@ def addmm_linear_replacement_nd(
             return aten.zendnn_linear_unary(mat_1, mat_2, bias)
 
     match.replace_by_example(
-        repl, [bias, mat_1, size, mat_2, dims, size_1, beta, alpha]
+        # pyrefly: ignore [bad-argument-type]
+        repl,
+        [bias, mat_1, size, mat_2, dims, size_1, beta, alpha],
     )
 
 
