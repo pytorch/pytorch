@@ -122,10 +122,12 @@ if not IS_WINDOWS:
                 "-std=c++17",
                 f"-DTORCH_TARGET_VERSION={torch_version_2_9}",
                 f"-I{source_file.parent}",  # For includes in same directory
-                "-DUSE_ROCM=1" if ROCM_HOME else "",
                 *self.pytorch_includes,
                 *self.cuda_includes,
             ]
+
+            if ROCM_HOME:
+                cmd.extend(["-DUSE_ROCM=1"])
 
             cmd.extend([str(source_file), "-o", str(output_file)])
 
