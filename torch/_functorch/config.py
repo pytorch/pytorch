@@ -65,6 +65,8 @@ autograd_cache_allow_custom_autograd_functions: bool = Config(
     env_name_force="TORCHINDUCTOR_AUTOGRAD_CACHE_ALLOW_CUSTOM_AUTOGRAD", default=False
 )
 
+pallas_target_tpu: bool = Config(env_name_force="PALLAS_TARGET_TPU", default=False)
+
 # For now, this is just for enabling unit testing in test_aot_autograd_cache.py
 # We will either make this the default with AOTAutogradCache, or
 # we'll just use it in the precompile flow. So there's no

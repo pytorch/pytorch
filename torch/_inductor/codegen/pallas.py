@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy  # noqa: TC002
@@ -888,7 +887,7 @@ class PallasKernel(SIMDKernel):
 
         kernel_name = name or "<KERNEL_NAME>"
         interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
-        is_tpu = os.environ.get("PALLAS_TARGET_TPU") == "1"
+        is_tpu = torch._functorch.config.pallas_target_tpu
         if is_tpu and not has_tpu_pallas():
             raise RuntimeError(
                 "PALLAS_TARGET_TPU is set, but no TPU device was found. "
@@ -928,7 +927,7 @@ class PallasKernel(SIMDKernel):
             is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
                 buffer_name
             )
-            aliasable_flags[param] = not interpret_is_cpu and is_contiguous
+            aliasable_flags[param] = (not interpret_is_cpu) and is_contiguous
         alias_params = [
             f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
         ]
@@ -1093,9 +1092,7 @@ class PallasKernel(SIMDKernel):
                             f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
                         )
                     else:
-                        code.writeline(
-                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr})"
-                        )
+                        code.writeline(f"{ptr}_jax = jax.dlpack.from_dlpack({ptr})")
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in pointer_tail:
                 if ptr.startswith("in_ptr"):
