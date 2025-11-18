@@ -707,12 +707,10 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
         local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
-        offset = 0
-        if local_shard_size > 0:
-            offset = int(sharded_indices[rank][0].item())
+        offsets = sharded_indices[rank].tolist()
 
         # offsets from _StridedShard is never used
-        return (local_shard_size, offset)
+        return (local_shard_size, offsets)
 
 
 class Replicate(torch._C._distributed.Replicate):
