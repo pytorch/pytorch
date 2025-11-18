@@ -327,7 +327,7 @@ def estimate_nccl_collective_runtime_impl(
 
 def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     """
-    Returns estimated NCCL collective runtime in nanoseconds (ns).
+    Returns estimated NCCL collective runtime in nanoseconds (ms).
 
     The following heuristics are copied from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc.
     We aim to estimate the runtime as accurately as possible.
@@ -363,7 +363,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
     use_nccl_estimator: bool = True,
 ) -> float:
     """
-    Returns estimated NCCL collective runtime in nanoseconds (ns).
+    Returns estimated NCCL collective runtime in nanoseconds (ms).
 
     The following heuristics are copied from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc.
     We aim to estimate the runtime as accurately as possible.
