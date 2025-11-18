@@ -39,10 +39,11 @@ import types
 import unittest
 import warnings
 import weakref
+from collections.abc import Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, NamedTuple, Optional, Sized, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
@@ -77,7 +78,7 @@ from torch.export.dynamic_shapes import (
     _RelaxedConstraint,
     Constraint,
 )
-from torch.fx import GraphModule
+from torch.fx import GraphModule, traceback as fx_traceback
 from torch.fx.experimental._dynamism import (
     clone_and_convert_to_meta,
     track_dynamism_across_examples,
@@ -1133,6 +1134,17 @@ class DisableContext(_TorchDynamoContext):
             try:
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
+                    if torch.compiler.is_exporting():
+                        with fx_traceback.annotate(
+                            {
+                                "_torchdynamo_disable": True,
+                                "_torchdynamo_disable_recursive": True,
+                                "_torchdynamo_disable_method": getattr(
+                                    fn, "__name__", type(fn).__name__
+                                ),
+                            }
+                        ):
+                            return fn(*args, **kwargs)
                     return fn(*args, **kwargs)
                 finally:
                     set_eval_frame(None)
@@ -1153,6 +1165,8 @@ class DisableContext(_TorchDynamoContext):
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+
+        _fn._torchdynamo_disable_recursive = True  # type: ignore[attr-defined]
 
         return _fn
 
@@ -1302,8 +1316,8 @@ def argument_names(
 
 
 def check_if_dynamo_supported() -> None:
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 15):
+        raise RuntimeError("Python 3.15+ not yet supported for torch.compile")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -1771,16 +1785,21 @@ def rewrite_signature(
         # Check if function has optional input.
         for name, param in f_sig.parameters.items():
             if param.default is not inspect.Parameter.empty:
-                from torch._dynamo.exc import Unsupported
+                import torch._dynamo.graph_break_hints as graph_break_hints
+                from torch._dynamo.exc import unimplemented
 
                 log.error(
                     "Parameter %s is optional with a default value of %s",
                     name,
                     param.default,
                 )
-                raise Unsupported(
-                    "Tracing through optional input is not supported yet",
-                    case_name="optional_input",
+                unimplemented(
+                    gb_type="rewrite_signature: cannot trace optional function input",
+                    context="",
+                    explanation=f"Parameter {name} is optional with a default value of {param.default}. This is not supported yet.",
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
     def produce_matching(
@@ -2137,7 +2156,7 @@ def export(
 
             # Error if we have any constraints on static values
 
-            for k in shape_env.var_to_range.keys():
+            for k in shape_env.var_to_range:
                 if isinstance(k, sympy.Integer):
                     constraint_violation_error = ConstraintViolationError(
                         f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"

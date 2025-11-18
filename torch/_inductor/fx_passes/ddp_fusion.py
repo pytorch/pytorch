@@ -4,10 +4,10 @@ import inspect
 import logging
 import math
 import operator
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, cast
+from typing import Any, cast
 
 import torch
 import torch.fx as fx
@@ -97,7 +97,7 @@ def get_comm_block(comm_node: fx.Node) -> CommBlock | None:
         # Collective with only one output
         node_list = [comm_node, first_user]
         wait_nodes.append(first_user)
-    elif len(comm_node.users) > 1 and first_user.target == operator.getitem:
+    elif len(comm_node.users) > 1 and first_user.target is operator.getitem:
         # Collective with only more than one output
         node_list.append(comm_node)
         for user in comm_node.users:

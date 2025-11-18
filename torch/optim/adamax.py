@@ -39,7 +39,7 @@ class Adamax(Optimizer):
         maximize: bool = False,
         differentiable: bool = False,
         capturable: bool = False,
-    ):
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -239,7 +239,7 @@ def _single_tensor_adamax(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -319,7 +319,7 @@ def _multi_tensor_adamax(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if differentiable:
         raise AssertionError("_foreach ops don't support autograd")
 
@@ -334,7 +334,7 @@ def _multi_tensor_adamax(
         if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
+            for p, step in zip(params, state_steps, strict=True)
         ):
             raise AssertionError(
                 f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
@@ -441,7 +441,7 @@ def adamax(
     beta2: float,
     lr: float,
     weight_decay: float,
-):
+) -> None:
     r"""Functional API that performs adamax algorithm computation.
 
     See :class:`~torch.optim.Adamax` for details.

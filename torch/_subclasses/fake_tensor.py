@@ -759,7 +759,14 @@ class FakeTensor(Tensor):
 
         if (
             device.type
-            in ["cuda", "hpu", "xpu", "mps", torch._C._get_privateuse1_backend_name()]
+            in [
+                "cuda",
+                "hpu",
+                "xpu",
+                "mps",
+                "mtia",
+                torch._C._get_privateuse1_backend_name(),
+            ]
             and device.index is None
         ):
             if device.type != "mps" and getattr(torch, device.type).is_initialized():
@@ -1665,7 +1672,7 @@ class FakeTensorMode(TorchDispatchMode):
         if torch.Tag.inplace_view in func.tags:
             raise _BypassDispatchCache("inplace view")
 
-        if func == aten._unsafe_view.default:
+        if func is aten._unsafe_view.default:
             raise _BypassDispatchCache("unsafe view")
 
         if func in self.lift_fns:
@@ -3231,7 +3238,7 @@ class FakeCopyMode(TorchFunctionMode):
             return func(
                 self.fake_mode.from_tensor(args[0], static_shapes=True), **kwargs
             )
-        elif func == Tensor.__deepcopy__:
+        elif func is Tensor.__deepcopy__:
             assert len(args) == 2 and len(kwargs) == 0
             tensor = cast(Tensor, args[0])
             memo = cast(dict[int, FakeTensor], args[1])
