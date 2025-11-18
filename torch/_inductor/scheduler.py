@@ -6111,6 +6111,9 @@ class Scheduler:
         subkernel_nodes = nodes
         device = subkernel_nodes[0].get_device()
 
+        if not all(node.get_device() == device for node in subkernel_nodes):
+            return False
+
         # don't support benchmark fusion for CPU C++ backend right now.
         if device is None or (device.type == "cpu" and config.cpu_backend != "triton"):
             return False
