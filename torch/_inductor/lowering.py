@@ -5628,7 +5628,7 @@ def _avg_poolnd(
     window_size = functools.reduce(operator.mul, kernel_size)
 
     if window_size > 25 and any(
-        not V.graph.sizevars.statically_known_equals(k, s)
+        V.graph.sizevars.statically_known_true(sympy.Ne(k, s))
         for k, s in zip(kernel_size, stride)
     ):
         fallback = fallbacks_avg_poolnd[dim - 1]
