@@ -532,32 +532,13 @@ class TestCustomOpAutoTune(TestCase):
                     msg=f"{impl_name} implementation differs for seq_len={seq_len}",
                 )
 
-        # Test autotuning with compilation
-        test_x = torch.randn(2, 256, 128, device=self.device, dtype=self.dtype)
-        test_weight = torch.ones(128, device=self.device, dtype=self.dtype)
-        expected = test_x * test_weight
-
-        self._run_autotune_test(
-            dynamic_range_op,
-            (test_x, test_weight),
-            expected,
-            "DynamicRangeTuning",
-        )
-
-        # Verify torch.cond dispatch function was generated
-        import os
-
-        dispatch_dir = "/tmp/torch_inductor_range_dispatch"
-        dispatch_file = os.path.join(dispatch_dir, "dynamic_range_autotuned_dispatch.py")
-
-        if os.path.exists(dispatch_file):
-            with open(dispatch_file, "r") as f:
-                dispatch_code = f.read()
-                self.assertIn(
-                    "torch.cond",
-                    dispatch_code,
-                    "Generated dispatch function should contain torch.cond",
-                )
+            # Test autotuning with compilation
+            self._run_autotune_test(
+                dynamic_range_op,
+                (test_x, test_weight),
+                expected,
+                f"DynamicRange_seq{seq_len}",
+            )
 
 
 if __name__ == "__main__":

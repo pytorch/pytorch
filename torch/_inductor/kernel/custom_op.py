@@ -328,6 +328,55 @@ def _generate_dispatch_function(
     return "\n".join(lines)
 
 
+def _merge_identical_implementations(
+    range_to_best_impl: dict[tuple[int, Union[int, float]], tuple[Callable, dict, str]],
+) -> dict[tuple[int, Union[int, float]], tuple[Callable, dict, str]]:
+    """Merge consecutive ranges using the same implementation."""
+    if not range_to_best_impl:
+        return {}
+
+    sorted_ranges = sorted(range_to_best_impl.items(), key=lambda x: x[0][0])
+    merged = {}
+    current_range_start, current_range_end = sorted_ranges[0][0]
+    current_impl, current_kwargs, current_name = sorted_ranges[0][1]
+
+    for i in range(1, len(sorted_ranges)):
+        (next_start, next_end), (next_impl, next_kwargs, next_name) = sorted_ranges[i]
+
+        if (
+            current_impl == next_impl
+            and current_kwargs == next_kwargs
+            and current_name == next_name
+            and next_start == current_range_end + 1
+        ):
+            current_range_end = next_end
+        else:
+            merged[(current_range_start, current_range_end)] = (
+                current_impl,
+                current_kwargs,
+                current_name,
+            )
+            current_range_start, current_range_end = next_start, next_end
+            current_impl, current_kwargs, current_name = (
+                next_impl,
+                next_kwargs,
+                next_name,
+            )
+
+    merged[(current_range_start, current_range_end)] = (
+        current_impl,
+        current_kwargs,
+        current_name,
+    )
+
+    if len(merged) < len(range_to_best_impl):
+        log.info(
+            f"Range merging: reduced from {len(range_to_best_impl)} to {len(merged)} ranges"
+        )
+
+    return merged
+
+
 def _split_points_to_ranges(
     split_points: list[int],
 ) -> list[tuple[int, Union[int, float]]]:
@@ -1079,12 +1128,58 @@ def _create_autotuning_lowering(
                 impl_name,
             )
 
-        log.info("✓ Completed autotuning for %d ranges", len(range_to_best_impl))
+        log.info("Completed autotuning for %d ranges", len(range_to_best_impl))
 
-        # Generate dispatch function for user review
+        # Merge consecutive ranges that use the same implementation
+        merged_range_to_best_impl = _merge_identical_implementations(range_to_best_impl)
+
+        log.info(
+            "After merging: %d unique implementations across %d ranges",
+            len(set((name for _, _, name in merged_range_to_best_impl.values()))),
+            len(merged_range_to_best_impl),
+        )
+
+        # Check if all ranges use the same implementation (no dispatch needed)
+        unique_impls = set(
+            (impl, tuple(sorted(kwargs.items())))
+            for impl, kwargs, _ in merged_range_to_best_impl.values()
+        )
+        if len(unique_impls) == 1:
+            log.info(
+                "All ranges selected the same implementation - skipping dispatch, using direct inline"
+            )
+            # Use the single implementation directly - inline it without dispatch
+            single_impl, single_kwargs, single_name = list(
+                merged_range_to_best_impl.values()
+            )[0]
+
+            # Trace and inline the single implementation
+            from torch.fx.experimental.proxy_tensor import make_fx
+            from ..decomposition import select_decomp_table
+
+            def single_impl_wrapper(*tensors):
+                return single_impl(*tensors, **{**runtime_kwargs, **single_kwargs})
+
+            with V.fake_mode:
+                fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
+                decomposition_table = select_decomp_table()
+                impl_gm = make_fx(
+                    single_impl_wrapper,
+                    decomposition_table=decomposition_table,
+                    tracing_mode="symbolic",
+                )(*fake_inputs)
+
+            log.info(f"Inlining single implementation: {single_name}")
+            from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
+
+            result = inline_subgraph_to_ir_nodes(impl_gm, tensor_inputs, name)
+            validate_ir(result)
+            return result
+
+        # Generate dispatch function for user review (using merged ranges)
         dispatch_func_code = _generate_dispatch_function(
             name=name,
-            range_to_best_impl=range_to_best_impl,
+            range_to_best_impl=merged_range_to_best_impl,
             tensor_name=tensor_name,
             dim_index=dim_index,
             op_overload=op_overload,
@@ -1100,14 +1195,15 @@ def _create_autotuning_lowering(
         with open(output_file, "w") as f:
             f.write(dispatch_func_code)
 
-        log.info("✓ Generated dispatch function saved to: %s", output_file)
+        log.info("Generated dispatch function saved to: %s", output_file)
 
         # ========================================
         # Option B: Use make_fx + inline_subgraph_to_ir_nodes
         # ========================================
         log.info("Creating runtime dispatch using make_fx tracing")
 
-        sorted_ranges = sorted(range_to_best_impl.items())
+        # Use merged ranges for compilation
+        sorted_ranges = sorted(merged_range_to_best_impl.items())
 
         # Build dispatch function for tracing
         def build_dispatch_fn_for_tracing():
@@ -1166,16 +1262,72 @@ def _create_autotuning_lowering(
             f"GraphModule created with {len(list(dispatch_gm.graph.nodes))} nodes"
         )
 
-        # Inline the dispatch graph to IR nodes
-        from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
+        log.info("Creating SubgraphBuffer with multi-range dispatch capability...")
 
-        log.debug("Inlining dispatch graph to IR nodes...")
+        from ..ir import FixedLayout, SubgraphBuffer, TensorBox
 
-        result = inline_subgraph_to_ir_nodes(
-            gm=dispatch_gm, inputs=tensor_inputs, name=f"{name}_dispatch"
+        range_gms = []
+
+        for (range_start, range_end), (
+            impl_fn,
+            impl_kwargs,
+            perf_time,
+        ) in sorted_ranges:
+            log.debug(
+                f"  Compiling range [{range_start}, {range_end}]: {impl_fn.__name__}"
+            )
+
+            # Create wrapper for this specific implementation
+            def create_impl_wrapper(fn, kwargs):
+                def wrapper(*tensors):
+                    return fn(*tensors, **{**runtime_kwargs, **kwargs})
+
+                return wrapper
+
+            impl_wrapper = create_impl_wrapper(impl_fn, impl_kwargs)
+
+            # Trace this implementation independently (no torch.cond!)
+            with V.fake_mode:
+                impl_gm = make_fx(
+                    impl_wrapper,
+                    decomposition_table=decomposition_table,
+                    tracing_mode="symbolic",
+                )(*fake_inputs)
+
+                log.debug(
+                    f"    → Generated GraphModule with {len(list(impl_gm.graph.nodes))} nodes"
+                )
+
+                # Store (range, GraphModule) tuple
+                range_gms.append(((range_start, range_end), impl_gm))
+
+        log.info(f"Compiled {len(range_gms)} range implementations")
+
+        # Step 2: Create unified SubgraphBuffer with multi-range dispatch
+        # Passing a list of (range, gm) tuples triggers multi-range mode
+        with V.fake_mode:
+            fake_output = dispatch_gm(*fake_inputs)
+            output_layout = FixedLayout(
+                device=fake_output.device,
+                dtype=fake_output.dtype,
+                size=fake_output.shape,
+                stride=fake_output.stride(),
+            )
+
+        result = TensorBox.create(
+            SubgraphBuffer(
+                layout=output_layout,
+                input_nodes=tensor_inputs,
+                gm=range_gms,  # List of (range, gm) tuples triggers multi-range mode
+                example_inputs=list(fake_inputs),
+                subgraph_name=f"{name}_autotuned",
+                dispatch_dim_index=dim_index,
+            )
         )
 
-        log.info("✓ Range-based dispatch created using make_fx + inline")
+        log.info(
+            f"Created SubgraphBuffer with multi-range dispatch ({len(range_gms)} ranges)"
+        )
 
         validate_ir(result)
         return result

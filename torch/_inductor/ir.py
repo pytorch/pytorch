@@ -6896,43 +6896,83 @@ class TMADescriptorStable(TMADescriptor):
 
 
 class SubgraphBuffer(ExternKernel):
+    """Represents a subgraph with optional multi-range dispatch."""
+
     def __init__(
         self,
         layout: Layout,
         input_nodes: list[Buffer],
-        gm: torch.fx.GraphModule,
+        gm: torch.fx.GraphModule
+        | list[tuple[tuple[int, int | float], torch.fx.GraphModule]],
         example_inputs: list[Any],
         subgraph_name: str,
+        dispatch_dim_index: int | None = None,
     ):
         super().__init__(None, layout, input_nodes)
-        self.gm = gm
         self.example_inputs = example_inputs
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
-        self.subgraph = V.graph.make_subgraph(self.gm, example_inputs, subgraph_name)
+        if isinstance(gm, list):
+            self.is_multi_range = True
+            self.dispatch_dim_index = dispatch_dim_index
+            assert dispatch_dim_index is not None
 
-        assert is_node_sequence(self.inputs)
-        sym_inputs = get_symbolic_inputs(self.inputs)
+            self.range_subgraphs: list[
+                tuple[tuple[int, int | float], SubgraphBuffer]
+            ] = []
 
-        for sym_inp in sym_inputs:
-            self.subgraph.graph_inputs[sym_inp.name] = sym_inp
-            self.subgraph.graph_input_names.append(sym_inp.name)
+            for (range_start, range_end), range_gm in gm:
+                range_subgraph = SubgraphBuffer(
+                    layout=layout,
+                    input_nodes=input_nodes,
+                    gm=range_gm,
+                    example_inputs=example_inputs,
+                    subgraph_name=f"{subgraph_name}_range_{range_start}_{range_end}",
+                    dispatch_dim_index=None,
+                )
+                self.range_subgraphs.append(((range_start, range_end), range_subgraph))
 
-        self.sym_inputs = [sym_var.name for sym_var in sym_inputs]
+            self.subgraph = None
+            self.sym_inputs = []
 
-        import torch._inductor.config as inductor_config
+        else:
+            self.is_multi_range = False
+            self.gm = gm
+            self.dispatch_dim_index = None
 
-        with V.set_graph_handler(self.subgraph):
-            # Don't bother autotuning on Triton here
-            with inductor_config.patch(
-                max_autotune=False,
-                max_autotune_gemm=False,
-                max_autotune_gemm_backends="ATEN",
-            ):
-                self.subgraph.run(*self.example_inputs)
+            self.subgraph = V.graph.make_subgraph(
+                self.gm, example_inputs, subgraph_name
+            )
+
+            assert is_node_sequence(self.inputs)
+            sym_inputs = get_symbolic_inputs(self.inputs)
+
+            for sym_inp in sym_inputs:
+                self.subgraph.graph_inputs[sym_inp.name] = sym_inp
+                self.subgraph.graph_input_names.append(sym_inp.name)
+
+            self.sym_inputs = [sym_var.name for sym_var in sym_inputs]
+
+            import torch._inductor.config as inductor_config
+
+            with V.set_graph_handler(self.subgraph):
+                with inductor_config.patch(
+                    max_autotune=False,
+                    max_autotune_gemm=False,
+                    max_autotune_gemm_backends="ATEN",
+                ):
+                    self.subgraph.run(*self.example_inputs)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        if self.is_multi_range:
+            self._codegen_multi_range_dispatch(wrapper)
+        else:
+            self._codegen_single_subgraph(wrapper)
+
+    def _codegen_single_subgraph(self, wrapper: PythonWrapperCodegen) -> None:
+        """Generate code for single subgraph."""
+
         class CodegenGraph:
             def __init__(self, graph: GraphLowering):
                 self.graph = graph
@@ -6944,6 +6984,48 @@ class SubgraphBuffer(ExternKernel):
             CodegenGraph(self.subgraph),
             [*self.sym_inputs, *outer_inputs],
             [self.name],
+        )
+
+    def _codegen_multi_range_dispatch(self, wrapper: PythonWrapperCodegen) -> None:
+        """Generate Python runtime dispatch for range-specific subgraphs."""
+        for (range_start, range_end), range_subgraph in self.range_subgraphs:
+            range_subgraph._codegen_single_subgraph(wrapper)
+
+        dispatch_fn_name = f"{self.name}_runtime_dispatch"
+        assert is_node_sequence(self.inputs)
+        input_refs = [t.get_name() for t in self.inputs]
+
+        wrapper.writeline(f"def {dispatch_fn_name}(args):")
+        wrapper.writeline(
+            f"    {', '.join([f'arg{i}' for i in range(len(input_refs))])} = args"
+        )
+        wrapper.writeline(f"    dispatch_size = arg0.size({self.dispatch_dim_index})")
+        wrapper.writeline("    ")
+
+        for i, ((range_start, range_end), range_subgraph) in enumerate(
+            self.range_subgraphs
+        ):
+            subgraph_name = range_subgraph.subgraph.name
+
+            if i == len(self.range_subgraphs) - 1:
+                wrapper.writeline(f"    else:")
+            else:
+                if range_end == float("inf"):
+                    condition = f"dispatch_size >= {range_start}"
+                else:
+                    condition = f"{range_start} <= dispatch_size <= {range_end}"
+
+                if i == 0:
+                    wrapper.writeline(f"    if {condition}:")
+                else:
+                    wrapper.writeline(f"    elif {condition}:")
+
+            wrapper.writeline(f"        return {subgraph_name}(args)")
+
+        wrapper.writeline("")
+        wrapper.writeline(f"{dispatch_fn_name}_args = [{', '.join(input_refs)}]")
+        wrapper.writeline(
+            f"({self.name},) = {dispatch_fn_name}({dispatch_fn_name}_args)"
         )
 
 
