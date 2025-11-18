@@ -1,9 +1,8 @@
 import functools
 import math
 import operator
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import timedelta
-from typing import Callable
 
 import torch
 from torch._C import ScriptObject

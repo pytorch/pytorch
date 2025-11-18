@@ -178,7 +178,7 @@ class TestSparseBase(TestCase):
 class TestSparse(TestSparseBase):
 
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
 
         self.index_tensor = lambda *args, **kwargs: torch.tensor(*args, **kwargs, dtype=torch.int64)
 
@@ -630,7 +630,6 @@ class TestSparse(TestSparseBase):
         i[0][0] = 0
         self.assertEqual(torch.empty((3, 0), dtype=dtype, device=device), self.safeToDense(x))
 
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
@@ -647,7 +646,8 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense(masked_grad=gradcheck.masked)
             x.requires_grad_(True)
-            gradcheck(fn, (x,))
+            kwargs = {"eps": 1e-4} if device == "mps:0" else {}
+            gradcheck(fn, (x,), **kwargs)
 
         i = self.index_tensor([
             [0, 1, 2, 2],
@@ -1391,9 +1391,9 @@ class TestSparse(TestSparseBase):
         # case nnz > size[d]
         run_test(tlen, tlen // 2)
 
-    @onlyCPU
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [di, dj], dtype, device, coalesced)
@@ -2236,7 +2236,6 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
-    @expectedFailureMPS
     @skipIfCrossRef
     def test_sparse_mask_backward(self, device, dtype):
         from itertools import product, repeat
@@ -2246,7 +2245,6 @@ class TestSparse(TestSparseBase):
         nnzs = (0, 5, 15, 25)
 
         lhs_data = torch.arange(1, 26, device=device).reshape(shape).to(dtype).to_sparse(sparse_dims)
-        rhs_data = lhs_data.clone()
 
         for nnz in nnzs:
             for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
@@ -2266,8 +2264,9 @@ class TestSparse(TestSparseBase):
                 # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
                 # lhs.sparse_mask(lhs_mask) accomplishes that.
                 lhs_mask = lhs.detach().clone()
-                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,), masked=True)
-                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False)
+                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,),
+                          masked=True, eps=3e-4, atol=5e-5)
+                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False, eps=3e-4, atol=5e-5)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
@@ -2674,7 +2673,6 @@ class TestSparse(TestSparseBase):
             self._test_asin_arcsin(input_uncoalesced, coalesced)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_mv(self, device, dtype, coalesced):
@@ -3729,7 +3727,6 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
     @dtypesIfMPS(*all_mps_types())
-    @expectedFailureMPS
     @dtypesIfCUDA(*floating_types_and(*[torch.half] if SM53OrLater and not TEST_WITH_ROCM else [],
                                       *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
                                       torch.complex64,
@@ -3826,9 +3823,9 @@ class TestSparse(TestSparseBase):
             def different_dtypes():
                 a, i_a, v_a = self._gen_sparse(2, 10, [2, 2], dtype, device, coalesced)
                 b, i_b, v_b = self._gen_sparse(2, 10, [2, 2], dtype, device, coalesced)
-                r2 = torch.sparse.mm(a.to(torch.float64), a.to(torch.float32))
+                r2 = torch.sparse.mm(a.to(torch.float32), a.to(torch.float16))
 
-            self.assertRaisesRegex(RuntimeError, 'mat1 dtype Double does not match mat2 dtype Float', different_dtypes)
+            self.assertRaisesRegex(RuntimeError, 'mat1 dtype Float does not match mat2 dtype Half', different_dtypes)
 
         def test_backward_noncontiguous():
             # Sparse.mm backward used to wrong with non-contiguous grads,

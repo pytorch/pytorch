@@ -72,7 +72,7 @@ struct LivenessAnalyzer {
         std::cout << e.first->outputs()[0]->debugName();
       }
 
-      std::cout << " " << e.first->kind().toQualString();
+      std::cout << ' ' << e.first->kind().toQualString();
       std::cout << " = ";
       dump(e.second);
       std::cout << '\n';
@@ -83,16 +83,16 @@ struct LivenessAnalyzer {
 
   void dump(const std::vector<Value*>& set) {
     bool first = true;
-    std::cout << "[";
+    std::cout << '[';
     for (auto el : set) {
       if (first) {
         first = false;
       } else {
         std::cout << ", ";
       }
-      std::cout << el->debugName() << "(" << el->unique() << ")";
+      std::cout << el->debugName() << '(' << el->unique() << ')';
     }
-    std::cout << "]";
+    std::cout << ']';
   }
 
  private:

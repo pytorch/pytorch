@@ -79,7 +79,7 @@ LOOP_BODY_2D = """
             & (idx_x_h < IN_H)[:, None]
             & (idx_x_w >= 0)[:, None]
             & (idx_x_w < IN_W)[:, None]
-            & (idx_x_c < GROUP_IN_C)[None, :
+            & (idx_x_c < GROUP_IN_C)[None, :]
         )
         matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
 
