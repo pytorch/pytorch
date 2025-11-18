@@ -86,17 +86,16 @@ class Tensor {
     return data_ptr;
   }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
   void* mutable_data_ptr() const {
     void* data_ptr{};
-    TORCH_ERROR_CODE_CHECK(
-        aoti_torch_get_mutable_data_ptr(ath_.get(), &data_ptr));
+    TORCH_ERROR_CODE_CHECK(torch_get_mutable_data_ptr(ath_.get(), &data_ptr));
     return data_ptr;
   }
 
   const void* const_data_ptr() const {
     const void* data_ptr{};
-    TORCH_ERROR_CODE_CHECK(
-        aoti_torch_get_const_data_ptr(ath_.get(), &data_ptr));
+    TORCH_ERROR_CODE_CHECK(torch_get_const_data_ptr(ath_.get(), &data_ptr));
     return data_ptr;
   }
 
@@ -105,6 +104,7 @@ class Tensor {
 
   template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
   const T* const_data_ptr() const;
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
   int64_t dim() const {
     int64_t dim;
