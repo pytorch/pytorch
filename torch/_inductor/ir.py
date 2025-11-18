@@ -1435,7 +1435,9 @@ class Reduction(Loops):
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
             )
-            outer = all(s > 1 for s in strides)
+            # A 0 stride does not make a reduction contiguous.
+            # This can happen when the reduction ranges contains a 1.
+            outer = all(s == 0 or s > 1 for s in strides)
             if outer:
                 num_outer += 1
             else:
@@ -9242,12 +9244,9 @@ class EffectfulKernel(FallbackKernel):
             unbacked_bindings=unbacked_bindings,
         )
 
-        from torch._higher_order_ops.effects import get_effect_key
+        from torch._higher_order_ops.effects import _get_effect
 
-        uncovered_args = [
-            a.value if isinstance(a, TorchBindObject) else a for a in tensor_args
-        ]
-        effect_type = get_effect_key(kernel, (*nontensor_args, *uncovered_args), kwargs)
+        effect_type = _get_effect(kernel)
         assert effect_type is not None
         self.effect_type = effect_type
         self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
@@ -9298,6 +9297,10 @@ class TorchBindObject(NonTensorObj):
     def get_buf_bytes(self) -> int:
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
+
+        if real_script_obj is None:
+            return 0
+
         assert hasattr(real_script_obj, "__obj_flatten__")
         flat_dict = dict(real_script_obj.__obj_flatten__())
         flat_elems = pytree.tree_flatten(flat_dict)[0]
