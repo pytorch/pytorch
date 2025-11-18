@@ -26,6 +26,7 @@ aten = torch.ops.aten
         Arg(),
         Arg(),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_pattern,
 )
 def zendnn_weight_prepack_for_linear_replacement_without_bias(
@@ -38,6 +39,7 @@ def zendnn_weight_prepack_for_linear_replacement_without_bias(
             mat_1, mat_2_prepacked, is_weight_prepacked=True
         )
 
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [mat_1, mat_2])
 
 
@@ -48,6 +50,7 @@ def zendnn_weight_prepack_for_linear_replacement_without_bias(
         Arg(),
         Arg(),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_pattern,
 )
 def zendnn_weight_prepack_for_linear_replacement_with_bias(
@@ -60,6 +63,7 @@ def zendnn_weight_prepack_for_linear_replacement_with_bias(
             mat_1, mat_2_prepacked, bias, is_weight_prepacked=True
         )
 
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [mat_1, mat_2, bias])
 
 
