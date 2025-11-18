@@ -168,7 +168,7 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
                 output_node = next(reversed(module.graph.find_nodes(op="output")))
                 output_args = output_node.args[0]
                 assert len(output_args) >= len(output_tokens), (
-                    f"{output_args} output arugments found\n"
+                    f"{output_args} output arguments found\n"
                     f"{output_tokens} output tokens found\n"
                     f"{module.graph}"
                 )
