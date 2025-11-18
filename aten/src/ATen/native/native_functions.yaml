@@ -12064,8 +12064,7 @@
   device_check: NoCheck   # TensorIterator
   python_module: nn
   dispatch:
-    CPU, CUDA: elu_out
-    MPS: elu_out_mps
+    CPU, CUDA, MPS: elu_out
 
 - func: elu(Tensor self, Scalar alpha=1, Scalar scale=1, Scalar input_scale=1) -> Tensor
   structured_delegate: elu.out
@@ -12078,8 +12077,7 @@
   structured_inherits: TensorIteratorBase
   python_module: nn
   dispatch:
-    CPU, CUDA: elu_backward_out
-    MPS: elu_backward_out_mps
+    CPU, CUDA, MPS: elu_backward_out
 
 - func: elu_backward(Tensor grad_output, Scalar alpha, Scalar scale, Scalar input_scale, bool is_result, Tensor self_or_result) -> Tensor
   structured_delegate: elu_backward.grad_input
