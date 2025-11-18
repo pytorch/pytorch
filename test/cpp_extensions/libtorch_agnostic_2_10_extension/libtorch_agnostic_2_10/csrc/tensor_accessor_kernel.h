@@ -1,3 +1,6 @@
+// This is duplicated from the libtorch_agnostic_2_9_extension
+// as a negative test for test_version_compatibility.py
+
 #pragma once
 
 #include <torch/headeronly/core/Dispatch_v2.h>
