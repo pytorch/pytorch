@@ -29,6 +29,8 @@ from torch.testing._internal.common_utils import (
 
 MY_LAMBDA = lambda x: x + 1  # noqa: E731
 
+EPS = torch.tensor(1e-7)
+
 
 class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
     def __init__(self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]):
@@ -586,6 +588,18 @@ from user code:
             compiled_fn = torch.compiler.load_compiled_function(f)
         actual = compiled_fn(fn, *inputs)
         self.assertEqual(expected, actual)
+
+    def test_aot_compile_with_global_tensor(self):
+        def fn(x, y):
+            return x + y + EPS
+
+        def make_inputs():
+            return (torch.randn(3, 4), torch.randn(3, 4))
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))
+
+        test_inputs = make_inputs()
+        self.assertEqual(compiled_fn(*test_inputs), fn(*test_inputs))
 
     def test_aot_compile_with_default_args(self):
         def fn(x, y=1):
