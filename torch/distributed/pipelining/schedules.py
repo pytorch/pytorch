@@ -1890,6 +1890,8 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         self.unshard_ops: dict[int, list[UnshardHandle]] = defaultdict(list)
         self.unsharded_stages = set()
 
+        self.ac_graph_execution_context: Optional[torch.utils.checkpoint.GraphExecGroup] = None
+
     def register_custom_function(
         self,
         computation_type: _ComputationType,
@@ -2213,12 +2215,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     )
                     _wait_batch_p2p(self.bwd_recv_ops.pop((stage_idx, mb_index)))
                 loss = self._maybe_get_loss(stage, mb_index)
-                stage.backward_one_chunk(
-                    mb_index,
-                    loss=loss,
-                    full_backward=False,
-                    last_backward=False,
-                )
+                self.ac_graph_exec_group = torch.utils.checkpoint.GraphExecGroup()
+                with self.ac_graph_exec_group:
+                    stage.backward_one_chunk(
+                        mb_index,
+                        loss=loss,
+                        full_backward=False,
+                        last_backward=False,
+                    )
                 # SEND/RECV op are avoided for special case with 2 adjacent stages on same rank
                 # see [Note: V-schedule special case]
                 if is_prev_stage_on_this_rank:
@@ -2229,10 +2233,12 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                 self._assert_unsharded(stage)
                 self.backward_counter[stage_idx] += 1
                 last_backward = self.backward_counter[stage_idx] == self._n_microbatches
-                stage.backward_weight_one_chunk(
-                    mb_index,
-                    last_backward=last_backward,
-                )
+                assert self.ac_graph_exec_group, "expect dI to be executed before dW"
+                with self.ac_graph_exec_group:
+                    stage.backward_weight_one_chunk(
+                        mb_index,
+                        last_backward=last_backward,
+                    )
             elif comp_type == REDUCE_GRAD:
                 grad_scale_factor = self._n_microbatches if self.scale_grads else 1
                 stage.perform_reduce_grad(grad_scale_factor)
