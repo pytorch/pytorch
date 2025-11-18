@@ -2747,6 +2747,8 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
                 tx,
                 f"pytree_get_node_type requires exactly 1 argument, got {len(args)}",
             )
+        if args[0].source:
+            install_guard(args[0].source.make_guard(GuardBuilder.TYPE_MATCH))
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
             return VariableTracker.build(tx, namedtuple)
