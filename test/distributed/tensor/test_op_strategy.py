@@ -388,10 +388,10 @@ class TestCostModel(DTensorOpTestBase):
 # reference: https://docs.pytorch.org/docs/stable/library.html#torch.library.register_autograd
 @torch.library.custom_op("mylib::numpy_sin", mutates_args=())
 def numpy_sin(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-    x_np = x.cpu()
-    y_np = y.cpu()
-    out_np = torch.sin(x_np) + torch.sin(y_np)
-    return out_np
+    x_np = x.cpu().numpy()
+    y_np = y.cpu().numpy()
+    out_np = np.sin(x_np) + np.sin(y_np)
+    return torch.from_numpy(out_np).to(device=x.device)
 
 
 def setup_context(ctx, inputs, output):
