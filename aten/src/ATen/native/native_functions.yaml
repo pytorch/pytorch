@@ -11558,7 +11558,7 @@
     CUDA: foreach_tensor_neg_cuda_
   autogen: _foreach_neg.out
 
-- func: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
+- func: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None, int[1]? dim=None, bool keepdim=False) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -11566,14 +11566,6 @@
     CUDA: foreach_tensor_norm_cuda
     MTIA: foreach_tensor_norm_mtia
   autogen: _foreach_norm.Scalar_out
-
-- func: _foreach_norm.dim(Tensor[] self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor[]
-  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
-  variants: function
-  dispatch:
-    CompositeExplicitAutograd: foreach_tensor_norm_dim_slow
-    CUDA: foreach_tensor_norm_dim_cuda
-  autogen: _foreach_norm.dim_out
 
 # Like _foreach_norm but returns sum(|x|^ord) without the final root
 - func: _foreach_powsum.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
