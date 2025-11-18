@@ -1982,7 +1982,7 @@ def forward(self, arg0_1, arg1_1):
 
         def forward_backward_with_ac():
             x = x_data.detach().requires_grad_(True)
-            
+
             z = torch.utils.checkpoint.checkpoint(
                 lambda a: torch.sin(a), x, use_reentrant=False
             )
@@ -2127,7 +2127,9 @@ def forward(self, arg0_1, arg1_1):
                 return h2
 
             # The checkpointed result is used in forward
-            h = torch.utils.checkpoint.checkpoint(checkpointed_fn, x, w, use_reentrant=False)
+            h = torch.utils.checkpoint.checkpoint(
+                checkpointed_fn, x, w, use_reentrant=False
+            )
 
             # Use h in both forward and backward:
             # 1. Forward: h is used to compute output
@@ -2141,7 +2143,9 @@ def forward(self, arg0_1, arg1_1):
 
             return out.detach(), dx.detach(), dw.detach()
 
-        _, captured_gm = self._compile_and_capture(fwd_bwd_with_ac_in_both_regions, True)
+        _, captured_gm = self._compile_and_capture(
+            fwd_bwd_with_ac_in_both_regions, True
+        )
 
         # The graph should have duplicated AC nodes for operations inside the checkpoint
         # that are needed in both forward (for output) and backward (for gradients)

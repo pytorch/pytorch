@@ -260,8 +260,8 @@ def reorder_ac_nodes_for_inference(gm: fx.GraphModule) -> fx.GraphModule:
     bwd_start = order[first_node_in_bwd]
 
     # Categorize AC nodes by usage
-    ac_used_in_fwd = set()
-    ac_used_in_bwd = set()
+    ac_used_in_fwd: set[fx.Node] = set()
+    ac_used_in_bwd: set[fx.Node] = set()
 
     for node in gm.graph.nodes:
         if must_recompute(node):
