@@ -65,6 +65,7 @@ from ..source import (
     DefaultsSource,
     GetItemSource,
     SkipGuardSource,
+    TypeSource,
 )
 from ..utils import (
     check_constant_args,
@@ -2747,9 +2748,11 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
                 tx,
                 f"pytree_get_node_type requires exactly 1 argument, got {len(args)}",
             )
+        type_source = None
         if args[0].source:
             install_guard(args[0].source.make_guard(GuardBuilder.TYPE_MATCH))
+            type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
             return VariableTracker.build(tx, namedtuple)
-        return VariableTracker.build(tx, python_type)
+        return VariableTracker.build(tx, python_type, source=type_source)
