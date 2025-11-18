@@ -225,7 +225,7 @@ S390X_BLOCKLIST = [
     "inductor/test_inplacing_pass",
     "inductor/test_kernel_benchmark",
     "inductor/test_max_autotune",
-    "inductor/test_move_constructors_to_cuda",
+    "inductor/test_move_constructors_to_gpu",
     "inductor/test_multi_kernel",
     "inductor/test_pattern_matcher",
     "inductor/test_perf",

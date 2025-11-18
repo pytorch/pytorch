@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy  # noqa: TC002
 
@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from ..ir import IRNode
+    from ..ops_handler import ReductionType
     from ..scheduler import BaseSchedulerNode
 
 
@@ -217,6 +218,189 @@ class PallasKernelOverrides(OpOverrides):
         if dtype == torch.bool:
             return "True" if val else "False"
         return f"jnp.array({val}, dtype={jax_dtype})"
+
+    @staticmethod
+    def real(x: str) -> str:
+        return f"jnp.real({x})"
+
+    @staticmethod
+    def imag(x: str) -> str:
+        return f"jnp.imag({x})"
+
+    @staticmethod
+    def conj(x: str) -> str:
+        return f"jnp.conj({x})"
+
+    @staticmethod
+    def angle(x: str) -> str:
+        return f"jnp.angle({x})"
+
+    @staticmethod
+    def view_as_real(x: str) -> str:
+        """View complex tensor as real tensor with extra dimension."""
+        return f"jnp.stack([jnp.real({x}), jnp.imag({x})], axis=-1)"
+
+    @staticmethod
+    def view_as_complex(x: str) -> str:
+        """View real tensor as complex tensor."""
+        return f"({x}[..., 0] + 1j * {x}[..., 1])"
+
+    # Comparison operations
+    @staticmethod
+    def eq(a: str, b: str) -> str:
+        return f"({a} == {b})"
+
+    @staticmethod
+    def ne(a: str, b: str) -> str:
+        return f"({a} != {b})"
+
+    @staticmethod
+    def lt(a: str, b: str) -> str:
+        return f"({a} < {b})"
+
+    @staticmethod
+    def le(a: str, b: str) -> str:
+        return f"({a} <= {b})"
+
+    @staticmethod
+    def gt(a: str, b: str) -> str:
+        return f"({a} > {b})"
+
+    @staticmethod
+    def ge(a: str, b: str) -> str:
+        return f"({a} >= {b})"
+
+    # Logical operations
+    @staticmethod
+    def logical_and(a: str, b: str) -> str:
+        return f"jnp.logical_and({a}, {b})"
+
+    @staticmethod
+    def logical_or(a: str, b: str) -> str:
+        return f"jnp.logical_or({a}, {b})"
+
+    @staticmethod
+    def logical_not(x: str) -> str:
+        return f"jnp.logical_not({x})"
+
+    @staticmethod
+    def logical_xor(a: str, b: str) -> str:
+        return f"jnp.logical_xor({a}, {b})"
+
+    # Math operations
+    @staticmethod
+    def atan2(a: str, b: str) -> str:
+        return f"jnp.arctan2({a}, {b})"
+
+    @staticmethod
+    def hypot(a: str, b: str) -> str:
+        return f"jnp.hypot({a}, {b})"
+
+    @staticmethod
+    def fmod(a: str, b: str) -> str:
+        return f"jnp.fmod({a}, {b})"
+
+    @staticmethod
+    def remainder(a: str, b: str) -> str:
+        return f"jnp.remainder({a}, {b})"
+
+    @staticmethod
+    def clamp(x: str, min_val: str, max_val: str) -> str:
+        return f"jnp.clip({x}, {min_val}, {max_val})"
+
+    @staticmethod
+    def clip(x: str, min_val: str, max_val: str) -> str:
+        return f"jnp.clip({x}, {min_val}, {max_val})"
+
+    # Sign operations
+    @staticmethod
+    def sign(x: str) -> str:
+        return f"jnp.sign({x})"
+
+    @staticmethod
+    def signbit(x: str) -> str:
+        return f"jnp.signbit({x})"
+
+    # Special math functions
+    @staticmethod
+    def erf(x: str) -> str:
+        return f"jax.scipy.special.erf({x})"
+
+    @staticmethod
+    def erfc(x: str) -> str:
+        return f"jax.scipy.special.erfc({x})"
+
+    @staticmethod
+    def erfinv(x: str) -> str:
+        return f"jax.scipy.special.erfinv({x})"
+
+    @staticmethod
+    def lgamma(x: str) -> str:
+        return f"jax.scipy.special.gammaln({x})"
+
+    @staticmethod
+    def digamma(x: str) -> str:
+        return f"jax.scipy.special.digamma({x})"
+
+    # Reciprocal and square
+    @staticmethod
+    def reciprocal(x: str) -> str:
+        return f"jnp.reciprocal({x})"
+
+    @staticmethod
+    def square(x: str) -> str:
+        return f"jnp.square({x})"
+
+    # Additional operations
+    @staticmethod
+    def fma(a: str, b: str, c: str) -> str:
+        """Fused multiply-add: a * b + c"""
+        return f"jnp.fma({a}, {b}, {c})"
+
+    @staticmethod
+    def copysign(a: str, b: str) -> str:
+        return f"jnp.copysign({a}, {b})"
+
+    @staticmethod
+    def nextafter(a: str, b: str) -> str:
+        return f"jnp.nextafter({a}, {b})"
+
+    @staticmethod
+    def ldexp(a: str, b: str) -> str:
+        return f"jnp.ldexp({a}, {b})"
+
+    @staticmethod
+    def frexp(x: str) -> str:
+        return f"jnp.frexp({x})"
+
+    @staticmethod
+    def modf(x: str) -> str:
+        return f"jnp.modf({x})"
+
+    # Bitwise operations
+    @staticmethod
+    def bitwise_and(a: str, b: str) -> str:
+        return f"jnp.bitwise_and({a}, {b})"
+
+    @staticmethod
+    def bitwise_or(a: str, b: str) -> str:
+        return f"jnp.bitwise_or({a}, {b})"
+
+    @staticmethod
+    def bitwise_xor(a: str, b: str) -> str:
+        return f"jnp.bitwise_xor({a}, {b})"
+
+    @staticmethod
+    def bitwise_not(x: str) -> str:
+        return f"jnp.bitwise_not({x})"
+
+    @staticmethod
+    def left_shift(a: str, b: str) -> str:
+        return f"jnp.left_shift({a}, {b})"
+
+    @staticmethod
+    def right_shift(a: str, b: str) -> str:
+        return f"jnp.right_shift({a}, {b})"
 
 
 class PallasKernel(SIMDKernel):
@@ -564,22 +748,95 @@ class PallasKernel(SIMDKernel):
         if self.use_masked_ops is None:
             self.use_masked_ops = self._determine_masked_ops_for_kernel()
 
-        index_str, needs_flatten = self._get_index_expr(index)
+        # Check if this is a scalar output (reduction to scalar)
+        # Only shape () is a true scalar, not (1,) which is a 1-element tensor
+        try:
+            buf = V.graph.get_buffer(name)
+            output_shape = buf.get_size()
+            is_scalar = len(output_shape) == 0
+        except Exception:
+            is_scalar = False
 
-        # Build store expression using string concatenation
-        use_masked = index_str == "..." and not needs_flatten and self.use_masked_ops
-
-        if use_masked:
-            # GPU masked store: flatten tensor and apply per-tensor mask
-            mask_var = self._get_or_create_mask(name)
-            store_expr = (
-                f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
-            )
+        if is_scalar:
+            # For scalar outputs, use [...] to assign the entire scalar
+            store_expr = f"{out}[...] = {value}"
         else:
-            # Direct indexed assignment
-            store_expr = f"{out}[{index_str}] = {value}"
+            index_str, needs_flatten = self._get_index_expr(index)
+
+            # Build store expression using string concatenation
+            use_masked = (
+                index_str == "..." and not needs_flatten and self.use_masked_ops
+            )
+
+            if use_masked:
+                # GPU masked store: flatten tensor and apply per-tensor mask
+                mask_var = self._get_or_create_mask(name)
+                store_expr = f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
+            else:
+                # Direct indexed assignment
+                store_expr = f"{out}[{index_str}] = {value}"
 
         self.stores.writeline(store_expr)
+
+    def reduction(
+        self,
+        dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        reduction_type: ReductionType,
+        value: Union[CSEVariable, tuple[CSEVariable, ...]],
+    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:  # type: ignore[override]
+        """
+        Generate code for reduction operations in JAX/Pallas.
+
+        Reductions in Pallas work by:
+        1. Loading the input data into the kernel
+        2. Applying JAX reduction operations (jnp.sum, jnp.max, etc.)
+        3. Storing the reduced result
+
+        The reduction happens over the loaded block of data.
+        """
+        assert self.inside_reduction
+
+        if isinstance(value, tuple):
+            raise Unsupported(
+                "Tuple reductions (e.g., welford_combine) not supported in Pallas backend"
+            )
+
+        # Check if this reduction is already cached
+        cache_key = (src_dtype, reduction_type, value)
+        if cache_key in self.cse.reduction_cache:
+            return self.cse.reduction_cache[cache_key]
+
+        # Map reduction types to JAX functions
+        reduction_ops = {
+            "sum": "jnp.sum",
+            "prod": "jnp.prod",  # CPU only - not supported in Pallas GPU (Triton) backend
+            "max": "jnp.max",
+            "min": "jnp.min",
+            "any": "jnp.any",
+        }
+
+        if reduction_type == "xor_sum":
+            reduction_expr = f"jnp.bitwise_xor.reduce({value})"
+        elif reduction_type in reduction_ops:
+            # Apply reduction over all axes to get scalar result
+            reduction_expr = f"{reduction_ops[reduction_type]}({value})"
+        else:
+            raise Unsupported(
+                f"Reduction type '{reduction_type}' not yet supported in Pallas backend. "
+                f"Supported types: {list(reduction_ops.keys())}, xor_sum"
+            )
+
+        # Generate CSE variable for the reduction result
+        result = self.cse.generate(
+            self.compute,
+            reduction_expr,
+            dtype=dtype,
+        )
+
+        # Cache the result
+        self.cse.reduction_cache[cache_key] = result
+        return result
 
     @staticmethod
     def _buffer_is_contiguous(buffer_name: str) -> bool:
@@ -642,6 +899,7 @@ class PallasKernel(SIMDKernel):
             import jax
             import jax.numpy as jnp
             from jax.experimental import pallas as pl
+            from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
             """
             + (
                 "\n            from jax.experimental.pallas import triton as pltriton"
@@ -822,16 +1080,6 @@ class PallasKernel(SIMDKernel):
                     )
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
-            code.writeline("# Map PyTorch dtype to JAX dtype")
-            code.writeline("_torch_dtype_to_jax = {")
-            code.writeline(
-                "    torch.float32: jnp.float32, torch.float64: jnp.float64, torch.float16: jnp.float16,"
-            )
-            code.writeline(
-                "    torch.int32: jnp.int32, torch.int64: jnp.int64, torch.int16: jnp.int16, torch.int8: jnp.int8,"
-            )
-            code.writeline("    torch.uint8: jnp.uint8, torch.bool: jnp.bool_,")
-            code.writeline("}")
             code.writeline(
                 "out_shapes = ("
                 + ", ".join([f"tuple({name}.shape)" for name in output_params])
@@ -840,7 +1088,10 @@ class PallasKernel(SIMDKernel):
             code.writeline(
                 "out_dtypes = ("
                 + ", ".join(
-                    [f"_torch_dtype_to_jax[{name}.dtype]" for name in output_params]
+                    [
+                        f"torch_dtype_to_jax_runtime({name}.dtype)"
+                        for name in output_params
+                    ]
                 )
                 + ",)"
             )
@@ -897,8 +1148,9 @@ class PallasScheduling(SIMDScheduling):
 
     @classmethod
     def get_backend_features(cls, device: torch.device) -> OrderedSet[BackendFeature]:
-        # Start minimal: no special features advertised
-        return OrderedSet()
+        # Pallas/JAX can handle reductions to single elements efficiently
+        # without requiring split reductions
+        return OrderedSet([BackendFeature.REDUCE_TO_SINGLE_ELEMENT])
 
     def define_kernel(
         self,
