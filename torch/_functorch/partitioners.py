@@ -296,11 +296,17 @@ def _is_backward_state(node: fx.Node) -> bool:
 
 
 def _has_tag_is_backward(node: fx.Node) -> bool:
-    return node.meta.get("partitioner_tag", None) == "is_backward"
+    return (
+        node.meta.get("partitioner_tag", None) == "is_backward"
+        or node.meta.get("custom", {}).get("backward", None) == 0
+    )
 
 
 def _has_tag_is_forward(node: fx.Node) -> bool:
-    return node.meta.get("partitioner_tag", None) == "is_forward"
+    return (
+        node.meta.get("partitioner_tag", None) == "is_forward"
+        or node.meta.get("custom", {}).get("forward", None) == 0
+    )
 
 
 def _has_tag_must_be_in_forward(node: fx.Node) -> bool:
@@ -1265,6 +1271,70 @@ def sort_depths(args, depth_map: dict[fx.Node, int]) -> list[tuple[fx.Node, int]
     return sorted(arg_depths.items(), key=operator.itemgetter(1), reverse=True)
 
 
+def collect_deps_with_filter(
+    node: fx.Node,
+    order: dict[fx.Node, int],
+    skip_condition: Callable[[fx.Node], bool],
+) -> OrderedSet[fx.Node]:
+    """
+    Collect all dependencies of a node that should be inserted,
+    respecting the skip_condition.
+
+    This is a common utility for graph reordering passes that need to
+    recursively pull in dependencies while maintaining original order.
+
+    Args:
+        node: The node whose dependencies to collect
+        order: Mapping from node to its original position in the graph
+        skip_condition: Function that returns True if a node should be skipped
+
+    Returns:
+        OrderedSet of nodes to be inserted (in dependency order, not sorted)
+    """
+    cur_nodes = [node]
+    insertable_nodes: OrderedSet[fx.Node] = OrderedSet()
+
+    while len(cur_nodes) > 0:
+        n = cur_nodes.pop()
+
+        if n in insertable_nodes:
+            continue
+
+        if skip_condition(n):
+            continue
+
+        insertable_nodes.add(n)
+        cur_nodes += n.all_input_nodes
+
+    return insertable_nodes
+
+
+def insert_nodes_in_original_order(
+    nodes: OrderedSet[fx.Node],
+    order: dict[fx.Node, int],
+    new_graph: fx.Graph,
+    env: dict[fx.Node, fx.Node],
+    node_copy_fn: Optional[Callable[[fx.Node], fx.Node]] = None,
+) -> None:
+    """
+    Insert nodes into a new graph in their original order.
+
+    Args:
+        nodes: Set of nodes to insert
+        order: Mapping from node to its original position in the graph
+        new_graph: The graph to insert nodes into
+        env: Environment mapping old nodes to new nodes
+        node_copy_fn: Optional custom function to copy nodes. If None, uses
+                      new_graph.node_copy(n, lambda x: env[x])
+    """
+    for n in sorted(nodes, key=lambda x: order[x]):
+        if n not in env:
+            if node_copy_fn is not None:
+                env[n] = node_copy_fn(n)
+            else:
+                env[n] = new_graph.node_copy(n, lambda x: env[x])
+
+
 def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     """
     This pass finds the first bwd node in the graph (by looking at users of
@@ -1298,22 +1368,14 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
     def insert_node_in_graph(node):
-        cur_nodes = [node]
-        insertable_nodes: OrderedSet[fx.Node] = OrderedSet()
-        while len(cur_nodes) > 0:
-            node = cur_nodes.pop()
-            if node in insertable_nodes or node in env:
-                continue
-            insertable_nodes.add(node)
+        # Skip condition: already in env
+        skip_condition = lambda n: n in env
 
-            # Bias traversal towards the nodes that have higher depth - prioritizes
-            # critical path first.
-            cur_nodes += node.all_input_nodes
+        # Collect dependencies that need to be inserted
+        insertable_nodes = collect_deps_with_filter(node, order, skip_condition)
 
-        # pyrefly: ignore [bad-assignment]
-        insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
-        for node in insertable_nodes:
-            env[node] = new_graph.node_copy(node, lambda x: env[x])
+        # Insert in original order
+        insert_nodes_in_original_order(insertable_nodes, order, new_graph, env)
 
     # Find first bwd node in the graph
     tangent_inputs = list(filter(_is_tangent, gm.graph.nodes))

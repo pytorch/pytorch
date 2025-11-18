@@ -1844,6 +1844,256 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(counter, 1)
 
 
+class ACReorderingInferenceModeTests(torch._dynamo.test_case.TestCase):
+    """Tests for AC reordering optimization in inference mode (forward+backward in one graph)."""
+
+    def _get_ac_nodes(self, gm):
+        """Get nodes tagged for AC recomputation."""
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        ac_nodes = []
+        for node in gm.graph.nodes:
+            if node.meta.get("recompute") in [
+                CheckpointPolicy.MUST_RECOMPUTE,
+                CheckpointPolicy.PREFER_RECOMPUTE,
+            ]:
+                ac_nodes.append(node)
+        return ac_nodes
+
+    def _get_backward_nodes(self, gm):
+        """Get nodes tagged as backward."""
+        backward_nodes = []
+        for node in gm.graph.nodes:
+            if node.meta.get("custom", {}).get("backward") is not None:
+                backward_nodes.append(node)
+        return backward_nodes
+
+    def _get_node_order(self, gm):
+        """Get mapping from node to its position in graph."""
+        return {node: idx for idx, node in enumerate(gm.graph.nodes)}
+
+    def _compile_and_capture(self, fn, enable_reordering):
+        """Helper to compile a function and capture the graph."""
+        captured_gm = None
+
+        def compiler(gm, example_inputs):
+            nonlocal captured_gm
+            captured_gm = gm
+            return gm.forward
+
+        backend = aot_autograd(
+            fw_compiler=compiler,
+            bw_compiler=None,
+            partition_fn=None,
+        )
+
+        with torch._functorch.config.patch(
+            enable_inference_mode_ac_reordering=enable_reordering
+        ):
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=False)
+            result = compiled_fn()
+
+        return result, captured_gm
+
+    def test_ac_reordering_simple_forward_backward(self):
+        """Test AC reordering with simple forward + backward pattern."""
+        torch._dynamo.allow_in_graph(torch.autograd.grad)
+
+        x_data = torch.randn(4, 4)
+        y_data = torch.randn(4, 4)
+
+        def simple_fwd_bwd():
+            x = x_data.detach().requires_grad_(True)
+            y = y_data.detach().requires_grad_(True)
+
+            with torch.fx.traceback.annotate({"forward": 0}):
+                z = torch.utils.checkpoint.checkpoint(
+                    lambda a, b: torch.sigmoid(torch.matmul(a, b)),
+                    x,
+                    y,
+                    use_reentrant=False,
+                )
+                loss = z.sum()
+
+            with torch.fx.traceback.annotate({"backward": 0}):
+                dx, dy = torch.autograd.grad(loss, (x, y))
+
+            return dx.detach(), dy.detach()
+
+        # Compile without and with reordering
+        (dx1, dy1), gm_without = self._compile_and_capture(simple_fwd_bwd, False)
+        (dx2, dy2), gm_with = self._compile_and_capture(simple_fwd_bwd, True)
+
+        # Verify correctness
+        self.assertTrue(torch.allclose(dx1, dx2))
+        self.assertTrue(torch.allclose(dy1, dy2))
+
+        # Assert graph structure
+        self.assertExpectedInline(
+            gm_without.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sigmoid = torch.ops.aten.sigmoid.default(mm);  mm = None
+    detach = torch.ops.aten.detach.default(sigmoid)
+    sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_1);  expand = detach_1 = None
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    mm_1 = torch.ops.aten.mm.default(t, sigmoid_backward);  t = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_2 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
+    detach_2 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
+    detach_3 = torch.ops.aten.detach.default(mm_1);  mm_1 = None
+    return (detach_2, detach_3)""",
+        )
+        self.assertExpectedInline(
+            gm_with.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sigmoid = torch.ops.aten.sigmoid.default(mm);  mm = None
+    sum_1 = torch.ops.aten.sum.default(sigmoid)
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    detach = torch.ops.aten.detach.default(sigmoid);  sigmoid = None
+    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_1);  expand = detach_1 = None
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    mm_1 = torch.ops.aten.mm.default(t, sigmoid_backward);  t = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_2 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
+    detach_2 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
+    detach_3 = torch.ops.aten.detach.default(mm_1);  mm_1 = None
+    return (detach_2, detach_3)""",
+        )
+
+    def test_ac_reordering_defers_backward_only_nodes(self):
+        """Test that AC nodes only used in backward are deferred to backward region."""
+        torch._dynamo.allow_in_graph(torch.autograd.grad)
+
+        x_data = torch.randn(4, 4)
+
+        def forward_backward_with_ac():
+            x = x_data.detach().requires_grad_(True)
+
+            with torch.fx.traceback.annotate({"forward": 0}):
+                z = torch.utils.checkpoint.checkpoint(
+                    lambda a: torch.sin(a), x, use_reentrant=False
+                )
+                loss = z.sum()
+
+            with torch.fx.traceback.annotate({"backward": 0}):
+                dx = torch.autograd.grad(loss, x)[0]
+
+            return dx.detach()
+
+        # Compile both versions
+        dx1, gm_without = self._compile_and_capture(forward_backward_with_ac, False)
+        dx2, gm_with = self._compile_and_capture(forward_backward_with_ac, True)
+
+        # Verify correctness
+        self.assertTrue(torch.allclose(dx1, dx2))
+
+        # Verify AC nodes are deferred to backward
+        ac_nodes_without = self._get_ac_nodes(gm_without)
+        ac_nodes_with = self._get_ac_nodes(gm_with)
+        backward_nodes_without = self._get_backward_nodes(gm_without)
+        backward_nodes_with = self._get_backward_nodes(gm_with)
+
+        if ac_nodes_with and backward_nodes_with:
+            order_without = self._get_node_order(gm_without)
+            order_with = self._get_node_order(gm_with)
+
+            first_bwd_idx_without = min(
+                order_without[n] for n in backward_nodes_without
+            )
+            first_bwd_idx_with = min(order_with[n] for n in backward_nodes_with)
+
+            # Count AC nodes before backward
+            ac_before_bwd_without = sum(
+                1
+                for ac in ac_nodes_without
+                if order_without[ac] < first_bwd_idx_without
+            )
+            ac_before_bwd_with = sum(
+                1 for ac in ac_nodes_with if order_with[ac] < first_bwd_idx_with
+            )
+
+            # With reordering, should defer AC nodes to backward
+            self.assertLessEqual(
+                ac_before_bwd_with,
+                ac_before_bwd_without,
+                f"With reordering, should have fewer/equal AC nodes in forward. "
+                f"Without: {ac_before_bwd_without}, With: {ac_before_bwd_with}",
+            )
+
+    def test_ac_reordering_graph_structure(self):
+        """Test that AC reordering produces the expected graph structure."""
+        torch._dynamo.allow_in_graph(torch.autograd.grad)
+
+        x_data = torch.randn(4, 4)
+        y_data = torch.randn(4, 4)
+
+        def simple_fwd_bwd():
+            x = x_data.detach().requires_grad_(True)
+            y = y_data.detach().requires_grad_(True)
+
+            with torch.fx.traceback.annotate({"forward": 0}):
+                z = torch.utils.checkpoint.checkpoint(
+                    lambda a, b: torch.matmul(a, b), x, y, use_reentrant=False
+                )
+                loss = z.sum()
+
+            with torch.fx.traceback.annotate({"backward": 0}):
+                dx, dy = torch.autograd.grad(loss, (x, y))
+
+            return dx.detach(), dy.detach()
+
+        _, captured_gm = self._compile_and_capture(simple_fwd_bwd, True)
+
+        # Assert the graph IR structure
+        self.assertExpectedInline(
+            captured_gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sum_1 = torch.ops.aten.sum.default(mm);  mm = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    mm_1 = torch.ops.aten.mm.default(t, expand);  t = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_2 = torch.ops.aten.mm.default(expand, t_1);  expand = t_1 = None
+    detach = torch.ops.aten.detach.default(mm_2);  mm_2 = None
+    detach_1 = torch.ops.aten.detach.default(mm_1);  mm_1 = None
+    return (detach, detach_1)""",
+        )
+
+        # Verify metadata
+        ac_nodes = self._get_ac_nodes(captured_gm)
+        backward_nodes = self._get_backward_nodes(captured_gm)
+
+        if ac_nodes and backward_nodes:
+            for ac_node in ac_nodes:
+                self.assertIn(
+                    ac_node.meta.get("recompute"),
+                    [
+                        CheckpointPolicy.MUST_RECOMPUTE,
+                        CheckpointPolicy.PREFER_RECOMPUTE,
+                    ],
+                    f"AC node {ac_node.name} should have recompute policy",
+                )
+
+            for bwd_node in backward_nodes:
+                self.assertIsNotNone(
+                    bwd_node.meta.get("custom", {}).get("backward"),
+                    f"Backward node {bwd_node.name} should have backward tag",
+                )
+
+
 devices = ["cuda", "hpu"]
 instantiate_device_type_tests(
     ActivationCheckpointingViaTagsTests, globals(), only_for=devices
