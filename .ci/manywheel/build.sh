@@ -4,8 +4,21 @@ set -ex
 
 SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-# Source the common build script for architecture-specific configurations (MKLDNN, ACL, etc.)
-source "${SCRIPTPATH}/../pytorch/build.sh" || true
+# Configure ARM Compute Library (ACL) for aarch64 builds
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  export USE_MKLDNN=1
+
+  # ACL is required for aarch64 builds
+  if [[ ! -d "/acl" ]]; then
+    echo "ERROR: ARM Compute Library not found at /acl"
+    echo "ACL is required for aarch64 builds. Check Docker image setup."
+    exit 1
+  fi
+
+  export USE_MKLDNN_ACL=1
+  export ACL_ROOT_DIR=/acl
+  echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
+fi
 
 case "${GPU_ARCH_TYPE:-BLANK}" in
     cuda | cuda-aarch64)
