@@ -4225,7 +4225,7 @@
     MTIA: mm_out_mtia
     MPS: mm_out_mps
     XPU: mm_out_xpu
-    SparseCPU, SparseCUDA: _sparse_mm_out
+    SparseCPU, SparseCUDA, SparseMPS: _sparse_mm_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: _sparse_csr_mm_out
 
 - func: mm.dtype(Tensor self, Tensor mat2, ScalarType out_dtype) -> Tensor

@@ -7,19 +7,23 @@ import torch
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU_AND_TRITON,
+    HAS_MULTIGPU,
+)
 
 
 requires_multigpu = functools.partial(
-    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
+    unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
 )
+
 
 aten = torch.ops.aten
 
 
-class TestMoveConstructorsToCuda(TestCase):
+class TestMoveConstructorsToGpu(TestCase):
     def _check_fn(self, func, expect_cpu, *args):
         out_eager = func(*args)
 
@@ -36,7 +40,7 @@ class TestMoveConstructorsToCuda(TestCase):
         def foo(x):
             return x[torch.arange(x.shape[0])]
 
-        inp = torch.rand(32, 77, 512, device="cuda")
+        inp = torch.rand(32, 77, 512, device=GPU_TYPE)
 
         self._check_fn(foo, False, inp)
 
@@ -45,14 +49,14 @@ class TestMoveConstructorsToCuda(TestCase):
             tmp1 = torch.arange(x.shape[0])
             return tmp1, x[tmp1]
 
-        inp = torch.rand(32, 77, 512, device="cuda")
+        inp = torch.rand(32, 77, 512, device=GPU_TYPE)
 
         self._check_fn(foo, True, inp)
 
     def test_non_convertable_op_failure(self):
         def foo(x):
             y = torch.arange(x.shape[0])
-            return x + y, torch.ones([4], device="cuda")
+            return x + y, torch.ones([4], device=GPU_TYPE)
 
         inp = torch.rand([100])
 
@@ -76,7 +80,7 @@ class TestMoveConstructorsToCuda(TestCase):
             c2 = torch.arange(-1, 3)
             return x[c1 + c2], c2 - 4 * 2
 
-        inp = torch.rand([4]).cuda()
+        inp = torch.rand([4]).to(GPU_TYPE)
         _, code = run_and_get_code(foo, inp)
         FileCheck().check_not("triton.jit").run(code[0])
 
@@ -95,12 +99,12 @@ class TestMoveConstructorsToCuda(TestCase):
         def foo(x):
             return (
                 x[torch.arange(x.shape[0])],
-                torch.ones([4], device="cuda:0"),
-                torch.ones([4], device="cuda:1"),
+                torch.ones([4], device=f"{GPU_TYPE}:0"),
+                torch.ones([4], device=f"{GPU_TYPE}:1"),
             )
 
         # nyi, multi-gpu
-        inp = torch.rand([100], device="cuda")
+        inp = torch.rand([100], device=GPU_TYPE)
         self._check_fn(foo, True, inp)
 
     def test_no_gpu(self):
@@ -112,5 +116,5 @@ class TestMoveConstructorsToCuda(TestCase):
 
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA_AND_TRITON:
+    if IS_LINUX and HAS_GPU_AND_TRITON:
         run_tests()
