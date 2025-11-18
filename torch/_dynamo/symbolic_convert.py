@@ -2050,22 +2050,23 @@ class InstructionTranslatorBase(
 
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
+        self.push(it)
         try:
             val = it.next_variable(self)
-            self.push(it)
             self.push(val)
         except (StopIteration, exc.ObservedUserStopIteration) as e:
             if isinstance(e, exc.ObservedUserStopIteration):
                 exc.handle_observed_exception(self)
 
-            # leave iterator upon exhaustion in 3.12
             if sys.version_info >= (3, 12):
                 # CPython 3.12 actually jumps to the instruction after the END_FOR
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(it)
                 self.push(ConstantVariable.create(None))
+            else:
+                # pop the iterator in Python < 3.12
+                self.pop()
             self.jump(inst)
 
     def _create_exception_type(self, val: VariableTracker) -> VariableTracker:
