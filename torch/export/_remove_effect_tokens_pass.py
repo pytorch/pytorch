@@ -124,6 +124,7 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
 
     This function does an inplace modification on the given ExportedProgram.
     """
+    print("before", ep)
     inputs_to_lifted_custom_objs = ep.graph_signature.inputs_to_lifted_custom_objs
 
     # mark submodules with effects as having effects. This will be used in the following pass to remove effects from subgraphs
@@ -163,10 +164,15 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
                     )
 
             # Remove tokens from the output node
-            output_node = next(reversed(module.graph.find_nodes(op="output")))
-            output_args = output_node.args[0]
-            assert len(output_args) >= len(output_tokens)
-            output_node.args = (tuple(output_args[len(output_tokens) :]),)
+            if len(output_tokens) > 0:
+                output_node = next(reversed(module.graph.find_nodes(op="output")))
+                output_args = output_node.args[0]
+                assert len(output_args) >= len(output_tokens), (
+                    f"{output_args} output arguments found\n"
+                    f"{output_tokens} output tokens found\n"
+                    f"{module.graph}"
+                )
+                output_node.args = (tuple(output_args[len(output_tokens) :]),)
 
             module.graph.eliminate_dead_code()
 
@@ -204,4 +210,5 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
 
     assert num_tokens == num_out_tokens
 
+    print("after", ep)
     return ep
