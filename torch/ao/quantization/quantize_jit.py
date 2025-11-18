@@ -68,7 +68,7 @@ def fuse_conv_bn_jit(model, inplace=False):
 def _prepare_jit(model, qconfig_dict, inplace=False, quant_type=QuantType.STATIC):
     _check_is_script_module(model)
     _check_forward_method(model)
-    if not all(isinstance(x, str) for x in qconfig_dict.keys()):
+    if not all(isinstance(x, str) for x in qconfig_dict):
         raise ValueError("qconfig_dict should only contain names(str) as keys.")
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
     model = fuse_conv_bn_jit(model, inplace)
@@ -90,7 +90,7 @@ def _prepare_ondevice_jit(
     quant_type=QuantType.STATIC,
 ):
     _check_is_script_module(model)
-    if not all(isinstance(x, str) for x in qconfig_dict.keys()):
+    if not all(isinstance(x, str) for x in qconfig_dict):
         raise ValueError("qconfig_dict should only contain names(str) as keys.")
     scripted_qconfig_dict = script_qconfig_dict(qconfig_dict)
     method_graph = model._c._get_method(method_name).graph

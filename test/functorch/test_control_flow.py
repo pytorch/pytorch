@@ -942,9 +942,7 @@ def forward(self, pred_1):
         b = torch.randn(4, requires_grad=True)
         c = torch.randn(4, requires_grad=True)
 
-        for pred, fn in zip(
-            [torch.tensor(False), torch.tensor(True)], [false_fn, true_fn]
-        ):
+        for pred in [torch.tensor(False), torch.tensor(True)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
                 "Cond doesn't work unless it is captured completely with torch.compile",
@@ -3066,13 +3064,9 @@ class GraphModule(torch.nn.Module):
         ).to(DEVICE)
 
         # Test 3 models: RNNScanList, RNNScanTensor, RNNLoop
-        models = [
-            ("ScanList", RNNScanList),
-            ("ScanTensor", RNNScanTensor),
-            ("Loop", RNNLoop),
-        ]
+        models = [RNNScanList, RNNScanTensor, RNNLoop]
 
-        for model_name, model_class in models:
+        for model_class in models:
             # Create uncompiled model
             model_uc = model_class().to(DEVICE)
             uncompiled_grads, uncompiled_loss = run_test_and_get_grads_loss(
@@ -7538,7 +7532,7 @@ def forward(self, arg0_1, arg1_1):
 
         inps = (torch.ones(3, 4), torch.ones(3, 5), torch.ones(5, 4), torch.ones(5, 3))
         for inp in inps:
-            gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 4))
+            gm = make_fx(foo, tracing_mode="symbolic")(inp)
             self.assertExpectedInline(
                 gm.code.strip(),
                 """\

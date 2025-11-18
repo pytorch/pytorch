@@ -41,18 +41,18 @@ class EnabledProxy:
             return False
         raise ValueError(f"Unknown setting of {name}. Try using 0 or 1.")
 
-    def __bool__(self):
+    def __bool__(self) -> bool:
         return self.enabled
 
 
 _enabled = EnabledProxy()
 
 
-def disable():
+def disable() -> None:
     _enabled.enabled = False
 
 
-def enable():
+def enable() -> None:
     _enabled.enabled = True
 
 
@@ -67,7 +67,7 @@ _script_classes: dict[type[Any], type[Any]] = {}
 _name_to_pyclass: dict[str, type[Any]] = {}
 
 
-def _add_script_class(python_class, script_class):
+def _add_script_class(python_class, script_class) -> None:
     _script_classes[python_class] = script_class
     _name_to_pyclass[script_class.qualified_name()] = python_class
 
@@ -83,7 +83,7 @@ def _get_python_class(qualified_name):
     return _name_to_pyclass.get(qualified_name)
 
 
-def _clear_class_state():
+def _clear_class_state() -> None:
     _script_classes.clear()
     _name_to_pyclass.clear()
 
@@ -108,7 +108,7 @@ def _try_get_jit_cached_overloads(key):
         return None
 
 
-def _set_jit_overload_cache(key, compiled_fns):
+def _set_jit_overload_cache(key, compiled_fns) -> None:
     _jit_function_overload_caching[key] = [fn.qualified_name for fn in compiled_fns]
 
 
@@ -122,7 +122,7 @@ def _try_get_jit_cached_function(key):
         return None
 
 
-def _set_jit_function_cache(key, value):
+def _set_jit_function_cache(key, value) -> None:
     # only free functions currently supported
     assert isinstance(value, torch.jit.ScriptFunction)
     _jit_caching_layer[key] = value.qualified_name

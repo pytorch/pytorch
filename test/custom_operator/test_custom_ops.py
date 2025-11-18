@@ -1,6 +1,5 @@
 # Owner(s): ["module: unknown"]
 
-import os.path
 import sys
 import tempfile
 import unittest
@@ -18,6 +17,7 @@ torch.ops.import_module("pointwise")
 
 class TestCustomOperators(TestCase):
     def setUp(self):
+        super().setUp()
         self.library_path = get_custom_op_library_path()
         ops.load_library(self.library_path)
 
@@ -143,16 +143,13 @@ def forward(self, arg0_1):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
         # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
         # close the file after creation and try to remove it manually.
-        file = tempfile.NamedTemporaryFile(delete=False)
-        try:
+        with tempfile.NamedTemporaryFile() as file:
             file.close()
             model.save(file.name)
             loaded = torch.jit.load(file.name)
-        finally:
-            os.unlink(file.name)
 
-        output = loaded.forward(torch.ones(5))
-        self.assertTrue(output.allclose(torch.ones(5) + 1))
+            output = loaded.forward(torch.ones(5))
+            self.assertTrue(output.allclose(torch.ones(5) + 1))
 
 
 if __name__ == "__main__":
