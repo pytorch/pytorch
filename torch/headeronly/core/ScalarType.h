@@ -336,6 +336,13 @@ inline std::ostream& operator<<(
   return stream << toString(scalar_type);
 }
 
+inline bool isQIntType(ScalarType t) {
+  // Don't forget to extend this when adding new QInt types
+  return t == ScalarType::QInt8 || t == ScalarType::QUInt8 ||
+      t == ScalarType::QInt32 || t == ScalarType::QUInt4x2 ||
+      t == ScalarType::QUInt2x4;
+}
+
 inline ScalarType toUnderlying(ScalarType t) {
   switch (t) {
     case ScalarType::QUInt8:
@@ -362,6 +369,7 @@ using c10::NumScalarTypes;
 using c10::ScalarType;
 using c10::toString;
 using c10::operator<<;
+using c10::isQIntType;
 using c10::toUnderlying;
 
 namespace impl {
