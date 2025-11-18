@@ -1,11 +1,10 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 #include <torch/headeronly/core/ScalarType.h>
-#include <c10/core/ScalarType.h>
 
 using torch::stable::Tensor;
 
-uint64_t get_template_any_data_ptr(Tensor t, c10::ScalarType dtype, bool mutable_) {
+uint64_t get_template_any_data_ptr(Tensor t, torch::headeronly::ScalarType dtype, bool mutable_) {
 #define DEFINE_CASE(T, name)                                            \
   case torch::headeronly::ScalarType::name: {                           \
     if (mutable_) {                                                     \
