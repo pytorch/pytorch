@@ -5,6 +5,7 @@
 #include <deque>
 #include <mutex>
 #include <set>
+#include <stack>
 #include <vector>
 
 namespace c10::xpu::XPUCachingAllocator {
@@ -349,7 +350,66 @@ struct AllocParams {
   StatTypes stat_types = {};
 };
 
+template <class T>
+class RingBuffer {
+ public:
+  RingBuffer() {
+    // alloc_trace is a pointer because we need to intentionally
+    // leak this on deallocation it can hold references to Python
+    // state which will already be destroyed when we are in exit handlers
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+    alloc_trace = new std::vector<T>();
+  }
+
+  void setMaxEntries(size_t size) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    alloc_trace_max_entries_ = std::max(static_cast<size_t>(1), size);
+  }
+
+  void insertEntries(const T& entry) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    if (alloc_trace->size() < alloc_trace_max_entries_) {
+      alloc_trace->emplace_back(entry);
+    } else {
+      (*alloc_trace)[alloc_trace_next++] = entry;
+      if (alloc_trace_next == alloc_trace_max_entries_) {
+        alloc_trace_next = 0;
+      }
+    }
+  }
+
+  void getEntries(std::vector<T>& result) const {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    result.reserve(result.size() + alloc_trace->size());
+    std::rotate_copy(
+        alloc_trace->begin(),
+        std::next(alloc_trace->begin(), alloc_trace_next),
+        alloc_trace->end(),
+        std::back_inserter(result));
+  }
+
+  void clear() {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    alloc_trace_next = 0;
+    alloc_trace->clear();
+  }
+
+ private:
+  size_t alloc_trace_max_entries_ = 1;
+
+  // Both alloc_trace and alloc_trace_next needs to be used
+  // under alloc_trace_lock.
+  mutable std::mutex alloc_trace_lock;
+  size_t alloc_trace_next = 0;
+  std::vector<T>*
+      alloc_trace; // pointer because we need to intentionally leak this on
+                   // deallocation it can hold references to Python state which
+                   // will already be destroyed when we are in exit handlers
+};
+
 } // anonymous namespace
+
+using AllocatorTraceTracker = std::function<void(const TraceEntry&)>;
 
 class DeviceCachingAllocator {
  private:
@@ -365,6 +425,12 @@ class DeviceCachingAllocator {
   bool set_fraction = false;
   std::vector<ExpandableSegment*> expandable_segments;
   std::vector<c10::DeviceIndex> devices_with_peer_access; // reserved
+  RingBuffer<TraceEntry> alloc_buffer;
+  std::vector<AllocatorTraceTracker> trace_trackers_;
+  bool record_history = false;
+  static thread_local std::stack<std::string> compile_context;
+  static thread_local std::string user_metadata;
+  RecordContext record_context_ = RecordContext::NEVER;
 
   size_t try_merge_blocks(Block* dst, Block* src, BlockPool& pool) {
     if (!src || src->allocated || src->event_count > 0 ||
@@ -393,6 +459,16 @@ class DeviceCachingAllocator {
     delete src;
 
     return subsumed_size;
+  }
+
+  std::vector<Block*> get_all_blocks() const {
+    std::vector<Block*> blocks;
+    blocks.insert(
+        blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
+    blocks.insert(
+        blocks.end(), large_blocks.blocks.begin(), large_blocks.blocks.end());
+    blocks.insert(blocks.end(), active_blocks.begin(), active_blocks.end());
+    return blocks;
   }
 
   void free_block(Block* block) {
@@ -1052,6 +1128,138 @@ class DeviceCachingAllocator {
     }
   }
 
+  void record_trace(
+      TraceEntry::Action action,
+      size_t addr,
+      size_t size,
+      sycl::queue* queue,
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      std::shared_ptr<GatheredContext> context) {
+    if (!record_history && trace_trackers_.empty())
+      return;
+    std::string compile_string = "N/A";
+    if (!compile_context.empty()) {
+      compile_string = compile_context.top();
+    }
+    TraceEntry te(
+        action,
+        device,
+        addr,
+        size,
+        queue,
+        mempool_id,
+        getApproximateTime(),
+        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
+        compile_string,
+        user_metadata);
+
+    // Callbacks should not include any Pytorch call
+    for (const auto& cb : trace_trackers_) {
+      cb(te);
+    }
+
+    if (record_history) {
+      alloc_buffer.insertEntries(te);
+    }
+  }
+
+  std::vector<SegmentInfo> snapshot() {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    std::vector<Block*> all_blocks;
+
+    // When snapshot is called with non-default mempool_id, we return
+    // all the blocks in the CUDACachingAllocator (as returned by
+    // get_all_blocks).
+    all_blocks = get_all_blocks();
+
+    size_t total_active = 0;
+    std::vector<SegmentInfo> result;
+
+    for (const Block* const head_block : all_blocks) {
+      // For expandable segments, we report one segment for each contiguous
+      // mapped range of memory
+      if (head_block->prev && head_block->prev->mapped) {
+        continue;
+      }
+      result.emplace_back();
+      SegmentInfo& segment_info = result.back();
+      segment_info.device = head_block->device;
+      segment_info.address = reinterpret_cast<size_t>(head_block->ptr);
+      segment_info.queue = head_block->queue;
+      segment_info.is_large = (!head_block->pool->is_small);
+      segment_info.is_expandable = head_block->expandable_segment;
+      // segment_info.context_when_allocated =
+      //     head_block->context_when_segment_allocated;
+
+      const Block* block = head_block;
+      while (block != nullptr && block->mapped) {
+        segment_info.blocks.emplace_back();
+        BlockInfo& block_info = segment_info.blocks.back();
+
+        block_info.size = block->size;
+        block_info.requested_size = block->requested_size;
+        block_info.allocated = block->allocated;
+        block_info.active = block->allocated || (block->event_count > 0) ||
+            !block->stream_uses.empty();
+
+        segment_info.total_size += block_info.size;
+        if (block_info.allocated) {
+          segment_info.allocated_size += block_info.size;
+        }
+        if (block_info.active) {
+          segment_info.active_size += block_info.size;
+          segment_info.requested_size += block_info.requested_size;
+        }
+        // block_info.context_when_allocated = block->context_when_allocated;
+        block = block->next;
+      }
+      total_active += segment_info.active_size;
+    }
+
+    std::sort(
+        result.begin(),
+        result.end(),
+        [](const SegmentInfo& a, const SegmentInfo& b) {
+          return a.address < b.address;
+        });
+
+    record_trace(
+        TraceEntry::SNAPSHOT, 0, total_active, nullptr, 0, {0, 0}, nullptr);
+    return result;
+  }
+
+  std::vector<TraceEntry> trace(
+      const std::function<time_t(approx_time_t)>& tsc_to_us) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    std::vector<TraceEntry> result;
+    alloc_buffer.getEntries(result);
+
+    // Convert all the timestamps from tsc to epoch time in microseconds.
+    for (auto& te : result) {
+      te.time_.t_ = tsc_to_us(te.time_.approx_t_);
+    }
+    return result;
+  }
+
+  void recordHistory(
+      bool enabled,
+      CreateContextFn context_recorder,
+      size_t alloc_buffer_max_entries,
+      RecordContext when,
+      bool clearHistory) {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+    TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
+    record_history = enabled;
+    context_recorder_.store(record_history ? context_recorder : nullptr);
+    alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
+    record_context_ = enabled ? when : RecordContext::NEVER;
+    if (!enabled || clearHistory) {
+      alloc_buffer.clear();
+    }
+  }
+
   double getMemoryFraction() {
     if (!set_fraction) {
       return 1.0;
@@ -1073,11 +1281,16 @@ class DeviceCachingAllocator {
 };
 
 static void local_raw_delete(void* ptr);
+thread_local std::stack<std::string> DeviceCachingAllocator::compile_context;
+thread_local std::string DeviceCachingAllocator::user_metadata;
 
 class XPUAllocator : public DeviceAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
+  c10::ApproximateClockToUnixTimeConverter clock_converter;
+  RingBuffer<AnnotationEntry> annotation_buffer;
+  bool record_history = false;
 
   void add_allocated_block(Block* block) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -1233,11 +1446,65 @@ class XPUAllocator : public DeviceAllocator {
     device_allocators[device]->resetAccumulatedStats();
   }
 
+  SnapshotInfo snapshot() {
+    // Set-up converter to convert timestamps from tsc to microseconds.
+    auto tsc_to_ns = clock_converter.makeConverter();
+    auto tsc_to_us = [=](approx_time_t t_approx) {
+      return tsc_to_ns(t_approx) / 1000;
+    };
+
+    SnapshotInfo result;
+
+    // Get AnnotationEntry list and convert the timestamps.
+    annotation_buffer.getEntries(result.external_annotations);
+    for (auto& ae : result.external_annotations) {
+      ae.time_.t_ = tsc_to_us(ae.time_.approx_t_);
+    }
+
+    // Get the device_traces' TraceEntry lists.
+    for (auto& da : device_allocators) {
+      result.device_traces.emplace_back(da->trace(tsc_to_us));
+      auto snap = da->snapshot();
+      result.segments.insert(result.segments.end(), snap.begin(), snap.end());
+    }
+
+    auto& md = result.config_metadata;
+    md.garbage_collection_threshold =
+        AcceleratorAllocatorConfig::garbage_collection_threshold();
+    md.max_split_size = AcceleratorAllocatorConfig::max_split_size();
+    md.expandable_segments =
+        AcceleratorAllocatorConfig::use_expandable_segments();
+    md.roundup_power2_divisions =
+        AcceleratorAllocatorConfig::roundup_power2_divisions();
+    md.last_allocator_settings =
+        AcceleratorAllocatorConfig::last_allocator_settings();
+    return result;
+  }
+
   void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
     assertValidDevice(dev);
     assertValidDevice(dev_to_access);
     c10::xpu::get_raw_device(dev).ext_oneapi_enable_peer_access(
         c10::xpu::get_raw_device(dev_to_access));
+  }
+
+  void recordHistory(
+      bool enabled,
+      CreateContextFn context_recorder,
+      size_t alloc_buffer_max_entries,
+      RecordContext when,
+      bool clearHistory) {
+    record_history = enabled;
+    annotation_buffer.setMaxEntries(alloc_buffer_max_entries);
+    annotation_buffer.clear();
+    for (auto& allocator : device_allocator) {
+      allocator->recordHistory(
+          enabled,
+          context_recorder,
+          alloc_buffer_max_entries,
+          when,
+          clearHistory);
+    }
   }
 
   double getMemoryFraction(DeviceIndex device) {
@@ -1308,6 +1575,10 @@ double getMemoryFraction(DeviceIndex device) {
 
 void setMemoryFraction(double fraction, DeviceIndex device) {
   return allocator.setMemoryFraction(fraction, device);
+}
+
+SnapshotInfo snapshot() {
+  return allocator.snapshot();
 }
 
 REGISTER_ALLOCATOR(kXPU, &allocator)
