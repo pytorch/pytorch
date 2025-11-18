@@ -1,13 +1,13 @@
 """
-AC Reordering Pass for Inference Graphs
+Activation Checkpointing Reordering Pass for Inference Graphs
 
-This pass minimizes AC node lifetimes by deferring whole AC chains to backward.
+Minimizes memory by duplicating checkpointed operations for backward use,
+then using DCE to remove unused forward versions.
 
-Only looks at nodes tagged with CheckpointPolicy.MUST_RECOMPUTE/PREFER_RECOMPUTE.
-When an AC node is deferred/duplicated, its entire AC chain (all AC dependencies)
-is also deferred/duplicated, while non-AC nodes (checkpoint inputs) are reused from forward.
-
-This mimics partitioner behavior: recompute checkpoint regions, reuse checkpoint inputs.
+Strategy:
+1. Insert all nodes in forward (including checkpointed operations)
+2. When backward needs a checkpointed node, duplicate the entire checkpoint region
+3. Run DCE to remove forward versions that have no users
 """
 
 import torch
@@ -15,16 +15,8 @@ import torch.fx as fx
 from torch._functorch.partitioners import (
     collect_deps_with_filter,
     insert_nodes_in_original_order,
+    must_recompute,
 )
-from torch.utils.checkpoint import CheckpointPolicy
-
-
-def must_recompute(node: fx.Node) -> bool:
-    """Check if node is tagged for AC recomputation"""
-    return node.meta.get("recompute", None) in [
-        CheckpointPolicy.MUST_RECOMPUTE,
-        CheckpointPolicy.PREFER_RECOMPUTE,
-    ]
 
 
 def _is_backward_node(node: fx.Node) -> bool:
@@ -32,88 +24,93 @@ def _is_backward_node(node: fx.Node) -> bool:
     return node.meta.get("custom", {}).get("backward") is not None
 
 
-def _get_input_for_duplicate_ac_chain(
+def _get_input_for_duplicate_checkpoint(
     x: fx.Node,
-    ac_duplicates: dict[fx.Node, fx.Node],
+    recomputed_nodes: dict[fx.Node, fx.Node],
     env: dict[fx.Node, fx.Node],
 ) -> fx.Node:
-    """Get input node when duplicating AC chains - reuse checkpoint inputs from forward."""
-    if x in ac_duplicates:
-        return ac_duplicates[x]
-    # Placeholders and non-AC nodes can be reused from forward
+    """Get input when duplicating checkpoint region - reuse checkpoint inputs from forward."""
+    if x in recomputed_nodes:
+        return recomputed_nodes[x]
+    # Placeholders and non-checkpointed nodes can be reused from forward
     return env.get(x, x)
 
 
-def _duplicate_ac_chain(
-    ac_node: fx.Node,
-    ac_duplicates: dict[fx.Node, fx.Node],
+def _duplicate_checkpoint_region(
+    node: fx.Node,
+    recomputed_nodes: dict[fx.Node, fx.Node],
     env: dict[fx.Node, fx.Node],
     new_graph: fx.Graph,
-    ac_both: set[fx.Node],
+    checkpointed_in_bwd: set[fx.Node],
 ) -> None:
     """
-    Recursively duplicate an AC node and its AC dependencies.
-    STOP at non-AC nodes (checkpoint inputs) - reuse those from forward.
+    Recursively duplicate a checkpointed node and its checkpointed dependencies.
+    Stop at non-checkpointed nodes (checkpoint inputs) - reuse those from forward.
 
-    This mimics the partitioner's behavior where only nodes inside the
-    checkpoint region are recomputed, and checkpoint inputs are reused.
+    This mimics partitioner behavior: recompute checkpoint region, reuse checkpoint inputs.
     """
-    if ac_node in ac_duplicates:
+    if node in recomputed_nodes:
         return
 
-    # First, duplicate all AC dependencies (nodes inside checkpoint region)
-    for inp in ac_node.all_input_nodes:
+    # First, duplicate all checkpointed dependencies (nodes inside checkpoint region)
+    for inp in node.all_input_nodes:
         # Skip placeholders (can be reused)
         if inp.op == "placeholder":
             continue
-        # Only duplicate if this dependency is ALSO an AC node
+        # Only duplicate if this dependency is also checkpointed
         # (i.e., it's inside the checkpoint region)
-        if must_recompute(inp) and inp not in ac_duplicates:
-            _duplicate_ac_chain(inp, ac_duplicates, env, new_graph, ac_both)
+        if must_recompute(inp) and inp not in recomputed_nodes:
+            _duplicate_checkpoint_region(
+                inp, recomputed_nodes, env, new_graph, checkpointed_in_bwd
+            )
 
     # Now duplicate this node
     dup = new_graph.node_copy(
-        ac_node,
-        lambda x: _get_input_for_duplicate_ac_chain(x, ac_duplicates, env),
+        node,
+        lambda x: _get_input_for_duplicate_checkpoint(x, recomputed_nodes, env),
     )
-    # Use _recomputed suffix for all duplicated AC nodes
-    dup.name = ac_node.name + "_recomputed"
-    ac_duplicates[ac_node] = dup
+    # Use _recomputed suffix for all duplicated nodes
+    dup.name = node.name + "_recomputed"
+    recomputed_nodes[node] = dup
 
 
-def _get_input_for_ac_duplicate(
+def _get_input_for_checkpointed_duplicate(
     x: fx.Node,
-    ac_duplicates: dict[fx.Node, fx.Node],
+    recomputed_nodes: dict[fx.Node, fx.Node],
     env: dict[fx.Node, fx.Node],
     new_graph: fx.Graph,
-    ac_both: set[fx.Node],
+    checkpointed_in_bwd: set[fx.Node],
 ) -> fx.Node:
-    """Get input when duplicating AC nodes - reuse checkpoint inputs."""
-    if x in ac_duplicates:
-        return ac_duplicates[x]
-    # If input is also an AC node, duplicate it first
-    if must_recompute(x) and x not in ac_duplicates:
-        _duplicate_ac_chain(x, ac_duplicates, env, new_graph, ac_both)
-        return ac_duplicates[x]
-    # Non-AC nodes (checkpoint inputs) - reuse from forward
+    """Get input when duplicating checkpointed nodes - reuse checkpoint inputs."""
+    if x in recomputed_nodes:
+        return recomputed_nodes[x]
+    # If input is also checkpointed, duplicate it first
+    if must_recompute(x) and x not in recomputed_nodes:
+        _duplicate_checkpoint_region(
+            x, recomputed_nodes, env, new_graph, checkpointed_in_bwd
+        )
+        return recomputed_nodes[x]
+    # Non-checkpointed nodes (checkpoint inputs) - reuse from forward
     return env.get(x, x)
 
 
 def _get_input_for_backward(
     x: fx.Node,
-    ac_duplicates: dict[fx.Node, fx.Node],
+    recomputed_nodes: dict[fx.Node, fx.Node],
     env: dict[fx.Node, fx.Node],
     new_graph: fx.Graph,
-    ac_both: set[fx.Node],
+    checkpointed_in_bwd: set[fx.Node],
 ) -> fx.Node:
     """Get input for regular backward nodes."""
-    if x in ac_duplicates:
-        return ac_duplicates[x]
-    # If input is an AC node (in both regions OR backward-only), duplicate it before using
-    # This ensures that when we defer AC nodes to backward, we also duplicate their AC dependencies
+    if x in recomputed_nodes:
+        return recomputed_nodes[x]
+    # If input is checkpointed and used in backward, duplicate it before using
+    # This ensures checkpoint regions are recomputed with their dependencies
     if must_recompute(x):
-        _duplicate_ac_chain(x, ac_duplicates, env, new_graph, ac_both)
-        return ac_duplicates[x]
+        _duplicate_checkpoint_region(
+            x, recomputed_nodes, env, new_graph, checkpointed_in_bwd
+        )
+        return recomputed_nodes[x]
     return env.get(x, x)
 
 
@@ -121,30 +118,27 @@ def _make_node_copy_fn(
     for_backward: bool,
     new_graph: fx.Graph,
     env: dict[fx.Node, fx.Node],
-    ac_both: set[fx.Node],
-    ac_duplicates: dict[fx.Node, fx.Node],
+    checkpointed_in_bwd: set[fx.Node],
+    recomputed_nodes: dict[fx.Node, fx.Node],
 ):
-    """Create a node copy function for AC-specific logic."""
+    """Create a node copy function for checkpoint-specific logic."""
 
     def node_copy_fn(n: fx.Node) -> fx.Node:
         # Forward pass: simple copy
         if not for_backward:
             return new_graph.node_copy(n, lambda x: env[x])
 
-        # Backward pass: handle AC nodes used in both regions
-        if n in ac_both:
-            # When duplicating AC nodes, duplicate only AC dependencies.
-            # This mimics partitioner behavior: recompute ops inside checkpoint,
-            # reuse checkpoint inputs from forward.
+        # Backward pass: duplicate checkpointed nodes used in backward
+        if must_recompute(n) and n in checkpointed_in_bwd:
+            # Duplicate this checkpointed node and its checkpointed dependencies
             dup = new_graph.node_copy(
                 n,
-                lambda x: _get_input_for_ac_duplicate(
-                    x, ac_duplicates, env, new_graph, ac_both
+                lambda x: _get_input_for_checkpointed_duplicate(
+                    x, recomputed_nodes, env, new_graph, checkpointed_in_bwd
                 ),
             )
             dup.name = n.name + "_recomputed"
-            ac_duplicates[n] = dup
-            # Also add to env so insert_nodes_in_original_order tracks it as processed
+            recomputed_nodes[n] = dup
             env[n] = dup
             return dup
 
@@ -152,7 +146,7 @@ def _make_node_copy_fn(
         return new_graph.node_copy(
             n,
             lambda x: _get_input_for_backward(
-                x, ac_duplicates, env, new_graph, ac_both
+                x, recomputed_nodes, env, new_graph, checkpointed_in_bwd
             ),
         )
 
@@ -161,27 +155,21 @@ def _make_node_copy_fn(
 
 def _make_skip_condition(
     for_backward: bool,
-    deferred_ac: set[fx.Node],
-    ac_duplicates: dict[fx.Node, fx.Node],
+    recomputed_nodes: dict[fx.Node, fx.Node],
     env: dict[fx.Node, fx.Node],
-    ac_both: set[fx.Node],
+    checkpointed_in_bwd: set[fx.Node],
 ):
     """Create a skip condition function for dependency collection."""
 
     def skip_condition(n: fx.Node) -> bool:
-        # Skip deferred AC in forward
-        if not for_backward and n in deferred_ac:
+        # Skip if already processed
+        if n in recomputed_nodes:
             return True
-
-        if for_backward:
-            # Skip if duplicate exists or already in env (and not needing dup)
-            if n in ac_duplicates:
-                return True
-            if n in env and n not in ac_both:
-                return True
-        else:
-            if n in env:
-                return True
+        if n in env:
+            # In backward, we might need to duplicate checkpointed nodes even if they're in env
+            if for_backward and must_recompute(n) and n in checkpointed_in_bwd:
+                return False
+            return True
         return False
 
     return skip_condition
@@ -191,17 +179,16 @@ def _insert_node_with_deps(
     node: fx.Node,
     for_backward: bool,
     order: dict[fx.Node, int],
-    deferred_ac: set[fx.Node],
-    ac_duplicates: dict[fx.Node, fx.Node],
+    recomputed_nodes: dict[fx.Node, fx.Node],
     env: dict[fx.Node, fx.Node],
-    ac_both: set[fx.Node],
+    checkpointed_in_bwd: set[fx.Node],
     new_graph: fx.Graph,
 ) -> None:
-    """Insert node and dependencies, deferring AC nodes as appropriate"""
+    """Insert node and dependencies"""
 
     # Create skip condition
     skip_condition = _make_skip_condition(
-        for_backward, deferred_ac, ac_duplicates, env, ac_both
+        for_backward, recomputed_nodes, env, checkpointed_in_bwd
     )
 
     # Collect dependencies
@@ -209,7 +196,7 @@ def _insert_node_with_deps(
 
     # Create node copy function
     node_copy_fn = _make_node_copy_fn(
-        for_backward, new_graph, env, ac_both, ac_duplicates
+        for_backward, new_graph, env, checkpointed_in_bwd, recomputed_nodes
     )
 
     # Insert nodes in original order using shared utility
@@ -220,37 +207,38 @@ def _insert_node_with_deps(
 
 def _get_output_arg(
     x,
-    ac_duplicates: dict[fx.Node, fx.Node],
+    recomputed_nodes: dict[fx.Node, fx.Node],
     env: dict[fx.Node, fx.Node],
 ):
-    """Get output argument, preferring duplicates over env."""
+    """Get output argument, preferring recomputed nodes over env."""
     if isinstance(x, fx.Node):
-        if x in ac_duplicates:
-            return ac_duplicates[x]
+        if x in recomputed_nodes:
+            return recomputed_nodes[x]
         return env.get(x, x)
     return x
 
 
-def reorder_ac_nodes_for_inference(gm: fx.GraphModule) -> fx.GraphModule:
+def remap_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModule:
     """
-    Reorder AC nodes to minimize lifetime by deferring whole AC chains to backward.
+    Remap (rematerialize) checkpointed nodes by duplicating checkpoint regions for backward.
 
-    Only looks at nodes tagged with CheckpointPolicy.MUST_RECOMPUTE/PREFER_RECOMPUTE.
-    When deferring/duplicating an AC node, we also defer/duplicate its AC dependencies
-    (the whole checkpoint region), but reuse non-AC nodes (checkpoint inputs) from forward.
-
-    This mimics partitioner behavior: recompute checkpoint region, reuse checkpoint inputs.
+    This is a generic rematerialization pass that relies on:
+    1. Nodes tagged with CheckpointPolicy.MUST_RECOMPUTE/PREFER_RECOMPUTE
+    2. Backward boundary marked with torch.fx.traceback.annotate({"backward": 0})
 
     Strategy:
-    1. AC nodes ONLY used in backward: Defer entire AC chain to backward
-    2. AC nodes used in BOTH: Duplicate AC chain in backward, keep original in forward
-    3. Non-AC nodes (checkpoint inputs): Always reused from forward
+    1. Insert all nodes in forward (including checkpointed nodes)
+    2. When backward needs a checkpointed node, duplicate the entire checkpoint region
+    3. Run DCE to remove unused forward nodes
+
+    DCE handles the cleanup: if a checkpointed node is only used in backward, its forward
+    version will have no users and DCE will remove it automatically.
 
     Args:
-        gm: Inference graph with forward and backward ops
+        gm: Graph with forward and backward ops
 
     Returns:
-        Reordered graph with minimized AC lifetimes
+        Graph with rematerialized checkpoint regions
     """
     # Find backward boundary
     first_node_in_bwd = None
@@ -266,55 +254,46 @@ def reorder_ac_nodes_for_inference(gm: fx.GraphModule) -> fx.GraphModule:
     order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
     bwd_start = order[first_node_in_bwd]
 
-    # Categorize AC nodes by usage
-    ac_used_in_fwd: set[fx.Node] = set()
-    ac_used_in_bwd: set[fx.Node] = set()
-
+    # Track which checkpointed nodes are used in backward (so we know which to duplicate)
+    checkpointed_in_bwd: set[fx.Node] = set()
     for node in gm.graph.nodes:
         if must_recompute(node):
             for user in node.users:
-                if order[user] < bwd_start:
-                    ac_used_in_fwd.add(node)
-                else:
-                    ac_used_in_bwd.add(node)
-
-    # Only need to track AC nodes used in backward or both regions
-    ac_bwd_only = ac_used_in_bwd - ac_used_in_fwd
-    ac_both = ac_used_in_fwd & ac_used_in_bwd
+                if order[user] >= bwd_start:
+                    checkpointed_in_bwd.add(node)
+                    break
 
     # Build reordered graph
     new_graph = fx.Graph()
     env: dict[fx.Node, fx.Node] = {}
-    ac_duplicates: dict[fx.Node, fx.Node] = {}
+    recomputed_nodes: dict[fx.Node, fx.Node] = {}
 
     # Add placeholders
     for node in gm.graph.find_nodes(op="placeholder"):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
-    # Nodes to defer (don't compute in forward)
-    deferred_ac = ac_bwd_only
-
-    # Insert forward (defer backward-only AC nodes)
+    # Insert forward - insert ALL nodes (no deferral)
+    # DCE will remove checkpointed nodes that are only used in backward
     for node in list(gm.graph.nodes)[:bwd_start]:
         if node.op in ("placeholder", "output"):
             continue
-        if node not in env and node not in deferred_ac:
+        if node not in env:
             _insert_node_with_deps(
-                node, False, order, deferred_ac, ac_duplicates, env, ac_both, new_graph
+                node,
+                False,
+                order,
+                recomputed_nodes,
+                env,
+                checkpointed_in_bwd,
+                new_graph,
             )
 
-    # Before processing backward, remove ac_both nodes from env
-    # so they can be duplicated in the backward region
-    for node in ac_both:
-        if node in env:
-            del env[node]
-
-    # Insert backward (compute deferred AC nodes + create duplicates)
+    # Insert backward - duplicate checkpointed nodes as needed
     for node in list(gm.graph.nodes)[bwd_start:]:
         if node.op == "output":
             continue
         _insert_node_with_deps(
-            node, True, order, deferred_ac, ac_duplicates, env, ac_both, new_graph
+            node, True, order, recomputed_nodes, env, checkpointed_in_bwd, new_graph
         )
 
     # Handle output
@@ -322,7 +301,15 @@ def reorder_ac_nodes_for_inference(gm: fx.GraphModule) -> fx.GraphModule:
     assert output_node.op == "output"
 
     new_graph.output(
-        tuple(_get_output_arg(arg, ac_duplicates, env) for arg in output_node.args[0])
+        tuple(
+            _get_output_arg(arg, recomputed_nodes, env) for arg in output_node.args[0]
+        )
     )
     new_gm = torch.fx.GraphModule(gm, new_graph)
+
+    # DCE removes forward checkpointed nodes that are only used in backward
+    # After duplication, those forward nodes have no users
+    new_gm.graph.eliminate_dead_code()
+    new_gm.recompile()
+
     return new_gm

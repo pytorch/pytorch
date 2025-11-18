@@ -222,10 +222,10 @@ def aot_stage1_graph_capture(
         # For joint graphs with autograd, the partitioner handles AC recomputation correctly
         if torch._functorch.config.enable_inference_mode_ac_reordering:
             from torch._functorch._activation_checkpointing.ac_reorder_inference_pass import (
-                reorder_ac_nodes_for_inference,
+                remap_nodes_with_ac_annotations,
             )
 
-            graph = reorder_ac_nodes_for_inference(graph)
+            graph = remap_nodes_with_ac_annotations(graph)
 
     return AOTGraphCapture(
         wrappers=wrappers,
