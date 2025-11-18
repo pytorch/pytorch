@@ -285,10 +285,10 @@ class OverlapPreservingBucketer:
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
         for n, deps in additional_deps.items():
-            torch._check(not n._erased, lambda: f"Erased node deps not transfered: {n}")
+            torch._check(not n._erased, lambda: f"Erased node deps not transferred: {n}")
             for d in deps:
                 torch._check(
-                    not d._erased, lambda: f"Erased node deps not transfered: {d}"
+                    not d._erased, lambda: f"Erased node deps not transferred: {d}"
                 )
 
         _stable_topological_sort(self.graph, additional_deps)
