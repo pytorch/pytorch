@@ -2901,12 +2901,23 @@ Tensor linalg_matrix_norm(
   _linalg_matrix_norm_checks(A, dim_, opt_dtype, /*low_precision*/abs_ord != 2.);
 
   auto max_min = [ord, keepdim](const Tensor& A, int64_t dim) { return ord > 0 ? A.amax(dim, keepdim) : A.amin(dim, keepdim); };
+  auto max_min_wrapper = [ord, max_min](const Tensor &A, int64_t dim) {
+    if (A.size(dim) == 0 && ord > 0) {
+      auto new_shape(DimVector(A.sizes()));
+      auto dim_ = maybe_wrap_dim(dim, A.dim());
+      new_shape[dim_] = 1;
+      auto zeros = at::zeros(new_shape, A.options());
+      return max_min(zeros, dim);
+    } else {
+      return max_min(A, dim);
+    }
+  };
   if (abs_ord == 2.) {
     // Move dims to the end
     auto permutation = create_dim_backshift_permutation(dim_[0], dim_[1], A.dim());
 
     auto A_ = opt_dtype.has_value() ? A.to(*opt_dtype) : A;
-    auto result = max_min(at::linalg_svdvals(A_.permute(permutation)), -1);
+    auto result = max_min_wrapper(at::linalg_svdvals(A_.permute(permutation)), -1);
     if (keepdim) {
       auto permutation_reverse = create_reverse_permutation(std::move(permutation));
       result = result.unsqueeze(-1).permute(permutation_reverse);
@@ -2923,7 +2934,7 @@ Tensor linalg_matrix_norm(
     if (!keepdim && (dim_[0] < dim_[1])) {
       dim_[1]--;
     }
-    return max_min(at::linalg_vector_norm(A, 1., {dim_[0]}, keepdim, opt_dtype), dim_[1]);
+    return max_min_wrapper(at::linalg_vector_norm(A, 1., {dim_[0]}, keepdim, opt_dtype), dim_[1]);
   }
 }
 

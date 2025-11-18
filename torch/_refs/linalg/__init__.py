@@ -269,12 +269,20 @@ def matrix_norm(
 
         max_min = partial(torch.amax if ord > 0.0 else torch.amin, keepdim=keepdim)
 
+        def max_min_wrapper(A, dim):
+            if A.size(dim) == 0:
+                new_size = list(A.size())
+                new_size[dim] = 1
+                return max_min(torch.zeros(new_size, dtype=A.dtype), dim)
+            else:
+                return max_min(A, dim)
+
         if abs_ord == 2.0:
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
             # pyrefly: ignore [index-error]
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
-            result = max_min(svdvals(prims.transpose(A, perm)), dim=-1)
+            result = max_min_wrapper(svdvals(prims.transpose(A, perm)), dim=-1)
             if keepdim:
                 inv_perm = _inverse_permutation(perm)
                 result = prims.transpose(torch.unsqueeze(result, -1), inv_perm)
@@ -286,7 +294,7 @@ def matrix_norm(
                 dim0, dim1 = dim1, dim0
             if not keepdim and (dim0 < dim1):
                 dim1 -= 1
-            return max_min(
+            return max_min_wrapper(
                 vector_norm(A, 1.0, dim=dim0, keepdim=keepdim, dtype=dtype), dim1
             )
 

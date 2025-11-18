@@ -27,7 +27,7 @@ from torch.testing._internal.common_utils import \
      runOnRocmArch, MI300_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
-     onlyCPU, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
+     onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
      skipCUDAIfNoMagmaAndNoCusolver, skipCUDAIfRocm, onlyNativeDeviceTypes, dtypesIfCUDA,
      onlyCUDA, skipMeta, skipCUDAIfNoCusolver, skipCUDAIfNotRocm, dtypesIfMPS, largeTensorTest)
 from torch.testing import make_tensor
@@ -2015,6 +2015,7 @@ class TestLinalg(TestCase):
                     run_test_case(input, ord, dim, keepdim)
 
     # Test degenerate shape results match numpy for linalg.norm matrix norms
+    @skipIf(np.lib.NumpyVersion(np.__version__) >= '2.3.0', 'Numpy changed handling of degenerate inputs in 2.3.0')
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
@@ -2043,13 +2044,13 @@ class TestLinalg(TestCase):
         S = 10
         test_cases = [
             # input size, p settings that cause error, dim
-            ((0, 0), [1, 2, inf, -1, -2, -inf], None),
-            ((0, S), [2, inf, -2, -inf], None),
-            ((S, 0), [1, 2, -1, -2], None),
+            ((0, 0), [-1, -2, -inf], None),
+            ((0, S), [-2, -inf], None),
+            ((S, 0), [-1, -2], None),
             ((S, S, 0), [], (0, 1)),
             ((1, S, 0), [], (0, 1)),
-            ((0, 0, S), [1, 2, inf, -1, -2, -inf], (0, 1)),
-            ((0, 0, S), [1, 2, inf, -1, -2, -inf], (1, 0)),
+            ((0, 0, S), [-1, -2, -inf], (0, 1)),
+            ((0, 0, S), [-1, -2, -inf], (1, 0)),
         ]
 
         for keepdim in [True, False]:
