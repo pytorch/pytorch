@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
+    skip_unless_torch_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -464,6 +465,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         run(g, 64, 8)
         self.assertEqual(cnt.frame_count, 2)
 
+    @skip_unless_torch_gpu
     def test_dtensor_unbacked_matmuls(self):
         from torch.distributed.tensor import randn as d_randn
 

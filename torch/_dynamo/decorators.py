@@ -15,7 +15,6 @@ import torch
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
 from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import (
@@ -44,7 +43,6 @@ if TYPE_CHECKING:
         set_guard_error_hook,
         unsupported,
     )
-
     from .variables import VariableTracker
 else:
     for name in dir(torch._C._dynamo.eval_frame):
@@ -610,6 +608,7 @@ def mark_unbacked(
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
+        # pyrefly: ignore [missing-attribute]
         if isinstance(t._specialize_on, dict):
             # pyrefly: ignore [missing-attribute]
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
