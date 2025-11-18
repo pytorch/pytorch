@@ -341,18 +341,13 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
 
 def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
-    """Estimate the size of a collective operation in bytes.
-
-    For all_gather and reduce_scatter, both input and output buffers are needed.
-    For all_reduce, it can typically be done in-place, so only one buffer is needed.
-    """
-    from torch._inductor.fx_passes.bucketing import (
-        is_all_reduce_tensor as is_all_reduce,
-    )
-
+    """Estimate the size of a collective operation in bytes, including inputs and outputs."""
     input_bytes = None
 
     args, kwargs = fx_node.args, fx_node.kwargs
+    kwargs = dict(kwargs)
+
+    # dont double count pre-allocated buffer passed in
     kwargs.pop("out", None)
 
     def tensor_bytes(t) -> int:
@@ -383,12 +378,21 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
         get_size_numel(output_tensor.size()) * output_tensor.element_size()
     )  # pyre-ignore
 
-    # all_reduce can be in-place, so only needs one buffer
-    if is_all_reduce(fx_node):
-        return max(input_bytes, output_bytes)
-
-    # otherwise assume both live concurrently
     return input_bytes + output_bytes
+
+
+def estimate_fx_collective_memory_footprint(fx_node: torch.fx.Node) -> int:
+    """Estimate the memory footprint of a collective operation in bytes.
+
+    This returns the total bytes that need to be live concurrently in memory.
+    For all_reduce, we divide by 2 since it can be done in-place.
+    """
+    from torch._inductor.fx_passes.bucketing import (
+        is_all_reduce_tensor as is_all_reduce,
+    )
+
+    size = estimate_fx_collective_size(fx_node)
+    return size if not is_all_reduce(fx_node) else size // 2
 
 
 def estimate_nccl_collective_runtime_from_fx_node(
