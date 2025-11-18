@@ -20,6 +20,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     skipIf,
+    skipIfXpu,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
@@ -402,7 +403,7 @@ class TestAnalysis(TestCase):
         (not torch.xpu.is_available()) and (not SM80OrLater),
         "Requires XPU or CUDA SM80",
     )
-    @skipXPUIf(
+    @skipIfXpu(
         msg="Intel triton issue: https://github.com/intel/intel-xpu-backend-for-triton/issues/5491"
     )
     @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
