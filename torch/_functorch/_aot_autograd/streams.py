@@ -43,6 +43,12 @@ def set_stream(node: Node, ind: int) -> None:
         node.meta["custom"] = {"stream": ind}
 
 
+def handle_synced_deallocation(graph: torch.fx.Graph, node: Node, last_usage: Node):
+    # allocating_stream = get_stream(node)
+    # side_stream = get_stream(last_usage)
+    pass
+
+
 def insert_sync(
     graph: torch.fx.Graph,
     consumer: Node,
@@ -112,3 +118,16 @@ def insert_backward_syncs(gm: torch.fx.GraphModule) -> None:
                     arg_stream = get_stream(arg)
                     if arg_stream != cur_node_stream and get_device(arg).type != "cpu":
                         insert_sync(gm.graph, node, arg, node_to_wait_event_ind)
+
+
+def sync_deallocations(gm: torch.fx.GraphModule) -> None:
+    """Handles https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream"""
+    # Note: this is only needed if the last usage of a tensor is on a stream other than
+    # the stream the tensor was allocated
+    for node in gm.graph.nodes:
+        if is_bwd_node(node):
+            allocating_stream = get_stream(node)
+            last_user = max(user for user in node.users.keys())
+            side_stream = get_stream(last_user)
+            if allocating_stream != side_stream:
+                handle_synced_deallocation(gm.graph, node, last_user)
