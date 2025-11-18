@@ -10,6 +10,7 @@ import torch._dynamo.test_case
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
 import torch.distributed._functional_collectives as _functional_collectives
+import torch.fx as fx
 from torch._C import FileCheck
 from torch._dynamo.utils import counters, same
 from torch._inductor.utils import run_and_get_code, run_and_get_triton_code
@@ -237,6 +238,49 @@ graph():
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))
             self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_patches())
+    def test_schedulable_wait(self):
+        """Test that if a wait node is scheduable or not."""
+        from torch._inductor.fx_passes.bucketing import _schedulable_wait_node
+
+        def test_graph():
+            graph = fx.Graph()
+
+            inp = graph.placeholder("inp")
+            group_size = graph.placeholder("group_size")
+            group_name = graph.placeholder("group_name")
+
+            ag_0_out = graph.call_function(
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                args=(inp, group_size, group_name),
+            )
+            ag_0_wait = graph.call_function(
+                torch.ops._c10d_functional.wait_tensor.default,
+                args=(ag_0_out,),
+            )
+            ag_1_out = graph.call_function(
+                torch.ops._c10d_functional.all_gather_into_tensor.default,
+                args=(ag_0_wait, group_size, group_name),
+            )
+            ag_1_wait = graph.call_function(
+                torch.ops._c10d_functional.wait_tensor.default,
+                args=(ag_1_out,),
+            )
+            ag_2_wait = graph.call_function(
+                torch.ops._c10d_functional.wait_tensor.default,
+                args=(ag_1_wait,),
+            )
+
+            graph.output(ag_2_wait)
+            return graph
+
+        graph = test_graph()
+        schedulable = {"wait_tensor_default", "wait_tensor_default_1"}
+        for node in list(graph.nodes):
+            expected = node.name in schedulable
+            assert _schedulable_wait_node(node) is expected
 
     @torch._inductor.config.patch(get_patches())
     def test_reorder_compute_for_overlap_mul(self):
