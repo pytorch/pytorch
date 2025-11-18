@@ -1610,6 +1610,9 @@ class SIMDScheduling(BaseScheduling):
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
+        # the statically_known_gt works as expected for dynamic shapes
+        # since we already add guards in MixOrderReduction.can_fuse
+        # for dynamic shapes.
         if not V.graph.sizevars.statically_known_gt(
             numel,
             rnumel,
@@ -1625,7 +1628,10 @@ class SIMDScheduling(BaseScheduling):
             device_prop = DeviceProperties.create(node1.get_device())
             num_sm = device_prop.multi_processor_count
             estimated_num_splits = num_sm * 8
-            split_size = max(next_power_of_2(numel // estimated_num_splits), 16)
+
+            # split_size is decided based on hint
+            numel_hint = V.graph.sizevars.size_hint(numel)
+            split_size = max(next_power_of_2(numel_hint // estimated_num_splits), 16)
             split_size = min(split_size, 128)
             return split_size
 
