@@ -199,38 +199,34 @@ def _compute_local_shape_and_global_offset(
         mesh_dim_size = mesh_shape[mesh_dim]
         if isinstance(placement, (Shard, _StridedShard)):
             shard_dim = placement.dim
+            zero_global_offset = global_shape[shard_dim]
             assert shard_dim < len(local_shape), (
                 f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
             )
-            # if my_coordinate == [3, 1]:
-            #     import fbvscode
-            #     fbvscode.set_trace()    
             shard_size, shard_offsets = placement._local_shard_size_and_offset(
                 local_shape[shard_dim],
                 mesh_dim_size,
                 my_coordinate[mesh_dim],
             )
+            # if my_coordinate == [0, 1]:
+            #     import fbvscode
+            #     fbvscode.set_trace()
             
             if shard_dim not in shard_dim_to_global_offsets:
-                # if my_coordinate == [3, 1]:
-                #     import fbvscode
-                #     fbvscode.set_trace()
                 if shard_size > 0:
                     shard_dim_to_global_offsets[shard_dim] = shard_offsets
                 else:
-                    shard_dim_to_global_offsets[shard_dim] = [global_shape[shard_dim]]
+                    shard_dim_to_global_offsets[shard_dim] = [zero_global_offset]
             else:
                 global_shard_offsets = shard_dim_to_global_offsets[shard_dim]
-                if isinstance(placement, _StridedShard):
-                    raise NotImplementedError("impelment _StridedShard")
-                if isinstance(placement, Shard):
-                    # if my_coordinate == [3, 1]:
-                    #     import fbvscode
-                    #     fbvscode.set_trace()
-                    if shard_size > 0:
-                        shard_dim_to_global_offsets[shard_dim] = global_shard_offsets[shard_offsets : (shard_offsets + shard_size)]
-                    else:
-                        shard_dim_to_global_offsets[shard_dim] = [global_shape[shard_dim]]
+                if shard_size > 0:
+                    try:
+                        shard_dim_to_global_offsets[shard_dim] = [global_shard_offsets[i] for i in shard_offsets]
+                    except:
+                        import fbvscode
+                        fbvscode.set_trace()
+                else:
+                    shard_dim_to_global_offsets[shard_dim] = [zero_global_offset]
 
 
             local_shape[shard_dim] = shard_size
