@@ -112,7 +112,7 @@ if not IS_WINDOWS:
             Returns (success, error_message).
             """
             if not GPU_HOME:
-                return False, "CUDA_HOME not set"
+                return False, "one of CUDA_HOME and ROCM_HOME should be set but is not"
 
             torch_version_2_9 = "0x0209000000000000"
 
