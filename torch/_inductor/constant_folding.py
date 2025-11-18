@@ -1,5 +1,6 @@
 import collections
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -214,7 +215,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # TODO - fix errors with this
         if (
             node.op == "call_function"
-            and node.target == aten._efficientzerotensor.default
+            and node.target is aten._efficientzerotensor.default
         ):
             return self.unknown_value
 

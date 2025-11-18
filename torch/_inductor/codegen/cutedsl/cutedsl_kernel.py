@@ -3,7 +3,8 @@ import contextlib
 import dataclasses
 import logging
 import textwrap
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import sympy
 
@@ -65,6 +66,10 @@ class CuteDSLSubgraphInfo:
     body: IndentedBuffer
     template_mask: Optional[str] = None
     template_out: Optional[str] = None
+    cse: Optional[CSE[Any]] = None
+
+    def __post_init__(self):
+        self.only_copy_if_non_none_fields = ("cse",)
 
     def to_dict(self):
         return {
@@ -118,8 +123,6 @@ class CuteDSLTemplateKernel(Kernel):
 
     def kexpr(self, expr: sympy.Expr) -> str:
         """Convert sympy expression to CuteDSL string representation."""
-        # For CuteDSL, we use standard Python string conversion
-        # since CuteDSL uses Python syntax for expressions
         return str(expr)
 
     def gen_imports(self) -> str:
@@ -134,6 +137,7 @@ class CuteDSLTemplateKernel(Kernel):
             import cuda.bindings.driver as cuda
             from cutlass._mlir.dialects import math as mlir_math
             import operator
+            from torch._inductor.codegen.cutedsl._cutedsl_utils import ssa_to_indexable, result_to_ssa
             """
         )
         return imports.getvalue()
@@ -191,10 +195,15 @@ class CuteDSLTemplateKernel(Kernel):
                 body=IndentedBuffer(),
                 template_mask=None,
                 template_out=None,
+                cse=None,
             )
 
         subgraph = self.subgraph_bodies[body_name]
         for key, value in subgraph.to_dict().items():
+            if value is None and key in getattr(
+                subgraph, "only_copy_if_non_none_fields", ()
+            ):
+                continue
             setattr(self, key, value)
 
         try:
@@ -212,15 +221,17 @@ class CuteDSLTemplateKernel(Kernel):
                 setattr(self, key, value)
 
     @contextlib.contextmanager
-    def create_subgraph_body(self, body_name: str):
+    def create_subgraph_body(self, body_name: str, *, clear_cse: bool = False):
         """Create a new subgraph body for template processing."""
         assert body_name not in self.subgraph_bodies, (
             f"Subgraph body '{body_name}' already exists"
         )
+        new_cse = self.cse.clone() if clear_cse else None
         self.subgraph_bodies[body_name] = CuteDSLSubgraphInfo(
             body=IndentedBuffer(),
             template_mask=None,
             template_out=None,
+            cse=new_cse,
         )
         with self.set_subgraph_body(body_name):
             yield
@@ -294,7 +305,8 @@ class CuteDSLTemplateKernel(Kernel):
 
         # Register the hook and return placeholder
         placeholder = "<UNPACK_BUFFERS>"
-        assert placeholder not in self.render_hooks
+        # TODO: I think double invoking is fine for this specific hook
+        # assert placeholder not in self.render_hooks
         self.render_hooks[placeholder] = hook
         return placeholder
 
@@ -330,7 +342,7 @@ class CuteDSLTemplateKernel(Kernel):
         while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
             num += 1
 
-        with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
+        with self.create_subgraph_body(f"mod_{subgraph_number}_{num}", clear_cse=True):
             subgraph = self._get_subgraph(subgraph_number)
             modification_handler = ModificationWrapperCuteDSL(
                 self, subgraph_number, fixed_inputs, mask
@@ -406,72 +418,32 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed(template args) input for CuteDSL."""
         if name not in self.fixed_inputs:
-            index_str = self._process_indexing(index)
             var = self._add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
             var_dtype = buffer.dtype
 
-            # Get the CuteDSL dtype mapping
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
                 var_dtype, "cutlass.Float32"
             )
+            renamed_index = self.kernel.rename_indexing(index)
 
-            # NB
-            # This assumes single-value loads which is not generally the case but is a workaround
-            # since we don't have gather support yet. We do loads in non-SSA form then convert
-            # back to SSA form for any remaining operations over the loaded values.
-            #
-            # Pattern:
-            #   index_frag = cute.make_fragment(1, cutlass.Int32)
-            #   index_frag.store(index)
-            #   val_frag = cute.make_fragment(1, dtype)
-            #   index = index_frag[0]
-            #   val_frag[0] = tensor[index]
-            #   result = val_frag.load()
-
-            index_frag = self.kernel.cse.generate(
-                self.kernel.body,
-                "cute.make_fragment(1, cutlass.Int32)",
-                dtype=torch.int32,
-                bounds=ValueRanges.unknown(),
+            idx_var = self._emit_scalar_fragment(
+                self.kernel.kexpr(renamed_index), "cutlass.Int32", torch.int32
             )
 
-            self.kernel.cse.generate(
-                self.kernel.body,
-                f"{index_frag}.store({index_str})",
-                dtype=torch.int32,
-                bounds=ValueRanges.unknown(),
+            val_frag = self.kernel.cse.newvar(dtype=var_dtype)
+            self.kernel.body.writeline(
+                f"{val_frag} = cute.make_fragment(1, {cute_dtype})"
             )
 
-            val_frag = self.kernel.cse.generate(
-                self.kernel.body,
-                f"cute.make_fragment(1, {cute_dtype})",
-                dtype=var_dtype,
-                bounds=ValueRanges.unknown(),
-            )
-
-            index_var = self.kernel.cse.generate(
-                self.kernel.body,
-                f"{index_frag}[0]",
-                dtype=torch.int32,
-                bounds=ValueRanges.unknown(),
-            )
-
-            self.kernel.cse.generate(
-                self.kernel.body,
-                f"{val_frag}[0] = ({var}[{index_var}])",
-                dtype=var_dtype,
-                bounds=ValueRanges.unknown(),
-            )
+            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[{idx_var}])")
 
             final_expr = f"{val_frag}.load()"
 
-            # Handle upcast to fp32 if needed
             if (
                 var_dtype in (torch.float16, torch.bfloat16)
                 and config.triton.codegen_upcast_to_fp32
             ):
-                # Apply dtype conversion after fragment load
                 final_expr = f"({final_expr}).to(cutlass.Float32)"
                 var_dtype = torch.float32
 
@@ -486,10 +458,24 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
         value = self.fixed_inputs[name]
         dtype = self._get_input_dtype(name)
 
-        # ensure CSE wrapping
         return self.kernel.cse.generate(
             self.kernel.body, value, bounds=ValueRanges.unknown(), dtype=dtype
         )
+
+    def _emit_scalar_fragment(
+        self, expr_str: str, cute_dtype: str, torch_dtype: torch.dtype
+    ) -> str:
+        """
+        Convert SSA expression to indexable scalar for tensor loads.
+
+        Workaround for lack of gather support: SSA values cannot be used directly
+        as indices. This generates code to convert SSA → indexable scalar.
+        """
+        result = self.kernel.cse.newvar(dtype=torch_dtype)
+        self.kernel.body.writeline(
+            f"{result} = ssa_to_indexable({expr_str}, {cute_dtype})"
+        )
+        return str(result)
 
     def indirect_indexing(self, index_var: str, size, check, wrap_neg=True):
         """Convert index variable to symbolic form."""

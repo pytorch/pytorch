@@ -644,8 +644,8 @@ void weight_to_int4pack_kernel(
             int32_t val2 = src[(d + 32) * K + k];
             int32_t val3 = src[(d + 48) * K + k];
 
-            uint8_t packed02 = (((uint8_t)(val2) << 4)) | ((uint8_t)(val0));
-            uint8_t packed13 = (((uint8_t)(val3) << 4)) | ((uint8_t)(val1));
+            uint8_t packed02 = ((uint8_t)val2 << 4) | ((uint8_t)val0);
+            uint8_t packed13 = ((uint8_t)val3 << 4) | ((uint8_t)val1);
 
             dst[k * 32 + d] = packed02;
             dst[k * 32 + 16 + d] = packed13;
@@ -656,7 +656,7 @@ void weight_to_int4pack_kernel(
             int32_t val0 = src[n * K + k];
             int32_t val1 = src[n * K + K + k];
 
-            uint8_t packed = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
+            uint8_t packed = ((uint8_t)val1 << 4) | ((uint8_t)val0);
             dst[k * nb_size / 2 + n / 2] = packed;
           }
         }
@@ -667,7 +667,7 @@ void weight_to_int4pack_kernel(
             int32_t val0 = src[(d + 0) * K + k];
             int32_t val1 = src[(d + 16) * K + k];
 
-            uint8_t packed01 = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
+            uint8_t packed01 = ((uint8_t)val1 << 4) | ((uint8_t)val0);
             dst[k * 16 + d] = packed01;
           }
         } else {
@@ -676,7 +676,7 @@ void weight_to_int4pack_kernel(
             int32_t val0 = src[n * K + k];
             int32_t val1 = src[n * K + K + k];
 
-            uint8_t packed = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
+            uint8_t packed = ((uint8_t)val1 << 4) | ((uint8_t)val0);
             dst[k * nb_size / 2 + n / 2] = packed;
           }
         }
@@ -685,7 +685,7 @@ void weight_to_int4pack_kernel(
           int32_t val0 = src[n * K + k];
           int32_t val1 = src[n * K + K + k];
 
-          uint8_t packed = (((uint8_t)(val1) << 4)) | ((uint8_t)(val0));
+          uint8_t packed = ((uint8_t)val1 << 4) | ((uint8_t)val0);
           dst[k * nb_size / 2 + n / 2] = packed;
         }
 #endif
@@ -872,16 +872,16 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
           for (size_t k_idx = 0; k_idx < k; ++k_idx) {
             const float src0_0 = src_ptr[k_idx];
 
-            max0 = (std::max)(src0_0, max0);
-            min0 = (std::min)(src0_0, min0);
+            max0 = std::max(src0_0, max0);
+            min0 = std::min(src0_0, min0);
           }
 
           // Maximum/minimum int8 values
           const float qmin = (float)INT8_MIN;
           const float qmax = (float)INT8_MAX;
 
-          const float rmin0 = (std::min)(0.0f, min0);
-          const float rmax0 = (std::max)(0.0f, max0);
+          const float rmin0 = std::min(0.0f, min0);
+          const float rmax0 = std::max(0.0f, max0);
 
           const float scale0 =
               rmin0 == rmax0 ? 1.f : (qmax - qmin) / (rmax0 - rmin0);
@@ -900,8 +900,8 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
               ? qmin - descaled_min0
               : qmax - descaled_max0;
 
-          zero_point0 = (std::max)(zero_point0, qmin);
-          zero_point0 = (std::min)(zero_point0, qmax);
+          zero_point0 = std::max(zero_point0, qmin);
+          zero_point0 = std::min(zero_point0, qmax);
 
           // Round to nearest integer
           const int32_t nudged_zero_point0 = lrintf(zero_point0);
@@ -909,9 +909,9 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
           int8_t* dst_ptr = lhs_qa8dx + m_idx * dst_stride;
 
           // LHS offset at the beginning of the row
-          *((float*)(dst_ptr)) = recip_scale0;
+          *((float*)dst_ptr) = recip_scale0;
           dst_ptr += sizeof(float);
-          *((int32_t*)(dst_ptr)) = -nudged_zero_point0;
+          *((int32_t*)dst_ptr) = -nudged_zero_point0;
           dst_ptr += sizeof(int32_t);
 
           // Quantize the channels
@@ -922,8 +922,8 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
             int32_t v0_s32 = (int32_t)(std::round(src0_0 * scale0));
 
             v0_s32 = v0_s32 + nudged_zero_point0;
-            v0_s32 = (std::max)(v0_s32, static_cast<int32_t>(INT8_MIN));
-            v0_s32 = (std::min)(v0_s32, static_cast<int32_t>(INT8_MAX));
+            v0_s32 = std::max(v0_s32, static_cast<int32_t>(INT8_MIN));
+            v0_s32 = std::min(v0_s32, static_cast<int32_t>(INT8_MAX));
             dst_ptr[0] = (int8_t)v0_s32;
             dst_ptr += sizeof(int8_t);
           }
@@ -988,8 +988,8 @@ void ref_dyn_quant_matmul_4bit_channelwise_kernel(
       main_acc = main_acc * lhs_scale;
 
       // Clamp (min-max) operation
-      main_acc = (std::max)(main_acc, scalar_min);
-      main_acc = (std::min)(main_acc, scalar_max);
+      main_acc = std::max(main_acc, scalar_min);
+      main_acc = std::min(main_acc, scalar_max);
 
       dst_f32[0] = main_acc;
       dst_f32 += 1;
@@ -1024,15 +1024,15 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
 
       for (size_t k_idx = 0; k_idx < k; ++k_idx) {
         const float src0_0 = src_ptr[k_idx];
-        max0 = (std::max)(src0_0, max0);
-        min0 = (std::min)(src0_0, min0);
+        max0 = std::max(src0_0, max0);
+        min0 = std::min(src0_0, min0);
       }
 
       const float qmin = (float)INT8_MIN;
       const float qmax = (float)INT8_MAX;
 
-      const float rmin0 = (std::min)(0.0f, min0);
-      const float rmax0 = (std::max)(0.0f, max0);
+      const float rmin0 = std::min(0.0f, min0);
+      const float rmax0 = std::max(0.0f, max0);
       const float scale0 =
           (rmin0 == rmax0) ? 1.f : (qmax - qmin) / (rmax0 - rmin0);
       const float recip_scale0 = scale0 ? 1.0f / scale0 : 0.0f;
@@ -1044,22 +1044,22 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
           ? qmin - descaled_min0
           : qmax - descaled_max0;
 
-      zero_point0 = (std::max)(zero_point0, qmin);
-      zero_point0 = (std::min)(zero_point0, qmax);
+      zero_point0 = std::max(zero_point0, qmin);
+      zero_point0 = std::min(zero_point0, qmax);
       const int32_t nudged_zero_point0 = lrintf(zero_point0);
 
       int8_t* dst_ptr = lhs_qa8dx + row_idx * dst_stride;
 
-      *((float*)(dst_ptr)) = recip_scale0;
+      *((float*)dst_ptr) = recip_scale0;
       dst_ptr += sizeof(float);
-      *((int32_t*)(dst_ptr)) = -nudged_zero_point0;
+      *((int32_t*)dst_ptr) = -nudged_zero_point0;
       dst_ptr += sizeof(int32_t);
 
       for (size_t k_idx = 0; k_idx < k; ++k_idx) {
         const float src0_0 = src_ptr[k_idx];
         int32_t v0_s32 = (int32_t)(std::round(src0_0 * scale0));
-        v0_s32 = (std::max)(
-            (std::min)(
+        v0_s32 = std::max(
+            std::min(
                 v0_s32 + nudged_zero_point0, static_cast<int32_t>(INT8_MAX)),
             static_cast<int32_t>(INT8_MIN));
         dst_ptr[0] = (int8_t)v0_s32;
@@ -1118,8 +1118,8 @@ void ref_dyn_quant_matmul_4bit_groupwise_kernel(
       }
 
       main_acc = main_acc * lhs_scale;
-      main_acc = (std::max)(main_acc, scalar_min);
-      main_acc = (std::min)(main_acc, scalar_max);
+      main_acc = std::max(main_acc, scalar_min);
+      main_acc = std::min(main_acc, scalar_max);
 
       dst_f32[0] = main_acc;
       dst_f32 += 1;

@@ -209,7 +209,7 @@ def _broadcast_state_dict(rank, state_dict):
     dist.broadcast_object_list(olist)
     state_dict = cast(dict[str, torch.Tensor], olist[0])
     # Ensure that the state is on DEVICE
-    for param_name in state_dict.keys():
+    for param_name in state_dict:
         state_dict[param_name] = state_dict[param_name].to(DEVICE_TYPE)
     return state_dict
 

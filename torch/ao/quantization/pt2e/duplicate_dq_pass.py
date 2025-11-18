@@ -64,7 +64,7 @@ class DuplicateDQPass(PassBase):
                     if (
                         isinstance(getitem_node, torch.fx.node.Node)
                         and getitem_node.op == "call_function"
-                        and getitem_node.target == operator.getitem
+                        and getitem_node.target is operator.getitem
                     ):
                         choose_qparam_node = getitem_node.args[0]
                         if (

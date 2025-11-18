@@ -174,7 +174,7 @@ struct CollectiveFingerPrint {
           ss << "Detected mismatch between collectives on ranks. Rank "
              << backend->getRank() << " is running collective: " << *this
              << ", but Rank " << rank
-             << " is running collective: " << rank_fingerprint << ".";
+             << " is running collective: " << rank_fingerprint << '.';
           auto diff_result = compute_collective_diff(rank_fingerprint);
           if (std::get<0>(diff_result)) {
             ss << std::get<1>(diff_result);

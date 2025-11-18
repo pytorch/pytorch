@@ -271,7 +271,7 @@ def convert_conv_weights_to_channels_last(gm: torch.fx.GraphModule):
     folded by freezing.
     """
     with dynamo_timed("convert_conv_weights_to_channels_last"):
-        convs = [n for n in gm.graph.nodes if n.target == aten.convolution.default]
+        convs = [n for n in gm.graph.nodes if n.target is aten.convolution.default]
         for conv in convs:
             weight_node = conv.args[1]
             if len(weight_node.meta["val"].size()) != 4 or weight_node.meta[

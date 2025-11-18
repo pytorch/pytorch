@@ -99,7 +99,7 @@ std::string ErrorReport::current_call_stack() {
 
 const char* ErrorReport::what() const noexcept {
   std::stringstream msg;
-  msg << "\n" << ss.str();
+  msg << '\n' << ss.str();
   msg << ":\n";
   context.highlight(msg);
 
