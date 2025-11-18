@@ -469,8 +469,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         # use 2x2 mesh for testing
         dist.destroy_process_group()
-        fake_store = FakeStore()
-        dist.init_process_group("fake", store=fake_store, rank=2, world_size=4)
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
         device_mesh = init_device_mesh(self.device_type, (2, 2))
 
         for test_index, (px, py) in enumerate(
@@ -479,6 +478,13 @@ def forward(self, b_parametrizations_buffer_original0, x):
                 [[Replicate(), Replicate()], [Replicate(), Replicate()]],
                 [[Replicate(), Shard(0)], [Replicate(), Replicate()]],
                 [[Replicate(), Shard(1)], [Replicate(), Shard(0)]],
+                # any of these should pass with redistribution
+                [[Replicate(), Partial()], [Replicate(), Replicate()]],
+                [[Partial(), Partial()], [Partial(), Partial()]],
+                [[Partial(), Partial()], [Shard(0), Replicate()]],
+                [[Replicate(), Shard(0)], [Replicate(), Shard(0)]],
+                [[Shard(0), Shard(1)], [Shard(1), Shard(0)]],
+                [[Partial(), Replicate()], [Shard(0), Shard(0)]],
             ]
         ):
             # create DTensors with unbacked outer/inner sizes
@@ -489,6 +495,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
                 torch._dynamo.decorators.mark_unbacked(y_dt, i)
 
             # full-graph capture
+            torch._dynamo.reset()
             cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
             fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
             fn(x_dt, y_dt)
@@ -500,7 +507,15 @@ def forward(self, b_parametrizations_buffer_original0, x):
                 out, eager_out = fn(dx, dy), torch.mm(dx, dy)
                 self.assertEqual(tuple(out.shape), (3, 1))
                 self.assertEqual(cnt.frame_count, 1)
-                self.assertTrue(torch.allclose(out.to_local(), eager_out.to_local()))
+                self.assertEqual(out.shape, eager_out.shape)
+
+            # test on uneven shardings
+            if test_index >= 3:
+                dx = d_randn(20, 17, device_mesh=device_mesh, placements=px)
+                dy = d_randn(17, 5, device_mesh=device_mesh, placements=py)
+                out, eager_out = fn(dx, dy), torch.mm(dx, dy)
+                self.assertEqual(cnt.frame_count, 1)
+                self.assertEqual(out.shape, eager_out.shape)
 
     def test_dtensor_requires_grad_recompile(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")

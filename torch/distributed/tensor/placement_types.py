@@ -11,7 +11,6 @@ from torch._C._distributed import Placement
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
-    fill_empty_tensor_to_shards,
     mesh_broadcast,
     mesh_scatter,
     pad_tensor,
@@ -68,10 +67,7 @@ class Shard(torch._C._distributed.Shard):
         )
 
         # chunk tensor over dimension `dim` into n slices
-        tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
-        tensor_list = fill_empty_tensor_to_shards(
-            tensor_list, self.dim, num_chunks - len(tensor_list)
-        )
+        tensor_list = self._custom_chunk(tensor, num_chunks, dim=self.dim)
 
         # compute the chunk size inline with ``torch.chunk`` to calculate padding
         full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
@@ -87,6 +83,25 @@ class Shard(torch._C._distributed.Shard):
                 shard = shard.contiguous()
             shard_list.append(shard)
         return shard_list, pad_sizes
+
+    def _custom_chunk(
+        self, tensor: torch.Tensor, num_chunks: int, dim: int
+    ) -> list[torch.Tensor]:
+        """
+        Dynamic shapes-friendly implementation of chunk that returns pre-determined num_chunks,
+        and accounts for uneven/zero-sharding cases.
+        """
+        assert tensor.dim() > 0
+        assert num_chunks > 0
+
+        dim_size = tensor.size(dim)
+        split_size = (dim_size + num_chunks - 1) // num_chunks
+        chunks = []
+        for i in range(num_chunks):
+            start = torch.sym_min(split_size * i, dim_size)
+            end = torch.sym_min(split_size * (i + 1), dim_size)
+            chunks.append(tensor.narrow(dim, start, end - start))
+        return chunks
 
     @staticmethod
     @maybe_run_for_local_tensor
@@ -106,8 +121,11 @@ class Shard(torch._C._distributed.Shard):
         Returns (new local shard size, offset)
 
         """
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
         # Compute the chunk size inline with ``torch.chunk``
-        if curr_local_size % num_chunks == 0:
+        # Assume uneven sharding as general case for unbacked sizes.
+        if guard_or_false(curr_local_size % num_chunks == 0):
             full_chunk_size = curr_local_size // num_chunks
             return full_chunk_size, full_chunk_size * rank
 
@@ -115,14 +133,11 @@ class Shard(torch._C._distributed.Shard):
         full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
         shard_starting_idx = full_chunk_size * rank
 
-        if curr_local_size < shard_starting_idx:
-            return 0, curr_local_size
-        else:
-            local_shard_size = (
-                min(curr_local_size, shard_starting_idx + full_chunk_size)
-                - shard_starting_idx
-            )
-            return local_shard_size, shard_starting_idx
+        shard_end_idx = torch.sym_min(
+            curr_local_size, shard_starting_idx + full_chunk_size
+        )
+        local_shard_size = torch.sym_max(0, shard_end_idx - shard_starting_idx)
+        return local_shard_size, torch.sym_min(curr_local_size, shard_starting_idx)
 
     def _local_shard_size_and_offset(
         self,
@@ -137,8 +152,11 @@ class Shard(torch._C._distributed.Shard):
     def _maybe_unpad_tensor_with_sizes(
         dim, local_tensor, pad_sizes, mesh_dim_local_rank, make_contiguous
     ) -> torch.Tensor:
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
         # Only unpad if the local_tensor was padded on the dimension.
-        if pad_sizes[mesh_dim_local_rank] > 0:
+        # Assume padding (uneven sharding) as general case for unbacked sizes.
+        if guard_or_true(pad_sizes[mesh_dim_local_rank] > 0):
             local_tensor = unpad_tensor(
                 local_tensor, dim, pad_sizes[mesh_dim_local_rank]
             )
@@ -218,6 +236,8 @@ class Shard(torch._C._distributed.Shard):
         """
         reduce and scatter a tensor on a mesh dimension
         """
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(mesh_dim=mesh_dim)
 
@@ -226,7 +246,8 @@ class Shard(torch._C._distributed.Shard):
             # which should be an empty tensor
             return tensor
 
-        is_padded = tensor.size(self.dim) % num_chunks != 0
+        # Assume padding (uneven sharding) as general case for unbacked sizes.
+        is_padded = guard_or_true(tensor.size(self.dim) % num_chunks != 0)
         pad_sizes = None
         if is_padded:
             scattered_list, pad_sizes = self._split_tensor(
@@ -254,7 +275,10 @@ class Shard(torch._C._distributed.Shard):
         logical_dim_size: int,
         num_chunks: int,
     ) -> torch.Tensor:
-        is_padded = logical_dim_size % num_chunks != 0
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        # Assume padding (uneven sharding) as general case for unbacked sizes.
+        is_padded = guard_or_true(logical_dim_size % num_chunks != 0)
 
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
@@ -273,7 +297,10 @@ class Shard(torch._C._distributed.Shard):
         logical_dim_size: int,
         num_chunks: int,
     ) -> torch.Tensor:
-        is_padded = logical_dim_size % num_chunks != 0
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
+        # Assume padding (uneven sharding) as general case for unbacked sizes.
+        is_padded = guard_or_true(logical_dim_size % num_chunks != 0)
 
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
@@ -353,10 +380,12 @@ class Shard(torch._C._distributed.Shard):
         old_shard_dim: int,
         new_shard_dim: int,
     ) -> tuple[bool, int, int, bool, int, int]:
+        from torch.fx.experimental.symbolic_shapes import guard_or_true
+
         results = []
         for shard_dim in [old_shard_dim, new_shard_dim]:
             dim_logical_size = current_logical_shape[shard_dim]
-            dim_padding = dim_logical_size % num_chunks != 0
+            dim_padding = guard_or_true(dim_logical_size % num_chunks != 0)
             dim_full_chunk_size = (dim_logical_size + num_chunks - 1) // num_chunks
             results.append((dim_padding, dim_logical_size, dim_full_chunk_size))
 
