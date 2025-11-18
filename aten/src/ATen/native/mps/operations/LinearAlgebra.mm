@@ -30,6 +30,7 @@
 #include <ATen/ops/linalg_lu_factor_native.h>
 #include <ATen/ops/linalg_lu_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
+#include <ATen/ops/lu_unpack.h>
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/orgqr_native.h>
@@ -1169,7 +1170,7 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
     U.copy_(U_part.triu());
   }
 
-  if (unpack_pivots && (LU_pivots.numel() != 0)) {
+  if (unpack_pivots) {
     // P as an identity matrix for pivots
     P.fill_(0);
     LU_pivots.dim() == 1 ? P.diagonal().fill_(1) : P.diagonal(0, -2, -1).fill_(1);
@@ -1547,7 +1548,13 @@ TORCH_IMPL_FUNC(linalg_lu_out_mps)(const Tensor& A, bool pivot, const Tensor& P,
   auto pivots = at::empty({0}, A.options().dtype(kInt));
   auto info = at::empty({0}, A.options().dtype(kInt));
   mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, /*check_errors=*/false);
-  mps::lu_unpack_mps_impl(LU, pivots, /*unpack_data=*/true, /*unpack_pivots=*/true, P, L, U);
+  at::lu_unpack_out(const_cast<Tensor&>(P),
+                    const_cast<Tensor&>(L),
+                    const_cast<Tensor&>(U),
+                    LU,
+                    pivots,
+                    /*unpack_data=*/true,
+                    /*unpack_pivots=*/pivot);
 }
 
 TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
