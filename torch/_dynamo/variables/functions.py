@@ -644,6 +644,23 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             ]:
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
+
+        if hasattr(self.fn, "__module__") and self.fn.__module__ == "einops.einops":
+            try:
+                return super().call_function(tx, args, kwargs)
+            except Unsupported as e:
+                unimplemented(
+                    gb_type="Failed to trace einops function",
+                    context=f"einops function '{self.get_name()}'",
+                    explanation=e.msg,
+                    hints=[
+                        "Tracing through einops functions is experimental and may not be fully supported.\n"
+                        "To disable einops tracing, set `torch._dynamo.config.enable_einops_tracing = False`.\n"
+                        "Alternatively, explicitly allow this function in the graph with "
+                        f"`torch._dynamo.allow_in_graph({self.get_name()})`",
+                        *graph_break_hints.DYNAMO_BUG,
+                    ],
+                )
         return super().call_function(tx, args, kwargs)
 
 
