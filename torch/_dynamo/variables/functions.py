@@ -647,9 +647,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         if hasattr(self.fn, "__module__") and self.fn.__module__ == "einops.einops":
             try:
-                super().call_function(tx, args, kwargs)
+                return super().call_function(tx, args, kwargs)
             except Unsupported as e:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Failed to trace einops function",
                     context=f"einops function '{self.get_name()}'",
                     explanation=e.msg,
