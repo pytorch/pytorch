@@ -1739,7 +1739,7 @@ class SIMDScheduling(BaseScheduling):
 
         # a extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
-        nsplit = (numel + split_size - 1) // split_size
+        nsplit = V.graph.wrapper_code.codegen_python_sizevar((numel + split_size - 1) // split_size)
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
 
