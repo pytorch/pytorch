@@ -962,7 +962,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         x = (torch.randn(4, 16, requires_grad=True),)
 
         with self.assertRaisesRegex(Exception, "weight = self.linear.w"):
-            torch._dynamo.functional_export._dynamo_graph_capture_for_export(Model())(x)
+            torch._dynamo.functional_export.dynamo_graph_capture_for_export(Model())(x)
 
 
 instantiate_parametrized_tests(ExceptionTests)

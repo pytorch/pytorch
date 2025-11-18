@@ -230,10 +230,21 @@ class PallasKernel(SIMDKernel):
     - Compute expression with Python operators (compatible with jax.numpy broadcasting)
     - Generate Python code that defines a Pallas kernel and a host entrypoint.
     - Use async_compile.pallas path to compile and load Python code.
+
+    For GPU (Triton backend):
+    - Use masked loads/stores with power-of-2 block sizes to handle non-power-of-2 shapes
     """
 
     overrides = PallasKernelOverrides  # type: ignore[assignment]
     kexpr: Callable[[sympy.Expr], str] = pexpr  # Use Python expression printer
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Determine device type once at initialization
+        device = V.graph.get_current_device_or_throw()
+        self.is_gpu = device.type == "cuda"
+        self.use_masked_ops: bool | None = None
+        self.tensor_masks = {}  # Map tensor name to mask variable name
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -404,14 +415,98 @@ class PallasKernel(SIMDKernel):
         else:
             return self._get_index_str(index), False
 
+    def _determine_masked_ops_for_kernel(self) -> bool:
+        """
+        Determine if we should use masked ops for this entire kernel.
+
+        Masked ops with pl.ds(block_size) flatten tensors to 1D, which works when:
+        1. We're on GPU (CUDA backend uses Triton which requires power-of-2 sizes)
+        2. All tensors are already 1D (so flattening doesn't change dimensionality)
+        3. All tensors have the same size (so broadcasting works correctly)
+
+        With per-tensor masks, each tensor gets its own mask based on its size.
+
+        This should be called once in codegen_kernel() before generating the kernel body.
+        """
+        if not self.is_gpu:
+            return False
+
+        # Get all buffer sizes
+        # We need ALL buffers - inputs, outputs, and intermediates
+        all_buffer_names = OrderedSet()
+
+        # Get input buffers from args
+        all_buffer_names.update(self.args.input_buffers.keys())
+        # Get output buffers from args
+        all_buffer_names.update(self.args.output_buffers.keys())
+        # Also get any intermediate buffers from the graph
+        all_buffer_names.update(V.graph.name_to_buffer.keys())
+
+        # Get shapes and sizes for all buffers
+        buf_info = []
+        for buf_name in all_buffer_names:
+            try:
+                buf = V.graph.get_buffer(buf_name)
+                size = buf.get_size()
+                shape = tuple(int(s) if hasattr(s, "__int__") else s for s in size)
+                # Calculate flattened size
+                total_size = 1
+                for s in size:
+                    if hasattr(s, "__int__"):
+                        total_size *= int(s)
+                    else:
+                        total_size *= s
+                buf_info.append((buf_name, shape, total_size))
+            except Exception:
+                pass
+
+        # Only use masked ops if:
+        # 1. All buffers are 1D (single-element shape tuples)
+        # 2. All buffers have the same size
+        # This ensures that pl.ds(block_size) flattening works correctly
+        # and masks can be properly applied without broadcasting issues.
+        if buf_info and len(buf_info) > 0:
+            # Check if all are 1D
+            all_1d = all(len(shape) == 1 for _, shape, _ in buf_info)
+            if not all_1d:
+                return False
+
+            # Check if all have the same size
+            first_size = buf_info[0][2]
+            all_same_size = all(size == first_size for _, _, size in buf_info)
+            return all_same_size
+
+        return False
+
+    def _get_or_create_mask(self, buf_name: str) -> str:
+        """Get or create a unique mask variable for a buffer."""
+        if buf_name not in self.tensor_masks:
+            mask_var = f"mask_{buf_name}"
+            self.tensor_masks[buf_name] = mask_var
+        return self.tensor_masks[buf_name]
+
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:  # type: ignore[override]
         buf = self.args.input(name)
         dtype = V.graph.get_dtype(name)
 
+        # Determine masked ops strategy on first load/store if not yet determined
+        if self.use_masked_ops is None:
+            self.use_masked_ops = self._determine_masked_ops_for_kernel()
+
         index_str, needs_flatten = self._get_index_expr(index)
-        if needs_flatten:
+
+        # Build load expression using string concatenation
+        use_masked = index_str == "..." and not needs_flatten and self.use_masked_ops
+
+        if use_masked:
+            # GPU masked load: flatten tensor and apply per-tensor mask
+            mask_var = self._get_or_create_mask(name)
+            load_expr = f"pltriton.load({buf}.at[pl.ds(block_size)], mask={mask_var})"
+        elif needs_flatten:
+            # Flatten then index for non-contiguous access
             load_expr = f"{buf}[...].flatten()[{index_str}]"
         else:
+            # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
 
         return self.cse.generate(
@@ -466,8 +561,32 @@ class PallasKernel(SIMDKernel):
         out = self.args.output(name)
         self.store_buffer_names.add(name)
 
-        index_str, _ = self._get_index_expr(index)
-        self.stores.writeline(f"{out}[{index_str}] = {value}")
+        # Determine masked ops strategy on first load/store if not yet determined
+        if self.use_masked_ops is None:
+            self.use_masked_ops = self._determine_masked_ops_for_kernel()
+
+        index_str, needs_flatten = self._get_index_expr(index)
+
+        # Build store expression using string concatenation
+        use_masked = index_str == "..." and not needs_flatten and self.use_masked_ops
+
+        if use_masked:
+            # GPU masked store: flatten tensor and apply per-tensor mask
+            mask_var = self._get_or_create_mask(name)
+            store_expr = (
+                f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
+            )
+        else:
+            # Direct indexed assignment
+            store_expr = f"{out}[{index_str}] = {value}"
+
+        self.stores.writeline(store_expr)
+
+    @staticmethod
+    def _buffer_is_contiguous(buffer_name: str) -> bool:
+        buf = V.graph.get_buffer(buffer_name)
+        layout = buf.get_layout()
+        return layout.is_contiguous()
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:  # type: ignore[override]
         """
@@ -491,108 +610,286 @@ class PallasKernel(SIMDKernel):
                 "Pallas backend currently supports single-output elementwise kernels only"
             )
 
-        # Get output dtype at compile time
-        output_name = live_outs[0]
-        output_dtype = V.graph.get_dtype(output_name)
-        output_dtype_jax = torch_dtype_to_jax(output_dtype)
-
         code = IndentedBuffer()
-        code.splice(
-            """
-            import functools
-            import torch
-            import jax
-            import jax.numpy as jnp
-            from jax.experimental import pallas as pl
-            """,
-            strip=True,
-        )
 
         # Define the Pallas kernel: accepts refs, uses broadcasted expressions
         arg_defs, _, _, _ = self.args.python_argdefs()
-        # Order: inputs (in_ptr*), then outputs (out_ptr*), then sizes/workspaces
         kernel_params = [a.name for a in arg_defs]
+        pure_out_params = [p for p in kernel_params if p.startswith("out_ptr")]
+        output_params = [
+            p for p in kernel_params if p.startswith(("out_ptr", "in_out_ptr"))
+        ]
+        if not output_params:
+            raise RuntimeError("Pallas backend requires at least one output buffer")
+
+        output_buffer_lookup = {
+            inner: outer
+            for outer, inner in self.args.output_buffers.items()
+            if isinstance(inner, str)
+        }
 
         kernel_name = name or "<KERNEL_NAME>"
-        interpret_literal = (
-            "True" if V.graph.get_current_device_or_throw().type == "cpu" else "False"
+        interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
+        interpret_literal = "True" if interpret_is_cpu else "False"
+
+        # For GPU (Triton backend), import pltriton for masked loads/stores
+        # Import math at module level if we'll use it for masked ops
+        imports = (
+            """
+            import functools
+            """
+            + ("import math\n            " if self.use_masked_ops else "")
+            + """import torch
+            import jax
+            import jax.numpy as jnp
+            from jax.experimental import pallas as pl
+            """
+            + (
+                "\n            from jax.experimental.pallas import triton as pltriton"
+                if not interpret_is_cpu
+                else ""
+            )
+            + (
+                "\n            from torch._inductor.runtime.runtime_utils import next_power_of_2"
+                if self.use_masked_ops
+                else ""
+            )
         )
-        code.writeline(f"def {kernel_name}_kernel({', '.join(kernel_params)}):")
+        code.splice(imports, strip=True)
+
+        aliasable_flags: dict[str, bool] = {}
+        for param in pure_out_params:
+            buffer_name = output_buffer_lookup.get(param)
+            is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
+                buffer_name
+            )
+            aliasable_flags[param] = (not interpret_is_cpu) and is_contiguous
+        alias_params = [
+            f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
+        ]
+        pointer_tail = [
+            p for p in kernel_params if p.startswith(("in_out_ptr", "in_ptr"))
+        ]
+        kernel_input_params = alias_params + pointer_tail
+        full_kernel_params = alias_params + kernel_params
+        non_alias_out_set = OrderedSet(
+            [name for name, flag in aliasable_flags.items() if not flag]
+        )
+        copy_output_indices = [
+            idx for idx, name in enumerate(output_params) if name in non_alias_out_set
+        ]
+        self.aliasable_out_ptrs = aliasable_flags
+
+        # For GPU with masked ops, add block_size as keyword-only parameter
+        kernel_signature = (
+            f"def {kernel_name}_kernel({', '.join(full_kernel_params)}"
+            + (", *, block_size" if self.use_masked_ops else "")
+            + "):"
+        )
+        code.writeline(kernel_signature)
         with code.indent():
-            # Emit compute (CSE) and store lines; they reference *_ptr[index] directly
-            # The iteration variables are implicitly handled by JAX's vectorization
-            # When using [...], it processes the whole array
-            # When using explicit indices, they should be JAX-traced values
+            # For masked ops on GPU, generate per-tensor masks at the start
+            if self.use_masked_ops and self.tensor_masks:
+                # Create a mapping from buffer name to parameter name
+                buf_to_param = {}
+                for outer, inner in self.args.input_buffers.items():
+                    buf_to_param[outer] = inner if isinstance(inner, str) else outer
+                for outer, inner in self.args.output_buffers.items():
+                    buf_to_param[outer] = inner if isinstance(inner, str) else outer
+
+                # Generate a mask for each tensor that was accessed
+                for buf_name, mask_var in sorted(self.tensor_masks.items()):
+                    param_name = buf_to_param.get(buf_name, buf_name)
+                    # Find the corresponding parameter in kernel_params
+                    matching_param = None
+                    for p in kernel_params:
+                        # Check if this parameter corresponds to the buffer
+                        if param_name == p or buf_name in str(p):
+                            matching_param = p
+                            break
+
+                    if matching_param:
+                        # Calculate flattened size for this tensor
+                        code.writeline(f"# Mask for {buf_name}")
+                        code.writeline(f"{mask_var}_size = {matching_param}.size")
+                        code.writeline(
+                            f"{mask_var} = jnp.arange(block_size) < {mask_var}_size"
+                        )
+
+            # Emit compute (CSE) and store lines; they reference *_ptr[index] directly.
+            # Iteration variables are implicitly handled by JAX vectorization, so
+            # explicit indices should be JAX-traced values.
             for line in self.compute._lines:
                 code.writeline(str(line))
             for line in self.stores._lines:
                 code.writeline(str(line))
 
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
-        code.writeline("@functools.partial(jax.jit, static_argnums=(0, 1))")
-        code.writeline(f"def {jit_wrapper_name}(out_shape, out_dtype, *kernel_refs):")
+        donate_indices = []
+        for idx, name in enumerate(kernel_input_params):
+            if (name in alias_params) or name.startswith("in_out_ptr"):
+                donate_indices.append(idx + 2)
+        if donate_indices:
+            donate_literal = "(" + ", ".join(str(x) for x in donate_indices) + ",)"
+        else:
+            donate_literal = "()"
+        code.writeline(
+            "@functools.partial("
+            "jax.jit, static_argnums=(0, 1), donate_argnums="
+            f"{donate_literal})"
+        )
+        code.writeline(
+            f"def {jit_wrapper_name}(out_shapes, out_dtypes, {', '.join(kernel_input_params)}):"
+        )
         with code.indent():
-            code.writeline("out_spec = jax.ShapeDtypeStruct(out_shape, out_dtype)")
+            code.writeline("out_specs = tuple(")
+            code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
+            code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
+            code.writeline(")")
+
+            # For masked ops, calculate block_size as next power of 2 of max flattened size
+            if self.use_masked_ops:
+                code.writeline(
+                    "# Calculate block_size as next power of 2 for Triton backend"
+                )
+                code.writeline("# Find maximum flattened size across all tensors")
+                code.writeline("max_size = 0")
+                # Calculate size for all input tensors
+                for param in kernel_input_params:
+                    code.writeline(f"max_size = max(max_size, {param}.size)")
+                # Also consider output shapes
+                code.writeline("for shape in out_shapes:")
+                code.writeline(
+                    "    tensor_size = shape[0] if len(shape) == 1 else math.prod(shape)"
+                )
+                code.writeline("    max_size = max(max_size, tensor_size)")
+                code.writeline("block_size = next_power_of_2(max_size)")
+
+            alias_pairs: list[tuple[int, int]] = []
+            for out_idx, name in enumerate(output_params):
+                if name.startswith("out_ptr"):
+                    if aliasable_flags.get(name, False):
+                        alias_name = f"{name}_alias"
+                        input_idx = kernel_input_params.index(alias_name)
+                        alias_pairs.append((input_idx, out_idx))
+                else:
+                    input_idx = kernel_input_params.index(name)
+                    alias_pairs.append((input_idx, out_idx))
+            alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
+
+            # For masked ops, wrap kernel with functools.partial to pass block_size
+            kernel_arg = (
+                f"functools.partial({kernel_name}_kernel, block_size=block_size),"
+                if self.use_masked_ops
+                else f"{kernel_name}_kernel,"
+            )
             code.writeline("return pl.pallas_call(")
-            code.writeline(f"    {kernel_name}_kernel,")
-            code.writeline("    out_shape=out_spec,")
+            code.writeline("    " + kernel_arg)
+
+            code.writeline("    out_shape=out_specs,")
             code.writeline(f"    interpret={interpret_literal},")
             code.writeline("    grid=(1,),")
-            code.writeline(")(*kernel_refs)")
+            code.writeline(
+                f"    input_output_aliases={{ {alias_map_literal} }},"
+                if alias_pairs
+                else "    input_output_aliases={},"
+            )
+            code.writeline(")(")
+            code.writeline(f"    {', '.join(kernel_input_params)},")
+            code.writeline(")")
 
-        # Host entry: convert torch tensors <-> jax, call pallas_call and copy back
         main_name = f"{kernel_name}_main"
-        code.writeline(f"def {main_name}({', '.join(kernel_params)}, stream=None):")
+        code.writeline(
+            f"def {main_name}({', '.join(full_kernel_params)}, stream=None):"
+        )
         with code.indent():
-            # Enable JAX x64 mode to support float64/int64 types
             code.writeline("# Enable JAX x64 mode for float64/int64 support")
             code.writeline("jax.config.update('jax_enable_x64', True)")
-            # Identify inputs (in_ptr*) and output (out_ptr*)
-            input_params = [
-                p for p in kernel_params if p.startswith(("in_ptr", "in_out_ptr"))
-            ]
-            output_params = [p for p in kernel_params if p.startswith("out_ptr")]
+            if alias_params:
+                code.writeline("# Convert Torch -> JAX for donated outputs")
+                for alias_name in alias_params:
+                    code.writeline(
+                        f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
+                    )
+            code.writeline("# Convert Torch -> JAX for in-place tensors")
+            for ptr in pointer_tail:
+                if ptr.startswith("in_out_ptr"):
+                    code.writeline(f"{ptr}_jax = jax.dlpack.from_dlpack({ptr})")
+            code.writeline("# Convert Torch -> JAX for inputs")
+            for ptr in pointer_tail:
+                if ptr.startswith("in_ptr"):
+                    code.writeline(
+                        f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous())"
+                    )
 
-            if len(output_params) != 1:
-                raise RuntimeError(
-                    f"Expected exactly 1 output, got {len(output_params)}"
-                )
-
-            output_param = output_params[0]
-
-            # Convert inputs to JAX arrays
-            for inp in input_params:
-                code.writeline(
-                    f"{inp}_jax = jax.dlpack.from_dlpack({inp}.contiguous())"
-                )
-
-            # Get output metadata from PyTorch tensor
             code.writeline("# Prepare output metadata from PyTorch tensor")
-            code.writeline(f"out_shape = tuple({output_param}.shape)")
-            code.writeline(f"out_dtype = {output_dtype_jax}")
+            code.writeline("# Map PyTorch dtype to JAX dtype")
+            code.writeline("_torch_dtype_to_jax = {")
+            code.writeline(
+                "    torch.float32: jnp.float32, torch.float64: jnp.float64, torch.float16: jnp.float16,"
+            )
+            code.writeline(
+                "    torch.int32: jnp.int32, torch.int64: jnp.int64, torch.int16: jnp.int16, torch.int8: jnp.int8,"
+            )
+            code.writeline("    torch.uint8: jnp.uint8, torch.bool: jnp.bool_,")
+            code.writeline("}")
+            code.writeline(
+                "out_shapes = ("
+                + ", ".join([f"tuple({name}.shape)" for name in output_params])
+                + ",)"
+            )
+            code.writeline(
+                "out_dtypes = ("
+                + ", ".join(
+                    [f"_torch_dtype_to_jax[{name}.dtype]" for name in output_params]
+                )
+                + ",)"
+            )
+            arg_name_map: dict[str, str] = {}
+            for alias_name in alias_params:
+                arg_name_map[alias_name] = f"{alias_name}_jax"
+            for ptr in pointer_tail:
+                arg_name_map[ptr] = f"{ptr}_jax"
 
-            call_args = ["out_shape", "out_dtype"] + [
-                f"{inp}_jax" for inp in input_params
-            ]
-            call_arg_str = ", ".join(call_args)
-            code.writeline(f"res = {jit_wrapper_name}({call_arg_str})")
-
-            # Copy result back
-            code.writeline("# Copy result back into the provided torch output tensor")
-            code.writeline("res_t = torch.from_dlpack(res)")
-            code.writeline(f"{output_param}.copy_(res_t)")
+            if kernel_input_params:
+                alias_args_str = ", ".join(
+                    arg_name_map[name] for name in kernel_input_params
+                )
+                code.writeline(
+                    f"res = {jit_wrapper_name}(out_shapes, out_dtypes, {alias_args_str})"
+                )
+            else:
+                code.writeline(f"res = {jit_wrapper_name}(out_shapes, out_dtypes)")
+            if copy_output_indices:
+                code.writeline(
+                    "result_values = res if isinstance(res, tuple) else (res,)"
+                )
+                for idx in copy_output_indices:
+                    name = output_params[idx]
+                    code.writeline(
+                        f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                    )
 
         return code.getvalue()
 
     def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:  # type: ignore[override]
         """Generate the Python code that calls this Pallas kernel."""
         wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
+        arg_defs, call_args, _, _ = self.args.python_argdefs()
+        kernel_param_names = [a.name for a in arg_defs]
+        pure_out_params = [p for p in kernel_param_names if p.startswith("out_ptr")]
+        call_arg_strs = list(map(str, call_args))
+        aliasable = getattr(self, "aliasable_out_ptrs", {})
+        alias_call_args = [
+            call_arg_strs[kernel_param_names.index(p)]
+            for p in pure_out_params
+            if aliasable.get(p, False)
+        ]
 
         # Generate kernel call: kernel_name.run(arg1, arg2, ...)
         # Note: async_compile.pallas loads {name}_main function and wraps it in PallasKernelWrapper
         # which exposes a run() method
-        kernel_call = f"{name}.run({', '.join(map(str, call_args))})"
+        kernel_call = f"{name}.run({', '.join(alias_call_args + call_arg_strs)})"
         wrapper.writeline(kernel_call)
 
 
