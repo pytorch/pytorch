@@ -5,13 +5,21 @@ from typing import Optional, Union
 import torch
 from torch import Size, Tensor
 from torch.nn import functional as F, init
-from torch.nn.parameter import Parameter
+from torch.nn.parameter import Parameter, UninitializedParameter
 
 from ._functions import CrossMapLRN2d as _cross_map_lrn2d
+from .lazy import LazyModuleMixin
 from .module import Module
 
 
-__all__ = ["LocalResponseNorm", "CrossMapLRN2d", "LayerNorm", "GroupNorm", "RMSNorm"]
+__all__ = [
+    "LocalResponseNorm",
+    "CrossMapLRN2d",
+    "LayerNorm",
+    "GroupNorm",
+    "LazyGroupNorm",
+    "RMSNorm",
+]
 
 
 class LocalResponseNorm(Module):
@@ -328,6 +336,84 @@ class GroupNorm(Module):
         return "{num_groups}, {num_channels}, eps={eps}, affine={affine}".format(
             **self.__dict__
         )
+
+
+class LazyGroupNorm(LazyModuleMixin, GroupNorm):
+    r"""A :class:`torch.nn.GroupNorm` module where `num_channels` is inferred.
+
+    In this module, the `weight` and `bias` of the affine transformation are of :class:`torch.nn.UninitializedParameter`
+    class. They will be initialized after the first call to ``forward`` is done and the
+    module will become a regular :class:`torch.nn.GroupNorm` module. The ``num_channels`` argument
+    of the :class:`GroupNorm` is inferred from the ``input.shape[1]``.
+
+    Check the :class:`torch.nn.modules.lazy.LazyModuleMixin` for further documentation
+    on lazy modules and their limitations.
+
+
+    Args:
+        num_groups (int): number of groups to separate the channels into
+        eps: a value added to the denominator for numerical stability. Default: 1e-5
+        affine: a boolean value that when set to ``True``, this module
+            has learnable per-channel affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
+
+    Shape:
+        - Input: :math:`(N, C, *)` where :math:`C=\text{num\_channels}`
+        - Output: :math:`(N, C, *)` (same shape as input)
+
+    """
+
+    cls_to_become = GroupNorm  # type: ignore[assignment]
+    weight: UninitializedParameter  # type: ignore[assignment]
+    bias: UninitializedParameter  # type: ignore[assignment]
+
+    def __init__(
+        self,
+        num_groups: int,
+        eps: float = 1e-5,
+        affine: bool = True,
+        device=None,
+        dtype=None,
+    ) -> None:
+        factory_kwargs = {"device": device, "dtype": dtype}
+        # affine is hardcoded to False to avoid creating tensor
+        # that will soon be overwritten.
+        # use num_groups = num_channels to pass assertion in GroupNorm
+        super().__init__(num_groups, num_groups, eps, False)
+
+        self.num_groups = num_groups
+        self.eps = eps
+        self.affine = affine
+
+        if self.affine:
+            self.weight = UninitializedParameter(**factory_kwargs)
+            self.bias = UninitializedParameter(**factory_kwargs)
+        else:
+            self.register_parameter("weight", None)
+            self.register_parameter("bias", None)
+
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        if not self.has_uninitialized_params() and self.affine:
+            super().reset_parameters()
+
+    def initialize_parameters(self, input) -> None:  # type: ignore[override]
+        """
+        Infers ``num_channels`` based on ``input`` and initializes parameters.
+        """
+        if self.has_uninitialized_params():
+            self.num_channels = input.shape[1]
+
+            if self.num_channels % self.num_groups != 0:
+                raise ValueError("num_channels must be divisible by num_groups")
+
+            if self.affine:
+                assert isinstance(self.weight, UninitializedParameter)
+                assert isinstance(self.bias, UninitializedParameter)
+                self.weight.materialize((self.num_channels,))
+                self.bias.materialize((self.num_channels,))
+                self.reset_parameters()
 
 
 class RMSNorm(Module):
