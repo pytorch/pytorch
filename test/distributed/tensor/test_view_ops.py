@@ -666,9 +666,15 @@ class TestViewOps(DTensorTestBase):
         # cover uneven sharding with mesh size +/- 1
         # for seq_len in [mesh.size(0) - 1, mesh.size(0), mesh.size(0) + 1]:
         #     for dim1 in [mesh.size(1) - 1, mesh.size(1), mesh.size(1) + 1]:
-        for seq_len in [mesh.size(0) + 1]:
-            for dim1 in [mesh.size(1) + 1]:
+        
+        for seq_len in [mesh.size(0) * 2]:
+            for dim1 in [mesh.size(1) * 2 - 1, mesh.size(1) * 2, mesh.size(1) * 2 + 1]:
                 self._test_dtensor_flatten_2d(mesh, seq_len, dim1)
+
+        for seq_len in [mesh.size(0) * 2 - 1, mesh.size(0) * 2 + 1]:
+            for dim1 in [mesh.size(1) * 2]:
+                # expect error
+                pass
 
     def _test_dtensor_flatten_2d(self, mesh, seq_len, dim1):
         # S1, S2
