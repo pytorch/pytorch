@@ -1608,7 +1608,7 @@ MemPool::MemPool(
   XPUCachingAllocator::createOrIncrefPool(device_, id_, allocator);
   if (use_on_oom) {
     // XPU doesn't support use_on_oom yet
-    TORCH_WARM(
+    TORCH_WARN(
         "XPUCachingAllocator::MemPool: use_on_oom is not supported on XPU");
   }
 }
