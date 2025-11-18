@@ -1398,7 +1398,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         items: list[VariableTracker],
         tuple_cls: type[tuple],
         dynamic_attributes: Optional[dict[str, VariableTracker]] = None,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """Constructor signature matches the old NamedTupleVariable.
 
@@ -1610,31 +1610,6 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             self.dynamic_attributes[attr] = value
             return result
 
-        elif name == "_replace":
-            # NamedTuple._replace should create a new instance.
-            if args:
-                raise_args_mismatch(tx, name, "0 args", f"{len(args)} args")
-
-            fields = self.fields()
-            new_items = list(self._tuple_vt.items)
-            for field_name, new_value in kwargs.items():
-                if field_name not in fields:
-                    raise_observed_exception(
-                        ValueError,
-                        tx,
-                        args=[
-                            variables.ConstantVariable.create(
-                                f"Got unexpected field name: '{field_name}'"
-                            )
-                        ],
-                    )
-
-                field_index = fields.index(field_name)
-                new_items[field_index] = new_value
-
-            return NamedTupleVariable(
-                new_items, self.tuple_cls, self.dynamic_attributes
-            )
         return super().call_method(tx, name, args, kwargs)
 
     def python_type(self) -> type:
