@@ -71,7 +71,7 @@ int32_t get_c_recursion_limit() {
 
 struct CRecursionLimitRAII {
   PyThreadState* tstate;
-  int old_recursion_remaining;
+  int32_t old_recursion_remaining;
   CRecursionLimitRAII(PyThreadState* tstate) : tstate{tstate} {
     auto limit = get_c_recursion_limit();
     auto& remaining = tstate->c_recursion_remaining;
