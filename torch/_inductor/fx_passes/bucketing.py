@@ -2,7 +2,8 @@ import collections
 import logging
 import operator
 from collections import defaultdict
-from typing import Any, Callable, Literal, TypeAlias
+from collections.abc import Callable
+from typing import Any, Literal, TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -120,9 +121,9 @@ def bucket_reduce_scatter(
 
 
 def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
-    return (
-        node.op == "call_function"
-        and node.target is torch.ops._c10d_functional.all_gather_into_tensor.default
+    return node.op == "call_function" and (
+        node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
+        or node.target == torch.ops._c10d_functional.all_gather_into_tensor_out.default
     )
 
 
@@ -137,6 +138,7 @@ def is_wait_tensor(node: torch.fx.Node) -> bool:
     return (
         node.op == "call_function"
         and node.target is torch.ops._c10d_functional.wait_tensor.default
+        and node.args[0].op == "call_function"
     )
 
 

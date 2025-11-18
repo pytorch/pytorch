@@ -535,7 +535,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             if (
                 len(invoke_quant_replacement.users) == 1
                 and len(subgraph.users) == 1
-                and first_user.target == operator.getitem
+                and first_user.target is operator.getitem
                 and first_user.args[1] == 0
             ):
                 subgraph_graph = getattr(gm, subgraph.target)
@@ -892,6 +892,9 @@ def _other_is_broadcasted_in_dim(match):
     dim = match.kwargs["dim"]
     if isinstance(dim, int):
         dim = (dim,)
+
+    if any(d >= len(other_shape) for d in dim):
+        return False
 
     return all(statically_known_true(other_shape[d] == 1) for d in dim)
 

@@ -48,6 +48,30 @@ void warnDeprecatedDataPtr() {
   TORCH_CHECK(false, "Cannot access data pointer of Storage that is invalid.");
 }
 
+void StorageImpl::incref_pyobject() const {
+  // Because intrusive_ptr incref uses relaxed memory order, we need to
+  // do an acquire fence to ensure that the kHasPyObject bit was
+  // observed before the load of the PyObject* below.
+  // NB: This is a no-op on x86/x86-64
+  std::atomic_thread_fence(std::memory_order_acquire);
+
+  PyObject* obj = pyobj_slot_.load_pyobj();
+  (*pyobj_slot_.pyobj_interpreter())->incref(obj);
+}
+
+void StorageImpl::decref_pyobject() const {
+  PyObject* obj = pyobj_slot_.load_pyobj();
+  (*pyobj_slot_.pyobj_interpreter())->decref(obj);
+}
+
+bool StorageImpl::try_incref_pyobject() const {
+  c10::impl::PyInterpreter* interp = pyobj_slot_.pyobj_interpreter();
+  if (C10_UNLIKELY(!interp)) {
+    return false;
+  }
+  return (*interp)->try_incref(pyobj_slot_);
+}
+
 void SetStorageImplCreate(DeviceType t, StorageImplCreateHelper fptr) {
   // Allowlist verification.
   // Only if the devicetype is in the allowlist,

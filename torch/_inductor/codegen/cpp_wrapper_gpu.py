@@ -337,7 +337,7 @@ class DeferredTritonCallWrapper:
                     elif (
                         isinstance(arg_type, type(SymbolicCallArg))
                         and arg_signature is not None
-                        and arg_signature in signature2dtype.keys()
+                        and arg_signature in signature2dtype
                     ) or arg_type in (sympy.Integer, int, sympy.Float, float):
                         write_dummy_scalar_ivalue(arg_name)
                     elif arg_signature and arg_signature.startswith("tensordesc<"):
@@ -719,7 +719,7 @@ class CppWrapperGpu(CppWrapperCpu):
             elif (
                 isinstance(arg_type, type(SymbolicCallArg))
                 and arg_signature is not None
-                and arg_signature in signature2dtype.keys()
+                and arg_signature in signature2dtype
             ):
                 code.writeline(
                     f"{signature2dtype[arg_signature]} {var_name} = {cexpr(arg)};"

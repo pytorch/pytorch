@@ -6,8 +6,9 @@ import os
 import shutil
 import sys
 import tempfile
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Callable, Optional
+from typing import Optional
 
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 
@@ -491,6 +492,13 @@ class CompilerBisector:
         Run fn repeatedly attempting to bisect torch.compile. fn should return True on success and False on failure.
         """
 
+        # TODO graph bisecting is not well composed with lowering
+        # bisector so far. Use a config to opt-in
+        import torch._inductor.config as inductor_config
+
+        if inductor_config.test_configs.bisect_pre_grad_graph:
+            BACKENDS["inductor"].insert(0, BisectSubsystem("pre_grad_graph"))
+
         if not cli_interface:
             bisection_enabled_orig = cls.bisection_enabled
             cls.delete_bisect_status()
@@ -501,6 +509,9 @@ class CompilerBisector:
                 cls.bisection_enabled = bisection_enabled_orig
                 cls.delete_bisect_status()
                 cls.in_process_cache = None
+
+                if BACKENDS["inductor"][0].name == "pre_grad_graph":
+                    del BACKENDS["inductor"][0]
 
             cleanup_handler = atexit.register(cleanup)
 
