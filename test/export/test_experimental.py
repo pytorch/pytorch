@@ -456,6 +456,31 @@ def forward(self, x):
         test_inputs = make_inputs()
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
 
+    def test_dynamo_graph_capture_with_call_override(self):
+        class _InterestingModule(torch.nn.Module):
+            def __init__(self, module):
+                super().__init__()
+                self._module = module
+
+            def __call__(self, *args, **kwargs):
+                return self._module(*args, **kwargs)
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        foo = _InterestingModule(MyModel())
+
+        def make_inputs():
+            return (torch.randn(2, 3),)
+
+        trace_inputs = make_inputs()
+        gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
+        test_inputs = make_inputs()
+        self.assertEqual(gm(*test_inputs), foo(*test_inputs))
+        self.assertEqual(len(list(gm.buffers())), len(list(foo.buffers())))
+        self.assertEqual(len(list(gm.parameters())), len(list(foo.parameters())))
+
     def test_dynamo_graph_capture_custom_pytree_type(self):
         import torch.utils._pytree as pytree
 
