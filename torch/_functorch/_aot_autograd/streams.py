@@ -1,0 +1,53 @@
+from typing import Optional, TypeAlias
+
+import torch.fx
+import torch.fx.traceback
+from torch._dynamo.graph_utils import _get_flat_args
+
+
+Node: TypeAlias = torch.fx.Node
+
+
+def is_gradient_acc(node: Node) -> bool:
+    return node.meta.get("is_gradient_acc", False)
+
+
+def get_stream(node: Node) -> Optional[int]:
+    maybe_annotation = node.meta.get("custom", None)
+    if maybe_annotation is not None:
+        return node.meta["custom"].get("stream", None)
+    else:
+        return None
+
+
+def set_stream(node: Node, ind: int) -> None:
+    if "custom" in node.meta:
+        node.meta["custom"].update({"stream": ind})
+    else:
+        node.meta["custom"] = {"stream": ind}
+
+
+def assign_backward_streams(gm: torch.fx.GraphModule) -> None:
+    """Assigns backward streams to gradient accumulation nodes"""
+
+    # NB: iterate in reverse order to more closely match eager
+    # the user node stream will be populated first
+    for node in reversed(list(gm.graph.nodes)):
+        if is_gradient_acc(node):
+            # Accumulation stream selection. Follow the rules from top to bottom to determine the accumulation stream:
+            # 1. Match first stream assignment of the first user with a stream
+            # 2. Match first stream assignment encountered in the args from left to right
+            # This differs from eager in some cases:
+            # Specifically the eager code uses the autograd node to determine the stream,
+            # crucially this does not necessarily correspond to the FX graph node. For example,
+            # in the backward for an add node with a constant we will passthrough and during backward tracing,
+            # no op will be added to the FX graph, so our stream assignment will differ in this case.
+            gradients = _get_flat_args(node, {})
+            users = list(node.users.keys())
+
+            # All gradients will be on same device, they will be coerced if they were not with a .to() node
+            for neighbor in users + gradients:
+                ind = get_stream(neighbor)
+                if ind is not None:
+                    set_stream(node, ind)
+                    break
