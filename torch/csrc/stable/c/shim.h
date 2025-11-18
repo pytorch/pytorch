@@ -92,6 +92,17 @@ AOTI_TORCH_EXPORT AOTITorchError torch_get_thread_idx(uint32_t* out_thread_idx);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_num_threads(uint32_t* out_num_threads);
 
+// Get a pointer to the underlying storage data
+AOTI_TORCH_EXPORT AOTITorchError torch_get_mutable_data_ptr(
+    AtenTensorHandle tensor,
+    void** ret_data_ptr // returns borrowed reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_const_data_ptr(
+    AtenTensorHandle tensor,
+    const void** ret_data_ptr // returns borrowed reference
+);
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #ifdef __cplusplus
