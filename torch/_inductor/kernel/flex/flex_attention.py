@@ -53,6 +53,17 @@ Expr = sympy.Expr
 ForceImpl = Literal["DEFAULT", "DECODE", "FLASH", "TRITON"]
 
 
+def _sanitize_kernel_options_for_triton(
+    kernel_options: dict[str, Any],
+) -> tuple[dict[str, Any], ForceImpl]:
+    """We always strip quotes around str values, we only need this in lowering, so we pop it here
+    to avoid passing to triton constexpr dict
+    """
+    sanitized = dict(kernel_options)
+    force_impl = cast(ForceImpl, sanitized.pop("FORCE_IMPL", "DEFAULT"))
+    return sanitized, force_impl
+
+
 @SymbolicGridFn
 def flex_attention_grid(batch_size, q_heads, num_queries, d_model, meta, *, cdiv):
     """How is this kernel parallelized?
@@ -172,7 +183,7 @@ def flex_attention(
     )
     freeze_irnodes(mask_graph_buffer)
 
-    kernel_options = dict(kernel_options)
+    kernel_options, force_impl = _sanitize_kernel_options_for_triton(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -182,9 +193,6 @@ def flex_attention(
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
-
-    # pop so it doesnt get thread through to Triton constexpr dict
-    force_impl = cast(ForceImpl, kernel_options.pop("FORCE_IMPL", "DEFAULT"))
 
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
@@ -655,7 +663,7 @@ def flex_attention_backward(*args, **kwargs):
         f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
     )
 
-    kernel_options = dict(kernel_options)
+    kernel_options, _ = _sanitize_kernel_options_for_triton(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
