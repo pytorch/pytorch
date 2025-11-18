@@ -309,7 +309,7 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_9, m) {
   m.def("my_amax(Tensor a) -> Tensor");
   m.def("my_amax_vec(Tensor a) -> Tensor");
   m.def("my_is_cpu(Tensor t) -> bool");
-   m.def("test_default_constructor(bool undefined) -> bool");
+  m.def("test_default_constructor(bool undefined) -> bool");
 }
 
 bool test_default_constructor(bool defined) {
@@ -330,7 +330,6 @@ bool test_default_constructor(bool defined) {
   }
   return out.defined();
 }
-
 
 STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_9, CompositeExplicitAutograd, m) {
   m.impl("my_zero_", TORCH_BOX(&my_zero_));

@@ -2379,7 +2379,9 @@ class BenchmarkRunner:
                     print(
                         f"Load model outputs from {self.args.compare_model_outputs_with} to compare"
                     )
-                    saved_result = torch.load(self.args.compare_model_outputs_with)
+                    saved_result = torch.load(
+                        self.args.compare_model_outputs_with, weights_only=False
+                    )
                     is_bitwise_same = bitwise_same(saved_result, new_result)
                     if not is_bitwise_same:
                         print(
