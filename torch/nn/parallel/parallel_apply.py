@@ -1,6 +1,6 @@
 import threading
 from collections.abc import Sequence
-from typing import Any, cast, Union
+from typing import Any, cast
 
 import torch
 from torch._utils import ExceptionWrapper
@@ -12,7 +12,7 @@ __all__ = ["get_a_var", "parallel_apply"]
 
 
 def get_a_var(
-    obj: Union[torch.Tensor, list[Any], tuple[Any, ...], dict[Any, Any]],
+    obj: torch.Tensor | list[Any] | tuple[Any, ...] | dict[Any, Any],
 ) -> torch.Tensor | None:
     if isinstance(obj, torch.Tensor):
         return obj
@@ -32,7 +32,7 @@ def parallel_apply(
     modules: Sequence[Module],
     inputs: Sequence[Any],
     kwargs_tup: Sequence[dict[str, Any]] | None = None,
-    devices: Sequence[Union[int, torch.device] | None] | None = None,
+    devices: Sequence[int | torch.device | None] | None = None,
 ) -> list[Any]:
     r"""Apply each `module` in :attr:`modules` in parallel on each of :attr:`devices`.
 
@@ -73,7 +73,7 @@ def parallel_apply(
         module: Module,
         input: Any,
         kwargs: dict[str, Any],
-        device: Union[int, torch.device] | None = None,
+        device: int | torch.device | None = None,
         stream: torch.Stream | None = None,
     ) -> None:
         torch.set_grad_enabled(grad_enabled)
