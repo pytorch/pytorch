@@ -718,7 +718,11 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
 #elif defined(USE_ROCM)
     C10_HIP_CHECK(hipMemImportFromShareableHandle(
         &handles[r],
+#if ROCM_VERSION >= 70100
+        reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
+#else
         (void*)(uintptr_t) & (imported_handles[r]),
+#endif
         hipMemHandleTypePosixFileDescriptor));
 #else
     TORCH_CHECK(
