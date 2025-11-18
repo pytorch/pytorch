@@ -38,6 +38,13 @@ __all__ = [
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
 
+_warned_messages = set()
+
+def warn_once(msg, category=UserWarning, stacklevel=2):
+    if msg not in _warned_messages:
+        _warned_messages.add(msg)
+        warn(msg, category=category, stacklevel=stacklevel)
+
 
 class _NumpyEncoder(json.JSONEncoder):
     """
@@ -205,6 +212,8 @@ class _KinetoProfile:
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
             )
+        if (self.profiler is not None) and (not self.acc_events):
+            warn_once("Warning: Profiler clears events at the end of each cycle. Only events from the current cycle will be reported. To keep events across cycles, set acc_events=True.")
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
