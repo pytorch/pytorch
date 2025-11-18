@@ -28,6 +28,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
+    _apply_kernel_options,
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
@@ -3677,6 +3678,27 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                     "FORCE_IMPL": "TRITON",
                     "FORCE_USE_FLEX_ATTENTION": True,
                 },
+            )
+
+    @supported_platform
+    def test_force_impl_defaults_and_rejects_invalid(self, device):
+        device = torch.device(device)
+        query = torch.randn(1, 1, 4, 8, device=device, dtype=torch.float32)
+        key = torch.randn(1, 1, 4, 8, device=device, dtype=torch.float32)
+        value = torch.randn(1, 1, 4, 8, device=device, dtype=torch.float32)
+
+        kernel_options = _apply_kernel_options(
+            query, key, value, return_lse=True, kernel_options={}
+        )
+        self.assertEqual(kernel_options["FORCE_IMPL"], "DEFAULT")
+
+        with self.assertRaisesRegex(ValueError, r"Invalid FORCE_IMPL value 'INVALID'"):
+            _apply_kernel_options(
+                query,
+                key,
+                value,
+                return_lse=True,
+                kernel_options={"FORCE_IMPL": "INVALID"},
             )
 
     @supported_platform

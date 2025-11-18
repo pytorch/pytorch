@@ -7,10 +7,11 @@ import inspect
 import itertools
 import math
 import operator
+import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, TypeAlias
 
 import torch
 from torch import Tensor
@@ -82,6 +83,7 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
+_ForceImpl: TypeAlias = Literal["DEFAULT", "TRITON", "FLASH", "DECODE"]
 
 
 # pyrefly: ignore [invalid-inheritance]
@@ -219,7 +221,7 @@ class FlexKernelOptions(TypedDict, total=False):
     """ROCm-specific waves per execution unit."""
 
     # pyrefly: ignore [invalid-annotation]
-    FORCE_IMPL: NotRequired[Literal["DEFAULT", "TRITON", "FLASH", "DECODE"]]
+    FORCE_IMPL: NotRequired[_ForceImpl]
     """Forces a specific kernel implementation instead of using heuristics.
 
     Options:
@@ -1257,6 +1259,14 @@ def _apply_kernel_options(
             "FORCE_IMPL supersedes the legacy knob; please drop FORCE_USE_FLEX_ATTENTION "
             "and only specify the desired FORCE_IMPL."
         )
+
+    if "FORCE_IMPL" in kernel_options:
+        valid_impls = typing.get_args(_ForceImpl)
+        if kernel_options["FORCE_IMPL"] not in valid_impls:
+            raise ValueError(
+                f"Invalid FORCE_IMPL value '{kernel_options['FORCE_IMPL']}'. "
+                f"Must be one of {valid_impls}"
+            )
 
     kernel_options.setdefault("FORCE_IMPL", "DEFAULT")
     kernel_options.setdefault("PRESCALE_QK", False)
