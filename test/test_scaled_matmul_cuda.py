@@ -1179,8 +1179,8 @@ class TestFP8Matmul(TestCase):
             bias = torch.randn((N,), device=device, dtype=bias_dtype_)
 
         e4m3_type = torch.float8_e4m3fn
-        x_scales = tensor_to_scale(x, torch.float8_e4m3fn, dim=1).float()
-        y_scales = tensor_to_scale(y, torch.float8_e4m3fn, dim=1).float()
+        x_scales = tensor_to_scale(x, e4m3_type, dim=1).float()
+        y_scales = tensor_to_scale(y, e4m3_type, dim=1).float()
 
         x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
         y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type)
