@@ -212,17 +212,12 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
   loss.resize_((reduction == Reduction::None || grad_output.defined()) ? target.sizes() : IntArrayRef({}));
   TORCH_CHECK(loss.is_mps());
 
-  Tensor loss_squeezed = loss.squeeze();
-  Tensor input_squeezed = input.squeeze();
-  Tensor target_squeezed = target.squeeze();
-
   @autoreleasepool {
-    std::string key =
-        op_name + reductionToString(reduction) + getTensorsStringKey({input_squeezed, target_squeezed, weight});
+    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, weight});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_squeezed);
-      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target_squeezed);
+      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
+      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
 
       MPSGraphTensor* bceLossUnweighted = nil;
       // if grad_output is defined, then it's a backward pass
@@ -252,12 +247,12 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
           newCachedGraph->gradInputTensor = bceLoss;
         }
       } else {
-        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input_squeezed.sizes().size());
+        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input.sizes().size());
       }
     });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input_squeezed);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target_squeezed);
-    Placeholder lossPlaceholder = Placeholder(cachedGraph->lossTensor, loss_squeezed);
+    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
+    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
+    Placeholder lossPlaceholder = Placeholder(cachedGraph->lossTensor, loss);
 
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
 

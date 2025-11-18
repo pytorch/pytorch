@@ -19,7 +19,7 @@ __all__ = [
 
 @functional_datapipe("_dataframes_as_tuples")
 class DataFramesAsTuplesPipe(IterDataPipe):
-    def __init__(self, source_datapipe):
+    def __init__(self, source_datapipe) -> None:
         self.source_datapipe = source_datapipe
 
     def __iter__(self):
@@ -30,7 +30,7 @@ class DataFramesAsTuplesPipe(IterDataPipe):
 
 @functional_datapipe("_dataframes_per_row", enable_df_api_tracing=True)
 class PerRowDataFramesPipe(DFIterDataPipe):
-    def __init__(self, source_datapipe):
+    def __init__(self, source_datapipe) -> None:
         self.source_datapipe = source_datapipe
 
     def __iter__(self):
@@ -42,7 +42,7 @@ class PerRowDataFramesPipe(DFIterDataPipe):
 
 @functional_datapipe("_dataframes_concat", enable_df_api_tracing=True)
 class ConcatDataFramesPipe(DFIterDataPipe):
-    def __init__(self, source_datapipe, batch=3):
+    def __init__(self, source_datapipe, batch=3) -> None:
         self.source_datapipe = source_datapipe
         self.n_batch = batch
 
@@ -59,7 +59,7 @@ class ConcatDataFramesPipe(DFIterDataPipe):
 
 @functional_datapipe("_dataframes_shuffle", enable_df_api_tracing=True)
 class ShuffleDataFramesPipe(DFIterDataPipe):
-    def __init__(self, source_datapipe):
+    def __init__(self, source_datapipe) -> None:
         self.source_datapipe = source_datapipe
 
     def __iter__(self):
@@ -84,7 +84,7 @@ class ShuffleDataFramesPipe(DFIterDataPipe):
 
 @functional_datapipe("_dataframes_filter", enable_df_api_tracing=True)
 class FilterDataFramesPipe(DFIterDataPipe):
-    def __init__(self, source_datapipe, filter_fn):
+    def __init__(self, source_datapipe, filter_fn) -> None:
         self.source_datapipe = source_datapipe
         self.filter_fn = filter_fn
 
@@ -101,7 +101,7 @@ class FilterDataFramesPipe(DFIterDataPipe):
                 filter_res.append(self.filter_fn(df.iloc[i]))
 
         buffer = []
-        for df, res in zip(all_buffer, filter_res):
+        for df, res in zip(all_buffer, filter_res, strict=True):
             if res:
                 buffer.append(df)
                 if len(buffer) == size:
@@ -113,7 +113,7 @@ class FilterDataFramesPipe(DFIterDataPipe):
 
 @functional_datapipe("_to_dataframes_pipe", enable_df_api_tracing=True)
 class ExampleAggregateAsDataFrames(DFIterDataPipe):
-    def __init__(self, source_datapipe, dataframe_size=10, columns=None):
+    def __init__(self, source_datapipe, dataframe_size=10, columns=None) -> None:
         self.source_datapipe = source_datapipe
         self.columns = columns
         self.dataframe_size = dataframe_size

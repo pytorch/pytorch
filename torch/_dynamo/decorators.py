@@ -96,6 +96,7 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
             # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
 
@@ -890,6 +891,7 @@ _allowed_config_patches = (
     "allow_unspec_int_on_nn_module",
     "skip_torchrec",
     "dont_skip_tracing",
+    "nested_graph_breaks",
 )
 
 from . import config
@@ -965,6 +967,26 @@ def dont_skip_tracing(fn: Optional[Any] = None) -> Any:
     return ctx
 
 
+@overload
+def disable_nested_graph_breaks(fn: None = None) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def disable_nested_graph_breaks(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
+def disable_nested_graph_breaks(fn: Optional[Any] = None) -> Any:
+    """
+    Context manager/decorator to disable nested graph breaks when tracing
+    this function and any nested functions. Used when nested graph breaks
+    is causing problems.
+    """
+    ctx = patch_dynamo_config(nested_graph_breaks=False)
+    if fn:
+        return ctx(fn)
+    return ctx
+
+
 class ErrorOnGraphBreakDecoratorContextManager:
     def __init__(self, error_on_graph_break: bool) -> None:
         self.error_on_graph_break = error_on_graph_break
@@ -1002,3 +1024,13 @@ def error_on_graph_break(
     The default value of torch.compile's `error_on_graph_break` setting is False.
     """
     return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)
+
+
+def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> Optional[bool]:
+    """
+    Check if a method is marked as `dynamo_disable` recursively. It returns:
+    - True if disable(recursive=True)
+    - False if disable(recursive=False)
+    - None if method is not a disable decorator
+    """
+    return getattr(method, "_torchdynamo_disable_recursive", None)

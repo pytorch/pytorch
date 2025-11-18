@@ -250,7 +250,7 @@ def transpose_inference_rule(n: Node):
     We check that dimensions for the transpose operations
     are within range of the tensor type of the node
     """
-    if n.target == torch.transpose:
+    if n.target is torch.transpose:
         assert isinstance(n.args[0], Node)
         t = n.args[0].type
 
@@ -674,7 +674,7 @@ class GraphTypeChecker:
             return n.type
 
         elif n.op == "call_function":
-            if n.target == getattr:
+            if n.target is getattr:
                 assert getattr in _INFERENCE_RULES
                 return _INFERENCE_RULES[n.target](n, self.traced)
 
