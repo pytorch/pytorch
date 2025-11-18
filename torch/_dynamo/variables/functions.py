@@ -29,6 +29,7 @@ import logging
 import sys
 import traceback
 import types
+from collections import namedtuple
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
 from typing import Any, Optional, TYPE_CHECKING, TypeVar
@@ -70,6 +71,7 @@ from ..utils import (
     cmp_name_to_op_mapping,
     identity,
     is_function,
+    is_namedtuple_cls,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -2717,3 +2719,37 @@ class CreateTMADescriptorStableVariable(VariableTracker):
             tensor=tensor,  # type: ignore[arg-type]
             block_shape=block_shape,  # type: ignore[arg-type]
         )
+
+
+class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
+    """
+    `torch.utils._pytree._get_node_type` function is very hot function. We want to special case it to reduce Dynamo tracing time.
+
+    def _get_node_type(tree: Any) -> Any:
+        node_type = type(tree)
+        # All namedtuple types are implicitly registered as pytree nodes.
+        # XXX: Other parts of the codebase expect namedtuple types always return
+        #      `namedtuple` instead of the actual namedtuple type. Even if the type
+        #      is explicitly registered.
+        if is_namedtuple_class(node_type):
+            return namedtuple
+        return node_type
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if len(args) != 1:
+            raise_type_error_exc(
+                tx,
+                f"pytree_get_node_type requires exactly 1 argument, got {len(args)}",
+            )
+        out = VariableTracker.build(tx, args[0].python_type())
+        if isinstance(out, variables.UserDefinedClassVariable) and is_namedtuple_cls(
+            out.value
+        ):
+            return VariableTracker.build(tx, namedtuple)
+        return out

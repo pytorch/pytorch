@@ -64,6 +64,7 @@ from .functions import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    PyTreeGetNodeTypeFunctionVariable,
     SkipFunctionVariable,
     TMADescriptorExperimentalVariable,
     TMADescriptorStableVariable,
