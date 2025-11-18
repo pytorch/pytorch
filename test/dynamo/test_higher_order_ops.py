@@ -3395,6 +3395,91 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, msg):
             fn_with_hints(x, y)
 
+    @requires_cuda_and_triton
+    def test_wrap_inductor_compiled_regions_option(self):
+        """
+        Test that wrap_inductor_compiled_regions option wraps compiled regions
+        in inductor_compiled_code HOP, making them visible to DebugMode.
+        """
+        from torch.utils._debug_mode import DebugMode
+
+        # Test with wrapping enabled
+        @torch.compile(
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+        )
+        def fn_wrapped(x, y):
+            return torch.matmul(x, y)
+
+        # Test with wrapping disabled (default)
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn_not_wrapped(x, y):
+            return torch.matmul(x, y)
+
+        x = torch.randn(4, 4, device="cuda")
+        y = torch.randn(4, 4, device="cuda")
+
+        # Test wrapped version - HOP should be visible in DebugMode
+        with DebugMode() as debug_mode_wrapped:
+            result_wrapped = fn_wrapped(x, y)
+
+        debug_string_wrapped = debug_mode_wrapped.debug_string()
+        self.assertIn("inductor_compiled_code", debug_string_wrapped)
+
+        # Test non-wrapped version - HOP should NOT be visible
+        with DebugMode() as debug_mode_not_wrapped:
+            result_not_wrapped = fn_not_wrapped(x, y)
+
+        debug_string_not_wrapped = debug_mode_not_wrapped.debug_string()
+        self.assertNotIn("inductor_compiled_code", debug_string_not_wrapped)
+
+        # Both should produce correct results
+        expected = torch.matmul(x, y)
+        self.assertEqual(result_wrapped, expected)
+        self.assertEqual(result_not_wrapped, expected)
+
+    @requires_cuda_and_triton
+    def test_wrap_inductor_compiled_regions_with_backward(self):
+        """
+        Test that wrap_inductor_compiled_regions works correctly with autograd.
+        """
+        from torch.utils._debug_mode import DebugMode
+
+        @torch.compile(
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+        )
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        # Clone for eager comparison
+        x_eager = x.detach().clone().requires_grad_(True)
+        y_eager = y.detach().clone().requires_grad_(True)
+
+        # Compiled forward and backward
+        with DebugMode() as debug_mode:
+            result = fn(x, y)
+            loss = result.sum()
+            loss.backward()
+
+        # HOP should be visible in forward pass
+        self.assertIn("inductor_compiled_code", debug_mode.debug_string())
+
+        # Eager forward and backward for comparison
+        expected = torch.matmul(x_eager, y_eager)
+        expected_loss = expected.sum()
+        expected_loss.backward()
+
+        # Check correctness
+        self.assertEqual(result, expected)
+        self.assertEqual(x.grad, x_eager.grad)
+        self.assertEqual(y.grad, y_eager.grad)
+
 
 class HigherOrderOpVmapGuardTests(
     torch._dynamo.test_case.TestCaseWithNestedGraphBreaks, LoggingTestCase
