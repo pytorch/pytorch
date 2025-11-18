@@ -17,6 +17,7 @@ from torch._library.opaque_object import get_opaque_type_name, register_opaque_t
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.fx.graph import _illegal_char_regex
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -332,7 +333,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                 "_TestOpaqueObject::noisy_inject", None
             )
 
-    def test_compile(self):
+    def test_compile1(self):
         def foo(rng_state, x):
             x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
             x = x * x
@@ -348,10 +349,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         backend = AotEagerAndRecordGraphs()
         torch.compile(foo, fullgraph=True, backend=backend)(rng, x)
+
+        # This is done in torch.fx's graph in _namespace.create_name() where it
+        # sanitizes the name
+        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(RNGState))
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             f"""\
-def forward(self, L_x_ : torch.Tensor, L_rng_state_ : {get_opaque_type_name(RNGState)}):
+def forward(self, L_x_ : torch.Tensor, L_rng_state_ : {fx_class}):
     l_x_ = L_x_
     l_rng_state_ = L_rng_state_
     x = torch.ops._TestOpaqueObject.noisy_inject(l_x_, l_rng_state_);  l_x_ = None
