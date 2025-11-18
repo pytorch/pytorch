@@ -48,6 +48,7 @@ from ..source import (
     AttrSource,
     GenericAttrSource,
     GetItemSource,
+    Source,
     TypeMROSource,
     TypeSource,
     WeakRefCallSource,
@@ -2101,39 +2102,116 @@ class WeakRefVariable(VariableTracker):
 
 
 class DatetimeClassVariable(VariableTracker):
+    def is_python_constant(self):
+        return False
+
+    def as_python_constant(self):
+        raise AsPythonConstantNotImplementedError(self)
+
+    def as_proxy(self):
+        return super().as_proxy()
+
     def python_type(self):
         return type(datetime.datetime)
 
-    def call_method(self, tx, name, args, kwargs):
+    def call_method(self, tx: "InstructionTranslator", name, args, kwargs):
         if name == "now" and not args and not kwargs:
-            return DatetimeNowVariable()
+            proxy = tx.output.create_proxy(
+                "call_function", datetime.datetime.now, (), {}
+            )
+            source = AttrSource(self.source, "now")
+            return DatetimeNowVariable(source=source, proxy=proxy)
         return super().call_method(tx, name, args, kwargs)
 
 
-def _datetime_attr_tensor(attr: str, dtype: torch.dtype):
-    val = getattr(datetime.datetime.now(), attr)
-    t = torch.tensor(val, dtype=dtype)
-    return t
-
-
-_supported_datetime_attrs = {
-    "year",
-    "month",
-    "day",
-    "hour",
-    "minute",
-    "second",
-    "microsecond",
-}
-
-
 class DatetimeNowVariable(VariableTracker):
-    def var_getattr(self, tx, name: str) -> VariableTracker:
-        # TODO: for now supporting only attributes; operations on now() won't work yet
-        if name in _supported_datetime_attrs:
-            vt = tx.output.synthetic_graph_input(
-                _datetime_attr_tensor, (name, torch.get_default_dtype())
+    def __init__(
+        self,
+        proxy: torch.fx.Proxy,
+        source: Optional[Source] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(source=source, **kwargs)
+        self.proxy = proxy
+
+    def is_python_constant(self):
+        return False
+
+    def as_python_constant(self):
+        raise AsPythonConstantNotImplementedError(self)
+
+    def python_type(self):
+        return datetime.datetime
+
+    def as_proxy(self):
+        return self.proxy
+
+    def call_method(self, tx: "InstructionTranslator", name, args, kwargs):
+        self_proxy = self.as_proxy()
+        # TODO: make an allowlist for names and filter by it and fallback to return super().call_method(tx, name, args, kwargs)
+        # TODO take care of kwargs
+        # args_proxy = [arg.as_proxy(tx) for arg in args]
+        if name == "timestamp" and not args and not kwargs:
+            proxy = tx.output.create_proxy(
+                "call_method",
+                "timestamp",
+                (self_proxy,),
+                {},
             )
-            vt.is_datetime_scalar = True
-            return vt
-        return super().var_getattr(tx, name)
+
+            return DatetimeScalarVariable(proxy=proxy, source=self.source)
+        return super().call_method(tx, name, args, kwargs)
+
+
+class TimedeltaVariable(VariableTracker):
+    def __init__(
+        self,
+        proxy: torch.fx.Proxy,
+        source: Optional[Source] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__(source=source, **kwargs)
+        self.proxy = proxy
+
+    def is_python_constant(self):
+        return False
+
+    def as_python_constant(self):
+        raise AsPythonConstantNotImplementedError(self)
+
+    def python_type(self):
+        return datetime.timedelta
+
+    def as_proxy(self):
+        return self.proxy
+
+    def call_method(self, tx: "InstructionTranslator", name, args, kwargs):
+        self_proxy = self.as_proxy()
+        if name == "total_seconds" and not args and not kwargs:
+            proxy = tx.output.create_proxy(
+                "call_method",
+                "total_seconds",
+                (self_proxy,),
+                {},
+            )
+            source = AttrSource(self.source, "total_seconds")
+            return DatetimeScalarVariable(proxy=proxy, source=source)
+        return super().call_method(tx, name, args, kwargs)
+
+
+class DatetimeScalarVariable(VariableTracker):
+    def __init__(self, proxy, source, **kwargs):
+        super().__init__(source=source, **kwargs)
+        self.proxy = proxy
+
+    def as_proxy(self):
+        return self.proxy
+
+    def python_type(self):
+        return float
+
+    def is_python_constant(self):
+        return False
+
+    def as_python_constant(self):
+        raise AsPythonConstantNotImplementedError(self)
