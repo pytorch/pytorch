@@ -1379,14 +1379,6 @@ class SizeVariable(TupleVariable):
 
 
 class NamedTupleVariable(UserDefinedTupleVariable):
-    """
-    Represents user defined objects that are subclasses of namedtuple like
-    objects.
-    Handles both namedtuples and structseq objects.
-    structseq objects are always immutable.
-    namedtuples can be mutable or immutable.
-    """
-
     _nonvar_fields = {
         "tuple_cls",
         "dynamic_attributes",
@@ -1400,15 +1392,6 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         dynamic_attributes: Optional[dict[str, VariableTracker]] = None,
         **kwargs: Any,
     ) -> None:
-        """Constructor signature matches the old NamedTupleVariable.
-
-        Args:
-            items: List of VariableTracker items (the tuple elements).
-            tuple_cls: The namedtuple/structseq class.
-            dynamic_attributes: Dict for dynamic attributes (subclass-only).
-            **kwargs: Standard VariableTracker kwargs (source, mutation_type,
-                etc.).
-        """
         tuple_vt = variables.TupleVariable(
             items, mutation_type=kwargs.get("mutation_type", ValueMutationNew())
         )
@@ -1438,49 +1421,20 @@ class NamedTupleVariable(UserDefinedTupleVariable):
 
     @property
     def items(self) -> list[VariableTracker]:
-        """Get items from the underlying tuple variable.
-
-        Returns:
-            List of VariableTracker items from the tuple.
-        """
         return self._tuple_vt.items
 
     def is_namedtuple(self) -> bool:
-        """Check if regular namedtuple (has _fields and _make).
-
-        Returns:
-            True if regular namedtuple, False if structseq.
-        """
         return isinstance(getattr(self.tuple_cls, "_fields", None), tuple) and callable(
             getattr(self.tuple_cls, "_make", None)
         )
 
     def is_structseq(self) -> bool:
-        """Check if structseq (NOT a regular namedtuple).
-
-        Returns:
-            True if structseq, False if regular namedtuple.
-        """
         return not self.is_namedtuple()
 
     def fields(self) -> tuple[str, ...]:
-        """Get field names from tuple_cls.
-
-        Returns:
-            Tuple of field names.
-        """
         return namedtuple_fields(self.tuple_cls)
 
     def as_python_constant(self):
-        """Convert to Python constant value.
-
-        Uses different construction patterns for structseq vs namedtuple:
-        - Structseq: `tuple_cls([items...])` - single iterable arg
-        - Namedtuple: `tuple_cls(*items)` - positional args
-
-        Returns:
-            Python constant value of the namedtuple/structseq.
-        """
         if self.is_structseq():
             # StructSequenceType(iterable)
             result = self.python_type()([x.as_python_constant() for x in self.items])
@@ -1503,29 +1457,11 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         return result
 
     def as_proxy(self):
-        """Convert to FX proxy for graph construction.
-
-        Uses different construction patterns for structseq vs namedtuple:
-        - Structseq: `tuple_cls([proxies...])` - single iterable arg
-        - Namedtuple: `tuple_cls(*proxies)` - positional args
-
-        Returns:
-            FX proxy representing the namedtuple/structseq.
-        """
         if self.is_structseq():
-            return self.tuple_cls([x.as_proxy() for x in self._tuple_vt.items])
-        return self.tuple_cls(*[x.as_proxy() for x in self._tuple_vt.items])
+            return self.python_type()([x.as_proxy() for x in self._tuple_vt.items])
+        return self.python_type()(*[x.as_proxy() for x in self._tuple_vt.items])
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        """Generate bytecode to reconstruct the object.
-
-        Uses different reconstruction for structseq vs namedtuple:
-        - Structseq: Use `tuple_cls` directly as constructor
-        - Namedtuple: Use `tuple_cls._make` method
-
-        Args:
-            codegen: PyCodegen instance for generating bytecode.
-        """
         if self.is_structseq():
             create_fn = self.tuple_cls
         else:
@@ -1553,12 +1489,6 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             codegen.store_attr(name)
 
     def _is_method_overridden(self, method_name: str) -> bool:
-        """Checks if a method is overridden in the NamedTuple subclass.
-        Args:
-            method_name (str): The name of the method to check.
-        Returns:
-            bool: True if the method is overridden in the subclass, False otherwise.
-        """
         if getattr(self.tuple_cls, method_name, None) == getattr(
             self.tuple_cls.__mro__[-3], method_name, None
         ):
@@ -1572,17 +1502,6 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        """Handle method calls on the namedtuple/structseq.
-
-        Args:
-            tx: InstructionTranslator instance.
-            name: Method name.
-            args: Method arguments.
-            kwargs: Method keyword arguments.
-
-        Returns:
-            VariableTracker for the method result.
-        """
         if self._is_method_overridden(name):
             # Fall back to UserDefinedTupleVariable
             return super().call_method(tx, name, args, kwargs)
@@ -1597,9 +1516,10 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             attr_var, value = args
             attr = attr_var.as_python_constant()
 
-            # Structseq is always immutable
             if (
+                # structseq is immutable
                 self.is_structseq()
+                # namedtuple directly created by `collections.namedtuple` is immutable
                 or self.tuple_cls.__bases__ == (tuple,)
                 or attr in self.fields()
             ):
@@ -1613,24 +1533,9 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def python_type(self) -> type:
-        """Return the namedtuple/structseq class type.
-
-        Returns:
-            The tuple_cls type.
-        """
         return self.tuple_cls
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
-        """Handle attribute access on the namedtuple/structseq.
-
-        Args:
-            tx: InstructionTranslator instance.
-            name: Attribute name to access.
-
-        Returns:
-            VariableTracker for the attribute value.
-        """
-
         if name == "_fields":
             source = NamedTupleFieldsSource(self.source) if self.source else None
             return VariableTracker.build(tx, self.fields(), source=source)
