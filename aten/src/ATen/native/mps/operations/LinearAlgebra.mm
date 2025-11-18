@@ -28,6 +28,7 @@
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
+#include <ATen/ops/linalg_lu_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/mm_native.h>
@@ -1539,6 +1540,14 @@ TORCH_IMPL_FUNC(lu_unpack_out_mps)
 TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
 (const Tensor& A, bool pivot, bool check_errors, const Tensor& LU, const Tensor& pivots, const Tensor& info) {
   mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, check_errors);
+}
+
+TORCH_IMPL_FUNC(linalg_lu_out_mps)(const Tensor& A, bool pivot, const Tensor& P, const Tensor& L, const Tensor& U) {
+  Tensor LU = at::empty({0}, A.scalar_type(), std::nullopt, kMPS, std::nullopt, MemoryFormat::Contiguous);
+  auto pivots = at::empty({0}, A.options().dtype(kInt));
+  auto info = at::empty({0}, A.options().dtype(kInt));
+  mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, /*check_errors=*/false);
+  mps::lu_unpack_mps_impl(LU, pivots, /*unpack_data=*/true, /*unpack_pivots=*/true, P, L, U);
 }
 
 TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const Tensor& result, const Tensor& info) {
