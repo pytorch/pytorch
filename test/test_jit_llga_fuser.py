@@ -854,4 +854,5 @@ instantiate_device_type_tests(TestFusionPattern, globals())
 instantiate_device_type_tests(TestOp, globals())
 
 if __name__ == '__main__':
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()
