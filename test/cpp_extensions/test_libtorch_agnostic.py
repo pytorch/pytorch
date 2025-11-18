@@ -761,6 +761,60 @@ if not IS_WINDOWS:
             expected_flat = t.view([-1])
             self.assertEqual(result_flat, expected_flat)
 
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_sum(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, 5, device=device)
+
+            result = libtorch_agnostic.ops.my_sum(t, [0])
+            expected = torch.sum(t, [0])
+            self.assertEqual(result, expected)
+
+            result_multi = libtorch_agnostic.ops.my_sum(t, [0, 2])
+            expected_multi = torch.sum(t, [0, 2])
+            self.assertEqual(result_multi, expected_multi)
+
+            result_keepdim = libtorch_agnostic.ops.my_sum(t, [1], True)
+            expected_keepdim = torch.sum(t, [1], keepdim=True)
+            self.assertEqual(result_keepdim, expected_keepdim)
+
+            result_dtype = libtorch_agnostic.ops.my_sum(t, [0], False, torch.float64)
+            expected_dtype = torch.sum(t, [0], dtype=torch.float64)
+            self.assertEqual(result_dtype, expected_dtype)
+
+            # Test sum without dim (sum all elements) - pass empty list
+            result_all = libtorch_agnostic.ops.my_sum(t, [])
+            expected_all = torch.sum(t)
+            self.assertEqual(result_all, expected_all)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_sum_out(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.randn(3, 4, 5, device=device)
+
+            out = torch.empty(4, 5, device=device)
+            result = libtorch_agnostic.ops.my_sum_out(out, t, [0])
+            expected = torch.sum(t, [0])
+            self.assertEqual(out, expected)
+            self.assertEqual(id(result), id(out))
+
+            out_keepdim = torch.empty(3, 1, 5, device=device)
+            libtorch_agnostic.ops.my_sum_out(out_keepdim, t, [1], True)
+            expected_keepdim = torch.sum(t, [1], keepdim=True)
+            self.assertEqual(out_keepdim, expected_keepdim)
+
+            out_dtype = torch.empty(4, 5, dtype=torch.float64, device=device)
+            libtorch_agnostic.ops.my_sum_out(out_dtype, t, [0], False, torch.float64)
+            expected_dtype = torch.sum(t, [0], dtype=torch.float64)
+            self.assertEqual(out_dtype, expected_dtype)
+
+            out_all = torch.empty([], device=device)
+            libtorch_agnostic.ops.my_sum_out(out_all, t, [])
+            expected_all = torch.sum(t)
+            self.assertEqual(out_all, expected_all)
+
         def test_mv_tensor_accessor(self, device):
             import libtorch_agnostic_2_9 as libtorch_agnostic
 

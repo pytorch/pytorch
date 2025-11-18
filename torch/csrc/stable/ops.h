@@ -379,6 +379,55 @@ inline torch::stable::Tensor view(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+// We expect this to be the stable version of the sum.dim_IntList op.
+// This function computes the sum of the input tensor along the specified
+// dimensions and returns a new tensor containing the result. This function is
+// only available in 2.10 because it uses the stableivalue conversion for
+// HeaderOnlyArrayRef<T>, which is only available in 2.10. The dim parameter is
+// optional - if not provided, sums over all dimensions.
+inline torch::stable::Tensor sum(
+    const torch::stable::Tensor& self,
+    std::optional<torch::headeronly::IntHeaderOnlyArrayRef> dim = std::nullopt,
+    bool keepdim = false,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(keepdim),
+      torch::stable::detail::from(dtype)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::sum", "dim_IntList", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the sum.IntList_out op.
+// This function takes an output tensor and computes the sum of the input tensor
+// along the specified dimensions. The output tensor is modified in-place and
+// returned. Following C++ convention, the out parameter comes first. This
+// function is only available in 2.10 because it uses the stableivalue
+// conversion for HeaderOnlyArrayRef<T>, which is only available in 2.10.
+// Note: Parameters are passed by value instead of reference for stable ABI
+// compatibility. The dim parameter is optional - if not provided, sums over all
+// dimensions.
+inline torch::stable::Tensor sum_out(
+    torch::stable::Tensor out,
+    const torch::stable::Tensor& self,
+    std::optional<torch::headeronly::IntHeaderOnlyArrayRef> dim = std::nullopt,
+    bool keepdim = false,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt) {
+  const auto num_args = 5;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(keepdim),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(out)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::sum", "IntList_out", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #endif
 
 HIDDEN_NAMESPACE_END(torch, stable)

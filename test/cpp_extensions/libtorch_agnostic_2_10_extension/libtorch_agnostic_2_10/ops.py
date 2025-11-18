@@ -227,3 +227,37 @@ def get_template_any_data_ptr(t, dtype, mutable) -> int:
     return torch.ops.libtorch_agnostic_2_10.get_template_any_data_ptr.default(
         t, dtype, mutable
     )
+
+
+def my_sum(self, dim, keepdim=False, dtype=None) -> Tensor:
+    """
+    Returns the sum of the tensor along the specified dimensions.
+
+    Args:
+        self: Tensor - input tensor
+        dim: list[int] - dimensions to sum over
+        keepdim: bool - whether to keep the reduced dimensions
+        dtype: ScalarType or None - the desired data type of returned tensor
+
+    Returns: Tensor - the sum of the tensor along the specified dimensions
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_sum.default(self, dim, keepdim, dtype)
+
+
+def my_sum_out(out, self, dim, keepdim=False, dtype=None) -> Tensor:
+    """
+    Computes the sum of the tensor along the specified dimensions and writes
+    the result to the output tensor.
+
+    Args:
+        out: Tensor - output tensor (modified in-place)
+        self: Tensor - input tensor
+        dim: list[int] - dimensions to sum over
+        keepdim: bool - whether to keep the reduced dimensions
+        dtype: ScalarType or None - the desired data type of returned tensor
+
+    Returns: Tensor - the output tensor (same as out parameter)
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_sum_out.default(
+        out, self, dim, keepdim, dtype
+    )
