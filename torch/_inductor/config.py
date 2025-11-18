@@ -421,6 +421,10 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
     None
 )
 
+bucket_all_reduces_fx: Literal["none", "all"] = "none"
+# By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
+bucket_all_reduces_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
@@ -1158,6 +1162,12 @@ decompose_mem_bound_mm: bool = False
 # In the common case, most inputs will be aligned.
 assume_aligned_inputs: bool = False
 
+# assume_32bit_indexing means that we assume 32-bit indexing is always safe; we always
+# use 32-bit indices regardless of tensor sizes. If assume_32bit_indexing contradicts
+# with example inputs we throw. This is useful when all dynamic shapes are unbacked and
+# you know you only operate with 32-bit sizes.
+assume_32bit_indexing: bool = False
+
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
 # ignoring the unsupported args may lead to unexpected autotuning behavior: don't
@@ -1189,6 +1199,8 @@ enable_caching_generated_triton_templates: bool = True
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
+
+enable_autograd_for_aot: bool = False
 
 
 def get_worker_log_path() -> Optional[str]:
