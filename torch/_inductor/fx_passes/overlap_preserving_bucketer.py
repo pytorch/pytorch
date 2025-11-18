@@ -234,7 +234,6 @@ class OverlapPreservingBucketer:
                 self.aug_graph.add_extra_dep(n=info.wait_node, dep=hn)
 
     def bucket_collectives(self) -> None:
-        """Main entry point for bucketing collectives."""
         # Group collectives by PG first
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start in self.collective_info:
@@ -285,10 +284,12 @@ class OverlapPreservingBucketer:
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
         for n, deps in additional_deps.items():
-            torch._check(not n._erased, lambda: f"Erased node deps not transfered: {n}")
+            torch._check(
+                not n._erased, lambda: f"Erased node deps not transferred: {n}"
+            )
             for d in deps:
                 torch._check(
-                    not d._erased, lambda: f"Erased node deps not transfered: {d}"
+                    not d._erased, lambda: f"Erased node deps not transferred: {d}"
                 )
 
         _stable_topological_sort(self.graph, additional_deps)
