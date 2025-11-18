@@ -825,7 +825,7 @@ def _create_arg_dict(self, a):
             k = self.create_arg(k)
             map_arg(k, _no_nodes_error)
         r[k] = self.create_arg(v)
-    return r
+    return type(a)(r)
 
 
 _create_arg_bypass = {
