@@ -9,11 +9,7 @@ This closely follows the pattern from default_partition's reordering_to_mimic_au
 
 import torch
 import torch.fx as fx
-from torch._functorch.partitioners import (
-    collect_deps_with_filter,
-    insert_nodes_in_original_order,
-    must_recompute,
-)
+from torch._functorch.partitioners import collect_deps_with_filter, must_recompute
 
 
 def _is_backward_node(node: fx.Node) -> bool:
@@ -102,6 +98,7 @@ def remap_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModule:
         Insert a node and its dependencies into the graph.
         Pattern from reordering_to_mimic_autograd_engine.
         """
+
         # Skip condition: already in env (but in backward, may need to duplicate AC nodes)
         def skip_condition(n: fx.Node) -> bool:
             if n in recomputed_nodes:
