@@ -138,6 +138,7 @@ class OverlapPreservingBucketer:
         bucket_mode: BucketMode = "custom_ops_multidtype",
     ):
         self.graph = graph
+        max_coll_distance = 20
         self.collective_info = collective_info
         self.node_ancestors = node_ancestors
         self.scheduled = scheduled
@@ -151,6 +152,9 @@ class OverlapPreservingBucketer:
         self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
 
         self._add_hiding_interval_constraints()
+
+        # Recompute ancestors with hiding interval dependencies for fast O(1) checks
+        self._recompute_augmented_ancestors()
 
     def build_timelines(self) -> dict[str, Optional[PGEvent]]:
         "Construct each process groups ordered series of event"
@@ -232,6 +236,49 @@ class OverlapPreservingBucketer:
                 # Enforce: start -> compute -> wait
                 self.aug_graph.add_extra_dep(n=hn, dep=start)
                 self.aug_graph.add_extra_dep(n=info.wait_node, dep=hn)
+
+    def _recompute_augmented_ancestors(self) -> None:
+        """
+        Recompute node ancestors including ONLY hiding interval dependencies.
+
+        The augmented ancestor set includes all reachability through:
+        1. Original graph edges
+        2. Hiding interval deps: collective_start -> hiding_node -> wait
+
+        We do NOT include timeline sequential dependencies, as those are too restrictive
+        and would prevent valid buckets. We only care about preserving the hiding intervals.
+
+        This allows O(1) has_path checks for ancestor conflicts instead of O(V+E) graph traversals.
+        """
+        # Start with original ancestors
+        self.augmented_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = {
+            n: self.node_ancestors[n].copy() for n in self.scheduled
+        }
+
+        # Build adjacency list with ONLY hiding interval edges
+        hiding_edges: dict[fx.Node, list[fx.Node]] = defaultdict(list)
+
+        # Add hiding interval constraints: start -> hiding_node -> wait
+        for start, info in self.collective_info.items():
+            if info.is_exposed:
+                continue
+            for hiding_node in info.hiding_nodes:
+                # hiding_node depends on start
+                hiding_edges[hiding_node].append(start)
+                # wait depends on hiding_node
+                hiding_edges[info.wait_node].append(hiding_node)
+
+        # Compute transitive closure using topological order
+        # Process nodes in reverse topological order to efficiently propagate ancestors
+        for node in reversed(list(self.scheduled)):
+            node_ancestors = self.augmented_ancestors[node]
+
+            # Add hiding interval predecessors and their ancestors
+            for pred in hiding_edges[node]:
+                if pred not in node_ancestors:
+                    node_ancestors.add(pred)
+                # Add all of predecessor's ancestors
+                node_ancestors |= self.augmented_ancestors[pred]
 
     def bucket_collectives(self) -> None:
         # Group collectives by PG first
@@ -338,28 +385,44 @@ class OverlapPreservingBucketer:
             processed.add(start_node)
             start_node_idx = self.node_idx[start_node]
 
-            # Check candidates in sorted order, break when beyond max distance
+            # Greedy optimization: stop after consecutive failures
+            consecutive_failures = 0
+            max_consecutive_failures = 5
+
+            # IMPORTANT: Only check candidates with index > start_node_idx
+            # This avoids trying the same pair twice (e.g., (A, B) and later (B, A))
             for candidate in sorted_collectives:
                 if candidate in processed:
                     continue
 
                 candidate_idx = self.node_idx[candidate]
-                # Check if candidate is within max distance from the bucket start
-                distance = abs(candidate_idx - start_node_idx)
-                if distance > self.max_coll_distance:
-                    # Since sorted, all remaining candidates will be too far
-                    if candidate_idx > start_node_idx:
-                        break
+
+                # Skip candidates before start_node to avoid duplicate pair checking
+                if candidate_idx <= start_node_idx:
                     continue
+
+                # Check if candidate is within max distance from the bucket start
+                distance = candidate_idx - start_node_idx
+                if distance > self.max_coll_distance:
+                    # Since sorted and only looking forward, all remaining will be too far
+                    break
 
                 candidate_bytes = self.collective_info[candidate].size_bytes
                 if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_consecutive_failures:
+                        break
                     continue
 
                 if self._can_add_to_bucket(bucket_info, candidate):
                     bucket_info.collectives.append(candidate)
                     bucket_info.total_bytes += candidate_bytes
                     processed.add(candidate)
+                    consecutive_failures = 0  # Reset on success
+                else:
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_consecutive_failures:
+                        break
 
             if len(bucket_info.collectives) > 1:
                 buckets.append(bucket_info)
@@ -659,28 +722,30 @@ class OverlapPreservingBucketer:
         """
         Check if candidate has ancestor conflicts with bucket collectives.
         Returns True if there are conflicts.
+
+        Uses precomputed augmented_ancestors for O(1) checks instead of O(V+E) traversals.
         """
         candidate_info = self.collective_info[candidate]
         candidate_wait = candidate_info.wait_node
 
         for coll in bucket_info.collectives:
-            # Check if collectives are ancestors of each other
-            if self._ancestor_dep(coll, candidate):
+            # Check if collectives are ancestors of each other using augmented ancestors
+            if coll in self.augmented_ancestors[candidate] or candidate in self.augmented_ancestors[coll]:
                 return True
 
             # Check if waits are ancestors of each other
             coll_wait = self.collective_info[coll].wait_node
-            if self._ancestor_dep(candidate_wait, coll_wait):
+            if coll_wait in self.augmented_ancestors[candidate_wait] or candidate_wait in self.augmented_ancestors[coll_wait]:
                 return True
 
             # Check if existing hiding node conflicts with candidate wait
             for old_hiding_node in self.collective_info[coll].hiding_nodes:
-                if self._ancestor_dep(old_hiding_node, candidate_wait):
+                if old_hiding_node in self.augmented_ancestors[candidate_wait] or candidate_wait in self.augmented_ancestors[old_hiding_node]:
                     return True
 
             # Check if candidate hiding node conflicts with existing wait
             for new_hiding_node in candidate_info.hiding_nodes:
-                if self._ancestor_dep(new_hiding_node, coll_wait):
+                if new_hiding_node in self.augmented_ancestors[coll_wait] or coll_wait in self.augmented_ancestors[new_hiding_node]:
                     return True
 
         return False
