@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import contextlib
 import logging
 import threading
 from collections.abc import Callable, Sequence
@@ -652,8 +651,8 @@ class ShardingPropagator:
                 is_leaf=lambda x: isinstance(x, DTensorSpec),
             )
             log.info(
-                f"Selected strategy {placements_in} -> {placements_out} for {op_schema.op} with input {args_spec}, using unbacked hints: {replacements}"
-            )  # noqa: G004
+                f"Selected strategy {placements_in} -> {placements_out} for {op_schema.op} with input {args_spec}, using unbacked hints: {replacements}"  # noqa: G004
+            )
         return strategy_index
 
     def _select_strategy(
