@@ -14,9 +14,36 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     IS_WINDOWS,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
     xfailIfTorchDynamo,
 )
+
+
+def get_supported_dtypes():
+    """Return a list of dtypes that are supported by torch stable ABI."""
+    return [
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+        torch.bfloat16,
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fnuz,
+        torch.complex32,
+        torch.complex64,
+        torch.complex128,
+        torch.bool,
+    ]
 
 
 # TODO: Fix this error in Windows:
@@ -274,6 +301,43 @@ if not IS_WINDOWS:
             expected0 = torch.narrow(t, dim0, start0, length0)
             self.assertEqual(out0, expected0)
 
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+        def test_get_any_data_ptr(self, device):
+            import libtorch_agnostic
+
+            t = torch.empty(2, 5, device=device, dtype=torch.float32)
+            expected_p = t.data_ptr()
+
+            for mutable in [True, False]:
+                p = libtorch_agnostic.ops.get_any_data_ptr(t, mutable)
+                self.assertEqual(p, expected_p)
+
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+        def test_get_template_any_data_ptr(self, device):
+            import libtorch_agnostic
+
+            supported_dtypes = get_supported_dtypes()
+
+            for dtype in supported_dtypes:
+                t = torch.empty(2, 5, device=device, dtype=dtype)
+                expected_p = t.data_ptr()
+
+                for rdtype in supported_dtypes:
+                    if dtype == rdtype:
+                        for mutable in [True, False]:
+                            p = libtorch_agnostic.ops.get_template_any_data_ptr(
+                                t, rdtype, mutable
+                            )
+                            self.assertEqual(p, expected_p)
+                    else:
+                        for mutable in [True, False]:
+                            with self.assertRaisesRegex(
+                                RuntimeError, "expected scalar type.* but found"
+                            ):
+                                libtorch_agnostic.ops.get_template_any_data_ptr(
+                                    t, rdtype, mutable
+                                )
+
         @onlyCUDA
         @deviceCountAtLeast(2)
         def test_device_guard(self, device):
@@ -524,6 +588,113 @@ if not IS_WINDOWS:
             num_threads = libtorch_agnostic.ops.test_get_num_threads()
             expected_num_threads = torch.get_num_threads()
             self.assertEqual(num_threads, expected_num_threads)
+
+        def test_my_empty(self, device):
+            import libtorch_agnostic
+
+            deterministic = torch.are_deterministic_algorithms_enabled()
+            try:
+                # set use_deterministic_algorithms to fill uninitialized memory
+                torch.use_deterministic_algorithms(True)
+
+                size = [2, 3]
+                result = libtorch_agnostic.ops.my_empty(size, None, None, None)
+                expected = torch.empty(size)
+                self.assertEqual(result, expected, exact_device=True)
+
+                result_float = libtorch_agnostic.ops.my_empty(
+                    size, torch.float32, None, None
+                )
+                expected_float = torch.empty(size, dtype=torch.float32)
+                self.assertEqual(result_float, expected_float, exact_device=True)
+
+                result_with_device = libtorch_agnostic.ops.my_empty(
+                    size, torch.float64, device, None
+                )
+                expected_with_device = torch.empty(
+                    size, dtype=torch.float64, device=device
+                )
+                self.assertEqual(
+                    result_with_device, expected_with_device, exact_device=True
+                )
+
+                if device == "cuda":
+                    result_pinned = libtorch_agnostic.ops.my_empty(
+                        size, torch.float32, "cpu", True
+                    )
+                    expected_pinned = torch.empty(
+                        size, dtype=torch.float32, device="cpu", pin_memory=True
+                    )
+                    self.assertEqual(result_pinned, expected_pinned)
+                    self.assertTrue(result_pinned.is_pinned())
+            finally:
+                torch.use_deterministic_algorithms(deterministic)
+
+        def test_my_flatten(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 3, 4, device=device)
+            result = libtorch_agnostic.ops.my_flatten(t)
+            expected = torch.flatten(t)
+            self.assertEqual(result, expected)
+
+            result_start = libtorch_agnostic.ops.my_flatten(t, 1)
+            expected_start = torch.flatten(t, 1)
+            self.assertEqual(result_start, expected_start)
+
+            result_range = libtorch_agnostic.ops.my_flatten(t, 2, -1)
+            expected_range = torch.flatten(t, 2, -1)
+            self.assertEqual(result_range, expected_range)
+
+        def test_my_reshape(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 3, 4, device=device)
+
+            result = libtorch_agnostic.ops.my_reshape(t, [6, 4])
+            expected = torch.reshape(t, [6, 4])
+            self.assertEqual(result, expected)
+
+            result_infer = libtorch_agnostic.ops.my_reshape(t, [-1, 4])
+            expected_infer = torch.reshape(t, [-1, 4])
+            self.assertEqual(result_infer, expected_infer)
+
+            result_flat = libtorch_agnostic.ops.my_reshape(t, [-1])
+            expected_flat = torch.reshape(t, [-1])
+            self.assertEqual(result_flat, expected_flat)
+
+        def test_my_view(self, device):
+            import libtorch_agnostic
+
+            t = torch.randn(2, 3, 4, device=device)
+
+            result = libtorch_agnostic.ops.my_view(t, [6, 4])
+            expected = t.view([6, 4])
+            self.assertEqual(result, expected)
+
+            result_infer = libtorch_agnostic.ops.my_view(t, [-1, 4])
+            expected_infer = t.view([-1, 4])
+            self.assertEqual(result_infer, expected_infer)
+
+            result_flat = libtorch_agnostic.ops.my_view(t, [-1])
+            expected_flat = t.view([-1])
+            self.assertEqual(result_flat, expected_flat)
+
+        def test_mv_tensor_accessor(self, device):
+            import libtorch_agnostic
+
+            m = torch.rand(3, 5, device=device)
+            v = torch.rand(5, device=device)
+            result = libtorch_agnostic.ops.mv_tensor_accessor(m, v)
+            expected = torch.mv(m, v)
+            self.assertEqual(result, expected)
+
+            # non-contiguous inputs
+            m = torch.rand(3 * 2, 5 * 3, device=device)[::2, ::3]
+            v = torch.rand(5 * 4, device=device)[::4]
+            result = libtorch_agnostic.ops.mv_tensor_accessor(m, v)
+            expected = torch.mv(m, v)
+            self.assertEqual(result, expected)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
