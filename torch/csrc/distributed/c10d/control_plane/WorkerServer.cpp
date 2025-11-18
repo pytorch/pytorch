@@ -87,17 +87,17 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
       "/handler/",
       [](const httplib::Request& req [[maybe_unused]], httplib::Response& res) {
         std::ostringstream body;
-        body << '[';
+        body << "[";
         bool first = true;
         for (const auto& name : getHandlerNames()) {
           if (!first) {
-            body << ',';
+            body << ",";
           }
           first = false;
 
-          body << '"' << jsonStrEscape(name) << '"';
+          body << "\"" << jsonStrEscape(name) << "\"";
         }
-        body << ']';
+        body << "]";
 
         res.set_content(body.str(), "application/json");
       });
