@@ -960,11 +960,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
         )
 
         recorded_list.clear()
-        # TODO: seems like invoke_subgraph's py_autograd impl calls the subgraph
-        # eagerly twice. Once for get_output_metadata and then once for
-        # InvokeSubgraphAutogradOp. This causes record_memory to be called twice.
-        with torch.no_grad():
-            out2 = ep.module()(x)
+        out2 = ep.module()(x)
         self.assertEqual(len(recorded_list), 4)
         self.assertTrue(torch.allclose(model(x)[0], out2[0]))
 
