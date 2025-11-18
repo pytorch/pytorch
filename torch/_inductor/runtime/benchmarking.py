@@ -1,17 +1,22 @@
 import functools
 import inspect
+import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
 from typing import Any, Concatenate, Optional, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
+from filelock import FileLock
+
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.config import use_experimental_benchmarker
+from torch._inductor.config import accelerator_locking, use_experimental_benchmarker
+from torch._inductor.runtime.runtime_utils import default_cache_dir
 from torch.utils._debug_mode import DebugMode
 
 
@@ -24,7 +29,42 @@ use_experimental_benchmarker = (
 MILLISECONDS_PER_SECOND = 1000
 
 P = ParamSpec("P")
+R = TypeVar("R")
 T = TypeVar("T")
+
+# thread usage lock for accelerators; this lock handles locking
+# across threads in the same process, and does not lock across
+# other processes that might be attempting to access the accelerator
+thread_ulock: threading.Lock = threading.Lock()
+
+
+@contextmanager
+def _accelerator_lock() -> Generator[None, None, None]:
+    device: torch.device | None = None
+    if (device := torch.accelerator.current_accelerator(check_available=True)) is None:
+        yield
+    else:
+        dindex: int = torch.accelerator.current_device_index()
+        dinfo: str = f"{device.type}_{dindex}"
+
+        # usage lock for the accelerator
+        ulock: FileLock = FileLock(
+            default_cache_dir() + f"/locks/usage_{dinfo}.lock"
+        )  # pyrefly: ignore [bad-assignment]
+
+        with ulock:
+            yield
+
+
+def accelerator_lock(fn: Callable[P, R]) -> Callable[P, R]:
+    @wraps(fn)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        if accelerator_locking:
+            with _accelerator_lock():
+                return fn(*args, **kwargs)
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
@@ -235,6 +275,7 @@ class Benchmarker:
         return median(run_for(rep))
 
     @time_and_count
+    @accelerator_lock
     def benchmark_gpu(self: Self, *args: Any, **kwargs: Any) -> float:
         raise NotImplementedError
 
@@ -251,6 +292,7 @@ class TritonBenchmarker(Benchmarker):
 
     @may_distort_benchmarking_result
     @time_and_count
+    @accelerator_lock
     # pyrefly: ignore [bad-override]
     def benchmark_gpu(
         self: Self,
@@ -321,6 +363,7 @@ class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
 
     @may_distort_benchmarking_result
     @time_and_count
+    @accelerator_lock
     def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],

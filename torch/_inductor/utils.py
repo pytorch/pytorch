@@ -288,9 +288,12 @@ def do_bench_using_profiling(
     # to torch._inductor.runtime.benchmarking and change all the call site.
     # But that's not trivial due to so many call sites in and out of pytorch.
 
-    from torch._inductor.runtime.benchmarking import may_distort_benchmarking_result
+    from torch._inductor.runtime.benchmarking import (
+        accelerator_lock,
+        may_distort_benchmarking_result,
+    )
 
-    return may_distort_benchmarking_result(_do_bench_using_profiling)(
+    return may_distort_benchmarking_result(accelerator_lock(_do_bench_using_profiling))(
         fn, warmup, rep, is_vetted_benchmarking
     )
 
