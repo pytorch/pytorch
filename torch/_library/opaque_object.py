@@ -181,17 +181,14 @@ def register_opaque_type(cls: Any) -> None:
     Registers the given type as an opaque type which allows this to be consumed
     by a custom operator.
 
-    The type name will be automatically generated from the class's fully qualified name.
-    For example, if the class is `mymodule.MyClass`, the type name will be
-    `mymodule_MyClass`. Nested classes are also supported: `mymodule.Outer.Inner`
-    becomes `mymodule_Outer_Inner`.
+    The type name will be automatically generated from the class's fully
+    qualified name (ex. my_module.MyClass).
 
     Args:
         cls (type): The class to register as an opaque type.
     """
     # Generate a fully qualified name by combining module and qualname
-    # Replace dots with underscores since schema_type_parser breaks on periods
-    name = f"{cls.__module__}_{cls.__qualname__}".replace(".", "_")
+    name = f"{cls.__module__}.{cls.__qualname__}"
 
     _OPAQUE_TYPES[cls] = name
 
