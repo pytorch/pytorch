@@ -204,16 +204,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     void** ret_data_ptr // returns borrowed reference
 );
 
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_mutable_data_ptr(
-    AtenTensorHandle tensor,
-    void** ret_data_ptr // returns borrowed reference
-);
-
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_const_data_ptr(
-    AtenTensorHandle tensor,
-    const void** ret_data_ptr // returns borrowed reference
-);
-
 // Get the nbytes of the underlying storage
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_storage_size(AtenTensorHandle tensor, int64_t* ret_size);

@@ -23,6 +23,7 @@ class NCCL_COLL(IntEnum):
     ALL_GATHER = 1
     REDUCE_SCATTER = 2
     ALL_TO_ALL = 3
+    UNSUPPORTED = 4
 
 
 class NVIDIA_GPU_TYPE(IntEnum):
@@ -53,10 +54,10 @@ def get_collective_type_from_kernel_name(kernel_name: str) -> NCCL_COLL:
         return NCCL_COLL.ALL_GATHER
     elif "reduce_scatter" in kernel_name:
         return NCCL_COLL.REDUCE_SCATTER
-    elif "torch.ops._dtensor.shard_dim_alltoall.default" in kernel_name:
+    elif any(comm in kernel_name for comm in ("all_to_all", "alltoall")):
         return NCCL_COLL.ALL_TO_ALL
     else:
-        raise ValueError(f"Unsupported collective kernel: {kernel_name}")
+        return NCCL_COLL.UNSUPPORTED
 
 
 def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
@@ -340,13 +341,12 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
 
 def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
-    size = 0
+    sz_bytes = 0
     for node in fx_node.all_input_nodes:
         if (t := node.meta.get("val")) is not None:
-            size += t.numel() * t.element_size()
-
-    # TODO - symbolic
-    return size
+            numel = get_size_numel(t.size())
+            sz_bytes += numel * get_dtype_size(t.dtype)
+    return sz_bytes
 
 
 def estimate_nccl_collective_runtime_from_fx_node(
