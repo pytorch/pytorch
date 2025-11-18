@@ -176,6 +176,7 @@ class OverlapPreservingBucketer:
         head = None
         prev_event = None
         position = 0
+        hiding_nodes = OrderedSet()
 
         for node in self.scheduled:
             node_type = None
@@ -183,11 +184,12 @@ class OverlapPreservingBucketer:
             # Determine if this node is relevant for this PG
             if node in self.collective_info and get_group_name(node) == pg:
                 node_type = "starts"
+                hiding_nodes |= self.collective_info[node].hiding_nodes
             elif is_wait_tensor(node):
                 wait_input = node.args[0]
                 if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
                     node_type = "waits"
-            elif is_compute_node(node):
+            elif is_compute_node(node) or node in hiding_nodes:
                 node_type = "compute"
 
             if node_type is None:
@@ -205,7 +207,6 @@ class OverlapPreservingBucketer:
 
             prev_event = event
             position += 1
-
         return head
 
     def _populate_node_to_event(self, pg: str) -> None:
@@ -222,10 +223,12 @@ class OverlapPreservingBucketer:
         Add hiding interval constraints: start -> compute -> wait.
         """
         for start, info in self.collective_info.items():
-            if info.hiding_node and not info.is_exposed:
+            if info.is_exposed:
+                continue
+            for hn in info.hiding_nodes:
                 # Enforce: start -> compute -> wait
-                self.aug_graph.add_extra_dep(n=info.hiding_node, dep=start)
-                self.aug_graph.add_extra_dep(n=info.wait_node, dep=info.hiding_node)
+                self.aug_graph.add_extra_dep(n=hn, dep=start)
+                self.aug_graph.add_extra_dep(n=info.wait_node, dep=hn)
 
     def bucket_collectives(self) -> None:
         """Main entry point for bucketing collectives."""
@@ -358,13 +361,13 @@ class OverlapPreservingBucketer:
 
     def _get_intervals(
         self, event: PGEvent
-    ) -> tuple[Optional[tuple[int, int]], Optional[tuple[int, int]]]:
-        """Get (execution_interval, hiding_interval) for a collective event.
+    ) -> tuple[Optional[tuple[int, int]], list[tuple[int, int]]]:
+        """Get (execution_interval, hiding_intervals) for a collective event.
 
         Returns:
-            (execution_interval, hiding_interval) where:
+            (execution_interval, hiding_intervals) where:
             - execution_interval is (start_pos, wait_pos) or None
-            - hiding_interval is (start_pos, compute_pos) or None if no hiding node
+            - hiding_intervals is a list of (start_pos, compute_pos) tuples, one for each hiding node
 
         Works for both start and wait events by looking up the collective info.
         """
@@ -375,13 +378,13 @@ class OverlapPreservingBucketer:
         elif event.is_wait:
             wait_input = event.node.args[0]
             if not isinstance(wait_input, fx.Node):
-                return None, None
+                return None, []
             coll = wait_input
         else:
-            return None, None
+            return None, []
 
         if coll not in self.collective_info:
-            return None, None
+            return None, []
 
         info = self.collective_info[coll]
         start_event = self.node_to_event[coll]
@@ -389,14 +392,17 @@ class OverlapPreservingBucketer:
 
         execution_interval = (start_event.position, wait_event.position)
 
-        hiding_interval = None
-        if info.hiding_node:
-            hiding_interval = (
-                start_event.position,
-                self.node_to_event[info.hiding_node].position,
-            )
+        hiding_intervals = []
+        if info.hiding_nodes:
+            for hiding_node in info.hiding_nodes:
+                hiding_intervals.append(
+                    (
+                        start_event.position,
+                        self.node_to_event[hiding_node].position,
+                    )
+                )
 
-        return execution_interval, hiding_interval
+        return execution_interval, hiding_intervals
 
     def _preserves_hiding_intervals(
         self,
@@ -424,9 +430,9 @@ class OverlapPreservingBucketer:
         # Collect hiding compute positions for the bucket
         bucket_hiding_compute_positions = []
         for coll in all_bucketed_colls:
-            if hiding_node := self.collective_info[coll].hiding_node:
+            for coll_hiding_node in self.collective_info[coll].hiding_nodes:
                 bucket_hiding_compute_positions.append(
-                    self.node_to_event[hiding_node].position
+                    self.node_to_event[coll_hiding_node].position
                 )
 
         # Get new positions
@@ -478,11 +484,10 @@ class OverlapPreservingBucketer:
                 curr_event.node not in all_bucketed_colls
                 and curr_event.node not in all_bucketed_waits
             ):
-                exec_interval, hiding_interval = self._get_intervals(curr_event)
+                exec_interval, hiding_interval_list = self._get_intervals(curr_event)
                 if exec_interval:
                     execution_intervals.append(exec_interval)
-                if hiding_interval:
-                    hiding_intervals.append(hiding_interval)
+                hiding_intervals.extend(hiding_interval_list)
             curr_event = curr_event.next
 
         curr_event = new_wait_event.prev
@@ -491,11 +496,10 @@ class OverlapPreservingBucketer:
                 curr_event.node not in all_bucketed_colls
                 and curr_event.node not in all_bucketed_waits
             ):
-                exec_interval, hiding_interval = self._get_intervals(curr_event)
+                exec_interval, hiding_interval_list = self._get_intervals(curr_event)
                 if exec_interval:
                     execution_intervals.append(exec_interval)
-                if hiding_interval:
-                    hiding_intervals.append(hiding_interval)
+                hiding_intervals.extend(hiding_interval_list)
             curr_event = curr_event.prev
 
         # Check: no hiding interval should be enclosed by any execution interval
@@ -659,12 +663,12 @@ class OverlapPreservingBucketer:
                 return True
 
             # Check if existing hiding node conflicts with candidate wait
-            if hiding_node := self.collective_info[coll].hiding_node:
-                if self._ancestor_dep(hiding_node, candidate_wait):
+            for old_hiding_node in self.collective_info[coll].hiding_nodes:
+                if self._ancestor_dep(old_hiding_node, candidate_wait):
                     return True
 
             # Check if candidate hiding node conflicts with existing wait
-            if new_hiding_node := candidate_info.hiding_node:
+            for new_hiding_node in candidate_info.hiding_nodes:
                 if self._ancestor_dep(new_hiding_node, coll_wait):
                     return True
 

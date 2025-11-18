@@ -1,5 +1,6 @@
 import functools
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch._dynamo.utils import counters
@@ -124,7 +125,10 @@ def register_patterns(
     if bias:
 
         @register_graph_pattern(
-            pattern, pass_dict=pass_pattern, extra_check=extra_check
+            pattern,
+            # pyrefly: ignore [bad-argument-type]
+            pass_dict=pass_pattern,
+            extra_check=extra_check,
         )
         def replacement_fn(
             match: Match, mat_1: Any, mat_2: Any, bias: Any, *, is_weight_prepacked: Any
@@ -141,11 +145,15 @@ def register_patterns(
                     post_op=post_op_name,
                 )
 
+            # pyrefly: ignore [bad-argument-type]
             match.replace_by_example(repl, [mat_1, mat_2, bias, is_weight_prepacked])
     else:
 
         @register_graph_pattern(
-            pattern, pass_dict=pass_pattern, extra_check=extra_check
+            pattern,
+            # pyrefly: ignore [bad-argument-type]
+            pass_dict=pass_pattern,
+            extra_check=extra_check,
         )
         def replacement_fn(
             match: Match, mat_1: Any, mat_2: Any, *, is_weight_prepacked: Any
@@ -159,6 +167,7 @@ def register_patterns(
                     post_op=post_op_name,
                 )
 
+            # pyrefly: ignore [bad-argument-type]
             match.replace_by_example(repl, [mat_1, mat_2, is_weight_prepacked])
 
 
