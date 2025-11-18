@@ -793,6 +793,9 @@ class CompiledAOTI(OutputCode):
         if config.aot_inductor.package_cpp_only:
             return
 
+        if not config.enable_autograd_for_aot:
+            return
+
         if isinstance(self.filename, list):
             current_callable = next(
                 fn for fn in self.filename if isinstance(fn, str) and fn.endswith(".so")
