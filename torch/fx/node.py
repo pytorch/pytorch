@@ -85,6 +85,23 @@ _side_effectful_need_to_be_preserved_pre_dispatch: list[Callable[..., Any]] = [
     torch.amp._exit_autocast,
 ]
 
+_side_effect_inplace: set[Callable[..., Any]] = {
+    operator.iadd,
+    operator.iand,
+    operator.iconcat,
+    operator.ifloordiv,
+    operator.ilshift,
+    operator.imod,
+    operator.imul,
+    operator.imatmul,
+    operator.ior,
+    operator.ipow,
+    operator.irshift,
+    operator.isub,
+    operator.itruediv,
+    operator.ixor,
+}
+
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
 # or add logic to correctly mark all inplace ops as side effectful.
 _side_effectful_functions: set[Callable[..., Any]] = {
@@ -101,6 +118,7 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     _ops.profiler._record_function_exit,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
+    *_side_effect_inplace,
     *_side_effectful_need_to_be_preserved_pre_dispatch,
 }
 
@@ -769,6 +787,16 @@ class Node(_NodeBase):
             # because this function is used by graph.eliminate_dead_code,
             # and some users depend on current elimination behavior.
             return getattr(target_mod, "_is_impure", False)
+
+        if self.op == "call_method":
+            target_name = (
+                self.target
+                if isinstance(self.target, str)
+                else torch.typename(self.target)
+            )
+            # Check for functions with names ending in an underscore (e.g., 'add_') that are inplace in torch
+            if target_name.endswith("_"):
+                return True
 
         return False
 
