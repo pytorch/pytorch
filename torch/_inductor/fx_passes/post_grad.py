@@ -707,8 +707,6 @@ def is_valid_addmm_activation_fusion(match: Match, activation: str = "relu") -> 
     )
 
 
-
-
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
@@ -738,39 +736,42 @@ def lazy_init():
     betas = ({"betas": 1.3}, {})
     alphas = ({"alpha": 1.2}, {})
 
-    def add_kwargs(kwargs):
-        def decorated(f):
-            def inner(*args):
-                return f(*args, **kwargs)
+    patterns = (
+        lambda inp, m1, m2, beta, alpha: aten.relu(
+            aten.addmm(inp, m1, m2, beta=beta, alpha=alpha)
+        ),
+        lambda inp, m1, m2, beta, alpha: aten.gelu(
+            aten.addmm(inp, m1, m2, beta=beta, alpha=alpha), approximate="tanh"
+        ),
+    )
+    replacements = (
+        lambda inp, m1, m2, beta, alpha: aten._addmm_activation(
+            inp, m1, m2, beta=beta, alpha=alpha
+        ),
+        lambda inp, m1, m2, beta, alpha: aten._addmm_activation(
+            inp, m1, m2, beta=beta, alpha=alpha, use_gelu=True
+        ),
+    )
 
-            return inner
-        return decorated
-
-    def apply_activation(activation, **act_kwargs):
-        def decorated(f):
-            def inner(*args, **kwargs):
-                return activation(f(*args, **kwargs), **act_kwargs)
-
-            return inner
-        return decorated
-
-
-    #for beta, alpha in itertools.product(betas, alphas):
-    for beta, alpha in itertools.product([{"beta": 1.2}], [{"alpha": 1.3}]):
-        register_replacement(
-            # pyrefly: ignore [bad-argument-type]
-            lambda inp, m1, m2, beta, alpha: aten.relu(aten.addmm(inp, m1, m2, beta=beta, alpha=alpha)),
-            # pyrefly: ignore [bad-argument-type]
-            lambda inp, m1, m2, beta, alpha: aten._addmm_activation(inp, m1, m2, beta=beta, alpha=alpha),
-            args,
-            # pyrefly: ignore [bad-argument-type]
-            trace_fn=fwd_only,
-            # pyrefly: ignore [bad-argument-type]
-            pass_dicts=pass_patterns[1],
-            extra_check=is_valid_addmm_activation_fusion,
-            scalar_workaround={**beta, **alpha},
-        )
-    #register_replacement(
+    # for beta, alpha in itertools.product(betas, alphas):
+    for pattern, replacement in zip(patterns, replacements):
+        for beta, alpha in itertools.product([{"beta": 1.2}], [{"alpha": 1.3}]):
+            register_replacement(
+                # pyrefly: ignore [bad-argument-type]
+                pattern,
+                # lambda inp, m1, m2, beta, alpha: aten.relu(aten.addmm(inp, m1, m2, beta=beta, alpha=alpha)),
+                # pyrefly: ignore [bad-argument-type]
+                replacement,
+                # lambda inp, m1, m2, beta, alpha: aten._addmm_activation(inp, m1, m2, beta=beta, alpha=alpha),
+                args,
+                # pyrefly: ignore [bad-argument-type]
+                trace_fn=fwd_only,
+                # pyrefly: ignore [bad-argument-type]
+                pass_dicts=pass_patterns[1],
+                extra_check=is_valid_addmm_activation_fusion,
+                scalar_workaround={**beta, **alpha},
+            )
+    # register_replacement(
     #    # pyrefly: ignore [bad-argument-type]
     #    lambda inp, m1, m2: aten.relu(aten.addmm(inp, m1, m2)),
     #    # pyrefly: ignore [bad-argument-type]
@@ -781,7 +782,7 @@ def lazy_init():
     #    # pyrefly: ignore [bad-argument-type]
     #    pass_dicts=pass_patterns[1],
     #    extra_check=is_valid_addmm_activation_fusion,
-    #)
+    # )
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
@@ -1628,7 +1629,7 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
     match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
 
 
-#@register_graph_pattern(
+# @register_graph_pattern(
 #    CallFunction(
 #        aten.relu,
 #        CallFunction(
@@ -1643,8 +1644,8 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
 #    # pyrefly: ignore [bad-argument-type]
 #    pass_dict=pass_patterns[1],
 #    extra_check=is_valid_addmm_activation_fusion,
-#)
-#def relu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha):
+# )
+# def relu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha):
 #    def replacement(inp, mat1, mat2, beta, alpha):
 #        return aten._addmm_activation(inp, mat1, mat2, beta=beta, alpha=alpha)
 #
@@ -1652,51 +1653,51 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
 #    match.replace_by_example(replacement, [inp, mat1, mat2, beta, alpha])
 
 
-@register_graph_pattern(
-    CallFunction(
-        aten.gelu,
-        CallFunction(
-            aten.addmm,
-            KeywordArg("inp"),
-            Arg(),
-            Arg(),
-            beta=KeywordArg("beta"),
-            alpha=KeywordArg("alpha"),
-        ),
-        approximate=KeywordArg("approximate"),
-    ),
-    # pyrefly: ignore [bad-argument-type]
-    pass_dict=pass_patterns[1],
-    extra_check=lambda *args, **kwargs: is_valid_addmm_activation_fusion(
-        *args, activation="gelu", **kwargs
-    ),
-)
-def gelu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha, approximate):
-    def replacement(inp, mat1, mat2, beta, alpha, approximate):
-        return aten._addmm_activation(
-            inp, mat1, mat2, beta=beta, alpha=alpha, use_gelu=True
-        )
-
-    # pyrefly: ignore [bad-argument-type]
-    match.replace_by_example(replacement, [inp, mat1, mat2, beta, alpha, approximate])
-
-
-@register_graph_pattern(
-    CallFunction(aten.gelu, Arg(), approximate=KeywordArg("approximate")),
-    # pyrefly: ignore [bad-argument-type]
-    pass_dict=pass_patterns[2],
-)
-def gelu_decomposition(match: Match, inp, *, approximate):
-    @functools.cache
-    def get_gelu_decomposition() -> Callable:
-        # NOTE: get_decompositions is experimental
-        from torch._decomp import get_decompositions
-
-        gelu_decomp = get_decompositions([aten.gelu])[aten.gelu.default]
-        return gelu_decomp
-
-    # pyrefly: ignore [bad-argument-type]
-    match.replace_by_example(get_gelu_decomposition(), [inp, approximate])
+# @register_graph_pattern(
+#    CallFunction(
+#        aten.gelu,
+#        CallFunction(
+#            aten.addmm,
+#            KeywordArg("inp"),
+#            Arg(),
+#            Arg(),
+#            beta=KeywordArg("beta"),
+#            alpha=KeywordArg("alpha"),
+#        ),
+#        approximate=KeywordArg("approximate"),
+#    ),
+#    # pyrefly: ignore [bad-argument-type]
+#    pass_dict=pass_patterns[1],
+#    extra_check=lambda *args, **kwargs: is_valid_addmm_activation_fusion(
+#        *args, activation="gelu", **kwargs
+#    ),
+# )
+# def gelu_addmm_fusion(match: Match, mat1, mat2, *, inp, beta, alpha, approximate):
+#    def replacement(inp, mat1, mat2, beta, alpha, approximate):
+#        return aten._addmm_activation(
+#            inp, mat1, mat2, beta=beta, alpha=alpha, use_gelu=True
+#        )
+#
+#    # pyrefly: ignore [bad-argument-type]
+#    match.replace_by_example(replacement, [inp, mat1, mat2, beta, alpha, approximate])
+#
+#
+# @register_graph_pattern(
+#    CallFunction(aten.gelu, Arg(), approximate=KeywordArg("approximate")),
+#    # pyrefly: ignore [bad-argument-type]
+#    pass_dict=pass_patterns[2],
+# )
+# def gelu_decomposition(match: Match, inp, *, approximate):
+#    @functools.cache
+#    def get_gelu_decomposition() -> Callable:
+#        # NOTE: get_decompositions is experimental
+#        from torch._decomp import get_decompositions
+#
+#        gelu_decomp = get_decompositions([aten.gelu])[aten.gelu.default]
+#        return gelu_decomp
+#
+#    # pyrefly: ignore [bad-argument-type]
+#    match.replace_by_example(get_gelu_decomposition(), [inp, approximate])
 
 
 def is_valid_addmm_fusion(match):
