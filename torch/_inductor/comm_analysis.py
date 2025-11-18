@@ -23,6 +23,7 @@ class NCCL_COLL(IntEnum):
     ALL_GATHER = 1
     REDUCE_SCATTER = 2
     ALL_TO_ALL = 3
+    UNSUPPORTED = 4
 
 
 class NVIDIA_GPU_TYPE(IntEnum):
@@ -53,10 +54,10 @@ def get_collective_type_from_kernel_name(kernel_name: str) -> NCCL_COLL:
         return NCCL_COLL.ALL_GATHER
     elif "reduce_scatter" in kernel_name:
         return NCCL_COLL.REDUCE_SCATTER
-    elif "torch.ops._dtensor.shard_dim_alltoall.default" in kernel_name:
+    elif any(comm in kernel_name for comm in ("all_to_all", "alltoall")):
         return NCCL_COLL.ALL_TO_ALL
     else:
-        raise ValueError(f"Unsupported collective kernel: {kernel_name}")
+        return NCCL_COLL.UNSUPPORTED
 
 
 def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
@@ -196,16 +197,9 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
     if "all_gather_into_tensor_out" in py_kernel_name:
         args = args[1:] + args[0]
 
-    try:
-        with torch.distributed._time_estimator(
-            group=pg, device=device
-        ) as time_estimator:
-            w = fn(*args, **kwargs)
-            torch.ops._c10d_functional.wait_tensor.default(w)
-    except Exception as e:
-        # NCCL estimator can fail
-        log.info(e)  # noqa: G200
-        return None
+    with torch.distributed._time_estimator(group=pg, device=device) as time_estimator:
+        w = fn(*args, **kwargs)
+        torch.ops._c10d_functional.wait_tensor.default(w)
 
     est_time_us = time_estimator.estimated_time
     # -1000 constant is NCCL return in case of error during estimations.
@@ -347,19 +341,59 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
 
 def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
-    size = 0
-    for node in fx_node.all_input_nodes:
-        if (t := node.meta.get("val")) is not None:
-            size += t.numel() * t.element_size()
+    """Estimate the size of a collective operation in bytes.
 
-    # TODO - symbolic
-    return size
+    For all_gather and reduce_scatter, both input and output buffers are needed.
+    For all_reduce, it can typically be done in-place, so only one buffer is needed.
+    """
+    from torch._inductor.fx_passes.bucketing import (
+        is_all_reduce_tensor as is_all_reduce,
+    )
+
+    input_bytes = None
+
+    args, kwargs = fx_node.args, fx_node.kwargs
+    kwargs.pop("out", None)
+
+    def tensor_bytes(t) -> int:
+        return get_size_numel(t.size()) * get_dtype_size(t.dtype)
+
+    def add_inp_bytes(inp: torch.fx.Node):
+        t = inp.meta.get("val", None)
+        if t is None:
+            return
+
+        nonlocal input_bytes
+        if input_bytes is None:
+            input_bytes = 0
+        input_bytes += tensor_bytes(t)
+
+    pytree.tree_map_only(
+        torch.fx.Node,
+        add_inp_bytes,
+        (args, kwargs),
+    )
+
+    output_tensor = fx_node.meta.get("val", None)
+
+    if input_bytes is None or output_tensor is None:
+        return 0
+
+    output_bytes = (
+        get_size_numel(output_tensor.size()) * output_tensor.element_size()
+    )  # pyre-ignore
+
+    # all_reduce can be in-place, so only needs one buffer
+    if is_all_reduce(fx_node):
+        return max(input_bytes, output_bytes)
+
+    # otherwise assume both live concurrently
+    return input_bytes + output_bytes
 
 
 def estimate_nccl_collective_runtime_from_fx_node(
     fx_node: torch.fx.Node,
     override_size: Optional[int] = None,
-    # TODO(ivankobzarev): NCCL estimator sometimes fail unexpectedly, enable back after fix.
     use_nccl_estimator: bool = True,
 ) -> float:
     """
