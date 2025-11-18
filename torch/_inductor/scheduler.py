@@ -254,7 +254,7 @@ class MixOrderReduction:
         # fully cached by L2
         size_thres = 5 * 2**20
 
-        # Call evaluate_expr ratehr than statically_known_geq since nrow can
+        # Call evaluate_expr rather than statically_known_geq since nrow can
         # have dynamic shape in real models.
         # Don't use hint directly since hint can be non-representative.
         if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
