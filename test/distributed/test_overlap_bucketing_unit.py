@@ -620,6 +620,60 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             exactly=True,
         ).run(graph_str)
 
+    def test_mm_pw_rs(self):
+        # permute_89: "bf16[16032, 16384][1, 16032]cuda:0"
+        # cat_33: "bf16[16384, 8192][8192, 1]cuda:0"
+        # mm_57: "bf16[16032, 8192][8192, 1]cuda:0" = torch.ops.aten.mm.default(permute_89, cat_33);  permute_89 = cat_33 = None
+        # convert_element_type_275: "f32[16032, 8192][8192, 1]cuda:0" = torch.ops.prims.convert_element_type.default(mm_57, torch.float32);  mm_57 = None
+        # reduce_scatter_tensor_8: "f32[1002, 8192][8192, 1]cuda:0" = torch.ops._c10d_functional.reduce_scatter_tensor.default(convert_element_type_275, 'sum', 16, '1');  convert_element_type_275 = None
+        # wait_tensor_126: "f32[1002, 8192][8192, 1]cuda:0" = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor_8);  reduce_scatter_tensor_8 = None
+        def func(permute_89, cat_33):
+            mm_57 = torch.ops.aten.mm.default(permute_89, cat_33)
+            convert_element_type_275 = torch.ops.prims.convert_element_type.default(
+                mm_57, torch.float32
+            )
+            reduce_scatter_tensor_8 = (
+                torch.ops._c10d_functional.reduce_scatter_tensor.default(
+                    convert_element_type_275, "sum", 16, "1"
+                )
+            )
+            wait_tensor_126 = torch.ops._c10d_functional.wait_tensor.default(
+                reduce_scatter_tensor_8
+            )
+            return wait_tensor_126
+
+        def inps():
+            return (
+                torch.randn(16032, 16384, dtype=torch.bfloat16, device=self.device),
+                torch.randn(16384, 8192, dtype=torch.bfloat16, device=self.device),
+            )
+
+        fake_tensor_mode = FakeTensorMode()
+        with fake_tensor_mode:
+            ins = inps()
+            gm = make_fx(func)(*ins)
+
+        from torch._inductor.fx_passes.decompose_mm import split_mm_rs
+
+        num_chunks = 2
+        split_mm_rs(gm, 1, num_chunks)
+        graph_str = str(gm.graph)
+        FileCheck().check_count(
+            "torch.ops.aten.mm",
+            num_chunks,
+            exactly=True,
+        ).run(graph_str)
+        FileCheck().check_count(
+            "torch.ops.prims.convert_element_type.default",
+            num_chunks,
+            exactly=True,
+        ).run(graph_str)
+        FileCheck().check_count(
+            "torch.ops._c10d_functional.reduce_scatter_tensor.default",
+            num_chunks,
+            exactly=True,
+        ).run(graph_str)
+
     def test_mm_split_cat_rs(self):
         # add_29: "bf16[2, 8192, 1024][8388608, 1024, 1]cuda:0"
         # permute_87: "bf16[3584, 8192][1, 3584]cuda:0"
@@ -643,9 +697,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         def func(add_29, permute_87, view_198):
             mm_55 = torch.ops.aten.mm.default(view_198, permute_87)
             view_199 = torch.ops.aten.reshape.default(mm_55, [2, 8192, 8192])
-            mm_55 = None
             split_33 = torch.ops.aten.split.Tensor(view_199, 1024, 2)
-            view_199 = None
             getitem_336 = split_33[0]
             getitem_337 = split_33[1]
             getitem_338 = split_33[2]
@@ -654,7 +706,6 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             getitem_341 = split_33[5]
             getitem_342 = split_33[6]
             getitem_343 = split_33[7]
-            split_33 = None
             cat_32 = torch.ops.aten.cat.default(
                 [
                     getitem_336,
@@ -690,26 +741,20 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ins = inps()
             gm = make_fx(func)(*ins)
 
-        print(f"XXX GM:{gm.graph}")
-        from torch._inductor.fx_passes.decompose_mm import split_mm_split_cat_rs
+        from torch._inductor.fx_passes.decompose_mm import split_mm_rs
 
-        split_mm_split_cat_rs(gm, 16384, 4)
+        num_chunks = 2
+        split_mm_rs(gm, 16384, num_chunks)
         graph_str = str(gm.graph)
         FileCheck().check_count(
             "torch.ops.aten.mm",
-            4,
+            num_chunks,
             exactly=True,
-        ).check_count(
-            "torch.ops.aten.split.Tensor",
-            4,
-            exactly=True,
-        ).check_count(
-            "torch.ops.aten.cat.default",
-            4,
-            exactly=True,
-        ).check_count(
+        ).run(graph_str)
+
+        FileCheck().check_count(
             "torch.ops._c10d_functional.reduce_scatter_tensor.default",
-            4,
+            num_chunks,
             exactly=True,
         ).run(graph_str)
 
