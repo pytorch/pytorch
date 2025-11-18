@@ -10,6 +10,7 @@ import torch
 from ._utils import _device_t, _get_device_index
 from .memory import (
     empty_cache,
+    get_memory_info,
     max_memory_allocated,
     max_memory_reserved,
     memory_allocated,
@@ -25,9 +26,10 @@ __all__ = [
     "current_device_idx",  # deprecated
     "current_device_index",
     "current_stream",
-    "empty_cache",
     "device_count",
     "device_index",
+    "empty_cache",
+    "get_memory_info",
     "is_available",
     "max_memory_allocated",
     "max_memory_reserved",
