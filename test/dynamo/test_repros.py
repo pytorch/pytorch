@@ -7482,7 +7482,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             sys.setrecursionlimit(old_recursion_limit)
 
     @unittest.skipIf(
-        sys.version_info < (3, 12) or sys.version_info >= (3, 13),
+        sys.version_info < (3, 12) or sys.version_info >= (3, 14),
         "only 3.12, 3.13 affected by c recursion limit",
     )
     def test_dynamo_set_recursion_limit(self):
@@ -7516,7 +7516,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             sys.setrecursionlimit(old_recursion_limit)
 
     @unittest.skipIf(
-        sys.version_info < (3, 12) or sys.version_info >= (3, 13),
+        sys.version_info < (3, 12) or sys.version_info >= (3, 14),
         "only 3.12, 3.13 affected by c recursion limit",
     )
     def test_dynamo_set_recursion_limit_usage(self):
