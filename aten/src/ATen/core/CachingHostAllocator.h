@@ -40,6 +40,7 @@ struct HostBlock {
   ska::flat_hash_set<S> streams_; // streams on which the block was used
   c10::MempoolId_t owning_pool_{0,0}; // never changes after construction, so we don't need a mutex to guard this
   bool was_allocated_during_stream_capture_;
+  std::vector<std::tuple<void *, size_t, std::string>> sections_read_under_stream_capture_;
 };
 
 template <typename B>
@@ -807,6 +808,7 @@ struct CachingHostAllocatorImpl {
     return it->second->blocks;
   }
 
+protected:
   B* get_block_from_ptr(void *ptr) {
     std::shared_lock<std::shared_mutex> lk(instance_mutex_);
     {
