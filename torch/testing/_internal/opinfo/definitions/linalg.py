@@ -1068,7 +1068,7 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
         else:
             return output
 
-    batch_shapes = ((), (3,), (3, 3))
+    batch_shapes = ((), (3,), (3, 3), (0,))
     # pivot=False only supported in CUDA
     pivots = (True, False) if torch.device(device).type == "cuda" else (True,)
     deltas = (-2, -1, 0, +1, +2)
