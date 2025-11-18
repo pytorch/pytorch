@@ -7,12 +7,13 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeAlias, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch.nn.attention.flex_attention import _ForceImpl
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering
@@ -50,17 +51,15 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 Expr = sympy.Expr
 
-ForceImpl: TypeAlias = Literal["DEFAULT", "DECODE", "FLASH", "TRITON"]
-
 
 def _sanitize_kernel_options_for_triton(
     kernel_options: dict[str, Any],
-) -> tuple[dict[str, Any], ForceImpl]:
+) -> tuple[dict[str, Any], _ForceImpl]:
     """We always strip quotes around str values, we only need this in lowering, so we pop it here
     to avoid passing to triton constexpr dict
     """
     sanitized = dict(kernel_options)
-    force_impl = cast(ForceImpl, sanitized.pop("FORCE_IMPL", "DEFAULT"))
+    force_impl = cast(_ForceImpl, sanitized.pop("FORCE_IMPL", "DEFAULT"))
     return sanitized, force_impl
 
 
