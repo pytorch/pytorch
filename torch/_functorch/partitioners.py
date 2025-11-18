@@ -296,17 +296,11 @@ def _is_backward_state(node: fx.Node) -> bool:
 
 
 def _has_tag_is_backward(node: fx.Node) -> bool:
-    return (
-        node.meta.get("partitioner_tag", None) == "is_backward"
-        or node.meta.get("custom", {}).get("backward", None) == 0
-    )
+    return node.meta.get("partitioner_tag", None) == "is_backward"
 
 
 def _has_tag_is_forward(node: fx.Node) -> bool:
-    return (
-        node.meta.get("partitioner_tag", None) == "is_forward"
-        or node.meta.get("custom", {}).get("forward", None) == 0
-    )
+    return node.meta.get("partitioner_tag", None) == "is_forward"
 
 
 def _has_tag_must_be_in_forward(node: fx.Node) -> bool:
@@ -1368,11 +1362,9 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
     def insert_node_in_graph(node):
-        # Skip condition: already in env
-        skip_condition = lambda n: n in env
-
         # Collect dependencies that need to be inserted
-        insertable_nodes = collect_deps_with_filter(node, order, skip_condition)
+        # Skip condition: already in env
+        insertable_nodes = collect_deps_with_filter(node, order, lambda n: n in env)
 
         # Insert in original order
         insert_nodes_in_original_order(insertable_nodes, order, new_graph, env)

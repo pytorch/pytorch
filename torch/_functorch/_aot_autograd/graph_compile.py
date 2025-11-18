@@ -208,7 +208,6 @@ def aot_stage1_graph_capture(
                     fw_metadata=aot_state.fw_metadata,
                 )
             )
-        # Do NOT apply AC reordering to joint graphs - the partitioner handles AC recomputation
     else:
         graph, updated_flat_args, updated_flat_args_descs, maybe_subclass_meta = (
             aot_dispatch_base_graph(  # type: ignore[assignment]
@@ -1721,15 +1720,12 @@ def _aot_stage2a_partition(
         #     so we need to figure out which subclass fw inputs they map to.
         if maybe_subclass_meta is None:
             num_backward_tokens: int = inner_meta.num_backward_tokens
-            try:
-                assert (
-                    len(bw_outs)
-                    == len(fw_metadata.input_info)
-                    + inner_meta.num_outputs_rng_offset
-                    + num_backward_tokens
-                )
-            except:
-                breakpoint()  # Commented out for testing
+            assert (
+                len(bw_outs)
+                == len(fw_metadata.input_info)
+                + inner_meta.num_outputs_rng_offset
+                + num_backward_tokens
+            )
             bw_outs_no_rng_no_tokens = bw_outs
             if (inner_meta.num_outputs_rng_offset + num_backward_tokens) > 0:
                 bw_outs_no_rng_no_tokens = bw_outs[
