@@ -7504,6 +7504,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
             fn(torch.ones(3), 1000)
             opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+            sys.setrecursionlimit(100000)
             with self.assertRaises(Exception):
                 opt_fn(torch.ones(3), 1000)
 
