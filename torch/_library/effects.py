@@ -54,9 +54,8 @@ class EffectHolder:
             schema = torch._C._get_schema(opname, overload)
             for arg in schema.arguments:
                 if isinstance(arg.type, torch.ClassType):
-                    if (
-                        arg.type.str() in skip_classes
-                    ):  # pyrefly: ignore[missing-attribute]
+                    type_str = arg.type.str()  # pyrefly: ignore[missing-attribute]
+                    if type_str in skip_classes:
                         continue
                     self._effect = EffectType.ORDERED
                     return
