@@ -82,7 +82,7 @@ if(NOT ZENDNN_FOUND)
 
   # set zendnnl binary dir, if unsure set ${CMAKE_CURRENT_BINARY_DIR}/zendnnl.
   zendnnl_add_option(NAME ZENDNNL_BINARY_DIR
-    VALUE ${ZENDNNL_SOURCE_DIR}/build
+    VALUE ${CMAKE_BINARY_DIR}/third_party/ZenDNN
     TYPE PATH
     CACHE_STRING "zendnnl_binary_dir"
     COMMAND_LIST ZNL_CMAKE_ARGS)

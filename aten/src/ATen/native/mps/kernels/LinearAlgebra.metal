@@ -96,7 +96,9 @@ kernel void addmm(
     auto bias =
         biasData[thread_id.y * strides[3].x + thread_id.x * strides[3].y];
     outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
-        static_cast<T>(alpha_beta[0] * sum + alpha_beta[1] * bias);
+        static_cast<T>(
+            c10::metal::mul(alpha_beta[0], sum) +
+            c10::metal::mul(alpha_beta[1], bias));
   }
 }
 
