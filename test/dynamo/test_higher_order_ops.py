@@ -39,7 +39,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 
 
 def count_ops(gm, args, freq, op):
@@ -727,7 +730,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         arg_count = ifdynstaticdefault(4, 5)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0
-        expected_op_count = ifdynstaticdefault(9, 7)
+        expected_op_count = ifdynstaticdefault(10, 8)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x,)),
@@ -747,6 +750,7 @@ class GraphModule(torch.nn.Module):
         c: "i64[u0, 1]" = l_x_.nonzero()
 
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
+        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
@@ -783,6 +787,7 @@ class GraphModule(torch.nn.Module):
         c: "i64[u0, 1]" = l_x_.nonzero()
 
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
+        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
@@ -881,7 +886,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         arg_count = ifdynstaticdefault(4, 5)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0
-        expected_op_count = ifdynstaticdefault(9, 7)
+        expected_op_count = ifdynstaticdefault(10, 8)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x,)),
@@ -903,6 +908,7 @@ class GraphModule(torch.nn.Module):
         c: "i64[u0, 1]" = l_x_.nonzero()
 
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
+        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
@@ -953,7 +959,7 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(3)
         arg_count = ifdynstaticdefault(5, 6)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0 and u1
-        expected_op_count = ifdynstaticdefault(15, 11)
+        expected_op_count = ifdynstaticdefault(17, 13)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x, y)),
@@ -974,6 +980,7 @@ class GraphModule(torch.nn.Module):
         c: "i64[u0, 1]" = l_x_.nonzero()
 
         sym_size_int_2: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
+        _check_is_size = torch._check_is_size(sym_size_int_2);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int_2 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
@@ -983,6 +990,7 @@ class GraphModule(torch.nn.Module):
         d: "i64[u1, 1]" = l_y_.nonzero();  l_y_ = None
 
         sym_size_int_3: "Sym(u1)" = torch.ops.aten.sym_size.int(d, 0)
+        _check_is_size_1 = torch._check_is_size(sym_size_int_3);  _check_is_size_1 = None
 
         ge_1: "Sym(u1 >= 0)" = sym_size_int_3 >= 0
         _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_2 = None
@@ -3389,6 +3397,91 @@ class GraphModule(torch.nn.Module):
         msg = r"args must be a tuple of tensors, ints, floats, or bools,"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn_with_hints(x, y)
+
+    @requires_cuda_and_triton
+    def test_wrap_inductor_compiled_regions_option(self):
+        """
+        Test that wrap_inductor_compiled_regions option wraps compiled regions
+        in inductor_compiled_code HOP, making them visible to DebugMode.
+        """
+        from torch.utils._debug_mode import DebugMode
+
+        # Test with wrapping enabled
+        @torch.compile(
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+        )
+        def fn_wrapped(x, y):
+            return torch.matmul(x, y)
+
+        # Test with wrapping disabled (default)
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn_not_wrapped(x, y):
+            return torch.matmul(x, y)
+
+        x = torch.randn(4, 4, device="cuda")
+        y = torch.randn(4, 4, device="cuda")
+
+        # Test wrapped version - HOP should be visible in DebugMode
+        with DebugMode() as debug_mode_wrapped:
+            result_wrapped = fn_wrapped(x, y)
+
+        debug_string_wrapped = debug_mode_wrapped.debug_string()
+        self.assertIn("inductor_compiled_code", debug_string_wrapped)
+
+        # Test non-wrapped version - HOP should NOT be visible
+        with DebugMode() as debug_mode_not_wrapped:
+            result_not_wrapped = fn_not_wrapped(x, y)
+
+        debug_string_not_wrapped = debug_mode_not_wrapped.debug_string()
+        self.assertNotIn("inductor_compiled_code", debug_string_not_wrapped)
+
+        # Both should produce correct results
+        expected = torch.matmul(x, y)
+        self.assertEqual(result_wrapped, expected)
+        self.assertEqual(result_not_wrapped, expected)
+
+    @requires_cuda_and_triton
+    def test_wrap_inductor_compiled_regions_with_backward(self):
+        """
+        Test that wrap_inductor_compiled_regions works correctly with autograd.
+        """
+        from torch.utils._debug_mode import DebugMode
+
+        @torch.compile(
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+        )
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        # Clone for eager comparison
+        x_eager = x.detach().clone().requires_grad_(True)
+        y_eager = y.detach().clone().requires_grad_(True)
+
+        # Compiled forward and backward
+        with DebugMode() as debug_mode:
+            result = fn(x, y)
+            loss = result.sum()
+            loss.backward()
+
+        # HOP should be visible in forward pass
+        self.assertIn("inductor_compiled_code", debug_mode.debug_string())
+
+        # Eager forward and backward for comparison
+        expected = torch.matmul(x_eager, y_eager)
+        expected_loss = expected.sum()
+        expected_loss.backward()
+
+        # Check correctness
+        self.assertEqual(result, expected)
+        self.assertEqual(x.grad, x_eager.grad)
+        self.assertEqual(y.grad, y_eager.grad)
 
 
 class HigherOrderOpVmapGuardTests(
@@ -6890,7 +6983,7 @@ class ActivationCheckpointingTests(
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_fallback(self):
         def gn(x, y):
