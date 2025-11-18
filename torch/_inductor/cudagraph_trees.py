@@ -50,7 +50,7 @@ import weakref
 from collections import defaultdict
 from contextlib import AbstractContextManager
 from enum import auto, Enum
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch.fx
 from torch import Tensor
@@ -86,7 +86,7 @@ from torch.utils.weak import TensorWeakRef
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator, Iterator, Sequence
+    from collections.abc import Callable, Generator, Iterator, Sequence
 
     from torch._guards import CompileId
     from torch._inductor.utils import InputType
@@ -536,9 +536,14 @@ class StorageWeakRefWrapper:
         if self.extra_ref_check is not None and not self.extra_ref_check():
             return False
 
-        # if extra_ref_check is not None we expect an additional reference
         stor_count = torch._C._storage_Use_Count(self.ref.cdata)
-        return (stor_count - (self.extra_ref_check is not None)) == 0
+        if self.extra_ref_check is not None:
+            # if extra_ref_check is not None we expect two additional references:
+            #  - one from the Python storage object
+            #  - one from the cached Tensor
+            stor_count -= 2
+        assert stor_count >= 0
+        return stor_count == 0
 
     def __repr__(self) -> str:
         if self.ref is None or self.ref.expired():
@@ -1439,7 +1444,15 @@ class CUDAGraphNode:
                 self_loc = self_ref()
                 if self_loc is None:
                     return False
-                return self_loc.get_output_refcount(i) == 2
+                refcount = self_loc.get_output_refcount(i)
+                # pyrefly: ignore
+                if self_loc.cached_tensor_outputs[i]._use_count() > 1:
+                    # c10::Tensor may also holds one reference count
+                    assert refcount >= 3
+                    return refcount == 3
+                else:
+                    assert refcount >= 2
+                    return refcount == 2
 
             check = functools.partial(check_refcount, i=i)
 

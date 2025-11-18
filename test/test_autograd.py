@@ -7364,6 +7364,62 @@ for shape in [(1,), ()]:
         ):
             checkpoint_sequential(modules_list, 3, a)
 
+    @skipIfTorchDynamo("GraphExecGroup does not support compile")
+    def test_checkpoint_graph_execution_group(self):
+        def run(use_graph_execution_group):
+            counter = [0]
+
+            def fn(x):
+                counter[0] += 1
+                y = x.sin().cos()
+                z = y.sin().cos()
+                return y, z
+
+            x = torch.randn(3, 3, requires_grad=True)
+
+            y, z = checkpoint(fn, x, use_reentrant=False)
+
+            group = torch.utils.checkpoint.GraphExecGroup()
+
+            ctx = contextlib.nullcontext()
+            if use_graph_execution_group:
+                ctx = group
+
+            with ctx:
+                (grad_y,) = torch.autograd.grad(
+                    z, inputs=(y,), grad_outputs=(torch.ones(3, 3),)
+                )
+
+                (grad_x,) = torch.autograd.grad(
+                    y,
+                    inputs=(x,),
+                    grad_outputs=(grad_y,),
+                )
+
+            if use_graph_execution_group:
+                self.assertEqual(counter[0], 2)
+            else:
+                self.assertEqual(counter[0], 3)
+
+        run(use_graph_execution_group=True)
+        run(use_graph_execution_group=False)
+
+        # Test the not actually disjoint case (using retain_graph=True since
+        # otherwise autograd itself will catch this)
+        def fn(x):
+            return x.sin().cos()
+
+        x = torch.randn(3, 3, requires_grad=True)
+        out = checkpoint(fn, x, use_reentrant=False)
+        with torch.utils.checkpoint.GraphExecGroup():
+            # Under this context, we will enforce that two backward are disjoint
+            # even if retain_graph=True.
+            out.sum().backward(retain_graph=True)
+            with self.assertRaisesRegex(
+                RuntimeError, "Performing two backward calls that overlap"
+            ):
+                out.sum().backward()
+
     def test_checkpoint_detects_non_determinism(self):
         def save_3_tensors(x):
             out = x.sin().exp()
@@ -10838,6 +10894,34 @@ get_out().sum().backward()
                 return inp**2.0
 
             self.assertTrue(gradcheck(func, x, fast_mode=True))
+
+    def test_grad_thread_safety(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        NUM_ITERS = 10
+        NUM_THREADS = 4
+
+        # Concurrent calls to tensor.untyped_storage()
+        def access_grad(tensor, barrier):
+            barrier.wait()
+            return weakref.ref(tensor.grad)
+
+        for i in range(NUM_ITERS):
+            tensor = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+            (tensor**2).sum().backward()
+
+            barrier = threading.Barrier(NUM_THREADS)
+            with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
+                futures = [
+                    executor.submit(access_grad, tensor, barrier)
+                    for _ in range(NUM_THREADS)
+                ]
+
+                # Check that all the grad tensors returned were the same
+                for future in futures:
+                    self.assertEqual(future.result()(), tensor.grad)
+                self.assertIsNotNone(tensor.grad)
 
 
 def index_perm_variable(shape, max_indices):
@@ -15241,6 +15325,14 @@ class TestAutogradMultipleDispatch(TestCase):
         self.assertEqual(x.grad, torch.ones_like(x))
         self.assertEqual(y.grad, 2 * torch.ones_like(x))
         self.assertEqual(z.grad, torch.ones_like(x))
+
+    def test_atan2_zero_gradient(self):
+        x = torch.tensor([0.0], requires_grad=True)
+        y = torch.tensor([0.0], requires_grad=True)
+        z = torch.atan2(x, y)
+        z.backward()
+        self.assertEqual(x.grad, torch.zeros_like(x))
+        self.assertEqual(y.grad, torch.zeros_like(y))
 
 
 # Import test cases from below autograd/ here. These are found

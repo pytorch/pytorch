@@ -5,7 +5,7 @@ import time
 import unittest
 from itertools import product
 from functools import partial
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 
@@ -359,6 +359,29 @@ class TestMatmulCuda(InductorTestCase):
                 self.assertEqual(agrad, a.grad)
                 self.assertEqual(bgrad, b.grad)
 
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16)
+    @unittest.skipIf(not SM100OrLater, "cuBLAS integration for batch invariance is only on Blackwell")
+    @serialTest()
+    def test_cublas_batch_invariance_blackwell(self, device, dtype):
+        orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (False, False)
+        with blas_library_context('cublaslt'):
+            N = 2048
+            K = 6144
+            M_max = 32
+            x = torch.randn(M_max, K, device="cuda", dtype=torch.bfloat16)
+            w = torch.randn(N, K, device="cuda", dtype=torch.bfloat16).t()
+            full = x @ w
+            xx = x[:1]
+            out = xx @ w
+            self.assertEqual(full[:1], out, atol=0., rtol=0.)
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
+
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -490,8 +513,6 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
-        if TEST_WITH_ROCM and a_row_major and b_row_major and dtype in [torch.bfloat16, torch.float16]:
-            self.skipTest("failed using hipblaslt on rocm 6.4.2")
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4
@@ -726,11 +747,13 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("M", [1, 32, 64])
-    @parametrize("N", [1, 32, 64])
+    @parametrize("N", [1, 64])
     @parametrize("K", [1, 32, 64])
-    @parametrize("batch_size", [None, 1, 32])
+    @parametrize("batch_size", [None, 1])
+    @parametrize("broadcast_self", [False, True])
+    @parametrize("high_precision_self", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
+    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
         if torch.version.hip:
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
@@ -745,19 +768,21 @@ class TestMatmulCuda(InductorTestCase):
         device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
-            def create_inputs(B=None):
+            def create_inputs(B, broadcast_self):
                 if B is None:
                     a = torch.randn(M, K, device=device, dtype=dtype)
                     b = torch.randn(K, N, device=device, dtype=dtype)
-                    c = torch.randn(M, N, device=device, dtype=dtype)
+                    c_shape = (M, N) if not broadcast_self else (N)
+                    c = torch.randn(c_shape, device=device, dtype=dtype)
                 else:
                     a = torch.randn(B, M, K, device=device, dtype=dtype)
                     b = torch.randn(B, K, N, device=device, dtype=dtype)
-                    c = torch.randn(B, M, N, device=device, dtype=dtype)
+                    c_shape = (B, M, N) if not broadcast_self else (N)
+                    c = torch.randn(c_shape, device=device, dtype=dtype)
 
                 return a, b, c
 
-            a, b, c = create_inputs(batch_size)
+            a, b, c = create_inputs(batch_size, broadcast_self)
 
             a_fp32, b_fp32, c_fp32 = a.to(torch.float32), b.to(torch.float32), c.to(torch.float32)
 
@@ -779,21 +804,31 @@ class TestMatmulCuda(InductorTestCase):
                         with self.assertRaises(RuntimeError):
                             torch.addmm(c, a, b, out_dtype=output_dtype)
                 else:
+                    if c.dtype != output_dtype and high_precision_self:
+                        c = c.to(output_dtype)
                     if batch_size:
                         out = torch.baddbmm(c, a, b, out_dtype=output_dtype)
                         if output_dtype == torch.float32:
                             baseline = torch.baddbmm(c_fp32, a_fp32, b_fp32)
                         else:
                             baseline = torch.baddbmm(c, a, b)
+                        # test out variant
+                        out_ten = torch.full_like(out, float("nan"))
+                        torch.baddbmm(c, a, b, out_dtype=output_dtype, out=out_ten)
                     else:
                         out = torch.addmm(c, a, b, out_dtype=output_dtype)
                         if output_dtype == torch.float32:
                             baseline = torch.addmm(c_fp32, a_fp32, b_fp32)
                         else:
                             baseline = torch.addmm(c, a, b)
+                        # test out variant
+                        out_ten = torch.full_like(out, float("nan"))
+                        torch.addmm(c, a, b, out_dtype=output_dtype, out=out_ten)
 
                     self.assertEqual(out.dtype, output_dtype)
+                    self.assertEqual(out_ten.dtype, output_dtype)
                     torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
+                    torch.testing.assert_close(out_ten, out, atol=0, rtol=0)
 
 
     @onlyCUDA

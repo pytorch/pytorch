@@ -40,6 +40,7 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedSingleProcTestCase,
     MultiProcessTestCase,
     requires_accelerator_dist_backend,
+    requires_gloo,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -1341,13 +1342,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3  # It generates 2 getattr to unpack the array
         assert same(out, correct)
 
+    # This doesn't work in all cases, and now we properly loudly error.
+    # See: https://github.com/pytorch/pytorch/issues/151240
+    # When differentiable funcols are implemented can revert.
+    @unittest.expectedFailure
     def test_backwards(self):
-        """
-        It's probably not that common to need backwards support for collectives.
-
-        However, I wanted to at least see if it was possible to support it as a design goal.
-        """
-
         def func(inp):
             ar = _functional_collectives.all_reduce(inp, "sum", "0")
             return ar
@@ -1775,16 +1774,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = [x, w, ar_0, ar_1]
         f(*inputs, **self.get_world_trs())
 
-        def _pass(g):
-            from torch._inductor.fx_passes.bucketing import bucket_all_reduce
-
-            bucket_all_reduce(g.owning_module, lambda _: 2000)
-
-        torch._inductor.config.post_grad_custom_post_pass = _pass
-
         with torch._inductor.config.patch(
             {
                 "reorder_for_compute_comm_overlap": False,
+                "bucket_all_reduces_fx": bucket_mode,
             }
         ):
             compiled = torch.compile(f)
@@ -1985,6 +1978,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                     "bucket_reduce_scatters_fx_bucket_size_determinator": lambda _: 2,
                     "reorder_for_compute_comm_overlap": True,
                     "reorder_for_compute_comm_overlap_passes": [
+                        _reorder_communication_preserving_peak_memory,
                         sink_waits_iterative,
                         _reorder_communication_preserving_peak_memory,
                     ],
@@ -2046,11 +2040,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert node_stats is not None
         self.assertTrue(isinstance(node_stats, dict))
         self.assertEqual(len(node_stats), 4)
-        it = iter(node_stats.values())
-        node_stat0 = next(it)
-        self.assertTrue(node_stat0.limiting_factor == "None")
-        node_stat1 = next(it)
-        self.assertTrue("collective ordering" in node_stat1.limiting_factor)
 
     @skipIfXpu  # https://github.com/intel/torch-xpu-ops/issues/1581
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
@@ -2224,6 +2213,50 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             return ag_1_wait
 
         gm = make_fx(func)(torch.ones(4, 4, device=self.device), group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_gather_into_tensor(n):
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                assert est_ms > 0
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                assert est_ms_nccl > 0
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_regression_use_nccl_estimate_with_gloo(self):
+        # Test checks that using nccl estimator option does not hard fail
+        # with backends that does not support runtime estimations, e.g. gloo
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(inp, group_size, group_name):
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                inp, group_size, group_name
+            )
+            ag_0_wait = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_wait, group_size, group_name
+            )
+            ag_1_wait = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+            return ag_1_wait
+
+        gm = make_fx(func)(torch.ones(4, 4), group_size, group_name)
         g = gm.graph
         for n in g.nodes:
             if is_all_gather_into_tensor(n):

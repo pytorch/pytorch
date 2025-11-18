@@ -19,6 +19,7 @@ import operator
 import os
 import pickle
 import random
+import re
 import sys
 import tempfile
 import threading
@@ -69,6 +70,7 @@ from torch.fx.experimental.symbolic_shapes import (
     constrain_unify,
     ConstraintViolationError,
     expect_true,
+    guard_or_false,
     guard_size_oblivious,
     ShapeEnv,
 )
@@ -100,7 +102,6 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.logging_utils import logs_to_string
 
 
 pytree_modules = {
@@ -242,6 +243,61 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val3, correct3))
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
+
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    def test_assume_32_bit_indexing(self):
+        @torch.compile(backend="inductor")
+        def func(a, b):
+            # Multiple concat operations
+            x = torch.concat([a, b], dim=0)
+            y = torch.concat([a, b], dim=1)
+
+            # Reshape to create indexing patterns
+            x_flat = x.reshape(-1)
+            y_flat = y.reshape(-1)
+
+            # Take the smaller one and expand
+            min_size = min(x_flat.shape[0], y_flat.shape[0])
+            x_trunc = x_flat[:min_size]
+            y_trunc = y_flat[:min_size]
+
+            # Combine and compute
+            result = (x_trunc + y_trunc) * 10
+
+            # Cumulative operations create complex indexing
+            cumsum = result.cumsum(dim=0)
+
+            return cumsum.sum()
+
+        a = torch.rand(100, 30, device="cuda")
+        b = torch.rand(100, 30, device="cuda")
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 1)
+
+        source_code = run_and_get_code(func, a, b)[1]
+
+        self.assertTrue(
+            "xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)\\n"
+            in str(source_code)
+        )
+        self.assertFalse(
+            "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
+        )
+
+        torch._dynamo.reset()
+
+        with torch._inductor.config.patch(assume_32bit_indexing=True):
+            source_code = run_and_get_code(func, a, b)[1]
+            self.assertFalse(
+                "xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)\\n"
+                in str(source_code)
+            )
+            self.assertTrue(
+                "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
+            )
 
     def test_dynamo_inside_custom_op(self):
         cnt = torch._dynamo.testing.InductorAndRecordGraphs()
@@ -1427,6 +1483,170 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
                 return torch.arange(0, y)
 
         self.assertRaises(torch._dynamo.exc.UserError, lambda: f(torch.tensor([3])))
+
+    def test_check_compiles_when_predicate_true_and_message_has_no_closure(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, lambda: "Shape is not greater than 3")
+            return x + 1
+
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        y = f(x)
+        self.assertEqual(y.shape, x.shape)
+
+    def test_check_compiles_when_predicate_true_constant_and_message_has_no_closure(
+        self,
+    ):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, lambda: "Shape is not greater than 3")
+            return x + 1
+
+        x = torch.randn(4)
+
+        y = f(x)
+        self.assertEqual(y.shape, x.shape)
+
+    def test_check_compiles_when_predicate_true_constant_and_message_None(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3)
+            return x + 1
+
+        x = torch.randn(4)
+
+        y = f(x)
+        self.assertEqual(y.shape, x.shape)
+
+    def test_check_compiles_when_predicate_true_and_message_None(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3)
+            return x + 1
+
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        y = f(x)
+        self.assertEqual(y.shape, x.shape)
+
+    def test_check_compiles_when_predicate_true_and_message_has_global(self):
+        global GLOBAL_INT
+        GLOBAL_INT = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, lambda: f"{GLOBAL_INT} is not greater than 3")
+            return x + 1
+
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        y = f(x)
+        self.assertEqual(y.shape, x.shape)
+
+    def test_check_raises_at_runtime_when_predicate_false_and_message_has_global(self):
+        global GLOBAL_INT
+        GLOBAL_INT = 1
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, lambda: f"{GLOBAL_INT} is not greater than 3")
+            return x + 1
+
+        x = torch.randn(3)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        with self.assertRaisesRegex(
+            RuntimeError, f"{GLOBAL_INT} is not greater than 3"
+        ):
+            f(x)
+
+    def test_check_raises_at_runtime_when_predicate_false_and_message_None(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3)
+            return x + 1
+
+        x = torch.randn(3)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        with self.assertRaisesRegex(RuntimeError, None):
+            f(x)
+
+    def test_check_raises_at_runtime_when_predicate_false_constant_and_message_None(
+        self,
+    ):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3)
+            return x + 1
+
+        x = torch.randn(3)
+
+        with self.assertRaisesRegex(RuntimeError, None):
+            f(x)
+
+    def test_check_raises_at_runtime_when_predicate_false_and_message_has_no_closure(
+        self,
+    ):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, lambda: "Shape is not greater than 3")
+            return x + 1
+
+        x = torch.randn(3)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "Shape is not greater than 3"):
+            f(x)
+
+    def test_check_raises_at_runtime_when_predicate_false_constant_and_message_has_no_closure(
+        self,
+    ):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, lambda: "Shape is not greater than 3")
+            return x + 1
+
+        x = torch.randn(3)
+
+        with self.assertRaisesRegex(RuntimeError, "Shape is not greater than 3"):
+            f(x)
+
+    def test_check_assert_error_at_runtime_when_predicate_false_and_message_has_closure(
+        self,
+    ):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, lambda: f"{x.shape[0]} is not greater than 3")
+            return x + 1
+
+        x = torch.randn(3)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Can't extract message from torch._check()"
+        ):
+            f(x)
+
+    def test_check_assert_error_at_runtime_when_predicate_true_and_message_has_closure(
+        self,
+    ):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            torch._check(x.shape[0] > 3, lambda: f"{x.shape[0]} is not greater than 3")
+            return x + 1
+
+        x = torch.randn(4)
+        torch._dynamo.maybe_mark_dynamic(x, 0)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "Can't extract message from torch._check()"
+        ):
+            f(x)
 
     def test_assert(self):
         @torch.compile
@@ -5471,6 +5691,115 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertTrue(same(res11, res12))
         self.assertTrue(same(res21, res22))
 
+    def test_replay_side_effects_config(self):
+        # Test that replay_side_effects config controls mutation replay
+        def fn(x, lst):
+            lst.append(x + 1)
+            return x * 2
+
+        x = torch.tensor([5.0])
+
+        # Test with replay enabled (default)
+        lst_with_replay = []
+        opt_fn_with_replay = torch.compile(fn, backend="eager")
+        result1 = opt_fn_with_replay(x, lst_with_replay)
+        self.assertEqual(len(lst_with_replay), 1)  # Mutation should be replayed
+        self.assertTrue(same(result1, x * 2))
+
+        torch._dynamo.reset()
+
+        # Test with replay disabled
+        lst_without_replay = []
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="warn"
+        ):
+            opt_fn_without_replay = torch.compile(fn, backend="eager")
+            result2 = opt_fn_without_replay(x, lst_without_replay)
+            self.assertEqual(
+                len(lst_without_replay), 0
+            )  # Mutation should NOT be replayed
+            self.assertTrue(same(result2, x * 2))
+
+        torch._dynamo.reset()
+        lst_without_replay = []
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="error"
+        ):
+            opt_fn_without_replay = torch.compile(fn, backend="eager")
+            with self.assertRaisesRegex(
+                RuntimeError,
+                re.escape(
+                    "While compiling, we found certain side effects happened in the model.forward. Here are the list of potential sources you can double check: [\"L['lst']\"]"
+                ),
+            ):
+                _ = opt_fn_without_replay(x, lst_without_replay)
+
+    def test_replay_side_effects_model_attr(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+
+            def forward(self, x):
+                return x.cos()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+                self.tensor = None
+                self.bar = Bar()
+
+            def forward(self, x):
+                self.const = 5
+                self.tensor = x.sin()
+                res = self.bar(x)
+                return x.cos() + res.sum() + self.tensor
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="error"
+        ):
+            foo = Foo()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                re.escape(
+                    "While compiling, we found certain side effects happened in the model.forward. Here are the list of potential sources you can double check: [\"L['self']\"]"
+                ),
+            ):
+                torch.compile(foo, fullgraph=True)(torch.randn(4, 4))
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="silent"
+        ):
+            foo_v2_compile = Foo()
+            foo_v2_eager = Foo()
+            inp = torch.randn(4, 4)
+            res = torch.compile(foo_v2_compile, fullgraph=True)(torch.randn(4, 4))
+            self.assertEqual(foo_v2_compile.tensor, None)
+            self.assertEqual(foo_v2_compile.const, 4)
+            self.assertEqual(foo_v2_compile.bar.const, 4)
+            same(res, foo_v2_eager(inp))
+
+    def test_replay_side_effects_input_mut(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+                self.tensor = None
+
+            def forward(self, x):
+                x.add_(5)
+                return x.cos()
+
+        # This is ok because we actually capture the graph which
+        # has mutation. In export, we never retrace the actual
+        # gm so we won't see any mutation applied to inputs
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="error"
+        ):
+            foo = Foo()
+            torch.compile(foo, fullgraph=True)(torch.randn(4, 4))
+
     def test_list_append_return_none(self):
         def fn(x):
             alist = []
@@ -5623,6 +5952,20 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         output = loss(input, target)
 
         self.assertTrue(torch.allclose(dynamo_output, output))
+
+    def test_repr(self):
+        class Config:
+            def __repr__(self):
+                return "Config()"
+
+        def forward(x, config):
+            return x * len(repr(config))
+
+        config = Config()
+        x = torch.randn(2, 2)
+
+        compiled = torch.compile(forward, fullgraph=True)
+        compiled(x, config)
 
     def test_nn_functional_reduction(self):
         def fn(loss, reduction):
@@ -13195,6 +13538,30 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         self.assertEqual(actual, expected)
 
     @parametrize_pytree_module
+    def test_pytree_tree_map_dict_order(self, pytree):
+        def fn(tree):
+            new_tree = pytree.tree_map(lambda x: x, tree)
+            return list(new_tree.keys()), list(new_tree.values())
+
+        x = torch.randn(3, 2)
+        fn_opt = torch.compile(fullgraph=True)(fn)
+
+        tree1 = {"b": x + 2, "a": x, "c": x - 1}
+        expected1 = fn(tree1)
+        actual1 = fn_opt(tree1)
+        self.assertEqual(actual1, expected1)
+
+        tree2 = collections.OrderedDict([("b", x + 2), ("a", x), ("c", x - 1)])
+        expected2 = fn(tree2)
+        actual2 = fn_opt(tree2)
+        self.assertEqual(actual2, expected2)
+
+        tree3 = collections.defaultdict(int, {"b": x + 2, "a": x, "c": x - 1})
+        expected3 = fn(tree3)
+        actual3 = fn_opt(tree3)
+        self.assertEqual(actual3, expected3)
+
+    @parametrize_pytree_module
     def test_pytree_tree_map_only(self, pytree):
         if not callable(getattr(pytree, "tree_map_only", None)):
             # OpTree and JAX PyTree do not have `tree_map_only`
@@ -13218,6 +13585,27 @@ class MiscTestsPyTree(torch._inductor.test_case.TestCase):
         self.assertEqual(comp_out, real_out)
         self.assertEqual(counter.frame_count, 1)
         self.assertEqual(counter.op_count, 9)
+
+    def test_pytree_register_constant_with_side_effect(self):
+        class Foo:
+            pass
+
+        class Bar:
+            def __eq__(self, other):
+                return super().__eq__(other)
+
+            def __hash__(self):
+                return 0
+
+        python_pytree.register_constant(Bar)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, obj):
+            obj.attr = {3: Bar()}
+            return x + 1
+
+        inp = torch.ones(3)
+        self.assertEqual(fn(inp, Foo()), inp + 1)
 
 
 class TestTracer(JitTestCase):
@@ -13634,6 +14022,112 @@ devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(
     MiscTestsDevice, globals(), only_for=devices, allow_xpu=True
 )
+
+
+class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_symbool_tensor_mul(self):
+        def symbool_mul_fn(x_bool, sentinel):
+            result = x_bool * sentinel
+            return result
+
+        x_true = torch.tensor([True], device="cuda")
+        x_false = torch.tensor([False], device="cuda")
+        sentinel = torch.tensor(2.0, requires_grad=True, device="cuda")
+        eager_result_true = symbool_mul_fn(x_true, sentinel)
+        eager_result_false = symbool_mul_fn(x_false, sentinel)
+        compiled_fn = torch.compile(symbool_mul_fn, fullgraph=True, dynamic=True)
+        compiled_result_true = compiled_fn(x_true, sentinel)
+        compiled_result_false = compiled_fn(x_false, sentinel)
+        self.assertEqual(eager_result_true, compiled_result_true)
+        self.assertEqual(eager_result_false, compiled_result_false)
+        self.assertEqual(compiled_result_true.item(), 2.0)
+        self.assertEqual(compiled_result_false.item(), 0.0)
+
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_symbool_guard_or_false(self):
+        def symbool_guard_fn(a_bool_tensor, b):
+            u0 = a_bool_tensor.item()
+            # Make sure guard_or_false still handles SymBool produced by .item()
+            if guard_or_false(u0):
+                return b * 10
+            else:
+                return b * 100
+
+        compiled_guard_fn = torch.compile(
+            symbool_guard_fn, backend="eager", dynamic=True
+        )
+        a_true = torch.tensor(True, device="cuda")
+        a_false = torch.tensor(False, device="cuda")
+        b = torch.randn(6, device="cuda")
+        eager_res_true = symbool_guard_fn(a_true, b)
+        compiled_res_true = compiled_guard_fn(a_true, b)
+        self.assertEqual(eager_res_true, compiled_res_true)
+        eager_res_false = symbool_guard_fn(a_false, b)
+        compiled_res_false = compiled_guard_fn(a_false, b)
+        self.assertEqual(eager_res_false, compiled_res_false)
+        self.assertEqual(compiled_res_true, b * 10)
+        self.assertEqual(compiled_res_false, b * 100)
+
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
+    def test_symbool_tensor_mul_does_not_fail(self):
+        def fuzzed_program(arg_0, sentinel):
+            var_node_2 = arg_0
+            var_node_1 = torch.squeeze(var_node_2)
+            var_node_0 = var_node_1.item()
+            result = var_node_0 * sentinel
+            if result.is_complex():
+                result = result.real
+            return result
+
+        sentinel = torch.tensor(1.0, requires_grad=True, device="cuda")
+        arg_0 = torch.tensor([True], dtype=torch.bool, device="cuda")
+        args = (arg_0,) + (sentinel,)
+        try:
+            compiled_program = torch.compile(
+                fuzzed_program, fullgraph=True, dynamic=True
+            )
+            compiled_program(*args)
+        except Exception as e:
+            self.fail(f"torch.compile failed with error: {e}")
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorify_track_item_symint(self):
+        def _random_resize(image: torch.Tensor):
+            image_metanet = image
+            default_patch_size = 14
+            rand_cnn_resolution = (224, 256)
+            min_nump = rand_cnn_resolution[0] // default_patch_size
+            max_nump = rand_cnn_resolution[1] // default_patch_size
+            new_nump = torch.randint(min_nump, max_nump + 1, (1,)).item()
+            torch._check(new_nump > 0)
+            torch._check(new_nump * default_patch_size > 1)
+
+            image_metanet = F.interpolate(
+                image_metanet,
+                size=(new_nump * default_patch_size, new_nump * default_patch_size),
+                mode="bilinear",
+                align_corners=True,
+            )
+            img_h_new, img_w_new = image_metanet.shape[2:]
+
+            return (img_h_new, img_w_new), image_metanet
+
+        _random_resize_compiled = torch.compile(fullgraph=True)(_random_resize)
+
+        # Test the function
+        input_tensor = torch.rand(1, 3, 224, 224)
+        (h, w), output = _random_resize_compiled(input_tensor)
+
+        # Verify output properties
+        self.assertEqual(output.shape[0], 1)
+        self.assertEqual(output.shape[1], 3)
+        self.assertEqual(output.shape[2], h)
+        self.assertEqual(output.shape[3], w)
+        self.assertTrue(h % 14 == 0)
+        self.assertTrue(w % 14 == 0)
+        self.assertTrue(224 <= h <= 256)
+        self.assertTrue(224 <= w <= 256)
 
 
 if __name__ == "__main__":
