@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import shlex
+import subprocess
 import sys
 from abc import abstractmethod
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Never
 
 from . import ParseError
@@ -17,6 +19,9 @@ from .python_file import PythonFile
 if TYPE_CHECKING:
     from argparse import Namespace
     from collections.abc import Iterator, Sequence
+
+
+MAX_ERROR_CHARS = 2_048
 
 
 class ErrorLines:
@@ -52,16 +57,14 @@ class FileLinter:
 
     @classmethod
     def run(cls) -> Never:
-        sys.exit(not cls().lint_all())
+        linter = cls()
+        sys.exit(not (linter.lint_all() or linter.args.lintrunner))
 
     def lint_all(self) -> bool:
-        if self.args.fix and self.args.lintrunner:
-            raise ValueError("--fix and --lintrunner are incompatible")
-
         success = True
         for p in self.paths:
             success = self._lint_file(p) and success
-        return self.args.lintrunner or success
+        return success
 
     @classmethod
     def make_file(cls, pc: Path | str | None = None) -> PythonFile:
@@ -71,6 +74,8 @@ class FileLinter:
     def args(self) -> Namespace:
         args = self.parser.parse_args(self.argv)
 
+        if args.fix and args.lintrunner:
+            raise ValueError("--fix and --lintrunner are incompatible")
         return args
 
     @cached_property
@@ -87,6 +92,25 @@ class FileLinter:
             elif f != "--":
                 files.append(f)
         return sorted(Path(f) for f in files)
+
+    def call(self, cmd: str | Sequence[str], check: bool = True, **kwargs: Any) -> str:
+        """Run a subprocess and return stdout as a string"""
+        if self.args.verbose:
+            print("$", *([cmd] if isinstance(cmd, str) else cmd))
+
+        shell = kwargs.get("shell", False)
+        if shell and not isinstance(cmd, str):
+            cmd = shlex.join(cmd)
+        elif not shell and isinstance(cmd, str):
+            cmd = shlex.split(cmd)
+        assert shell == isinstance(cmd, str)
+        p = subprocess.run(cmd, text=True, capture_output=True, **kwargs)
+
+        if check:
+            p.check_returncode()
+
+        assert isinstance(p.stdout, str)
+        return p.stdout
 
     def _lint_file(self, p: Path) -> bool:
         if self.args.verbose:
@@ -109,10 +133,10 @@ class FileLinter:
         # Because of recursive replacements, we need to repeat replacing and reparsing
         # from the inside out until all possible replacements are complete
         previous_result_count = float("inf")
-        first_results = None
+        first_results: list[LintResult] = []
         original = replacement = pf.contents
+        results: list[LintResult] = []
 
-        # pyrefly: ignore [bad-assignment]
         while True:
             try:
                 results = sorted(self._lint(pf), key=LintResult.sort_key)
@@ -141,8 +165,7 @@ class FileLinter:
 
             lines = pf.lines[:]
             for r in reversed(results):
-                if r.is_edit and not r.is_recursive:
-                    r.apply(lines)
+                r.apply(lines)
             replacement = "".join(lines)
 
             if not any(r.is_recursive for r in results):
