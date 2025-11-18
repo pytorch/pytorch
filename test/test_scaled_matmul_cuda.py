@@ -1284,7 +1284,8 @@ class TestFP8Matmul(TestCase):
         (128, 512, 256),
     ])
     @with_tf32_off
-    def test_scaled_mm_vs_emulated_row_wise(self, base_dtype, device):
+    def test_scaled_mm_vs_emulated_row_wise(self, base_dtype, shapes, device):
+        M, K, N = shapes
         # Fp32 out_dtype is only supported by cuBLAS, which however only started
         # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
         if base_dtype is torch.float32:
@@ -1305,8 +1306,8 @@ class TestFP8Matmul(TestCase):
         input_dtype = e4m3_type
         output_dtype = base_dtype
 
-        x = torch.randn(16, 16, device=device, dtype=base_dtype)
-        y = torch.randn(32, 16, device=device, dtype=base_dtype).t()
+        x = torch.randn(M, K, device="cuda", dtype=base_dtype)
+        y = torch.randn(N, K, device="cuda", dtype=base_dtype).t()
         bias = None
         if base_dtype in {torch.bfloat16, torch.float16}:
             bias = torch.randn((N,), device=device, dtype=base_dtype)
@@ -1581,6 +1582,7 @@ class TestFP8Matmul(TestCase):
 
         _run_test(x_hp, x_recipe, x_fp8, x_scales, x_scales_original,
                   y_hp, y_recipe, y_fp8, y_scales, y_scales_original)
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not IS_SM90, "cuBLAS blockwise scaling requires sm90+")
@@ -2343,6 +2345,7 @@ class TestFP8Matmul(TestCase):
 
         self.scaled_grouped_mm_helper(a, b, scale_a, scale_b, out, fast_accum)
 
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8_GROUPED_GEMM, f8_grouped_msg)
     @parametrize("fast_accum", [False, True])
     # AMD does not support non-contiguous inputs yet
@@ -2378,6 +2381,7 @@ class TestFP8Matmul(TestCase):
                 outlist.append(out[:, start:offs_cpu[i]])
                 start = offs_cpu[i]
                 self.scaled_grouped_mm_helper(a, blist, scale_a, bscalelist, outlist, fast_accum)
+
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, mx_skip_msg)
     def test_blockwise_mxfp8_compile(self) -> None:
