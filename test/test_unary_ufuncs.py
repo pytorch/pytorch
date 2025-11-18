@@ -509,31 +509,31 @@ class TestUnaryUfuncs(TestCase):
             torch.nan_to_num(x, out=out, nan=nan, posinf=posinf, neginf=neginf)
             self.assertEqual(result, out)
 
-    @dtypes(torch.complex128, torch.complex64)
-    def test_nan_to_num_complex_args(self, device, dtype):
-        old_values = {"nan": torch.tensor(float('nan')),
-                      "posinf": torch.tensor(float("inf")),
-                      "neginf": torch.tensor(float("-inf"))}
-        new_values = {"nan": complex(random.random(), random.random()),
-                      "posinf": complex(random.random() * 5, random.random() * 5),
-                      "neginf": complex(random.random() * 10, random.random() * 10)}
-        x = torch.zeros(1, dtype=dtype, device=device)
-        # test mixture of 'NAN' values (e.g. nan-inf*j)
-        for key1, new_value1 in new_values.items():
-            for key2, new_value2 in new_values.items():
-                x[0] = torch.complex(old_values[key1], old_values[key2])
+        if dtype in (torch.complex128, torch.complex64):
+            # test complex arguments
+            old_values = {"nan": torch.tensor(float('nan')),
+                          "posinf": torch.tensor(float("inf")),
+                          "neginf": torch.tensor(float("-inf"))}
+            new_values = {"nan": complex(random.random(), random.random()),
+                          "posinf": complex(random.random() * 5, random.random() * 5),
+                          "neginf": complex(random.random() * 10, random.random() * 10)}
+            x = torch.zeros(1, dtype=dtype, device=device)
+            # test mixture of extreme/nan values (e.g. nan-inf*j)
+            for key1, new_value1 in new_values.items():
+                for key2, new_value2 in new_values.items():
+                    x[0] = torch.complex(old_values[key1], old_values[key2])
+                    x = x.nan_to_num(**new_values)
+                    self.assertEqual(x[0], new_value1 + new_value2 * 1j)
+
+            # test mixture of extreme/nan values with 'normal' values (e.g. nan+2*j)
+            for key1, new_value1 in new_values.items():
+                x[0] = torch.complex(old_values[key1], torch.tensor(2.))
                 x = x.nan_to_num(**new_values)
-                self.assertEqual(x[0], new_value1 + new_value2 * 1j)
+                self.assertEqual(x[0], new_value1 + 2j)
 
-        # test mixture of 'NAN' values with 'normal' values (e.g. nan+2*j)
-        for key1, new_value1 in new_values.items():
-            x[0] = torch.complex(old_values[key1], torch.tensor(2.))
-            x = x.nan_to_num(**new_values)
-            self.assertEqual(x[0], new_value1 + 2j)
-
-            x[0] = torch.complex(torch.tensor(2.), old_values[key1])
-            x = x.nan_to_num(**new_values)
-            self.assertEqual(x[0], 2 + new_value1 * 1j)
+                x[0] = torch.complex(torch.tensor(2.), old_values[key1])
+                x = x.nan_to_num(**new_values)
+                self.assertEqual(x[0], 2 + new_value1 * 1j)
 
     @onlyCPU
     def test_nan_to_num_bfloat16(self, device):
