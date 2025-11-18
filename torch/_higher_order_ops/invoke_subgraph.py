@@ -80,6 +80,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         assert all(
             isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
             for o in operands
+            if o is not None
         ), (
             f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
         )
@@ -562,7 +563,34 @@ def _(ctx, subgraph, identifier, *operands):
         do_auto_functionalize_v2,
     )
 
+    # (in the functionalization metadata phase) Capture tokens before
+    tokens_before = dict(ctx.mode._tokens)
+
+    # Check if this subgraph has effects stored in the cache
+    invoke_subgraph_cache = get_invoke_subgraph_cache()
+    effects = None
+    if invoke_subgraph_cache:
+        effects = invoke_subgraph_cache.get_effects(identifier)
+
+    if effects:
+        assert len(effects) == 1, "Multiple effects within a subgraph NYI"
+        tokens = ctx.mode._tokens
+        effects = next(iter(effects))
+        token_input = tokens[effects]
+
+        operands = (token_input, *operands)
+
+        def wrap_subgraph(subgraph):
+            def wrapped_subgraph(token, *args):
+                res = subgraph(*args)
+                return ctx.unwrap_tensors(ctx.mode._tokens[effects]), *res
+
+            return wrapped_subgraph
+
+        subgraph = wrap_subgraph(subgraph)
+
     unwrapped_operands = ctx.unwrap_tensors(operands)
+
     hop_instance = HopInstance.create(invoke_subgraph, subgraph, identifier, *operands)
     if can_auto_functionalize(hop_instance):
         # NOTE: [auto_functionalize x invoke_subgraph caching]
@@ -587,6 +615,28 @@ def _(ctx, subgraph, identifier, *operands):
         # of invoke_subgraph ops if input aliasing/mutation is detected.
         functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
+
+    if effects:
+        (new_token, *out) = out
+        ctx.mode._tokens[effects] = new_token
+
+    # (in the functionalization metadata phase) Capture tokens after and see if
+    # there are any differences (there are new effects or the token value for an
+    # effect type has changed)
+    tokens_after = dict(ctx.mode._tokens)
+    discovered_effects = set()
+    for effect_type, token in tokens_after.items():
+        if effect_type not in tokens_before or tokens_before[effect_type] is not token:
+            discovered_effects.add(effect_type)
+
+    if discovered_effects:
+        assert ctx.mode._allow_token_discovery, (
+            f"Number of tokens changed by {len(discovered_effects)} when tracing subgraph {subgraph}."
+        )
+        # Store discovered effects in the cache by identifier
+        if invoke_subgraph_cache:
+            invoke_subgraph_cache.add_effects(identifier, discovered_effects)
+
     return ctx.wrap_tensors(out)
 
 
