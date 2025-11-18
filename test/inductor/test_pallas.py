@@ -799,12 +799,6 @@ if test_torchinductor.HAS_GPU and HAS_PALLAS:
     pass
 
 
-if test_torchinductor.HAS_TPU and HAS_PALLAS:
-    # make_pallas(test_torchinductor.SweepInputsTPUTest)
-    # make_pallas(test_torchinductor.TPUTests)
-    pass
-
-
 if __name__ == "__main__":
     if HAS_PALLAS:
         run_tests(needs="filelock")

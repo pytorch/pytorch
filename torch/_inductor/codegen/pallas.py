@@ -928,9 +928,7 @@ class PallasKernel(SIMDKernel):
             is_contiguous = buffer_name is not None and self._buffer_is_contiguous(
                 buffer_name
             )
-            aliasable_flags[param] = (
-                not interpret_is_cpu and not is_tpu
-            ) and is_contiguous
+            aliasable_flags[param] = not interpret_is_cpu and is_contiguous
         alias_params = [
             f"{param}_alias" for param in pure_out_params if aliasable_flags[param]
         ]
@@ -1087,7 +1085,6 @@ class PallasKernel(SIMDKernel):
                         code.writeline(
                             f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
                         )
-            device_str = ", device=jax.devices('tpu')[0]" if is_tpu else ""
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in pointer_tail:
                 if ptr.startswith("in_out_ptr"):
