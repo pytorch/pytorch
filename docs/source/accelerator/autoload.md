@@ -57,6 +57,59 @@ Define the initialization hook `_autoload` for backend initialization in [torch_
 
 ::::
 
+### Clarification: what autoload does — and what it doesn't
+
+The autoload entry point (for example, ``torch_foo = torch_foo:_autoload``) causes Python to import your package and invoke the ``_autoload`` callable. The loader expects ``_autoload`` to return a module-like object. Importantly, the autoload mechanism itself does not implicitly modify the already-imported ``torch`` package object or attach the returned module as an attribute on ``torch``. If you want your backend to be available as ``torch.foo`` (or another attribute on ``torch``), your package must explicitly attach the module to the ``torch`` namespace.
+
+Minimal example ``_autoload``
+
+Below is a minimal ``_autoload`` that returns the implementation module and, when ``torch`` is already importable, attaches it as ``torch.foo``. Adapt module names to your package layout.
+
+.. code-block:: python
+
+    # torch_foo/__init__.py
+
+    import importlib
+    import types
+
+    def _autoload(*args, **kwargs) -> types.ModuleType:
+        """
+        Entry point invoked by the autoload mechanism. Return a module-like object.
+
+        Also attach the implementation module to `torch.foo` when `torch` is already
+        importable. This makes the backend accessible via `import torch` followed by
+        `torch.foo`.
+        """
+        # Import the actual implementation submodule (adjust name as needed).
+        module = importlib.import_module("torch_foo.impl")  # e.g. the real backend code
+
+        # Try to attach to the torch namespace for convenience.
+        # Guard against environments where torch isn't importable yet.
+        try:
+            import torch
+        except Exception:
+            # If torch is not importable at the time of _autoload, simply return the module.
+            # In typical autoload usage the caller is inside torch so torch will be importable.
+            return module
+
+        # Attach the loaded module under the chosen attribute on the torch package.
+        # Choose a name that avoids colliding with existing attributes.
+        setattr(torch, "foo", module)
+
+        return module
+
+Notes and edge cases
+
+- The autoload entry point only calls your ``_autoload`` and expects a module-like object; it does not itself set attributes on ``torch``. Attaching the module to the ``torch`` namespace is an explicit step performed by your package (as shown above).
+- If ``torch`` is not importable at the time ``_autoload`` runs, the attachment step will be skipped; the returned module is still usable by the caller that received it from the entry point. To make ``torch.foo`` available later, you can:
+  - Attach the attribute at import-time of a module that is imported by ``torch`` (if you control that code path), or
+  - Re-run a small attach helper when ``torch`` is imported (for example, a lightweight function that checks ``if hasattr(torch, "foo"): return`` then sets ``torch.foo``), but be careful to avoid import cycles.
+- Avoid clobbering existing attributes on ``torch``. Pick a unique name (for example, ``torch.foo_backend`` or ``torch._foo_backend``) if appropriate.
+
+See also
+
+- Minimal reproducible example demonstrating the difference: https://github.com/pganssle-google/torch-backend-mwe
+
 ## Result
 
 After setting up the entry point and backend, build and install your backend. Now, we can use the new accelerator without explicitly importing it.
