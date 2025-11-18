@@ -1306,8 +1306,8 @@ class TestFP8Matmul(TestCase):
         input_dtype = e4m3_type
         output_dtype = base_dtype
 
-        x = torch.randn(M, K, device="cuda", dtype=base_dtype)
-        y = torch.randn(N, K, device="cuda", dtype=base_dtype).t()
+        x = torch.randn(M, K, device=device, dtype=base_dtype)
+        y = torch.randn(N, K, device=device, dtype=base_dtype).t()
         bias = None
         if base_dtype in {torch.bfloat16, torch.float16}:
             bias = torch.randn((N,), device=device, dtype=base_dtype)
