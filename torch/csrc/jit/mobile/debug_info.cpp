@@ -103,7 +103,7 @@ std::pair<std::string, std::string> getStackTraceWithModuleHierarchy(
       std::get<kDebugInfoTupleNodeNameIndex>(last_entry);
   module_info.append(".").append(node_name);
   std::ostringstream ss;
-  ss << "Module hierarchy:" << module_info << "\n";
+  ss << "Module hierarchy:" << module_info << '\n';
   format_stack_trace(ss, stack_entries);
   return {ss.str(), std::move(module_info)};
 }
