@@ -100,7 +100,24 @@ def forward_block_mn(
     # m_ij
     l_i = l_i * alpha + tl.sum(p, 1)
     # # -- scale and update acc --
+
+    {%- if USE_SUBTILING %}
+    acc0, acc1 = tl.split(
+        acc.reshape(BLOCK_M, 2, V_HEAD_DIM_ROUNDED//2).permute((0, 2, 1))
+    )
+
+    acc0 = acc0 * alpha[:, None]
+    acc1 = acc1 * alpha[:, None]
+
+    acc = (
+        tl.join(acc0, acc1)
+        .permute(0, 2, 1)
+        .reshape(BLOCK_M, V_HEAD_DIM_ROUNDED)
+    )
+    {%- else %}
     acc = acc * alpha[:, None]
+    {%- endif %}
+
     {%- if USE_TMA %}
     v = tl.load_tensor_descriptor(
         desc_v,

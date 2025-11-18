@@ -205,6 +205,11 @@ class FlexKernelOptions(TypedDict, total=False):
     This is experimental and may not work on all hardware, currently specific
     to NVIDIA GPUs Hopper+. Default: False."""
 
+    # pyrefly: ignore [invalid-annotation]
+    USE_SUBTILING: NotRequired[bool]
+    """Whether to subtile the alpha-scaling step before the second matmul (P @ V)
+    to reduce register pressure for large head dims. Default: False."""
+
     # ROCm-specific options
     # pyrefly: ignore [invalid-annotation]
     kpack: NotRequired[int]
@@ -1243,6 +1248,7 @@ def _apply_kernel_options(
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
     kernel_options.setdefault("PRESCALE_QK", False)
+    kernel_options.setdefault("USE_SUBTILING", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
     # This forces all biases grad scatters to be done in the DQ iteration loop of the backwards
