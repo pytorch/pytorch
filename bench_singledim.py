@@ -115,6 +115,6 @@ for test_name, test in tests.items():
             "single_dim_strategy": single_s,
         }
         slowdown = single_t / orig_t
-        print(f"{test_name=}, {mesh_name=}, {orig_t=:.2f}s {single_t=:.2f}s {slowdown=:.2f}x {len(orig_s.strategies)=}, {len(single_s.strategies)=}")
+        print(f"{test_name=}, {mesh_name=}, time for expanded strategy:{single_t * 1000:.2f}ms ({slowdown=:.2f}x) {len(orig_s.strategies)=}, {len(single_s.strategies)=}")
 
 torch.distributed.destroy_process_group()
