@@ -25,8 +25,8 @@ mkdir -p "$TMP_DIR"/build/torch
 
 export SCRIPT_HELPERS_DIR=$SCRIPT_PARENT_DIR/win-test-helpers
 
-if [[ "$TEST_CONFIG" = "force_on_cpu" ]]; then
-  # run the full test suite for force_on_cpu test
+if [[ "$TEST_CONFIG" = "force_on_cpu" || "$TEST_CONFIG" = "openreg" ]]; then
+  # run the full test suite for force_on_cpu test and openreg test
   export USE_CUDA=0
 fi
 
@@ -51,7 +51,7 @@ run_tests() {
 
     # OpenReg test configuration
     if [[ "$TEST_CONFIG" = "openreg" ]]; then
-        python test/run_test.py --verbose -i test_openreg
+        python "$TEST_DIR"/run_test.py --verbose -i test_openreg
         return
     fi
 
