@@ -1178,7 +1178,6 @@ class TestFP8Matmul(TestCase):
             bias_dtype_ = y.dtype if bias_dtype == "same" else torch.float32
             bias = torch.randn((N,), device=device, dtype=bias_dtype_)
 
-        e4m3_type = torch.float8_e4m3fn
         x_scales = tensor_to_scale(x, e4m3_type, dim=1).float()
         y_scales = tensor_to_scale(y, e4m3_type, dim=1).float()
 
@@ -1636,8 +1635,6 @@ class TestFP8Matmul(TestCase):
                 return hp_to_1x128(t, scale)
             else:
                 return hp_to_128x128(t, scale)
-
-        e4m3_type = torch.float8_e4m3fn
 
         if test_case == "x_eye_b_eye":
             if M != K or M != N:
