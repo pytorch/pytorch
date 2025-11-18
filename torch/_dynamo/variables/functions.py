@@ -39,6 +39,7 @@ from weakref import WeakKeyDictionary
 import torch
 from torch._dynamo.exc import get_stack_above_dynamo
 from torch._guards import Source
+from torch.utils._pytree import is_namedtuple_class
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
@@ -71,7 +72,6 @@ from ..utils import (
     cmp_name_to_op_mapping,
     identity,
     is_function,
-    is_namedtuple_cls,
     is_wrapper_or_member_descriptor,
     istype,
     make_cell,
@@ -2747,9 +2747,7 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
                 tx,
                 f"pytree_get_node_type requires exactly 1 argument, got {len(args)}",
             )
-        out = VariableTracker.build(tx, args[0].python_type())
-        if isinstance(out, variables.UserDefinedClassVariable) and is_namedtuple_cls(
-            out.value
-        ):
+        python_type = args[0].python_type()
+        if is_namedtuple_class(python_type):
             return VariableTracker.build(tx, namedtuple)
-        return out
+        return VariableTracker.build(tx, python_type)
