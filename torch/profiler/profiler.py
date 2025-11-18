@@ -40,6 +40,7 @@ PROFILER_STEP_NAME = "ProfilerStep"
 
 _warned_messages = set()
 
+
 def warn_once(msg, category=UserWarning, stacklevel=2):
     if msg not in _warned_messages:
         _warned_messages.add(msg)
