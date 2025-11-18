@@ -150,6 +150,10 @@ if(USE_CUDA)
 
     if(TARGET torch::nvtx3)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtx3)
+    else()
+      if(TARGET torch::nvtoolsext)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
+      endif()
     endif()
 endif()
 
