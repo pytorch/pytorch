@@ -5560,6 +5560,13 @@ def avg_pool3d(
     )
 
 
+fallbacks_avg_poolnd = [
+    fallback_handler(aten.avg_pool1d.default, add_to_fallback_set=False),
+    fallback_handler(aten.avg_pool2d.default, add_to_fallback_set=False),
+    fallback_handler(aten.avg_pool3d.default, add_to_fallback_set=False),
+]
+
+
 def _avg_poolnd(
     x,
     kernel_size,
@@ -5619,6 +5626,21 @@ def _avg_poolnd(
         return x_loader([*prefix, *ih])
 
     window_size = functools.reduce(operator.mul, kernel_size)
+
+    if window_size > 25 and any(
+        not V.graph.sizevars.statically_known_equals(k, s)
+        for k, s in zip(kernel_size, stride)
+    ):
+        fallback = fallbacks_avg_poolnd[dim - 1]
+        return fallback(
+            x,
+            kernel_size,
+            stride,
+            padding,
+            ceil_mode,
+            count_include_pad,
+            divisor_override,
+        )
 
     # TODO: remove this when #100331 is merged. We only do this
     # for window_size <=25 to avoid performance regressions compared
