@@ -23,6 +23,7 @@ from torch.utils._pytree import tree_flatten
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from torch.distributed.tensor import DTensor
     from torch.testing._internal.opinfo.core import OpInfo
 
 COMPLEX_DTYPES = set(COMPLEX_TO_REAL)
@@ -34,8 +35,8 @@ class Variant(Enum):
     Distributed = auto()
 
 
-def _as_local(arg: dist.tensor.DTensor | Any) -> torch.Tensor | Any:
-    if not isinstance(arg, dist.tensor.DTensor):
+def _as_local(arg: DTensor | Any) -> torch.Tensor | Any:
+    if not (dist.is_available() and isinstance(arg, dist.tensor.DTensor)):
         return arg
 
     return arg.full_tensor()

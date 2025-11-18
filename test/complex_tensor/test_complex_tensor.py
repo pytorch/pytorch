@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import torch
-from torch.testing._internal.common_distributed import MultiProcessTestCase
+import torch.distributed as dist
 
 
 # Support both when imported from elsewhere or directly as a file
@@ -192,13 +192,6 @@ class TestComplexTensor(TestCase):
 
 
 @unMarkDynamoStrictTest
-class TestComplexDistributed(TestCase, MultiProcessTestCase):
-    @ops(implemented_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
-    def test_distributed(self, device, dtype, op: OpInfo):
-        self.check_consistency(device, dtype, op, Variant.Distributed)
-
-
-@unMarkDynamoStrictTest
 class TestComplexBwdGradients(TestGradients):
     _default_dtype_check_enabled = True
 
@@ -228,7 +221,18 @@ class TestComplexBwdGradients(TestGradients):
 
 instantiate_device_type_tests(TestComplexTensor, globals())
 instantiate_device_type_tests(TestComplexBwdGradients, globals())
-instantiate_device_type_tests(TestComplexDistributed, globals())
+
+
+if dist.is_available():
+    from torch.testing._internal.common_distributed import MultiProcessTestCase
+
+    @unMarkDynamoStrictTest
+    class TestComplexDistributed(TestCase, MultiProcessTestCase):
+        @ops(implemented_op_db, allowed_dtypes=list(COMPLEX_DTYPES))
+        def test_distributed(self, device, dtype, op: OpInfo):
+            self.check_consistency(device, dtype, op, Variant.Distributed)
+
+    instantiate_device_type_tests(TestComplexDistributed, globals())
 
 if __name__ == "__main__":
     run_tests()
