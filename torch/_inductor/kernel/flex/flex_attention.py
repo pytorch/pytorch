@@ -7,7 +7,7 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import sympy
 
@@ -50,7 +50,7 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 Expr = sympy.Expr
 
-ForceImpl = Literal["DEFAULT", "DECODE", "FLASH", "TRITON"]
+ForceImpl: TypeAlias = Literal["DEFAULT", "DECODE", "FLASH", "TRITON"]
 
 
 def _sanitize_kernel_options_for_triton(
