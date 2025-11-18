@@ -64,8 +64,9 @@ from ..source import (
     ConstantSource,
     DefaultsSource,
     GetItemSource,
-    GlobalSource,
     SkipGuardSource,
+    TorchSource,
+    TypeSource,
 )
 from ..utils import (
     check_constant_args,
@@ -117,9 +118,12 @@ CO_VARKEYWORDS = 0x08
 # Module-level cache keyed by the function object
 _spec_cache: WeakKeyDictionary[Any, Any] = WeakKeyDictionary()
 
-pytree_supported_nodes_source = AttrSource(
-    AttrSource(AttrSource(GlobalSource("torch"), "utils"), "_pytree"), "SUPPORTED_NODES"
-)
+
+@functools.lru_cache
+def get_pytree_SUPPORTED_NODES_source():
+    return AttrSource(
+        AttrSource(AttrSource(TorchSource(), "utils"), "_pytree"), "SUPPORTED_NODES"
+    )
 
 
 class FunctionSpec:
@@ -2752,12 +2756,14 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
                 tx,
                 f"pytree_get_node_type requires exactly 1 argument, got {len(args)}",
             )
+        type_source = None
         if args[0].source:
             install_guard(args[0].source.make_guard(GuardBuilder.TYPE_MATCH))
+            type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
             return VariableTracker.build(tx, namedtuple)
-        return VariableTracker.build(tx, python_type)
+        return VariableTracker.build(tx, python_type, source=type_source)
 
 
 class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
@@ -2811,7 +2817,7 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         supported_nodes_var = VariableTracker.build(
             tx,
             torch.utils._pytree.SUPPORTED_NODES,
-            source=pytree_supported_nodes_source,
+            source=get_pytree_SUPPORTED_NODES_source(),
         )
-        is_supported = supported_nodes_var.__contains__(node_type_var)
-        return ConstantVariable.create(not is_supported)
+        out = supported_nodes_var.call_method(tx, "__contains__", [node_type_var], {})
+        return ConstantVariable.create(not out.value)
