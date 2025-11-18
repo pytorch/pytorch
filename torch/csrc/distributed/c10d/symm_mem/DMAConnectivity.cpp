@@ -7,7 +7,7 @@ std::string get_detector_key(
     c10::DeviceType device_type,
     const std::string& connection_type) {
   std::ostringstream oss;
-  oss << device_type << "/" << connection_type;
+  oss << device_type << '/' << connection_type;
   return oss.str();
 }
 
