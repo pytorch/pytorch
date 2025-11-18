@@ -5,6 +5,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <algorithm>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -89,13 +90,21 @@ static void check_min_max_dims(const OptionalTensorRef clamp_opt, const Tensor& 
     auto clamp_shape = clamp_opt->sizes();
     auto input_shape = input_t.sizes();
 
-    TORCH_CHECK(num_clamp_dims <= num_input_dims,
-                op_name + ": clamp tensor number of dims must not be greater than that of input tensor")
+    if (num_clamp_dims > num_input_dims) {
+      auto leading_dims = num_clamp_dims - num_input_dims;
+      for (int64_t i = 0; i < leading_dims; ++i) {
+        TORCH_CHECK(clamp_shape[i] == 1,
+                    op_name + ": clamp tensor leading shape must be 1 to broadcast with input tensor");
+      }
+    }
 
-    for (int i = 0; i < num_clamp_dims; i++)
+    auto clamp_idx = num_clamp_dims - 1;
+    auto input_idx = num_input_dims - 1;
+    auto common_dims = std::min(num_clamp_dims, num_input_dims);
+    for (int64_t i = 0; i < common_dims; ++i)
       // One of the indices is allowed to be 1; will be handled by broadcast
-      TORCH_CHECK(clamp_shape[num_clamp_dims - 1 - i] == input_shape[num_input_dims - 1 - i] ||
-                      clamp_shape[num_clamp_dims - 1 - i] == 1 || input_shape[num_input_dims - 1 - i] == 1,
+      TORCH_CHECK(clamp_shape[clamp_idx - i] == input_shape[input_idx - i] || clamp_shape[clamp_idx - i] == 1 ||
+                      input_shape[input_idx - i] == 1,
                   op_name + ": clamp tensor trailing shape must match input tensor")
   }
 }
@@ -136,9 +145,6 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
 
   auto result_type = output_t.scalar_type();
 
-  IntArrayRef new_min_shape;
-  IntArrayRef new_max_shape;
-
   auto num_min_dims = min_opt->dim();
   auto num_max_dims = max_opt->dim();
   auto num_input_dims = input_t.dim();
@@ -146,24 +152,32 @@ static void clamp_tensor_out_mps(const Tensor& input_t,
   std::vector<int64_t> new_min_arr(num_input_dims);
   std::vector<int64_t> new_max_arr(num_input_dims);
 
-  if (has_min && num_min_dims < num_input_dims) {
-    fill_new_shape(num_input_dims, num_min_dims, new_min_arr.data(), min_opt->sizes());
-    new_min_shape = IntArrayRef(new_min_arr);
-  }
-
-  if (has_max && num_max_dims < num_input_dims) {
-    fill_new_shape(num_input_dims, num_max_dims, new_max_arr.data(), max_opt->sizes());
-    new_max_shape = IntArrayRef(new_max_arr);
-  }
-
   Tensor min_opt_tensor;
   Tensor max_opt_tensor;
 
+  auto reshape_clamp_tensor = [&](const OptionalTensorRef clamp_tensor_ref,
+                                  int64_t num_clamp_dims,
+                                  std::vector<int64_t>& new_shape_storage) -> Tensor {
+    IntArrayRef clamp_shape = clamp_tensor_ref->sizes();
+    bool requires_view = false;
+
+    if (num_clamp_dims > num_input_dims) {
+      clamp_shape = clamp_shape.slice(num_clamp_dims - num_input_dims);
+      requires_view = true;
+    } else if (num_clamp_dims < num_input_dims) {
+      fill_new_shape(num_input_dims, num_clamp_dims, new_shape_storage.data(), clamp_shape);
+      clamp_shape = IntArrayRef(new_shape_storage);
+      requires_view = true;
+    }
+
+    return requires_view ? (*clamp_tensor_ref).view(clamp_shape) : *clamp_tensor_ref;
+  };
+
   if (has_min) {
-    min_opt_tensor = (num_min_dims < num_input_dims) ? (*min_opt).view(new_min_shape) : *min_opt;
+    min_opt_tensor = reshape_clamp_tensor(min_opt, num_min_dims, new_min_arr);
   }
   if (has_max) {
-    max_opt_tensor = (num_max_dims < num_input_dims) ? (*max_opt).view(new_max_shape) : *max_opt;
+    max_opt_tensor = reshape_clamp_tensor(max_opt, num_max_dims, new_max_arr);
   }
 
   @autoreleasepool {
@@ -244,8 +258,8 @@ static void clamp_scalar_out_mps(const Tensor& input_t,
 
   @autoreleasepool {
     // the optional min/max refs could affect how we build the cached graph
-    std::string key = op_name + (has_min ? ("_min:" + std::to_string(min_scalar)) : "") +
-        (has_max ? ("_max:" + std::to_string(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
+    std::string key = op_name + (has_min ? ("_min:" + to_hex_key(min_scalar)) : "") +
+        (has_max ? ("_max:" + to_hex_key(max_scalar)) : "") + "_scalar:" + getTensorsStringKey({input_t});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       if (has_min)
         newCachedGraph->minTensor = [mpsGraph constantWithScalar:min_scalar

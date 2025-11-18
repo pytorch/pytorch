@@ -1554,7 +1554,8 @@ class AOTInductorTestsTemplate:
 
     # scaled_dot_product_flash_attention
     @unittest.skipIf(
-        not HAS_XPU_AND_TRITON and not SM80OrLater, "bfloat16 only supported in sm80+"
+        not SM80OrLater and not HAS_XPU_AND_TRITON,
+        "bfloat16 only supported in sm80+ or XPU",
     )
     def test_sdpa(self):
         class Model(torch.nn.Module):
@@ -1571,7 +1572,10 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
+    @unittest.skipIf(
+        not SM80OrLater and not HAS_XPU_AND_TRITON,
+        "bfloat16 only supported in sm80+ or XPU",
+    )
     @unittest.skipIf(
         # for archs where this isn't lowered to flash attention, the math
         # backend will be used and it doesn't work for bfloat16
@@ -5926,8 +5930,8 @@ class AOTInductorTestsTemplate:
     @requires_gpu
     def test_d2h_copy(self):
         # device to copy host should always have the same stride
-        if "cuda" not in self.device:
-            raise unittest.SkipTest("This test is only for CUDA")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("This test is only for CUDA or XPU")
 
         class ToCpuModel(nn.Module):
             def forward(self, x):

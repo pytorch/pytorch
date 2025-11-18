@@ -49,7 +49,8 @@ def build_collective_info(graph, hiding_annotations):
     """
     Build CollectiveInfo dict from manual hiding annotations.
 
-    hiding_annotations: dict mapping collective_start -> hiding_compute_node
+    hiding_annotations: dict mapping collective_start -> hiding_compute_node(s)
+                        Can be a single node or a list/OrderedSet of nodes
     """
     from torch._inductor.fx_passes.overlap_scheduling import CollectiveInfo
 
@@ -65,12 +66,20 @@ def build_collective_info(graph, hiding_annotations):
 
     # Build CollectiveInfo for each collective
     for start_node, wait_node in start_to_wait.items():
-        hiding_node = hiding_annotations.get(start_node)
+        hiding_annotation = hiding_annotations.get(start_node)
+
+        # Convert to OrderedSet
+        hiding_nodes = OrderedSet()
+        if hiding_annotation is not None:
+            if isinstance(hiding_annotation, list | OrderedSet):
+                hiding_nodes = OrderedSet(hiding_annotation)
+            else:
+                hiding_nodes = OrderedSet([hiding_annotation])
 
         # Estimate size and time
         size_bytes = 16 * 4  # 4x4 tensor of floats
         estimated_time_ms = 1.0  # Dummy time
-        exposed_time_ms = 0.0 if hiding_node else 1.0  # Hidden if has hiding_node
+        exposed_time_ms = 0.0 if hiding_nodes else 1.0  # Hidden if has hiding_nodes
 
         collective_info[start_node] = CollectiveInfo(
             start_node=start_node,
@@ -78,7 +87,7 @@ def build_collective_info(graph, hiding_annotations):
             size_bytes=size_bytes,
             estimated_time_ms=estimated_time_ms,
             exposed_time_ms=exposed_time_ms,
-            hiding_node=hiding_node,
+            hiding_nodes=hiding_nodes,
         )
 
     return collective_info
@@ -565,6 +574,97 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         graph_str = str(traced.graph)
         FileCheck().check_count("all_gather_into_tensor_out", 1, exactly=False).run(
             graph_str
+        )
+
+    def test_can_bucket_with_multiple_hiding_nodes(self):
+        """
+        Test that collectives with multiple hiding nodes CAN bucket.
+
+        Graph structure:
+        ag1_start -> ag2_start -> mm1 -> mm2 -> mm3 -> ag1_wait -> ag2_wait
+
+        Where:
+        - ag1 is hidden by mm1 and mm2
+        - ag2 is hidden by mm2 and mm3
+        - Both collectives share mm2 as a hiding node
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 1
+
+            # Start both collectives
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, group_name
+            )
+
+            # Three compute operations that hide the collectives
+            mm1 = torch.mm(a, a)
+            mm2 = torch.mm(b, b)
+            mm3 = torch.mm(a + b, a + b)
+
+            # Wait for both
+            ag1_out = torch.ops._c10d_functional.wait_tensor(ag1)
+            ag2_out = torch.ops._c10d_functional.wait_tensor(ag2)
+
+            return ag1_out.sum() + ag2_out.sum() + mm1.sum() + mm2.sum() + mm3.sum()
+
+        # Use fake mode to trace without executing
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device) * 2
+
+            # Trace with make_fx
+            traced = make_fx(func)(a, b)
+
+        # Find nodes using find_nodes
+        ag1, ag2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        mm1, mm2, mm3 = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+
+        # Manually annotate hiding relationships with multiple hiding nodes
+        hiding_annotations = {
+            ag1: [mm1, mm2],  # ag1 is hidden by mm1 and mm2
+            ag2: [mm2, mm3],  # ag2 is hidden by mm2 and mm3
+        }
+
+        # Build collective info and ancestors
+        collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
+        scheduled = OrderedSet(traced.graph.nodes)
+
+        # Verify hiding_nodes are correctly set
+        self.assertEqual(len(collective_info[ag1].hiding_nodes), 2)
+        self.assertIn(mm1, collective_info[ag1].hiding_nodes)
+        self.assertIn(mm2, collective_info[ag1].hiding_nodes)
+        self.assertEqual(len(collective_info[ag2].hiding_nodes), 2)
+        self.assertIn(mm2, collective_info[ag2].hiding_nodes)
+        self.assertIn(mm3, collective_info[ag2].hiding_nodes)
+
+        # Run bucketing
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            OverlapPreservingBucketer,
+        )
+
+        bucketer = OverlapPreservingBucketer(
+            traced.graph,
+            collective_info,
+            node_ancestors,
+            scheduled,
+        )
+        bucketer.bucket_collectives()
+
+        FileCheck().check_count(
+            "all_gather_into_tensor_out", 1, exactly=False
+        ).check_count("torch.ops.aten.mm.default", 3, exactly=True).run(
+            str(traced.graph)
         )
 
 
