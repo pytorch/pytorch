@@ -732,6 +732,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._is_any_autocast_enabled",
         "torch._C._is_cached_tensor",
         "torch._C._is_flash_attention_available",
+        "torch._C._is_hardware_support_flash_attention",
         "torch._C._is_fwd_grad_enabled",
         "torch._C._is_key_in_tls",
         "torch._C._is_multithreading_enabled",
