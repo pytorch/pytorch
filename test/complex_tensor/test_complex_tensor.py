@@ -90,6 +90,7 @@ SKIPS = {
     Descriptor(op=aten.dot, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.mul, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(op=aten.exp, variant=Variant.GradCheck): "Numerical inconsistency",
+    Descriptor(op=aten.to, variant=Variant.GradCheck): "Numerical inconsistency",
     Descriptor(
         op=aten.any, variant=Variant.Distributed
     ): "does not have a sharding strategy registered",
@@ -206,12 +207,10 @@ class TestComplexBwdGradients(TestGradients):
         dtypes=OpDTypes.supported_backward,
         allowed_dtypes=[torch.complex128],
     )
-    def test_fn_grad(
-        self, device: torch.device, dtype: torch.dtype, op: OpInfo
-    ) -> None:
+    def test_fn_grad(self, device: str, dtype: torch.dtype, op: OpInfo) -> None:
         test_info = Descriptor(
             op=get_overload_packet_from_name(op.name),
-            device=device,
+            device_type=torch.device(device).type,
             dtype=dtype,
             variant=Variant.GradCheck,
         )

@@ -30,9 +30,10 @@ COMPLEX_TO_REAL = {
 REAL_TO_COMPLEX = {v: k for k, v in COMPLEX_TO_REAL.items()}
 
 # Used to promote dtypes in `promote_real_cpu_tensors`
-PROMOTE_TYPES_CPU = {
+PROMOTE_TYPES = {
     torch.float16: torch.float32,
     torch.bfloat16: torch.float32,
+    torch.complex32: torch.complex64,
 }
 
 
@@ -54,9 +55,21 @@ def is_complex_tensor(obj: Any, /) -> TypeIs[ComplexTensor]:
     return isinstance(obj, ComplexTensor)
 
 
-def promote_real_cpu_tensors(
+@overload
+def promote_tensors(
+    *tensors: ComplexTensor,
+) -> tuple[torch.dtype, tuple[ComplexTensor, ...]]: ...
+
+
+@overload
+def promote_tensors(
     *tensors: Tensor,
-) -> tuple[torch.dtype, tuple[Tensor, ...]]:
+) -> tuple[torch.dtype, tuple[Tensor, ...]]: ...
+
+
+def promote_tensors(
+    *tensors: Tensor | ComplexTensor,
+) -> tuple[torch.dtype, tuple[Tensor | ComplexTensor, ...]]:
     """
     Promotes all tensors to a common dtype.
     Additionally promotes CPU tensors to at least `float32`.
@@ -67,15 +80,7 @@ def promote_real_cpu_tensors(
         if isinstance(t, Tensor):
             out_dt = torch.promote_types(out_dt, t.dtype)
 
-    prom_dt = PROMOTE_TYPES_CPU.get(out_dt)
-    if prom_dt is None or any(
-        t.device.type != "cpu" for t in tensors if isinstance(t, Tensor)
-    ):
-        return out_dt, tuple(
-            t.to(out_dt) if isinstance(t, Tensor) else torch.asarray(t, dtype=out_dt)
-            for t in tensors
-        )
-
+    prom_dt = PROMOTE_TYPES.get(out_dt, out_dt)
     return out_dt, tuple(
         t.to(prom_dt) if isinstance(t, Tensor) else torch.asarray(t, dtype=prom_dt)
         for t in tensors
@@ -213,7 +218,7 @@ def register_binary_nonlinear(op: OpType) -> Callable:
     def impl(lhs: ComplexTensor, rhs: ComplexTensor, *args, **kwargs) -> ComplexTensor:
         a_r, a_i = split_complex_arg(lhs)
         b_r, b_i = split_complex_arg(rhs)
-        out_dt, (a_r, a_i, b_r, b_i) = promote_real_cpu_tensors(a_r, a_i, b_r, b_i)
+        out_dt, (a_r, a_i, b_r, b_i) = promote_tensors(a_r, a_i, b_r, b_i)
         real = op(a_r, b_r, *args, **kwargs) - op(a_i, b_i, *args, **kwargs)
         imag = op(a_r, b_i, *args, **kwargs) + op(a_i, b_r, *args, **kwargs)
         return ComplexTensor(real.to(out_dt), imag.to(out_dt))

@@ -11,7 +11,7 @@ from .common import (
     complex_to_real_dtype,
     is_complex,
     OpType,
-    promote_real_cpu_tensors,
+    promote_tensors,
     register_binary_nonlinear,
     register_complex,
     register_error,
@@ -24,6 +24,7 @@ from .common import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from typing import Any
 
 aten = torch.ops.aten
 
@@ -40,7 +41,7 @@ def register_binary_linear(op: OpType):
             return impl_with_alpha(lhs, rhs, *args, alpha=alpha, **kwargs)
         a_r, a_i = split_complex_arg(lhs)
         b_r, b_i = split_complex_arg(rhs)
-        out_dt, (a_r, a_i, b_r, b_i) = promote_real_cpu_tensors(a_r, a_i, b_r, b_i)
+        out_dt, (a_r, a_i, b_r, b_i) = promote_tensors(a_r, a_i, b_r, b_i)
         u = op(a_r, b_r, *args, **kwargs)
         v = op(a_i, b_i, *args, **kwargs)
         return ComplexTensor(u.to(out_dt), v.to(out_dt))
@@ -99,7 +100,6 @@ for simple_op in SIMPLE_OPS_LIST:
 # TODO (hameerabbasi): Not being tested
 SIMPLE_FORCE_TESTED_OPS = [
     aten.copy,
-    aten._to_copy,
     aten.col2im,
     aten.alias,
     aten.lift_fresh,
@@ -168,7 +168,7 @@ def div_impl(lhs: ComplexTensor, rhs: ComplexTensor, *, rounding_mode=None):
     if not is_complex(rhs):
         return ComplexTensor(a_r / rhs, a_i / rhs)
     b_r, b_i = split_complex_arg(rhs)
-    out_dt, (a_r, a_i, b_r, b_i) = promote_real_cpu_tensors(a_r, a_i, b_r, b_i)
+    out_dt, (a_r, a_i, b_r, b_i) = promote_tensors(a_r, a_i, b_r, b_i)
     num_r = a_r * b_r + a_i * b_i
     num_i = a_i * b_r - a_r * b_i
     den = b_r * b_r + b_i * b_i
@@ -181,7 +181,7 @@ def div_impl(lhs: ComplexTensor, rhs: ComplexTensor, *, rounding_mode=None):
 @register_complex(aten.reciprocal)
 def reciprocal_impl(self: ComplexTensor):
     self_r, self_i = split_complex_tensor(self)
-    out_dt, (self_r, self_i) = promote_real_cpu_tensors(self_r, self_i)
+    out_dt, (self_r, self_i) = promote_tensors(self_r, self_i)
     den = self_r * self_r + self_i * self_i
     return ComplexTensor(
         aten.div(self_r, den).to(out_dt),
@@ -192,19 +192,21 @@ def reciprocal_impl(self: ComplexTensor):
 # reductions
 @register_complex(aten.prod)
 def prod_impl(self: ComplexTensor, *args, **kwargs) -> ComplexTensor:
-    dtype = kwargs.pop("dtype", self.dtype)
-    kwargs["dtype"] = complex_to_real_dtype(dtype)
+    out_dt, (self,) = promote_tensors(self)
+    dtype = kwargs.pop("dtype", out_dt)
+    kwargs["dtype"] = complex_to_real_dtype(self.dtype)
 
     prod_r = torch.prod(torch.abs(self), *args, **kwargs)
     sum_phi = torch.sum(torch.angle(self), *args, **kwargs)
     u = prod_r * torch.cos(sum_phi)
     v = prod_r * torch.sin(sum_phi)
-    return ComplexTensor(u, v)
+    return ComplexTensor(u, v).to(dtype)  # type: ignore[bad-return]
 
 
 @register_complex(aten.pow)
 def pow_impl(self: ComplexTensor, exponent: ComplexTensor) -> ComplexTensor:
-    return torch.exp(exponent * torch.log(self))  # type: ignore[bad-return]
+    out_dt, (self, exponent) = promote_tensors(self, exponent)
+    return torch.exp(exponent * torch.log(self)).to(out_dt)  # type: ignore[bad-return]
 
 
 @register_complex(aten.cumprod)
@@ -224,7 +226,7 @@ def cumprod_impl(self: ComplexTensor, *args, **kwargs) -> ComplexTensor:
 @register_complex(aten.abs)
 def abs_impl(self: ComplexTensor) -> torch.Tensor:
     x, y = split_complex_tensor(self)
-    out_dt, (x, y) = promote_real_cpu_tensors(x, y)
+    out_dt, (x, y) = promote_tensors(x, y)
     result = torch.hypot(x, y)
     return result.to(out_dt)
 
@@ -265,18 +267,20 @@ def atan_impl(self: ComplexTensor) -> ComplexTensor:
 
 @register_complex(aten.asinh)
 def asinh_impl(self: ComplexTensor) -> ComplexTensor:
-    return torch.log(self + torch.sqrt(self * self + 1))  # type: ignore[bad-return]
+    out_dt, (self,) = promote_tensors(self)
+    return torch.log(self + torch.sqrt(self * self + 1)).to(out_dt)  # type: ignore[bad-return]
 
 
 @register_complex(aten.acosh)
 def acosh_impl(self: ComplexTensor) -> ComplexTensor:
-    return torch.log(self + torch.sqrt(self * self - 1))  # type: ignore[bad-return]
+    out_dt, (self,) = promote_tensors(self)
+    return torch.log(self + torch.sqrt(self * self - 1)).to(out_dt)  # type: ignore[bad-return]
 
 
 @register_complex(aten.atanh)
 def atanh_impl(self: ComplexTensor) -> ComplexTensor:
     x, y = split_complex_tensor(self)
-    out_dt, (x, y) = promote_real_cpu_tensors(x, y)
+    out_dt, (x, y) = promote_tensors(x, y)
 
     ret = 0.5 * (
         torch.log(ComplexTensor(1 + x, y)) - torch.log(ComplexTensor(1 - x, -y))
@@ -296,7 +300,7 @@ def cos_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten.cosh)
 def cosh_impl(self: ComplexTensor) -> ComplexTensor:
     x, y = split_complex_tensor(self)
-    out_dt, (x, y) = promote_real_cpu_tensors(x, y)
+    out_dt, (x, y) = promote_tensors(x, y)
     u = torch.cosh(x) * torch.cos(y)
     v = torch.sinh(x) * torch.sin(y)
     return ComplexTensor(u.to(out_dt), v.to(out_dt))
@@ -314,7 +318,7 @@ def sin_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten.sinh)
 def sinh_impl(self: ComplexTensor) -> ComplexTensor:
     x, y = split_complex_tensor(self)
-    out_dt, (x, y) = promote_real_cpu_tensors(x, y)
+    out_dt, (x, y) = promote_tensors(x, y)
     u = torch.sinh(x) * torch.cos(y)
     v = torch.cosh(x) * torch.sin(y)
     return ComplexTensor(u.to(out_dt), v.to(out_dt))
@@ -332,7 +336,7 @@ def tan_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten.tanh)
 def tanh_impl(self: ComplexTensor) -> ComplexTensor:
     x, y = split_complex_tensor(self)
-    out_dt, (x, y) = promote_real_cpu_tensors(x, y)
+    out_dt, (x, y) = promote_tensors(x, y)
 
     _2x = 2 * x
     _2y = 2 * y
@@ -348,7 +352,7 @@ def tanh_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten.exp)
 def exp_impl(self: ComplexTensor) -> ComplexTensor:
     x, y = split_complex_tensor(self)
-    out_dt, (x, y) = promote_real_cpu_tensors(x, y)
+    out_dt, (x, y) = promote_tensors(x, y)
     ex = torch.exp(x)
     u = ex * torch.cos(y)
     v = ex * torch.sin(y)
@@ -358,7 +362,7 @@ def exp_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten.expm1)
 def expm1_impl(self: ComplexTensor) -> ComplexTensor:
     x, y = split_complex_tensor(self)
-    out_dt, (x, y) = promote_real_cpu_tensors(x, y)
+    out_dt, (x, y) = promote_tensors(x, y)
     # TODO (hameerabbasi): The two lines below may have numerical issues
     ex = torch.exp(x)
     u = ex * torch.cos(y) - 1
@@ -368,9 +372,10 @@ def expm1_impl(self: ComplexTensor) -> ComplexTensor:
 
 @register_complex(aten.log)
 def log_impl(self: ComplexTensor) -> ComplexTensor:
+    out_dt, (self,) = promote_tensors(self)
     re = torch.log(torch.abs(self))
     im = torch.angle(self)
-    return ComplexTensor(re, im)
+    return ComplexTensor(re, im).to(out_dt)  # type: ignore[bad-return]
 
 
 @register_complex(aten.log1p)
@@ -598,7 +603,7 @@ def cat_impl(tensors: Sequence[ComplexTensor], dim: int = 0) -> ComplexTensor:
 @register_complex(aten.sgn)
 def sgn_impl(self: ComplexTensor) -> ComplexTensor:
     self_r, self_i = split_complex_tensor(self)
-    out_dt, (self_r, self_i) = promote_real_cpu_tensors(self_r, self_i)
+    out_dt, (self_r, self_i) = promote_tensors(self_r, self_i)
     abs_self = torch.abs(ComplexTensor(self_r, self_i))
     mask = (self_r != 0) | (self_i != 0)
     masked_sgn = ComplexTensor(
@@ -610,7 +615,7 @@ def sgn_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten.sqrt)
 def sqrt_impl(self: ComplexTensor) -> ComplexTensor:
     self_r, self_i = split_complex_tensor(self)
-    out_dt, (self_r, self_i) = promote_real_cpu_tensors(self_r, self_i)
+    out_dt, (self_r, self_i) = promote_tensors(self_r, self_i)
     self = ComplexTensor(self_r, self_i)
     self_abs_sqrt = torch.sqrt(torch.abs(self))
     self_half_angle = 0.5 * torch.angle(self)
@@ -624,7 +629,7 @@ def sqrt_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten.rsqrt)
 def rsqrt_impl(self: ComplexTensor) -> ComplexTensor:
     self_r, self_i = split_complex_tensor(self)
-    out_dt, (self_r, self_i) = promote_real_cpu_tensors(self_r, self_i)
+    out_dt, (self_r, self_i) = promote_tensors(self_r, self_i)
     self = ComplexTensor(self_r, self_i)
     self_abs_rsqrt = torch.rsqrt(torch.abs(self))
     self_neg_half_angle = -0.5 * torch.angle(self)
@@ -883,3 +888,34 @@ def diagonal_backward(
 ):
     grad_input = grad_output.new_zeros(input_sizes)
     return torch.diagonal_scatter(grad_input, grad_output, offset, dim1, dim2)
+
+
+def _dt_to_real(dt: torch.dtype | Any) -> torch.dtype | Any:
+    if not isinstance(dt, torch.dtype):
+        return dt
+
+    return COMPLEX_TO_REAL[dt]
+
+
+def register_to_impl(op: OpType):
+    """Register an op similar to `aten.to`, but may have different signatures."""
+
+    def impl(self: ComplexTensor, *args, **kwargs) -> torch.Tensor | ComplexTensor:
+        x, y = split_complex_tensor(self)
+        try:
+            args = tuple(_dt_to_real(a) for a in args)
+            kwargs = {k: _dt_to_real(v) for k, v in kwargs.items()}
+        except KeyError:
+            return op(x, *args, **kwargs)
+
+        return ComplexTensor(op(x, *args, **kwargs), op(y, *args, **kwargs))
+
+    func_name = _get_func_name(op)
+    impl.__name__ = func_name
+    impl.__qualname__ = func_name
+
+    return register_complex(op, impl)
+
+
+to_impl = register_to_impl(aten.to)
+_to_copy_impl = register_to_impl(aten._to_copy)

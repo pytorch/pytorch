@@ -58,7 +58,7 @@ TRANSFORM_FUNCS = {
 class Descriptor:
     op: OpOverloadPacket
     variant: Variant | None
-    device: torch.device | None = field(default=None)
+    device_type: str | None = field(default=None)
     dtype: torch.dtype | None = field(default=None)
 
     def matches(self, other: Descriptor) -> bool:
@@ -123,7 +123,7 @@ class TestCase(PytorchTestCase):
                 self.assertEqual(value_e, value_a, *args, **kwargs)
 
     def check_consistency(
-        self, device: torch.device, dtype, op: OpInfo, variant: Variant
+        self, device: str, dtype, op: OpInfo, variant: Variant
     ) -> None:
         try:
             from .test_complex_tensor import EXTRA_KWARGS, SKIPS
@@ -131,7 +131,7 @@ class TestCase(PytorchTestCase):
             from test_complex_tensor import EXTRA_KWARGS, SKIPS
         test_info = Descriptor(
             op=get_overload_packet_from_name(op.name),
-            device=device,
+            device_type=torch.device(device).type,
             dtype=dtype,
             variant=variant,
         )
@@ -144,7 +144,6 @@ class TestCase(PytorchTestCase):
             if extra_info.matches(test_info):
                 kwargs = extra_kw
                 break
-
         sample_inputs = op.sample_inputs(device, dtype)
         transform_fn = TRANSFORM_FUNCS[variant]
 
