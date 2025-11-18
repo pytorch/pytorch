@@ -1169,7 +1169,7 @@ static void lu_unpack_mps_impl(const Tensor& LU_data,
     U.copy_(U_part.triu());
   }
 
-  if (unpack_pivots) {
+  if (unpack_pivots && (LU_pivots.numel() != 0)) {
     // P as an identity matrix for pivots
     P.fill_(0);
     LU_pivots.dim() == 1 ? P.diagonal().fill_(1) : P.diagonal(0, -2, -1).fill_(1);
