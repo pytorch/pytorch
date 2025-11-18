@@ -301,9 +301,6 @@ namespace {
     }
   }
 
-// Note [Passing pointer and offset to fastAtomicAdd]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
 // ROCm-specific 2D backward kernel for grid_sample
 // - The default kernel launches N*H*W threads and loops over C.
 // - On MI300X / MI325X that "the loop over C + 4 atomics per C" is the bottleneck.
@@ -545,6 +542,8 @@ namespace {
   }
 #endif  // USE_ROCM
 
+// Note [Passing pointer and offset to fastAtomicAdd]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // For its internal bounds checking, fastAtomicAdd needs to know where the destination address
 // lies relative to the entire tensor, so we pass the base grad_input.data and full offset information,
 // including batch * channel offset (NC_offset).
