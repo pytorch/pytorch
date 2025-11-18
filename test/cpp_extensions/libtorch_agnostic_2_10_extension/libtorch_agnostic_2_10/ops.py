@@ -203,6 +203,32 @@ def my_view(t, size) -> Tensor:
     return torch.ops.libtorch_agnostic_2_10.my_view.default(t, size)
 
 
+def get_any_data_ptr(t, mutable) -> int:
+    """
+    Return data pointer value of the tensor.
+    Args:
+        t: Input tensor
+        mutable: whether data pointer qualifier is mutable or const
+    Returns: int - pointer value
+    """
+    return torch.ops.libtorch_agnostic_2_10.get_any_data_ptr.default(t, mutable)
+
+
+def get_template_any_data_ptr(t, dtype, mutable) -> int:
+    """
+    Return data pointer value of the tensor iff it has dtype.
+    Args:
+        t: Input tensor
+        dtype: Input dtype
+        mutable: whether data pointer qualifier is mutable or const
+    Returns: int - pointer value
+    Raises RuntimeError when t.dtype() != dtype.
+    """
+    return torch.ops.libtorch_agnostic_2_10.get_template_any_data_ptr.default(
+        t, dtype, mutable
+    )
+
+
 def my_sum(self, dim, keepdim=False, dtype=None) -> Tensor:
     """
     Returns the sum of the tensor along the specified dimensions.

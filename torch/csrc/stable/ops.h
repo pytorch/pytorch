@@ -380,11 +380,11 @@ inline torch::stable::Tensor view(
 }
 
 // We expect this to be the stable version of the sum.dim_IntList op.
-// This function computes the sum of the input tensor along the specified dimensions
-// and returns a new tensor containing the result.
-// This function is only available in 2.10 because it uses the stableivalue
-// conversion for HeaderOnlyArrayRef<T>, which is only available in 2.10.
-// The dim parameter is optional - if not provided, sums over all dimensions.
+// This function computes the sum of the input tensor along the specified
+// dimensions and returns a new tensor containing the result. This function is
+// only available in 2.10 because it uses the stableivalue conversion for
+// HeaderOnlyArrayRef<T>, which is only available in 2.10. The dim parameter is
+// optional - if not provided, sums over all dimensions.
 inline torch::stable::Tensor sum(
     const torch::stable::Tensor& self,
     std::optional<torch::headeronly::IntHeaderOnlyArrayRef> dim = std::nullopt,
@@ -403,12 +403,13 @@ inline torch::stable::Tensor sum(
 
 // We expect this to be the stable version of the sum.IntList_out op.
 // This function takes an output tensor and computes the sum of the input tensor
-// along the specified dimensions. The output tensor is modified in-place and returned.
-// Following C++ convention, the out parameter comes first.
-// This function is only available in 2.10 because it uses the stableivalue
+// along the specified dimensions. The output tensor is modified in-place and
+// returned. Following C++ convention, the out parameter comes first. This
+// function is only available in 2.10 because it uses the stableivalue
 // conversion for HeaderOnlyArrayRef<T>, which is only available in 2.10.
-// Note: Parameters are passed by value instead of reference for stable ABI compatibility.
-// The dim parameter is optional - if not provided, sums over all dimensions.
+// Note: Parameters are passed by value instead of reference for stable ABI
+// compatibility. The dim parameter is optional - if not provided, sums over all
+// dimensions.
 inline torch::stable::Tensor sum_out(
     torch::stable::Tensor out,
     const torch::stable::Tensor& self,
