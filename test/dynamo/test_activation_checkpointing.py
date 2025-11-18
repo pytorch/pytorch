@@ -1959,19 +1959,22 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
     sigmoid = torch.ops.aten.sigmoid.default(mm);  mm = None
-    sum_1 = torch.ops.aten.sum.default(sigmoid)
+    sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
-    detach = torch.ops.aten.detach.default(sigmoid);  sigmoid = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_1);  expand = detach_1 = None
+    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sigmoid_recomputed = torch.ops.aten.sigmoid.default(mm_recomputed);  mm_recomputed = None
+    detach = torch.ops.aten.detach.default(sigmoid_recomputed);  detach = None
+    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
     t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
-    mm_1 = torch.ops.aten.mm.default(t, sigmoid_backward);  t = None
+    mm_2 = torch.ops.aten.mm.default(t, sigmoid_backward);  t = None
     t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
-    mm_2 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
-    detach_2 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
-    detach_3 = torch.ops.aten.detach.default(mm_1);  mm_1 = None
-    return (detach_2, detach_3)""",
+    mm_3 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
+    detach_3 = torch.ops.aten.detach.default(mm_3);  mm_3 = None
+    detach_4 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
+    return (detach_3, detach_4)""",
         )
 
     def test_ac_reordering_defers_backward_only_nodes(self):
@@ -2155,23 +2158,120 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
     relu = torch.ops.aten.relu.default(mm);  mm = None
-    mul = torch.ops.aten.mul.Tensor(relu, 2.0)
+    mul = torch.ops.aten.mul.Tensor(relu, 2.0);  relu = None
     sum_1 = torch.ops.aten.sum.default(mul)
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
     mul_1 = torch.ops.aten.mul.Tensor(expand, 2.0);  expand = None
-    detach = torch.ops.aten.detach.default(relu);  relu = None
-    detach_1 = torch.ops.aten.detach.default(detach);  detach = None
-    threshold_backward = torch.ops.aten.threshold_backward.default(mul_1, detach_1, 0);  mul_1 = detach_1 = None
+    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    relu_recomputed = torch.ops.aten.relu.default(mm_recomputed);  mm_recomputed = None
+    detach = torch.ops.aten.detach.default(relu_recomputed);  detach = None
+    detach_recomputed = torch.ops.aten.detach.default(relu_recomputed);  relu_recomputed = None
+    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
+    threshold_backward = torch.ops.aten.threshold_backward.default(mul_1, detach_2, 0);  mul_1 = detach_2 = None
     t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
-    mm_1 = torch.ops.aten.mm.default(t, threshold_backward);  t = None
+    mm_2 = torch.ops.aten.mm.default(t, threshold_backward);  t = None
     t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
-    mm_2 = torch.ops.aten.mm.default(threshold_backward, t_1);  threshold_backward = t_1 = None
-    detach_2 = torch.ops.aten.detach.default(mul);  mul = None
-    detach_3 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
-    detach_4 = torch.ops.aten.detach.default(mm_1);  mm_1 = None
-    return (detach_2, detach_3, detach_4)""",
+    mm_3 = torch.ops.aten.mm.default(threshold_backward, t_1);  threshold_backward = t_1 = None
+    detach_3 = torch.ops.aten.detach.default(mul);  mul = None
+    detach_4 = torch.ops.aten.detach.default(mm_3);  mm_3 = None
+    detach_5 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
+    return (detach_3, detach_4, detach_5)""",
         )
+
+    def test_ac_reordering_recomputes_checkpointed_ops(self):
+        """
+        Test that AC nodes inside checkpoint are actually recomputed in backward.
+
+        This verifies the core benefit of AC reordering: checkpoint operations
+        should be recomputed in backward rather than saved, reducing memory usage.
+        """
+        torch._dynamo.allow_in_graph(torch.autograd.grad)
+
+        x_data = torch.randn(4, 4)
+        y_data = torch.randn(4, 4)
+
+        def fwd_bwd_with_checkpoint():
+            x = x_data.detach().requires_grad_(True)
+            y = y_data.detach().requires_grad_(True)
+
+            # Checkpoint contains sigmoid(mm(x, y))
+            # These operations (mm, sigmoid) should be recomputed in backward
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a, b: torch.sigmoid(torch.matmul(a, b)),
+                x,
+                y,
+                use_reentrant=False,
+            )
+
+            # Use z in both forward and backward:
+            # - Forward: compute loss from z
+            # - Backward: sigmoid_backward needs the sigmoid output
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"backward": 0}):
+                dx, dy = torch.autograd.grad(loss, (x, y))
+
+            return dx.detach(), dy.detach()
+
+        # Capture graph WITH AC reordering enabled
+        _, gm_with_reorder = self._compile_and_capture(fwd_bwd_with_checkpoint, True)
+
+        # Capture graph WITHOUT AC reordering
+        _, gm_without_reorder = self._compile_and_capture(
+            fwd_bwd_with_checkpoint, False
+        )
+
+        # Count operations in both graphs
+        def count_op_in_graph(gm, op):
+            count = 0
+            for node in gm.graph.nodes:
+                if node.target == op:
+                    count += 1
+            return count
+
+        # Count mm operations
+        mm_count_with = count_op_in_graph(gm_with_reorder, torch.ops.aten.mm.default)
+        mm_count_without = count_op_in_graph(
+            gm_without_reorder, torch.ops.aten.mm.default
+        )
+
+        # Count sigmoid operations
+        sigmoid_count_with = count_op_in_graph(
+            gm_with_reorder, torch.ops.aten.sigmoid.default
+        )
+        sigmoid_count_without = count_op_in_graph(
+            gm_without_reorder, torch.ops.aten.sigmoid.default
+        )
+
+        # WITH reordering: AC nodes (mm, sigmoid) should be recomputed in backward
+        # - 1x mm in forward for z = mm(x, y)
+        # - 1x sigmoid in forward for z = sigmoid(mm)
+        # - 2x mm in backward for gradients (mm_backward produces 2 mms)
+        # - IMPORTANT: 1x mm + 1x sigmoid RECOMPUTED in backward before sigmoid_backward
+        # Total: 4 mm ops (1 fwd + 2 bwd gradient + 1 recomputed), 2 sigmoid (1 fwd + 1 recomputed)
+
+        # WITHOUT reordering: AC nodes are saved via detach, not recomputed
+        # - 1x mm in forward
+        # - 1x sigmoid in forward + detach to save it
+        # - 2x mm in backward for gradients
+        # - NO recomputation (sigmoid is reused from detach)
+        # Total: 3 mm ops (1 fwd + 2 bwd gradient), 1 sigmoid (1 fwd, saved via detach)
+
+        # Verify expected counts
+        # With reordering: should see mm and sigmoid recomputed
+        self.assertEqual(
+            mm_count_with,
+            4,
+            "Expected 4 mm ops with AC reordering (1 fwd + 2 bwd grad + 1 recompute)",
+        )
+        self.assertEqual(mm_count_without, 3)
+        self.assertEqual(
+            sigmoid_count_with,
+            2,
+            "Expected 2 sigmoid ops with AC reordering (1 fwd + 1 recompute)",
+        )
+        self.assertEqual(sigmoid_count_without, 1)
 
 
 devices = ["cuda", "hpu"]

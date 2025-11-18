@@ -76,11 +76,8 @@ def _duplicate_ac_chain(
         ac_node,
         lambda x: _get_input_for_duplicate_ac_chain(x, ac_duplicates, env),
     )
-    # Only add _recomputed suffix to actual AC nodes
-    if ac_node in ac_both:
-        dup.name = ac_node.name + "_recomputed"
-    else:
-        dup.name = ac_node.name + "_dup"
+    # Use _recomputed suffix for all duplicated AC nodes
+    dup.name = ac_node.name + "_recomputed"
     ac_duplicates[ac_node] = dup
 
 
@@ -106,9 +103,16 @@ def _get_input_for_backward(
     x: fx.Node,
     ac_duplicates: dict[fx.Node, fx.Node],
     env: dict[fx.Node, fx.Node],
+    new_graph: fx.Graph,
+    ac_both: set[fx.Node],
 ) -> fx.Node:
     """Get input for regular backward nodes."""
     if x in ac_duplicates:
+        return ac_duplicates[x]
+    # If input is an AC node (in both regions OR backward-only), duplicate it before using
+    # This ensures that when we defer AC nodes to backward, we also duplicate their AC dependencies
+    if must_recompute(x):
+        _duplicate_ac_chain(x, ac_duplicates, env, new_graph, ac_both)
         return ac_duplicates[x]
     return env.get(x, x)
 
@@ -146,7 +150,10 @@ def _make_node_copy_fn(
 
         # Backward pass: regular node
         return new_graph.node_copy(
-            n, lambda x: _get_input_for_backward(x, ac_duplicates, env)
+            n,
+            lambda x: _get_input_for_backward(
+                x, ac_duplicates, env, new_graph, ac_both
+            ),
         )
 
     return node_copy_fn
