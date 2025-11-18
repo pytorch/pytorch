@@ -31,6 +31,7 @@ MemPool::MemPool(
   if (use_on_oom) {
     CUDACachingAllocator::setUseOnOOM(device_, id_);
   }
+  at::getHostAllocator(at::kCUDA)->create_or_incref_pool(id_);
 }
 
 MemPool::~MemPool() {
@@ -41,6 +42,8 @@ MemPool::~MemPool() {
   // until it is reset.
   CUDACachingAllocator::releasePool(device_, id_);
   c10::cuda::CUDACachingAllocator::emptyCache(id_);
+  at::getHostAllocator(at::kCUDA)->release_pool(id_);
+  // TODO: at::getHostAllocator(at::kCUDA)->empty_cache(id_)
 }
 
 MempoolId_t MemPool::id() {

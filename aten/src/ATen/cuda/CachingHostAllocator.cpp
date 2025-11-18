@@ -107,6 +107,7 @@ struct CUDACachingHostAllocatorImpl
       allocWithCudaHostRegister(ptr, size);
     } else {
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
       C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
     }
 
@@ -173,6 +174,14 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool query_event(EventPool::Event& event) override {
+    // It is rare, but query_event() can be called during stream
+    // capture. This happens when stream capture is immediately
+    // preceded by allocating to this pool via
+    // _use_cuda_memory_pool_manager. Since capture_begin() is
+    // preceded by torch.cuda.synchronize() in torch/cuda/graphs.py,
+    // we can be certain that cudaEventQuery always returns
+    // cudaSuccess in this rare situation.
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     cudaError_t err = cudaEventQuery(*event);
     if (err == cudaErrorNotReady) {
       (void)cudaGetLastError(); // clear CUDA error
@@ -280,8 +289,19 @@ struct CUDACachingHostAllocatorImpl
     }
 
     // Register the mapped pages using cudaHostRegister
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     AT_CUDA_CHECK(
         cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+  }
+
+  CUDAStream get_current_stream() const override {
+    return at::cuda::getCurrentCUDAStream();
+  }
+
+  bool stream_is_capturing(CUDAStream s) const override {
+    cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
+    C10_CUDA_CHECK(cudaStreamIsCapturing(s, &status));
+    return status != cudaStreamCaptureStatusNone;
   }
 };
 
