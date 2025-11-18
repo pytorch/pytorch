@@ -937,6 +937,34 @@ class Test2DStridedLocalShard(DTensorTestBase):
         self.assertEqual(global_offset, torch.Size([self.rank, 0]))
 
     @with_comms
+    def test_2d_shard_shard(self):
+        global_tensor = torch.arange(8).view(1, 8)
+        mesh_2d = init_device_mesh(
+            self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
+        )
+        local_size, global_offset = compute_local_shape_and_global_offset(
+            global_tensor.shape, mesh_2d, [Shard(0), Shard(0)]
+        )
+        import time
+        time.sleep(torch.distributed.get_rank())
+        print(f"rank={torch.distributed.get_rank()} local_size={local_size} global_offset={global_offset}")
+        # self.assertEqual(local_size, torch.Size([1, 2]))
+        # self.assertEqual(global_offset, torch.Size([self.rank, 0]))
+        
+    @with_comms
+    def test_1d_strided_shard(self):
+        global_tensor = torch.arange(2).view(2, 1)
+        mesh_1d = init_device_mesh(
+            self.device_type, (4,), mesh_dim_names=("DP",)
+        )
+        local_size, global_offset = compute_local_shape_and_global_offset(
+            global_tensor.shape, mesh_1d, [_StridedShard(1, split_factor=2)]
+        )
+        import time
+        time.sleep(torch.distributed.get_rank())
+        print(f"rank={torch.distributed.get_rank()} local_size={local_size} global_offset={global_offset}")
+
+    @with_comms
     def test_fsdp2_tp_2d_dtensor_local_shards_and_offsets(self):
         # We are mimicking the behavior of FSDP2 + TP.
         # Currently, the 2D DTensor's local shard is incorrect for resharding, since we want to avoid extra communication.

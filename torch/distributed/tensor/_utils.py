@@ -182,19 +182,7 @@ def _compute_local_shape_and_global_offset(
         # if rank not in the mesh, return empty offset
         return ((0,), ())
 
-    # StridedShard implies a non-standard order to apply shards; get the
-    # correct order to start applying splits
-    all_shards_are_strided = all(
-        isinstance(p, _StridedShard) for p in placements if isinstance(p, Shard)
-    )
-    if all_shards_are_strided:
-        ordered_placements: Sequence[tuple[int, Placement]] = [
-            (mesh_dim, p)
-            for (mesh_dim, p) in enumerate(placements)
-            if isinstance(p, Shard)
-        ]
-    else:
-        ordered_placements = _explicit_order_placements(mesh_shape, placements)
+    ordered_placements: Sequence[tuple[int, Placement]] = [(mesh_dim, p) for (mesh_dim, p) in enumerate(placements)]
 
     local_shape = list(global_shape)
     # We'll compute the data for where the shard begins on a per-dim basis.
@@ -205,7 +193,7 @@ def _compute_local_shape_and_global_offset(
 
     for mesh_dim, placement in ordered_placements:
         mesh_dim_size = mesh_shape[mesh_dim]
-        if isinstance(placement, Shard):
+        if isinstance(placement, (Shard, _StridedShard)):
             shard_dim = placement.dim
             assert shard_dim < len(local_shape), (
                 f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
@@ -217,10 +205,6 @@ def _compute_local_shape_and_global_offset(
             )
 
             local_shape[shard_dim] = shard_size
-
-            if isinstance(placement, _StridedShard):
-                global_offset[shard_dim] = None
-                continue
 
             shard_global_offset = global_offset[shard_dim] + not_none(shard_offset)
 
