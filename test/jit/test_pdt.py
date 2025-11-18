@@ -276,7 +276,7 @@ class TestPDT(JitTestCase):
     def test_multiple_class_with_same_method(self):
         class PDTModelOne:
             def test_find(self, a, b):
-                return b in a.keys()
+                return b in a
 
         class PDTModelTwo:
             def test_find(self, a, b):

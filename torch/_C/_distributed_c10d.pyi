@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 # mypy: disable-error-code="type-arg"
+from collections.abc import Callable
 from datetime import timedelta
 from enum import Enum
-from typing import Any, Callable, Optional, overload, Union
+from typing import Any, Optional, overload, Union
 
 import torch
 from torch import Tensor
@@ -214,6 +215,7 @@ class Store:
     def queue_pop(self, key: str, block: bool = True) -> bytes: ...
     def queue_push(self, key: str, value: Union[bytes, str]) -> None: ...
     def queue_len(self, key: str) -> int: ...
+    def list_keys(self) -> list[str]: ...
 
 class FileStore(Store):
     def __init__(self, path: str, numWorkers: int = ...) -> None: ...
