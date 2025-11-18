@@ -22,7 +22,12 @@ import tempfile
 from pathlib import Path
 
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
-from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME, include_paths as torch_include_paths
+from torch.utils.cpp_extension import (
+    CUDA_HOME,
+    include_paths as torch_include_paths,
+    ROCM_HOME,
+)
+
 
 GPU_HOME = CUDA_HOME or ROCM_HOME
 
