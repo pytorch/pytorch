@@ -894,7 +894,7 @@ class PallasKernel(SIMDKernel):
                 "PALLAS_TARGET_TPU is set, but no TPU device was found. "
                 "Please make sure that you have a TPU available and that JAX is configured correctly."
             )
-        interpret_literal = "True" if interpret_is_cpu or is_tpu else "False"
+        interpret_literal = "True" if interpret_is_cpu else "False"
 
         # For GPU (Triton backend), import pltriton for masked loads/stores
         # Import math at module level if we'll use it for masked ops
@@ -1075,22 +1075,41 @@ class PallasKernel(SIMDKernel):
             if alias_params:
                 code.writeline("# Convert Torch -> JAX for donated outputs")
                 for alias_name in alias_params:
-                    code.writeline(
-                        f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
-                    )
+                    # TODO: The `jax.device_put` path is a temporary workaround for a Mosaic compiler bug
+                    # that occurs with DLPack. Once TorchTPU provides a direct method for placing a
+                    # `torch.Tensor` on a TPU device, this should be reverted to use the
+                    #  `jax.dlpack.from_dlpack` path.
+                    if is_tpu:
+                        code.writeline(
+                            f"{alias_name}_jax = jax.device_put({alias_name}.cpu().numpy(), device=jax.devices('tpu')[0])"
+                        )
+                    else:
+                        code.writeline(
+                            f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
+                        )
             device_str = ", device=jax.devices('tpu')[0]" if is_tpu else ""
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in pointer_tail:
                 if ptr.startswith("in_out_ptr"):
-                    code.writeline(
-                        f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}{device_str})"
-                    )
+                    if is_tpu:
+                        code.writeline(
+                            f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
+                        )
+                    else:
+                        code.writeline(
+                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr})"
+                        )
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in pointer_tail:
                 if ptr.startswith("in_ptr"):
-                    code.writeline(
-                        f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous(){device_str})"
-                    )
+                    if is_tpu:
+                        code.writeline(
+                            f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
+                        )
+                    else:
+                        code.writeline(
+                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous())"
+                        )
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
             code.writeline(
