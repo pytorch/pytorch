@@ -32,10 +32,13 @@ import pickle
 from collections.abc import Sequence
 from typing import Optional
 
-from tools.flight_recorder.components.builder import build_db, transform_ft
-from tools.flight_recorder.components.config_manager import JobConfig
-from tools.flight_recorder.components.loader import read_dir
-from tools.flight_recorder.components.types import types
+from torch.distributed.flight_recorder.components.builder import build_db, transform_ft
+from torch.distributed.flight_recorder.components.config_manager import JobConfig
+from torch.distributed.flight_recorder.components.loader import read_dir
+from torch.distributed.flight_recorder.components.types import types
+
+
+__all__ = ["main"]
 
 
 def main(args: Optional[Sequence[str]] = None) -> None:
