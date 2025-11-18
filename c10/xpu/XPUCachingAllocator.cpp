@@ -893,11 +893,13 @@ class DeviceCachingAllocator {
   }
 
   bool release_cached_blocks(MempoolId_t mempool_id) {
+    bool streams_synced = false;
     if (mempool_id.first == 0 && mempool_id.second == 0 &&
         captures_underway.empty()) {
       synchronize_and_free_events();
       // See Note [Safe to Free Blocks on BlockPool]
       c10::xpu::syncStreamsOnDevice(device_index);
+      streams_synced = true;
 
       release_blocks(large_blocks);
       release_blocks(small_blocks);
@@ -915,6 +917,12 @@ class DeviceCachingAllocator {
           ++it;
           continue;
         }
+      }
+
+      if (!streams_synced) {
+        // See Note [Safe to Free Blocks on BlockPool]
+        c10::xpu::syncStreamsOnDevice(device_index);
+        streams_synced = true;
       }
       TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
       release_blocks(it->second->small_blocks);
