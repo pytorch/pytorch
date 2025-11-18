@@ -234,7 +234,6 @@ class OverlapPreservingBucketer:
                 self.aug_graph.add_extra_dep(n=info.wait_node, dep=hn)
 
     def bucket_collectives(self) -> None:
-        """Main entry point for bucketing collectives."""
         # Group collectives by PG first
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start in self.collective_info:
