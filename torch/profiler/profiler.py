@@ -213,7 +213,11 @@ class _KinetoProfile:
                 custom_trace_id_callback=self.custom_trace_id_callback,
             )
         if (self.profiler is not None) and (not self.acc_events):
-            warn_once("Warning: Profiler clears events at the end of each cycle. Only events from the current cycle will be reported. To keep events across cycles, set acc_events=True.")
+            warn_once(
+                "Warning: Profiler clears events at the end of each cycle."
+                "Only events from the current cycle will be reported."
+                "To keep events across cycles, set acc_events=True."
+            )
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
