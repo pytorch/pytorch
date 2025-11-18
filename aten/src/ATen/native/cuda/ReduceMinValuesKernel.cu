@@ -15,6 +15,7 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/cuda/NumericLimits.cuh>
 
+#include <cuda/std/utility>
 
 namespace at::native {
 
@@ -43,7 +44,7 @@ void min_launch_kernel(TensorIterator &iter) {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MinOps<scalar_t>{},
-      thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
+      cuda::std::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
   });
 }
 

@@ -15,6 +15,8 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/cuda/NumericLimits.cuh>
 
+#include <cuda/std/utility>
+
 namespace at::native {
 
 template <typename acc_t>
@@ -45,7 +47,7 @@ void max_launch_kernel(TensorIterator& iter) {
         gpu_reduce_kernel<scalar_t, scalar_t>(
             iter,
             MaxOps<scalar_t>{},
-            thrust::pair<scalar_t, int64_t>(
+            cuda::std::pair<scalar_t, int64_t>(
                 at::numeric_limits<scalar_t>::lower_bound(), 0));
       });
 }

@@ -141,7 +141,7 @@ AT_DISPATCH_V2(
       gpu_reduce_kernel<scalar_t, scalar_t>(
         iter,
         MinOps<scalar_t>{},
-        thrust::pair<scalar_t, int64_t>(upper_bound(), 0)  // Commas inside!
+        cuda::std::pair<scalar_t, int64_t>(upper_bound(), 0)  // Commas inside!
       );
     }),
     AT_EXPAND(AT_ALL_TYPES)

@@ -8,6 +8,8 @@
 #include <ATen/Dispatch.h>
 #include <ATen/native/ReduceOps.h>
 
+#include <cuda/std/utility>
+
 namespace at::native {
 
 template <typename scalar_t, typename out_t=scalar_t>
@@ -15,7 +17,7 @@ void std_var_kernel_impl(TensorIterator& iter, double correction, bool take_sqrt
   // reducing unrolling factor to 2 for welford kernel
   // This is necessary to lower register usage that leads to register spills.
   using accscalar_t = at::acc_type<scalar_t, true>;
-  using ops_t = WelfordOps<scalar_t, accscalar_t, int32_t, thrust::pair<out_t, out_t>>;
+  using ops_t = WelfordOps<scalar_t, accscalar_t, int32_t, cuda::std::pair<out_t, out_t>>;
   ops_t ops(static_cast<accscalar_t>(correction), take_sqrt);
   gpu_reduce_kernel<scalar_t, out_t, 2>(iter, ops, typename ops_t::acc_t{});
 }
