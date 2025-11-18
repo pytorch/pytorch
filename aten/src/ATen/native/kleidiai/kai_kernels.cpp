@@ -21,27 +21,18 @@ void kai_pack_int4_rhs(
     const int64_t n,
     const int64_t k,
     const int64_t bl) {
+  // Prefer Channelwise kernel over Groupwise kernel for conflicting cases
   if (bl == k) {
     // Channelwise
-    if (weight.scalar_type() == at::kBFloat16) {
-      auto kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(
-          kai_kernel_id::
-              matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
-      auto& params = kernel_packet.rhs_pack_params;
-      params.lhs_zero_point = 1;
-      params.rhs_zero_point = 8;
-      kai_pack_rhs_channelwise_int4<kai_matmul_ukernel_bf16_qa8dxp_qs4cxp>(
-          kernel_packet, weight_packed, weight, scales, bias, n, k);
-    } else {
-      auto kernel_packet = kai_select_channelwise_matmul_ukernel(
-          kai_kernel_id::
-              matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
-      auto& params = kernel_packet.rhs_pack_params;
-      params.lhs_zero_point = 1;
-      params.rhs_zero_point = 8;
-      kai_pack_rhs_channelwise_int4<kai_matmul_ukernel_f32_qa8dxp_qs4cxp>(
-          kernel_packet, weight_packed, weight, scales, bias, n, k);
-    }
+    auto kernel_packet = kai_select_channelwise_matmul_ukernel(
+        kai_kernel_id::
+            matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
+    auto& params = kernel_packet.rhs_pack_params;
+    params.lhs_zero_point = 1;
+    params.rhs_zero_point = 8;
+
+    kai_pack_rhs_channelwise_int4<kai_matmul_ukernel_f32_qa8dxp_qs4cxp>(
+        kernel_packet, weight_packed, weight, scales, bias, n, k);
   } else if (!(bl % 32) && !(k % bl)) {
     // Groupwise
     auto kernel_packet = kai_select_groupwise_matmul_ukernel(
@@ -72,29 +63,19 @@ void kai_pack_int4_rhs(
 size_t kai_pack_rhs_int4_size(
     const int64_t n,
     const int64_t k,
-    const int64_t bl,
-    at::ScalarType tensor_dtype) {
+    const int64_t bl) {
   size_t packed_size = n * k;
+  // Prefer Channelwise kernel over Groupwise kernel for conflicting cases
   if (bl == k) {
-    if (tensor_dtype == at::kBFloat16) {
-      auto kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(
-          kai_kernel_id::
-              matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod);
-      const auto& ukernel = kernel_packet.ukernel;
-      const size_t nr = ukernel.get_nr();
-      const size_t kr = ukernel.get_kr();
-      const size_t sr = ukernel.get_sr();
-      packed_size = kernel_packet.kai_get_rhs_packed_size(n, k, nr, kr, sr);
-    } else {
-      auto kernel_packet = kai_select_channelwise_matmul_ukernel(
-          kai_kernel_id::
-              matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
-      const auto& ukernel = kernel_packet.ukernel;
-      const size_t nr = ukernel.get_nr();
-      const size_t kr = ukernel.get_kr();
-      const size_t sr = ukernel.get_sr();
-      packed_size = kernel_packet.kai_get_rhs_packed_size(n, k, nr, kr, sr);
-    }
+    // Channelwise
+    auto kernel_packet = kai_select_channelwise_matmul_ukernel(
+        kai_kernel_id::
+            matmul_clamp_f32_qai8dxp1x8_qsi4cxp8x8_1x8x32_neon_dotprod);
+    const auto& ukernel = kernel_packet.ukernel;
+    const size_t nr = ukernel.get_nr();
+    const size_t kr = ukernel.get_kr();
+    const size_t sr = ukernel.get_sr();
+    packed_size = kernel_packet.kai_get_rhs_packed_size(n, k, nr, kr, sr);
   } else if (!(bl % 32) && !(k % bl)) {
     // Groupwise
     auto kernel_packet = kai_select_groupwise_matmul_ukernel(
@@ -167,7 +148,8 @@ static void kai_quant_pack_lhs_int4_mm_groupwise(
     const auto lhs_src_ptr = lhs_native_mtx_f32 + thread_id * src_stride;
     const int64_t m_idx = thread_id * vec_per_thread;
     auto lhs_packed_ptr = lhs_packed_base +
-        kernel_packet.kai_get_lhs_quant_pack_offset(m_idx, k, mr, kr, sr);
+        kai_get_lhs_packed_offset_lhs_quant_pack_qai8dxp_f32(
+                              m_idx, k, mr, kr, sr);
     const int64_t vec_num = (thread_id == num_threads - 1)
         ? (m - vec_per_thread * thread_id)
         : vec_per_thread;
@@ -277,7 +259,8 @@ static void kai_quant_pack_lhs_int4_mm_channelwise(
     const auto lhs_src_ptr = lhs_native_mtx_f32 + thread_id * src_stride;
     const int64_t m_idx = thread_id * vec_per_thread;
     auto lhs_packed_ptr = lhs_packed_base +
-        kernel_packet.kai_get_lhs_quant_pack_offset(m_idx, k, mr, kr, sr);
+        kai_get_lhs_packed_offset_lhs_quant_pack_qai8dxp_f32(
+                              m_idx, k, mr, kr, sr);
     const int64_t vec_num = (thread_id == num_threads - 1)
         ? (m - vec_per_thread * thread_id)
         : vec_per_thread;
@@ -337,144 +320,19 @@ static void kai_quant_pack_lhs_int4_mm_channelwise(
       });
 }
 
-static void kai_quant_pack_lhs_int4_mm_bf16_channelwise(
+void kai_quant_pack_lhs_int4_mm(
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,
-    const int64_t m,
-    const int64_t n,
-    const int64_t k) {
-  // Kernel IDs for GEMM and GEMV
-  constexpr kai_kernel_id gemm_id =
-      kai_kernel_id::matmul_clamp_bf16_qai8dxp4x8_qsi4cxp8x8_8x8_neon_i8mm;
-  constexpr kai_kernel_id gemv_id =
-      kai_kernel_id::matmul_clamp_bf16_qai8dxp1x8_qsi4cxp8x8_1x8_neon_dotprod;
-
-  // Get total threads and select kernel
-  const int64_t total_threads = at::get_num_threads();
-  auto kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(gemv_id);
-  if (cpuinfo_has_arm_i8mm() && m > 1) {
-    kernel_packet = kai_select_bf16_channelwise_matmul_ukernel(gemm_id);
-  }
-
-  // Thread blocking parameters
-  const int64_t n_step = kernel_packet.ukernel.get_n_step();
-  const size_t mr = kernel_packet.ukernel.get_mr();
-  const size_t kr = kernel_packet.ukernel.get_kr();
-  const size_t sr = kernel_packet.ukernel.get_sr();
-
-  const size_t lhs_packed_size =
-      kernel_packet.kai_get_lhs_packed_size(m, k, mr, kr, sr);
-  auto lhs_packed = std::make_unique<uint8_t[]>(lhs_packed_size);
-  uint8_t* dst_act_mtx_bf16 = reinterpret_cast<uint8_t*>(output.data_ptr());
-  const uint8_t* lhs_native_mtx_bf16 =
-      reinterpret_cast<const uint8_t*>(input.data_ptr());
-  const uint8_t* rhs_packed_mtx_qs4cx =
-      reinterpret_cast<const uint8_t*>(weight.data_ptr());
-  uint8_t* lhs_packed_base = lhs_packed.get();
-
-  constexpr int32_t element_size = sizeof(uint16_t);
-  const size_t lhs_stride = k * element_size;
-  const size_t dst_stride = n * element_size;
-
-  // LHS quantization packing
-  int64_t vec_per_thread = get_vec_per_thread(m, total_threads, mr);
-  int64_t num_threads = (m + vec_per_thread - 1) / vec_per_thread;
-  const size_t src_stride = vec_per_thread * lhs_stride;
-
-  auto lhs_quant_pack = [=, &kernel_packet](int64_t thread_id) {
-    const auto lhs_src_ptr = lhs_native_mtx_bf16 + thread_id * src_stride;
-    const int64_t m_idx = thread_id * vec_per_thread;
-    auto lhs_packed_ptr = lhs_packed_base +
-        kernel_packet.kai_get_lhs_quant_pack_offset(m_idx, k, mr, kr, sr);
-    const int64_t vec_num = (thread_id == num_threads - 1)
-        ? (m - vec_per_thread * thread_id)
-        : vec_per_thread;
-
-    kernel_packet.kai_run_lhs_quant_pack(
-        vec_num,
-        k,
-        mr,
-        kr,
-        sr,
-        0,
-        (const uint16_t*)lhs_src_ptr,
-        lhs_stride,
-        lhs_packed_ptr);
-  };
-
-  at::parallel_for(
-      0, num_threads, /*grain_size=*/1, [&](int64_t begin, int64_t end) {
-        for (int64_t thread_id = begin; thread_id < end; ++thread_id) {
-          lhs_quant_pack(thread_id);
-        }
-      });
-
-  // Matrix multiplication
-  vec_per_thread = get_vec_per_thread(n, total_threads, n_step);
-  num_threads = (n + vec_per_thread - 1) / vec_per_thread;
-
-  auto mm = [=, &kernel_packet](int64_t thread_id) {
-    const auto rhs_packed_ptr = rhs_packed_mtx_qs4cx +
-        kernel_packet.ukernel.get_rhs_packed_offset(
-            thread_id * vec_per_thread, k);
-    auto dst_ptr = dst_act_mtx_bf16 +
-        kernel_packet.ukernel.get_dst_offset(
-            0, thread_id * vec_per_thread, dst_stride);
-    const int64_t vec_num = (thread_id == num_threads - 1)
-        ? (n - vec_per_thread * thread_id)
-        : vec_per_thread;
-
-    kernel_packet.ukernel.run_matmul(
-        m,
-        vec_num,
-        k,
-        lhs_packed_base,
-        rhs_packed_ptr,
-        (uint16_t*)dst_ptr,
-        dst_stride,
-        element_size, // dst_stride_col
-        -FLT_MAX,
-        FLT_MAX);
-  };
-
-  at::parallel_for(
-      0, num_threads, /*grain_size=*/1, [&](int64_t begin, int64_t end) {
-        for (int64_t thread_id = begin; thread_id < end; ++thread_id) {
-          mm(thread_id);
-        }
-      });
-}
-void kai_quant_pack_lhs_int4_mm(
-    const at::Tensor& output,
-    const at::Tensor& input,
-    const at::Tensor& weight,
     const int64_t m,
     const int64_t n,
     const int64_t k,
     const int64_t bl) {
   // Prefer Channelwise kernel over Groupwise kernel for conflicting cases
   if (bl == k) {
-    const auto input_dtype = input.dtype();
-
-    if (input_dtype == at::kBFloat16) {
-      if (cpuinfo_has_arm_bf16()) {
-        kleidiai::kai_quant_pack_lhs_int4_mm_bf16_channelwise(
-            output, input, weight, m, n, k);
-      } else {
-        TORCH_CHECK(
-            false,
-            "BF16 Unsupported: CPU does not support BF16. Please use a CPU with BF16 support.");
-      }
-    } else if (input_dtype == at::kFloat) {
-      kleidiai::kai_quant_pack_lhs_int4_mm_channelwise(
-          output, input, weight, m, n, k);
-    } else {
-      TORCH_CHECK(
-          false,
-          "Unsupported input data type: Only Bfloat16 and Float inputs are supported.");
-    }
-  } else if ((bl % 32 == 0) && (k % bl == 0)) {
+    kleidiai::kai_quant_pack_lhs_int4_mm_channelwise(
+        output, input, weight, m, n, k);
+  } else if (!(bl % 32) && !(k % bl)) {
     kleidiai::kai_quant_pack_lhs_int4_mm_groupwise(
         output, input, weight, m, n, k, bl);
   }
