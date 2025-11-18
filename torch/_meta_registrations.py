@@ -6486,6 +6486,7 @@ def _check_scaled_mm_sizes(
                 pass  # do nothing, but do not error
             else:
                 # does not match any valid scaling type
+                # test comment for export
                 torch._check(
                     False,
                     lambda: (
