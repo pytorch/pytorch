@@ -191,13 +191,13 @@ def sync_dealloc(
 @sync_dealloc.register_fake
 def _(
     src_stream_index: int,
-    wait_for_dealloc_event_index: int,
-    tensor_to_dealloc: torch.Tensor,
+    wait_event_index: int,
+    to_dealloc: torch.Tensor,
 ) -> None:
     pass
 
 
-has_side_effect(torch.ops.streams.delayed_dealloc.default)
+has_side_effect(torch.ops.streams.sync_dealloc.default)
 
 
 class SymbolicStreamState:
