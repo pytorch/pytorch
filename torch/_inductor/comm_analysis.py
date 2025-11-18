@@ -353,6 +353,9 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
     input_bytes = None
 
     args, kwargs = fx_node.args, fx_node.kwargs
+    kwargs = dict(kwargs)
+
+    # dont double count pre-allocated buffer passed in
     kwargs.pop("out", None)
 
     def tensor_bytes(t) -> int:
