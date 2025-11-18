@@ -1043,6 +1043,11 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     import inspect
 
     if isinstance(mod, torch.nn.Module):
+        resolved_forward = mod.forward
+        if hasattr(resolved_forward, "__self__"):
+            # pyrefly: ignore [missing-attribute]
+            resolved_forward = resolved_forward.__func__
+
         # Mirrored from NNModuleVariable.call_function:
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
         if (
@@ -1054,7 +1059,12 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             and len(mod._backward_hooks) == 0
             and len(torch.nn.modules.module._global_backward_pre_hooks) == 0
             and len(torch.nn.modules.module._global_backward_hooks) == 0
+            and resolved_forward != torch.nn.Module.forward
         ):
+            # We cannot trace __call__ by default because it will break
+            # the legacy dynamo export. If we want to revisit this,
+            # feel free to remove this path and try unittests in
+            # test_strict_export_v2.py
             mod = mod.forward
         elif isinstance(mod, torch.fx.GraphModule):
             mod = mod._call_impl
