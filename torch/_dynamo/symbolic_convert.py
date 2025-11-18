@@ -2050,13 +2050,9 @@ class InstructionTranslatorBase(
 
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
-        if sys.version_info >= (3, 12):
-            # leave iterator upon exhaustion in 3.12
-            self.push(it)
+        self.push(it)
         try:
             val = it.next_variable(self)
-            if sys.version_info < (3, 12):
-                self.push(it)
             self.push(val)
         except (StopIteration, exc.ObservedUserStopIteration) as e:
             if isinstance(e, exc.ObservedUserStopIteration):
@@ -2068,6 +2064,9 @@ class InstructionTranslatorBase(
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
                 self.push(ConstantVariable.create(None))
+            else:
+                # pop the iterator in Python < 3.12
+                self.pop()
             self.jump(inst)
 
     def _create_exception_type(self, val: VariableTracker) -> VariableTracker:
