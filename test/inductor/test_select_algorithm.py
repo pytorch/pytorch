@@ -29,7 +29,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import is_big_gpu, run_and_get_kernels
 from torch._inductor.virtualized import V
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -180,7 +180,6 @@ class TestSelectAlgorithm(TestCase):
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @patches
-    @skipIfXpu(msg="Double datatype matmul is not supported in oneDNN")
     def test_mm_skip(self):
         @torch.compile
         def foo(a, b):
@@ -249,7 +248,6 @@ class TestSelectAlgorithm(TestCase):
 
     # TODO: fix accuracy failure of the triton template on XPU.
     # and enable this test case.
-    @skipIfXpu
     @patches
     def test_mm_plus_mm2(self):
         @torch.compile
