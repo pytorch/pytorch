@@ -59,6 +59,24 @@
 // forward declare
 class cublasCommonArgs;
 
+#ifndef _WIN32
+namespace fbgemm_gpu {
+
+// NOTE(slayton58): FBGemm_GPU kernels come from <fbgemm_gpu/torch_ops.h> within the FBGemm repo.
+//                  To update supported ops means a submodule bump, which is.. painful. Instead, we
+//                  can simply forward-declare the methods we want to use.. Works at least as a short-term
+//                  thing, but should still be fixed somewhere/somehow.
+at::Tensor f4f4bf16(
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    at::Tensor,
+    std::optional<at::Tensor>,
+    bool use_mx);
+
+} // namespace fbgemm_gpu
+#endif
+
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
 
@@ -722,7 +740,12 @@ _scaled_rowwise_rowwise(
   TORCH_CHECK_VALUE(scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat, "scale_a must have ", mat_a.size(0), " Float elements, got ", scale_a.numel())
   TORCH_CHECK_VALUE(scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat, "scale_b must have ", mat_b.size(1), " Float elements, got ", scale_b.numel())
 
-  TORCH_CHECK_VALUE(scale_a.stride(1) == 1, "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1));
+  // if we have a scale of shape [256, 1] (say), then stride can be [1, 0] - handle this case
+  TORCH_CHECK_VALUE(
+      scale_a.stride(1) == 1 ||
+      scale_a.size(1) == 1,
+      "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1)
+  );
   TORCH_CHECK_VALUE(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
 
   auto scaling_choice_a = ScalingType::RowWise;
@@ -1078,6 +1101,19 @@ _scaled_mxfp8_mxfp8(
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 }
 
+void
+_check_mxfp4_support() {
+#ifndef USE_ROCM
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  // Only on B200 GPUs
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    // B200 = 10.0, B300 = 10.3
+    dprops->major == 10,
+    "MXFP4 scaling only supported in CUDA for B200/B300"
+  );
+#endif
+}
+
 
 Tensor&
 _scaled_mxfp4_mxfp4(
@@ -1087,26 +1123,48 @@ _scaled_mxfp4_mxfp4(
           const std::optional<Tensor>& bias,
           const c10::ScalarType out_dtype,
           Tensor& out) {
-#ifndef USE_ROCM
-  TORCH_CHECK_NOT_IMPLEMENTED(false, "MXFP4 scaling supported on ROCM only");
-#endif
+#if defined(_WIN32) || (!defined(USE_ROCM) && !defined(USE_FBGEMM_GENAI))
+  TORCH_CHECK_NOT_IMPLEMENTED(false, "MXFP4 scaling supported on ROCM and CUDA+FBGEMM_GENAI only");
+#else
+  _check_mxfp4_support();
   // Restrictions:
   // A, B are FP4, scales are e8m0, A: shape K//32, B: K, N//32
   TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2 && mat_b.scalar_type() == at::kFloat4_e2m1fn_x2, "mat_a and mat_b must be fp4 types, got: ",
       mat_a.scalar_type(), mat_b.scalar_type());
 
-  auto scale_a_elems = ceil_div<int64_t>(2 * mat_a.size(0), 32) * mat_a.size(1);
-  auto scale_b_elems = ceil_div<int64_t>(2 * mat_b.size(1), 32) * mat_b.size(0);
+  // Packed FP4 format means actual-K = 2 * reported-K -- adjust
+  auto K_multiplier = 2;
+#ifdef USE_ROCM
+  // AMD
+  auto scale_a_elems = ceil_div<int64_t>(K_multiplier * mat_a.size(0), 32) * mat_a.size(1);
+  auto scale_b_elems = ceil_div<int64_t>(K_multiplier * mat_b.size(1), 32) * mat_b.size(0);
+#else
+  // NVIDIA
+  auto scale_a_elems = round_up<int64_t>(mat_a.size(0), 128) * round_up<int64_t>(ceil_div<int64_t>(K_multiplier * mat_a.size(1), 32), 4);
+  auto scale_b_elems = round_up<int64_t>(mat_b.size(1), 128) * round_up<int64_t>(ceil_div<int64_t>(K_multiplier * mat_b.size(0), 32), 4);
+#endif
   TORCH_CHECK_VALUE(scale_a_elems == scale_a.numel(),
          "For Blockwise scaling scale_a should have ", scale_a_elems, " elements, got: ", scale_a.numel());
   TORCH_CHECK_VALUE(scale_b_elems == scale_b.numel(),
          "For Blockwise scaling scale_b should have ", scale_b_elems, " elements, got: ", scale_b.numel());
+
+#ifdef USE_ROCM
+  // AMD
+  TORCH_CHECK_VALUE(swizzle_a == SwizzleType::NO_SWIZZLE, "scale_a must not be swizzled (NO_SWIZZLE format)");
+  TORCH_CHECK_VALUE(swizzle_b == SwizzleType::NO_SWIZZLE, "scale_b must not be swizzled (NO_SWIZZLE format)");
+#else
+  // NVIDIA
+  TORCH_CHECK_VALUE(swizzle_a == SwizzleType::SWIZZLE_32_4_4, "scale_a must be swizzled to SWIZZLE_32_4_4 format");
+  TORCH_CHECK_VALUE(swizzle_b == SwizzleType::SWIZZLE_32_4_4, "scale_b must be swizzled to SWIZZLE_32_4_4 format");
+#endif
 
   TORCH_CHECK_VALUE(scale_a.is_contiguous() && scale_b.is_contiguous(),
         "For Blockwise scaling both scales should be contiguous");
 
   TORCH_CHECK_VALUE(out.scalar_type() == out_dtype, "expected out.scalar_type() to be ", out_dtype, ", but got ", out_dtype);
 
+#ifdef USE_ROCM
+  // AMD
   auto scaling_choice_a = ScalingType::BlockWise1x32;
   auto scaling_choice_b = ScalingType::BlockWise1x32;
 
@@ -1121,11 +1179,30 @@ _scaled_mxfp4_mxfp4(
   TORCH_CHECK_VALUE(out.scalar_type() == ScalarType::BFloat16 ||
               out.scalar_type() == ScalarType::Half,
               "Block-wise scaling only supports BFloat16 or Half output types");
-#else
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Block-wise scaling for Float8_e8m0fnu requires ROCm 7.0 or later");
 #endif
 
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
+#else
+  // NVIDIA
+  // NOTE(slayton58): fbgemm_gpu::f4f4bf16 does *not* allow passing an output tensor,
+  //                  but we have one we need to use. Two clear options are to copy into
+  //                  our output (slow), or use a move-assignment-operator (faster).
+  //                  However, the compiler can complain about the explicit move preventing
+  //                  copy elision because the return from f4f4bf16 is a temporary object.
+  //                  So we don't explicitly move, and trust the compiler here...
+  //                  In the longer term this should be fixed on the FBGemm side.
+  out = fbgemm_gpu::f4f4bf16(
+      mat_a,
+      mat_b.transpose(-2, -1),
+      scale_a,
+      scale_b,
+      std::nullopt, /* global_scale */
+      true          /* use_mx */
+  );
+
+  return out;
+#endif
+#endif
 }
 
 Tensor&
@@ -1250,17 +1327,20 @@ _scaled_mm_cuda_v2_out(
         mat_a.size(0), "x", mat_a.size(1), " and ", mat_b.size(0), "x", mat_b.size(1), ")");
   }
 
+  // Handle fp4 packed-K dimension
+  int K_multiplier = (mat_a.scalar_type() == ScalarType::Float4_e2m1fn_x2) ? 2 : 1;
+
   TORCH_CHECK_VALUE(!bias || bias->numel() == mat_b.sizes()[1], "Bias must be size ", mat_b.sizes()[1],
        " but got ", bias->numel());
   TORCH_CHECK_VALUE(
-      mat_a.sizes()[1] % 16 == 0,
+      K_multiplier * mat_a.sizes()[1] % 16 == 0,
       "Expected trailing dimension of mat1 to be divisible by 16 ",
       "but got mat1 shape: (",
       mat_a.sizes()[0],
       "x",
-      mat_a.sizes()[1],
+      K_multiplier * mat_a.sizes()[1],
       ").");
-  TORCH_CHECK_VALUE(mat_b.sizes()[0] % 16 == 0 && mat_b.sizes()[1] % 16 == 0, "mat2 shape (", mat_b.sizes()[0], "x",
+  TORCH_CHECK_VALUE(K_multiplier * mat_b.sizes()[0] % 16 == 0 && mat_b.sizes()[1] % 16 == 0, "mat2 shape (", mat_b.sizes()[0], "x",
        mat_b.sizes()[1], ") must be divisible by 16");
 
   // TODO(slayton): Existing checks, not sure if they should really be here.

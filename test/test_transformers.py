@@ -1914,6 +1914,7 @@ class TestSDPAFailureModes(NNTestCase):
                     q, k, v, None, 0.0, is_causal=True))
 
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_fail_with_batch_size_geq_65536(self):
         batch_size = 2**16
         query = torch.rand([batch_size, 2, 2, 8], device='cuda', dtype=torch.float16, requires_grad=True)
@@ -1935,6 +1936,7 @@ class TestSDPAFailureModes(NNTestCase):
         self.assertEqual(value.grad, v_cpu.grad, atol=2e-3, rtol=1e-4)
 
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_fail_with_batch_size_geq_65536_error(self):
         query = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
         key = torch.rand([2**16, 2, 2, 8], device='cuda', dtype=torch.float16)
@@ -1948,6 +1950,7 @@ class TestSDPAFailureModes(NNTestCase):
 
     @largeTensorTest("15GB", "cuda")
     @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support Efficient Attention")
     def test_mem_eff_attention_large_seq_len_uniform_attention(self):
         device = torch.device("cuda")
         dtype = torch.bfloat16
@@ -2854,7 +2857,7 @@ class TestSDPACudaOnly(NNTestCase):
         # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
         shape = (20, 4, 4, 32)
         scale = 10
-        for i in range(100):
+        for _ in range(100):
             q = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
             k = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
             v = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
