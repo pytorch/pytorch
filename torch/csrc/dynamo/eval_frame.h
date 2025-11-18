@@ -53,8 +53,6 @@ PyObject* dynamo_eval_custom_code(
     const char* trace_annotation,
     int throw_flag);
 
-int get_c_recursion_limit();
-
 #ifdef __cplusplus
 
 } // extern "C"

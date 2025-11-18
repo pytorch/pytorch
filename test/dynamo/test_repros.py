@@ -7456,6 +7456,35 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             msg,
         )
 
+    def test_dynamo_set_recursion_limit_simple(self):
+        # Test that torch._dynamo.set_recursion_limit calls sys.setrecursionlimit for all supported
+        # Python versions
+        old_recursion_limit = sys.getrecursionlimit()
+        old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()
+        try:
+
+            def fn(x, n):
+                if n == 0:
+                    return x
+                return fn(x, n - 1) + 1
+
+            sys.setrecursionlimit(100)
+
+            with self.assertRaises(RecursionError):
+                fn(torch.ones(3), 1000)
+
+            opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+            torch._dynamo.set_recursion_limit(100000)
+            self.assertEqual(fn(torch.ones(3), 1000), opt_fn(torch.ones(3), 1000))
+        finally:
+            if old_dynamo_recursion_limit > 0:
+                torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
+            sys.setrecursionlimit(old_recursion_limit)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12) or sys.version_info >= (3, 13),
+        "only 3.12, 3.13 affected by c recursion limit",
+    )
     def test_dynamo_set_recursion_limit(self):
         old_recursion_limit = sys.getrecursionlimit()
         old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()
@@ -7485,6 +7514,10 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
             sys.setrecursionlimit(old_recursion_limit)
 
+    @unittest.skipIf(
+        sys.version_info < (3, 12) or sys.version_info >= (3, 13),
+        "only 3.12, 3.13 affected by c recursion limit",
+    )
     def test_dynamo_set_recursion_limit_usage(self):
         old_recursion_limit = sys.getrecursionlimit()
         old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()

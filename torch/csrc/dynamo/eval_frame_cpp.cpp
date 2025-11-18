@@ -50,9 +50,24 @@ static py::handle _callback_from_action(
   return callback;
 }
 
-#if IS_PYTHON_3_12_PLUS && !IS_PYTHON_3_14_PLUS
-
 // c_recursion_remaining only defined in 3.12 and 3.13
+
+static int32_t c_recursion_limit = -1;
+
+void set_c_recursion_limit(int32_t limit) {
+  if (limit < 1) {
+    throw std::range_error("recursion limit must be greater or equal than 1");
+  }
+  c_recursion_limit = limit;
+  // cannot fail
+  Py_SetRecursionLimit(limit); // also set the Python limit
+}
+
+int32_t get_c_recursion_limit() {
+  return c_recursion_limit;
+}
+
+#if IS_PYTHON_3_12_PLUS && !IS_PYTHON_3_14_PLUS
 
 struct CRecursionLimitRAII {
   PyThreadState* tstate;

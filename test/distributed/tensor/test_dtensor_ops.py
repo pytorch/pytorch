@@ -157,7 +157,6 @@ dtensor_fails = {
     xfail("cholesky_solve"),
     xfail("combinations"),
     xfail("complex"),
-    xfail("convolution_backward"),
     xfail("count_nonzero"),
     xfail("cross"),
     xfail("cummax"),

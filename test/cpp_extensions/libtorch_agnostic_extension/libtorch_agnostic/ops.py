@@ -227,6 +227,37 @@ def test_tensor_device(t):
     return torch.ops.libtorch_agnostic.test_tensor_device.default(t)
 
 
+def get_any_data_ptr(t, mutable) -> int:
+    """
+    Return data pointer value of the tensor.
+
+    Args:
+        t: Input tensor
+        mutable: whether data pointer qualifier is mutable or const
+
+    Returns: int - pointer value
+    """
+    return torch.ops.libtorch_agnostic.get_any_data_ptr.default(t, mutable)
+
+
+def get_template_any_data_ptr(t, dtype, mutable) -> int:
+    """
+    Return data pointer value of the tensor iff it has dtype.
+
+    Args:
+        t: Input tensor
+        dtype: Input dtype
+        mutable: whether data pointer qualifier is mutable or const
+
+    Returns: int - pointer value
+
+    Raises RuntimeError when t.dtype() != dtype.
+    """
+    return torch.ops.libtorch_agnostic.get_template_any_data_ptr.default(
+        t, dtype, mutable
+    )
+
+
 def my_pad(t) -> Tensor:
     """
     Pads the input tensor with hardcoded padding parameters.
@@ -542,3 +573,17 @@ def my_view(t, size) -> Tensor:
     Returns: Tensor - tensor with new view
     """
     return torch.ops.libtorch_agnostic.my_view.default(t, size)
+
+
+def mv_tensor_accessor(m, v) -> Tensor:
+    """
+    Returns matrix-vector product.
+
+    Args:
+        m: any 2-D Tensor with shape (N, M)
+        v: any 1-D Tensor with shape (M,)
+
+    Returns:
+        a 1-D Tensor with shape (N,)
+    """
+    return torch.ops.libtorch_agnostic.mv_tensor_accessor.default(m, v)

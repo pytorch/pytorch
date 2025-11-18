@@ -19,6 +19,9 @@ PyObject* dynamo__custom_eval_frame(
 PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* obj);
 void skip_code_recursive(PyCodeObject* code);
 
+void set_c_recursion_limit(int32_t limit);
+int32_t get_c_recursion_limit();
+
 #ifdef __cplusplus
 
 } // extern "C"
