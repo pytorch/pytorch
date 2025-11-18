@@ -560,3 +560,21 @@ torch_get_num_threads(uint32_t* out_num_threads) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(
       { *out_num_threads = static_cast<uint32_t>(at::get_num_threads()); });
 }
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_const_data_ptr(AtenTensorHandle tensor, const void** ret_data_ptr) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_data_ptr = t->const_data_ptr();
+  });
+}
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_mutable_data_ptr(AtenTensorHandle tensor, void** ret_data_ptr) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* t =
+        torch::aot_inductor::tensor_handle_to_tensor_pointer(tensor);
+    *ret_data_ptr = t->mutable_data_ptr();
+  });
+}
