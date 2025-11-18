@@ -1148,19 +1148,32 @@ def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]]:
+def is_storage(obj: _Any, /) -> builtins.bool:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
         obj (Object): Object to test
     Example::
 
-        >>> x = torch.tensor([1, 2, 3])
-        >>> torch.is_storage(x)
-        False
-        >>> torch.is_storage(x.untyped_storage())
+        >>> import torch
+        >>> # UntypedStorage (recommended)
+        >>> tensor = torch.tensor([1, 2, 3])
+        >>> storage = tensor.untyped_storage()
+        >>> torch.is_storage(storage)
         True
-
+        >>>
+        >>> # TypedStorage (legacy)
+        >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
+        >>> torch.is_storage(typed_storage)
+        True
+        >>>
+        >>> # regular tensor (should return False)
+        >>> torch.is_storage(tensor)
+        False
+        >>>
+        >>> # non-storage object
+        >>> torch.is_storage([1, 2, 3])
+        False
     """
     return type(obj) in _storage_classes
 
@@ -2439,6 +2452,35 @@ class _TorchCompileInductorWrapper:
                 reset_cudagraph_trees()
 
 
+class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
+    compiler_name = "aotinductor"
+
+    def __init__(self, mode, options, dynamic):
+        super().__init__(mode, options, dynamic)
+        self.apply_options({"cpp_wrapper": True})
+        self.apply_options({"aot_inductor.package": True})
+
+    def __call__(self, model_, inputs_):
+        from contextlib import nullcontext
+        from unittest import mock
+
+        from torch._guards import detect_fake_mode
+        from torch._inductor.virtualized import V
+
+        fake_mode = detect_fake_mode(inputs_)
+        ctx = (
+            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+            if fake_mode
+            else nullcontext()
+        )
+        with (
+            V.set_aot_compilation(True),
+            ctx,
+            torch._inductor.config.patch("enable_autograd_for_aot", True),
+        ):
+            return super().__call__(model_, inputs_)
+
+
 class _TorchCompileWrapper:
     def __init__(self, backend, mode, options, dynamic):
         from torch._dynamo.backends.registry import lookup_backend
@@ -2672,8 +2714,10 @@ def compile(
             backend = bisect_backend
 
     guard_filter_fn = None
+    use_aoti = False
     if options and isinstance(options, dict):
         guard_filter_fn = options.pop("guard_filter_fn", None)
+        use_aoti = options.pop("use_aoti", False)
 
     if torch.compiler.is_exporting():
         warnings.warn(
@@ -2700,7 +2744,10 @@ def compile(
         return export_wrapped_fn
 
     if backend == "inductor":
-        backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+        if use_aoti:
+            backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic)
+        else:
+            backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
