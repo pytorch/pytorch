@@ -38,10 +38,6 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipIfXpu(
-        msg="The OP aten.nonzero implemented by XPU has different memory layout with fake tensor."
-        " Remove this skip after #146883 fixed."
-    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
@@ -653,6 +649,9 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipIfXpu(
+        msg="Invalid SPIR-V modul,https://github.com/intel/torch-xpu-ops/issues/2329"
+    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @inductor_config.patch({"max_autotune": True})
     @dynamo_config.patch({"capture_scalar_outputs": True})
