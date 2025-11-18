@@ -46,7 +46,6 @@
 #include <ATen/ATen.h>
 
 #include <structmember.h>
-#include <csignal>
 #include <cstdint>
 #include <memory>
 #include <utility>
@@ -1278,7 +1277,7 @@ get_thread_local_native_sharding_propagator_cache() {
     py::dict thread_dict =
         py::reinterpret_borrow<py::dict>(PyThreadState_GetDict());
     // We need to clean up before Python detaches from the thread if
-    // the thread is being destroyed. There is a chance that
+    // the thread is being destroyed.
     if (!thread_dict.contains("__DTensor_fastpath_thread_cache_cleanup")) {
       thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
           py::capsule(new std::thread::id(this_thread_id), [](void* p) {
