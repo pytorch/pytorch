@@ -126,8 +126,8 @@ def get_source_partitions(
         return SourcePartition(
             nodes,
             module_type,
-            inputs_ret,
-            outputs_ret,
+            inputs_ret, # type: ignore[arg-type]
+            outputs_ret, # type: ignore[arg-type]
             params_ret, # type: ignore[arg-type]
         )
 
