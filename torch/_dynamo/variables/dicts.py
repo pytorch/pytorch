@@ -763,7 +763,7 @@ class ConstDictVariable(VariableTracker):
                     variables.UserDefinedDictVariable,
                     variables.DefaultDictVariable,
                 ),
-            ):
+            ) and not isinstance(other, SetVariable):
                 # Always return the specialized dictionary, and in the case
                 # both are specialized, take the first to be the type of the
                 # new dictionary
@@ -964,16 +964,14 @@ class DefaultDictVariable(ConstDictVariable):
 
     @staticmethod
     def is_supported_arg(arg: VariableTracker) -> bool:
-        if isinstance(arg, variables.BuiltinVariable):
-            return arg.fn in (list, tuple, dict, set)
-        else:
-            return isinstance(
-                arg,
-                (
-                    variables.functions.BaseUserFunctionVariable,
-                    variables.functions.PolyfilledFunctionVariable,
-                ),
-            )
+        return isinstance(
+            arg,
+            (
+                variables.BuiltinVariable,
+                variables.functions.BaseUserFunctionVariable,
+                variables.functions.PolyfilledFunctionVariable,
+            ),
+        ) or (isinstance(arg, variables.ConstantVariable) and arg.value is None)
 
     def call_method(
         self,
@@ -1006,10 +1004,7 @@ class DefaultDictVariable(ConstDictVariable):
             # Setting a default factory must be a callable or None type
             if (
                 istype(args[0], ConstantVariable) and args[0].value == "default_factory"
-            ) and (
-                (istype(args[1], ConstantVariable) and args[1].value is None)
-                or hasattr(args[1], "fn")
-            ):
+            ) and self.is_supported_arg(args[1]):
                 tx.output.side_effects.mutation(self)
                 self.default_factory = args[1]
                 return ConstantVariable.create(None)
