@@ -68,7 +68,7 @@ __device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 valu
 #endif
 }
 #define ATOMICADD preview_unsafeAtomicAdd
-else
+#else
 #define ATOMICADD unsafeAtomicAdd
 #endif
 #define NATIVE_ZERO_BF16 __float2bfloat16(0.0f)
