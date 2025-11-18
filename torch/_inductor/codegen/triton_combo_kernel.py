@@ -388,7 +388,7 @@ class ComboKernel(Kernel):
         Only allow optimize_mask=True when 1) sequential dispatch is used,
         2) numels except x dimension are the same for each sub kernel.
         """
-        return TritonKernel(
+        return ComboKernel._get_triton_kernel_cls_type(
             tiling,
             features=features,
             pid_cache={"tl.program_id(0)": "pid_offset"},
@@ -748,13 +748,12 @@ class ComboKernel(Kernel):
                     )
         return extra_args
 
-    def _get_triton_kernel_cls_type(self) -> type[TritonKernel]:
-        triton_scheduler = V.graph.scheduler
-        assert isinstance(V.graph.scheduler, TritonScheduling)
-        triton_scheduler = cast(TritonScheduling, V.graph.scheduler)
+    @staticmethod
+    def _get_triton_kernel_cls_type() -> type[TritonKernel]:
         triton_kernel_cls = TritonKernel
-        if issubclass(triton_scheduler.kernel_type, TritonKernel):
-            triton_kernel_cls = triton_scheduler.kernel_type
+        maybe_triton_scheduler = V.graph.scheduler
+        if issubclass(maybe_triton_scheduler, TritonScheduling) and issubclass(maybe_triton_scheduler.kernel_type, TritonKernel):
+            triton_kernel_cls = maybe_triton_scheduler.kernel_type
             triton_kernel_cls = cast(type[TritonKernel], triton_kernel_cls)
         return triton_kernel_cls
 

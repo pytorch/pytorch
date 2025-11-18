@@ -2229,6 +2229,8 @@ def cached_autotune(
     filename=None,
     inductor_meta=None,
     custom_kernel=False,
+    caching_autotuner_cls: type[CachingAutotuner] = CachingAutotuner,
+    debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner
 ):
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
@@ -2267,7 +2269,7 @@ def cached_autotune(
 
         heuristic_config = get_heuristic_config(device.type)
         if inductor_meta.get("profile_bandwidth"):
-            return heuristic_config.debug_autotuner_cls(
+            return debug_autotuner_cls(
                 fn,
                 triton_meta=triton_meta,
                 inductor_meta=inductor_meta,
@@ -2286,7 +2288,7 @@ def cached_autotune(
                 filename=filename,
                 with_bandwidth_info=True,
             )
-        return heuristic_config.caching_autotuner_cls(
+        return caching_autotuner_cls(
             fn,
             triton_meta=triton_meta,
             inductor_meta=inductor_meta,
@@ -4041,38 +4043,3 @@ class RoundRobinComboKernelGrid(ComboKernelGrid):
         if xnumels_x_dim:
             exprs.append(self.ceildiv(self.maximum(xnumels_x_dim), meta.get("XBLOCK")))
         return f"({self.maximum(exprs)}) * {num_kernels}"
-
-
-
-@dataclasses.dataclass(frozen=True)
-class HeuristicConfig:
-    heuristic_module: str
-    caching_autotuner_cls: type[CachingAutotuner]
-    debug_autotuner_cls: type[DebugAutotuner]
-    def __post_init__(self):
-        assert issubclass(self.caching_autotuner_cls, CachingAutotuner)
-        assert issubclass(self.debug_autotuner_cls, CachingAutotuner)
-        try:
-            importlib.import_module(self.heuristic_module)
-        except ImportError as e:
-            raise ImportError(f"{self.heuristic_module=} must be importable") from e
-
-
-DEFAULT_HEURISTIC_CONFIG = HeuristicConfig(__name__, CachingAutotuner, DebugAutotuner)
-HEURISTIC_PROVIDER: dict[str, HeuristicConfig] = {"cpu": DEFAULT_HEURISTIC_CONFIG, "cuda": DEFAULT_HEURISTIC_CONFIG}
-
-def register_heuristic_config(device: str, heuristic_config: HeuristicConfig, *, allow_override: bool = False) -> None:
-    if device in HEURISTIC_PROVIDER and not allow_override:
-        raise RuntimeError(
-            f"{device=} has an existing registration {HEURISTIC_PROVIDER[device]}. "
-            "To override this set `allow_override` to True"
-        )
-    HEURISTIC_PROVIDER[device] = heuristic_config
-
-def get_heuristic_config(device: str, *, allow_fallback: bool = True):
-    if not allow_fallback and device not in HEURISTIC_PROVIDER:
-        raise RuntimeError(
-            f"{device=} does not have a heuristic config registered and {allow_fallback=}."
-            f" Available configs: {HEURISTIC_PROVIDER}"
-        )
-    return HEURISTIC_PROVIDER.get(device, DEFAULT_HEURISTIC_CONFIG)

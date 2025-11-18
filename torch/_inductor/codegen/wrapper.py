@@ -75,7 +75,6 @@ from .cpp_utils import cexpr
 from .custom_extern_kernel_codegen import CUSTOM_EXTERN_KERNEL_CODEGEN
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
-
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
@@ -1078,7 +1077,7 @@ class PythonWrapperCodegen(CodeGen):
     Generate outer wrapper in Python that calls the kernels.
     """
 
-    supports_caching = True  # Whether the output code is cacheable.
+    supports_caching: bool= True  # Whether the output code is cacheable.
 
     def __init__(self):
         super().__init__()
@@ -2424,6 +2423,15 @@ class PythonWrapperCodegen(CodeGen):
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.subgraph_definitions.splice(subgraph_code.value)
 
+    @classmethod
+    def _get_triton_info_kernel_cls(cls) -> "TritonKernel":
+        # Other inductor triton backends may be subclass from
+        # the TritonKernel class. An override of this method
+        # allows them to set which subclass to use to get information
+        # such as common triton imports or inductor metadata
+        from .triton import TritonKernel
+        return TritonKernel
+
     def define_user_defined_triton_kernel(
         self,
         kernel,
@@ -2446,17 +2454,6 @@ class PythonWrapperCodegen(CodeGen):
             TMADescriptorArg,
         )
         from .triton import TritonKernel, TritonScheduling
-
-        triton_kernel_cls: type[TritonKernel] = TritonKernel
-
-        # Use a triton kernel subclass if available to provide metadata for the
-        # user defined triton kernel
-        device = V.graph.get_current_device_or_throw()
-        device_scheduler = get_scheduling_for_device(device)
-        if isinstance(device_scheduler, TritonScheduling) and issubclass(
-            device_scheduler.kernel_type, TritonKernel
-        ):
-            triton_kernel_cls = cast(type[TritonKernel], device_scheduler.kernel_type)
 
         original_name = kernel.__name__
         signature: list[KernelArgType] = []
@@ -2573,7 +2570,7 @@ class PythonWrapperCodegen(CodeGen):
         )
         triton_meta: dict[str, Any] = {
             "signature": triton_signature,
-            "device": DeviceProperties.create(device),
+            "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             # Triton compiler includes equal_to_1 args into constants even
             # when they are not constexpr. otherwise there may be a segfault
             # during launching the Inductor-compiled Triton kernel.
@@ -2669,9 +2666,10 @@ class PythonWrapperCodegen(CodeGen):
             compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
         inductor_meta["kernel_name"] = name
-        inductor_meta.update(triton_kernel_cls.inductor_meta_common())
+        triton_info_kernel_cls = self._get_triton_info_kernel_cls()
+        inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
-        compile_wrapper.splice(triton_kernel_cls.gen_common_triton_imports())
+        compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
 
