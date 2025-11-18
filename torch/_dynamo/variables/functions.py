@@ -42,6 +42,7 @@ from torch._guards import Source
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
+    format_skip_frame_message,
     get_dynamo_observed_exception,
     handle_observed_exception,
     InfiniteGeneratorError,
@@ -1652,8 +1653,13 @@ class SkipFunctionVariable(VariableTracker):
             skip_frame_msg = kwargs.get("msg")
             if skip_frame_msg:
                 skip_frame_msg = skip_frame_msg.as_python_constant()
+            else:
+                skip_frame_msg = ""
             raise SkipFrame(
-                f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}"
+                format_skip_frame_message(
+                    tx.f_code,
+                    f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}",
+                )
             )
         elif self.value is torch._dynamo.step_unsupported:
             raise StepUnsupported
