@@ -13783,7 +13783,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 r"raise RuntimeError\('u.* >= 0'\)"
             ).run(code[0])
 
-    @
     def test_lite_regional_inductor_lowers(self):
         qk = torch.randn(8, 1, 8, 4224, 14, dtype=torch.float32)
 
