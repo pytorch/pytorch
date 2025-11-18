@@ -11,7 +11,7 @@ from typing import Any, Literal
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.comm_analysis import estimate_fx_collective_size
+from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import _schedulable_wait_node, is_wait_tensor
 from torch._inductor.fx_passes.memory_estimator import (
     _is_releasable,
@@ -327,7 +327,7 @@ class OverlapScheduler:
                 info = CollectiveInfo(
                     start_node=start,
                     wait_node=node,
-                    size_bytes=estimate_fx_collective_size(start),
+                    size_bytes=estimate_fx_collective_memory_footprint(start),
                     estimated_time_ms=coll_time_ms,
                     exposed_time_ms=coll_time_ms,  # Initially fully exposed
                 )
