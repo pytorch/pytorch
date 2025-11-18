@@ -60,7 +60,6 @@ class _ExperimentalConfig:
         verbose: bool = ...,
         performance_events: list[str] = ...,
         enable_cuda_sync_events: bool = ...,
-        profile_all_threads: bool = ...,
     ) -> None: ...
 
 class ProfilerConfig:

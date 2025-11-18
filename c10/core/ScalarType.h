@@ -92,13 +92,6 @@ inline bool isComplexType(ScalarType t) {
       t == ScalarType::ComplexDouble);
 }
 
-inline bool isQIntType(ScalarType t) {
-  // Don't forget to extend this when adding new QInt types
-  return t == ScalarType::QInt8 || t == ScalarType::QUInt8 ||
-      t == ScalarType::QInt32 || t == ScalarType::QUInt4x2 ||
-      t == ScalarType::QUInt2x4;
-}
-
 inline bool isBitsType(ScalarType t) {
   return t == ScalarType::Bits1x8 || t == ScalarType::Bits2x4 ||
       t == ScalarType::Bits4x2 || t == ScalarType::Bits8 ||
