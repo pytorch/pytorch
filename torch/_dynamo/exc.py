@@ -794,6 +794,38 @@ def format_error_msg_verbose(
     return msg
 
 
+def format_frame_info(code: types.CodeType) -> str:
+    return (
+        f"{getattr(code, 'co_name', '<unknown>')} "
+        f"({getattr(code, 'co_filename', '<unknown>')} "
+        f"line {getattr(code, 'co_firstlineno', 0)})"
+    )
+
+
+def format_skip_frame_message(code: Optional[types.CodeType], reason: str) -> str:
+    if code is not None:
+        frame_info = format_frame_info(code)
+        return (
+            f"torch.compile intentionally decided to skip the frame {frame_info} and fall back to eager.\n"
+            f"Reason: {reason}"
+        )
+    else:
+        return (
+            f"torch.compile intentionally decided to skip the frame and fall back to eager.\n"
+            f"Reason: {reason}"
+        )
+
+
+def format_loop_skip_frame_message(code: types.CodeType, frame_summary: str) -> str:
+    frame_info = format_frame_info(code)
+    return (
+        "Skipping frame because there is a graph break in a for/while loop\n"
+        f"torch.compile intentionally decided to skip the frame {frame_info} and fall back to eager.\n"
+        f"Reason: Skipping frame because there is a graph break in a for/while loop.\n"
+        f"{frame_summary}"
+    )
+
+
 def format_error_msg(
     exc: Exception,
     code: types.CodeType,
