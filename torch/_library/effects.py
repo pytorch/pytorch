@@ -39,8 +39,12 @@ class EffectHolder:
         # params, so we dont need to mark them as ordered
         skip_classes = (
             "__torch__.torch.classes.quantized.Conv2dPackedParamsBase",
-            "__torch__.torch.classes.quantized.LinearPackedParamsBase",
             "__torch__.torch.classes.quantized.Conv3dPackedParamsBase",
+            "__torch__.torch.classes.quantized.EmbeddingPackedParamsBase",
+            "__torch__.torch.classes.quantized.LinearPackedParamsBase",
+            "__torch__.torch.classes.xnnpack.Conv2dOpContext",
+            "__torch__.torch.classes.xnnpack.LinearOpContext",
+            "__torch__.torch.classes.xnnpack.TransposeConv2dOpContext",
         )
 
         opname = f"{namespace}::{opname}"
@@ -50,7 +54,9 @@ class EffectHolder:
             schema = torch._C._get_schema(opname, overload)
             for arg in schema.arguments:
                 if isinstance(arg.type, torch.ClassType):
-                    if arg.type.str() in skip_classes:
+                    if (
+                        arg.type.str() in skip_classes
+                    ):  # pyrefly: ignore[missing-attribute]
                         continue
                     self._effect = EffectType.ORDERED
                     return
