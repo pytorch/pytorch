@@ -739,7 +739,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 scaled_configs, dtype_size
             )
 
-        if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
+        if (
+            config.max_autotune_gemm_prune_exhaustive_configs
+            and config.max_autotune_gemm_search_space == "EXHAUSTIVE"
+        ):
             assert dtype_size > 0, "dtype_size must be provided for exhaustive search"
             scaled_configs = self._prune_exhaustive_configs(scaled_configs, dtype_size)
         return self._finalize_mm_configs(scaled_configs)
