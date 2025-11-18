@@ -12,15 +12,10 @@ from numpy import inf
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import (
-    _get_magma_version,
-    _get_torch_cuda_version,
-    with_tf32_off,
-)
+from torch.testing._internal.common_cuda import _get_magma_version, with_tf32_off
 from torch.testing._internal.common_device_type import (
     has_cusolver,
     skipCPUIfNoLapack,
-    skipCUDAIf,
     skipCUDAIfNoCusolver,
     skipCUDAIfNoMagma,
     skipCUDAIfNoMagmaAndNoCusolver,
@@ -1469,9 +1464,6 @@ op_db: list[OpInfo] = [
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_solve,
         decorators=[
-            skipCUDAIf(
-                _get_torch_cuda_version() < (11, 4), "not available before CUDA 11.3.1"
-            ),
             skipCUDAIfNoCusolver,
             skipCUDAIfRocm,
             skipCPUIfNoLapack,
