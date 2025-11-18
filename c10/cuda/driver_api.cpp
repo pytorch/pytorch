@@ -1,7 +1,6 @@
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/driver_api.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <cuda_runtime.h>
@@ -61,11 +60,14 @@ void* get_symbol(const char* name, int version) {
   }
 #endif
 
+  // As of CUDA 13, this API is deprecated.
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 13000)
   // This fallback to the old API to try getting the symbol again.
   if (auto st = cudaGetDriverEntryPoint(name, &out, cudaEnableDefault, &qres);
       st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
     return out;
   }
+#endif
 
   // If the symbol cannot be resolved, report and return nullptr;
   // the caller is responsible for checking the pointer.

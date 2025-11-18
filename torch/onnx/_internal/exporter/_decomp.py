@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import itertools
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 import torch._ops
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.onnx._internal.exporter import _registration
 
 

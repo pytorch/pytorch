@@ -3,9 +3,9 @@
 #include <functional>
 #include <map>
 
+#include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <torch/nativert/graph/Graph.h>
-
 namespace torch::nativert {
 
 using PassSignature = std::function<bool(Graph*)>;
@@ -63,9 +63,7 @@ class GraphPassRegistry {
 
   const GraphPass& get_pass(const GraphPassIdentifier& name) {
     auto it = registry_.find(name);
-    if (it == registry_.end()) {
-      throw std::runtime_error("Pass " + name + " not registered to get");
-    }
+    TORCH_CHECK(it != registry_.end(), "Pass ", name, " not registered to get");
     return it->second;
   }
 

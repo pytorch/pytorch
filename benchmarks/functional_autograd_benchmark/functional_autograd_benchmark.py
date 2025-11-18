@@ -1,7 +1,8 @@
 import time
 from argparse import ArgumentParser
 from collections import defaultdict
-from typing import Any, Callable, NamedTuple
+from collections.abc import Callable
+from typing import Any, NamedTuple
 
 import torch
 from torch.autograd import functional

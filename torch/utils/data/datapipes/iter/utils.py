@@ -49,7 +49,8 @@ class IterableWrapperIterDataPipe(IterDataPipe[_T]):
             except TypeError:
                 warnings.warn(
                     "The input iterable can not be deepcopied, "
-                    "please be aware of in-place modification would affect source data."
+                    "please be aware of in-place modification would affect source data.",
+                    stacklevel=2,
                 )
         yield from source_data
 

@@ -101,7 +101,7 @@ class ListTest(list_tests.CommonTest):
             list(sequence=[])
 
     def test_keywords_in_subclass(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass(list):
                 pass
         u = subclass([1, 2])
@@ -110,7 +110,7 @@ class ListTest(list_tests.CommonTest):
         with self.assertRaises(TypeError):
             subclass(sequence=())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass_with_init(list):
                 def __init__(self, seq, newarg=None):
                     super().__init__(seq)
@@ -120,7 +120,7 @@ class ListTest(list_tests.CommonTest):
         self.assertEqual(list(u), [1, 2])
         self.assertEqual(u.newarg, 3)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class subclass_with_new(list):
                 def __new__(cls, seq, newarg=None):
                     self = super().__new__(cls, seq)
@@ -172,7 +172,7 @@ class ListTest(list_tests.CommonTest):
             lst *= size
 
     def test_repr_mutate(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Obj:
                 @staticmethod
                 def __repr__():
@@ -276,14 +276,14 @@ class ListTest(list_tests.CommonTest):
         # Issue 8847: In the PGO build, the MSVC linker's COMDAT folding
         # optimization causes failures in code that relies on distinct
         # function addresses.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class L(list): pass
         with self.assertRaises(TypeError):
             (3,) + L([1,2])
 
     def test_equal_operator_modifying_operand(self):
         # test fix for seg fault reported in bpo-38588 part 2.
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class X:
                 def __eq__(self,other) :
                     list2.clear()
@@ -308,7 +308,7 @@ class ListTest(list_tests.CommonTest):
         self.assertFalse(list3 == list4)
 
     def test_lt_operator_modifying_operand(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # See gh-120298
             class evil:
                 def __lt__(self, other):
@@ -320,7 +320,7 @@ class ListTest(list_tests.CommonTest):
             a[0] < a
 
     def test_list_index_modifing_operand(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             # See gh-120384
             class evil:
                 def __init__(self, lst):
@@ -346,7 +346,7 @@ class ListTest(list_tests.CommonTest):
         # bpo-38610: The count(), index(), and remove() methods were not
         # holding strong references to list elements while calling
         # PyObject_RichCompareBool().
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class X:
                 def __eq__(self, other):
                     lst.clear()
@@ -356,7 +356,7 @@ class ListTest(list_tests.CommonTest):
         with self.assertRaises(ValueError):
             lst.index(lst)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class L(list):
                 def __eq__(self, other):
                     str(other)

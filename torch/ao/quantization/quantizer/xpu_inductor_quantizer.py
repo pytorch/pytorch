@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.ao.quantization.observer import HistogramObserver, PerChannelMinMaxObserver
@@ -91,15 +91,15 @@ class XPUInductorQuantizer(X86InductorQuantizer):
     def _annotate_qat_conv2d_fusion_pattern(
         self,
         model: torch.fx.GraphModule,
-        quantization_config: Optional[QuantizationConfig],
-        filter_fn: Optional[FilterFn] = None,
+        quantization_config: QuantizationConfig | None,
+        filter_fn: FilterFn | None = None,
     ):
         pass
 
     def _annotate_maxpool2d(
         self,
         node: Node,
-        quantization_config: Optional[QuantizationConfig],
+        quantization_config: QuantizationConfig | None,
     ) -> None:
         """
         Here we skip the annotate logic for maxpool at XPU backend
@@ -112,7 +112,7 @@ class XPUInductorQuantizer(X86InductorQuantizer):
         node: Node,
     ) -> None:
         if (node.target in int8_in_int8_out_ops) and (_is_any_annotated([node])):
-            if node.target == torch.ops.aten.max_pool2d.default:
+            if node.target is torch.ops.aten.max_pool2d.default:
                 return
             else:
                 input_node = node.all_input_nodes[0]

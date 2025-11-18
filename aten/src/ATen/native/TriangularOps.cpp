@@ -52,6 +52,7 @@ void apply_triu_tril_single(
     int64_t self_col_stride,
     bool upper) {
   constexpr int64_t zero = 0;
+  k = std::clamp(k, -n, m); // Clamp k to [-n, m] to prevent i + k arithmetic overflow, especially if k approaches INT64_MAX/INT64_MIN.
 
   if (upper) {
     parallel_for(0, n, 0, [&](int64_t start, int64_t end) {

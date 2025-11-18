@@ -42,7 +42,7 @@ if TEST_SCIPY:
 #       supports `exclude` argument.
 #       For more context: https://github.com/pytorch/pytorch/pull/56352#discussion_r633277617
 def sample_inputs_i0_i1(op_info, device, dtype, requires_grad, **kwargs):
-    exclude_zero = requires_grad and op_info.op == torch.special.i0e
+    exclude_zero = requires_grad and op_info.op is torch.special.i0e
     make_arg = partial(
         make_tensor,
         dtype=dtype,
@@ -448,6 +448,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: inf
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            # Too slow
+            DecorateInfo(
+                unittest.skip, "TestCommon", "test_compare_cpu", device_type="xpu"
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -474,6 +478,10 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            # Too slow
+            DecorateInfo(
+                unittest.skip, "TestCommon", "test_compare_cpu", device_type="xpu"
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -640,6 +648,16 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
         supports_autograd=False,
+        skips=(
+            DecorateInfo(
+                unittest.skip(
+                    "Scipy doesn't support bool inputs to spherical_bessel_j0"
+                ),
+                "TestUnaryUfuncs",
+                "test_reference_numerics_normal",
+                dtypes=(torch.bool,),
+            ),
+        ),
     ),
 ]
 
@@ -758,6 +776,16 @@ python_ref_db: list[OpInfo] = [
                     torch.float32: tol(atol=1e-03, rtol=1e-03),
                     torch.float64: tol(atol=1e-05, rtol=1e-03),
                 }
+            ),
+        ),
+        skips=(
+            DecorateInfo(
+                unittest.skip(
+                    "Scipy doesn't support bool inputs to spherical_bessel_j0"
+                ),
+                "TestUnaryUfuncs",
+                "test_reference_numerics_normal",
+                dtypes=(torch.bool,),
             ),
         ),
     ),

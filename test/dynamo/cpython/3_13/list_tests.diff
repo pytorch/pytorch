@@ -62,16 +62,16 @@ index dbc5ef4f9f2..af717703053 100644
 @@ -5,7 +58,7 @@ Tests common to list and UserList.UserList
  import sys
  from functools import cmp_to_key
- 
+
 -from test import seq_tests
 +import seq_tests
  from test.support import ALWAYS_EQ, NEVER_EQ, get_c_recursion_limit
- 
- 
+
+
 @@ -119,10 +172,6 @@ class CommonTest(seq_tests.CommonTest):
          a[-1] = 9
          self.assertEqual(a, self.type2test([5,6,7,8,9]))
- 
+
 -        msg = "list indices must be integers or slices"
 -        with self.assertRaisesRegex(TypeError, msg):
 -            a['a'] = "python"
@@ -81,7 +81,7 @@ index dbc5ef4f9f2..af717703053 100644
          del a[1]
 @@ -270,13 +319,14 @@ class CommonTest(seq_tests.CommonTest):
          self.assertRaises(TypeError, a.extend)
- 
+
          # overflow test. issue1621
 -        class CustomIter:
 -            def __iter__(self):
@@ -90,7 +90,7 @@ index dbc5ef4f9f2..af717703053 100644
 -                raise StopIteration
 -            def __length_hint__(self):
 -                return sys.maxsize
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class CustomIter:
 +                def __iter__(self):
 +                    return self
@@ -104,13 +104,13 @@ index dbc5ef4f9f2..af717703053 100644
 @@ -337,21 +387,23 @@ class CommonTest(seq_tests.CommonTest):
          a = self.type2test([NEVER_EQ])
          self.assertRaises(ValueError, a.remove, ALWAYS_EQ)
- 
+
 -        class BadExc(Exception):
 -            pass
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class BadExc(Exception):
 +                pass
- 
+
 -        class BadCmp:
 -            def __eq__(self, other):
 -                if other == 2:
@@ -121,24 +121,24 @@ index dbc5ef4f9f2..af717703053 100644
 +                    if other == 2:
 +                        raise BadExc()
 +                    return False
- 
+
          a = self.type2test([0, 1, 2, 3])
          self.assertRaises(BadExc, a.remove, BadCmp())
- 
+
 -        class BadCmp2:
 -            def __eq__(self, other):
 -                raise BadExc()
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            class BadCmp2:
 +                def __eq__(self, other):
 +                    raise BadExc()
- 
+
          d = self.type2test('abcdefghcij')
          d.remove('c')
 @@ -376,13 +428,14 @@ class CommonTest(seq_tests.CommonTest):
          self.assertRaises(ValueError, a.index, 2, 0, 4)
          self.assertEqual(a, self.type2test([-2, -1, 0, 1, 2]))
- 
+
 -        # Test modifying the list during index's iteration
 -        class EvilCmp:
 -            def __init__(self, victim):
@@ -146,7 +146,7 @@ index dbc5ef4f9f2..af717703053 100644
 -            def __eq__(self, other):
 -                del self.victim[:]
 -                return False
-+        with torch._dynamo.set_fullgraph(fullgraph=False):
++        with torch._dynamo.error_on_graph_break(False):
 +            # Test modifying the list during index's iteration
 +            class EvilCmp:
 +                def __init__(self, victim):

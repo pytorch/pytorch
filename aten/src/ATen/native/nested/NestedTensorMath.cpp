@@ -316,7 +316,7 @@ Tensor NestedTensor_to_padded_tensor_generic(
     TORCH_CHECK(
         (int64_t)output_size_.size() == ret_val.dim(),
         "Length of output_size does not match NestedTensor dims. Broadcasting is not supported.");
-    for (int64_t i = 0; i < (int64_t)ret_val.dim(); i++) {
+    for (int64_t i = 0; i < ret_val.dim(); i++) {
       TORCH_CHECK(
           output_size_[i] >= ret_val.size(i),
           "Value in output_size is less than NestedTensor padded size. Truncation is not supported.");

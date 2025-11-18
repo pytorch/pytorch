@@ -12,7 +12,8 @@ import tempfile
 import typing
 import unittest
 from types import BuiltinFunctionType
-from typing import Callable, NamedTuple, Optional, Union
+from typing import NamedTuple, Optional, Union
+from collections.abc import Callable
 
 import torch
 import torch.fx.experimental.meta_tracer
@@ -261,7 +262,7 @@ class TestFXExperimental(JitTestCase):
                 self.embedding_layers = torch.nn.ModuleList()
                 el = torch.nn.EmbeddingBag(500000, 4, mode="sum", sparse=True)
                 self.embedding_layers.append(el)
-                for i in range(3):
+                for _ in range(3):
                     el = torch.nn.EmbeddingBag(1000000, 4, mode="sum", sparse=True)
                     self.embedding_layers.append(el)
                 el = torch.nn.EmbeddingBag(500000, 4, mode="sum", sparse=True)
@@ -271,7 +272,7 @@ class TestFXExperimental(JitTestCase):
                 x = self.bottom_layers(a)
                 y = []
                 c = []
-                for i in range(len(self.embedding_layers)):
+                for _ in range(len(self.embedding_layers)):
                     temp = torch.randint(10, (8,))
                     c.append(temp + b)
                 for i in range(len(self.embedding_layers)):

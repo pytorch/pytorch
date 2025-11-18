@@ -11,9 +11,10 @@ import re
 import socket
 import time
 import weakref
+from collections.abc import Callable
 from datetime import timedelta
 from threading import Event, Thread
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 
 __all__ = ["parse_rendezvous_endpoint"]

@@ -13,6 +13,8 @@ mappings between nodes and their duplicates, enabling efficient graph analysis a
 optimization operations.
 """
 
+from __future__ import annotations
+
 import copyreg
 import io
 import logging
@@ -21,7 +23,7 @@ import operator
 import pickle
 from collections import defaultdict, deque
 from dataclasses import fields
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 
 import torch._logging
 import torch.fx
@@ -36,13 +38,26 @@ T = TypeVar("T")
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .symbolic_convert import InstructionTranslatorBase
 
 
 Node = torch.fx.Node
 Region = list[Node]
 IdenticalNodes = list[Node]
-GlobalStateKey = tuple[bool, bool, int, bool, bool, torch.dtype, bool, bool, bool, bool]
+GlobalStateKey = tuple[
+    bool,
+    bool,
+    int,
+    tuple[bool, bool],
+    tuple[bool, bool],
+    torch.dtype,
+    bool,
+    bool,
+    bool,
+    bool,
+]
 
 log = logging.getLogger(__name__)
 graph_expansion_log = torch._logging.getArtifactLogger(
@@ -163,7 +178,7 @@ class BackwardBfsArgIter:
         self._queue: deque[Optional[Node]] = deque()
 
     @staticmethod
-    def create(origin: Node) -> "BackwardBfsArgIter":
+    def create(origin: Node) -> BackwardBfsArgIter:
         it = BackwardBfsArgIter(origin)
         it.add_children(origin)
         # pop the origin node, since it is the origin of
@@ -238,7 +253,7 @@ class GraphRegionTracker:
             and n0 is not n1
         )
 
-    def track_node(self, tx: "InstructionTranslatorBase", node: Node) -> None:
+    def track_node(self, tx: InstructionTranslatorBase, node: Node) -> None:
         """
         The main entry point for tracking a node. This function will hash the node argument and group
         nodes with the same hash together. It updates the hash_to_duplicates and node_to_duplicates dictionaries
@@ -256,7 +271,7 @@ class GraphRegionTracker:
                 duplicates.append(node)
                 self.node_to_duplicates[node] = duplicates
         except NodeHashException as e:
-            log.debug("Unable to hash node %s with exception %s", node, e)
+            log.debug("Unable to hash node %s with exception %s", node, e)  # noqa: G200
 
     def track_node_mutations(
         self,
@@ -318,6 +333,7 @@ class GraphRegionTracker:
             if len(group) > 1:
                 region_group = []
                 min_rank = math.inf
+                # pyrefly: ignore [bad-assignment]
                 for node in group:
                     # some nodes aren't in the topo ranking?
                     if node in topological_ranking:

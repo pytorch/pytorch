@@ -207,7 +207,7 @@ class SendBuffer {
   SendBuffer(detail::TCPClient& client, detail::QueryType cmd)
       : client(client) {
     buffer.reserve(32); // enough for most commands
-    buffer.push_back((uint8_t)cmd);
+    buffer.push_back(static_cast<uint8_t>(cmd));
   }
 
   void appendString(const std::string& str) {
@@ -224,7 +224,7 @@ class SendBuffer {
 
   template <typename T>
   void appendValue(T value) {
-    uint8_t* begin = (uint8_t*)&value;
+    uint8_t* begin = reinterpret_cast<uint8_t*>(&value);
     buffer.insert(buffer.end(), begin, begin + sizeof(T));
     maybeFlush();
   }
@@ -721,6 +721,30 @@ int64_t TCPStore::queueLen(const std::string& key) {
   buffer.flush();
 
   return client_->receiveValue<int64_t>();
+}
+
+std::vector<std::string> TCPStore::listKeys() {
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__list);
+
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  detail::SendBuffer buffer(*client_, detail::QueryType::LIST_KEYS);
+  buffer.flush();
+
+  auto numKeys = client_->receiveValue<int64_t>();
+  std::vector<std::string> keys;
+  keys.reserve(numKeys);
+  for (auto i = 0; i < numKeys; ++i) {
+    auto bits = client_->receiveBits();
+    std::string str(bits.begin(), bits.end());
+    if (str.find(keyPrefix_) == 0) {
+      str = str.substr(keyPrefix_.size());
+    } else {
+      continue;
+    }
+    keys.emplace_back(str);
+  }
+  return keys;
 }
 
 bool TCPStore::hasExtendedApi() const {

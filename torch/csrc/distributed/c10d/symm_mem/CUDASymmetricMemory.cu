@@ -146,78 +146,6 @@ void* CUDASymmetricMemory::get_multicast_ptr() {
   return mc_addr_;
 }
 
-at::Tensor CUDASymmetricMemory::get_buffer(
-    int rank,
-    c10::IntArrayRef sizes,
-    c10::ScalarType dtype,
-    int64_t storage_offset) {
-  const size_t numel = std::accumulate(
-      sizes.begin(),
-      sizes.end(),
-      static_cast<size_t>(1),
-      std::multiplies<size_t>());
-  const auto element_size = c10::elementSize(dtype);
-  const auto req_size = (numel + storage_offset) * element_size;
-  TORCH_CHECK(
-      req_size <= buffer_size_,
-      "CUDASymmetricMemory::get_buffer: the requested size (",
-      req_size,
-      " bytes) exceeds the allocated size (",
-      buffer_size_,
-      " bytes)");
-  auto data_ptr = reinterpret_cast<uint8_t*>(buffers_[rank]) +
-      storage_offset * element_size;
-  auto device = c10::Device(c10::DeviceType::CUDA, local_device_idx_);
-  auto options = at::TensorOptions().dtype(dtype).device(device);
-  return at::for_blob(data_ptr, sizes)
-      .options(options)
-      .target_device(device)
-      .make_tensor();
-}
-
-at::Tensor CUDASymmetricMemory::get_signal_pad(
-    int rank,
-    c10::IntArrayRef sizes,
-    std::optional<c10::ScalarType> dtype,
-    int64_t storage_offset) {
-  // If the dtype is unspecified, default it to UInt32, as it
-  // is the most common type for signaling purposes.
-  if (!dtype.has_value()) {
-    dtype = c10::ScalarType::UInt32;
-  }
-
-  // If the shape is unspecified, treat the signal pad as a 1d tensor.
-  const auto element_size = c10::elementSize(*dtype);
-  std::vector<int64_t> shape;
-  if (!sizes.empty()) {
-    shape = sizes.vec();
-  } else {
-    shape.push_back(signal_pad_size / element_size);
-  }
-
-  const size_t numel = std::accumulate(
-      shape.begin(),
-      shape.end(),
-      static_cast<size_t>(1),
-      std::multiplies<size_t>());
-  const auto req_size = (numel + storage_offset) * element_size;
-  TORCH_CHECK(
-      req_size <= signal_pad_size,
-      "CUDASymmetricMemory::get_signal_pad: the requested size (",
-      req_size,
-      " bytes) exceeds the allocated size (",
-      signal_pad_size,
-      " bytes)");
-  auto data_ptr = reinterpret_cast<uint8_t*>(signal_pads_[rank]) +
-      storage_offset * element_size;
-  auto device = c10::Device(c10::DeviceType::CUDA, local_device_idx_);
-  auto options = at::TensorOptions().dtype(*dtype).device(device);
-  return at::for_blob(data_ptr, shape)
-      .options(options)
-      .target_device(device)
-      .make_tensor();
-}
-
 void check_channel(int channel, int world_size) {
   TORCH_CHECK(
       channel >= 0,
@@ -388,6 +316,14 @@ int CUDASymmetricMemory::get_world_size() {
   return world_size_;
 }
 
+c10::Device CUDASymmetricMemory::get_device() {
+  return c10::Device(c10::DeviceType::CUDA, local_device_idx_);
+}
+
+bool CUDASymmetricMemory::world_within_direct_access() {
+  return true;
+}
+
 Block::Block(
     c10::intrusive_ptr<AllocationRef> alloc_ref,
     int device_idx,
@@ -442,6 +378,7 @@ void* CUDASymmetricMemoryAllocator::alloc(
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemCreate_(&handle, block_size, &prop, 0));
 
 #elif defined(USE_ROCM)
+  handle_type_ = Expandable_Segments_Handle_Type::POSIX_FD;
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
   prop.location.type = hipMemLocationTypeDevice;
@@ -507,6 +444,7 @@ struct RendezvousRequest {
   size_t buffer_size;
   size_t signal_pad_offset;
   bool has_multicast_support;
+  char hostname[HOST_NAME_MAX + 1];
 };
 
 void validate_rendezvous_requests(
@@ -514,13 +452,15 @@ void validate_rendezvous_requests(
     int world_size) {
   TORCH_CHECK(reqs.size() == (size_t)world_size);
 
-  std::unordered_set<int> device_indices;
-  device_indices.reserve(world_size);
+  // For NVL72 systems, multiple hosts can be within a single nvlink domain.
+  // Multiple blocks will have same device_idx but they are on different hosts.
+  // Use (hostname, device_idx) pair to uniquely identify each allocation.
+  std::set<std::pair<std::string, int>> device_host_pairs;
   for (auto req : reqs) {
-    device_indices.insert(req.device_idx);
+    device_host_pairs.insert(std::make_pair(std::string(req.hostname), req.device_idx));
   }
   if (!allow_overlapping_devices() &&
-      device_indices.size() < (size_t)world_size) {
+      device_host_pairs.size() < (size_t)world_size) {
     TORCH_CHECK(
         false,
         "CUDASymmetricMemoryAllocator::rendezvous: ",
@@ -577,6 +517,11 @@ static void init_multicast_for_block(
   using McHandleType =
       std::conditional_t<use_fabric_handle, CUmemFabricHandle, int>;
 
+  McHandleType invalidator;
+  std::memset(&invalidator, UINT8_MAX, sizeof(McHandleType));
+
+  // Phase 1: export handle (rank 0 only)
+  McHandleType mc_exported_handle{};
   if (rank == 0) {
     CUmulticastObjectProp mc_prop{};
     mc_prop.numDevices = world_size;
@@ -585,68 +530,82 @@ static void init_multicast_for_block(
 
     // create a multicast object, which acts as a handle that allows multiple
     // devices or processes to access the same memory allocation coherently.
-    auto err = driver_api->cuMulticastCreate_(&mc_handle, &mc_prop);
-    if (err != CUDA_SUCCESS) {
-      const char* err_str;
-      CUresult get_error_str_err = driver_api->cuGetErrorString_(err, &err_str);
-      if (get_error_str_err != CUDA_SUCCESS) {
-        err_str = "unknown cuda driver error";
-      }
-      LOG(WARNING)
-          << "SymmetricMemory: cuMulticastCreate failed with: \"" << err_str
-          << "\". Gracefully skipping multicast initialization. "
-          << "However, this is unexpected. Please report the issue on GitHub.";
+    try {
+      C10_CUDA_DRIVER_CHECK(
+          driver_api->cuMulticastCreate_(&mc_handle, &mc_prop));
+      // using the CUDA Driver API to export a multicast object into a POSIX file
+      // descriptor.
+      C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
+          &mc_exported_handle, mc_handle, handleType, 0));
+    } catch (const std::exception& e) {
       // Allow peers gracefully skip multicast initialization by sending -1
-      // TODO: allow graceful skip for fabric
-      if constexpr (!use_fabric_handle) {
-        ipc_channel.broadcast_fds(rank, 0, pids, -1);
-      }
-      return;
-    }
-
-    McHandleType mc_exported_handle;
-    // using the CUDA Driver API to export a multicast object into a POSIX file
-    // descriptor.
-    C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
-        &mc_exported_handle, mc_handle, handleType, 0));
-    if constexpr (!use_fabric_handle) {
-      ipc_channel.broadcast_fds(rank, 0, pids, mc_exported_handle);
-      // Ref count is incremented as soon as SCM_RIGHTS send happens
-      close(mc_exported_handle);
-    } else {
-      // TODO implement storeExchange.broadcast
-      storeExchange.all_gather(store, rank, world_size, mc_exported_handle);
-    }
-
-  } else {
-    if constexpr (!use_fabric_handle) {
-      int mc_fd = ipc_channel.broadcast_fds(rank, 0, pids, -1);
-      if (mc_fd == -1) {
-        return;
-      }
-      // Convert back to a handle from the broadcasted POSIX file descriptor.
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
-          &mc_handle,
-          (void*)(uintptr_t)mc_fd,
-          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
-      close(mc_fd);
-    } else {
-      CUmemFabricHandle null_handle{};
-      auto mc_handles =
-          storeExchange.all_gather(store, rank, world_size, null_handle);
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
-          &mc_handle, (void*)&(mc_handles[0]), CU_MEM_HANDLE_TYPE_FABRIC));
+      mc_exported_handle = invalidator;
+      LOG(WARNING)
+          << "SymmetricMemory: fail to export multicast handle.\n"
+          << e.what();
     }
   }
 
-  // All rank adds their physical allocation to the multicast object
-  C10_CUDA_DRIVER_CHECK(
-      driver_api->cuMulticastAddDevice_(mc_handle, block->device_idx));
-  C10_CUDA_DRIVER_CHECK(driver_api->cuMulticastBindMem_(
-      mc_handle, 0, block->alloc_ref->handle, 0, block->block_size, 0));
+  // Phase 2: Exchange handle
+  McHandleType recv_handle;
+  if constexpr (!use_fabric_handle) {
+    recv_handle = ipc_channel.broadcast_fds(rank, 0, pids, mc_exported_handle);
+  } else {
+    // TODO implement storeExchange.broadcast
+    auto gathered_handles = storeExchange.all_gather(store, rank, world_size, mc_exported_handle);
+    recv_handle = std::move(gathered_handles[0]);
+  }
 
+  // Check exchange result
+  if (memcmp(&recv_handle, &invalidator, sizeof(McHandleType)) == 0) {
+    LOG(WARNING) << "Gracefully skipping multicast initialization.";
+    return;
+  }
+
+  // Flip to true after all CUDA steps finish
+  bool success_end = false;
+
+  // Phase 3: Import handle (non-0 ranks only)
+  if (rank != 0) {
+    if constexpr (!use_fabric_handle) {
+      // Convert back to a handle from the broadcasted POSIX file descriptor.
+      C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
+          &mc_handle,
+          (void*)(uintptr_t)recv_handle,
+          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR), check_all);
+    } else {
+      C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
+          &mc_handle, (void*)&(recv_handle), CU_MEM_HANDLE_TYPE_FABRIC), check_all);
+    }
+  }
+
+  // Phase 4: Bind memory
+  // All rank adds their physical allocation to the multicast object
+  C10_CUDA_DRIVER_CHECK_GOTO(
+      driver_api->cuMulticastAddDevice_(mc_handle, block->device_idx), check_all);
+  C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMulticastBindMem_(
+      mc_handle, 0, block->alloc_ref->handle, 0, block->block_size, 0), check_all);
+
+  success_end = true;
+
+check_all:
+  // Whether all ranks have succeeded
+  bool all_succeed = true;
+  auto rank_successes = storeExchange.all_gather(store, rank, world_size, success_end);
+  for (int r = 0; r < world_size; ++r) {
+    all_succeed &= rank_successes[r];
+  }
+  // Close the file descriptor before exit
+  if constexpr (!use_fabric_handle) {
+    close(recv_handle);
+  }
+  if (!all_succeed) {
+    LOG(WARNING) << "Gracefully skipping multicast initialization.";
+    return;
+  }
+
+  // Phase 5: Map to virtual memory
   map_block(&mc_addr, mc_handle, block->block_size, block->device_idx);
-  storeExchange.barrier(store, rank, world_size);
 #endif
 }
 
@@ -710,6 +669,9 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
       .buffer_size = block->buffer_size,
       .signal_pad_offset = block->signal_pad_offset,
       .has_multicast_support = device_has_multicast_support(block->device_idx)};
+
+  // Populate hostname field for host identification
+  gethostname(local_req.hostname, sizeof(local_req.hostname));
   auto reqs = storeExchange.all_gather(store, rank, world_size, local_req);
   validate_rendezvous_requests(reqs, world_size);
 
@@ -756,7 +718,11 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
 #elif defined(USE_ROCM)
     C10_HIP_CHECK(hipMemImportFromShareableHandle(
         &handles[r],
+#if ROCM_VERSION >= 70100
+        reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
+#else
         (void*)(uintptr_t) & (imported_handles[r]),
+#endif
         hipMemHandleTypePosixFileDescriptor));
 #else
     TORCH_CHECK(
@@ -784,11 +750,16 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
   std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs;
   for (int r = 0; r < world_size; ++r) {
     if (r == rank) {
-      alloc_refs.emplace_back(block->alloc_ref);
       if (mc_addr != nullptr) {
         alloc_refs.push_back(c10::make_intrusive<AllocationRef>(
             mc_addr, mc_handle, block->block_size, block->device_idx, true));
       }
+      // Note that in B200, cuMulticastUnbind can error if the mapped buffers
+      // are free'd before the multicast object is free'd. That's why the
+      // alloc_ref for the multicast object is added first into the vector,
+      // such that ~AllocationRef can release it first. For more context,
+      // see: https://github.com/pytorch/pytorch/issues/162429
+      alloc_refs.emplace_back(block->alloc_ref);
       continue;
     }
     alloc_refs.push_back(c10::make_intrusive<AllocationRef>(

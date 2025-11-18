@@ -1,8 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
-from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, Optional
 from unittest import skip
 
 import torch
@@ -330,6 +330,25 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         z = d_input * d_other
         self.assertEqual(z.placements, (Replicate(),))
         self.assertEqual(z.to_local(), input)
+
+    def test_inplace_op_partial_to_replicate(self):
+        # test that in-place operations that require redistribution raise an error
+        # to preserve aliasing semantics (issue #163374)
+        device_mesh = self.build_device_mesh()
+
+        input_tensor = torch.tensor(64.0, device=self.device_type)
+        partial_dt = DTensor.from_local(
+            input_tensor, device_mesh, placements=(Partial(),)
+        )
+
+        self.assertTrue(partial_dt.placements[0].is_partial())
+
+        # Inplace ops that require placement changes (Partial -> Replicate) should error
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "in-place operations that require placement changes are not supported",
+        ):
+            partial_dt.clamp_(max=10)
 
 
 if __name__ == "__main__":

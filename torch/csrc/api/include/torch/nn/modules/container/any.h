@@ -185,11 +185,12 @@ class AnyModule {
       typename... ArgumentTypes>
   std::unique_ptr<AnyModulePlaceholder> make_holder(
       std::shared_ptr<ModuleType>&& module,
-      ReturnType (Class::*)(ArgumentTypes...));
+      ReturnType (Class::* /*unused*/)(ArgumentTypes...));
 
   /// Helper method invoked by const and non-const `get()`.
   template <typename ModuleType, typename ReturnType, typename... ArgumentTypes>
-  ModuleType& get_(ReturnType (ModuleType::*)(ArgumentTypes...)) const;
+  ModuleType& get_(
+      ReturnType (ModuleType::* /*unused*/)(ArgumentTypes...)) const;
 
   /// Helper method invoked by const and non-const `get()`.
   template <typename ModuleType>
@@ -320,7 +321,7 @@ template <
     typename... ArgumentTypes>
 std::unique_ptr<AnyModulePlaceholder> AnyModule::make_holder(
     std::shared_ptr<ModuleType>&& module,
-    ReturnType (Class::*)(ArgumentTypes...)) {
+    ReturnType (Class::* /*unused*/)(ArgumentTypes...)) {
   static_assert(
       torch::detail::check_not_lvalue_references<ArgumentTypes...>(),
       "Modules stored inside AnyModule must not take references. "
@@ -345,7 +346,7 @@ ModuleType& AnyModule::get_() const {
 
 template <typename ModuleType, typename ReturnType, typename... ArgumentTypes>
 ModuleType& AnyModule::get_(
-    ReturnType (ModuleType::*)(ArgumentTypes...)) const {
+    ReturnType (ModuleType::* /*unused*/)(ArgumentTypes...)) const {
   if (typeid(ModuleType).hash_code() == type_info().hash_code()) {
     return *static_cast<AnyModuleHolder<ModuleType, ArgumentTypes...>&>(
                 *content_)

@@ -353,6 +353,17 @@ def test_linalg(device="cpu") -> None:
             torch.linalg.svd(A)
 
 
+def test_sdpa(device="cpu", dtype=torch.float16) -> None:
+    """Regression test for https://github.com/pytorch/pytorch/issues/167602
+    Without nvrtc_builtins on CuDNN-9.13 on CUDA-13 fails with ` No valid execution plans built.`
+    """
+    print(f"Testing SDPA on {device} using type {dtype}")
+    k, q, v = torch.rand(3, 1, 16, 77, 64, dtype=dtype, device=device).unbind(0)
+    attn = torch.rand(1, 1, 77, 77, dtype=dtype, device=device)
+    rc = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn)
+    assert rc.isnan().any().item() is False
+
+
 def smoke_test_compile(device: str = "cpu") -> None:
     supported_dtypes = [torch.float16, torch.float32, torch.float64]
 
@@ -386,8 +397,8 @@ def smoke_test_compile(device: str = "cpu") -> None:
 
 
 def smoke_test_nvshmem() -> None:
-    if not torch.cuda.is_available():
-        print("CUDA is not available, skipping NVSHMEM test")
+    if not torch.cuda.is_available() or target_os == "windows":
+        print("Windows platform or CUDA is not available, skipping NVSHMEM test")
         return
 
     # Check if NVSHMEM is compiled in current build
@@ -396,7 +407,9 @@ def smoke_test_nvshmem() -> None:
     except ImportError:
         # Not built with NVSHMEM support.
         # torch is not compiled with NVSHMEM prior to 2.9
-        if torch.__version__ < "2.9":
+        from torch.torch_version import TorchVersion
+
+        if TorchVersion(torch.__version__) < (2, 9):
             return
         else:
             # After 2.9: NVSHMEM is expected to be compiled in current build
@@ -487,10 +500,12 @@ def main() -> None:
     smoke_test_conv2d()
     test_linalg()
     test_numpy()
+    test_sdpa()
 
     if is_cuda_system:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()
+        test_sdpa("cuda")
 
     if options.package == "all":
         smoke_test_modules()
