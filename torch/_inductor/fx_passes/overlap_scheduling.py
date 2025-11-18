@@ -783,7 +783,7 @@ class OverlapScheduler:
             # TODO: we could potentially be more strict about limiting the amount of
             # pre-fetched memory before memory peak, and adjust allowed collective mem.
             if not self.off_compute_path(collective):
-                if (
+                if abs(
                     self.compute_index_domination[collective]
                     - self.current_compute_index
                 ) > self.max_compute_pre_fetch:
