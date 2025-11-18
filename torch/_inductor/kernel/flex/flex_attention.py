@@ -193,24 +193,6 @@ def flex_attention(
             score_mod_other_buffers,
             mask_mod_other_buffers,
         )
-    if _use_flex_flash_attention(
-        subgraph,
-        mask_graph,
-        kernel_options,
-        num_score_mod_placeholders=len(placeholder_inps),
-    ):
-        return create_flex_flash_attention_kernel(
-            query,
-            key,
-            value,
-            block_mask,
-            scale,
-            kernel_options,
-            subgraph_buffer,
-            mask_graph_buffer,
-            score_mod_other_buffers,
-            mask_mod_other_buffers,
-        )
 
     (
         query,
@@ -239,6 +221,31 @@ def flex_attention(
             full_q_indices,
         ]
     )
+
+    if _use_flex_flash_attention(
+        subgraph,
+        mask_graph,
+        kernel_options,
+        num_score_mod_placeholders=len(placeholder_inps),
+    ):
+        return create_flex_flash_attention_kernel(
+            query,
+            key,
+            value,
+            block_mask,
+            scale,
+            kernel_options,
+            subgraph_buffer,
+            mask_graph_buffer,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+            kv_num_blocks,
+            kv_indices,
+            full_kv_num_blocks,
+            full_kv_indices,
+            mask_graph=mask_graph,
+            subgraph=subgraph,
+        )
 
     score_mod_other_buffers = maybe_realize(score_mod_other_buffers)
     mask_mod_other_buffers = maybe_realize(mask_mod_other_buffers)
@@ -478,7 +485,7 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
     for node in joint_graph.nodes:
         if (
             node.op == "call_function"
-            and node.target == torch.ops.flex_lib.zeros_and_scatter.default
+            and node.target is torch.ops.flex_lib.zeros_and_scatter.default
         ):
             for user in node.users:
                 if user.op != "output":
@@ -843,7 +850,7 @@ def flex_attention_backward(*args, **kwargs):
             **cur_kernel_options,
         )
     inputs_for_autotuning = (
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         [
             query,
             key,
@@ -914,11 +921,11 @@ def get_bwd_subgraph_outputs(
     joint_outputs: JointOutputResult,
 ) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
     subgraph_buffer = (
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
@@ -930,5 +937,5 @@ def get_bwd_subgraph_outputs(
         *joint_outputs.mutated_grads,
     ]
 
-    # pyrefly: ignore  # not-iterable
+    # pyrefly: ignore [not-iterable]
     return [*subgraph_buffer, *mask_graph_buffer, *joint_output_buffers]

@@ -1876,20 +1876,19 @@ class TestBinaryUfuncs(TestCase):
 
                     expected = python_op(a, b)
 
-                    for op in (operator.truediv, torch.true_divide):
-                        actual_scalar = torch_op(a, b)
+                    actual_scalar = torch_op(a, b)
 
-                        a_t = torch.tensor(a, device=device)
-                        b_t = torch.tensor(b, device=device)
+                    a_t = torch.tensor(a, device=device)
+                    b_t = torch.tensor(b, device=device)
 
-                        actual_tensor = torch_op(a_t, b_t)
-                        actual_first_tensor = torch_op(a_t, b)
-                        actual_second_tensor = torch_op(a, b_t)
+                    actual_tensor = torch_op(a_t, b_t)
+                    actual_first_tensor = torch_op(a_t, b)
+                    actual_second_tensor = torch_op(a, b_t)
 
-                        self.assertEqual(actual_scalar, expected)
-                        self.assertEqual(actual_tensor.item(), expected)
-                        self.assertEqual(actual_first_tensor, actual_tensor)
-                        self.assertEqual(actual_second_tensor, actual_tensor)
+                    self.assertEqual(actual_scalar, expected)
+                    self.assertEqual(actual_tensor.item(), expected)
+                    self.assertEqual(actual_first_tensor, actual_tensor)
+                    self.assertEqual(actual_second_tensor, actual_tensor)
 
         _scalar_helper(operator.truediv, operator.truediv)
         _scalar_helper(operator.truediv, torch.true_divide)
@@ -3540,7 +3539,7 @@ class TestBinaryUfuncs(TestCase):
         if base2:
             ref_func = np.logaddexp2
             our_func = torch.logaddexp2
-        elif dtype in (torch.complex64, torch.complex128):
+        elif dtype in (torch.complex32, torch.complex64, torch.complex128):
             # numpy has not implemented logaddexp for complex
             def complex_logaddexp(x1, x2):
                 x = np.stack((x1, x2))
@@ -3559,6 +3558,13 @@ class TestBinaryUfuncs(TestCase):
                 ref = ref_func(a.cpu().float().numpy(), b.cpu().float().numpy())
                 v = our_func(a, b)
                 self.assertEqual(ref, v.float(), atol=0.01, rtol=0.01)
+            elif dtype == torch.complex32:
+                ref = ref_func(
+                    a.cpu().to(torch.complex64).numpy(),
+                    b.cpu().to(torch.complex64).numpy(),
+                )
+                v = our_func(a, b)
+                self.assertEqual(ref, v.to(torch.complex64), atol=0.01, rtol=0.01)
             else:
                 ref = ref_func(a.cpu().numpy(), b.cpu().numpy())
                 v = our_func(a, b)
@@ -3589,12 +3595,23 @@ class TestBinaryUfuncs(TestCase):
         _test_helper(a, b)
 
     @skipIfTorchDynamo()  # complex infs/nans differ under Dynamo/Inductor
-    @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
+    @dtypesIfCUDA(
+        torch.float32,
+        torch.float64,
+        torch.bfloat16,
+        torch.complex32,
+        torch.complex64,
+        torch.complex128,
+    )
     @dtypes(
         torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128
     )
     def test_logaddexp(self, device, dtype):
-        if sys.version_info >= (3, 12) and dtype in (torch.complex64, torch.complex128):
+        if sys.version_info >= (3, 12) and dtype in (
+            torch.complex32,
+            torch.complex64,
+            torch.complex128,
+        ):
             return self.skipTest("complex flaky in 3.12")
         self._test_logaddexp(device, dtype, base2=False)
 

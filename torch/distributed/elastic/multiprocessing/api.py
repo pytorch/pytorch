@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from enum import IntFlag
 from multiprocessing import synchronize
 from types import FrameType
-from typing import Any, Optional, Union
+from typing import Any, Optional, TextIO, Union
 
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure, record
@@ -38,7 +38,7 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
-from torch.numa.binding import NumaOptions
+from torch.numa.binding import maybe_wrap_with_numa_binding, NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -491,8 +491,8 @@ class PContext(abc.ABC):
         self.stderrs = logs_dest.stderrs
         self.error_files = logs_dest.error_files
         self.nprocs = nprocs
-        self.filtered_stdout = logs_dest.filtered_stdout
-        self.filtered_stderr = logs_dest.filtered_stderr
+        self.filtered_stdout: Optional[TextIO] = None
+        self.filtered_stderr: Optional[TextIO] = None
 
         self._tail_logs = [
             TailLog(name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes),
@@ -500,6 +500,9 @@ class PContext(abc.ABC):
         ]
 
         if duplicate_stdout_filters:
+            self.filtered_stdout = open(
+                logs_dest.filtered_stdout, mode="w", errors="replace", buffering=1
+            )
             self._tail_logs.append(
                 TailLog(
                     name,
@@ -513,6 +516,9 @@ class PContext(abc.ABC):
             )
 
         if duplicate_stderr_filters:
+            self.filtered_stderr = open(
+                logs_dest.filtered_stderr, mode="w", errors="replace", buffering=1
+            )
             self._tail_logs.append(
                 TailLog(
                     name,
@@ -657,6 +663,10 @@ class PContext(abc.ABC):
         self._close(death_sig=death_sig, timeout=timeout)
         for tail_log in self._tail_logs:
             tail_log.stop()
+        if self.filtered_stdout:
+            self.filtered_stdout.close()
+        if self.filtered_stderr:
+            self.filtered_stderr.close()
 
 
 def get_std_cm(std_rd: str, redirect_fn):
@@ -675,6 +685,7 @@ def _wrap(
     stderr_redirects: dict[int, str],  # redirect file for stderr (to console if None)
     ret_vals: dict[int, mp.SimpleQueue],
     queue_finished_reading_event: synchronize.Event,
+    numa_options: Optional[NumaOptions],
 ) -> None:
     # get the per-rank params up front so we fail fast if no mapping is found
     args_ = args[local_rank]
@@ -691,6 +702,9 @@ def _wrap(
         os.environ[k] = v
 
     with stdout_cm, stderr_cm:
+        fn = maybe_wrap_with_numa_binding(
+            fn, gpu_index=local_rank, numa_options=numa_options
+        )
         ret = record(fn)(*args_)
     ret_val_.put(ret)
     queue_finished_reading_event.wait()
@@ -755,12 +769,12 @@ class MultiprocessContext(PContext):
                 self.stderrs,
                 self._ret_vals,
                 self._worker_finished_event,
+                self._numa_options,
             ),
             nprocs=self.nprocs,
             join=False,
             daemon=False,
             start_method=self.start_method,
-            numa_options=self._numa_options,
         )
 
     def _is_done(self) -> bool:

@@ -227,7 +227,8 @@ class UniformValueConstantFolder(ConstantFolder):
         self.symint_nodes = _SymHashingDict()
         for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
-                self.symint_nodes[n.meta["val"]] = n
+                if n.meta["val"] not in self.symint_nodes:
+                    self.symint_nodes[n.meta["val"]] = n
 
         # reference from torch/_funtorch/partitioners.py:get_default_op_list
         self.view_op_packets = [
@@ -315,7 +316,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # single-elem attrs
         if node.op == "get_attr" or (
             node.op == "call_function"
-            and node.target == torch.ops.aten.lift_fresh_copy.default
+            and node.target is torch.ops.aten.lift_fresh_copy.default
         ):
             out = super(ConstantFolder, self).run_node(node)
             if isinstance(out, torch.Tensor) and out.numel() == 1:
@@ -328,7 +329,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # constructors ops
         if (
             node.op == "call_function"
-            and node.target == aten.full.default
+            and node.target is aten.full.default
             and len(node.args) == 2
         ):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
@@ -339,7 +340,7 @@ class UniformValueConstantFolder(ConstantFolder):
                 return aten.full.default(*new_args, **node.kwargs)
 
         # handle before view ops because this changes value
-        if node.target == aten.view.dtype:
+        if node.target is aten.view.dtype:
             return super(ConstantFolder, self).run_node(node)
 
         # view ops, return input tensor, the first argument
@@ -437,7 +438,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 # the conversion from tensor and back to value can be lossy, just use the original full ctor value
                 if (
                     node.op == "call_function"
-                    and node.target == aten.full.default
+                    and node.target is aten.full.default
                     and len(node.args) == 2
                 ):
                     value = node.args[1]
@@ -517,7 +518,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             invoke_quant_replacement = graph.call_function(
                 torch._higher_order_ops.invoke_quant,
                 (subgraph, *args),
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 kwargs,
             )
             invoke_quant_replacement.meta.update(subgraph.meta)
@@ -534,7 +535,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             if (
                 len(invoke_quant_replacement.users) == 1
                 and len(subgraph.users) == 1
-                and first_user.target == operator.getitem
+                and first_user.target is operator.getitem
                 and first_user.args[1] == 0
             ):
                 subgraph_graph = getattr(gm, subgraph.target)
@@ -628,7 +629,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         device=KeywordArg("device"),
         requires_grad=KeywordArg("requires_grad"),
     ),
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=patterns,
 )
 def fix_iota_device(match: Match, length, start, step, dtype, device, requires_grad):
@@ -682,7 +683,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
         ),
         KeywordArg("dtype2"),
     ),
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=patterns,
 )
 def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtype):
@@ -745,7 +746,7 @@ def definitely_equal(
 
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=patterns,
 )
 def pointless_view(match: Match, arg, size):
@@ -763,7 +764,7 @@ def pointless_view(match: Match, arg, size):
         CallFunction(aten.view.default, KeywordArg("arg"), KeywordArg("size1")),
         KeywordArg("size2"),
     ),
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=patterns,
 )
 def pointless_view_pair(match: Match, arg, size1, size2):
@@ -784,7 +785,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
         CallFunction(aten.permute.default, KeywordArg("arg"), KeywordArg("perm1")),
         KeywordArg("perm2"),
     ),
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=patterns,
 )
 def pointless_permute_pair(match: Match, arg, perm1, perm2):
@@ -805,7 +806,7 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
         Arg(),
         Arg(),
     ),
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=patterns,
 )
 def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
@@ -819,7 +820,7 @@ def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
         and statically_known_true(mat1.meta["val"].shape[0] == 1)
         and statically_known_true(mat2.meta["val"].shape[0] == 1)
     ):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(repl, [mat1, mat2])
 
 
@@ -892,6 +893,9 @@ def _other_is_broadcasted_in_dim(match):
     if isinstance(dim, int):
         dim = (dim,)
 
+    if any(d >= len(other_shape) for d in dim):
+        return False
+
     return all(statically_known_true(other_shape[d] == 1) for d in dim)
 
 
@@ -909,17 +913,17 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         return (inp - max_) * (sign * other)
 
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
 
 
 for reverse, to_dtype in itertools.product((False, True), repeat=2):
     register_graph_pattern(
         _partial_softmax_pattern(aten.mul.Tensor, reverse=reverse, to_dtype=to_dtype),
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[1],
         extra_check=_other_is_broadcasted_in_dim,
     )(mul_softmax_pattern)
@@ -939,17 +943,17 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         return (inp - max_) / (sign * other)
 
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
 
 
 for to_dtype in (False, True):
     register_graph_pattern(
         _partial_softmax_pattern(aten.div.Tensor, to_dtype=to_dtype),
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[1],
         extra_check=_other_is_broadcasted_in_dim,
     )(div_softmax_pattern)

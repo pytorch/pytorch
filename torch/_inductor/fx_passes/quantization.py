@@ -1175,8 +1175,8 @@ def _register_concat_linear_int8_woq_lowering(
         mm_node_of_x = None
         for candidate in iter(x.users.keys()):
             if (
-                candidate.target == aten.mm.default
-                and list(candidate._input_nodes)[1].target == aten.cat.default
+                candidate.target is aten.mm.default
+                and list(candidate._input_nodes)[1].target is aten.cat.default
             ):
                 mm_node_of_x = candidate
                 break

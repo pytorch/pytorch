@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_XPU,
     TestCase,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -422,6 +423,17 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(res_or, torch.SymInt, msg=type(res_or))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_or(s97, s26), 14)"""
+        )
+
+    def test_symint_bitwise_xor(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 0b1100)
+        b0 = create_symint(shape_env, 0b1010)
+        res_xor = a0 ^ b0
+        self.assertEqual(res_xor, 0b0110)
+        self.assertIsInstance(res_xor, torch.SymInt, msg=type(res_xor))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_xor(s97, s26), 6)"""
         )
 
     def test_stride(self):
@@ -3204,6 +3216,9 @@ class TestGuardsExpressions(TestCase):
         self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
         self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
+    @unittest.skipIf(
+        TEST_XPU, "Skipped on XPU"
+    )  # https://github.com/intel/torch-xpu-ops/issues/2169"
     @skipIfTorchDynamo("Attempt to trace generator")
     @torch.fx.experimental._config.patch("use_duck_shape", False)
     def test_size_comparison_no_recompile(self):
@@ -3658,7 +3673,7 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
         self.assertEqual(result_compiled, result_eager)
         self.assertEqual(cnt.frame_count, 1)
 
-        # Pass a contiguous tensor. A recompilation will happen due to 0/1 speciialization on stride.
+        # Pass a contiguous tensor. A recompilation will happen due to 0/1 specialization on stride.
         log_stream, ctx = logs_to_string(
             "torch._functorch._aot_autograd.graph_capture", "aot_graphs"
         )
@@ -3798,6 +3813,74 @@ def forward(self, arg0_1: "i64[2][1]cpu", arg1_1: "Sym(u2)", arg2_1: "Sym(u3)", 
     @torch._inductor.config.patch("cpp_wrapper", True)
     def test_unbacked_slice_with_step_cpp_wrapper(self):
         self.test_unbacked_slice_with_step()
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_slice_with_tensor_indices(self):
+        for d in [True, False]:
+            # Test slicing with tensor start/stop/step on RHS (reading)
+
+            # Test 1: Basic slice with tensor start and stop
+            def f1(x, start_t, stop_t):
+                return x[start_t:stop_t]
+
+            x = torch.randn(20)
+            start_t = torch.tensor(5)
+            stop_t = torch.tensor(15)
+            fn1 = torch.compile(f1, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(
+                torch.allclose(fn1(x, start_t, stop_t), f1(x, start_t, stop_t))
+            )
+
+            # Test 2: Slice with tensor step
+            def f2(x, start_t, stop_t, step_t):
+                return x[start_t:stop_t:step_t]
+
+            step_t = torch.tensor(2)
+            fn2 = torch.compile(f2, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(
+                torch.allclose(
+                    fn2(x, start_t, stop_t, step_t), f2(x, start_t, stop_t, step_t)
+                )
+            )
+
+            # Test 3: Slice with only tensor start
+            def f3(x, start_t):
+                return x[start_t:]
+
+            fn3 = torch.compile(f3, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(torch.allclose(fn3(x, start_t), f3(x, start_t)))
+
+            # Test 4: Slice with only tensor stop
+            def f4(x, stop_t):
+                return x[:stop_t]
+
+            fn4 = torch.compile(f4, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(torch.allclose(fn4(x, stop_t), f4(x, stop_t)))
+
+            # Test 5: Negative indices with tensors
+            def f5(x, start_t):
+                return x[start_t:-1]
+
+            start_t_neg = torch.tensor(-10)
+            fn5 = torch.compile(f5, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(torch.allclose(fn5(x, start_t_neg), f5(x, start_t_neg)))
+
+            # Test 6: Multidimensional slice with tensor indices
+            def f6(x, start_t, stop_t):
+                return x[:, start_t:stop_t]
+
+            x_2d = torch.randn(10, 20)
+            fn6 = torch.compile(f6, fullgraph=True, dynamic=d, backend="inductor")
+            self.assertTrue(
+                torch.allclose(fn6(x_2d, start_t, stop_t), f6(x_2d, start_t, stop_t))
+            )
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_slice_with_tensor_indices_cpp_wrapper(self):
+        self.test_slice_with_tensor_indices()
 
     @fresh_cache()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -4328,6 +4411,169 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         a = torch.ones(9, dtype=torch.int32)
 
         self.assertEqual(compiled(a, b), func(a, b))
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    def test_narrow_unbacked_start(self):
+        def func(x, start, length):
+            # unbacked start
+            u0 = start.item()
+            return torch.narrow(x, 0, u0, length)
+
+        compiled_func = torch.compile(func, fullgraph=True, backend="inductor")
+
+        x = torch.tensor([1, 2, 3, 4, 5, 6])
+
+        # Test cases: (start, length)
+        test_cases = [
+            # Negative starts
+            (-2, 2),  # Start from second-to-last element
+            (-1, 1),  # Start from last element
+            (-3, 3),  # Start from third-to-last element
+            (-6, 2),  # Start from beginning (negative)
+            (-4, 1),  # Start from fourth-to-last element
+            # Positive starts
+            (0, 2),  # Start from beginning
+            (1, 3),  # Start from second element
+            (2, 2),  # Start from third element
+            (4, 2),  # Start near end
+            # Edge cases
+            (0, 6),  # Full tensor
+            (0, 1),  # Single element from start
+            (5, 1),  # Single element from end
+        ]
+
+        for start_val, length in test_cases:
+            with self.subTest(start=start_val, length=length):
+                start = torch.tensor([start_val])
+
+                # Test with compiled function
+                result_compiled = compiled_func(x, start, length)
+
+                # Test with eager function (expected behavior)
+                result_eager = func(x, start, length)
+
+                # Compare results
+                self.assertEqual(result_compiled, result_eager)
+
+    @fresh_cache()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("cpp_wrapper", True)
+    def test_narrow_unbacked_start_cpp_wrapper(self):
+        """Test narrow with unbacked start with cpp_wrapper"""
+        self.test_narrow_unbacked_start()
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_narrow_with_tensor_start(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def f(x, start, end):
+            return torch.narrow(x, 0, start, end)
+
+        x = torch.tensor(
+            [False], device="cuda:0" if torch.cuda.is_available() else "cpu"
+        )
+        start = torch.tensor(0)
+        res = f(x, start, 0)
+        self.assertEqual(res.shape, torch.Size([0]))
+
+    @skipIfTorchDynamo()
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_backed_size_oblivious_expand(self):
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+
+        def func(a, shape):
+            return a.expand(*shape)
+
+        compiled = torch.compile(func, fullgraph=True, backend=cnt, dynamic=True)
+
+        def run(a, shape):
+            self.assertEqual(compiled(a, shape), func(a, shape))
+
+        # No specialization - matching dimensions
+        run(torch.rand(2, 10), (2, 10))
+        run(torch.rand(5, 5), (5, 5))
+        self.assertEqual(cnt.frame_count, 1)  # Single compilation
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # Specialize input dim to 1 (broadcasting)
+        # Input dim is 1, needs to expand to larger size
+        run(torch.rand(1, 10), (9, 10))  # Compile with input[0] == 1
+        run(torch.rand(1, 5), (7, 5))  # Reuse same compiled graph
+        self.assertEqual(cnt.frame_count, 1)
+        # Changing input from 1 triggers recompilation
+        run(torch.rand(5, 10), (5, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # Multi-dimensional broadcasting
+        # Multiple dimensions with different broadcast semantics
+        run(torch.rand(1, 1, 10), (5, 7, 10))  # Broadcast first two dims
+        run(torch.rand(1, 1, 5), (3, 4, 5))  # Reuse pattern
+        self.assertEqual(cnt.frame_count, 1)
+
+    @skipIfTorchDynamo()
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_backed_size_oblivious_broadcast(self):
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+
+        def func(a, b):
+            torch.broadcast_shapes(a.size(), b.size())
+            return a + b
+
+        compiled = torch.compile(func, fullgraph=True, backend=cnt, dynamic=True)
+
+        def run(a, b):
+            self.assertEqual(compiled(a, b), func(a, b))
+
+        # No 0/1 specializations, no broadcasts.
+        # but a[0] == b[0] and a[1] == b[1] are asserted.
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        run(torch.rand(1, 1), torch.rand(1, 1))
+        run(torch.rand(10, 10), torch.rand(10, 10))
+
+        self.assertEqual(cnt.frame_count, 1)
+        run(torch.rand(10, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # specialize a[0] == 1. b[0] not specialized.
+        run(torch.rand(1, 10), torch.rand(9, 10))
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 1)
+        # if we change a[0] we get recompilation.
+        run(torch.rand(10, 10), torch.rand(10, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # TODO duck sizing shall be disabled when backed_size_oblivious
+        # is on probably.
+        # specialize b[0] == 1. a[0] not specialized.
+        run(torch.rand(10, 11), torch.rand(1, 11))
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 1)
+        run(torch.rand(2, 10), torch.rand(2, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    def test_unbacked_view_extra(self):
+        def fn(x):
+            i0 = x.nonzero().size(0)
+            y = torch.zeros((i0, 192))
+            return y.view([12, -1, 192])
+
+        res1 = torch.compile(fn, fullgraph=True)(torch.ones((12,)))
+        res2 = fn(torch.ones((12,)))
+        self.assertEqual(res1, res2)
 
 
 instantiate_parametrized_tests(TestUnbacked)

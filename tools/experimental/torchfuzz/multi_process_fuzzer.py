@@ -48,30 +48,8 @@ def persist_print(msg):
 # List of regex patterns for ignore bucket
 IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
-        r"Dynamo failed to run FX node with fake tensors: call_method fill_diagonal_"
-    ),  # https://github.com/pytorch/pytorch/issues/163420
-    re.compile(
-        r"TypeError: unsupported operand type\(s\) for divmod\(\): 'SymInt' and 'int'"
-    ),  # https://github.com/pytorch/pytorch/issues/163457
-    re.compile(
-        r"RuntimeError: self\.stride\(-1\) must be 1 to view ComplexDouble as"
-    ),  # https://github.com/pytorch/pytorch/issues/162561
-    re.compile(
-        r"BooleanAtom not allowed in this context"
-    ),  # https://github.com/pytorch/pytorch/issues/160726
-    re.compile(
-        r"TypeError\(\"unsupported operand type\(s\) for \*: 'SymBool' and 'FakeTensor'\"\)"
-    ),  # https://github.com/pytorch/pytorch/issues/164684
-    re.compile(r"KeyError: u\d+"),  # https://github.com/pytorch/pytorch/issues/164685
-    re.compile(
-        r"torch\._inductor\.exc\.InductorError: CppCompileError: C\+\+ compile error"
-    ),  # https://github.com/pytorch/pytorch/issues/164686
-    re.compile(
-        r"\.item\(\) # dtype="
-    ),  # https://github.com/pytorch/pytorch/issues/164725
-    re.compile(
-        r"dimensionality of sizes \(0\) must match dimensionality of strides \(1\)"
-    ),  # https://github.com/pytorch/pytorch/issues/164814
+        r"torch\._inductor\.exc\.InductorError: AssertionError: -1"
+    ),  # https://github.com/pytorch/pytorch/issues/167937
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]
@@ -296,7 +274,7 @@ def run_multi_process_fuzzer(
                 )
 
                 def write_func(msg):
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     pbar.write(msg)
             else:
                 persist_print("Progress: (install tqdm for better progress bar)")
@@ -591,7 +569,7 @@ def run_until_failure(
                     pbar.set_postfix_str(f"{total_successful}/{total_ignored}")
 
                     def write_func(msg):
-                        # pyrefly: ignore  # missing-attribute
+                        # pyrefly: ignore [missing-attribute]
                         pbar.write(msg)
                 else:
                     pbar = None

@@ -86,8 +86,8 @@ bool can_accumulate_inplace(const Variable& v) {
       v.is_non_overlapping_and_dense() &&
 
       // and we hold the last reference
-      at::caching::adjusted_use_count(v) == 1 && v.has_storage() &&
-      v.storage().use_count() == 1);
+      impl::is_tensor_stealable(v, 1 + at::caching::is_cached_tensor(v)) &&
+      v.has_storage() && v.storage().use_count() == 1);
 }
 } // anonymous namespace
 
@@ -194,7 +194,7 @@ void InputBuffer::add(
     Variable&& var,
     const std::optional<c10::Stream>& opt_producer_stream_,
     const std::optional<c10::Stream>& opt_consumer_stream_,
-    const std::shared_ptr<Node>& fn) {
+    Node* fn) {
   TORCH_INTERNAL_ASSERT(pos < buffer.size());
 
   if (!var.defined()) {
@@ -235,7 +235,7 @@ void InputBuffer::add(
   TORCH_INTERNAL_ASSERT(opt_consumer_stream && opt_producer_stream);
 
   if (*opt_consumer_stream != *opt_producer_stream &&
-      dynamic_cast<AccumulateGrad*>(fn.get()) &&
+      dynamic_cast<AccumulateGrad*>(fn) &&
       at::globalContext().warnOnAccumulateGradStreamMismatch()) {
     TORCH_WARN_ONCE(
         "The AccumulateGrad node's stream does not match the stream of the node that produced "

@@ -68,11 +68,11 @@ def triton_config_to_hashable(cfg: Config) -> Hashable:
     Convert triton config to a tuple that can uniquely identify it. We can use
     the return value as a dictionary key.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     items = sorted(cfg.kwargs.items())
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     items.append(("num_warps", cfg.num_warps))
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     items.append(("num_stages", cfg.num_stages))
     return tuple(items)
 
@@ -106,7 +106,7 @@ def get_max_y_grid() -> int:
 
 
 try:
-    # pyrefly: ignore  # import-error
+    # pyrefly: ignore [import-error]
     import colorama
 
     HAS_COLORAMA = True
@@ -118,7 +118,7 @@ except ModuleNotFoundError:
 if HAS_COLORAMA:
 
     def _color_text(msg: str, color: str) -> str:
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return getattr(colorama.Fore, color.upper()) + msg + colorama.Fore.RESET
 
 else:
@@ -187,3 +187,57 @@ def compile_mps_shader(source: str) -> Any:
         return torch.mps.compile_shader(source)
     except SyntaxError as err:
         raise SyntaxError(f"failed to compile {source} with {err.msg}") from err
+
+
+def torch_dtype_to_jax_runtime(dtype: torch.dtype) -> Any:
+    """
+    Map PyTorch dtype to actual JAX dtype object at runtime.
+
+    This helper is used in generated Pallas kernels at runtime to convert
+    PyTorch dtypes to JAX dtype objects (not string representations).
+
+    Args:
+        dtype: PyTorch dtype to convert
+
+    Returns:
+        JAX dtype object (e.g., jnp.float32 object itself)
+    """
+    import jax.numpy as jnp  # pyrefly: ignore [import-error]
+
+    dtype_map = {
+        torch.float32: jnp.float32,
+        torch.float64: jnp.float64,
+        torch.float16: jnp.float16,
+        torch.bfloat16: jnp.bfloat16,
+        torch.int32: jnp.int32,
+        torch.int64: jnp.int64,
+        torch.int16: jnp.int16,
+        torch.int8: jnp.int8,
+        torch.uint8: jnp.uint8,
+        torch.bool: jnp.bool_,
+        torch.complex64: jnp.complex64,
+        torch.complex128: jnp.complex128,
+    }
+    if dtype not in dtype_map:
+        raise ValueError(f"Unsupported dtype for JAX conversion: {dtype}")
+    return dtype_map[dtype]
+
+
+def torch_dtype_to_jax(dtype: torch.dtype) -> str:
+    """
+    Map PyTorch dtype to JAX dtype expression string.
+
+    This helper is used at compile time in codegen to generate
+    JAX dtype expressions for Pallas kernels.
+
+    Args:
+        dtype: PyTorch dtype to convert
+
+    Returns:
+        JAX dtype expression as string (e.g., "jnp.float32")
+    """
+    jax_dtype = torch_dtype_to_jax_runtime(dtype)
+    dtype_name = jax_dtype.__name__
+    if dtype_name == "bool":
+        dtype_name = "bool_"
+    return f"jnp.{dtype_name}"

@@ -18,6 +18,7 @@ from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint.api import CheckpointException
 from torch.distributed.checkpoint.default_planner import (
     _create_default_local_metadata,
+    _validate_global_plan,
     create_default_global_save_plan,
     create_default_local_load_plan,
     create_default_local_save_plan,
@@ -28,6 +29,7 @@ from torch.distributed.checkpoint.filesystem import CURRENT_DCP_VERSION
 from torch.distributed.checkpoint.metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,
+    Metadata,
     MetadataIndex,
     TensorProperties,
     TensorStorageMetadata,
@@ -216,7 +218,7 @@ class TestSavePlan(TestCase):
         # Number of plans should remain unchanged
         self.assertEqual(len(all_plans), len(deduped_plans))
 
-        # Numer of items in the deduped plans should be less than the original plans
+        # Number of items in the deduped plans should be less than the original plans
         for new_plan, old_plan in zip(deduped_plans, all_plans):
             self.assertFalse(_compare_save_plans(new_plan, old_plan))
             self.assertTrue(len(new_plan.items) < len(old_plan.items))
@@ -558,6 +560,32 @@ class TestPlannerHelpers(TestCase):
         self.assertFalse(_compare_save_plans(plan1, plan2))
         self.assertTrue(_compare_save_plans(plan1, plan1))
         self.assertTrue(_compare_save_plans(plan2, plan2))
+
+
+class TestValidateGlobalPlan(TestCase):
+    def _make_metadata(self, chunks, size):
+        storage = TensorStorageMetadata(
+            properties=TensorProperties(dtype=torch.float32),
+            size=torch.Size(size),
+            chunks=chunks,
+        )
+        return Metadata(state_dict_metadata={"param": storage})
+
+    def test_non_overlapping_chunks(self):
+        chunks = [
+            ChunkStorageMetadata(offsets=torch.Size([i]), sizes=torch.Size([1]))
+            for i in range(4)
+        ]
+        metadata = self._make_metadata(chunks, [4])
+        self.assertTrue(_validate_global_plan([SavePlan([])], metadata))
+
+    def test_detect_overlapping_chunks(self):
+        chunks = [
+            ChunkStorageMetadata(offsets=torch.Size([0]), sizes=torch.Size([2])),
+            ChunkStorageMetadata(offsets=torch.Size([1]), sizes=torch.Size([2])),
+        ]
+        metadata = self._make_metadata(chunks, [4])
+        self.assertFalse(_validate_global_plan([SavePlan([])], metadata))
 
 
 class TestLoadPlanner(TestCase):

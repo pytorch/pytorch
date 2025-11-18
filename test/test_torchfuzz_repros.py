@@ -13,6 +13,7 @@ import pytest
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 class TestFuzzerCompileIssues(TestCase):
@@ -20,6 +21,7 @@ class TestFuzzerCompileIssues(TestCase):
 
     def setUp(self):
         """Configure common test settings."""
+        super().setUp()
         torch._dynamo.config.capture_scalar_outputs = True
         torch._dynamo.config.capture_dynamic_output_shape_ops = True
         torch._inductor.config.emulate_precision_casts = True
@@ -220,67 +222,6 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-    @pytest.mark.xfail(reason="Issue #164086")
-    def test_fuzzer_issue_164086(self):
-        torch.manual_seed(0)
-
-        def foo(arg0, arg1, arg2, arg3, arg4, arg5):
-            t0 = arg0  # size=(42, 56), stride=(42, 1), dtype=int64, device=cuda
-            t1 = torch.tanh(
-                t0
-            )  # size=(42, 56), stride=(42, 1), dtype=int64, device=cuda
-            t2 = t1.clone()
-            t2.zero_()  # size=(42, 56), stride=(42, 1), dtype=int64, device=cuda
-            t3 = (
-                arg1  # size=(50000, 128), stride=(50000, 1), dtype=float16, device=cuda
-            )
-            t4 = arg2  # size=(46, 128), stride=(46, 1), dtype=float16, device=cuda
-            t5 = torch.nn.functional.linear(
-                t3, t4
-            )  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
-            t6 = arg3  # size=(50000, 4, 46), stride=(184, 46, 1), dtype=float16, device=cuda
-            t7 = t6.max(
-                dim=1
-            ).values  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
-            t8 = arg4  # size=(25786, 46), stride=(46, 1), dtype=float16, device=cuda
-            t9 = arg5  # size=(24214, 46), stride=(46, 1), dtype=float16, device=cuda
-            t10 = torch.cat(
-                [t8, t9], dim=0
-            )  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
-            t11 = torch.pow(
-                torch.pow(torch.pow(torch.pow(t5, t7), t10), t5), t7
-            )  # size=(50000, 46), stride=(50000, 1), dtype=float16, device=cuda
-            t12 = torch.nn.functional.embedding(
-                torch.clamp(t2, 0, t11.size(0) - 1).to(torch.long), t11
-            )  # size=(42, 56, 46), stride=(2576, 46, 1), dtype=float16, device=cuda
-            output = t12
-            return output
-
-        arg0 = torch.randint(0, 1000, [42, 56], dtype=torch.int64, device="cuda")
-        arg1 = torch.rand(
-            [50000, 128], dtype=torch.float16, device="cuda", requires_grad=True
-        )
-        arg2 = torch.rand(
-            [46, 128], dtype=torch.float16, device="cuda", requires_grad=True
-        )
-        arg3 = torch.rand(
-            [50000, 4, 46], dtype=torch.float16, device="cuda", requires_grad=True
-        )
-        arg4 = torch.rand(
-            [25786, 46], dtype=torch.float16, device="cuda", requires_grad=True
-        )
-        arg5 = torch.rand(
-            [24214, 46], dtype=torch.float16, device="cuda", requires_grad=True
-        )
-
-        out_eager = foo(arg0, arg1, arg2, arg3, arg4, arg5)
-        out_eager.sum().backward()
-        print("Eager Success! ✅")
-        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
-        out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, arg5)
-        out_compiled.sum().backward()
-        print("Compile Success! ✅")
-
     @pytest.mark.xfail(reason="Issue #163877")
     def test_fuzzer_issue_163877(self):
         torch.manual_seed(0)
@@ -314,34 +255,6 @@ class TestFuzzerCompileIssues(TestCase):
         print("Eager Success! ✅")
         compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
         out_compiled = compiled_foo(arg0, arg1)
-        out_compiled.sum().backward()
-        print("Compile Success! ✅")
-
-    @pytest.mark.xfail(reason="Issue #163971")
-    def test_fuzzer_issue_163971(self):
-        torch.manual_seed(0)
-
-        def foo(arg0):
-            t0 = arg0  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t1 = torch.softmax(
-                t0, dim=0
-            )  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t2 = torch.nn.functional.gelu(
-                t1
-            )  # size=(), stride=(), dtype=bfloat16, device=cuda
-            t3 = torch.softmax(
-                t2, dim=0
-            )  # size=(), stride=(), dtype=bfloat16, device=cuda
-            output = t3
-            return output
-
-        arg0 = torch.rand([], dtype=torch.bfloat16, device="cuda", requires_grad=True)
-
-        out_eager = foo(arg0)
-        out_eager.sum().backward()
-        print("Eager Success! ✅")
-        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
-        out_compiled = compiled_foo(arg0)
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
@@ -510,44 +423,155 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
-    @pytest.mark.xfail(reason="Issue #163674")
-    def test_fuzzer_issue_163674(self):
-        torch.manual_seed(0)
+    @pytest.mark.xfail(reason="Issue #167937")
+    def test_fuzzer_issue_167937(self):
+        torch.manual_seed(1251149731)
+        torch.set_default_device("cuda")
 
-        def foo(arg0, arg1, arg2):
-            t0 = arg0  # size=(79488, 1, 3, 1), stride=(3, 3, 1, 1), dtype=float16, device=cuda
-            t1 = t0.clone()
-            t1.zero_()  # size=(79488, 1, 3, 1), stride=(3, 3, 1, 1), dtype=float16, device=cuda
-            t2 = arg1  # size=(79488, 1, 3, 1), stride=(3, 3, 1, 1), dtype=float32, device=cuda
-            t3 = arg2  # size=(), stride=(), dtype=float32, device=cuda
-            t4 = t2.clone()
-            t4.fill_(
-                t3.item()
-            )  # size=(79488, 1, 3, 1), stride=(3, 3, 1, 1), dtype=float32, device=cuda
-            t5 = torch.pow(
-                t1, t4
-            )  # size=(79488, 1, 3, 1), stride=(3, 3, 1, 1), dtype=float32, device=cuda
-            t6 = t5.reshape(
-                (96, 69, 36)
-            )  # size=(96, 69, 36), stride=(2484, 36, 1), dtype=float32, device=cuda
-            output = t6
-            return output
+        def fuzzed_program(
+            arg_0,
+            arg_1,
+            arg_2,
+            arg_3,
+            arg_4,
+            arg_5,
+            arg_6,
+            arg_7,
+            arg_8,
+            arg_9,
+            sentinel,
+        ):
+            var_node_3 = arg_0  # size=(27, 28, 7), stride=(196, 7, 1), dtype=bfloat16, device=cuda
+            var_node_4 = (
+                arg_1  # size=(27, 7, 6), stride=(42, 6, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_2 = torch.matmul(
+                var_node_3.to(torch.bfloat16), var_node_4.to(torch.bfloat16)
+            )  # size=(27, 28, 6), stride=(168, 6, 1), dtype=bfloat16, device=cuda
+            var_node_6 = (
+                arg_2  # size=(27, 6, 9), stride=(54, 9, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_7 = torch.full(
+                (27, 9, 1), -0.310546875, dtype=torch.bfloat16
+            )  # size=(27, 9, 1), stride=(9, 1, 1), dtype=bfloat16, device=cuda
+            var_node_5 = torch.matmul(
+                var_node_6.to(torch.bfloat16), var_node_7.to(torch.bfloat16)
+            )  # size=(27, 6, 1), stride=(6, 1, 1), dtype=bfloat16, device=cuda
+            var_node_1 = torch.matmul(
+                var_node_2.to(torch.bfloat16), var_node_5.to(torch.bfloat16)
+            )  # size=(27, 28, 1), stride=(28, 1, 1), dtype=bfloat16, device=cuda
+            var_node_8 = arg_3  # size=(27, 28, 1), stride=(28, 1, 1), dtype=bfloat16, device=cuda
+            var_node_9 = torch.full(
+                (27, 28, 1), 0.76953125, dtype=torch.bfloat16
+            )  # size=(27, 28, 1), stride=(28, 1, 1), dtype=bfloat16, device=cuda
+            var_node_12 = (
+                arg_4  # size=(3, 4), stride=(4, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_13 = (
+                arg_5  # size=(4, 15), stride=(15, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_11 = torch.matmul(
+                var_node_12.to(torch.bfloat16), var_node_13.to(torch.bfloat16)
+            )  # size=(3, 15), stride=(15, 1), dtype=bfloat16, device=cuda
+            var_node_15 = (
+                arg_6  # size=(15, 12), stride=(12, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_16 = (
+                arg_7  # size=(12, 1), stride=(1, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_14 = torch.matmul(
+                var_node_15.to(torch.bfloat16), var_node_16.to(torch.bfloat16)
+            )  # size=(15, 1), stride=(1, 1), dtype=bfloat16, device=cuda
+            var_node_10 = torch.matmul(
+                var_node_11.to(torch.bfloat16), var_node_14.to(torch.bfloat16)
+            )  # size=(3, 1), stride=(1, 1), dtype=bfloat16, device=cuda
+            var_node_19 = (
+                arg_8  # size=(1, 8), stride=(8, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_20 = (
+                arg_9  # size=(8, 2), stride=(2, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_18 = torch.matmul(
+                var_node_19.to(torch.bfloat16), var_node_20.to(torch.bfloat16)
+            )  # size=(1, 2), stride=(2, 1), dtype=bfloat16, device=cuda
+            var_node_21 = torch.full(
+                (2, 1), 0.000762939453125, dtype=torch.bfloat16
+            )  # size=(2, 1), stride=(1, 1), dtype=bfloat16, device=cuda
+            var_node_17 = torch.matmul(
+                var_node_18.to(torch.bfloat16), var_node_21.to(torch.bfloat16)
+            )  # size=(1, 1), stride=(1, 1), dtype=bfloat16, device=cuda
+            var_node_0, _ = torch.nn.functional.multi_head_attention_forward(
+                var_node_1.to(torch.bfloat16),
+                var_node_8.to(torch.bfloat16),
+                var_node_9.to(torch.bfloat16),
+                1,
+                1,
+                var_node_10.to(torch.bfloat16),
+                None,  # in_proj_bias
+                None,  # bias_k
+                None,  # bias_v
+                False,  # add_zero_attn
+                0.0,  # dropout_p (no dropout for testing)
+                var_node_17.to(torch.bfloat16),
+                None,  # out_proj_bias
+                training=False,  # Use eval mode for deterministic behavior
+                need_weights=False,  # Don't compute attention weights for performance
+            )  # size=(27, 28, 1), stride=(28, 1, 1), dtype=bfloat16, device=cuda
+            # Ensure gradient computation by multiplying with sentinel and taking real part
+            result = var_node_0 * sentinel
+            if result.is_complex():
+                result = result.real
+            return result
 
-        arg0 = torch.rand(
-            [79488, 1, 3, 1], dtype=torch.float16, device="cuda", requires_grad=True
-        )
-        arg1 = torch.rand(
-            [79488, 1, 3, 1], dtype=torch.float32, device="cuda", requires_grad=True
-        )
-        arg2 = torch.rand([], dtype=torch.float32, device="cuda", requires_grad=True)
+        try:
+            # Sentinel tensor to ensure gradient computation
+            sentinel = torch.tensor(1.0, requires_grad=True)
+            arg_0 = torch.as_strided(
+                torch.randn(5292).to(torch.bfloat16), (27, 28, 7), (196, 7, 1)
+            )
+            arg_1 = torch.as_strided(
+                torch.randn(1134).to(torch.bfloat16), (27, 7, 6), (42, 6, 1)
+            )
+            arg_2 = torch.as_strided(
+                torch.randn(1458).to(torch.bfloat16), (27, 6, 9), (54, 9, 1)
+            )
+            arg_3 = torch.as_strided(
+                torch.randn(756).to(torch.bfloat16), (27, 28, 1), (28, 1, 1)
+            )
+            arg_4 = torch.as_strided(torch.randn(12).to(torch.bfloat16), (3, 4), (4, 1))
+            arg_5 = torch.as_strided(
+                torch.randn(60).to(torch.bfloat16), (4, 15), (15, 1)
+            )
+            arg_6 = torch.as_strided(
+                torch.randn(180).to(torch.bfloat16), (15, 12), (12, 1)
+            )
+            arg_7 = torch.as_strided(
+                torch.randn(12).to(torch.bfloat16), (12, 1), (1, 1)
+            )
+            arg_8 = torch.as_strided(torch.randn(8).to(torch.bfloat16), (1, 8), (8, 1))
+            arg_9 = torch.as_strided(torch.randn(16).to(torch.bfloat16), (8, 2), (2, 1))
+            args = (
+                arg_0,
+                arg_1,
+                arg_2,
+                arg_3,
+                arg_4,
+                arg_5,
+                arg_6,
+                arg_7,
+                arg_8,
+                arg_9,
+            ) + (sentinel,)
 
-        out_eager = foo(arg0, arg1, arg2)
-        out_eager.sum().backward()
-        print("Eager Success! ✅")
-        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
-        out_compiled = compiled_foo(arg0, arg1, arg2)
-        out_compiled.sum().backward()
-        print("Compile Success! ✅")
+            out_eager = fuzzed_program(*args)
+            out_eager.sum().backward()
+            print("Eager Success! ✅")
+            compiled_foo = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
+            out_compiled = compiled_foo(*args)
+            out_compiled.sum().backward()
+            print("Compile Success! ✅")
+        finally:
+            torch.set_default_device(None)
 
 
 if __name__ == "__main__":
