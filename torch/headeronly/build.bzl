@@ -25,11 +25,32 @@ def define_targets(rules):
 
     rules.genrule(**genrule_args)
 
+    # Generate enum_tag.h using torchgen
+    enum_tag_genrule_args = {
+        "name": "enum_tag_h",
+        "srcs": [
+            "//aten/src/ATen/native:native_functions.yaml",
+            "//aten/src/ATen/native:tags.yaml",
+            "templates/enum_tag.h",
+        ],
+        "outs": ["core/enum_tag.h"],
+        "cmd": "$(execpath //torchgen:gen) " +
+               "--source-path aten/src/ATen " +
+               "--headeronly " +
+               "--headeronly-install-dir $(@D)/..",
+        "tools": ["//torchgen:gen"],
+    }
+
+    if not is_buck:
+        enum_tag_genrule_args["visibility"] = ["//visibility:public"]
+
+    rules.genrule(**enum_tag_genrule_args)
+
     rules.cc_library(
         name = "torch_headeronly",
         hdrs = rules.glob([
             "**/*.h"
-        ]) + ["version.h.in"],
+        ]) + ["version.h.in", "core/enum_tag.h"],
         visibility = ["//visibility:public"],
         deps = [
             "//torch/headeronly/macros",

@@ -65,6 +65,7 @@ def define_targets(rules):
     gen_aten_srcs = [
         "aten/src/ATen/native/native_functions.yaml",
         "aten/src/ATen/native/tags.yaml",
+        "//torch/headeronly:enum_tag_h",
     ] + rules.glob(["aten/src/ATen/templates/*"])
 
     gen_aten_cmd = " ".join([

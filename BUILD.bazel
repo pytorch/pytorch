@@ -14,7 +14,10 @@ load(":ufunc_defs.bzl", "aten_ufunc_generated_cpu_kernel_sources", "aten_ufunc_g
 load("//:tools/bazel.bzl", "rules")
 
 # Export files for use by torch/headeronly (where version.h generation now lives)
-exports_files(["version.txt"])
+exports_files([
+    "version.txt",
+    "aten/src/ATen/native/tags.yaml",
+])
 
 define_targets(rules = rules)
 

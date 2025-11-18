@@ -304,9 +304,43 @@ if(INTERN_BUILD_ATEN_OPS)
       DEPENDS ${all_python} ${${gen_type}_templates}
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/native_functions.yaml
         ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
+        ${CMAKE_BINARY_DIR}/torch/headeronly/core/enum_tag.h
       WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
     )
   endforeach()
+
+  # Generate headeronly files (enum_tag.h)
+  set(HEADERONLY_BASE_DIR ${CMAKE_BINARY_DIR}/torch/headeronly)
+  set(GEN_HEADERONLY_COMMAND
+      "${Python_EXECUTABLE}" -m torchgen.gen
+      --source-path ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen
+      --headeronly
+      --headeronly-install-dir ${HEADERONLY_BASE_DIR}
+      --output-dependencies ${CMAKE_BINARY_DIR}/torch/headeronly/core/generated_headeronly.cmake
+  )
+
+  # Dry run to bootstrap the output variables
+  execute_process(
+      COMMAND ${GEN_HEADERONLY_COMMAND} --dry-run
+      RESULT_VARIABLE RETURN_VALUE
+      WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+  )
+
+  if(NOT RETURN_VALUE EQUAL 0)
+    message(FATAL_ERROR "Failed to get generated headeronly list")
+  endif()
+
+  include("${CMAKE_BINARY_DIR}/torch/headeronly/core/generated_headeronly.cmake")
+
+  add_custom_command(
+    COMMENT "Generating headeronly files"
+    OUTPUT ${headeronly_generated_headers} ${CMAKE_BINARY_DIR}/torch/headeronly/core/generated_headeronly.cmake
+    COMMAND ${GEN_HEADERONLY_COMMAND}
+    DEPENDS ${all_python}
+      ${CMAKE_CURRENT_LIST_DIR}/../torch/headeronly/templates/enum_tag.h
+      ${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/tags.yaml
+    WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/..
+  )
 
   # Generated headers used from a CUDA (.cu) file are
   # not tracked correctly in CMake. We make the libATen.so depend explicitly
@@ -314,7 +348,8 @@ if(INTERN_BUILD_ATEN_OPS)
   add_custom_target(ATEN_CPU_FILES_GEN_TARGET DEPENDS
       ${generated_headers} ${core_generated_headers} ${cpu_vec_generated_headers} ${ops_generated_headers}
       ${generated_sources} ${core_generated_sources} ${cpu_vec_generated_sources} ${ops_generated_sources}
-      ${generated_declarations_yaml} ${generated_unboxing_sources})
+      ${generated_declarations_yaml} ${generated_unboxing_sources}
+      ${headeronly_generated_headers})
   add_custom_target(ATEN_CUDA_FILES_GEN_TARGET DEPENDS
       ${cuda_generated_headers} ${cuda_generated_sources})
   add_library(ATEN_CPU_FILES_GEN_LIB INTERFACE)
