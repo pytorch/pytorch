@@ -1216,6 +1216,9 @@ def define_buck_targets(
             "core/enum_tag.h": ":gen_aten[core/enum_tag.h]",
         }),
         labels = labels,
+        exported_deps = [
+            "{}torch/headeronly:enum_tag_h".format(ROOT_PATH),
+        ],
     )
 
     fb_xplat_cxx_library(
