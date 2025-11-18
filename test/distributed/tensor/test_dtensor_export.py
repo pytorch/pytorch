@@ -267,7 +267,7 @@ class DTensorExportTest(TestCase):
                 "all_reduce",
                 "wait_tensor",
                 "view_2",
-                "t_12",
+                "t_16",
             ]
             unmarked_nodes_fw = [
                 "view_3",
@@ -282,48 +282,48 @@ class DTensorExportTest(TestCase):
                 "all_reduce_1",
                 "wait_tensor_1",
                 "view_6",
-                "t_4",
-                "t_8",
+                "t_5",
+                "t_11",
             ]
 
             marked_nodes_bw = [
-                "mm_4",
-                "t_13",
+                "mm_8",
+                "t_17",
                 "view_1",
-                "mm_5",
-                "t_14",
-                "sum_3",
-                "view_9",
-                "t_15",
+                "mm_9",
+                "t_18",
+                "sum_5",
+                "view_11",
+                "t_19",
                 "detach",
                 "detach_3",
                 "threshold_backward_1",
-                "t_16",
-                "mm_6",
-                "t_17",
-                "sum_4",
-                "view_10",
-                "t_18",
+                "t_20",
+                "mm_10",
+                "t_21",
+                "sum_6",
+                "view_12",
+                "t_22",
             ]
             unmarked_nodes_bw = [
-                "mm",
-                "t_5",
-                "view_5",
                 "mm_1",
-                "t_6",
-                "sum_1",
-                "view_7",
                 "t_7",
+                "view_5",
+                "mm_3",
+                "t_8",
+                "sum_2",
+                "view_8",
+                "t_9",
                 "detach_1",
                 "detach_2",
                 "threshold_backward",
-                "mm_2",
-                "t_9",
-                "mm_3",
-                "t_10",
-                "sum_2",
-                "view_8",
-                "t_11",
+                "mm_5",
+                "t_13",
+                "mm_7",
+                "t_14",
+                "sum_4",
+                "view_10",
+                "t_15",
                 "all_reduce_2",
                 "wait_tensor_2",
             ]
@@ -542,13 +542,18 @@ graph():
     %item : [num_users=2] = call_method[target=item](args = (%clamp,), kwargs = {})
     %ge_1 : [num_users=1] = call_function[target=operator.ge](args = (%item, 1), kwargs = {})
     %_assert_scalar_default : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_1, Runtime assertion failed for expression u0 >= 1 on node 'ge_1'), kwargs = {})
-    %getitem : [num_users=2] = call_function[target=operator.getitem](args = (%l_x_, slice(None, item, None)), kwargs = {})
+    %getitem : [num_users=3] = call_function[target=operator.getitem](args = (%l_x_, slice(None, item, None)), kwargs = {})
     %getattr_1 : [num_users=1] = call_function[target=builtins.getattr](args = (%getitem, _local_tensor), kwargs = {})
     %sym_size_int : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%getattr_1, 0), kwargs = {})
+    %sym_size_int_1 : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%getitem, 0), kwargs = {})
     %ge_2 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int, 0), kwargs = {})
     %_assert_scalar_default_1 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_2, Runtime assertion failed for expression u2 >= 0 on node 'ge_2'), kwargs = {})
     %le : [num_users=1] = call_function[target=operator.le](args = (%sym_size_int, 4), kwargs = {})
     %_assert_scalar_default_2 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%le, Runtime assertion failed for expression u2 <= 4 on node 'le'), kwargs = {})
+    %ge_3 : [num_users=1] = call_function[target=operator.ge](args = (%sym_size_int_1, 0), kwargs = {})
+    %_assert_scalar_default_3 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%ge_3, Runtime assertion failed for expression u1 >= 0 on node 'ge_3'), kwargs = {})
+    %le_1 : [num_users=1] = call_function[target=operator.le](args = (%sym_size_int_1, 4), kwargs = {})
+    %_assert_scalar_default_4 : [num_users=0] = call_function[target=torch.ops.aten._assert_scalar.default](args = (%le_1, Runtime assertion failed for expression u1 <= 4 on node 'le_1'), kwargs = {})
     return (getitem,)""",  # noqa: B950
         )
 
