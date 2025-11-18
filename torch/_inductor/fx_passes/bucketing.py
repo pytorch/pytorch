@@ -506,7 +506,9 @@ def _pre_bucket_all_gather(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
-    out_dtype_ints: list[int],  # dtype enum values, that inputs are converted to before all_gather
+    out_dtype_ints: list[
+        int
+    ],  # dtype enum values, that inputs are converted to before all_gather
     rank: int,
 ) -> torch.Tensor:
     # Convert int indices back to torch.dtype
