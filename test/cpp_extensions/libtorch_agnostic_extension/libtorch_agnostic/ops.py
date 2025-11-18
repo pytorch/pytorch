@@ -227,6 +227,37 @@ def test_tensor_device(t):
     return torch.ops.libtorch_agnostic.test_tensor_device.default(t)
 
 
+def get_any_data_ptr(t, mutable) -> int:
+    """
+    Return data pointer value of the tensor.
+
+    Args:
+        t: Input tensor
+        mutable: whether data pointer qualifier is mutable or const
+
+    Returns: int - pointer value
+    """
+    return torch.ops.libtorch_agnostic.get_any_data_ptr.default(t, mutable)
+
+
+def get_template_any_data_ptr(t, dtype, mutable) -> int:
+    """
+    Return data pointer value of the tensor iff it has dtype.
+
+    Args:
+        t: Input tensor
+        dtype: Input dtype
+        mutable: whether data pointer qualifier is mutable or const
+
+    Returns: int - pointer value
+
+    Raises RuntimeError when t.dtype() != dtype.
+    """
+    return torch.ops.libtorch_agnostic.get_template_any_data_ptr.default(
+        t, dtype, mutable
+    )
+
+
 def my_pad(t) -> Tensor:
     """
     Pads the input tensor with hardcoded padding parameters.
@@ -487,3 +518,72 @@ def test_get_num_threads() -> int:
     Returns: int - the number of threads for the parallel backend
     """
     return torch.ops.libtorch_agnostic.test_get_num_threads.default()
+
+
+def my_empty(size, dtype=None, device=None, pin_memory=None) -> Tensor:
+    """
+    Creates an empty tensor with the specified size, dtype, device, and pin_memory.
+
+    Args:
+        size: list[int] - size of the tensor to create
+        dtype: ScalarType or None - data type of the tensor
+        device: Device or None - device on which to create the tensor
+        pin_memory: bool or None - whether to use pinned memory
+
+    Returns: Tensor - an uninitialized tensor with the specified properties
+    """
+    return torch.ops.libtorch_agnostic.my_empty.default(size, dtype, device, pin_memory)
+
+
+def my_flatten(t, start_dim=0, end_dim=-1) -> Tensor:
+    """
+    Flattens the input tensor from start_dim to end_dim into a single dimension.
+
+    Args:
+        t: Tensor - tensor to flatten
+        start_dim: int - first dimension to flatten (default: 0)
+        end_dim: int - last dimension to flatten (default: -1)
+
+    Returns: Tensor - flattened tensor
+    """
+    return torch.ops.libtorch_agnostic.my_flatten.default(t, start_dim, end_dim)
+
+
+def my_reshape(t, shape) -> Tensor:
+    """
+    Returns a tensor with the same data but different shape.
+
+    Args:
+        t: Tensor - tensor to reshape
+        shape: list[int] - new shape for the tensor
+
+    Returns: Tensor - reshaped tensor
+    """
+    return torch.ops.libtorch_agnostic.my_reshape.default(t, shape)
+
+
+def my_view(t, size) -> Tensor:
+    """
+    Returns a new tensor with the same data as the input tensor but of a different shape.
+
+    Args:
+        t: Tensor - tensor to view
+        size: list[int] - new size for the tensor
+
+    Returns: Tensor - tensor with new view
+    """
+    return torch.ops.libtorch_agnostic.my_view.default(t, size)
+
+
+def mv_tensor_accessor(m, v) -> Tensor:
+    """
+    Returns matrix-vector product.
+
+    Args:
+        m: any 2-D Tensor with shape (N, M)
+        v: any 1-D Tensor with shape (M,)
+
+    Returns:
+        a 1-D Tensor with shape (N,)
+    """
+    return torch.ops.libtorch_agnostic.mv_tensor_accessor.default(m, v)

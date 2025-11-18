@@ -29,6 +29,7 @@ import cProfile
 import dis
 import functools
 import gc
+import importlib
 import inspect
 import itertools
 import logging
@@ -901,6 +902,7 @@ class DynamoOutput:
             self.bytecode,
             self.tracer_output.closure,
             argdefs,
+            self.tracer_output.f_globals,
         )
 
 
@@ -922,6 +924,34 @@ class BackendInput:
     tensor_to_context: WeakIdKeyDictionary
 
 
+@dataclass(frozen=True)
+class GraphRuntimeEnv:
+    bytecode: types.CodeType
+    import_sources: dict[str, str]
+    used_globals: dict[str, Any]
+    closure: Optional[tuple[Any, ...]]
+    argdefs: Optional[tuple[Any, ...]]
+
+    def forward_callable(
+        self, backend_id: str, compiled_fn: Callable[..., Any]
+    ) -> Callable[..., Any]:
+        import_sources = {
+            alias: importlib.import_module(module_name)
+            for alias, module_name in self.import_sources.items()
+        }
+        f_globals = {
+            **import_sources,
+            **self.used_globals,
+            backend_id: compiled_fn,
+        }
+        return types.FunctionType(
+            self.bytecode,
+            f_globals,
+            closure=self.closure,
+            argdefs=self.argdefs,
+        )
+
+
 @dataclass
 class GraphCaptureOutput:
     """
@@ -934,6 +964,7 @@ class GraphCaptureOutput:
     bytecode: CodeType
     closure: Optional[tuple[Any, ...]]
     argdefs: Optional[tuple[Any, ...]]
+    f_globals: dict[str, Any]
 
     def build_guards(
         self,
@@ -953,6 +984,27 @@ class GraphCaptureOutput:
             strict_error=strict_error,
         )
 
+    def get_runtime_env(self) -> GraphRuntimeEnv:
+        from torch._dynamo.source import get_global_source_name
+
+        used_globals = {}
+        for (
+            source
+        ) in self.output_graph.export_metadata.graph_input_idx_to_local_source.values():
+            global_name = get_global_source_name(source)
+            if global_name is None:
+                continue
+            if global_name in self.f_globals:
+                used_globals[global_name] = self.f_globals[global_name]
+
+        return GraphRuntimeEnv(
+            bytecode=self.bytecode,
+            import_sources=self.import_sources,
+            used_globals=used_globals,
+            closure=self.closure,
+            argdefs=self.argdefs,
+        )
+
 
 @dataclass
 class CaptureOutput:
@@ -970,27 +1022,17 @@ class CaptureOutput:
     # BackendInput can be None when dynamo didn't compile any graph (no tensor op)
     backend_input: Optional[BackendInput]
 
-    def forward_callable(self) -> Callable[..., Any]:
-        import importlib
-
-        # TODO code sharing
-        import_sources = self.graph_capture_output.output_graph.import_sources
+    def forward_callable(
+        self,
+        *,
+        compiled_fn: Optional[Callable[..., Any]] = None,
+    ) -> Callable[..., Any]:
+        runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
         backend_id = self.backend_input.backend_id
-        import_sources = {
-            alias: importlib.import_module(module_name)
-            for alias, module_name in import_sources.items()
-        }
-        f_globals = {
-            **import_sources,
-            backend_id: self.backend_input.graph_module,
-        }
-        return types.FunctionType(
-            self.graph_capture_output.bytecode,
-            f_globals,
-            closure=self.graph_capture_output.closure,
-            argdefs=self.graph_capture_output.argdefs,
-        )
+        # pyrefly: ignore [not-callable]
+        compiled_fn = compiled_fn or self.backend_input.graph_module
+        return runtime_env.forward_callable(backend_id, compiled_fn)
 
 
 def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
@@ -1001,6 +1043,11 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     import inspect
 
     if isinstance(mod, torch.nn.Module):
+        resolved_forward = mod.forward
+        if hasattr(resolved_forward, "__self__"):
+            # pyrefly: ignore [missing-attribute]
+            resolved_forward = resolved_forward.__func__
+
         # Mirrored from NNModuleVariable.call_function:
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
         if (
@@ -1012,7 +1059,12 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             and len(mod._backward_hooks) == 0
             and len(torch.nn.modules.module._global_backward_pre_hooks) == 0
             and len(torch.nn.modules.module._global_backward_hooks) == 0
+            and resolved_forward != torch.nn.Module.forward
         ):
+            # We cannot trace __call__ by default because it will break
+            # the legacy dynamo export. If we want to revisit this,
+            # feel free to remove this path and try unittests in
+            # test_strict_export_v2.py
             mod = mod.forward
         elif isinstance(mod, torch.fx.GraphModule):
             mod = mod._call_impl
@@ -1870,7 +1922,7 @@ class ConvertFrame:
                 raise
 
             soft_fail = isinstance(e, Unsupported)
-
+            code = frame.f_code
             # This is a soft failure. In the sense, the code path reaches here
             # when we do not support graph breaks on bytecodes like LOAD_ATTR,
             # BUILD_SET etc. In such case, we can fallback to eager without
@@ -1885,7 +1937,13 @@ class ConvertFrame:
                         user_stack_formatted = "".join(
                             traceback.format_list(user_stack)
                         )
-                        user_stack_trace = f"Graph break: skip: from user code at:\n{user_stack_formatted}"
+                        frame_info = exc.format_frame_info(code)
+                        user_stack_trace = (
+                            "Graph break: torch.compile cannot properly resume from this graph break, which results in a skip.\n"
+                            f"torch.compile will skip tracing the frame {frame_info} and fall back to eager.\n"
+                            "The graph break occurred in the following user code:\n"
+                            f"{user_stack_formatted}"
+                        )
                         torch._logging.trace_structured(
                             "artifact",
                             metadata_fn=lambda: {
@@ -1897,6 +1955,7 @@ class ConvertFrame:
                         graph_break_log.debug(
                             user_stack_trace,
                             exc_info=True,
+                            stack_info=config.verbose,
                         )
 
             if not config.suppress_errors and not soft_fail:

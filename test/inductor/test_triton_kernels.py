@@ -711,7 +711,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(int_result, resulti)
 
     @requires_gpu
-    @skipIfXpu
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
@@ -723,6 +722,7 @@ def forward(self, x_1, output_1):
         ):
             pid = tl.program_id(axis=0)
             block_start = pid * BLOCK_SIZE
+
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
@@ -2243,7 +2243,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(compiled_out, eager_out)
 
     # TODO enable this test case on XPU.
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @parametrize("cfg", ["normal", "cpp_wrapper"])
     def test_triton_kernel_dtype_view(self, cfg):
         # https://github.com/pytorch/pytorch/issues/136159
@@ -2542,8 +2542,11 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(actual, expected)
 
     @requires_gpu
+    @skipIfXpu(
+        msg="XPU Triton result in nan, "
+        "https://github.com/intel/torch-xpu-ops/issues/2330"
+    )
     @skipIfRocm
-    @skipIfXpu
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     def test_kernel_inline_asm(self, quotes):

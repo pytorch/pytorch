@@ -121,7 +121,7 @@ Tensor& do_metal_addmm(const Tensor& self,
                        const Scalar& alpha,
                        const Scalar& beta,
                        const Tensor& bias) {
-  if (beta.toDouble() == 0 && alpha.toDouble() == 1) {
+  if (beta.isFloatingPoint() && alpha.isFloatingPoint() && beta.toDouble() == 0 && alpha.toDouble() == 1) {
     return do_metal_mm(self, other, output);
   }
   auto stream = getCurrentMPSStream();
@@ -147,13 +147,15 @@ Tensor& do_metal_addmm(const Tensor& self,
         std::array<int64_t, 2> i64;
         std::array<int32_t, 2> i32;
         std::array<float, 2> f32;
-      } alpha_beta;
+        std::array<c10::complex<float>, 2> c64;
+      } alpha_beta{};
       if (output.scalar_type() == kLong) {
         alpha_beta.i64 = {alpha.toLong(), beta.toLong()};
       } else if (c10::isIntegralType(output.scalar_type(), true)) {
         alpha_beta.i32 = {alpha.toInt(), beta.toInt()};
+      } else if (c10::isComplexType(output.scalar_type())) {
+        alpha_beta.c64 = {alpha.toComplexFloat(), beta.toComplexFloat()};
       } else {
-        TORCH_INTERNAL_ASSERT(c10::isFloatingType(output.scalar_type()));
         alpha_beta.f32 = {alpha.toFloat(), beta.toFloat()};
       }
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
@@ -190,8 +192,14 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
   static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
   constexpr auto max_stride_size = 32768;
+  constexpr auto max_complex_inner_size = 2048;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
   if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
+    return true;
+  }
+  // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
+  // See https://github.com/pytorch/pytorch/issues/167727#issuecomment-3529308548
+  if (c10::isComplexType(self.scalar_type()) && self.size(1) > max_complex_inner_size) {
     return true;
   }
   return !is_macos_14_4_or_newer &&
