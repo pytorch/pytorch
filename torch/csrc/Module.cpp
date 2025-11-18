@@ -212,8 +212,8 @@ static PyObject* THPModule_initExtension(
         }
         auto frame_id = s_tb[idx];
         const auto& frame = s_tbs.all_frames.at(frame_id);
-        oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
-            << ':' << frame.lineno << '\n';
+        oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
+            << ":" << frame.lineno << '\n';
       }
       return oss.str();
     });
@@ -2150,7 +2150,7 @@ PyObject* initModule() {
 #ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
-#if defined(USE_CUDA)
+#if defined(USE_CUDA) && !defined(USE_ROCM)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #ifdef USE_MPS
@@ -2772,8 +2772,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_dump_local_tls_set", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-    std::cout << "Included: " << toString(local_keyset.included_) << '\n';
-    std::cout << "Excluded: " << toString(local_keyset.excluded_) << '\n';
+    std::cout << "Included: " << toString(local_keyset.included_) << "\n";
+    std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
   });
 
   py_module.def(

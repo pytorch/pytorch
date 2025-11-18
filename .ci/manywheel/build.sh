@@ -4,17 +4,14 @@ set -ex
 
 SCRIPTPATH="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-# Source the common build script for architecture-specific configurations (MKLDNN, ACL, etc.)
-source "${SCRIPTPATH}/../pytorch/build.sh" || true
-
 case "${GPU_ARCH_TYPE:-BLANK}" in
-    cuda | cuda-aarch64)
+    cuda)
         bash "${SCRIPTPATH}/build_cuda.sh"
         ;;
     rocm)
         bash "${SCRIPTPATH}/build_rocm.sh"
         ;;
-    cpu | cpu-cxx11-abi | cpu-aarch64 | cpu-s390x)
+    cpu | cpu-cxx11-abi | cpu-s390x)
         bash "${SCRIPTPATH}/build_cpu.sh"
         ;;
     xpu)
