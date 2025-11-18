@@ -27,6 +27,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+# from torch.testing._internal.distributed._tensor.common_dtensor import redistribute
 
 
 # convenient wrapper to register sharding propagation rules
@@ -49,48 +50,66 @@ def register_prop_rule(
     return wrapper
 
 
+def _expand_single_dim_strategy_to_mesh(single_dim_strategy: Callable[[OpSchema], list[list[Placement]]]) -> Callable[[OpSchema], StrategyType]:
+    """
+    Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
+    sharding types used by inputs.
+    """
+    def expanded_strategy(op_schema: OpSchema) -> StrategyType:
+
+        strategies_over_one_mesh_dim = single_dim_strategy(op_schema)
+        args_strategy = [s for s in op_schema.args_strategy if isinstance(s, OpStrategy)]
+        assert len(args_strategy) > 0, "expected at least one Tensor arg"
+        mesh = args_strategy[0].mesh
+
+        # implicitly allow replicating output, all inputs
+        strategies_over_one_mesh_dim.append([Replicate()] * (1 + len(args_strategy)))
+
+        # TODO: handle 'ShardingPlaceholder' expansion (doesn't exist yet)
+        # TODO: identify differences between this and 'expand_' util
+        all_mesh_dim_strategies = [strategies_over_one_mesh_dim] * mesh.ndim
+        strategy_combs = itertools.product(*all_mesh_dim_strategies)
+        all_strategies = []
+        for strategy_comb in strategy_combs:
+            spec_list = [
+                DTensorSpec(mesh, tuple(specs)) for specs in zip(*strategy_comb)
+            ]
+            arg_specs = spec_list[1:]
+            src_strategies = [s for s in op_schema.args_schema if isinstance(s, OpStrategy)]
+            if any(not is_tensor_shardable(src_strat.shape, arg_spec) for src_strat, arg_spec in zip(src_strategies, arg_specs)):
+                # Note: since we don't look at mesh dims inside single_dim_strategies, we can't tell if tensors are 'shardable'
+                # instead, we filter out unshardable strategies after mesh expansion
+                # TODO: make this more robust after adding ShardingPlaceholder, allowing us to say inside a single_dim_strategy
+                # whether we care about even-sharding or other specific properties
+                continue
+
+            assert len(arg_specs) == len(src_strategies), "expected one src strategy per arg spec"
+            all_strategies.append(
+                OpSpec(output_specs=spec_list[0], input_specs=spec_list[1:], redistribute_cost=[
+                    generate_redistribute_costs(src_strategy, arg_spec) for (src_strategy, arg_spec) in zip(src_strategies, arg_specs)
+                ])
+            )
+        return OpStrategy(all_strategies)
+
+    return expanded_strategy
+
 def register_single_dim_strategy(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[[Callable[[OpSchema], list[OpSpec]]], Callable[[OpSchema], StrategyType]]:
+) -> Callable[
+    [Callable[[OpSchema], list[list[Placement]]]], Callable[[OpSchema], list[list[Placement]]]
+]:
     """
     Registers a simplified op strategy that only considers a single mesh dim, taking care to expand it
     to cover all the mesh dims present in the runtime inputs.
     """
-
     def expanded_registration_wrapper(
-        single_dim_strategy: Callable[[OpSchema], list[OpSpec]],
-    ) -> Callable[[OpSchema], StrategyType]:
-        def _expanded_strategy(op_schema: OpSchema) -> StrategyType:
-            """
-            Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
-            sharding types used by inputs.
-            """
-            inputs_strategy = op_schema.args_strategy
-            mesh = inputs_strategy[0].mesh
-            strategies_over_one_mesh_dim = single_dim_strategy(op_schema)
-
-            # copied from einsum strategy..
-            # TODO: identify differences between this and 'expand_' util
-            # TODO: handle 'ShardingPlaceholder' expansion (doesn't exist yet)
-            all_mesh_dim_strategies = [strategies_over_one_mesh_dim] * mesh.ndim
-            strategy_combs = itertools.product(*all_mesh_dim_strategies)
-            all_strategies = []
-            for strategy_comb in strategy_combs:
-                spec_list = [
-                    DTensorSpec(mesh, tuple(specs)) for specs in zip(*strategy_comb)
-                ]
-                all_strategies.append(
-                    OpSpec(output_specs=spec_list[0], input_specs=spec_list[1:])
-                )
-
-            return OpStrategy(all_strategies)
-
-        # register_op_strategy returns another wrapper that actually does the strategy registration,
-        # we just add another layer of wrapping that expands the single_dim_strategy into a strategy that's
-        # compatible with register_op_strategy
+        single_dim_strategy: Callable[[OpSchema], list[list[Placement]]],
+    ) -> Callable[[OpSchema], list[list[Placement]]]:
+        _expanded_strategy = _expand_single_dim_strategy_to_mesh(single_dim_strategy)
         register_op_strategy(op, schema_info)(_expanded_strategy)
-        return _expanded_strategy
+
+        return single_dim_strategy
 
     return expanded_registration_wrapper
 
@@ -201,7 +220,10 @@ def prod(xs: Iterable[int]) -> int:
 
 
 def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
-    """Check if the shape is shardable according to the spec."""
+    """Check if the spec matches these criteria:
+    * any Shard placements in spec refer to valid tensor dims
+    * no empty local tensors (uneven sharding OK, as long as last rank has >0 size)
+    """
     # number of shards in each tensor dimension
     shards_map = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
@@ -267,6 +289,9 @@ def infer_broadcast_dims_map(
 ) -> list[int]:
     # infer the broadcast dims map, where it maps from the common shape dim to the input shape dim
     # this is aligned with the broadcast semantics
+    # e.g. if common_shape = [1, 2, 3, 4] and input_shape = [2, 3, 4],
+    # broadcast_dims_map will be [-1, 0, 1, 2]
+    # meaning that dim 0 in the output has no mapping to the input, and dim 1 in the output maps to dim 0 in the input
     common_ndim = len(common_shape)
     input_ndim = len(input_shape)
     broadcast_dims_map = [-1] * common_ndim

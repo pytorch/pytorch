@@ -238,6 +238,47 @@ def skip_if_lt_x_gpu(x):
     return decorator
 
 
+def requires_world_size(n: int):
+    """
+    Decorator to request a specific world size for a test. The test harness can
+    read this attribute to set the number of ranks to spawn. If there are fewer
+    than `n` CUDA devices available, the test should be skipped by the harness.
+
+    Usage:
+        @require_world_size(3)
+        def test_something(self):
+            ...
+    """
+
+    def decorator(func):
+        func._required_world_size = n
+        available = torch.cuda.device_count()
+        return unittest.skipUnless(
+            available >= n, f"requires {n} GPUs, found {available}"
+        )(func)
+
+    return decorator
+
+
+def get_required_world_size(obj: Any, default: int) -> int:
+    """
+    Returns the requested world size for the currently running unittest method on `obj`
+    if annotated via `@require_world_size(n)`, else returns `default`.
+    """
+    try:
+        # Try MultiProcessTestCase helper first, then unittest fallback
+        test_name = (
+            obj._current_test_name()  # type: ignore[attr-defined]
+            if hasattr(obj, "_current_test_name") and callable(obj._current_test_name)
+            else obj._testMethodName
+        )
+        fn = getattr(obj, test_name)
+        value = fn._required_world_size
+        return int(value)
+    except Exception:
+        return default
+
+
 # This decorator helps avoiding initializing cuda while testing other backends
 def nccl_skip_if_lt_x_gpu(backend, x):
     def decorator(func):
@@ -365,6 +406,13 @@ def requires_nccl_version(version, msg):
             torch.cuda.nccl.version() < version,
             f"Requires NCCL version greater than or equal to: {version}, found: {torch.cuda.nccl.version()}, reason: {msg}",
         )
+
+
+def requires_nccl_shrink():
+    """
+    Require NCCL shrink support (NCCL available and version >= 2.27).
+    """
+    return requires_nccl_version((2, 27), "Need NCCL 2.27+ for shrink_group")
 
 
 def requires_nccl():
@@ -1663,7 +1711,7 @@ class MultiProcContinuousTest(TestCase):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         assert rdvz_file is not None
-        # rank should be local_rank for tests running on <= 8gpus which is how all these tests are designed
+        # rank should be local_rank for tests running on <= 8 gpus which is how all these tests are designed
         # and we expect LOCAL_RANK set by torchrun. Setting it lets init_device_mesh set the device without
         # issuing a warning
         os.environ["LOCAL_RANK"] = str(rank)
@@ -1723,6 +1771,22 @@ class MultiProcContinuousTest(TestCase):
                 cls._run_test_given_id(test_id)
                 completion_queue.put(test_id)
             except BaseException as ex:  # noqa: B036
+                if isinstance(ex, SystemExit):
+                    # Get exit code from the process
+                    exit_code = getattr(ex, "code", None)
+
+                    # Look up exit code in TEST_SKIPS to see if it is a valid skip
+                    skip_entry = next(
+                        (v for v in TEST_SKIPS.values() if v.exit_code == exit_code),
+                        None,
+                    )
+
+                    # If we found an entry, we want to skip the test and the object back to the main process
+                    if skip_entry:
+                        completion_queue.put(unittest.SkipTest(skip_entry.message))
+                        # Skip exception handling below, move to main thread for processing the skip
+                        continue
+
                 raised_exception = True
                 # Send the exception and stack trace back to the dispatcher
                 exc_info = sys.exc_info()
@@ -1844,6 +1908,8 @@ class MultiProcContinuousTest(TestCase):
                 # Wait for the workers to finish the test
                 for i, completion_queue in enumerate(self.completion_queues):
                     rv = completion_queue.get()
+                    if isinstance(rv, unittest.SkipTest):
+                        raise rv
                     if isinstance(rv, BaseException):
                         # Hit an exception, re-raise it in the main process.
                         logger.warning(

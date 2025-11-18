@@ -602,6 +602,24 @@ class TestGenericPytree(TestCase):
             run_test(case)
 
     @parametrize_pytree_module
+    def test_tree_map_dict_order(self, pytree):
+        d = {"b": 2, "a": 1, "c": 3}
+        od = OrderedDict([("b", 2), ("a", 1), ("c", 3)])
+        dd = defaultdict(int, {"b": 2, "a": 1, "c": 3})
+        for tree in (d, od, dd):
+            result = pytree.tree_map(lambda x: x, tree)
+            self.assertEqual(
+                list(result.keys()),
+                list(tree.keys()),
+                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+            )
+            self.assertEqual(
+                list(result.values()),
+                list(tree.values()),
+                msg=f"Dictionary keys order changed in tree_map: {tree!r} vs. {result!r}",
+            )
+
+    @parametrize_pytree_module
     def test_tree_map_only(self, pytree):
         self.assertEqual(pytree.tree_map_only(int, lambda x: x + 2, [0, "a"]), [2, "a"])
 

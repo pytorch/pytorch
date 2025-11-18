@@ -1,6 +1,7 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import copy
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
@@ -96,16 +97,23 @@ class _ToTorchTensor(torch.autograd.Function):
         )
         tensor_stride = tuple(tensor_stride)
         grad_placements = grad_placements or dtensor_spec.placements
-        grad_spec = DTensorSpec(
-            mesh,
-            grad_placements,
-            tensor_meta=TensorMeta(
-                shape=dtensor_meta.shape,
-                stride=tensor_stride,
-                dtype=dtensor_meta.dtype,
-            ),
-        )
-
+        if (
+            tensor_stride == dtensor_meta.stride
+            and grad_placements == dtensor_spec.placements
+        ):
+            # Avoid actual sharing of specs in case they're modified during (e.g.)
+            # sharding propagation.
+            grad_spec = copy.copy(dtensor_spec)
+        else:
+            grad_spec = DTensorSpec(
+                mesh,
+                grad_placements,
+                tensor_meta=TensorMeta(
+                    shape=dtensor_meta.shape,
+                    stride=tensor_stride,
+                    dtype=dtensor_meta.dtype,
+                ),
+            )
         return (
             # pyrefly: ignore [bad-argument-type]
             DTensor(
@@ -338,14 +346,11 @@ class DTensor(torch.Tensor):
         )
 
     @classmethod
-    @torch._disable_dynamo
-    # pyre-fixme[3]: Return type must be annotated.
-    # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        return DTensor._op_dispatcher.dispatch(
-            func,
-            args,
-            kwargs or {},
+        # We just need to have an implementation here; the __torch_dispatch__ machinery
+        # calls into a specific C++ fast path that doesn't call here.
+        raise NotImplementedError(
+            "DTensor.__torch_dispatch__ should not actually get called"
         )
 
     @staticmethod
@@ -671,6 +676,8 @@ class DTensor(torch.Tensor):
     def __metadata_guard__(
         cls, orig: tuple[DTensorSpec, bool], other: tuple[DTensorSpec, bool]
     ) -> bool:
+        # TODO - delete this - This is now unused after the PR -
+        # https://github.com/pytorch/pytorch/pull/165824
         orig_spec, orig_requires_grad = orig
         other_spec, other_requires_grad = other
         return (
