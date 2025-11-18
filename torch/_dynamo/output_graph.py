@@ -794,6 +794,7 @@ class OutputGraph(OutputGraphCommon):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GLOBAL_STATE))
         self.guards.add(
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
@@ -2324,8 +2325,18 @@ class OutputGraph(OutputGraphCommon):
                     )
                 )
 
+                tmp_vars = []
                 for constructor in index_to_bytecode_constructor.values():
                     constructor(cg)
+                    var_name = (
+                        self.new_var()
+                    )  # keep alive any user objects for the rest of the frame
+                    # TODO: we could omit this for objects we create but shouldn't be too much overhead for now
+                    cg.store(var_name)
+                    tmp_vars.append(var_name)
+
+                for var_name in tmp_vars:
+                    cg.append_output(cg.create_load(var_name))
 
                 cg.call_function(len(index_to_bytecode_constructor), False)
                 cg.pop_top()
@@ -2769,6 +2780,7 @@ class DynamoTracerOutput:
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
     closure: Optional[tuple[Any, ...]]
+    f_globals: dict[str, Any]
 
     def __init__(
         self, tracer: "InstructionTranslatorBase", error: Optional[Any] = None
@@ -2776,6 +2788,7 @@ class DynamoTracerOutput:
         self.error_on_graph_break = tracer.error_on_graph_break
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
         self.closure = tracer.closure
+        self.f_globals = tracer.f_globals
         if error:
             self.output_graph = None
         else:
