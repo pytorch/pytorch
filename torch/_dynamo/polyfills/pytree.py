@@ -201,8 +201,11 @@ class PyTreeSpec:
             num_children = 0
         else:
             assert callable(self._unflatten_func)
-            num_nodes = sum((spec.num_nodes for spec in self._children), start=1)
-            num_leaves = sum(spec.num_leaves for spec in self._children)
+            num_nodes = 1
+            num_leaves = 0
+            for child in self._children:
+                num_nodes += child.num_nodes
+                num_leaves += child.num_leaves
             num_children = len(self._children)
 
         object.__setattr__(self, "num_nodes", num_nodes)
