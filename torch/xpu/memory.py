@@ -240,6 +240,15 @@ def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -
     torch._C._xpu_setMemoryFraction(fraction, device)
 
 
+def memory_snapshot():
+    r"""Return a snapshot of the XPU memory allocator state across all devices.
+
+    Interpreting the output of this function requires familiarity with the
+    memory allocator internals.
+    """
+    return torch._C._xpu_memorySnapshot()["segments"]
+
+
 __all__ = [
     "empty_cache",
     "get_per_process_memory_fraction",
@@ -248,6 +257,7 @@ __all__ = [
     "mem_get_info",
     "memory_allocated",
     "memory_reserved",
+    "memory_snapshot",
     "memory_stats",
     "memory_stats_as_nested_dict",
     "reset_accumulated_memory_stats",
