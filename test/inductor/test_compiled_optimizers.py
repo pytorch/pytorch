@@ -320,7 +320,7 @@ def build_opt_kwarg_db():
                     continue
 
                 if has_tensor_lr:
-                    for scheduler_cls in LR_SCHEDULER_TO_KWARGS.keys():
+                    for scheduler_cls in LR_SCHEDULER_TO_KWARGS:
                         name_w_scheduler = name + f"_{scheduler_cls.__name__.lower()}"
                         compiled_opt_db.append(
                             (

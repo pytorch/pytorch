@@ -83,6 +83,31 @@ std::string get_type_str<int32_t>() {
   return "int32_t";
 }
 
+// If all tensors are contiguous with the same dtype and the cat dimension is 0,
+// then we can simply copy each tensor's underlying buffer contiguously into the
+// output.
+static void cat_out_mps_contiguous_impl(const ITensorListRef& inputs, const Tensor& output) {
+  MPSStream* stream = getCurrentMPSStream();
+  id<MTLBuffer> output_buffer = getMTLBufferStorage(output);
+  size_t output_offset = output.storage_offset() * output.itemsize();
+
+  for (const Tensor& input : inputs) {
+    if (cat_should_skip_tensor(input)) {
+      continue;
+    }
+
+    id<MTLBuffer> input_buffer = getMTLBufferStorage(input);
+    size_t input_offset = input.storage_offset() * input.itemsize();
+    auto nbytes = input.nbytes();
+    auto profile_id =
+        getMPSProfiler().beginProfileCopy(input_buffer, output_buffer, input, output, nbytes, /*non_blocking=*/true);
+
+    stream->copy(input_buffer, output_buffer, nbytes, input_offset, output_offset, profile_id, SyncType::NONE);
+
+    output_offset += nbytes;
+  }
+}
+
 // NOTE: `output` is expected to already have the correct size.
 template <typename idx_type_t>
 static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, const Tensor& output) {
@@ -105,7 +130,7 @@ static void cat_out_mps_impl(const ITensorListRef& inputs, int64_t dimension, co
   // copy all the input tensor data into a packed buffer, which would not be
   // ideal.
   for (const Tensor& input : inputs) {
-    if (input.numel() == 0) {
+    if (cat_should_skip_tensor(input)) {
       continue;
     }
 
@@ -243,101 +268,16 @@ TORCH_IMPL_FUNC(cat_out_mps)
   if (out.numel() == 0) {
     return;
   }
+
   auto materialized_inputs = inputs.materialize();
-  auto out_dtype = at::native::result_type(inputs);
+  bool has_large_tensor =
+      isTooLargeForMPSGraph(out) || std::any_of(materialized_inputs.begin(), materialized_inputs.end(), [](auto& t) {
+        return !cat_should_skip_tensor(t) && isTooLargeForMPSGraph(t);
+      });
 
-  int idx = 0;
-  for (const Tensor& t : materialized_inputs) {
-    TORCH_CHECK(t.dim() > 0, "zero-dimensional tensor (at position ", idx, ") cannot be concatenated");
-    auto lap = at::get_overlap_status(out, t);
-    TORCH_CHECK(lap != at::MemOverlapStatus::Partial && lap != at::MemOverlapStatus::Full,
-                "torch.cat(): unsupported operation: the input tensors cannot refer to any "
-                "of the output memory locations. Found overlap in input tensor ",
-                idx);
-    idx++;
-  }
-  // Check for type promotion
-  TORCH_CHECK(canCast(out_dtype, out.scalar_type()),
-              "torch.cat(): input types can't be cast to the desired output type ",
-              out.scalar_type());
-  TORCH_CHECK(!inputs.empty(), "torch.cat(): invalid number of inputs ", inputs.size());
-
-  dimension = legacy_cat_wrap_dim(dimension, materialized_inputs);
-  TORCH_CHECK(dimension >= 0, "torch.cat(): invalid dimension ", dimension);
-
-  // previously, size [0] tensors were the only possible empty tensors; thus, it
-  // wasn't possible to cat empty tensors unless all the other tensors were
-  // 1-dimensional, so we allowed these tensors to be "skipped".  We maintain
-  // this behavior for backwards compatibility, but only for this specific size
-  // (i.e. other empty sizes are not skipped).
-  // FIXME: warn if this is the case
-  auto should_skip = [](const Tensor& t) { return t.dim() == 1 && t.size(0) == 0; };
-  at::assert_no_internal_overlap(out);
-
-  Tensor notSkippedTensor;
-  // Indices of tensors to be skipped because they're empty
-  std::vector<int64_t> skipped_tensor_indices;
-  // Tensors to be read
-  std::vector<Tensor> input_tensors;
-  int tensor_idx = 0;
-  for (const Tensor& t : materialized_inputs) {
-    if (t.numel() == 0 || should_skip(t)) {
-      skipped_tensor_indices.push_back(tensor_idx);
-      tensor_idx++;
-      continue;
-    }
-    input_tensors.push_back(t);
-    // TODO: Is this OK?
-    notSkippedTensor = t;
-    tensor_idx++;
-  }
-  // If all inputs are empty tensors, return an empty tensor
-  if (!notSkippedTensor.defined()) {
-    return;
-  }
-  for (const Tensor& t : inputs) {
-    TORCH_CHECK(t.device() == notSkippedTensor.device(),
-                "torch.cat(): all input tensors must be on the same device. Received ",
-                t.device(),
-                " and ",
-                notSkippedTensor.device());
-  }
-  TORCH_CHECK(out.device() == notSkippedTensor.device(),
-              "torch.cat(): all input tensors and out must be on the same device, but inputs are on ",
-              notSkippedTensor.device(),
-              " and out is on ",
-              out.device());
-
-  std::vector<int64_t> size(notSkippedTensor.sizes().vec());
-
-  // Compute size of the result in the cat dimension
-  int64_t cat_dim_size = 0;
-  idx = 0;
-  bool has_large_tensor = false;
-  for (const Tensor& tensor : materialized_inputs) {
-    if (isTooLargeForMPSGraph(tensor)) {
-      has_large_tensor |= true;
-    }
-    if (!should_skip(tensor)) {
-      // TODO: Factor out `check_shape_except_dim`
-      check_shape_except_dim(notSkippedTensor, tensor, dimension, idx);
-      cat_dim_size += tensor.size(dimension);
-      idx++;
-    }
-  }
-  // Compute the size of the result
-  size[dimension] = cat_dim_size;
-  // skip resizing if size of result is same as expected
-  if (out.sizes() != size) {
-    out.resize_(size, MemoryFormat::Contiguous);
-  }
-  if (out.numel() == 0) {
-    return;
-  }
-
-  has_large_tensor |= isTooLargeForMPSGraph(out);
-
-  if (has_large_tensor) {
+  if (all_contiguous && all_same_dtype && (memory_format == MemoryFormat::Contiguous) && (dimension == 0)) {
+    return mps::cat_out_mps_contiguous_impl(materialized_inputs, out);
+  } else if (has_large_tensor) {
     return mps::cat_out_mps_impl<int64_t>(materialized_inputs, dimension, out);
   } else {
     return mps::cat_out_mps_impl<int32_t>(materialized_inputs, dimension, out);

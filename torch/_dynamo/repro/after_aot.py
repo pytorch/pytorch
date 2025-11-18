@@ -405,6 +405,7 @@ isolate_fails_code_str = None
                 # pyrefly: ignore [missing-attribute]
                 kernel._fn_name
                 if isinstance(kernel, JITFunction)
+                # pyrefly: ignore  # missing-attribute
                 else kernel.fn._fn_name
             )
             fn_name = fn_name.split(".")[-1]
@@ -444,6 +445,7 @@ isolate_fails_code_str = None
         # Extract symbolic variables from the same arguments
         # pyrefly: ignore [unbound-name]
         if (
+            # pyrefly: ignore [unbound-name]
             isinstance(arg, torch.SymInt)
             # By checking sympy.Symbol, we are excluding any symbolic expressions.
             # TODO: we may need to solve expressions to extract symbol definitions.
@@ -457,6 +459,7 @@ isolate_fails_code_str = None
             for dim in arg.shape:
                 # pyrefly: ignore [unbound-name]
                 if (
+                    # pyrefly: ignore [unbound-name]
                     isinstance(dim, torch.SymInt)
                     and isinstance(dim.node.expr, sympy.Symbol)
                     and dim.node.hint is not None
@@ -465,6 +468,7 @@ isolate_fails_code_str = None
             for stride in arg.stride():
                 # pyrefly: ignore [unbound-name]
                 if (
+                    # pyrefly: ignore [unbound-name]
                     isinstance(stride, torch.SymInt)
                     and isinstance(stride.node.expr, sympy.Symbol)
                     and stride.node.hint is not None

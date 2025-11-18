@@ -38,7 +38,7 @@ struct HostBlock {
   bool allocated_{false}; // in-use flag
   size_t event_count_{0}; // number of related events
   ska::flat_hash_set<S> streams_; // streams on which the block was used
-  c10::MempoolId_t owning_pool_{0,0};
+  c10::MempoolId_t owning_pool_{0,0}; // never changes after construction, so we don't need a mutex to guard this
   bool was_allocated_during_stream_capture_;
   std::vector<std::tuple<void *, size_t, std::string>> sections_read_under_stream_capture_;
 };
@@ -272,8 +272,8 @@ struct CachingHostAllocatorImpl {
   using PrivatePool = HostPrivatePool<S, E, B>;
 
   virtual ~CachingHostAllocatorImpl() {
-    active_ = false;
-    if (pinned_use_background_threads()) {
+    if (active_) {
+      active_ = false;
       getBackgroundThreadPool()->waitWorkComplete();
     }
   }
@@ -315,6 +315,7 @@ struct CachingHostAllocatorImpl {
 
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
+        active_ = true;
         getBackgroundThreadPool()->run([&]() {
           while (active_) {
             // Background thread conservatively processes default pool events.
@@ -351,9 +352,11 @@ struct CachingHostAllocatorImpl {
 
     std::optional<std::vector<E>> events;
     ska::flat_hash_set<S> streams;
+    bool allocated_during_capture = false;
     {
       std::lock_guard<std::mutex> g(block->mutex_);
       block->allocated_ = false;
+      allocated_during_capture = block->was_allocated_during_stream_capture_;
       if (block->streams_.empty()) {
         TORCH_INTERNAL_ASSERT(block->event_count_ == 0);
       } else {
@@ -369,7 +372,7 @@ struct CachingHostAllocatorImpl {
     // cudaEventRecord() does not work for indicating when a block can
     // be reused while stream capture is happening, since no actual
     // GPU work happens during stream capture.
-    if (!block->was_allocated_during_stream_capture_) {
+    if (!allocated_during_capture) {
       // Event recording must be done outside the mutex to avoid potential
       // deadlocks (e.g., when Python GIL is involved)
       for (auto stream : streams) {
@@ -383,7 +386,7 @@ struct CachingHostAllocatorImpl {
       std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
       pool.free_list_[index].list_.push_back(block);
     } else {
-      TORCH_INTERNAL_ASSERT(!block->was_allocated_during_stream_capture_ || events->empty());
+      TORCH_INTERNAL_ASSERT(!allocated_during_capture || events->empty());
       // restore these events that record by used streams.
       auto& pool = pool_from_block(block);
       std::lock_guard<std::mutex> g(pool.events_mutex_);
@@ -445,7 +448,7 @@ struct CachingHostAllocatorImpl {
     free_from_pool(default_pool_);
     // Also flush and free from private pools that are marked freeable
     {
-      std::shared_lock<std::shared_mutex> lg(instance_mutex_);
+      std::unique_lock<std::shared_mutex> lg(instance_mutex_);
       for (auto it = graph_pools_freeable_.begin(); it != graph_pools_freeable_.end();) {
         process_events(it->second->blocks);
         free_from_pool(it->second->blocks);
@@ -728,7 +731,7 @@ struct CachingHostAllocatorImpl {
       c10::MempoolId_t pool_id,
       std::function<bool(c10::Stream)> filter) {
     std::unique_lock<std::shared_mutex> lg(instance_mutex_);
-    create_or_incref_pool(pool_id);
+    create_or_incref_pool_under_lock(pool_id);
     for (auto it2 = captures_underway_.begin(); it2 != captures_underway_.end();
          ++it2) {
       TORCH_CHECK(
@@ -750,7 +753,7 @@ struct CachingHostAllocatorImpl {
     TORCH_CHECK(false, "endAllocatePool: not currently recording to mempool_id");
   }
 
-  void create_or_incref_pool(c10::MempoolId_t pool_id) {
+  void create_or_incref_pool_under_lock(c10::MempoolId_t pool_id) {
     auto it = graph_pools_.find(pool_id);
     if (it == graph_pools_.end()) {
       graph_pools_.emplace(pool_id, std::make_unique<PrivatePool>(pool_id));
@@ -758,6 +761,11 @@ struct CachingHostAllocatorImpl {
       TORCH_INTERNAL_ASSERT(it->second->use_count > 0);
       it->second->use_count++;
     }
+  }
+
+  void create_or_incref_pool(c10::MempoolId_t pool_id) {
+    std::unique_lock<std::shared_mutex> lg(instance_mutex_);
+    create_or_incref_pool_under_lock(pool_id);
   }
 
   void release_pool(c10::MempoolId_t pool_id) {
@@ -896,9 +904,9 @@ protected:
   std::vector<
       std::pair<c10::MempoolId_t, std::function<bool(c10::Stream)>>> captures_underway_;
 
-  // Indicates whether the object is active.
+  // Indicates whether the event-processing thread pool is active.
   // Set to false in the destructor to signal background threads to stop.
-  std::atomic<bool> active_{true};
+  std::atomic<bool> active_{false};
 
   alignas(hardware_destructive_interference_size) HostStatsStaged stats_;
 };

@@ -1655,7 +1655,7 @@ static inline void baddbmm_cpu_kernel(const Tensor& result, const Tensor& self, 
   auto s0 = self.accessor<const scalar_t, 3>();
   auto m0 = mat2.accessor<const scalar_t, 3>();
 
-  int64_t grain_size = std::max(internal::GRAIN_SIZE / (is * js * ks), (int64_t)1);
+  int64_t grain_size = std::max(internal::GRAIN_SIZE / (is * js * ks), static_cast<int64_t>(1));
   using opmath_t = at::opmath_type<scalar_t>;
   parallel_for(0, bs, grain_size, [&](int64_t b_begin, int64_t b_end) {
       for (const auto b : c10::irange(b_begin, b_end)) {
@@ -3541,9 +3541,9 @@ Tensor _dyn_quant_matmul_4bit_cpu(
     const int64_t out_features) {
   auto M = inp.size(0);
   TORCH_CHECK(
-      inp.dtype() == kFloat,
+      inp.dtype() == kFloat || (inp.dtype() == kBFloat16 && block_size == in_features),
       __func__,
-      " : expect input to be 32-bit float tensor.");
+      " : expect input to be float32 or bfloat16 tensor.");
   TORCH_CHECK(
       block_size == in_features ||
           (!(block_size % 32) && !(in_features % block_size)),

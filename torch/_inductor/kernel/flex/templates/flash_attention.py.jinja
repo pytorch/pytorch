@@ -1,6 +1,10 @@
-
+{% if NEEDS_BLOCK_MASK %}
+{{def_kernel("Q", "K", "V", "LOGSUMEXP", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
+{% else %}
 {{def_kernel("Q", "K", "V", "LOGSUMEXP")}}
+{% endif %}
     from flash_attn.cute.interface import _flash_attn_fwd
+    from flash_attn.cute.block_sparsity import BlockSparseTensorsTorch
 
     # Transpose tensors for _flash_attn_fwd compatibility (B,H,M,D) -> (B,M,H,D)
     q_transposed = Q.transpose(1, 2)
@@ -26,6 +30,25 @@
     output = {{get_output()}}
     output_transposed = output.transpose(1, 2)
 
+    {% if NEEDS_BLOCK_MASK %}
+    @cute.jit
+    def mask_mod(b_idx, h_idx, q_idx, kv_idx, aux_tensors):
+        {{unpack_buffers("aux_tensors", indent_width=8)}}
+        {{ modification(
+        subgraph_number=1,
+        output_name="mask_mod_output",
+        b="b_idx",
+        h="h_idx",
+        m="q_idx",
+        n="kv_idx",
+        ) | indent_except_first(2) }}
+        return mask_mod_output
+    block_sparse_tensors = BlockSparseTensorsTorch(KV_NUM_BLKS, KV_IDX, FULL_KV_NUM_BLKS, FULL_KV_IDX)
+    {% else %}
+    block_sparse_tensors = None
+    mask_mod = None
+    {% endif %}
+
     # Collect any additional tensor buffers that were added during modifications
     {% set tensor_buffers = get_tensor_buffers() -%}
     {% if tensor_buffers -%}
@@ -41,10 +64,11 @@
         k_transposed,
         v_transposed,
         softmax_scale={{SM_SCALE}},
-        causal={{CAUSAL}},
         return_lse=True,
         score_mod=score_mod,
+        mask_mod=mask_mod,
         out=output_transposed,
         lse=LOGSUMEXP,
+        block_sparse_tensors=block_sparse_tensors,
         aux_tensors=buffers
     )

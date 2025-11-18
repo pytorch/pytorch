@@ -67,7 +67,7 @@ def from_dynamic_axes_to_dynamic_shapes(
             # output names are not needed for dynamic_shapes
             continue
         if isinstance(axes, dict):
-            if any(not isinstance(k, int) for k in axes.keys()):
+            if any(not isinstance(k, int) for k in axes):
                 raise ValueError(
                     "The axis in dynamic_axes must be in the form of: dict[int, str] or list[int]."
                 )

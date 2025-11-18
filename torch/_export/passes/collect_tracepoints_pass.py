@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import operator
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch.export.exported_program import ConstantArgument, TensorArgument
@@ -29,8 +29,8 @@ class CollectTracepointsPass(PassBase):
         self.specs = specs
         self.sig = sig
 
-    def call(self, gm: torch.fx.GraphModule) -> Optional[PassResult]:
-        def get_arg_spec(arg) -> Union[TensorArgument, ConstantArgument]:
+    def call(self, gm: torch.fx.GraphModule) -> PassResult | None:
+        def get_arg_spec(arg) -> TensorArgument | ConstantArgument:
             if isinstance(arg, torch.fx.Node):
                 if isinstance(arg.meta.get("val"), torch.Tensor):
                     return TensorArgument(name=arg.name)
@@ -130,7 +130,7 @@ class CollectTracepointsPass(PassBase):
                         if isinstance(arg, torch.fx.Node):
                             for user in node.users:
                                 assert user.op == "call_function"
-                                assert user.target == operator.getitem
+                                assert user.target is operator.getitem
                                 assert isinstance(user.args[1], int)
                                 if user.args[1] == i:
                                     user.replace_all_uses_with(arg)

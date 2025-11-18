@@ -174,6 +174,12 @@ class TORCH_API Context {
   static long versionCuDNN() {
     return detail::getCUDAHooks().versionCuDNN();
   }
+  static long versionRuntimeCuDNN() {
+    return detail::getCUDAHooks().versionRuntimeCuDNN();
+  }
+  static long versionCuDNNFrontend() {
+    return detail::getCUDAHooks().versionCuDNNFrontend();
+  }
   static bool hasCuSOLVER() {
     return detail::getCUDAHooks().hasCuSOLVER();
   }
@@ -404,6 +410,9 @@ class TORCH_API Context {
   void setDisplayVmapFallbackWarnings(bool enabled);
   bool areVmapFallbackWarningsEnabled() const;
 
+  void setWarnOnAccumulateGradStreamMismatch(bool enabled);
+  bool warnOnAccumulateGradStreamMismatch() const;
+
   bool isDefaultMobileCPUAllocatorSet();
   void setDefaultMobileCPUAllocator();
   void unsetDefaultMobileCPUAllocator();
@@ -494,6 +503,7 @@ class TORCH_API Context {
   bool release_original_weights = false;
 #endif
   bool display_vmap_fallback_warnings_ = false;
+  bool warn_on_accumulate_grad_stream_mismatch_ = true;
   std::atomic<at::QEngine> quantized_engine = at::QEngine::NoQEngine;
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;

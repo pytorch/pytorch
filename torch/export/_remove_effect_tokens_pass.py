@@ -83,7 +83,7 @@ def _remove_effect_tokens_from_graph_helper(
 
         # Update user getitem nodes
         for user in list(new_node.users.keys()):
-            assert user.target == operator.getitem
+            assert user.target is operator.getitem
             # getitem(with_effects, 0) == token
             if user.args[1] == 0:
                 ep.graph.erase_node(user)

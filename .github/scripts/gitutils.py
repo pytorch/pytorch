@@ -4,10 +4,10 @@ import os
 import re
 import tempfile
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from functools import wraps
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, cast, Optional, TypeVar, Union
 
 
 T = TypeVar("T")
