@@ -1153,6 +1153,7 @@ class TestFP8Matmul(TestCase):
         use_fast_accum: bool,
         bias_dtype: torch.dtype | None
     ) -> None:
+        torch.manual_seed(42)
         # Fp32 out_dtype is only supported by cuBLAS, which however only started
         # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
         if base_dtype is torch.float32:
@@ -1394,6 +1395,7 @@ class TestFP8Matmul(TestCase):
     ])
     @with_tf32_off
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype, shapes):
+        torch.manual_seed(42)
         M, K, N = shapes
         # Fp32 out_dtype is only supported by cuBLAS, which however only started
         # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
