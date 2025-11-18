@@ -428,7 +428,7 @@ def unlift_tokens(fw_module, fw_metadata, aot_config, bw_module=None):
                         new_node = module.graph.call_function(
                             torch.ops.higher_order.with_effects,
                             (
-                                token_args[0],
+                                token_args[0],  # pyrefly: ignore[bad-argument-type]
                                 torch.ops.higher_order.invoke_subgraph,
                                 subgraph_node,
                                 identifier,
