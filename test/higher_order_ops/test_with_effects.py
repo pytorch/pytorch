@@ -945,7 +945,7 @@ def forward(self, token, p_mod_list_0_linear1_weight, p_mod_list_0_linear1_bias,
     with_effects = torch.ops.higher_order.with_effects(getitem_4, torch.ops.mylib.record_memory.default, 'forward', 'N');  getitem_4 = None
     getitem_6 = with_effects[0];  with_effects = None
     return (getitem_6, getitem_5)""",
-        )
+            )
 
             self.assertExpectedInline(
                 decomp.graph_module.repeated_subgraph0.code.strip(),
