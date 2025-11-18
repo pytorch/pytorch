@@ -1075,6 +1075,8 @@ def default_partition(
     saved_values = []
     saved_sym_nodes = []
 
+    distributed_enabled = torch.distributed.is_available()
+
     def is_tensor(node):
         return "tensor_meta" in node.meta or isinstance(
             node.meta.get("val"), torch._subclasses.FakeTensor
@@ -1098,7 +1100,10 @@ def default_partition(
                 "placeholder",
                 "output",
             )
-            and node.target is not torch.ops._c10d_functional.wait_tensor.default
+            and (
+                not distributed_enabled
+                or node.target is not torch.ops._c10d_functional.wait_tensor.default
+            )
         )
 
     for node in joint_module.graph.nodes:
@@ -1123,7 +1128,7 @@ def default_partition(
             )
             saved_values.append(node)
             continue
-        assert is_tensor(node) or not node.op == "call_function", (
+        assert is_tensor(node) or node.op != "call_function", (
             f"Expected {node} to be a tensor"
         )
         backward_usages = [n for n in node.users if n.name not in forward_node_names]
@@ -1159,6 +1164,8 @@ def default_partition(
 
     # Run DCE while overriding the definition of is_impure_node
     def is_not_collective(node):
+        if not distributed_enabled:
+            return True
         if node.target is torch.ops._c10d_functional.wait_tensor.default:
             return False
         if node.target is torch.ops._c10d_functional.all_gather_into_tensor.default:
