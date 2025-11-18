@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
-def estimate_aten_runtime(fx_node, compute_multiplier=1.0):
+def estimate_aten_runtime(fx_node, override_size=None, compute_multiplier=1.0):
     # for tests, assume a matmul can hide a single collective
     if "c10" in str(fx_node.target):
         return 1.0
@@ -1112,7 +1112,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         # Use 0.5 compute multiplier so each collective needs 2 matmuls to be fully hidden
         def estimate_with_half_compute(fx_node, override_size=None):
-            return estimate_aten_runtime(fx_node, compute_multiplier=0.5)
+            return estimate_aten_runtime(fx_node, override_size, compute_multiplier=0.5)
 
         def func(a, b, *, ranks):
             # Two all_gathers that will be hidden by multiple compute operations
