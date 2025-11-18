@@ -690,6 +690,42 @@ class <lambda>(torch.nn.Module):
             opcheck(wait_stream, args)
 
     @requires_cuda
+    def test_record_stream_problem_basic(self):
+        # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
+        # for what this tests/solves for
+        # We expect there to be a sync_dealloc op added to the graph for y
+        # synchronizing the first stream w/ the second stream after the second stream is finished
+        def fn(x):
+            e = torch.Event()
+            with torch.Stream(device="cuda:0"):
+                y = torch.ones(2, 2, device="cuda:0")
+                e.record()
+                z = y * x
+
+            with torch.Stream(device="cuda:0"):
+                e.wait()
+                z0 = y * 2 * x
+
+            return z0, z
+
+    @requires_cuda
+    def test_record_stream_problem_interleaved(self):
+        # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
+        # for what this tests/solves for
+        # This will have interleaved computation where y is
+        # first allocated on the first stream used on the second stream
+        # used on the first stream again then finally used on the last stream
+        def fn(x):
+            with torch.Stream(device="cuda:0"):
+                y = torch.ones(2, 2, device="cuda:0")
+                z = y * x
+
+            with torch.Stream(device="cuda:0"):
+                z0 = y * 2 * x
+
+            return z0, z
+
+    @requires_cuda
     def test_inductor_lowering(self):
         with patch("torch._inductor.config.implicit_fallbacks", False):
 
