@@ -1844,8 +1844,8 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         self.assertEqual(counter, 1)
 
 
-class ACReorderingInferenceModeTests(torch._dynamo.test_case.TestCase):
-    """Tests for AC reordering optimization in inference mode (forward+backward in one graph)."""
+class ACReorderingTests(torch._dynamo.test_case.TestCase):
+    """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
 
     def _get_ac_nodes(self, gm):
         """Get nodes tagged for AC recomputation."""
@@ -1967,6 +1967,34 @@ def forward(self, arg0_1, arg1_1):
 
         dx1, gm_without = self._compile_and_capture(forward_backward_with_ac, False)
         dx2, gm_with = self._compile_and_capture(forward_backward_with_ac, True)
+
+        self.assertExpectedInline(
+            str(gm_without.code).strip(),
+            """\
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1)
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
+    detach = torch.ops.aten.detach.default(mul);  mul = None
+    return (detach,)"""
+        )
+
+        self.assertExpectedInline(
+            str(gm_with.code).strip(),
+            """\
+def forward(self, arg0_1):
+    sin = torch.ops.aten.sin.default(arg0_1)
+    sum_1 = torch.ops.aten.sum.default(sin);  sin = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
+    detach = torch.ops.aten.detach.default(mul);  mul = None
+    return (detach,)"""
+        )
 
         # Verify correctness
         self.assertTrue(torch.allclose(dx1, dx2))
