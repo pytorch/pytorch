@@ -105,6 +105,12 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_.clear();
   }
 
+  void incref_pyobject() const override final;
+
+  void decref_pyobject() const override final;
+
+  bool try_incref_pyobject() const override final;
+
   size_t nbytes() const {
     // OK to do this instead of maybe_as_int as nbytes is guaranteed positive
     TORCH_CHECK(!size_bytes_is_heap_allocated_);
@@ -369,5 +375,19 @@ C10_API c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
     c10::Allocator* allocator,
     bool resizable,
     std::optional<at::Device> device_opt);
+
+namespace detail {
+
+#ifndef C10_MOBILE
+template <class T>
+struct TargetTraits<
+    T,
+    std::enable_if_t<
+        std::is_base_of_v<c10::StorageImpl, std::remove_cv_t<T>>>> {
+  static constexpr bool can_have_pyobject = true;
+};
+#endif
+
+} // namespace detail
 
 } // namespace c10
