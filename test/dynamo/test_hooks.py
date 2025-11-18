@@ -807,7 +807,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.ModuleList()
-                for i in range(10):
+                for _ in range(10):
                     layer = torch.nn.Linear(16, 16)
                     layer.register_forward_pre_hook(lambda _, inp: fw_hook(inp))
                     layer = torch.compile(layer, backend=cnts)

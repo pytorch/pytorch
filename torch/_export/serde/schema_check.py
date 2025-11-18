@@ -129,7 +129,7 @@ def _staged_schema():
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None
-            assert typing.get_origin(f.type) == Annotated, (
+            assert typing.get_origin(f.type) is Annotated, (
                 f"Field {f.name} must be annotated with an integer id."
             )
             thrift_id = f.type.__metadata__[0]

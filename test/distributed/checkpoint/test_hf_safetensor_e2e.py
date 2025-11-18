@@ -60,7 +60,7 @@ class TestSingleRankSaveLoad(TestCase):
         self.assertEqual(
             sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys())
         )
-        for key in state_dict_to_save.keys():
+        for key in state_dict_to_save:
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_loaded[key])
             )
@@ -89,7 +89,7 @@ class TestSingleRankSaveLoad(TestCase):
         self.assertEqual(
             sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
         )
-        for key in state_dict_to_save.keys():
+        for key in state_dict_to_save:
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_to_load[key])
             )
@@ -116,7 +116,7 @@ class TestSingleRankSaveLoad(TestCase):
         self.assertEqual(
             sorted(state_dict_to_save.keys()), sorted(state_dict_loaded.keys())
         )
-        for key in state_dict_to_save.keys():
+        for key in state_dict_to_save:
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_loaded[key])
             )
@@ -156,7 +156,7 @@ class TestSingleRankSaveLoad(TestCase):
         self.assertEqual(
             sorted(state_dict_to_save.keys()), sorted(state_dict_to_load.keys())
         )
-        for key in state_dict_to_save.keys():
+        for key in state_dict_to_save:
             self.assertTrue(
                 torch.equal(state_dict_to_save[key], state_dict_to_load[key])
             )
@@ -208,7 +208,7 @@ class TestSingleRankSaveLoad(TestCase):
 
         # Create model.safetensors.index.json with weight mapping
         weight_map = {}
-        for key in quantized_checkpoint.keys():
+        for key in quantized_checkpoint:
             weight_map[key] = "model.safetensors"
 
         index_data = {
@@ -245,7 +245,7 @@ class TestSingleRankSaveLoad(TestCase):
             sorted(original_tensors.keys()), sorted(state_dict_to_load.keys())
         )
 
-        for tensor_name in original_tensors.keys():
+        for tensor_name in original_tensors:
             original = original_tensors[tensor_name]
             loaded = state_dict_to_load[tensor_name]
 

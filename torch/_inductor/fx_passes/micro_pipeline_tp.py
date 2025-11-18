@@ -386,9 +386,9 @@ class _Matmul:
         if len(self.nodes) == 1:
             assert self.nodes[0].target in (aten.mm.default, aten._scaled_mm.default)
         else:
-            assert self.nodes[0].target == aten.reshape.default
+            assert self.nodes[0].target is aten.reshape.default
             assert self.nodes[1].target in (aten.mm.default, aten._scaled_mm.default)
-            assert self.nodes[2].target == aten.reshape.default
+            assert self.nodes[2].target is aten.reshape.default
         self.arg_ancestor_nodes = _find_ancestors(self.B_node)
 
     def replace_with(self, new_node: torch.fx.Node) -> None:
@@ -415,7 +415,7 @@ class _Matmul:
         output_reshape_node = self.nodes[2]
 
         assert mm_node.target in (aten.mm.default, aten._scaled_mm.default)
-        assert output_reshape_node.target == aten.reshape.default
+        assert output_reshape_node.target is aten.reshape.default
 
         output_reshape_node.replace_all_uses_with(new_node)
         if len(mm_node.users) > 1:
@@ -482,7 +482,7 @@ class _ScaledMatmul(_Matmul):
         # Use mm_node with 2D args for both A and B, even if this is a "reshape -> mm -> reshape" pattern.
         # We will store the reshapes in pre_mm_reshape and post_mm_reshape, to be referenced later to
         # produce the correct output shapes, reduce-scatter along the correct dimensions, etc.
-        is_reshape_mm_reshape_pattern = match[0].target == aten.reshape.default
+        is_reshape_mm_reshape_pattern = match[0].target is aten.reshape.default
         mm_node = match[1] if is_reshape_mm_reshape_pattern else match[0]
         pre_mm_reshape = match[0] if is_reshape_mm_reshape_pattern else None
         post_mm_reshape = match[-1] if is_reshape_mm_reshape_pattern else None
@@ -540,10 +540,10 @@ def _find_reshape_mm_reshape(node: torch.fx.Node) -> list[_Matmul]:
     matmuls = []
     for match in matches:
         mm_node = match[1]
-        if mm_node.target == aten.mm.default:
+        if mm_node.target is aten.mm.default:
             matmul = _Matmul.from_match(match)
             matmuls.append(matmul)
-        elif mm_node.target == aten._scaled_mm.default:
+        elif mm_node.target is aten._scaled_mm.default:
             matmul = _ScaledMatmul.from_match(match)
             matmuls.append(matmul)
         else:
@@ -561,13 +561,13 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> list[_Matmul]:
     matmuls = []
     for user in node.users:
         # ND matmuls
-        if user.target == aten.reshape.default:
+        if user.target is aten.reshape.default:
             matmuls.extend(_find_reshape_mm_reshape(user))
         # 2D matmuls
-        elif user.target == aten.mm.default:
+        elif user.target is aten.mm.default:
             matmul = _Matmul.from_match(match=[user])
             matmuls.append(matmul)
-        elif user.target == aten._scaled_mm.default:
+        elif user.target is aten._scaled_mm.default:
             matmul = _ScaledMatmul.from_match([user])
             matmuls.append(matmul)
     return matmuls
@@ -790,11 +790,11 @@ def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
     """
     Returns producer matmul node if found, otherwise returns None.
     """
-    if node.target == aten.mm.default:
+    if node.target is aten.mm.default:
         return _Matmul.from_match(match=[node])
-    elif node.target == aten._scaled_mm.default:
+    elif node.target is aten._scaled_mm.default:
         return _ScaledMatmul.from_match(match=[node])
-    elif node.target == aten.reshape.default:
+    elif node.target is aten.reshape.default:
         reshape_node_1 = node
 
         mm_node = reshape_node_1.args[0]
@@ -807,9 +807,9 @@ def _find_producer_matmul(node: torch.fx.Node) -> _Matmul | None:
         if reshape_node_0.target != aten.reshape.default:
             return None
 
-        if mm_node.target == aten.mm.default:
+        if mm_node.target is aten.mm.default:
             return _Matmul.from_match(match=[reshape_node_0, mm_node, reshape_node_1])
-        elif mm_node.target == aten._scaled_mm.default:
+        elif mm_node.target is aten._scaled_mm.default:
             return _ScaledMatmul.from_match(
                 match=[reshape_node_0, mm_node, reshape_node_1]
             )

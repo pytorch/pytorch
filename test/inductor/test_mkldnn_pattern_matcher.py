@@ -142,7 +142,7 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4, device="cpu"):
 
 class TestPatternMatcherBase(TestCase):
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
         self.ctx_stack = contextlib.ExitStack()
         self.ctx_stack.enter_context(config.patch({"freezing": True}))
 

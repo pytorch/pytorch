@@ -71,9 +71,9 @@ def update_stack_example_value(node, metadata, dim=0, op=torch.stack):
     Update the example value of the node in the graph to enable followup split cat opt.
     """
     if node is not None and hasattr(node, "meta"):
-        if op == torch.stack:
+        if op is torch.stack:
             example_value = torch.stack(metadata, dim=dim)
-        elif op == torch.unbind:
+        elif op is torch.unbind:
             example_value = torch.unbind(metadata, dim=dim)  # type: ignore[assignment]
         else:
             return
@@ -85,9 +85,9 @@ def update_pointwise_example_value(pointwise_node, input, other, op):
     Update the example value of the add node in the graph to enable followup split cat opt.
     """
     if pointwise_node is not None and hasattr(pointwise_node, "meta"):
-        if op == torch.add:
+        if op is torch.add:
             example_value = torch.add(input, other)
-        elif op == torch.mul:
+        elif op is torch.mul:
             example_value = torch.mul(input, other)
         else:
             return
@@ -198,7 +198,7 @@ class PostGradBatchLinearFusion(BatchFusion):
             return None
         # get the user of the node
         if self.graph_search_options.get("fuse_nodes_with_same_users", False):
-            users = [user.target for user in node.users.keys()]
+            users = [user.target for user in node.users]
         else:
             users = ""  # type: ignore[assignment]
         # only handle the cases where inputs are 2D tensors
@@ -414,12 +414,12 @@ class BatchPointwiseMathOpsPostGradFusion(BatchPointwiseOpsFusionFactory):
             if self.graph_search_options.get("fuse_nodes_with_same_parent", False):
                 # only consider the linear case so far
                 # pyre-fixme[16]
-                if input.target == aten.select or other.target == aten.select:  # type: ignore[union-attr]
+                if input.target is aten.select or other.target is aten.select:  # type: ignore[union-attr]
                     parent = (
                         # pyre-fixme[16]
                         input.args[0]  # type: ignore[union-attr]
                         # pyre-fixme[16]
-                        if input.target == aten.select  # type: ignore[union-attr]
+                        if input.target is aten.select  # type: ignore[union-attr]
                         else other.args[0]  # type: ignore[union-attr]
                     )
                 else:
@@ -627,7 +627,7 @@ class PreGradBatchLinearFusion(BatchFusion):
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
             if self.graph_search_options.get("fuse_nodes_with_same_users", False):
-                users = [user.target for user in node.users.keys()]
+                users = [user.target for user in node.users]
             else:
                 users = ""  # type: ignore[assignment]
             group_key = (
@@ -742,7 +742,7 @@ class BatchLayernormFusion(BatchFusion):
             weight = get_arg_value(node, 2, "weight")
             bias = get_arg_value(node, 3, "bias")
             if self.graph_search_options.get("fuse_nodes_with_same_users", False):
-                users = [user.target for user in node.users.keys()]
+                users = [user.target for user in node.users]
             else:
                 users = ""  # type: ignore[assignment]
             group_key = (
@@ -950,7 +950,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                 torch.stack, args=(batch_inputs,), kwargs={"dim": 0}
             )
             update_stack_example_value(stack_inputs, batch_inputs_metadata)
-            if self.op == torch.nn.functional.relu:
+            if self.op is torch.nn.functional.relu:
                 batch_op = graph.call_function(  # type: ignore[operator]
                     self.op,
                     args=(stack_inputs,),
@@ -958,6 +958,7 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
                 )
                 batch_op.meta["example_value"] = self.op(
                     stack_inputs.meta["example_value"],
+                    # pyrefly: ignore [bad-argument-type]
                     inplace=subset[0].kwargs.get("inplace", False),
                 )
             else:
@@ -1424,7 +1425,7 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         }
         non_fbgemm_fusions = {
             fusion: config.post_grad_fusion_options[fusion]
-            for fusion in config.post_grad_fusion_options.keys()
+            for fusion in config.post_grad_fusion_options
             if fusion not in fbgemm_fusion_keys
         }
         fusions += generate_fusion_from_config(non_fbgemm_fusions, pre_grad=False)

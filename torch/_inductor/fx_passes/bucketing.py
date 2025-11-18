@@ -2,13 +2,18 @@ import collections
 import logging
 import operator
 from collections import defaultdict
-from typing import Any, Callable, Literal, TypeAlias
+from collections.abc import Callable
+from typing import Any, Literal, TypeAlias
 
 import torch
 import torch.distributed as dist
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import detect_fake_mode
+from torch._inductor.comm_analysis import (
+    get_collective_type_from_kernel_name,
+    NCCL_COLL,
+)
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -49,6 +54,23 @@ def _ar_group_key(node: torch.fx.Node) -> tuple[str, str, torch.dtype]:
     assert isinstance(group_name, str)
     assert isinstance(reduce_op, str)
     return (group_name, reduce_op, dtype)
+
+
+def _schedulable_wait_node(node: torch.fx.Node) -> bool:
+    """
+    Add additional check on if the wait node is schedulable
+    We should not schedule a fx node that is:
+        1. wait on a collective that is not callable
+        2. wait on a non-NCCL communication node
+    """
+    if not is_wait_tensor(node):
+        return False
+    assert isinstance(node.args[0], torch.fx.Node)
+    assert isinstance(node.args[0].target.name(), str)
+    is_callable: bool = node.args[0].op == "call_function"
+    coll: NCCL_COLL = get_collective_type_from_kernel_name(node.args[0].target.name())
+    is_collective: bool = coll != NCCL_COLL.UNSUPPORTED
+    return is_callable and is_collective
 
 
 def bucket_key(node: torch.fx.Node, mode: BucketMode | None = None) -> object | None:
@@ -120,9 +142,9 @@ def bucket_reduce_scatter(
 
 
 def is_all_gather_into_tensor(node: torch.fx.Node) -> bool:  # type: ignore[arg-type]
-    return (
-        node.op == "call_function"
-        and node.target is torch.ops._c10d_functional.all_gather_into_tensor.default
+    return node.op == "call_function" and (
+        node.target == torch.ops._c10d_functional.all_gather_into_tensor.default
+        or node.target == torch.ops._c10d_functional.all_gather_into_tensor_out.default
     )
 
 
@@ -144,6 +166,13 @@ def is_all_reduce_tensor(node: torch.fx.Node) -> bool:
     return (
         node.op == "call_function"
         and node.target is torch.ops._c10d_functional.all_reduce.default
+    )
+
+
+def is_all_to_all_tensor(node: torch.fx.Node) -> bool:
+    return (
+        node.op == "call_function"
+        and node.target is torch.ops._c10d_functional.all_to_all_single.default
     )
 
 
@@ -730,7 +759,7 @@ def process_collective_bucket(
             is_all_gather_into_tensor(n)
             and isinstance(node_in, torch.fx.Node)  # Add type check
             and node_in.op == "call_function"
-            and node_in.target == torch.ops.prims.convert_element_type.default
+            and node_in.target is torch.ops.prims.convert_element_type.default
             and len(node_in.users) == 1
         ):
             ag_node_to_pre_nodes[n].append(node_in)

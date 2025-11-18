@@ -697,7 +697,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
     def test_unspecialized_float_multiply_precision(self):
         dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
-        for i, dtype in enumerate(dtypes):
+        for dtype in dtypes:
 
             def fn(x, y):
                 return x * y
@@ -722,7 +722,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             return x + y.item()
 
         dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
-        for i, dtype in enumerate(dtypes):
+        for dtype in dtypes:
             x = torch.ones(3, 3, dtype=dtype)
             self.assertEqual(f(x), x + x.sum().item())
 

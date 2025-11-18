@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import IS_LINUX, run_tests, TestCase
 @unittest.skipIf(not IS_LINUX, "Only works on linux")
 class TestTorchrun(TestCase):
     def setUp(self):
+        super().setUp()
         self._test_dir = tempfile.mkdtemp(prefix=self.__class__.__name__)
 
     def tearDown(self):
