@@ -356,9 +356,10 @@ def trace_flex_attention(
     )
     # pyrefly: ignore [missing-attribute]
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
-    out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", flex_attention, proxy_args, {}
-    )
+    with torch.fx.experimental.proxy_tensor.set_original_aten_op(flex_attention):
+        out_proxy = proxy_mode.tracer.create_proxy(
+            "call_function", flex_attention, proxy_args, {}
+        )
     return track_tensor_tree(
         example_out,
         out_proxy,
@@ -1114,23 +1115,26 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
-    return trace_flex_attention_backward(
-        mode,
-        query,
-        key,
-        value,
-        out,
-        logsumexp,
-        grad_out,
-        grad_logsumexp,
-        fw_graph,
-        joint_graph,
-        block_mask,
-        scale,
-        kernel_options,
-        score_mod_other_buffers,
-        mask_mod_other_buffers,
-    )
+    with torch.fx.experimental.proxy_tensor.set_original_aten_op(
+        flex_attention_backward
+    ):
+        return trace_flex_attention_backward(
+            mode,
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            grad_logsumexp,
+            fw_graph,
+            joint_graph,
+            block_mask,
+            scale,
+            kernel_options,
+            score_mod_other_buffers,
+            mask_mod_other_buffers,
+        )
 
 
 @flex_attention_backward.py_functionalize_impl

@@ -509,7 +509,9 @@ def merge_chunks(
                 values_to_cat = []
                 chunk_start_idx = 0
                 assert len(partial_values) == len(meta_chunks)
-                for partial_value, meta_chunk in zip(partial_values, meta_chunks):
+                for partial_value, meta_chunk in zip(
+                    partial_values, meta_chunks, strict=True
+                ):
                     chunk_end_idx = chunk_start_idx + meta_chunk.size(arg.split_dim)
 
                     slice_indices = [slice(None, None, None)] * partial_value.ndim

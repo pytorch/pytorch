@@ -1,4 +1,5 @@
 #include <c10/util/Exception.h>
+#include <c10/util/FileSystem.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Type.h>
 
@@ -27,7 +28,7 @@ Error::Error(
     const void* caller)
     : Error(
           str("[enforce fail at ",
-              detail::StripBasename(file),
+              c10::filesystem::path(file).filename(),
               ":",
               line,
               "] ",
@@ -44,7 +45,7 @@ std::string Error::compute_what(bool include_backtrace) const {
 
   if (context_.size() == 1) {
     // Fold error and context in one line
-    oss << " (" << context_[0] << ")";
+    oss << " (" << context_[0] << ')';
   } else {
     for (const auto& c : context_) {
       oss << "\n  " << c;
@@ -52,7 +53,7 @@ std::string Error::compute_what(bool include_backtrace) const {
   }
 
   if (include_backtrace && backtrace_) {
-    oss << "\n" << backtrace_->get();
+    oss << '\n' << backtrace_->get();
   }
 
   return oss.str();
@@ -247,7 +248,7 @@ void WarningHandler::process(const Warning& warning) {
   LOG_AT_FILE_LINE(
       WARNING, warning.source_location().file, warning.source_location().line)
       << "Warning: " << warning.msg() << " (function "
-      << warning.source_location().function << ")";
+      << warning.source_location().function << ')';
 }
 
 std::string GetExceptionString(const std::exception& e) {

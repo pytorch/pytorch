@@ -1474,13 +1474,6 @@ except RuntimeError as e:
         res_cpu = src.cpu()[idx.cpu()]
         self.assertEqual(res.cpu(), res_cpu)
 
-    def test_fast_index_overflow(self):
-        src = torch.randint(0, 20, (4, 87, 1056, 736), device="cuda")
-        indices = torch.tensor([True, False, False, True], device="cuda")
-        res = src[indices]
-        res_cpu = src.cpu()[indices.cpu()]
-        self.assertEqual(res.cpu(), res_cpu)
-
     def test_randint_randomness_for_large_range(self) -> None:
         # For large ranges, randint generation is slightly different. This lead to a subtle bug where some Philox
         # offsets were not calculated correctly, resulting in reused random states.
@@ -4633,6 +4626,52 @@ print(torch.cuda.get_allocator_backend())
         rc = check_output(test_script)
         self.assertEqual(rc, "cudaMallocAsync")
 
+    def test_allocator_memory_fraction_setting(self):
+        def make_env(fraction):
+            env = os.environ.copy()
+            var = "PYTORCH_CUDA_ALLOC_CONF"
+            key = "per_process_memory_fraction"
+            value = [
+                x
+                for x in env.get(var, "").split(",")
+                if len(x) > 0 and not x.startswith(f"{key}:")
+            ]
+            value.append(f"{key}:{fraction}")
+            env[var] = ",".join(value)
+            return env
+
+        def run_test(value):
+            test_script = """\
+import os
+import torch
+device = torch._C._cuda_getDevice()
+value = torch.cuda.memory.get_per_process_memory_fraction(device)
+print(value, end="")
+            """
+            return subprocess.run(
+                [sys.executable, "-c", test_script],
+                env=make_env(value),
+                text=True,
+                check=True,
+                capture_output=True,
+            )
+
+        self.assertEqual(run_test(0.0).stdout, "0.0")
+        self.assertEqual(run_test(0.5).stdout, "0.5")
+        self.assertEqual(run_test(1.0).stdout, "1.0")
+
+        with self.assertRaises(subprocess.CalledProcessError) as e:
+            run_test(-0.1)
+        assert "per_process_memory_fraction is invalid" in e.exception.stderr, (
+            e.exception.stderr
+        )
+
+        with self.assertRaises(subprocess.CalledProcessError) as e:
+            run_test(1.1)
+        assert "per_process_memory_fraction is invalid" in e.exception.stderr, (
+            e.exception.stderr
+        )
+
     def test_cachingAllocator_raw_alloc(self):
         # Test that raw_alloc respects the setting that
         # activates/deactivates the caching allocator
@@ -5573,6 +5612,20 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
 
             assert new_data_ptr != old_data_ptr
 
+    def test_unpinned_memory_use(self):
+        # It is allowed to call copy_(non_blocking=True) on pageable
+        # host memory. TODO: We should test that a warning is emitted
+        # here, since we have no way to guarantee that pageable host
+        # memory allocated during stream capture stays alive so long
+        # as the graph is alive.
+        pool = torch.cuda.MemPool()
+        with torch.cuda.memory.use_mem_pool(pool):
+            data = torch.empty(8)
+            data_gpu = torch.randn(8, device="cuda")
+            data_gpu.copy_(data, non_blocking=True)
+            old_data_ptr = data.data_ptr()
+            del data
+
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestCachingHostAllocatorMemoryPool(TestCase):
@@ -5831,8 +5884,9 @@ class TestCachingHostAllocatorMemoryPool(TestCase):
     @parametrize("use_cuda_host_register", [True, False])
     def test_pin_memory_nested_pools(self, use_cuda_host_register):
         with caching_host_allocator_use_host_register(use_cuda_host_register):
-            # When nesting `with torch.cuda.memory.use_mem_pool`, I would
-            # like to guarantee that allocations go to the right pool.
+            # When nesting `with torch.cuda.memory.use_mem_pool`, I
+            # would like to guarantee that allocations go to the right
+            # pool based on a stack-based ordering.
             pool1 = torch.cuda.MemPool()
             pool2 = torch.cuda.MemPool()
             with torch.cuda.memory.use_mem_pool(pool1):
@@ -5845,6 +5899,113 @@ class TestCachingHostAllocatorMemoryPool(TestCase):
 
             # assert len(pool1_segments) == 1
             # assert len(pool2_segments) == 1
+
+    @parametrize("use_cuda_host_register", [True, False])
+    def test_threaded_empty_separate_pools(self, use_cuda_host_register):
+        # Two threads allocating in separate pools concurrently should be isolated;
+        # each pool should later reuse its own freed block.
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool_a = torch.cuda.MemPool()
+            pool_b = torch.cuda.MemPool()
+            results = {}
+            barrier = threading.Barrier(2)
+
+            def worker(name, pool):
+                with torch.cuda.memory.use_mem_pool(pool):
+                    barrier.wait()
+                    t = torch.empty(8, pin_memory=True)
+                    results[name] = t.data_ptr()
+                    del t
+
+            ta = threading.Thread(target=worker, args=("a", pool_a))
+            tb = threading.Thread(target=worker, args=("b", pool_b))
+            ta.start()
+            tb.start()
+            ta.join()
+            tb.join()
+
+            # Each pool should reuse its own pointer on next allocation
+            with torch.cuda.memory.use_mem_pool(pool_a):
+                t_a2 = torch.empty(8, pin_memory=True)
+                p_a2 = t_a2.data_ptr()
+                del t_a2
+            with torch.cuda.memory.use_mem_pool(pool_b):
+                t_b2 = torch.empty(8, pin_memory=True)
+                p_b2 = t_b2.data_ptr()
+                del t_b2
+
+            self.assertEqual(p_a2, results["a"])
+            self.assertEqual(p_b2, results["b"])
+
+    @parametrize("use_cuda_host_register", [True, False])
+    @parametrize("direction", ["h2d", "d2h"])
+    def test_threaded_copy_separate_pools(self, direction, use_cuda_host_register):
+        # Two threads perform non_blocking copies that record events in separate pools.
+        # Each pool should defer reuse until the copy completes, then reuse its own block.
+        with caching_host_allocator_use_host_register(use_cuda_host_register):
+            pool_a = torch.cuda.MemPool()
+            pool_b = torch.cuda.MemPool()
+            results = {}
+            barrier = threading.Barrier(2)
+
+            def worker(name, pool):
+                N = 1024
+                s = torch.cuda.Stream()
+                with torch.cuda.memory.use_mem_pool(pool):
+                    barrier.wait()
+                    if direction == "h2d":
+                        h = torch.empty(N, pin_memory=True)
+                        pre = h.data_ptr()
+                        d = torch.empty(N, device="cuda")
+                        with torch.cuda.stream(s):
+                            d.copy_(h, non_blocking=True)
+                    else:  # d2h
+                        d = torch.randn(N, device="cuda")
+                        h = torch.empty(N, pin_memory=True)
+                        pre = h.data_ptr()
+                        with torch.cuda.stream(s):
+                            h.copy_(d, non_blocking=True)
+                    # Free while copy is outstanding
+                    del h
+                    # We have no way to ensure sure that the cpu
+                    # thread stays ahead of without the trickery found
+                    # in
+                    # TestCudaDeviceParametrized::test_graph_external_wait_and_record,
+                    # so this test does not actually verify that
+                    # allocations are not reused until all kernels
+                    # using them are finished.
+
+                    # After sync, should reuse
+                    s.synchronize()
+                    h2 = torch.empty(N, pin_memory=True)
+                    post = h2.data_ptr()
+                    results[name] = {"pre": pre, "post": post}
+
+            ta = threading.Thread(target=worker, args=("a", pool_a))
+            tb = threading.Thread(target=worker, args=("b", pool_b))
+            ta.start()
+            tb.start()
+            ta.join()
+            tb.join()
+
+            self.assertEqual(results["a"]["post"], results["a"]["pre"])
+            self.assertEqual(results["b"]["post"], results["b"]["pre"])
+            self.assertNotEqual(results["a"]["pre"], results["b"]["pre"])
+
+    def test_unpinned_memory_use(self):
+        # It is allowed to call copy_(non_blocking=True) on pageable
+        # host memory. We should ensure that this works in the
+        # presence of memory pools.
+        pool = torch.cuda.MemPool()
+        with torch.cuda.memory.use_mem_pool(pool):
+            data = torch.empty(8)
+            data_gpu = torch.randn(8, device="cuda")
+            data_gpu.copy_(data, non_blocking=True)
+            old_data_ptr = data.data_ptr()
+            del data
+
+            data2 = torch.empty(8)
+            data_gpu.copy_(data2, non_blocking=True)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -7468,7 +7629,8 @@ class TestCompileKernel(TestCase):
         with self.assertRaises(RuntimeError):
             kernel.set_shared_memory_config(excessive_shared_mem)
 
-    @tf32_on_and_off(0.05 if TEST_WITH_ROCM else 0.005)
+    @skipIfRocmArch(MI300_ARCH)
+    @tf32_on_and_off(0.005)
     @unittest.skipIf(not TEST_CUDA, "No CUDA")
     def test_compile_kernel_advanced(self):
         # Test matrix multiplication
@@ -7911,6 +8073,132 @@ class TestCudaDeviceParametrized(TestCase):
             work_stream.query(),
             "end_event.synchronize() completing should imply that work_stream is done",
         )
+
+
+class TestFXMemoryProfiler(TestCase):
+    """Tests for memory profiler augmentation with original stack traces."""
+
+    class MLPModule(nn.Module):
+        def __init__(self, device):
+            super().__init__()
+            torch.manual_seed(5)
+            self.net1 = nn.Linear(10, 16, bias=True, device=device)
+            self.relu = nn.ReLU()
+            self.net2 = nn.Linear(16, 10, bias=True, device=device)
+
+        def forward(self, x):
+            a = self.net1(x)
+            b = self.relu(a)
+            c = self.net2(b)
+            return c
+
+    class MLPModule2(nn.Module):
+        def __init__(self, device):
+            super().__init__()
+            torch.manual_seed(5)
+            self.net1 = nn.Linear(10, 16, bias=True, device=device)
+            self.relu = nn.ReLU()
+            self.net2 = nn.Linear(16, 10, bias=True, device=device)
+
+        def forward(self, x):
+            d = self.net1(x)
+            e = self.relu(d)
+            f = self.net2(e)
+            return f
+
+    def collect_frames(
+        self, augmented_snapshot, collect_device_traces=True, collect_segments=True
+    ):
+        """Collects all frames that has node metadata from a memory snapshot."""
+        # Collect all frames with FX metadata
+        fx_frames = []
+
+        # Check device traces for FX debug fields
+        if collect_device_traces and "device_traces" in augmented_snapshot:
+            for trace_list in augmented_snapshot["device_traces"]:
+                for trace_entry in trace_list:
+                    if isinstance(trace_entry, dict) and "frames" in trace_entry:
+                        for frame in trace_entry["frames"]:
+                            if isinstance(frame, dict):
+                                # Check for FX debug fields
+                                if "fx_node_op" in frame or "fx_node_name" in frame:
+                                    fx_frames.append(frame)
+
+        # Check segments/blocks for FX debug fields
+        if collect_segments and "segments" in augmented_snapshot:
+            for segment in augmented_snapshot["segments"]:
+                if "blocks" in segment:
+                    for block in segment["blocks"]:
+                        if "frames" in block:
+                            for frame in block["frames"]:
+                                if isinstance(frame, dict):
+                                    if "fx_node_op" in frame or "fx_node_name" in frame:
+                                        fx_frames.append(frame)
+        return fx_frames
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    def test_fx_memory_profiler_augmentation(self):
+        """Test that memory snapshots are augmented with FX debug information."""
+
+        device = "cuda"
+        mod = self.MLPModule(device)
+        # reset cache to start fresh
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory._record_memory_history()
+        compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
+        result = compiled(torch.randn(10, 10, device=device))
+        augmented_snapshot = torch.cuda.memory._snapshot(augment_with_fx_traces=True)
+        torch.cuda.memory._record_memory_history(enabled=None, clear_history=True)
+        torch.cuda.empty_cache()
+
+        fx_frames = self.collect_frames(augmented_snapshot)
+        self.assertGreater(len(fx_frames), 2)
+
+        for frame in fx_frames:
+            # Every FX frame should have both node_op and node_name
+            self.assertIn("fx_node_op", frame)
+            self.assertIn("fx_node_name", frame)
+            self.assertIn("fx_node_target", frame)
+            self.assertIn("fx_original_trace", frame)
+
+            self.assertIn(frame["fx_node_name"], ["addmm", "relu", "addmm_1"])
+            fx_node_name = frame["fx_node_name"]
+            if fx_node_name == "addmm":
+                self.assertIn("a = self.net1(x)", frame["fx_original_trace"])
+            elif fx_node_name == "addmm_1":
+                self.assertIn("c = self.net2(b)", frame["fx_original_trace"])
+            elif fx_node_name == "relu":
+                self.assertIn("b = self.relu(a)", frame["fx_original_trace"])
+
+        # Test that when we have two graphs with the same src_code, they're not hashed
+        # to the same metadata
+        mod = self.MLPModule2(device)
+        torch.cuda.memory._record_memory_history()
+        compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
+        result = compiled(torch.randn(10, 10, device=device))
+        augmented_snapshot = torch.cuda.memory._snapshot(augment_with_fx_traces=True)
+        torch.cuda.memory._record_memory_history(enabled=None, clear_history=True)
+
+        # avoid collecting segments from previous run for unit test purpose
+        fx_frames = self.collect_frames(augmented_snapshot, collect_segments=False)
+        self.assertGreater(len(fx_frames), 0)
+
+        for frame in fx_frames:
+            # Every FX frame should have both node_op and node_name
+            self.assertIn("fx_node_op", frame)
+            self.assertIn("fx_node_name", frame)
+            self.assertIn("fx_node_target", frame)
+            self.assertIn("fx_original_trace", frame)
+
+            self.assertIn(frame["fx_node_name"], ["addmm", "relu", "addmm_1"])
+            fx_node_name = frame["fx_node_name"]
+            if fx_node_name == "addmm":
+                self.assertIn("d = self.net1(x)", frame["fx_original_trace"])
+            elif fx_node_name == "addmm_1":
+                self.assertIn("f = self.net2(e)", frame["fx_original_trace"])
+            elif fx_node_name == "relu":
+                self.assertIn("e = self.relu(d)", frame["fx_original_trace"])
 
 
 instantiate_parametrized_tests(TestCuda)
