@@ -148,3 +148,23 @@ def eig(
         "should be replaced with:\n"
         "L_complex, V_complex = torch.linalg.eig(A)"
     )
+
+
+def solve_triangular(A, B, upper=False, left=False, unitriangular=False, *, out=None):
+    """Solve the linear system A x = B.
+
+    A must be a triangular matrix.
+    """
+   
+    if not isinstance(A, torch.Tensor) or not isinstance(B, torch.Tensor):
+        raise TypeError("solve_triangular: expected Tensor inputs for A and B")
+
+    
+    if A.device != B.device:
+        raise RuntimeError(
+            f"solve_triangular: expected tensors to be on the same device, "
+            f"but found A on {A.device} and B on {B.device}. Move tensors to the same device."
+        )
+
+    return torch.linalg.solve_triangular(A, B, upper, left, unitriangular, out)
+
