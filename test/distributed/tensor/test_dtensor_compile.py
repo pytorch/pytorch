@@ -464,6 +464,44 @@ def forward(self, b_parametrizations_buffer_original0, x):
         run(g, 64, 8)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_dtensor_unbacked_matmuls(self):
+        from torch.distributed.tensor import randn as d_randn
+
+        # use 2x2 mesh for testing
+        dist.destroy_process_group()
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=2, world_size=4)
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        for test_index, (px, py) in enumerate(
+            [
+                # these should pass as no redistribute strategy is available
+                [[Replicate(), Replicate()], [Replicate(), Replicate()]],
+                [[Replicate(), Shard(0)], [Replicate(), Replicate()]],
+                [[Replicate(), Shard(1)], [Replicate(), Shard(0)]],
+            ]
+        ):
+            # create DTensors with unbacked outer/inner sizes
+            x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=px)
+            y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=py)
+            for i in range(2):
+                torch._dynamo.decorators.mark_unbacked(x_dt, i)
+                torch._dynamo.decorators.mark_unbacked(y_dt, i)
+
+            # full-graph capture
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+            fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
+            fn(x_dt, y_dt)
+
+            # test sharded matmuls with zero-size shards
+            if test_index >= 1:
+                dx = d_randn(3, 1, device_mesh=device_mesh, placements=px)
+                dy = d_randn(1, 1, device_mesh=device_mesh, placements=py)
+                out, eager_out = fn(dx, dy), torch.mm(dx, dy)
+                self.assertEqual(tuple(out.shape), (3, 1))
+                self.assertEqual(cnt.frame_count, 1)
+                self.assertTrue(torch.allclose(out.to_local(), eager_out.to_local()))
+
     def test_dtensor_requires_grad_recompile(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
