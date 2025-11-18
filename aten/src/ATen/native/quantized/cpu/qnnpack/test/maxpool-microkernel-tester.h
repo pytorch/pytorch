@@ -232,7 +232,7 @@ class MaxPoolMicrokernelTester {
           ASSERT_EQ(
               uint32_t(yRef[i * kc() + k]), uint32_t(y[i * yStride() + k]))
               << "at pixel " << i << ", channel " << k << ", n = " << n()
-              << ", ks = " << kh() << "x" << kw() << " (" << ks()
+              << ", ks = " << kh() << 'x' << kw() << " (" << ks()
               << "), kc = " << kc();
         }
       }
