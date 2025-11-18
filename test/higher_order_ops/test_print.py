@@ -253,7 +253,7 @@ x = add_1, y = add_2);  getitem = None
             return (x1, x3)
 
         x = torch.randn(3, 3)
-        opt_f = torch.compile(backend="inductor")(f)
+        opt_f = torch.compile(backend="inductor", fullgraph=True)(f)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             opt_f(x)
             printed_output = mock_stdout.getvalue().strip()
@@ -262,6 +262,42 @@ x = add_1, y = add_2);  getitem = None
             printed_output,
             f"moo {x * 2}\nmoo {x * 2 * x * 2}",
         )
+
+    def test_compile_inductor(self):
+        def f(x):
+            torch.ops.aten._print("moo")
+            res = x + x
+            torch.ops.aten._print("moo")
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        res = torch.compile(f, backend="inductor")(*inputs)
+        self.assertEqual(True, torch.allclose(res, f(*inputs)))
+
+    def test_compile_inductor_hop_print(self):
+        def f(x):
+            torch._higher_order_ops.print("moo")
+            res = x + x
+            torch._higher_order_ops.print("moo")
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        res = torch.compile(f, backend="inductor")(*inputs)
+        self.assertEqual(True, torch.allclose(res, f(*inputs)))
+
+    def test_compile_inductor_hop_print_kwargs(self):
+        def f(x):
+            torch._higher_order_ops.print("moo hop{x}", x=x)
+            res = x + x
+            torch._higher_order_ops.print("moo {x}", x=res)
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        res = torch.compile(f, backend="inductor")(*inputs)
+        self.assertEqual(True, torch.allclose(res, f(*inputs)))
 
 
 if __name__ == "__main__":
