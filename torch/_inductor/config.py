@@ -544,6 +544,13 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
+
+# Specify whether to prune the search space for GEMM autotuning in Exhaustive based
+# on a heuristic about shared memory usage.
+max_autotune_gemm_prune_exhaustive_configs: bool = (
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_PRUNE_EXHAUSTIVE_CONFIGS", "1")
+) == "1"
+
 # Specify the size of the search space for flex attention autotuning.
 # DEFAULT     - balance between compile time overhead and performance
 # EXHAUSTIVE  - maximize performance
