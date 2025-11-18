@@ -5,6 +5,10 @@ import torch
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_utils import TEST_XPU
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class MatMulModule(torch.nn.Module):
@@ -68,13 +72,13 @@ class TestInductorExternalCallable(TestCase):
             msg=f"torch.compile(..., external_matmul = {matmul_dup}) failed",
         )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not found")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "CUDA and XPU not found")
     @unittest.skipIf(
         torch.cuda.is_available() and torch.cuda.get_device_capability() < (7, 0),
         "Triton does not support device capability < 7.0",
     )
     def test_matmul_cuda(self):
-        device = torch.device("cuda")
+        device = torch.device(device_type)
         x = (torch.eye(128, 128) * 2).to(device=device)
         opt_fn = torch.compile(
             MatMulModule().to(device),
