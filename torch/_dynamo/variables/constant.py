@@ -14,7 +14,7 @@ import torch
 from torch._dynamo.source import AttrSource, GetItemSource
 
 from .. import graph_break_hints, variables
-from ..exc import raise_observed_exception, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented
 from ..utils import (
     cmp_name_to_op_mapping,
     common_constant_types,
@@ -182,9 +182,9 @@ its type to `common_constant_types`.
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
-            return variables.SymNodeVariable(self.as_proxy(), self.value).call_method(
-                tx, name, args, kwargs
-            )
+            return variables.SymNodeVariable.create(
+                tx, self.as_proxy(), self.value
+            ).call_method(tx, name, args, kwargs)
 
         try:
             const_args = [a.as_python_constant() for a in args]
@@ -192,7 +192,7 @@ its type to `common_constant_types`.
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
 
-        if isinstance(self.value, str) and name in str.__dict__.keys():
+        if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)
             try:
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
@@ -233,7 +233,7 @@ its type to `common_constant_types`.
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
-        elif type(self.value) is complex and name in complex.__dict__.keys():
+        elif type(self.value) is complex and name in complex.__dict__:
             method = getattr(self.value, name)
             try:
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
@@ -292,7 +292,7 @@ class EnumVariable(VariableTracker):
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
-        unimplemented_v2(
+        unimplemented(
             gb_type="Failed to construct Enum variable",
             context=f"value: {value_vt}, allowed enum values: {list(cls_type)}",
             explanation="Attempted to construct an Enum value that is non-constant (e.g. int, string) "

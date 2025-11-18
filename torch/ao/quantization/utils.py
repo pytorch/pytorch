@@ -9,7 +9,7 @@ import warnings
 from collections import OrderedDict
 from collections.abc import Callable
 from inspect import getfullargspec, signature
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import torch
 from torch.ao.quantization.quant_type import QuantType
@@ -24,7 +24,7 @@ else:
     from typing import TypeAliasType
 
     NodePattern = TypeAliasType(
-        "NodePattern", Union[tuple[Node, Node], tuple[Node, tuple[Node, Node]], Any]
+        "NodePattern", tuple[Node, Node] | tuple[Node, tuple[Node, Node]] | Any
     )
 
 
@@ -52,12 +52,10 @@ else:
 
     Pattern = TypeAliasType(
         "Pattern",
-        Union[
-            Callable,
-            tuple[Callable, Callable],
-            tuple[Callable, tuple[Callable, Callable]],
-            Any,
-        ],
+        Callable
+        | tuple[Callable, Callable]
+        | tuple[Callable, tuple[Callable, Callable]]
+        | Any,
     )
 
 
@@ -548,7 +546,7 @@ def has_no_children_ignoring_parametrizations(module):
 
 def _get_path_of_module(
     root: torch.nn.Module, submodule: torch.nn.Module
-) -> Optional[str]:
+) -> str | None:
     """Get the path (fully qualified name) of a submodule
 
     Example::
