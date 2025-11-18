@@ -3667,5 +3667,16 @@
         "Use custom operators instead of direct attribute/method access."
       ]
     }
+  ],
+  "GB0363": [
+    {
+      "Gb_type": "Opaque object were created in the middle of the program and passed to a custom op.",
+      "Context": "Opaque object types: {intermediate_opaques}. Function: {self.value}",
+      "Explanation": "Opaque objects cannot be created inside the torch.compile region. They must be created before entering the compiled function.",
+      "Hints": [
+        "Please create the opaque object before calling torch.compile ",
+        "and pass it in as an argument or as a global variable."
+      ]
+    }
   ]
 }
