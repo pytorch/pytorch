@@ -75,8 +75,7 @@ jobs:
           pytorch-linux-jammy-py3-clang12-onnx,
           pytorch-linux-jammy-linter,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter,
-          # TODO: Re-enable me when docker pin update happens
-          # pytorch-linux-jammy-py3-clang12-executorch,
+          pytorch-linux-jammy-py3-clang12-executorch,
           pytorch-linux-jammy-py3.12-triton-cpu,
           pytorch-linux-noble-riscv64-py3.12-gcc14
         ]
