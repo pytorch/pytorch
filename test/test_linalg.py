@@ -10071,6 +10071,65 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             a_strided.cpu().numpy() @ b_strided.cpu().numpy()).to(device=device, dtype=dtype)
         self.assertEqual(expect, res)
 
+    @onlyCUDA
+    def test_logaddexp_cpu_vs_cuda_complex(self, device):
+        # test logaddexp with complex values produce the same values (up to machine precision) on cpu and CUDA.
+        input_real = torch.tensor([0.052, -0.2115, 0.6913], dtype=torch.float64)
+        input_img = torch.tensor([-0.3229, -0.8374, 0.8391], dtype=torch.float64)
+        input_complex = torch.complex(input_real, input_img).cuda()
+
+        other_real = torch.tensor([0.2550, 0.8769, -0.4884], dtype=torch.float64)
+        other_img = torch.tensor([0.6063, 0.4343, -1.4166], dtype=torch.float64)
+        other_complex = torch.complex(other_real, other_img).cuda()
+
+        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
+        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
+
+        torch.testing.assert_close(out_gpu.cpu(), out_cpu, rtol=1e-12, atol=1e-14)
+
+        # test extreme cases (infty, -infty, and nan) are handled the same between cuda and cpu
+        input_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
+        other_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
+        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
+        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
+        self.assertEqual(out_gpu.cpu(), out_cpu)
+
+        input_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
+        other_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(-float('inf')))
+        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
+        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
+        self.assertEqual(out_gpu.cpu(), out_cpu)
+
+        input_complex = torch.complex(torch.tensor(-float('inf')), torch.tensor(float('inf')))
+        other_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
+        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
+        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
+        self.assertEqual(out_gpu.cpu(), out_cpu)
+
+        input_complex = torch.complex(torch.tensor(-float('inf')), torch.tensor(float('inf')))
+        other_complex = torch.complex(torch.tensor(-float('inf')), torch.tensor(float('inf')))
+        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
+        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
+        self.assertEqual(out_gpu.cpu(), out_cpu)
+
+        input_complex = torch.complex(torch.tensor(-float('inf')), torch.tensor(float('inf')))
+        other_complex = torch.complex(torch.tensor(-float('inf')), torch.tensor(2.))
+        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
+        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
+        self.assertEqual(out_gpu.cpu(), out_cpu)
+
+        input_complex = torch.complex(torch.tensor(2.), torch.tensor(float('inf')))
+        other_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
+        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
+        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
+        self.assertEqual(out_gpu.cpu(), out_cpu)
+
+        input_complex = torch.complex(torch.tensor(float('nan')), torch.tensor(float('inf')))
+        other_complex = torch.complex(torch.tensor(float('inf')), torch.tensor(float('inf')))
+        out_gpu = torch.logaddexp(input=input_complex, other=other_complex)
+        out_cpu = torch.logaddexp(input=input_complex.cpu(), other=other_complex.cpu())
+        self.assertEqual(out_gpu.cpu(), out_cpu)
+
 instantiate_device_type_tests(TestLinalg, globals())
 
 if __name__ == '__main__':
