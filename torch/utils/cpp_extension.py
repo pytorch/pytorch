@@ -1745,14 +1745,11 @@ def check_compiler_is_gcc(compiler) -> bool:
             version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
         except Exception:
             return False
-    # Check for 'gcc' or 'g++' for sccache wrapper
+    # Check for GCC by verifying both COLLECT_GCC and gcc version string are present
+    # This works for c++, g++, gcc, and versioned variants like g++-13
     pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
-    results = re.findall(pattern, version_string)
-    if len(results) != 1:
-        return False
-    compiler_path = os.path.realpath(results[0].strip())
-    # On RHEL/CentOS c++ is a gcc compiler wrapper
-    if os.path.basename(compiler_path) == 'c++' and 'gcc version' in version_string:
+    has_collect_gcc = pattern.search(version_string) is not None
+    if has_collect_gcc and 'gcc version' in version_string:
         return True
     return False
 
@@ -1836,7 +1833,7 @@ def _check_and_build_extension_h_precompiler_headers(
 
     def build_precompile_header(pch_cmd) -> None:
         try:
-            subprocess.check_output(pch_cmd, shell=True, stderr=subprocess.STDOUT)
+            subprocess.check_output(shlex.split(pch_cmd), stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"Compile PreCompile Header fail, command: {pch_cmd}") from e
 

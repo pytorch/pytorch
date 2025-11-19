@@ -2122,6 +2122,10 @@ class PythonWrapperCodegen(CodeGen):
             output.writeline(f"{name} = {val}")
 
         def add_torchbind_input(name, value):
+            if value is None:
+                output.writeline(f"{name} = None")
+                return
+
             import pickle
 
             assert isinstance(value, torch.ScriptObject)
@@ -2259,7 +2263,7 @@ class PythonWrapperCodegen(CodeGen):
         gpu: bool = True,
         cpp_definition: Optional[str] = None,
     ):
-        if config.triton.autotune_at_compile_time:
+        if config.triton.autotune_at_compile_time and gpu:
             body = self._format_kernel_definition(
                 kernel_name, kernel_body, metadata=metadata
             )
@@ -3745,6 +3749,13 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
 
         super().__init__()
 
+        root = self.get_root_graph()
+        # Only generate auto-tuning block in the main graph
+        self.kernel_autotune_defs = root.kernel_autotune_defs
+        self.kernel_autotune_calls = root.kernel_autotune_calls
+        # Only store kernel src to name mapping in the main graph
+        self.src_to_kernel = root.src_to_kernel
+
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
         # the subgraph.
@@ -3837,3 +3848,16 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         #         V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         #     )
         self.parent_wrapper.write_get_raw_stream_header_once()
+
+    @cache_on_self
+    def get_root_graph(self) -> PythonWrapperCodegen:
+        root: PythonWrapperCodegen | SubgraphPythonWrapperCodegen = self
+        while isinstance(root, SubgraphPythonWrapperCodegen):
+            root = root.parent_wrapper
+
+        assert isinstance(root, PythonWrapperCodegen)
+        return root
+
+    def generate_and_run_autotune_block(self):
+        # Only execute auto-tuning block in the main graph
+        pass

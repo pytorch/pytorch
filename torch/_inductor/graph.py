@@ -110,6 +110,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
+    should_fallback_by_default,
     SUPPORTED_MKLDNN_DEVICES,
     ValueWithLineMap,
 )
@@ -1629,6 +1630,20 @@ class GraphLowering(torch.fx.Interpreter):
                     )
                 )
             ):
+                debug("fallback_handler")
+                result = fallback_handler(n.target, add_to_fallback_set=False)(
+                    *args,  # type: ignore[possibly-undefined]
+                    **kwargs,  # type: ignore[possibly-undefined]
+                )
+            elif (
+                n.op == "call_function"
+                and isinstance(
+                    n.target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+                )
+                and should_fallback_by_default(n)
+            ):
+                # this path supports fallback due to inductor lite mode. It supports
+                # both OpOverload and HOPs (e.g., triton_kernel_wrapper_functional).
                 debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
                     *args,  # type: ignore[possibly-undefined]

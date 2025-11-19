@@ -3,7 +3,7 @@
 import copy
 import operator
 import warnings
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
@@ -98,7 +98,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     modules: dict[str, torch.nn.Module],
     node_name_to_scope: dict[str, tuple[str, type]],
     node_name_to_qconfig: dict[str, QConfigAny],
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> None:
     """Replace activation_post_process module call node with quantize and
     dequantize node working with decomposed Tensor
@@ -165,7 +165,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
 
         # 1. extract information for inserting q/dq node from activation_post_process
         node_type = "call_function"
-        quantize_op: Optional[Callable] = None
+        quantize_op: Callable | None = None
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
@@ -373,7 +373,7 @@ def _replace_observer_with_quantize_dequantize_node(
     modules: dict[str, torch.nn.Module],
     node_name_to_scope: dict[str, tuple[str, type]],
     node_name_to_qconfig: dict[str, QConfigAny],
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> None:
     """Replace activation_post_process module call node with quantize and
     dequantize node
@@ -430,7 +430,7 @@ def _replace_observer_with_quantize_dequantize_node(
         # 1. extract the information from activation_post_process module for generating
         # the quantize and dequantize operator
         node_type = "call_function"
-        quantize_op: Optional[Callable] = None
+        quantize_op: Callable | None = None
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
@@ -678,7 +678,7 @@ def _insert_dequantize_node(node: Node, graph: Graph) -> None:
 
 def _maybe_get_observer_for_node(
     node: Node, modules: dict[str, torch.nn.Module]
-) -> Optional[torch.nn.Module]:
+) -> torch.nn.Module | None:
     """
     If the node is observed, return the observer
     instance. Otherwise, return None.
@@ -696,7 +696,7 @@ def convert_standalone_module(
     modules: dict[str, torch.nn.Module],
     model: torch.fx.GraphModule,
     is_reference: bool,
-    backend_config: Optional[BackendConfig],
+    backend_config: BackendConfig | None,
 ) -> None:
     """Converts a observed standalone module to a quantized standalone module by calling
     the fx convert api, currently using the same `is_reference` flag as parent, but we may
@@ -765,7 +765,7 @@ def convert_weighted_module(
     backend_config: BackendConfig,
     is_decomposed: bool = False,
     is_reference: bool = False,
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> None:
     """Convert a weighted module to reference quantized module in the model
     If the QConfig of a QAT module is not set, the module will still be converted to
@@ -1033,11 +1033,11 @@ def convert_custom_module(
 def convert(
     model: GraphModule,
     is_reference: bool = False,
-    convert_custom_config: Union[ConvertCustomConfig, dict[str, Any], None] = None,
+    convert_custom_config: ConvertCustomConfig | dict[str, Any] | None = None,
     is_standalone_module: bool = False,
     _remove_qconfig_flag: bool = True,
-    qconfig_mapping: Union[QConfigMapping, dict[str, Any], None] = None,
-    backend_config: Union[BackendConfig, dict[str, Any], None] = None,
+    qconfig_mapping: QConfigMapping | dict[str, Any] | None = None,
+    backend_config: BackendConfig | dict[str, Any] | None = None,
     is_decomposed: bool = False,
     keep_original_weights: bool = False,
 ) -> GraphModule:
