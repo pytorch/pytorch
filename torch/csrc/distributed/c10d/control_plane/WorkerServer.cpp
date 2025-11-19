@@ -152,11 +152,17 @@ WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
     TORCH_CHECK(
         server_.bind_to_port(hostOrFile, 80),
         fmt::format("Error binding to {}", hostOrFile));
+  } else if (port == 0) {
+    C10D_WARNING("Server listening to TCP {}:{}", hostOrFile, port);
+    port_ = server_.bind_to_any_port(hostOrFile);
+    TORCH_CHECK(
+        port_ >= 0, fmt::format("Error binding to {}:{}", hostOrFile, port));
   } else {
     C10D_WARNING("Server listening to TCP {}:{}", hostOrFile, port);
     TORCH_CHECK(
         server_.bind_to_port(hostOrFile, port),
         fmt::format("Error binding to {}:{}", hostOrFile, port));
+    port_ = port;
   }
 
   serverThread_ = std::thread([this]() {

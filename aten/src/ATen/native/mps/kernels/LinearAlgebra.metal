@@ -817,8 +817,7 @@ kernel void unpack_pivots(
   for (uint32_t i = 0; i < dim_size; i++) {
     auto j = pivots[i] - 1;
     auto perm_j = perm[j];
-    auto perm_i = perm[i];
-    perm[j] = perm_i;
+    perm[j] = perm[i];
     perm[i] = perm_j;
   }
 }
