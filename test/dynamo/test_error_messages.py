@@ -1855,7 +1855,7 @@ Graph Break Reason: Call to `torch._dynamo.graph_break()`
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
 User code traceback:
-  File "test_error_messages.py", line N, in test_try_block_causes_multiple_graph_breaks
+  File "test_error_messages.py", line N, in test_try_block_causes_graph_breaks
     torch.compile(outer, backend="eager")(torch.ones(3))
   File "test_error_messages.py", line N, in outer
     return middle_with_try(x)
@@ -1878,7 +1878,7 @@ Graph Break Reason: Call to `torch._dynamo.graph_break()`
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
 User code traceback:
-  File "test_error_messages.py", line N, in test_try_block_causes_multiple_graph_breaks
+  File "test_error_messages.py", line N, in test_try_block_causes_graph_breaks
     torch.compile(outer, backend="eager")(torch.ones(3))
   File "test_error_messages.py", line N, in outer
     return middle_with_try(x)
