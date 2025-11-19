@@ -748,11 +748,23 @@ def _unlift_exported_program_lifted_states(
 ) -> torch.fx.GraphModule:
     check_guards = check_guards and _ok_to_generate_guards_fn()
 
+    source_node_dict = {
+        node.name: node for node in ep.graph.nodes if node.op != "placeholder"
+    }
+    # placeholder node name might change after deepcopy
+    placeholder_source_node_dict = {
+        node.target: node for node in ep.graph.nodes if node.op == "placeholder"
+    }
+
+    new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
+    new_gm.meta.update(ep.graph_module.meta)
+    ep = copy.copy(ep)
+    ep._graph_module = new_gm
+
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
         ep = _remove_effect_tokens(ep)
 
-    new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
     forward_arg_names = (
         sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
@@ -786,19 +798,13 @@ def _unlift_exported_program_lifted_states(
         for out_spec in ep.graph_signature.output_specs
     ]
 
-    source_node_dict = {
-        node.name: node for node in ep.graph.nodes if node.op != "placeholder"
-    }
-    # placeholder node name might change after deepcopy
-    placeholder_source_node_dict = {
-        node.target: node for node in ep.graph.nodes if node.op == "placeholder"
-    }
     for node in new_gm.graph.nodes:
         source_node = None
         if node.op == "placeholder":
             source_node = placeholder_source_node_dict.get(node.target)
         else:
-            source_node = source_node_dict.get(node.name)
+            if node.name in source_node_dict:
+                source_node = source_node_dict.get(node.name)
         node.meta["from_node"] = [
             NodeSource(
                 source_node,
