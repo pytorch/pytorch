@@ -59,7 +59,7 @@ def compute_local_shape_and_global_offset(
     mesh: DeviceMesh,
     placements: Sequence[Placement],
     skip_offset: bool = False,
-) -> tuple[tuple[int, ...], Optional[tuple[int, ...]]]:
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """
     Compute the local tensor shape and the global offsets into the original tensor
     of a DTensor on its current global rank. This is useful for checkpointing purpose.
@@ -110,7 +110,7 @@ def _compute_local_shape_and_global_offset(
     my_coordinate: Optional[list[int]],
     placements: Sequence[Placement],
     skip_offset: bool = False,
-) -> tuple[tuple[int, ...], Optional[tuple[int, ...]]]:
+) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """
     Suppose you have a full tensor with size global_shape, and you have sharded
     it according to placements for mesh_shape.  This function returns, for a
@@ -127,9 +127,10 @@ def _compute_local_shape_and_global_offset(
     which changes the order you should apply sharding.
     """
 
+    empty_offset = ()
     if my_coordinate is None:
         # if rank not in the mesh, return empty offset
-        return ((0,), ())
+        return ((0,), empty_offset)
 
     local_shape = list(global_shape)
     # Perform shard from left to right. For example,
@@ -176,7 +177,7 @@ def _compute_local_shape_and_global_offset(
                 shard_dim_to_global_offsets[shard_dim][i] for i in shard_offsets
             ]
     if skip_offset:
-        return tuple(local_shape), None
+        return tuple(local_shape), empty_offset
     global_offset = [0] * len(global_shape)
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
         global_offset[shard_dim] = global_offsets[0]
