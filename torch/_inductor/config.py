@@ -1213,6 +1213,7 @@ enable_autograd_for_aot: bool = False
 
 pallas_target_tpu: bool = Config(env_name_force="PALLAS_TARGET_TPU", default=False)
 
+
 def get_worker_log_path() -> Optional[str]:
     log_loc = None
     if is_fbcode():
