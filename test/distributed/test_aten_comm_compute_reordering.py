@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
-def estimate_aten_runtime(fx_node, compute_multiplier=1.0):
+def estimate_aten_runtime(fx_node, override_size=None, compute_multiplier=1.0):
     # for tests, assume a matmul can hide a single collective
     if "c10" in str(fx_node.target):
         return 1.0
@@ -1112,7 +1112,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
         # Use 0.5 compute multiplier so each collective needs 2 matmuls to be fully hidden
         def estimate_with_half_compute(fx_node, override_size=None):
-            return estimate_aten_runtime(fx_node, compute_multiplier=0.5)
+            return estimate_aten_runtime(fx_node, override_size, compute_multiplier=0.5)
 
         def func(a, b, *, ranks):
             # Two all_gathers that will be hidden by multiple compute operations
@@ -1160,6 +1160,56 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
 
             # Verify correctness
             correct = func(a, b, ranks=ranks)
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_bucket_patches())
+    def test_bucketing_with_convert_dtype(self):
+        """Test that all_gathers with dtype conversion get bucketed and produce correct results."""
+
+        def func(a, b, c, d, *, ranks):
+            # Convert inputs to float16 before all_gather
+            a_fp16 = a.to(torch.float16)
+            b_fp16 = b.to(torch.float16)
+
+            # Two all_gathers with converted dtypes
+            ag1 = _functional_collectives.all_gather_tensor(a_fp16, 0, ranks)
+            ag2 = _functional_collectives.all_gather_tensor(b_fp16, 0, ranks)
+
+            # same dtype
+            ag3 = _functional_collectives.all_gather_tensor(c, 0, ranks)
+            ag4 = _functional_collectives.all_gather_tensor(d, 0, ranks)
+
+            return ag1, ag2, ag3, ag4
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(4, 4, dtype=torch.float32, device=device_type)
+            b = torch.ones(4, 4, dtype=torch.float64, device=device_type) * 2
+            c = torch.ones(4, 4, dtype=torch.float16, device=device_type) * 3
+            d = torch.ones(4, 4, dtype=torch.float64, device=device_type) * 4
+            ranks = list(range(self.world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+            out, aten_graph_str = run_and_get_aten_graph(compiled, a, b, c, d)
+
+            # Should have 1 bucketed all_gather (both ag1 and ag2 bucketed together)
+            FileCheck().check_count(
+                "torch.ops._c10d_functional.wait_tensor.default", 1, exactly=True
+            ).run(aten_graph_str)
+
+            # Verify convert_element_type ops are removed (dtype conversion handled by _pre_bucket_all_gather)
+            FileCheck().check_not("torch.ops.prims.convert_element_type").run(
+                aten_graph_str
+            )
+
+            # Verify correctness - this tests that dtype conversion is handled correctly
+            correct = func(a, b, c, d, ranks=ranks)
             self.assertTrue(same(out, correct))
 
 
