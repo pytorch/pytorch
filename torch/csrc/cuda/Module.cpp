@@ -1129,7 +1129,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def(
       "_cuda_record_memory_history_legacy",
-      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool, bool, bool, bool)>(
+      static_cast<void (*)(
+          bool, bool, int64_t, bool, bool, bool, bool, bool, bool)>(
           torch::cuda::_record_memory_history));
 
   m.def(

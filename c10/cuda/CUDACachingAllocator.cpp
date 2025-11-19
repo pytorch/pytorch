@@ -1276,7 +1276,7 @@ class DeviceCachingAllocator {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
-    this->skip_free_requested = skip_free_requested;
+    skip_free_requested = skip_free_requested;
     context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
@@ -3702,8 +3702,11 @@ class DeviceCachingAllocator {
     }
 
     if (record_history) {
-      // skip if flag skip_free_requested is True and the action is free requested
-      if (!(skip_free_requested && action == TraceEntry::Action::FREE_REQUESTED)) {
+      // Skip if flag skip_free_requested is True and the action is
+      // FREE_REQUESTED
+      bool should_skip =
+          skip_free_requested && action == TraceEntry::Action::FREE_REQUESTED;
+      if (!should_skip) {
         alloc_buffer.insertEntries(te);
       }
     }

@@ -228,7 +228,12 @@ void _record_memory_history(
 
   setRecordFunctionCallbacks(enabled, compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled, recorder, trace_alloc_max_entries, when, clearHistory, skip_free_requested);
+      enabled,
+      recorder,
+      trace_alloc_max_entries,
+      when,
+      clearHistory,
+      skip_free_requested);
 }
 
 static void checkOptionIn(
@@ -284,7 +289,12 @@ void _record_memory_history(
   setRecordFunctionCallbacks(
       enabled.has_value(), compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled.has_value(), recorder, max_entries, when, clearHistory, skip_free_requested);
+      enabled.has_value(),
+      recorder,
+      max_entries,
+      when,
+      clearHistory,
+      skip_free_requested);
 }
 
 std::string _memory_snapshot_pickled() {
