@@ -531,6 +531,44 @@ if HAS_CUDA_AND_TRITON:
 
                 self.assertEqual(fn(*args()), out)
 
+        @torch._inductor.config.patch("implicit_fallbacks", True)
+        @torch._inductor.config.patch("graph_partition", True)
+        def test_index_put_deterministic(self):
+            """
+            Test that index_put_ and related operations are properly handled
+            when deterministic algorithms are enabled, ensuring graph partitioning
+            works correctly and avoids cudagraph segfaults.
+            """
+
+            def fn(x, y, z):
+                x = torch.zeros_like(x)
+                return x.index_put_([y], z, True)
+
+            # Save the original state
+            orig_deterministic = torch.are_deterministic_algorithms_enabled()
+
+            try:
+                # Enable deterministic algorithms (as done in --accuracy mode)
+                torch.use_deterministic_algorithms(True)
+
+                fn_c = torch.compile(mode="reduce-overhead")(fn)
+
+                def args():
+                    x = torch.zeros((512, 512), dtype=torch.bool, device="cuda")
+                    y = torch.arange(512, dtype=torch.int64, device="cuda")
+                    z = torch.ones((512, 512), dtype=torch.bool, device="cuda")
+                    return x, y, z
+
+                # Run multiple iterations - should not segfault
+                # The key fix is that index_put_ triggers partitioning when deterministic mode is enabled
+                for i in range(3):
+                    out = fn_c(*args())
+                    self.assertEqual(fn(*args()), out)
+
+            finally:
+                # Restore original state
+                torch.use_deterministic_algorithms(orig_deterministic)
+
         def test_function_compiled_multiple_times(self):
             def foo(x):
                 y = foo2(x)
