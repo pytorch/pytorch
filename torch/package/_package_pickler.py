@@ -70,6 +70,8 @@ class PackagePickler(_PyTorchLegacyPickler):
             # to take iterable and return just the object (not tuple)
             # We need to get the parent object that contains the attribute
             name_parts = name.split(".")
+            if "<locals>" in name_parts:
+                raise PicklingError(f"Can't pickle local object {obj!r}")
             if len(name_parts) == 1:
                 parent = module
             else:
