@@ -11,10 +11,10 @@ import math
 import operator
 import os
 import textwrap
-from collections.abc import Callable, Iterable, Sequence
 from abc import abstractmethod
+from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE

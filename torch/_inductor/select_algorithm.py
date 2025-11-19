@@ -434,6 +434,7 @@ class TritonTemplateKernel(TritonKernel):
             reduction_idx = None
             for i, prefix in enumerate(tiling):
                 rt = prefix_to_range_tree[prefix]
+                # pyrefly: ignore  # missing-argument
                 if rt.is_reduction:
                     reduction_idx = i
                     break
