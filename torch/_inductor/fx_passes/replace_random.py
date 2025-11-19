@@ -72,8 +72,8 @@ def rand_eager_offset(offset: int, device: torch.device) -> torch.Tensor:
 
 @custom_op("custom_op::rand_eager_offsets", mutates_args={})
 def rand_eager_offsets(offsets: list[int], device: torch.device) -> torch.Tensor:
-    states = [ _reserve_state(device, int(off)) for off in offsets ]  # list[(seed, base)]
-    cpu = torch.tensor(states, dtype=torch.int64).pin_memory()        # shape [N, 2]
+    states = [_reserve_state(device, int(off)) for off in offsets]  # list[(seed, base)]
+    cpu = torch.tensor(states, dtype=torch.int64).pin_memory()      # shape [N, 2]
     out = torch.empty_like(cpu, device=device)
     out.copy_(cpu, non_blocking=True)
     return out

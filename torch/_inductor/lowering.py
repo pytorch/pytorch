@@ -2471,7 +2471,7 @@ def inductor_random(
     ).make_indexer()
     seed_loader = seed.make_loader()
 
-    if config.align_random_eager:
+    if config.align_random_eager and device.type == "cuda":
         threads_per_round = get_threads_per_round(device)
 
         def _vec_from_dtype(dt: torch.dtype) -> int:

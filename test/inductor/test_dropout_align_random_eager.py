@@ -16,6 +16,13 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
 )
 
+# If not running on Linux+CUDA, skip the whole module under pytest.
+if not (IS_LINUX and HAS_CUDA_AND_TRITON):
+    pytest.skip(
+        "Inductor CUDA dropout alignment tests require Linux and CUDA",
+        allow_module_level=True,
+    )
+
 # ───────────────────────────────────────────────────────────────
 # Global config
 # ───────────────────────────────────────────────────────────────
@@ -26,13 +33,12 @@ HIDDEN_DIM = 1024
 BATCH = 3
 SEQ_LEN = 2048
 
-# Torch-Inductor knobs
-torch._inductor.config.triton.unique_kernel_names = True
-torch._inductor.config.coordinate_descent_tuning = True
-torch._inductor.config.freezing = True
-torch._inductor.config.align_random_eager = True
-# torch._inductor.config.fallback_random = True
-# torch._inductor.config.max_autotune_pointwise = True
+config.triton.unique_kernel_names = True
+config.coordinate_descent_tuning = True
+config.freezing = True
+config.align_random_eager = True
+# config.fallback_random = True
+# config.max_autotune_pointwise = True
 
 
 # ───────────────────────────────────────────────────────────────
@@ -307,6 +313,28 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         torch.testing.assert_close(
             y_eager, y_comp, rtol=1e-3, atol=1e-4
         )
+
+    # ───────────────────────────────────────────────────────────
+    # New: codegen check using run_and_get_code + FileCheck
+    # (so those imports are actually used, following inductor idioms)
+    # ───────────────────────────────────────────────────────────
+    @requires_gpu()
+    def test_inductor_generated_code_contains_dropout(self):
+        device = torch.device(GPU_TYPE)
+        x = torch.randn(BATCH, SEQ_LEN, HIDDEN_DIM, device=device)
+
+        model = LinearBlock(HIDDEN_DIM, FFN_DIM, DROPOUT_P).to(device)
+        model.train()
+        compiled = torch.compile(model)
+
+        def fn(inp):
+            return compiled(inp)
+
+        _, codes = run_and_get_code(fn, x)
+        assert codes, "Expected inductor to generate at least one kernel"
+
+        # Just a basic sanity check that the generated code mentions dropout.
+        FileCheck().check("dropout").run(codes[0])
 
     # ───────────────────────────────────────────────────────────
     # Optional: perf smoke (GPU only)
