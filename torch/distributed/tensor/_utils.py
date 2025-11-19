@@ -208,9 +208,9 @@ def _compute_local_shape_and_global_offset(
                 mesh_dim_size,
                 my_coordinate[mesh_dim],
             )
-            # if my_coordinate == [0, 1]:
-            #     import fbvscode
-            #     fbvscode.set_trace()
+            if my_coordinate == [0, 0]:
+                import fbvscode
+                fbvscode.set_trace()
             
             if shard_dim not in shard_dim_to_global_offsets:
                 if shard_size > 0:
@@ -277,6 +277,7 @@ def _compute_local_shape_and_global_offset(
     # happen on mesh of 3 or more dimensions.
     # TODO: change this function to correctly address this.
     # TODO: this logic can be applied to contiguous sharding as well
+    print(f"{my_coordinate=} {shard_dim_to_global_offsets[0]=}", flush=True)
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
         # maybe do a contiuous check and throw error if not
         global_offset[shard_dim] = global_offsets[0]

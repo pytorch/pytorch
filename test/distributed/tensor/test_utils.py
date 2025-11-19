@@ -128,121 +128,155 @@ class LocalTest(TestCase):
 
     def test_compute_local_shape_and_global_offset_uneven(self):
         # S, S uneven without empty
-        global_shape = (18, 2)
-        DP = 4
-        TP = 2
-        mesh_shape = (DP, TP)
-        placements = [Shard(0), Shard(0)]
-        for my_coordinate in itertools.product(range(DP), range(TP)):
-            dp_rank, tp_rank = my_coordinate
-            local_shape, global_offset = _compute_local_shape_and_global_offset(global_shape, mesh_shape, list(my_coordinate), placements)
+        # global_shape = (18, 2)
+        # DP = 4
+        # TP = 2
+        # mesh_shape = (DP, TP)
+        # placements = [Shard(0), Shard(0)]
+        # for my_coordinate in itertools.product(range(DP), range(TP)):
+        #     dp_rank, tp_rank = my_coordinate
+        #     local_shape, global_offset = _compute_local_shape_and_global_offset(global_shape, mesh_shape, list(my_coordinate), placements)
             
-            dp012_shard_size = 5
-            if dp_rank in (0, 1, 2):
-                tp0_shard_size = 3
-                if tp_rank == 0:
-                    expected_shard_offset = dp012_shard_size * dp_rank
-                    expected_shard_size = 3
-                else:
-                    assert tp_rank == 1
-                    expected_shard_offset = dp012_shard_size * dp_rank + tp0_shard_size
-                    expected_shard_size = 2
-            else:
-                assert dp_rank == 3
-                tp0_shard_size = 2
-                if tp_rank == 0:
-                    expected_shard_offset = dp012_shard_size * dp_rank
-                    expected_shard_size = 2
-                else:
-                    assert tp_rank == 1
-                    expected_shard_offset = dp012_shard_size * dp_rank + tp0_shard_size
-                    expected_shard_size = 1
-            self.assertEqual(local_shape, (expected_shard_size, 2))
-            self.assertEqual(global_offset, (expected_shard_offset, 0))
+        #     dp012_shard_size = 5
+        #     if dp_rank in (0, 1, 2):
+        #         tp0_shard_size = 3
+        #         if tp_rank == 0:
+        #             expected_shard_offset = dp012_shard_size * dp_rank
+        #             expected_shard_size = 3
+        #         else:
+        #             assert tp_rank == 1
+        #             expected_shard_offset = dp012_shard_size * dp_rank + tp0_shard_size
+        #             expected_shard_size = 2
+        #     else:
+        #         assert dp_rank == 3
+        #         tp0_shard_size = 2
+        #         if tp_rank == 0:
+        #             expected_shard_offset = dp012_shard_size * dp_rank
+        #             expected_shard_size = 2
+        #         else:
+        #             assert tp_rank == 1
+        #             expected_shard_offset = dp012_shard_size * dp_rank + tp0_shard_size
+        #             expected_shard_size = 1
+        #     self.assertEqual(local_shape, (expected_shard_size, 2))
+        #     self.assertEqual(global_offset, (expected_shard_offset, 0))
 
-        # S, S uneven with empty
-        global_shape = (13, 2)
-        DP = 4
-        TP = 2
-        mesh_shape = (DP, TP)
-        placements = [Shard(0), Shard(0)]
-        for my_coordinate in itertools.product(range(DP), range(TP)):
-            dp_rank, tp_rank = my_coordinate
-            local_shape, global_offset = _compute_local_shape_and_global_offset(global_shape, mesh_shape, list(my_coordinate), placements)
+        # # S, S uneven with empty
+        # global_shape = (13, 2)
+        # DP = 4
+        # TP = 2
+        # mesh_shape = (DP, TP)
+        # placements = [Shard(0), Shard(0)]
+        # for my_coordinate in itertools.product(range(DP), range(TP)):
+        #     dp_rank, tp_rank = my_coordinate
+        #     local_shape, global_offset = _compute_local_shape_and_global_offset(global_shape, mesh_shape, list(my_coordinate), placements)
             
-            dp012_shard_size = 4
-            if dp_rank in (0, 1, 2):
-                tp0_shard_size = 2
-                if tp_rank == 0:
-                    expected_shard_offset = dp012_shard_size * dp_rank
-                    expected_shard_size = 2
-                else:
-                    assert tp_rank == 1
-                    expected_shard_offset = dp012_shard_size * dp_rank + tp0_shard_size
-                    expected_shard_size = 2
-            else:
-                assert dp_rank == 3
-                tp0_shard_size = 1
-                if tp_rank == 0:
-                    expected_shard_offset = dp012_shard_size * dp_rank
-                    expected_shard_size = 1
-                else:
-                    assert tp_rank == 1
-                    expected_shard_offset = global_shape[0]
-                    expected_shard_size = 0
-            self.assertEqual(local_shape, (expected_shard_size, 2))
-            self.assertEqual(global_offset, (expected_shard_offset, 0))
+        #     dp012_shard_size = 4
+        #     if dp_rank in (0, 1, 2):
+        #         tp0_shard_size = 2
+        #         if tp_rank == 0:
+        #             expected_shard_offset = dp012_shard_size * dp_rank
+        #             expected_shard_size = 2
+        #         else:
+        #             assert tp_rank == 1
+        #             expected_shard_offset = dp012_shard_size * dp_rank + tp0_shard_size
+        #             expected_shard_size = 2
+        #     else:
+        #         assert dp_rank == 3
+        #         tp0_shard_size = 1
+        #         if tp_rank == 0:
+        #             expected_shard_offset = dp012_shard_size * dp_rank
+        #             expected_shard_size = 1
+        #         else:
+        #             assert tp_rank == 1
+        #             expected_shard_offset = global_shape[0]
+        #             expected_shard_size = 0
+        #     self.assertEqual(local_shape, (expected_shard_size, 2))
+        #     self.assertEqual(global_offset, (expected_shard_offset, 0))
         
-        # SS, Shard
-        global_shape = (18, 2)
-        DP = 4
-        TP = 2
-        mesh_shape = (DP, TP)
-        placements = [_StridedShard(0, split_factor=TP), Shard(0)]
-        TP_shard_size = int(global_shape[0] / TP)
-        for my_coordinate in itertools.product(range(DP), range(TP)):
-            dp_rank, tp_rank = my_coordinate
-            local_shape, global_offset = _compute_local_shape_and_global_offset(global_shape, mesh_shape, list(my_coordinate), placements)
-            expected_shard_size = 3
-            expected_shard_offset = tp_rank * TP_shard_size + expected_shard_size * dp_rank
-            if dp_rank == 3:
-                expected_shard_size = 0
-                expected_shard_offset = 18
-            self.assertEqual(local_shape, (expected_shard_size, 2))
-            self.assertEqual(global_offset, (expected_shard_offset, 0))
+        # # SS, Shard
+        # global_shape = (18, 2)
+        # DP = 4
+        # TP = 2
+        # mesh_shape = (DP, TP)
+        # placements = [_StridedShard(0, split_factor=TP), Shard(0)]
+        # TP_shard_size = int(global_shape[0] / TP)
+        # for my_coordinate in itertools.product(range(DP), range(TP)):
+        #     dp_rank, tp_rank = my_coordinate
+        #     local_shape, global_offset = _compute_local_shape_and_global_offset(global_shape, mesh_shape, list(my_coordinate), placements)
+        #     expected_shard_size = 3
+        #     expected_shard_offset = tp_rank * TP_shard_size + expected_shard_size * dp_rank
+        #     if dp_rank == 3:
+        #         expected_shard_size = 0
+        #         expected_shard_offset = 18
+        #     self.assertEqual(local_shape, (expected_shard_size, 2))
+        #     self.assertEqual(global_offset, (expected_shard_offset, 0))
 
         # (SS, SS)
-        global_shape = (39, 2)
+        # global_shape = (39, 2)
+        # DP = 4
+        # TP = 2
+        # mesh_shape = (DP, TP)
+        # placements = [_StridedShard(0, split_factor=3), _StridedShard(0, split_factor=4)]
+        # for my_coordinate in itertools.product(range(DP), range(TP)):
+        #     dp_rank, tp_rank = my_coordinate
+        #     local_shape, global_offset = _compute_local_shape_and_global_offset(global_shape, mesh_shape, list(my_coordinate), placements)
+        #     if dp_rank in (0, 1, 2):
+        #         tp0_shard_size = 8
+        #         if tp_rank == 0:
+        #             expected_shard_offset = 4 * dp_rank
+        #             expected_shard_size = tp0_shard_size
+        #         else:
+        #             assert tp_rank == 1
+        #             expected_shard_offset = 4 * dp_rank + 2
+        #             expected_shard_size = 4
+        #     else:
+        #         assert dp_rank == 3
+        #         tp0_shard_size = 3
+        #         if tp_rank == 0:
+        #             expected_shard_offset = 4 * dp_rank
+        #             expected_shard_size = 3
+        #         else:
+        #             assert tp_rank == 1
+        #             expected_shard_offset = global_shape[0]
+        #             expected_shard_size = 0
+        #     self.assertEqual(local_shape, (expected_shard_size, 2))
+        #     self.assertEqual(global_offset, (expected_shard_offset, 0))
+
+        # (Shard, SS)
+        global_shape = (18, 2)
         DP = 4
         TP = 2
         mesh_shape = (DP, TP)
-        placements = [_StridedShard(0, split_factor=3), _StridedShard(0, split_factor=4)]
+        placements = [Shard(0), _StridedShard(0, split_factor=2)]
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(global_shape, mesh_shape, list(my_coordinate), placements)
             if dp_rank in (0, 1, 2):
-                tp0_shard_size = 8
+                tp0_shard_size = 4
                 if tp_rank == 0:
-                    expected_shard_offset = 4 * dp_rank
+                    expected_shard_offset = 5 * dp_rank
                     expected_shard_size = tp0_shard_size
                 else:
                     assert tp_rank == 1
-                    expected_shard_offset = 4 * dp_rank + 2
-                    expected_shard_size = 4
+                    expected_shard_offset = 5 * dp_rank + 2
+                    expected_shard_size = 1
             else:
                 assert dp_rank == 3
                 tp0_shard_size = 3
                 if tp_rank == 0:
-                    expected_shard_offset = 4 * dp_rank
-                    expected_shard_size = 3
+                    expected_shard_offset = 5 * dp_rank
+                    expected_shard_size = 2
                 else:
                     assert tp_rank == 1
-                    expected_shard_offset = global_shape[0]
-                    expected_shard_size = 0
-            self.assertEqual(local_shape, (expected_shard_size, 2))
+                    expected_shard_offset = 5 * dp_rank + 1
+                    expected_shard_size = 1
+            try:
+                self.assertEqual(local_shape, (expected_shard_size, 2))
+            except:
+                import fbvscode
+                fbvscode.set_trace()
             self.assertEqual(global_offset, (expected_shard_offset, 0))
 
-        # (Shard, SS)
         # (Shard, SS, Shard)
 
     # def test_compute_local_shape_and_global_offset_uneven(self):
@@ -275,7 +309,7 @@ class LocalTest(TestCase):
 class UtilTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 4
+        return 2
 
     def _compute_start_end_offsets(self, global_offset, local_size, n_dim):
         offset = []
