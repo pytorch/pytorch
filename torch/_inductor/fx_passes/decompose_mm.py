@@ -210,6 +210,7 @@ def _extract_post_mm_ops(intermediate_nodes):
         - view3d_node: The 2D->3D view node if present, else None
         Returns (None, None) if validation fails
     """
+
     def _is_pointwise(n):
         return n.target in (torch.ops.prims.convert_element_type.default,)
 

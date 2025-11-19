@@ -1015,8 +1015,7 @@ def schedule_overlap_bucketing(
     max_coll_distance: int = 1000,
     custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
-    # split_mm_rs_config: tuple[int, list[int]] | None = None,
-    split_mm_rs_config: tuple[list[int], int] | None = ([2, 4], 2048),
+    split_mm_rs_config: tuple[int, list[int]] | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
