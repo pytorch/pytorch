@@ -580,7 +580,7 @@ class OverlapScheduler:
     def get_non_collective_runtime_estimate(self, node: fx.Node) -> float | None:
         """Get runtime estimation for a node in ms. Returns None if no estimation is available."""
 
-        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion group.
+        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion group
         # TODO: move get collective runtime into here as well.
         if is_compute_node(node):
             return benchmark_node(node, self.custom_runtime_estimation)
@@ -593,15 +593,8 @@ class OverlapScheduler:
     def _reduce_exposed_time_of_in_flight_collectives(
         self, node: fx.Node, available_compute: float
     ) -> float:
-        """Reduce exposed time of in-flight collectives using available compute time.
+        """Reduce exposed time of in-flight collectives using available compute time and return available time"""
 
-        Args:
-            node: The node providing the compute time to hide collectives
-            available_compute: Available compute time in ms
-
-        Returns:
-            Remaining available compute time after overlapping with in-flight collectives
-        """
         # TODO: separate overlap time per process group
         for info in self.in_flight.values():
             if info.exposed_time_ms == 0:
@@ -783,10 +776,13 @@ class OverlapScheduler:
             # TODO: we could potentially be more strict about limiting the amount of
             # pre-fetched memory before memory peak, and adjust allowed collective mem.
             if not self.off_compute_path(collective):
-                if abs(
-                    self.compute_index_domination[collective]
-                    - self.current_compute_index
-                ) > self.max_compute_pre_fetch:
+                if (
+                    abs(
+                        self.compute_index_domination[collective]
+                        - self.current_compute_index
+                    )
+                    > self.max_compute_pre_fetch
+                ):
                     continue
 
             possible_collectives.append(collective)
@@ -858,11 +854,8 @@ class OverlapScheduler:
             info.exposed_time_ms -= overlap_amount
             info.hiding_nodes.add(compute_node)
             available_compute_time -= overlap_amount
-            reduced_time += overlap_amount  # Track how much time we've used
 
-        # Track any remaining compute time that couldn't be used to hide collectives
-        if available_compute_time > 0:
-            self.wasted_compute += available_compute_time
+        self.wasted_compute += available_compute_time
 
     def _find_schedulable_path(
         self, target: fx.Node, curr_compute_node: fx.Node | None
@@ -974,6 +967,10 @@ class OverlapScheduler:
 
         # Compute total exposed and potential exposed time
         total_exposed = sum(c.exposed_time_ms for c in self.collective_info.values())
+        hideable_exposed_ms = sum(
+            self.collective_info[c].exposed_time_ms
+            for c in potentially_hidden_collectives
+        )
         total_potential_exposed = sum(
             c.estimated_time_ms for c in self.collective_info.values()
         )
@@ -989,7 +986,7 @@ class OverlapScheduler:
         log.info(
             "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
             "original_peak_memory=%d bytes, rescheduled_peak_memory=%d bytes, "
-            "total_exposed_ms=%.2f, total_potential_exposed_ms=%.2f, "
+            "total_exposed_ms=%.2f, hideable_exposed_ms=%.2f, total_potential_exposed_ms=%.2f, "
             "wasted_compute_ms=%.2f",
             len(exposed),
             len(bad_exposed),
@@ -997,6 +994,7 @@ class OverlapScheduler:
             self.original_peak_memory,
             self.memory_tracker.peak_memory,
             total_exposed,
+            hideable_exposed_ms,
             total_potential_exposed,
             self.wasted_compute,
         )
