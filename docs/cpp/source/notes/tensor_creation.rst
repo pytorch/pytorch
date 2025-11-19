@@ -153,7 +153,7 @@ allowed values for these axes at the moment are:
 
 An instance of ``TensorOptions`` stores a concrete value for each of these
 axes. Here is an example of creating a ``TensorOptions`` object that represents
-a 64-bit float, strided tensor that requires a gradient, and lives on CUDA
+a 32-bit float, strided tensor that requires a gradient, and lives on CUDA
 device 1:
 
 .. code-block:: cpp
