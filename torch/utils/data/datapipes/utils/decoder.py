@@ -75,7 +75,7 @@ def basichandlers(extension: str, data):
 
     if extension in ["pt"]:
         stream = io.BytesIO(data)
-        return torch.load(stream)
+        return torch.load(stream, weights_only=True)
 
     # if extension in "ten tb".split():
     #     from . import tenbin
