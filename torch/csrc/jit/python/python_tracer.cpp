@@ -55,8 +55,8 @@ SourceRange getPythonInterpreterSourceRange() {
       if (src && src->filename()) {
         auto line =
             src->starting_line_no() + src->lineno_for_offset(range.start());
-        stack_trace << *(src->filename()) << "(" << line
-                    << "): " << entry.filename << "\n";
+        stack_trace << *(src->filename()) << '(' << line
+                    << "): " << entry.filename << '\n';
         if (!source_filename) {
           source_filename = *(src->filename());
           source_line = line;
@@ -218,7 +218,7 @@ void initPythonTracerBindings(PyObject* module) {
           "__repr__",
           [](const TracingState& s) {
             std::ostringstream ss;
-            ss << "<TracingState " << (const void*)&s << ">";
+            ss << "<TracingState " << (const void*)&s << '>';
             return ss.str();
           })
       .def(
