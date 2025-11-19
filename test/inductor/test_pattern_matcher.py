@@ -1250,11 +1250,14 @@ class TestPatternMatcher(TestCase):
                 _, (code) = run_and_get_code(fc, b, m1, m2, beta, alpha)
                 self.assertIn("_addmm_activation", code[0])
 
-
         # Check no disruptions in the gemm autotune process
         _, (code) = run_and_get_code(
             torch.compile(f, options={"max_autotune_gemm": True}),
-            b, m1, m2, beta, alpha,
+            b,
+            m1,
+            m2,
+            beta,
+            alpha,
         )
         self.assertNotIn("_addmm_activation", code[0])
 
