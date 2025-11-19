@@ -2058,7 +2058,7 @@ def _load(
                     )
 
             if os.environ.get("SKIP_READING_DATA", "0") == "1":
-                storage = torch.UntypedStorage(0)
+                storage = torch.UntypedStorage(0, device="meta")
                 if can_calculate_storage_offsets:
                     storage._checkpoint_offset = _get_offset(key, name, numel)
                 else:
