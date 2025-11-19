@@ -136,14 +136,14 @@ def _compute_local_shape_and_global_offset(
     # However, a single dim can be sharded multiple times, so we will end up
     # doing a Sum(size*stride) like computation to determine the location of our
     # shard for each of the shardings on that dim.
-    global_offset: list[int | None] = [0] * len(global_shape)
+    global_offset = [0] * len(global_shape)
     shard_dim_to_global_offsets = {}
 
     for mesh_dim, placement in ordered_placements:
         mesh_dim_size = mesh_shape[mesh_dim]
         if not isinstance(placement, (Shard, _StridedShard)):
             continue
-        
+
         shard_dim = placement.dim
         zero_global_offset = global_shape[shard_dim]
         assert shard_dim < len(local_shape), (
@@ -161,17 +161,21 @@ def _compute_local_shape_and_global_offset(
         if shard_size == 0:
             shard_dim_to_global_offsets[shard_dim] = [zero_global_offset]
             continue
-        
+
         if not isinstance(placement, _StridedShard):
+            assert shard_offsets is not None and isinstance(shard_offsets, int)
             shard_offsets = list(range(shard_offsets, shard_offsets + shard_size))
+
+        assert isinstance(shard_offsets, list)
 
         if shard_dim not in shard_dim_to_global_offsets:
             shard_dim_to_global_offsets[shard_dim] = shard_offsets
         else:
-            shard_dim_to_global_offsets[shard_dim] = [shard_dim_to_global_offsets[shard_dim][i] for i in shard_offsets]
+            shard_dim_to_global_offsets[shard_dim] = [
+                shard_dim_to_global_offsets[shard_dim][i] for i in shard_offsets
+            ]
 
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
-        # maybe do a contiuous check and throw error if not
         global_offset[shard_dim] = global_offsets[0]
 
     return tuple(local_shape), tuple(global_offset)
