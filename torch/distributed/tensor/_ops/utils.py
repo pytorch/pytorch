@@ -163,7 +163,10 @@ def prod(xs: Iterable[int]) -> int:
 
 
 def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
-    """Check if the shape is shardable according to the spec."""
+    """Check if the spec matches these criteria:
+    * any Shard placements in spec refer to valid tensor dims
+    * no empty local tensors (uneven sharding OK, as long as last rank has >0 size)
+    """
     # number of shards in each tensor dimension
     shards_map = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
@@ -229,6 +232,9 @@ def infer_broadcast_dims_map(
 ) -> list[int]:
     # infer the broadcast dims map, where it maps from the common shape dim to the input shape dim
     # this is aligned with the broadcast semantics
+    # e.g. if common_shape = [1, 2, 3, 4] and input_shape = [2, 3, 4],
+    # broadcast_dims_map will be [-1, 0, 1, 2]
+    # meaning that dim 0 in the output has no mapping to the input, and dim 1 in the output maps to dim 0 in the input
     common_ndim = len(common_shape)
     input_ndim = len(input_shape)
     broadcast_dims_map = [-1] * common_ndim
