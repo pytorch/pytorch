@@ -1259,6 +1259,29 @@ class BuiltinVariable(VariableTracker):
                 ],
             )
 
+        try:
+            from .misc import datetime_now, DatetimeNowVariable
+
+            if fn is datetime_now:
+                obj = BuiltinVariable(fn)
+
+                def call_datetime_now(
+                    tx: "InstructionTranslator",
+                    args: Sequence[VariableTracker],
+                    kwargs: dict[str, VariableTracker],
+                ) -> VariableTracker:
+                    proxy = tx.output.create_proxy(
+                        "call_function",
+                        datetime_now,
+                        (),
+                        {},
+                    )
+                    return DatetimeNowVariable(proxy=proxy, source=None)
+
+                return call_datetime_now
+        except Exception:
+            datetime_now = None
+
         if len(handlers) == 0:
             return lambda tx, args, kwargs: call_unimplemented(args)
         elif len(handlers) == 1:

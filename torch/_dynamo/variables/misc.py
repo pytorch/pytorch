@@ -46,6 +46,7 @@ from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
     AttrSource,
+    EphemeralSource,
     GenericAttrSource,
     GetItemSource,
     Source,
@@ -2125,6 +2126,13 @@ class DatetimeClassVariable(VariableTracker):
             return DatetimeNowVariable(source=source, proxy=proxy)
         return super().call_method(tx, name, args, kwargs)
 
+    def var_getattr(self, tx, name):
+        if name == "now":
+            from .builtin import BuiltinVariable
+
+            return BuiltinVariable(datetime_now)
+        return super().var_getattr(tx, name)
+
 
 class DatetimeNowVariable(VariableTracker):
     def __init__(
@@ -2133,6 +2141,8 @@ class DatetimeNowVariable(VariableTracker):
         source: Optional[Source] = None,
         **kwargs,
     ) -> None:
+        if source is None:
+            source = EphemeralSource("datetime_now")
         super().__init__(source=source, **kwargs)
         self.proxy = proxy
 
@@ -2189,6 +2199,8 @@ class TimedeltaVariable(VariableTracker):
         source: Optional[Source] = None,
         **kwargs,
     ) -> None:
+        if source is None:
+            source = EphemeralSource("timedelta")
         super().__init__(source=source, **kwargs)
         self.proxy = proxy
 
@@ -2224,6 +2236,8 @@ class TimedeltaVariable(VariableTracker):
 
 class DatetimeScalarVariable(VariableTracker):
     def __init__(self, proxy, source, **kwargs):
+        if source is None:
+            source = EphemeralSource("datetime_scalar")
         super().__init__(source=source, **kwargs)
         self.proxy = proxy
 
