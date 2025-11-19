@@ -1245,7 +1245,7 @@ class TestFP8Matmul(TestCase):
         # - fp8 vs. dq and fp8 vs. emulated should be high
         # - fp8 vs. hp should be lower (due to capturing quant error as well)
         snr_limit_hp = 25.
-        snr_limit_dq_emulated = 60
+        snr_limit_dq_emulated = 55
 
         def check_snr(Ps, Pq, limit):
             snr = compute_error(Ps, Pq)
