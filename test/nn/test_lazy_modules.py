@@ -1,4 +1,5 @@
 # Owner(s): ["module: nn"]
+import itertools
 import pickle
 import unittest
 
@@ -520,6 +521,261 @@ class TestLazyModules(TestCase):
             (16, 32, 2, 2, 2),
             (32,),
         )
+
+    def test_lazy_layer_norm_out_of_bound_batch_dim(self) -> None:
+        with self.assertRaisesRegex(
+            ValueError,
+            "start dim is 0 but layer norm is not intended to normalize over batch dimension",
+        ):
+            nn.LazyLayerNorm(start_dim=0)
+
+    def test_lazy_layer_norm_out_of_bound(self) -> None:
+        input = torch.ones((20, 5, 10, 10))
+        rank = len(input.shape)
+
+        allowed_start_dims = itertools.chain(range(1, rank), range(-rank + 1, 0))
+
+        for i in allowed_start_dims:
+            module = nn.LazyLayerNorm(start_dim=i)
+            module(input)
+
+        forbidden_start_dims_example = itertools.chain(
+            range(-rank, -rank - 3, -1), range(rank, rank + 3)
+        )
+
+        for i in forbidden_start_dims_example:
+            with self.assertRaisesRegex(ValueError, f"start dim {i} is out of bound"):
+                module = nn.LazyLayerNorm(start_dim=i)
+                module(input)
+
+    def _check_lazy_layer_norm(self, input_shape: tuple[int, ...]) -> None:
+        rank = len(input_shape)
+
+        allowed_start_dims = itertools.chain(range(1, rank), range(-rank + 1, 0))
+        element_wise_affine_cases = [True, False]
+        bias_cases = [True, False]
+
+        for start_dim, element_wise_affine, bias in itertools.product(
+            allowed_start_dims, element_wise_affine_cases, bias_cases
+        ):
+            module = nn.LazyLayerNorm(
+                start_dim, elementwise_affine=element_wise_affine, bias=bias
+            )
+
+            if element_wise_affine:
+                self.assertIsInstance(module.weight, UninitializedParameter)
+                if bias:
+                    self.assertIsInstance(module.bias, UninitializedParameter)
+
+                else:
+                    self.assertIsNone(module.bias)
+            else:
+                self.assertIsNone(module.weight)
+                self.assertIsNone(module.bias)
+
+            input = torch.ones(input_shape)
+            output = module(input)  # materialized
+
+            self.assertIsInstance(module, nn.LayerNorm)
+            self.assertNotIsInstance(module, nn.LazyLayerNorm)
+
+            with self.assertRaisesRegex(
+                AttributeError, "'LayerNorm' object has no attribute 'start_dim'"
+            ):
+                module.start_dim
+
+            if element_wise_affine:
+                self.assertNotIsInstance(module.weight, UninitializedParameter)
+                self.assertIsInstance(module.weight, Parameter)
+
+                self.assertEqual(
+                    module.weight.shape, torch.Size(module.normalized_shape)
+                )
+
+                self.assertEqual(module.weight, torch.ones(module.normalized_shape))
+
+                if bias:
+                    self.assertNotIsInstance(module.bias, UninitializedParameter)
+                    self.assertIsInstance(module.bias, Parameter)
+
+                    self.assertEqual(
+                        module.bias.shape, torch.Size(module.normalized_shape)
+                    )
+
+                    self.assertEqual(module.bias, torch.zeros(module.normalized_shape))
+
+                else:
+                    self.assertIsNone(module.bias)
+            else:
+                self.assertIsNone(module.weight)
+                self.assertIsNone(module.bias)
+
+            self.assertEqual(
+                output,
+                torch.nn.functional.layer_norm(
+                    input,
+                    module.normalized_shape,
+                    module.weight,
+                    module.bias,
+                    module.eps,
+                ),
+            )
+
+    def test_lazy_layer_norm(self) -> None:
+        batch_size = 10
+
+        input_shape_seq = (batch_size, 5, 10)
+        self._check_lazy_layer_norm(input_shape_seq)
+
+        input_shape_img = (batch_size, 5, 7, 7)
+        self._check_lazy_layer_norm(input_shape_img)
+
+        input_shape_vid = (batch_size, 7, 5, 10, 10)
+        self._check_lazy_layer_norm(input_shape_vid)
+
+    def _check_lazy_layer_norm_start_dim_calc(
+        self,
+        input_shape: tuple[int, ...],
+        start_dim: int,
+        normalized_shape_expected: tuple[int, ...],
+    ) -> None:
+        module = nn.LazyLayerNorm(start_dim)
+        input = torch.ones(input_shape)
+        module(input)  # materialized
+
+        self.assertEqual(module.normalized_shape, normalized_shape_expected)
+
+    def test_lazy_layer_norm_start_dim_calc(self) -> None:
+        input_shape = (5, 3, 7, 10)
+
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, 1, (3, 7, 10))
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, -1, (10,))
+
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, 2, (7, 10))
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, -2, (7, 10))
+
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, 3, (10,))
+        self._check_lazy_layer_norm_start_dim_calc(input_shape, -3, (3, 7, 10))
+
+    def _check_lazy_layer_norm_pickle(self, input_shape: tuple[int, ...]) -> None:
+        rank = len(input_shape)
+
+        allowed_start_dims = itertools.chain(range(1, rank), range(-rank + 1, 0))
+        element_wise_affine_cases = [True, False]
+        bias_cases = [True, False]
+
+        for start_dim, element_wise_affine, bias in itertools.product(
+            allowed_start_dims, element_wise_affine_cases, bias_cases
+        ):
+            module = nn.LazyLayerNorm(
+                start_dim, elementwise_affine=element_wise_affine, bias=bias
+            )
+
+            module = pickle.loads(pickle.dumps(module))
+            self.assertIsInstance(module, nn.LazyLayerNorm)
+
+            if element_wise_affine:
+                self.assertIsInstance(module.weight, UninitializedParameter)
+                if bias:
+                    self.assertIsInstance(module.bias, UninitializedParameter)
+
+                else:
+                    self.assertIsNone(module.bias)
+            else:
+                self.assertIsNone(module.weight)
+                self.assertIsNone(module.bias)
+
+            input = torch.ones(input_shape)
+            module(input)  # materialized
+            module = pickle.loads(pickle.dumps(module))
+
+            self.assertNotIsInstance(module, nn.LazyLayerNorm)
+            self.assertIsInstance(module, nn.LayerNorm)
+
+            if element_wise_affine:
+                self.assertNotIsInstance(module.weight, UninitializedParameter)
+                self.assertIsInstance(module.weight, Parameter)
+
+                self.assertEqual(
+                    module.weight.shape, torch.Size(module.normalized_shape)
+                )
+
+                self.assertEqual(module.weight, torch.ones(module.normalized_shape))
+                if bias:
+                    self.assertNotIsInstance(module.bias, UninitializedParameter)
+                    self.assertIsInstance(module.bias, Parameter)
+
+                    self.assertEqual(
+                        module.bias.shape, torch.Size(module.normalized_shape)
+                    )
+
+                    self.assertEqual(module.bias, torch.zeros(module.normalized_shape))
+
+                else:
+                    self.assertIsNone(module.bias)
+            else:
+                self.assertIsNone(module.weight)
+                self.assertIsNone(module.bias)
+
+    def test_lazy_layer_norm_pickle(self) -> None:
+        batch_size = 10
+
+        input_shape_seq = (batch_size, 5, 10)
+        self._check_lazy_layer_norm_pickle(input_shape_seq)
+
+        input_shape_img = (batch_size, 5, 7, 7)
+        self._check_lazy_layer_norm_pickle(input_shape_img)
+
+        input_shape_vid = (batch_size, 7, 5, 10, 10)
+        self._check_lazy_layer_norm_pickle(input_shape_vid)
+
+    def _check_lazy_layer_norm_norm_state(
+        self, normalized_shape: tuple[int, ...], start_dim: int
+    ) -> None:
+        # Note the value of start dim doesn't matter in this test as the parameter shape
+        #  is determent by normalized_shape of the LayerNorm
+        for bias in [True, False]:
+            module = nn.LayerNorm(normalized_shape, elementwise_affine=True, bias=bias)
+            lazy_module = nn.LazyLayerNorm(
+                start_dim, elementwise_affine=True, bias=bias
+            )
+
+            lazy_module.load_state_dict(module.state_dict())
+            # Parameters have been initialized but the module won't become a full
+            # LayerNorm one until the first iteration. This is due to
+            # limitations on the state_dict loading logic
+            self.assertFalse(lazy_module.has_uninitialized_params())
+            self.assertIsInstance(lazy_module, nn.LazyLayerNorm)
+
+            self.assertEqual(lazy_module.weight.shape, normalized_shape)
+
+            if bias:
+                self.assertEqual(lazy_module.bias.shape, normalized_shape)
+
+            module = nn.LayerNorm(normalized_shape, elementwise_affine=True, bias=bias)
+            lazy_module = nn.LazyLayerNorm(
+                start_dim, elementwise_affine=True, bias=bias
+            )
+            with self.assertRaisesRegex(RuntimeError, "shape of an uninitialized"):
+                module.load_state_dict(lazy_module.state_dict())
+
+    def test_lazy_layer_norm_norm_state(self) -> None:
+        normalized_shape = (5, 10)
+        self._check_lazy_layer_norm_norm_state(normalized_shape, -2)
+
+        normalized_shape = (5, 7, 7)
+        self._check_lazy_layer_norm_norm_state(normalized_shape, -3)
+
+        normalized_shape = (7, 5, 10, 10)
+        self._check_lazy_layer_norm_norm_state(normalized_shape, -4)
+
+    def test_lazy_layer_norm_backward(self) -> None:
+        module = nn.LazyLayerNorm(start_dim=-1)
+        input = torch.ones(2, 3, 4, requires_grad=True)
+        output = module(input).sum()
+        output.backward()
+        self.assertIsNotNone(module.weight.grad)
+        self.assertIsNotNone(module.bias.grad)
 
     def _check_lazy_norm(self, cls, lazy_cls, input_shape):
         for affine in [False, True]:
