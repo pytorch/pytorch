@@ -432,8 +432,8 @@ __host__ __device__
   }
 #ifdef __SYCL_DEVICE_ONLY__
 // SYCL Device assertions on Windows do not work properly with MSVC _wassert.
-// So we define SYCL_KERNEL_ASSERT macro to call __devicelib_assert_fail directly
-// and bypass _wassert.
+// So we define SYCL_KERNEL_ASSERT macro to call __devicelib_assert_fail
+// directly and bypass _wassert.
 #define SYCL_KERNEL_ASSERT(cond)        \
   if (C10_UNLIKELY(!(cond))) {          \
     (void)__devicelib_assert_fail(      \
