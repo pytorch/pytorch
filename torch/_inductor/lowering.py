@@ -3095,6 +3095,8 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten.index_reduce)
 make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 
+make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
+
 
 # Register with type_promotion_kind None.
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
