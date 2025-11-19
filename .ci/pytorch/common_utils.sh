@@ -96,7 +96,6 @@ function pip_build_and_install() {
     python3 -m pip wheel \
       --no-build-isolation \
       --no-deps \
-      --no-use-pep517 \
       -w "${wheel_dir}" \
       "${build_target}"
   fi
@@ -306,6 +305,28 @@ function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
   pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
+}
+
+function install_flash_attn_cute() {
+  echo "Installing FlashAttention CuTe from GitHub..."
+  # Grab latest main til we have a pinned commit
+  local flash_attn_commit
+  flash_attn_commit=$(git ls-remote https://github.com/Dao-AILab/flash-attention.git HEAD | cut -f1)
+
+  # Clone the repo to a temporary directory
+  rm -rf flash-attention-build
+  git clone --depth 1 --recursive https://github.com/Dao-AILab/flash-attention.git flash-attention-build
+
+  pushd flash-attention-build
+  git checkout "${flash_attn_commit}"
+
+  # Install only the 'cute' sub-directory
+  pip_install -e flash_attn/cute/
+  popd
+
+  # remove the local repo
+  rm -rf flash-attention-build
+  echo "FlashAttention CuTe installation complete."
 }
 
 function print_sccache_stats() {
