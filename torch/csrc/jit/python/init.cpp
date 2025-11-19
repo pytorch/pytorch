@@ -1798,7 +1798,7 @@ void initJITBindings(PyObject* module) {
                     << "' with schema(s):\n";
 
           for (const auto& op : sortedOps) {
-            docstring << "  " << op->schema() << "\n";
+            docstring << "  " << op->schema() << '\n';
           }
 
           py::list overload_names;
