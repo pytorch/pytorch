@@ -275,6 +275,9 @@ if __name__ == "__main__":
 
     print("Building PyTorch wheel")
     build_vars = ""
+    # Disable CUDA build
+    if not enable_cuda:
+        build_vars += "USE_CUDA=0 "
     # MAX_JOB=5 is not required for CPU backend (see commit 465d98b)
     if enable_cuda:
         build_vars += "MAX_JOBS=5 "

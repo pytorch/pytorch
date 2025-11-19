@@ -1515,8 +1515,12 @@ static void addmm_impl_cpu_(
   // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
   // additionally have support for running kernel with BF16 instructions
   if (transpose_c) {
-    bool apply_heur = apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
-    if (apply_heur && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
+    bool apply_heur =
+        apply_mkldnn_matmul_heur(b.sizes()[0], b.sizes()[1], a.sizes()[1]);
+    if (apply_heur && transpose_a && !transpose_b &&
+        (result.scalar_type() == at::ScalarType::Float ||
+         result.scalar_type() == at::ScalarType::BFloat16 ||
+         result.scalar_type() == at::ScalarType::Half)) {
       try {
         mkldnn_matmul(b, a, c, beta.to<float>(), alpha.to<float>());
         // We have dispatched to ACL GEMM for single precision float
@@ -3541,9 +3545,9 @@ Tensor _dyn_quant_matmul_4bit_cpu(
     const int64_t out_features) {
   auto M = inp.size(0);
   TORCH_CHECK(
-      inp.dtype() == kFloat,
+      inp.dtype() == kFloat || (inp.dtype() == kBFloat16 && block_size == in_features),
       __func__,
-      " : expect input to be 32-bit float tensor.");
+      " : expect input to be float32 or bfloat16 tensor.");
   TORCH_CHECK(
       block_size == in_features ||
           (!(block_size % 32) && !(in_features % block_size)),

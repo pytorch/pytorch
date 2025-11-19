@@ -327,18 +327,41 @@ void GeluKernelImpl(TensorIteratorBase& it, GeluType approximate) {
       });
     }
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(
-        ScalarType::Half,
-        ScalarType::BFloat16,
-        it.dtype(),
-        "GeluKernelImpl",
-        [&]() {
-        cpu_kernel_vec(
-            it,
-            scalar_gelu<scalar_t>,
-            vectorized_gelu<scalar_t>,
-            grain_size);
-      });
+       if (it.common_dtype() == c10::ScalarType::BFloat16) {
+        static uint16_t LUT[1u << 16];
+        static std::once_flag flag;
+        std::call_once(flag, [&]() {
+          for (uint32_t bits = 0; bits < 0x10000; ++bits) {
+            uint16_t input_bits = static_cast<uint16_t>(bits);
+            float input_float = c10::detail::f32_from_bits(input_bits);
+            // calculate gelu in fp32, then downcast and store in LUT
+            // gelu erf formula from https://discuss.pytorch.org/t/gelu-pytorch-formula/79875
+            float g = 0.5f * input_float * (1.f + std::erf(input_float * M_SQRT1_2));
+            LUT[input_bits] = c10::detail::round_to_nearest_even(g);
+          }
+        });
+        uint16_t* dst = reinterpret_cast<uint16_t*>(it.data_ptr(0));
+        uint16_t* src = reinterpret_cast<uint16_t*>(it.data_ptr(1));
+        const int64_t n = it.numel();
+        at::parallel_for(0, n, grain_size, [&](int64_t begin, int64_t end) {
+          for (int64_t i = begin; i < end; ++i)
+            dst[i] = LUT[src[i]];
+        });
+
+    } else {
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          ScalarType::Half,
+          ScalarType::BFloat16,
+          it.dtype(),
+          "GeluKernelImpl",
+          [&]() {
+          cpu_kernel_vec(
+              it,
+              scalar_gelu<scalar_t>,
+              vectorized_gelu<scalar_t>,
+              grain_size);
+        });
+    }
   }
 }
 
