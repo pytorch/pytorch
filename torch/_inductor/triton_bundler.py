@@ -299,7 +299,7 @@ class TritonBundler:
                             log.debug("failed to collect triton kernel", exc_info=True)
                         extension = os.path.splitext(filename)[1]
                         if extension in GPU_KERNEL_BIN_EXTS.values():
-                            # Each kernel has bunch of files like .cubin(for cuda), .spv(for xpu), .json, .ttir
+                            # Each kernel has bunch of files like .cubin(for cuda), .zebin(for xpu), .json, .ttir
                             # Just append one of them without the extension
                             kernel_names.append(Path(filename).stem)
                     if artifacts:
@@ -379,7 +379,7 @@ class TritonBundler:
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"] += 1
                     extension = os.path.splitext(artifact.filename)[1]
                     if extension in GPU_KERNEL_BIN_EXTS.values():
-                        # Each kernel has bunch of files like .cubin(for cuda), spv(for xpu), .json, .ttir
+                        # Each kernel has bunch of files like .cubin(for cuda), zebin(for xpu), .json, .ttir
                         # Just append one of them without the extension
                         kernel_names.append(Path(artifact.filename).stem)
 
