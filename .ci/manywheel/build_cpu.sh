@@ -19,6 +19,18 @@ fi
 ARCH=$(uname -m)
 echo "Building CPU wheel for architecture: $ARCH"
 
+# Detect and configure OpenBLAS for CPU aarch64
+    # Use OpenBLAS for BLAS/LAPACK on CPU aarch64 builds
+    if [[ ! -f "/opt/OpenBLAS/lib/libopenblas.so.0" ]]; then
+        echo "ERROR: OpenBLAS not found at /opt/OpenBLAS/lib/"
+        echo "OpenBLAS (BLAS/LAPACK) is required for CPU aarch64 builds"
+        exit 1
+    fi
+    echo "Using OpenBLAS for CPU aarch64"
+    export BLAS=OpenBLAS
+    export OpenBLAS_HOME=/opt/OpenBLAS
+fi
+
 WHEELHOUSE_DIR="wheelhousecpu"
 LIBTORCH_HOUSE_DIR="libtorch_housecpu"
 if [[ -z "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then

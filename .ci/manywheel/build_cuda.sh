@@ -33,6 +33,19 @@ fi
 ARCH=$(uname -m)
 echo "Building for architecture: $ARCH"
 
+# Detect and configure NVPL for BLAS/LAPACK for CUDA aarch64
+if [[ "$ARCH" == "aarch64" ]]; then
+    # Use NVPL (NVIDIA Performance Libraries) for ARM
+    # NVPL provides optimized BLAS and LAPACK for better cpu performance on NVIDIA platforms
+    if [[ ! -f "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0" ]]; then
+        echo "ERROR: NVPL not found at /usr/local/lib/"
+        echo "NVPL (BLAS/LAPACK) is required for CUDA aarch64 builds"
+        exit 1
+    fi
+    echo "Using NVPL BLAS/LAPACK for CUDA aarch64"
+    export BLAS=NVPL
+fi
+
 # Determine CUDA version and architectures to build for
 #
 # NOTE: We should first check `DESIRED_CUDA` when determining `CUDA_VERSION`,

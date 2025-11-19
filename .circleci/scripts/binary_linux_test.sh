@@ -66,10 +66,17 @@ fi
 if [[ "$PACKAGE_TYPE" != libtorch ]]; then
   if [[ "\$BUILD_ENVIRONMENT" != *s390x* ]]; then
     pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
-    retry pip install -q numpy protobuf typing-extensions
+    retry pip install numpy protobuf typing-extensions
   else
     pip install "\$pkg"
     retry pip install -q numpy protobuf typing-extensions
+  fi
+
+  # Verify numpy is installed
+  if ! python -c "import numpy; print('NumPy version:', numpy.__version__)" 2>/dev/null; then
+    echo "ERROR: NumPy installation failed or numpy is not importable"
+    echo "This is required for PyTorch testing"
+    exit 1
   fi
 fi
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
