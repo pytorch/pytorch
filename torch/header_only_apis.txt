@@ -204,3 +204,9 @@ HeaderOnlyGenericPackedTensorAccessor
 # HeaderOnlyTensorAccessorBase and
 # HeaderOnlyGenericPackedTensorAccessorBase are tested through
 # HeaderOnlyTensorAccessor and HeaderOnlyGenericPackedTensorAccessor
+
+# torch/headeronly/util/Deprecated.h
+# C10_DEPRECATED, C10_DEPRECATED_MESSAGE, and
+# C10_DEFINE_DEPRECATED_USING functionalities are expressed at compile
+# time that have no effect to runtime. Therefore, these macros are not
+# tested under test/.
