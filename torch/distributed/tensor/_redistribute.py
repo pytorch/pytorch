@@ -37,17 +37,20 @@ _FORCE_MIN_COST_REDISTRIBUTION_PLAN = None
 
 
 @contextlib.contextmanager
-def use_graph_based_transform(enabled: bool = True):
+def use_min_cost_redistribution_plan(enabled: bool = True):
     """
-    Context manager to control the redistribution transform strategy for DTensor operations.
+    Context manager to control the redistribution planning strategy for DTensor operations.
 
-    This allows switching between graph-based (optimal) and greedy (simpler) algorithms
-    for computing the sequence of collective operations needed to redistribute a DTensor
-    from one placement to another.
+    This context manager allows you to choose between two algorithms for computing the
+    sequence of collective operations needed to redistribute a DTensor from one placement
+    to another:
+
+    Note: When non-default shard orders are present, the graph-based algorithm is automatically
+    selected regardless of this setting.
 
     Args:
-        enabled (bool): If True, allow graph-based transform (respects auto-detection).
-                       If False, force greedy transform regardless of device order.
+        enabled (bool): If True, forces the use of the graph-based algorithm.
+                       If False, forces the use of the greedy algorithm.
                        Default: True
     """
     global _FORCE_MIN_COST_REDISTRIBUTION_PLAN
