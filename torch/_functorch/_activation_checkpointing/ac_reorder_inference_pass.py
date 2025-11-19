@@ -4,12 +4,26 @@ Activation Checkpointing Reordering Pass for Inference Graphs
 Minimizes memory by duplicating checkpointed operations for backward use,
 then using DCE to remove unused forward versions.
 
-This closely follows the pattern from default_partition's reordering_to_mimic_autograd_engine.
+Strategy:
+1. Apply partitioner's edge case helpers for correctness
+2. Build new graph, duplicating checkpointed nodes just-in-time when needed
+3. DCE cleanup (with custom is_impure_node like partitioner)
+4. raise_getitems pass for better memory
 """
 
 import torch
 import torch.fx as fx
-from torch._functorch.partitioners import collect_deps_with_filter, must_recompute
+from torch._functorch import config
+from torch._functorch.compile_utils import raise_getitems
+from torch._functorch.partitioners import (
+    cleanup_recompute_tags,
+    force_save_bw_mutation_src,
+    force_save_collectives,
+    has_recomputable_ops,
+    has_recomputable_rng_ops,
+    is_not_collective,
+    must_recompute,
+)
 
 
 def _is_backward_node(node: fx.Node) -> bool:
@@ -19,13 +33,13 @@ def _is_backward_node(node: fx.Node) -> bool:
 
 def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModule:
     """
-    Rematerialize checkpointed nodes by duplicating checkpoint regions for backward.
+    Remap (rematerialize) checkpointed nodes by duplicating checkpoint regions for backward.
 
-    This follows the same pattern as reordering_to_mimic_autograd_engine in partitioners.py:
-    1. Walk through graph node by node
-    2. For each node, pull in dependencies using collect_deps_with_filter
-    3. Duplicate checkpointed nodes when backward needs them
-    4. DCE cleans up unused forward copies
+    Strategy:
+    1. Apply partitioner's edge case handling first (MUST_SAVE, collectives, etc.)
+    2. Build new graph, duplicating checkpointed nodes just-in-time when needed
+    3. DCE cleanup (with custom is_impure_node like partitioner)
+    4. raise_getitems pass
 
     Args:
         gm: Graph with forward and backward ops (inference mode joint graph)
@@ -33,6 +47,30 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     Returns:
         Graph with rematerialized checkpoint regions
     """
+    # Early exit if no checkpointed ops
+    if not has_recomputable_ops(gm):
+        return gm
+
+    # Ban RNG ops in checkpointed regions (like partitioner does for inference mode)
+    # Note: RNG functionalization is not currently supported for inference mode graphs
+    if has_recomputable_rng_ops(gm):
+        raise RuntimeError(
+            "Activation checkpoint reordering in fullgraph does not support RNG ops in checkpointed regions. "
+            "RNG state cannot be properly synchronized between "
+            "forward and recomputed backward operations. Please move RNG operations outside "
+            "of checkpoint regions, or use joint graph mode (where partitioner handles RNG)."
+        )
+
+    # Apply partitioner's edge case handling FIRST
+    # This marks nodes that must be saved (MUST_SAVE, collectives, mutations, etc.)
+    if has_recomputable_ops(gm):
+        gm = cleanup_recompute_tags(gm, is_default_partition=False)
+
+    if not config.unsafe_allow_optimization_of_collectives:
+        force_save_collectives(gm)
+
+    force_save_bw_mutation_src(gm)
+
     # Find backward boundary
     first_node_in_bwd = None
     for node in gm.graph.nodes:
@@ -47,21 +85,12 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
     bwd_start = order[first_node_in_bwd]
 
-    # Track which checkpointed nodes are used in backward
-    checkpointed_in_bwd: set[fx.Node] = set()
-    for node in gm.graph.nodes:
-        if must_recompute(node):
-            for user in node.users:
-                if order[user] >= bwd_start:
-                    checkpointed_in_bwd.add(node)
-                    break
-
     # Build reordered graph
     new_graph = fx.Graph()
     env: dict[fx.Node, fx.Node] = {}
     recomputed_nodes: dict[fx.Node, fx.Node] = {}
 
-    # Add placeholders (like reordering_to_mimic_autograd_engine)
+    # Add placeholders
     for node in gm.graph.find_nodes(op="placeholder"):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
@@ -93,56 +122,36 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
         recomputed_nodes[node] = dup
         return dup
 
-    def insert_node_in_graph(node: fx.Node, for_backward: bool) -> None:
-        """
-        Insert a node and its dependencies into the graph.
-        Pattern from reordering_to_mimic_autograd_engine.
-        """
+    def insert_fwd_node(node: fx.Node) -> None:
+        """Insert a forward node - simple copy since all deps already in env."""
+        if node in env:
+            return
+        env[node] = new_graph.node_copy(node, lambda x: env[x])
 
-        # Skip condition: already in env or already recomputed
-        def skip_condition(n: fx.Node) -> bool:
-            if n in recomputed_nodes:
-                return True
-            if n in env:
-                return True
-            return False
+    def insert_bwd_node(node: fx.Node) -> None:
+        """Insert a backward node - duplicates checkpointed inputs on demand."""
+        if node in env or node in recomputed_nodes:
+            return
 
-        # Collect dependencies
-        insertable_nodes = collect_deps_with_filter(node, skip_condition)
+        # Copy node and remap inputs (duplicates checkpointed ones on demand)
+        def remap_input(x: fx.Node) -> fx.Node:
+            if must_recompute(x):
+                return duplicate_checkpoint_chain(x)
+            return env.get(x, x)
 
-        # Insert nodes in original order
-        for n in sorted(insertable_nodes, key=lambda x: order[x]):
-            if n not in env:
-                # Backward: duplicate checkpointed nodes
-                if for_backward and must_recompute(n) and n in checkpointed_in_bwd:
-                    env[n] = duplicate_checkpoint_chain(n)
-                # Backward: regular nodes may need recomputed inputs
-                elif for_backward:
-
-                    def get_input_for_backward(x: fx.Node) -> fx.Node:
-                        if x in recomputed_nodes:
-                            return recomputed_nodes[x]
-                        if must_recompute(x):
-                            # Duplicate checkpoint chain for this input
-                            return duplicate_checkpoint_chain(x)
-                        return env.get(x, x)
-
-                    env[n] = new_graph.node_copy(n, get_input_for_backward)
-                # Forward: simple copy
-                else:
-                    env[n] = new_graph.node_copy(n, lambda x: env[x])
+        env[node] = new_graph.node_copy(node, remap_input)
 
     # Insert forward nodes
     for node in list(gm.graph.nodes)[:bwd_start]:
         if node.op in ("placeholder", "output"):
             continue
-        insert_node_in_graph(node, for_backward=False)
+        insert_fwd_node(node)
 
     # Insert backward nodes
     for node in list(gm.graph.nodes)[bwd_start:]:
         if node.op == "output":
             continue
-        insert_node_in_graph(node, for_backward=True)
+        insert_bwd_node(node)
 
     # Handle output
     output_node = list(gm.graph.nodes)[-1]
@@ -158,8 +167,13 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     new_graph.output(tuple(get_output_arg(arg) for arg in output_node.args[0]))
     new_gm = torch.fx.GraphModule(gm, new_graph)
 
-    # DCE removes forward checkpointed nodes that are only used in backward
-    new_gm.graph.eliminate_dead_code()
+    # DCE with custom is_impure_node (like default_partition)
+    # Override to treat certain collectives as pure for DCE purposes
+    new_gm.graph.eliminate_dead_code(is_impure_node=is_not_collective)
+
+    # raise_getitems pass for better memory (like default_partition)
+    new_gm = raise_getitems(new_gm)
+
     new_gm.recompile()
 
     return new_gm

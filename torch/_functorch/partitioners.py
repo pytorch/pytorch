@@ -161,6 +161,21 @@ def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
     return False
 
 
+def is_not_collective(node: fx.Node) -> bool:
+    """
+    Helper for DCE to treat certain collectives as pure.
+    Used by both default_partition and AC reordering pass.
+    """
+    distributed_enabled = torch.distributed.is_available()
+    if not distributed_enabled:
+        return True
+    if node.target is torch.ops._c10d_functional.wait_tensor.default:
+        return False
+    if node.target is torch.ops._c10d_functional.all_gather_into_tensor.default:
+        return False
+    return True
+
+
 def sym_node_size(node: fx.Node) -> int:
     if isinstance(node.meta["val"], (torch.SymInt, torch.SymBool)):
         return 1
@@ -1045,6 +1060,7 @@ def default_partition(
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
+        # Maybe need this. We should error.
         if _is_functional_graph(joint_module.graph)[0] is not None:
             # Fall-back to previous behavior to avoid bc-breaking, although can
             # eventually flip the switch to make this a hard error.
@@ -1058,16 +1074,19 @@ def default_partition(
                 num_fwd_outputs=num_fwd_outputs,
                 static_lifetime_input_indices=static_lifetime_input_indices,
             )
-
+        # need this.
         joint_module = cleanup_recompute_tags(joint_module, is_default_partition=True)
 
+    # maybe need this
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(joint_module)
 
+    # maybe need this??
     force_save_bw_mutation_src(joint_module)
 
     if static_lifetime_input_indices is None:
         static_lifetime_input_indices = []
+    # not needed
     node_info = classify_nodes(
         joint_module, static_lifetime_input_indices, num_fwd_outputs
     )
@@ -1114,6 +1133,7 @@ def default_partition(
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
             continue
+        # figure out whether is partitioning thing??
         if is_multi_output(node):
             # Must be ordered before MUST_SAVE tags to avoid saving tuples marked MUST_SAVE.
             continue
@@ -1150,10 +1170,12 @@ def default_partition(
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
 
     if config._sync_decision_cross_ranks:
+        # we don't care?
         saved_values = _sync_decision_cross_ranks(joint_module.graph, saved_values)
 
     if static_lifetime_input_nodes is None:
         static_lifetime_input_nodes = node_info.static_lifetime_input_nodes
+    # maybe no need?
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module,
         saved_values,
@@ -1163,15 +1185,6 @@ def default_partition(
     )
 
     # Run DCE while overriding the definition of is_impure_node
-    def is_not_collective(node):
-        if not distributed_enabled:
-            return True
-        if node.target is torch.ops._c10d_functional.wait_tensor.default:
-            return False
-        if node.target is torch.ops._c10d_functional.all_gather_into_tensor.default:
-            return False
-        return True
-
     fw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
     bw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
 
@@ -1184,6 +1197,7 @@ def default_partition(
 
     # raise all getitem ops to as early as possible
     # this is helpful for memory, especially in the case of aot_eager backend
+    # need it
     fw_module = raise_getitems(fw_module)
     bw_module = raise_getitems(bw_module)
 
@@ -3014,6 +3028,7 @@ def min_cut_rematerialization_partition(
 
     if static_lifetime_input_indices is None:
         static_lifetime_input_indices = []
+    # used for activation quantization, so no neededc.
     node_info = classify_nodes(
         joint_module, static_lifetime_input_indices, num_fwd_outputs
     )

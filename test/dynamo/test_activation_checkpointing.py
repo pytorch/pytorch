@@ -1933,6 +1933,7 @@ class ACReorderingTests(torch._dynamo.test_case.TestCase):
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
     sigmoid = torch.ops.aten.sigmoid.default(mm);  mm = None
+    detach = torch.ops.aten.detach.default(sigmoid);  detach = None
     sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
@@ -2087,6 +2088,7 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
     relu = torch.ops.aten.relu.default(mm);  mm = None
+    detach = torch.ops.aten.detach.default(relu);  detach = None
     mul = torch.ops.aten.mul.Tensor(relu, 2.0);  relu = None
     sum_1 = torch.ops.aten.sum.default(mul)
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
@@ -2195,6 +2197,211 @@ def forward(self, arg0_1, arg1_1):
             1 for ac in self._get_ac_nodes(gm_with) if order[ac] < first_bwd_idx
         )
         self.assertEqual(ac_in_fwd, 0, "AC chain should be fully deferred")
+
+    def test_ac_reordering_with_rng_ops_raises_error(self):
+        """Verify error is raised when RNG ops are in checkpointed regions."""
+        torch._dynamo.allow_in_graph(torch.autograd.grad)
+
+        x_data = torch.randn(4, 4)
+
+        def fwd_bwd_with_rng():
+            x = x_data.detach().requires_grad_(True)
+
+            # Checkpoint with RNG op (rand_like)
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a: torch.sigmoid(a + torch.rand_like(a)), x, use_reentrant=False
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"backward": 0}):
+                dx = torch.autograd.grad(loss, x)[0]
+
+            return dx
+
+        # Should raise error about RNG ops not being supported
+        with self.assertRaisesRegex(
+            RuntimeError, "Activation checkpoint reordering does not support RNG ops"
+        ):
+            self._compile_and_capture(fwd_bwd_with_rng, True)
+
+    def test_ac_reordering_with_tuple_output(self):
+        """Verify AC reordering handles checkpoints with tuple outputs (getitem ops)."""
+        torch._dynamo.allow_in_graph(torch.autograd.grad)
+
+        x_data = torch.randn(4, 6)
+        y_data = torch.randn(6, 4)
+
+        def fwd_bwd_with_tuple():
+            x = x_data.detach().requires_grad_(True)
+            y = y_data.detach().requires_grad_(True)
+
+            # Checkpoint uses split (multi-output op) - sigmoid output saved for backward
+            def checkpoint_fn(a, b):
+                linear = torch.mm(a, b)
+                chunks = torch.split(linear, [2, 2], dim=1)
+                return torch.sigmoid(chunks[0]), chunks[1]
+
+            result = torch.utils.checkpoint.checkpoint(
+                checkpoint_fn, x, y, use_reentrant=False
+            )
+            sig_out = result[0]
+            linear_out = result[1]
+            loss = sig_out.sum() + linear_out.sum()
+
+            with torch.fx.traceback.annotate({"backward": 0}):
+                dx, dy = torch.autograd.grad(loss, (x, y))
+            return dx, dy
+
+        result_with, gm_with = self._compile_and_capture(fwd_bwd_with_tuple, True)
+        result_without, gm_without = self._compile_and_capture(
+            fwd_bwd_with_tuple, False
+        )
+
+        # Verify correctness
+        torch.testing.assert_close(result_with[0], result_without[0])
+        torch.testing.assert_close(result_with[1], result_without[1])
+
+        # WITHOUT reordering: checkpointed ops saved via detach (no recomputation)
+        self.assertExpectedInline(
+            str(gm_without.graph).strip(),
+            """\
+graph():
+    %arg0_1 : [num_users=2] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=2] = placeholder[target=arg1_1]
+    %mm : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%arg0_1, %arg1_1), kwargs = {})
+    %split_with_sizes : [num_users=2] = call_function[target=torch.ops.aten.split_with_sizes.default](args = (%mm, [2, 2], 1), kwargs = {})
+    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%split_with_sizes, 0), kwargs = {})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%split_with_sizes, 1), kwargs = {})
+    %sigmoid : [num_users=2] = call_function[target=torch.ops.aten.sigmoid.default](args = (%getitem,), kwargs = {})
+    %detach : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%sigmoid,), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%sigmoid,), kwargs = {})
+    %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%getitem_1,), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sum_1, %sum_2), kwargs = {})
+    %ones_like : [num_users=2] = call_function[target=torch.ops.aten.ones_like.default](args = (%add,), kwargs = {pin_memory: False, memory_format: torch.preserve_format})
+    %expand : [num_users=1] = call_function[target=torch.ops.aten.expand.default](args = (%ones_like, [4, 2]), kwargs = {})
+    %expand_1 : [num_users=1] = call_function[target=torch.ops.aten.expand.default](args = (%ones_like, [4, 2]), kwargs = {})
+    %detach_1 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach,), kwargs = {})
+    %sigmoid_backward : [num_users=1] = call_function[target=torch.ops.aten.sigmoid_backward.default](args = (%expand_1, %detach_1), kwargs = {})
+    %cat : [num_users=2] = call_function[target=torch.ops.aten.cat.default](args = ([%sigmoid_backward, %expand], 1), kwargs = {})
+    %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%arg0_1,), kwargs = {})
+    %mm_1 : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%t, %cat), kwargs = {})
+    %t_1 : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%arg1_1,), kwargs = {})
+    %mm_2 : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%cat, %t_1), kwargs = {})
+    return (mm_2, mm_1)""",  # noqa: B950
+        )
+
+        # WITH reordering: checkpointed ops recomputed in backward (_recomputed suffix)
+        # Key differences: mm/split/sigmoid/getitem appear TWICE (forward + recomputed)
+        self.assertExpectedInline(
+            str(gm_with.graph).strip(),
+            """\
+graph():
+    %arg0_1 : [num_users=3] = placeholder[target=arg0_1]
+    %arg1_1 : [num_users=3] = placeholder[target=arg1_1]
+    %mm : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%arg0_1, %arg1_1), kwargs = {})
+    %split_with_sizes : [num_users=2] = call_function[target=torch.ops.aten.split_with_sizes.default](args = (%mm, [2, 2], 1), kwargs = {})
+    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%split_with_sizes, 0), kwargs = {})
+    %getitem_1 : [num_users=1] = call_function[target=operator.getitem](args = (%split_with_sizes, 1), kwargs = {})
+    %sigmoid : [num_users=1] = call_function[target=torch.ops.aten.sigmoid.default](args = (%getitem,), kwargs = {})
+    %sum_1 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%sigmoid,), kwargs = {})
+    %sum_2 : [num_users=1] = call_function[target=torch.ops.aten.sum.default](args = (%getitem_1,), kwargs = {})
+    %add : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sum_1, %sum_2), kwargs = {})
+    %ones_like : [num_users=2] = call_function[target=torch.ops.aten.ones_like.default](args = (%add,), kwargs = {pin_memory: False, memory_format: torch.preserve_format})
+    %expand : [num_users=1] = call_function[target=torch.ops.aten.expand.default](args = (%ones_like, [4, 2]), kwargs = {})
+    %expand_1 : [num_users=1] = call_function[target=torch.ops.aten.expand.default](args = (%ones_like, [4, 2]), kwargs = {})
+    %mm_recomputed : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%arg0_1, %arg1_1), kwargs = {})
+    %split_with_sizes_recomputed : [num_users=1] = call_function[target=torch.ops.aten.split_with_sizes.default](args = (%mm_recomputed, [2, 2], 1), kwargs = {})
+    %getitem_recomputed : [num_users=1] = call_function[target=operator.getitem](args = (%split_with_sizes_recomputed, 0), kwargs = {})
+    %sigmoid_recomputed : [num_users=1] = call_function[target=torch.ops.aten.sigmoid.default](args = (%getitem_recomputed,), kwargs = {})
+    %detach_recomputed : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%sigmoid_recomputed,), kwargs = {})
+    %detach_2 : [num_users=1] = call_function[target=torch.ops.aten.detach.default](args = (%detach_recomputed,), kwargs = {})
+    %sigmoid_backward : [num_users=1] = call_function[target=torch.ops.aten.sigmoid_backward.default](args = (%expand_1, %detach_2), kwargs = {})
+    %cat : [num_users=2] = call_function[target=torch.ops.aten.cat.default](args = ([%sigmoid_backward, %expand], 1), kwargs = {})
+    %t : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%arg0_1,), kwargs = {})
+    %mm_2 : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%t, %cat), kwargs = {})
+    %t_1 : [num_users=1] = call_function[target=torch.ops.aten.t.default](args = (%arg1_1,), kwargs = {})
+    %mm_3 : [num_users=1] = call_function[target=torch.ops.aten.mm.default](args = (%cat, %t_1), kwargs = {})
+    return (mm_3, mm_2)""",  # noqa: B950
+        )
+
+    def test_ac_reordering_with_selective_checkpoint_policy(self):
+        """Verify AC reordering respects MUST_SAVE policy (addmm saved, relu recomputed)."""
+        torch._dynamo.allow_in_graph(torch.autograd.grad)
+
+        x_data = torch.randn(4, 128)
+        weight1 = torch.randn(128, 128)
+        bias1 = torch.randn(128)
+
+        # Policy: MUST_SAVE addmm, PREFER_RECOMPUTE everything else
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.addmm.default:
+                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+            return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
+        )
+
+        def fwd_bwd_with_policy():
+            x = x_data.detach().requires_grad_(True)
+            w1 = weight1.detach().requires_grad_(True)
+            b1 = bias1.detach().requires_grad_(True)
+
+            def checkpoint_fn(inp, w, b):
+                # addmm will be MUST_SAVE (not recomputed)
+                # relu will be PREFER_RECOMPUTE (recomputed)
+                linear = torch.nn.functional.linear(inp, w, b)  # addmm
+                return torch.relu(linear)
+
+            result = torch.utils.checkpoint.checkpoint(
+                checkpoint_fn, x, w1, b1, use_reentrant=False, context_fn=context_fn
+            )
+            loss = result.sum()
+
+            with torch.fx.traceback.annotate({"backward": 0}):
+                dx, dw, db = torch.autograd.grad(loss, (x, w1, b1))
+            return dx, dw, db
+
+        result_with, gm_with = self._compile_and_capture(fwd_bwd_with_policy, True)
+        result_without, gm_without = self._compile_and_capture(
+            fwd_bwd_with_policy, False
+        )
+
+        # Verify correctness
+        torch.testing.assert_close(result_with[0], result_without[0])
+        torch.testing.assert_close(result_with[1], result_without[1])
+        torch.testing.assert_close(result_with[2], result_without[2])
+
+        # Key insight: WITH reordering, addmm is MUST_SAVE (not recomputed)
+        # but relu is PREFER_RECOMPUTE (recomputed in backward)
+        def count_op(gm, target):
+            return sum(1 for n in gm.graph.nodes if n.target == target)
+
+        # WITHOUT: addmm saved, relu saved
+        addmm_without = count_op(gm_without, torch.ops.aten.addmm.default)
+        relu_without = count_op(gm_without, torch.ops.aten.relu.default)
+
+        # WITH: addmm still saved (MUST_SAVE), relu recomputed (PREFER_RECOMPUTE)
+        addmm_with = count_op(gm_with, torch.ops.aten.addmm.default)
+        relu_with = count_op(gm_with, torch.ops.aten.relu.default)
+
+        # addmm should NOT be recomputed (same count in both)
+        self.assertEqual(addmm_without, addmm_with)
+
+        # relu SHOULD be recomputed (more in WITH due to 1 fwd + 1 recomputed)
+        self.assertGreater(relu_with, relu_without)
+
+        # Verify no addmm_recomputed node exists
+        recomputed_nodes = [
+            n.name for n in gm_with.graph.nodes if "_recomputed" in n.name
+        ]
+        self.assertNotIn("addmm_recomputed", recomputed_nodes)
+
+        # Verify relu_recomputed exists
+        self.assertTrue(
+            any("relu" in name for name in recomputed_nodes),
+            f"Expected relu_recomputed but got: {recomputed_nodes}",
+        )
 
 
 devices = ["cuda", "hpu"]
