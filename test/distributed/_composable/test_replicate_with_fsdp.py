@@ -76,7 +76,7 @@ class ReplicateTest(MultiProcessTestCase):
             store=dist.FileStore(self.file_name, self.world_size),
         )
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_replicate_transformer(self):
         """
         This tests that replicate works on a transformer model with fully_shard and replicate layers
@@ -126,7 +126,7 @@ class ReplicateTest(MultiProcessTestCase):
                 for parameter in layer.parameters():
                     self.assertEqual(parameter.placements, (Shard(dim=0),))
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_replicate_transformer_managed_modules(self):
         """
         This tests that replicate managed modules works properly. In this test we use a Transformer Module with 3 layers,
@@ -178,7 +178,7 @@ class ReplicateTest(MultiProcessTestCase):
         replicate_model = replicate(replicate_model)
         self.assertEqual(len(_get_managed_modules((replicate_model,))), 21)
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_replicate_tp_device_mesh(self):
         """
         This tests that a user can pass in a device mesh to replicate a module
@@ -206,7 +206,7 @@ class ReplicateTest(MultiProcessTestCase):
                 self.assertEqual(parameter.device_mesh.shape, (2,))
                 self.assertEqual(parameter.placements, (Replicate(),))
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_train_replicate_fsdp(self):
         """
         Tests that replicate_model has the same behavior as original model when training
@@ -253,7 +253,7 @@ class ReplicateTest(MultiProcessTestCase):
             self.assertEqual(replicate_loss, loss)
             check_sharded_parity(self, model, replicate_model)
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_train_parity_2d_mlp(self):
         """
         Verifies when a device mesh is passed in, the model has the same behavior as the original model when training

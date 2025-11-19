@@ -3,7 +3,7 @@ import torch
 
 
 class MkldnnLinear(torch.jit.ScriptModule):
-    def __init__(self, dense_module, dtype):
+    def __init__(self, dense_module, dtype) -> None:
         super().__init__()
         self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
         if dense_module.bias is not None:
@@ -39,7 +39,7 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
 
     __constants__ = ['stride', 'padding', 'dilation', 'groups']
 
-    def __init__(self, dense_module):
+    def __init__(self, dense_module) -> None:
         super().__init__()
 
         self.stride = dense_module.stride
@@ -74,7 +74,7 @@ class _MkldnnConvNd(torch.jit.ScriptModule):
 
 
 class MkldnnConv1d(_MkldnnConvNd):
-    def __init__(self, dense_module, dtype):
+    def __init__(self, dense_module, dtype) -> None:
         super().__init__(dense_module)
 
         self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
@@ -87,7 +87,7 @@ class MkldnnConv1d(_MkldnnConvNd):
 
 
 class MkldnnConv2d(_MkldnnConvNd):
-    def __init__(self, dense_module, dtype):
+    def __init__(self, dense_module, dtype) -> None:
         super().__init__(dense_module)
 
         self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv2d_weight(
@@ -109,7 +109,7 @@ class MkldnnConv2d(_MkldnnConvNd):
         self.training = state[2]
 
 class MkldnnConv3d(_MkldnnConvNd):
-    def __init__(self, dense_module, dtype):
+    def __init__(self, dense_module, dtype) -> None:
         super().__init__(dense_module)
 
         self.register_buffer('weight', torch._C._nn.mkldnn_reorder_conv3d_weight(
@@ -134,7 +134,7 @@ class MkldnnConv3d(_MkldnnConvNd):
 class MkldnnBatchNorm(torch.jit.ScriptModule):
     __constants__ = ['exponential_average_factor', 'eps']
 
-    def __init__(self, dense_module):
+    def __init__(self, dense_module) -> None:
         super().__init__()
 
         if dense_module.training:
@@ -186,7 +186,7 @@ class MkldnnBatchNorm(torch.jit.ScriptModule):
         )
 
 class MkldnnPrelu(torch.jit.ScriptModule):
-    def __init__(self, dense_module, dtype):
+    def __init__(self, dense_module, dtype) -> None:
         super().__init__()
         self.register_buffer('weight', dense_module.weight.to_mkldnn(dtype))
 
