@@ -43,7 +43,6 @@ Example:
 from typing import Any, Optional
 
 import torch
-import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.device_mesh import DeviceMesh
 

@@ -5,8 +5,6 @@ import sys
 import torch
 import torch.distributed as dist
 import torch.distributed._differentiable_collectives as dcols
-import torch.distributed.distributed_c10d as c10d
-from torch.distributed.device_mesh import DeviceMesh
 from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
