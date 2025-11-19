@@ -42,6 +42,9 @@ class Shard : public Placement {
   explicit Shard(std::int64_t dim_) : dim(dim_) {}
 
   bool is_shard(std::optional<std::int64_t> dim_) const override {
+    if (typeid(*this) != typeid(Shard)) {
+      return false;
+    }
     return !dim_.has_value() || *dim_ == dim;
   }
 

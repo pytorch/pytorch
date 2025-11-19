@@ -25,7 +25,7 @@ class PlacementTypesTestCase(TestCase):
 
         ident_tests = (
             (shard, True, False, False),
-            (strided_shard, True, False, False),
+            (strided_shard, False, False, False),
             (partial_sum, False, True, False),
             (partial_max, False, True, False),
             (replicate, False, False, True),
