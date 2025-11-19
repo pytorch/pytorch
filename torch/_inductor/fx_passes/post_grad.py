@@ -109,7 +109,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             reorder_for_locality
         )
 
-    fake_tensor_updater = FakeTensorUpdater(gm.graph)
+    fake_tensor_updater = FakeTensorUpdater(gm)
 
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
