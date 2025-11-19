@@ -53,7 +53,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
-    skip_unless_torch_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -459,7 +458,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         run(g, 64, 8)
         self.assertEqual(cnt.frame_count, 2)
 
-    @skip_unless_torch_gpu
     def test_dtensor_unbacked_matmuls(self):
         from torch.distributed.tensor import randn as d_randn
 
@@ -492,18 +490,28 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
             # full-graph capture
             torch._dynamo.reset()
-            cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
             fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
-            fn(x_dt, y_dt)
+            out = fn(x_dt, y_dt)
 
             # test sharded matmuls with zero-size shards
-            if test_index >= 1:
-                dx = d_randn(3, 1, device_mesh=device_mesh, placements=px)
-                dy = d_randn(1, 1, device_mesh=device_mesh, placements=py)
-                out, eager_out = fn(dx, dy), torch.mm(dx, dy)
-                self.assertEqual(tuple(out.shape), (3, 1))
-                self.assertEqual(cnt.frame_count, 1)
-                self.assertEqual(out.shape, eager_out.shape)
+            if test_index == 1:
+                for m in [3, 0]:  # n, k = 0 cause recompiles on strides
+                    dx = d_randn(m, 1, device_mesh=device_mesh, placements=px)
+                    dy = d_randn(1, 1, device_mesh=device_mesh, placements=py)
+                    c_out, eager_out = fn(dx, dy), torch.mm(dx, dy)
+                    self.assertEqual(tuple(c_out.shape), (m, 1))
+                    self.assertEqual(cnt.frame_count, 1)
+                    self.assertEqual(c_out.shape, eager_out.shape)
+
+            # check output placements
+            if test_index <= 2:
+                exp_placement = [
+                    (Replicate(), Replicate()),
+                    (Replicate(), Shard(0)),
+                    (Replicate(), Partial()),
+                ][test_index]
+                self.assertEqual(out.placements, exp_placement)
 
             # test on uneven shardings
             if test_index >= 3:

@@ -583,6 +583,12 @@ graph():
                 n += 1
         self.assertEqual(n, 2)  # 2 nodes with bindings (x, y)
 
+        # test size-0 tensor
+        z_dt = distribute_tensor(
+            torch.randn(0, 0), device_mesh, placements=[Replicate(), Replicate()]
+        )
+        self.assertEqual(gm(z_dt, z_dt).shape, (0, 0))
+
 
 instantiate_parametrized_tests(DTensorExportTest)
 
