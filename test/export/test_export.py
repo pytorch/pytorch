@@ -17702,6 +17702,29 @@ class TestExportCustomClass(TorchTestCase):
             "torch.ops.aten.upsample_trilinear3d.vec", 1, exactly=True
         ).run(ep.graph_module.code)
 
+    def test_preserve_cia_op_profiler(self):
+        from torch._dispatch.python import enable_python_dispatcher
+        from torch.export.exported_program import (
+            _override_composite_implicit_decomp,
+            _split_decomp_table_to_cia_and_python_decomp,
+        )
+
+        (
+            cia_to_decomp,
+            _,
+        ) = _split_decomp_table_to_cia_and_python_decomp({})
+
+        x = torch.rand(1)
+        with (
+            _override_composite_implicit_decomp(
+                cia_to_decomp,
+            ),
+            enable_python_dispatcher(),
+        ):
+            # Test that record_function doesn't error out
+            with torch.autograd.profiler.record_function("fast"):
+                y = x + 1
+
     def test_export_unbacked_lt(self):
         class MyModel(torch.nn.Module):
             def forward(self, x, ranks):
