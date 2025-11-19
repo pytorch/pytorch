@@ -1610,13 +1610,7 @@ class SIMDScheduling(BaseScheduling):
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
-        # the statically_known_gt works as expected for dynamic shapes
-        # since we already add guards in MixOrderReduction.can_fuse
-        # for dynamic shapes.
-        if not V.graph.sizevars.statically_known_gt(
-            numel,
-            rnumel,
-        ):
+        if not V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel)):
             return self._codegen_mix_order_reduction(node2, node1)
 
         def _pick_split_size():
@@ -1640,10 +1634,7 @@ class SIMDScheduling(BaseScheduling):
         # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
 
-        assert V.graph.sizevars.statically_known_gt(
-            numel,
-            rnumel,
-        )
+        assert V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel))
 
         # split epilogue out of node2
         node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
