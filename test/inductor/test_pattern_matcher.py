@@ -1269,13 +1269,13 @@ class TestPatternMatcher(TestCase):
             ),
         )
         for activation in non_fusable_activations:
+
+            def f(b, m1, m2, beta, alpha):
+                return activation(torch.addmm(b, m1, m2, **beta, **alpha))
+
+            fc = torch.compile(f)
+
             for beta, alpha in itertools.product(betas, alphas):
-
-                def f(b, m1, m2, beta, alpha):
-                    return activation(torch.addmm(b, m1, m2, **beta, **alpha))
-
-                fc = torch.compile(f)
-
                 _, (code) = run_and_get_code(fc, b, m1, m2, beta, alpha)
                 self.assertNotIn("_addmm_activation", code[0])
 
