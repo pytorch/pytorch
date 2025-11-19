@@ -51,11 +51,11 @@ from torch._inductor.codegen.common import (
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.utils import get_triton_code, run_and_get_triton_code
 from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
-if HAS_TRITON:
+if HAS_GPU_AND_TRITON:
     import triton
     import triton.language as tl
 
@@ -143,7 +143,7 @@ class TritonExtensionBackendTests(test_torchinductor.TestCase):
             "tl_math.sin"
         ).check("device_str='privateuseone'").run(code)
 
-    def _custom_triton_backend_registration_fixture(self, device):
+    def _register_custom_backend_with_heuristics(self, device):
         class ExtensionTritonKernel(codegen.triton.TritonKernel):
             @classmethod
             @functools.lru_cache(None)
@@ -197,13 +197,12 @@ class TritonExtensionBackendTests(test_torchinductor.TestCase):
 
     @requires_cuda_and_triton
     def test_codegen_with_custom_heuristics_module(self):
-        device = "cpu"
-        self._custom_triton_backend_registration_fixture(device)
+        self._custom_triton_backend_registration_fixture(GPU_TYPE)
 
         def add(x, y):
             return x + y
 
-        x = torch.zeros((32,), device=device)
+        x = torch.zeros((32,), device=GPU_TYPE)
         y = x
         compiled_add = torch.compile(add)
 
@@ -214,8 +213,7 @@ class TritonExtensionBackendTests(test_torchinductor.TestCase):
 
     @requires_cuda_and_triton
     def test_codegen_with_custom_heuristics_module_udtk(self):
-        device = "cpu"
-        self._custom_triton_backend_registration_fixture(device)
+        self._custom_triton_backend_registration_fixture(GPU_TYPE)
 
         @triton.jit
         def add_kernel(
@@ -244,7 +242,7 @@ class TritonExtensionBackendTests(test_torchinductor.TestCase):
             add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=16)
             return output
 
-        args = [torch.randn(32, device=device) for _ in range(2)]
+        args = [torch.randn(32, device=GPU_TYPE) for _ in range(2)]
         code = run_and_get_triton_code(torch.compile(add), *args)
 
         FileCheck().check("import extension_triton_heuristics").check(
@@ -255,5 +253,5 @@ class TritonExtensionBackendTests(test_torchinductor.TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CPU and not IS_MACOS:
+    if (HAS_CPU or HAS_GPU_AND_TRITON) and not IS_MACOS:
         run_tests()
