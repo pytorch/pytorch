@@ -58,7 +58,10 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
-from torch.fx.passes.regional_inductor import _needs_inductor_compile
+from torch.fx.passes.regional_inductor import (
+    _needs_inductor_compile,
+    _needs_inductor_fallback,
+)
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
@@ -4066,6 +4069,9 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
     assert isinstance(
         target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
     ), f"Expected OpOverload or HigherOrderOperator, but found {type(target)}"
+
+    if _needs_inductor_fallback(node):
+        return True
 
     if not config.fallback_by_default:
         return False
