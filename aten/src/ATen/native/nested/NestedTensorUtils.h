@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/NestedTensorImpl.h>
 #include <ATen/Parallel.h>
 #include <ATen/core/Tensor.h>
