@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import importlib
 import builtins
 import copy
 import dataclasses
@@ -2230,7 +2229,7 @@ def cached_autotune(
     inductor_meta=None,
     custom_kernel=False,
     caching_autotuner_cls: type[CachingAutotuner] = CachingAutotuner,
-    debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner
+    debug_autotuner_cls: type[DebugAutotuner] = DebugAutotuner,
 ):
     """
     A copy of triton.autotune that calls our subclass.  Our subclass
