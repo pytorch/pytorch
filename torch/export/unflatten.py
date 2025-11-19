@@ -1278,6 +1278,27 @@ class _ModuleFrame:
                 f"Could not run remap_input() on op type: {x.op} for node {x}"
             )
 
+    def uplift_common_custom_metadata(self) -> None:
+        # Copy custom metadata if all nodes have same custom metadata
+        custom_meta = None
+        for node in self.node_map.values():
+            curr_meta = node.meta.get("custom", {})
+            if custom_meta is None:
+                # first node
+                custom_meta = curr_meta
+                continue
+
+            if curr_meta != custom_meta:
+                custom_meta = {}
+                break
+
+        if custom_meta:
+            # Lift common custom metadata to parent node and clear children node's custom metadata
+            assert self.parent_call_module is not None
+            self.parent_call_module.meta["custom"] = custom_meta
+            for node in self.node_map.values():
+                del node.meta["custom"]
+
     def finalize_outputs(self):
         self.created_modules.pop(self.fqn, None)
 
@@ -1356,6 +1377,7 @@ class _ModuleFrame:
             if isinstance(graph_outputs, torch.fx.Node)
             else [o.meta.get("val") for o in graph_outputs]
         )
+        self.uplift_common_custom_metadata()
 
         if len(orig_outputs) == 1 and signature is None:
             self.parent.node_map[orig_outputs[0]] = parent_out
