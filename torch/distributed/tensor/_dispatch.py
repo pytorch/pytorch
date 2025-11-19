@@ -152,6 +152,17 @@ class OpDispatcher:
             aten.as_strided.default: as_strided_handler,
         }
 
+    # ********************************************************************************************
+    # def dispatch(...)
+    #
+    # NOTE: this class no longer contains the top-level dispatch entrypoint!
+    # See #167051 for details
+    #
+    # The entrypoint has been moved to C++, and it handles common cases and then calls back into
+    # OpDispatcher python to handle corner cases.
+    # See dispatchDTensorOp() defined in python_variable.cpp and called from python_arg_parser.cpp
+    # ********************************************************************************************
+
     # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
     # as implicitly replicated or we throw error to user.
     # NOTE: It is EXTREMELY UNSAFE to turn this flag on by default so we intentionally leave
