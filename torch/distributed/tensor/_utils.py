@@ -55,8 +55,11 @@ class ExplicitRedistributionContext:
 
 
 def compute_local_shape_and_global_offset(
-    global_shape: ShapeType, mesh: DeviceMesh, placements: Sequence[Placement]
-) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    global_shape: ShapeType,
+    mesh: DeviceMesh,
+    placements: Sequence[Placement],
+    skip_offset: bool = False,
+) -> tuple[tuple[int, ...], Optional[tuple[int, ...]]]:
     """
     Compute the local tensor shape and the global offsets into the original tensor
     of a DTensor on its current global rank. This is useful for checkpointing purpose.
@@ -96,7 +99,7 @@ def compute_local_shape_and_global_offset(
 
     """
     return _compute_local_shape_and_global_offset(
-        global_shape, mesh.shape, mesh.get_coordinate(), placements
+        global_shape, mesh.shape, mesh.get_coordinate(), placements, skip_offset
     )
 
 
@@ -106,7 +109,8 @@ def _compute_local_shape_and_global_offset(
     mesh_shape: ShapeType,
     my_coordinate: Optional[list[int]],
     placements: Sequence[Placement],
-) -> tuple[tuple[int, ...], tuple[int, ...]]:
+    skip_offset: bool = False,
+) -> tuple[tuple[int, ...], Optional[tuple[int, ...]]]:
     """
     Suppose you have a full tensor with size global_shape, and you have sharded
     it according to placements for mesh_shape.  This function returns, for a
@@ -128,7 +132,7 @@ def _compute_local_shape_and_global_offset(
         return ((0,), ())
 
     local_shape = list(global_shape)
-    # Perform shard from left to right. For example, 
+    # Perform shard from left to right. For example,
     #   global tensor: [0, 1, 2, 3, 4, 5, 6, 7]
     #   placements: S(0), SS(0, split_factor=2)
     #   mesh_shape: (2, 2)
@@ -145,42 +149,37 @@ def _compute_local_shape_and_global_offset(
         mesh_dim_size = mesh_shape[mesh_dim]
         if not isinstance(placement, (Shard, _StridedShard)):
             continue
-
         shard_dim = placement.dim
         zero_global_offset = global_shape[shard_dim]
         assert shard_dim < len(local_shape), (
             f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
         )
-
         shard_size, shard_offsets = placement._local_shard_size_and_offset(
             local_shape[shard_dim],
             mesh_dim_size,
             my_coordinate[mesh_dim],
         )
-
         local_shape[shard_dim] = shard_size
-
+        if skip_offset:
+            continue
         if shard_size == 0:
             shard_dim_to_global_offsets[shard_dim] = [zero_global_offset]
             continue
-
         if not isinstance(placement, _StridedShard):
             assert shard_offsets is not None and isinstance(shard_offsets, int)
             shard_offsets = list(range(shard_offsets, shard_offsets + shard_size))
-
         assert isinstance(shard_offsets, list)
-
         if shard_dim not in shard_dim_to_global_offsets:
             shard_dim_to_global_offsets[shard_dim] = shard_offsets
         else:
             shard_dim_to_global_offsets[shard_dim] = [
                 shard_dim_to_global_offsets[shard_dim][i] for i in shard_offsets
             ]
-
+    if skip_offset:
+        return tuple(local_shape), None
     global_offset = [0] * len(global_shape)
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
         global_offset[shard_dim] = global_offsets[0]
-
     return tuple(local_shape), tuple(global_offset)
 
 
