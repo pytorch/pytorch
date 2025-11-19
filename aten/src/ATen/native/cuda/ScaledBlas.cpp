@@ -740,7 +740,12 @@ _scaled_rowwise_rowwise(
   TORCH_CHECK_VALUE(scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat, "scale_a must have ", mat_a.size(0), " Float elements, got ", scale_a.numel())
   TORCH_CHECK_VALUE(scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat, "scale_b must have ", mat_b.size(1), " Float elements, got ", scale_b.numel())
 
-  TORCH_CHECK_VALUE(scale_a.stride(1) == 1, "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1));
+  // if we have a scale of shape [256, 1] (say), then stride can be [1, 0] - handle this case
+  TORCH_CHECK_VALUE(
+      scale_a.stride(1) == 1 ||
+      scale_a.size(1) == 1,
+      "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1)
+  );
   TORCH_CHECK_VALUE(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
 
   auto scaling_choice_a = ScalingType::RowWise;

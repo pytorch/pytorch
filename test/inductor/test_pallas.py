@@ -383,6 +383,41 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    def test_non_power_of_2_sizes(self):
+        """Test that non-power-of-2 tensor sizes work with masked ops on GPU.
+
+        On GPU (Triton backend), Pallas requires power-of-2 sizes. We use masked
+        loads/stores to handle non-power-of-2 tensors by allocating power-of-2
+        blocks and masking out invalid elements.
+        """
+
+        def fn(a, b):
+            return a + b
+
+        compiled = self._compile(fn)
+
+        # Test a specific non-power-of-2 size (10)
+        a = torch.randn(10, device=self.DEVICE)
+        b = torch.randn(10, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_non_power_of_2_multiple_ops(self):
+        """Test non-power-of-2 sizes with multiple operations."""
+
+        def fn(x, y):
+            return x.sin() + y.cos() - (x * y)
+
+        compiled = self._compile(fn)
+
+        # Non-power-of-2 size: 17
+        x = torch.randn(17, device=self.DEVICE)
+        y = torch.randn(17, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
     def test_complex_indexing_gather(self):
         """Test complex indexing with gather-like operations."""
 

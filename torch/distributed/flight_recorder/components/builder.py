@@ -11,8 +11,8 @@ import os
 import sys
 from typing import Any  # type: ignore[attr-defined]
 
-from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
-from tools.flight_recorder.components.types import (
+from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
+from torch.distributed.flight_recorder.components.types import (
     Collective,
     Database,
     EntryState,
@@ -23,7 +23,7 @@ from tools.flight_recorder.components.types import (
     Op,
     Traceback,
 )
-from tools.flight_recorder.components.utils import (
+from torch.distributed.flight_recorder.components.utils import (
     add_stack_id_in_entries,
     align_trace_from_beginning,
     check_current_entry_match,
@@ -38,6 +38,13 @@ from tools.flight_recorder.components.utils import (
     match_coalesced_groups_with_non_p2p,
 )
 
+
+__all__ = [
+    "build_groups_memberships",
+    "build_collectives",
+    "transform_ft",
+    "build_db",
+]
 
 # Set up logging
 logger: FlightRecorderLogger = FlightRecorderLogger()

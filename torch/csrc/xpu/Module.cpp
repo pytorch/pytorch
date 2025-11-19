@@ -367,7 +367,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
                    << ", sub_group_sizes=[" << prop.sub_group_sizes
                    << "], has_fp16=" << prop.has_fp16
                    << ", has_fp64=" << prop.has_fp64
-                   << ", has_atomic64=" << prop.has_atomic64 << ")";
+                   << ", has_atomic64=" << prop.has_atomic64 << ')';
             return stream.str();
           });
 }
