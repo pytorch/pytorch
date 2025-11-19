@@ -118,6 +118,54 @@ class TorchBenchmarkBase(torch.nn.Module):
         name = (self.module_name() + "_" + "_".join(test_name_str)).replace(" ", "")
         return name
 
+    def get_memory_traffic_bytes(self):
+        """Return the number of bytes read/written by this operator.
+
+        Override this method in subclasses to enable memory bandwidth calculation.
+        The framework will use this value along with execution time to compute
+        and report memory bandwidth in GB/s.
+
+        This provides automatic calculation for matmul-like operations by
+        inferring dimensions from input tensor shapes:
+        - 2D inputs: (M, N) @ (N, K) → matmul, mm
+        - 3D inputs: (B, M, N) @ (B, N, K) → bmm, baddbmm
+
+        For custom memory patterns, override this method.
+
+        Returns:
+            int or None: Total bytes transferred (reads + writes), or None if not applicable
+        """
+        if not hasattr(self, 'inputs') or not self.inputs:
+            return None
+
+        input_tensors = [v for v in self.inputs.values() if isinstance(v, torch.Tensor)]
+        if len(input_tensors) < 2:
+            return None
+
+        input_a, input_b = input_tensors[0], input_tensors[1]
+
+        if input_a.dim() != input_b.dim() or input_a.dim() not in (2, 3):
+            return None
+
+        bytes_per_element = input_a.element_size()
+
+        if input_a.dim() == 3:
+            B_a, M, N_a = input_a.shape
+            B_b, N_b, K = input_b.shape
+            if B_a != B_b or N_a != N_b:
+                return None
+            B = B_a
+        else:
+            M, N_a = input_a.shape
+            N_b, K = input_b.shape
+            if N_a != N_b:
+                return None
+            B = 1
+
+        N = N_a
+        total_elements = B * (M * N + N * K + M * K)
+        return total_elements * bytes_per_element
+
 
 class PyTorchOperatorTestCase:
     """This class includes all the information needed to benchmark an operator.

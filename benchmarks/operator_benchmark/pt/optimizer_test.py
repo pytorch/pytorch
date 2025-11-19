@@ -46,13 +46,28 @@ class OptimizerBenchmark(op_bench.TorchBenchmarkBase):
 
         kwargs = {"momentum": 0.9} if op_func == optim.SGD else {}
         self.optimizer = op_func(self.params, lr=0.001, **kwargs)
-        self.inputs = {"dummy": self.params[0]} # Added to run memory benchmarking
+
+        # Memory traffic calculation for bandwidth
+        self.total_elements = sum(p.numel() for p in self.params)
+        self.bytes_per_element = self.params[0].element_size()
+        # SGD w/ momentum: read(param, grad, momentum) + write(param, momentum) = 5x
+        # Adam/AdamW: read(param, grad, exp_avg, exp_avg_sq) + write(param, exp_avg, exp_avg_sq) = 7x
+        # Adagrad/RMSprop: read(param, grad, state) + write(param, state) = 5x
+        if op_func in (optim.Adam, optim.AdamW):
+            self.memory_multiplier = 7
+        else:
+            self.memory_multiplier = 5
+
+        self.inputs = {"dummy": self.params[0]}
 
     def forward(self, dummy):
         self.optimizer.step()
         for param in self.params:
             param.grad = torch.randn_like(param)
         return self.params[0]
+
+    def get_memory_traffic_bytes(self):
+        return self.total_elements * self.bytes_per_element * self.memory_multiplier
 
 
 op_bench.generate_pt_tests_from_op_list(
