@@ -8053,10 +8053,7 @@ class TestQuantizedConv(TestCase):
         if fp32_output or bfloat16_output:
             self.assertTrue(result.dtype == qconv_output_dtype)
 
-        if bfloat16_output:
-            self.assertEqual(result.float(), result_ref.float(), atol=1e-2, rtol=1e-2)
-        else:
-            self.assertEqual(result.float(), result_ref.float(), atol=1e-6, rtol=1e-5)
+        self.assertEqual(result.float(), result_ref.float(), atol=1e-6, rtol=1e-5)
         assert not torch.isnan(result).any()
 
     def _test_qconv_fp8_helper(self, nd, pointwise_post_op):
