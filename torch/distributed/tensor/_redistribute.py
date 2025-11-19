@@ -89,15 +89,6 @@ def use_min_cost_redistribution_plan(enabled: bool = True):
         enabled (bool): If True, forces the use of the graph-based algorithm.
                        If False, forces the use of the greedy algorithm.
                        Default: True
-
-    Example:
-        >>> # Use graph-based algorithm for optimal redistribution
-        >>> with use_min_cost_redistribution_plan(enabled=True):
-        ...     dtensor = dtensor.redistribute(device_mesh, new_placements)
-        >>>
-        >>> # Use greedy algorithm for faster planning
-        >>> with use_min_cost_redistribution_plan(enabled=False):
-        ...     dtensor = dtensor.redistribute(device_mesh, new_placements)
     """
     global _FORCE_MIN_COST_REDISTRIBUTION_PLAN
     old_value = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
