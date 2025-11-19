@@ -220,7 +220,6 @@ class ExperimentalConfigWrapper {
     if (hasActivityTypeXPU) {
       configss << "XPUPTI_PROFILER_ENABLE_PER_KERNEL=" << perKernel << '\n';
     }
-             << '\n';
     configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << '\n';
     LOG(INFO) << "Generated config = " << configss.str();
 
