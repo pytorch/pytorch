@@ -2116,12 +2116,14 @@ class DatetimeClassVariable(VariableTracker):
 
     def call_method(self, tx: "InstructionTranslator", name, args, kwargs):
         if name == "now" and not args and not kwargs:
-            proxy = tx.output.create_proxy(
-                "call_function", datetime.datetime.now, (), {}
-            )
+            proxy = tx.output.create_proxy("call_function", datetime_now, (), {})
             source = AttrSource(self.source, "now")
             return DatetimeNowVariable(source=source, proxy=proxy)
         return super().call_method(tx, name, args, kwargs)
+
+
+def datetime_now():
+    return datetime.datetime.now()
 
 
 class DatetimeNowVariable(VariableTracker):
@@ -2148,9 +2150,6 @@ class DatetimeNowVariable(VariableTracker):
 
     def call_method(self, tx: "InstructionTranslator", name, args, kwargs):
         self_proxy = self.as_proxy()
-        # TODO: make an allowlist for names and filter by it and fallback to return super().call_method(tx, name, args, kwargs)
-        # TODO take care of kwargs
-        # args_proxy = [arg.as_proxy(tx) for arg in args]
         if name == "timestamp" and not args and not kwargs:
             proxy = tx.output.create_proxy(
                 "call_method",
@@ -2158,9 +2157,26 @@ class DatetimeNowVariable(VariableTracker):
                 (self_proxy,),
                 {},
             )
+            proxy.node.meta["example_value"] = 0.0
 
             return DatetimeScalarVariable(proxy=proxy, source=self.source)
         return super().call_method(tx, name, args, kwargs)
+
+    def var_getattr(self, tx, name):
+        if name in ("second", "minute", "hour", "day", "month", "year", "microsecond"):
+            self_proxy = self.as_proxy()
+            proxy = tx.output.create_proxy(
+                "call_function",
+                getattr,
+                (self_proxy, name),
+                {},
+            )
+
+            proxy.node.meta["example_value"] = 0
+            source = AttrSource(self.source, name)
+            return DatetimeScalarVariable(proxy=proxy, source=source)
+
+        return super().var_getattr(tx, name)
 
     def make_guard(self, fn):
         return
@@ -2197,6 +2213,7 @@ class TimedeltaVariable(VariableTracker):
                 (self_proxy,),
                 {},
             )
+            proxy.node.meta["example_value"] = 0.0
             source = AttrSource(self.source, "total_seconds")
             return DatetimeScalarVariable(proxy=proxy, source=source)
         return super().call_method(tx, name, args, kwargs)

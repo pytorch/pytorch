@@ -6,6 +6,7 @@ import collections
 import collections.abc
 import copy
 import dataclasses
+import datetime
 import dis
 import enum
 import functools
@@ -13285,6 +13286,80 @@ fn
         x = torch.randn(3)
         f(x)
         self.assertEqual(counter.frame_count, 2)
+
+    def test_datetime_now_in_graph_no_recompile(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            t = datetime.datetime.now()
+            return x + t.second
+
+        x = torch.randn(4)
+
+        # multiple runs shouldn't trigger recompile
+        out1 = fn(x)
+        out2 = fn(x)
+
+        print(f"out1: {out1} {out1.shape} {out1.dtype}")
+        print(f"out2: {out2} {out2.shape} {out2.dtype}")
+        print(f"x: {x} {x.shape} {x.dtype}")
+
+        self.assertEqual(out1.shape, x.shape)
+        self.assertEqual(out1.dtype, x.dtype)
+        self.assertEqual(out2.shape, x.shape)
+        self.assertEqual(out2.dtype, x.dtype)
+
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_datetime_elapsed_total_seconds_scalar_used(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            start = datetime.datetime.now()
+            y = x + 1
+            end = datetime.datetime.now()
+            elapsed = end - start
+            factor = elapsed.total_seconds()
+            return y * factor
+
+        x = torch.randn(5, 3)
+
+        out1 = fn(x)
+        out2 = fn(x)
+
+        self.assertEqual(out1.shape, x.shape)
+        self.assertEqual(out1.dtype, x.dtype)
+        self.assertEqual(out2.shape, x.shape)
+        self.assertEqual(out2.dtype, x.dtype)
+
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_datetime_timestamp_scalar_used(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            t = datetime.datetime.now()
+            ts = t.timestamp()
+            return x * ts
+
+        x = torch.randn(2, 2)
+
+        out1 = fn(x)
+        out2 = fn(x)
+
+        print(f"out1: {out1} {out1.shape} {out1.dtype}")
+        print(f"out2: {out2} {out2.shape} {out2.dtype}")
+        print(f"x: {x} {x.shape} {x.dtype}")
+
+        self.assertEqual(out1.shape, x.shape)
+        self.assertEqual(out1.dtype, x.dtype)
+        self.assertEqual(out2.shape, x.shape)
+        self.assertEqual(out2.dtype, x.dtype)
+
+        self.assertEqual(counter.frame_count, 1)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):

@@ -901,8 +901,8 @@ class BuiltinVariable(VariableTracker):
                 (a_proxy, b_proxy),
                 {},
             )
-            source = AttrSource(a.source, b.source, "-")
-            return TimedeltaVariable(proxy=proxy, source=source)
+            # Ideally we'd like to have some Source wrapper for two sources at once
+            return TimedeltaVariable(proxy=proxy, source=a.source)
 
         datetime_sub_handlers: list[
             tuple[
@@ -1374,26 +1374,6 @@ class BuiltinVariable(VariableTracker):
 
                 return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
-            if (
-                isinstance(args[0], TensorVariable)
-                and isinstance(args[1], TensorVariable)
-                and getattr(args[1], "is_datetime_scalar", False)
-            ):
-                tensor_proxy = args[0].as_proxy()
-                datetime_tensor_proxy = args[1].as_proxy()
-
-                proxy = tx.output.create_proxy(
-                    "call_function",
-                    torch.ops.aten.add.Tensor,  # TODO: add-only for now
-                    (tensor_proxy, datetime_tensor_proxy),
-                    {},
-                )
-
-                return wrap_fx_proxy_cls(
-                    FakeItemVariable,
-                    tx,
-                    proxy,
-                )
             if (
                 fn is operator.eq
                 and len(args) == 2
