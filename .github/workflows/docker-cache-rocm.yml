@@ -6,10 +6,9 @@ on:
     branches: [main, release]
     types:
       - completed
-  workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: true
 
 permissions:
@@ -50,9 +49,10 @@ jobs:
       matrix:
         runner: [linux.rocm.gfx942.docker-cache]
         docker-image: [
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}",
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
+          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}"
+          #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
+          #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}",
+          #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
         ]
     runs-on: "${{ matrix.runner }}"
     steps:
