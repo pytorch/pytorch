@@ -53,7 +53,6 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     MLPModule,
-    skip_unless_torch_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -212,8 +211,8 @@ def forward(self, b_parametrizations_buffer_original0, x):
     _assert_tensor_metadata = torch.ops.aten._assert_tensor_metadata.default(x, None, None, torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata = None
     _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  x = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
-    add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
-    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
+    add_1 = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
+    view_1 = torch.ops.aten.view.default(add_1, [4, 4]);  add_1 = None
     return (view_1,)""",  # noqa: B950
         )
 
@@ -353,9 +352,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         self.assertEqual(res, ref)
 
     @skipIfHpu
-    @unittest.skip(
-        "DTensor + dynamic fails - s77 + 8 is not tracked with proxy .. proxy_tensor.PythonKeyTracer"
-    )
     def test_dtensor_dynamic_slice(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -397,9 +393,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
             res = opt_fn(x)
         self.assertEqual(res, ref)
 
-    @unittest.skip(
-        "DTensor + dynamic fails - s77 + 8 is not tracked with proxy .. proxy_tensor.PythonKeyTracer"
-    )
     def test_dtensor_dynamic_cat(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -465,7 +458,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         run(g, 64, 8)
         self.assertEqual(cnt.frame_count, 2)
 
-    @skip_unless_torch_gpu
     def test_dtensor_unbacked_matmuls(self):
         from torch.distributed.tensor import randn as d_randn
 
@@ -491,18 +483,27 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
             # full-graph capture
             torch._dynamo.reset()
-            cnt = torch._dynamo.testing.CompileCounterWithBackend("eager")
+            cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
             fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
-            fn(x_dt, y_dt)
+            out = fn(x_dt, y_dt)
 
             # test sharded matmuls with zero-size shards
-            if test_index >= 1:
-                dx = d_randn(3, 1, device_mesh=device_mesh, placements=px)
-                dy = d_randn(1, 1, device_mesh=device_mesh, placements=py)
-                out, eager_out = fn(dx, dy), torch.mm(dx, dy)
-                self.assertEqual(tuple(out.shape), (3, 1))
-                self.assertEqual(cnt.frame_count, 1)
-                self.assertEqual(out.shape, eager_out.shape)
+            if test_index == 1:
+                for m in [3, 0]:  # n, k = 0 cause recompiles on strides
+                    dx = d_randn(m, 1, device_mesh=device_mesh, placements=px)
+                    dy = d_randn(1, 1, device_mesh=device_mesh, placements=py)
+                    c_out, eager_out = fn(dx, dy), torch.mm(dx, dy)
+                    self.assertEqual(tuple(c_out.shape), (m, 1))
+                    self.assertEqual(cnt.frame_count, 1)
+                    self.assertEqual(c_out.shape, eager_out.shape)
+
+            # check output placements
+            exp_placement = [
+                (Replicate(), Replicate()),
+                (Replicate(), Shard(0)),
+                (Replicate(), Partial()),
+            ][test_index]
+            self.assertEqual(out.placements, exp_placement)
 
     def test_dtensor_requires_grad_recompile(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
