@@ -586,7 +586,7 @@ elif [[ "${TEST_CONFIG}" == *inductor* && "${TEST_CONFIG}" != *perf* ]]; then
 fi
 
 if [[ "${TEST_CONFIG}" == *dynamic* ]]; then
-  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes --dynamic-batch-only)
+  DYNAMO_BENCHMARK_FLAGS+=(--dynamic-shapes)
 fi
 
 if [[ "${TEST_CONFIG}" == *cpu* ]]; then
@@ -725,7 +725,7 @@ test_perf_for_dashboard() {
       if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
         $TASKSET python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" --dynamic-shapes \
-            --dynamic-batch-only "$@" \
+            "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_dynamic_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *cppwrapper-true* ]]; then
@@ -983,7 +983,7 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     if [[ ${model_cfg[3]} == "dynamic" ]]; then
       $TASKSET python benchmarks/dynamo/torchbench.py \
         --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" --dynamic-shapes \
-        --dynamic-batch-only --freezing --timeout 9000 --"$backend" --output "$output_name"
+        --freezing --timeout 9000 --"$backend" --output "$output_name"
     else
       $TASKSET python benchmarks/dynamo/torchbench.py \
         --inference --performance --"$data_type" -dcpu -n50 --only "$model_name" \
