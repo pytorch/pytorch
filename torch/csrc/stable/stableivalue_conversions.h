@@ -5,6 +5,8 @@
 #include <torch/csrc/stable/device_struct.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/DeviceType.h>
+#include <torch/headeronly/core/Layout.h>
+#include <torch/headeronly/core/MemoryFormat.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
@@ -268,6 +270,68 @@ struct FromImpl<torch::stable::Tensor> {
 // =============================================================================
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
+// Specialization for c10::Layout => StableIValue
+// Note that we call into the shim to translate between the user's
+// Layout and libtorch's Layout, which can be different!
+using c10::Layout;
+template <>
+struct FromImpl<Layout> {
+  static StableIValue call(
+      Layout val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    switch (val) {
+      case Layout::Strided:
+        return from(aoti_torch_layout_strided());
+      case Layout::Sparse:
+        return from(aoti_torch_layout_sparse_coo());
+      case Layout::SparseCsr:
+        return from(aoti_torch_layout_sparse_csr());
+      case Layout::SparseCsc:
+        return from(aoti_torch_layout_sparse_csc());
+      case Layout::SparseBsr:
+        return from(aoti_torch_layout_sparse_bsr());
+      case Layout::SparseBsc:
+        return from(aoti_torch_layout_sparse_bsc());
+      case Layout::Mkldnn:
+        return from(aoti_torch_layout__mkldnn());
+      case Layout::Jagged:
+        return from(aoti_torch_layout_jagged());
+      default:
+        STD_TORCH_CHECK(
+            false,
+            "Not yet supported Layout, please file an issue describing your use case.");
+    }
+  }
+};
+
+// Specialization for c10::MemoryFormat => StableIValue
+// Note that we call into the shim to translate between the user's
+// MemoryFormat and libtorch's MemoryFormat, which can be different!
+using c10::MemoryFormat;
+template <>
+struct FromImpl<MemoryFormat> {
+  static StableIValue call(
+      MemoryFormat val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    switch (val) {
+      case MemoryFormat::Contiguous:
+        return from(aoti_torch_memory_format_contiguous_format());
+      case MemoryFormat::Preserve:
+        return from(aoti_torch_memory_format_preserve_format());
+      case MemoryFormat::ChannelsLast:
+        return from(aoti_torch_memory_format_channels_last());
+      case MemoryFormat::ChannelsLast3d:
+        return from(aoti_torch_memory_format_channels_last_3d());
+      default:
+        STD_TORCH_CHECK(
+            false,
+            "Not yet supported MemoryFormat, please file an issue describing your use case.");
+    }
+  }
+};
+
 // Specialization for torch::headeronly::HeaderOnlyArrayRef<T> => StableIValue
 // Returns a new owning reference of the underlying list.
 template <typename T>
@@ -528,6 +592,68 @@ struct ToImpl<torch::stable::Tensor> {
 // TO CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 // =============================================================================
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+// Specialization for StableIValue => c10::Layout
+template <>
+struct ToImpl<Layout> {
+  static Layout call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    int32_t shim_layout = to<int32_t>(val);
+    if (shim_layout == aoti_torch_layout_strided()) {
+      return Layout::Strided;
+    } else if (shim_layout == aoti_torch_layout_sparse_coo()) {
+      return Layout::Sparse;
+    } else if (shim_layout == aoti_torch_layout_sparse_csr()) {
+      return Layout::SparseCsr;
+    } else if (shim_layout == aoti_torch_layout_sparse_csc()) {
+      return Layout::SparseCsc;
+    } else if (shim_layout == aoti_torch_layout_sparse_bsr()) {
+      return Layout::SparseBsr;
+    } else if (shim_layout == aoti_torch_layout_sparse_bsc()) {
+      return Layout::SparseBsc;
+    } else if (shim_layout == aoti_torch_layout__mkldnn()) {
+      return Layout::Mkldnn;
+    } else if (shim_layout == aoti_torch_layout_jagged()) {
+      return Layout::Jagged;
+    } else {
+      STD_TORCH_CHECK(
+          false,
+          "Not yet supported Layout ",
+          std::to_string(shim_layout),
+          ", please file an issue describing your use case.");
+    }
+  }
+};
+
+// Specialization for StableIValue => c10::MemoryFormat
+template <>
+struct ToImpl<MemoryFormat> {
+  static MemoryFormat call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    int32_t shim_memory_format = to<int32_t>(val);
+    if (shim_memory_format == aoti_torch_memory_format_contiguous_format()) {
+      return MemoryFormat::Contiguous;
+    } else if (
+        shim_memory_format == aoti_torch_memory_format_preserve_format()) {
+      return MemoryFormat::Preserve;
+    } else if (shim_memory_format == aoti_torch_memory_format_channels_last()) {
+      return MemoryFormat::ChannelsLast;
+    } else if (
+        shim_memory_format == aoti_torch_memory_format_channels_last_3d()) {
+      return MemoryFormat::ChannelsLast3d;
+    } else {
+      STD_TORCH_CHECK(
+          false,
+          "Not yet supported MemoryFormat ",
+          std::to_string(shim_memory_format),
+          ", please file an issue describing your use case.");
+    }
+  }
+};
 
 // Specialization for StableIValue => std::vector<T>
 // std::vector<T> should be represented as a StableListHandle
