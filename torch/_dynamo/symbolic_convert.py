@@ -4203,18 +4203,11 @@ class InstructionTranslatorBase(
             user_stack = torch._guards.TracingContext.extract_stack()
 
         try:
-            if config.nested_graph_breaks and self.parent is not None:
-                frame_loc = self._make_frame_loc(
-                    self.f_code.co_filename,
-                    self.lineno,
-                    self.f_code.co_firstlineno,
-                )
-            else:
-                frame_loc = self._make_frame_loc(
-                    user_stack[-1].filename,
-                    user_stack[-1].lineno,
-                    0,
-                )
+            frame_loc = self._make_frame_loc(
+                self.f_code.co_filename,
+                self.lineno,
+                self.f_code.co_firstlineno,
+            )
         except IndexError:
             # first instruction
             frame_loc = (

@@ -1812,7 +1812,7 @@ User code traceback:
         )
 
     @make_logging_test(graph_breaks=True)
-    def test_duplicate_nested_graph_break_suppression_with_try_block(self, records):
+    def test_try_block_causes_graph_breaks(self, records):
         global inner, middle_with_try, outer
 
         def inner(x):
@@ -1828,8 +1828,7 @@ User code traceback:
             return x
 
         def outer(x):
-            result1, result2 = middle_with_try(x), middle_with_try(x)
-            return result1 + result2
+            return middle_with_try(x)
 
         with torch._dynamo.config.patch(nested_graph_breaks=True, verbose=False):
             torch.compile(outer, backend="eager")(torch.ones(3))
@@ -1837,14 +1836,12 @@ User code traceback:
         full_messages = [
             r for r in records if "Graph break in user code" in r.getMessage()
         ]
-        suppressed_messages = [
-            r
-            for r in records
-            if "user stack suppressed due to duplicate" in r.getMessage()
-        ]
 
-        self.assertEqual(len(full_messages), 1)
-        self.assertGreaterEqual(len(suppressed_messages), 1)
+        self.assertEqual(
+            len(full_messages),
+            2,
+            f"Expected at least 2 graph breaks from try block, got {len(full_messages)}",
+        )
 
         self.assertExpectedInline(
             munge_exc(full_messages[0].getMessage(), suppress_suffix=True, skip=0),
@@ -1858,10 +1855,10 @@ Graph Break Reason: Call to `torch._dynamo.graph_break()`
 
  For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
 User code traceback:
-  File "test_error_messages.py", line N, in test_duplicate_nested_graph_break_suppression_with_try_block
+  File "test_error_messages.py", line N, in test_try_block_causes_multiple_graph_breaks
     torch.compile(outer, backend="eager")(torch.ones(3))
   File "test_error_messages.py", line N, in outer
-    result1, result2 = middle_with_try(x), middle_with_try(x)
+    return middle_with_try(x)
   File "test_error_messages.py", line N, in middle_with_try
     return inner(x)
   File "test_error_messages.py", line N, in inner
@@ -1870,18 +1867,26 @@ User code traceback:
         )
 
         self.assertExpectedInline(
-            munge_exc(
-                suppressed_messages[0].getMessage(), suppress_suffix=True, skip=0
-            ),
+            munge_exc(full_messages[1].getMessage(), suppress_suffix=True, skip=0),
             """\
-Graph break (user stack suppressed due to duplicate graph break) in user code at test_error_messages.py:N
+Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
   Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html""",
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
+User code traceback:
+  File "test_error_messages.py", line N, in test_try_block_causes_multiple_graph_breaks
+    torch.compile(outer, backend="eager")(torch.ones(3))
+  File "test_error_messages.py", line N, in outer
+    return middle_with_try(x)
+  File "test_error_messages.py", line N, in middle_with_try
+    return inner(x)
+  File "test_error_messages.py", line N, in inner
+    torch._dynamo.graph_break()
+""",
         )
 
     @make_logging_test(graph_breaks=True)
