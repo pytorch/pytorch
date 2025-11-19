@@ -30,7 +30,7 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_exception, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import is_constant_source, is_from_local_source
 from ..utils import (
@@ -377,7 +377,7 @@ class ConstDictVariable(VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
             msg = f"Dictionary key {arg.value} not found during tracing"  # type: ignore[attr-defined]
-            unimplemented_v2(
+            unimplemented(
                 gb_type="key not found in dict",
                 context=f"Key {arg.value}",  # type: ignore[attr-defined]
                 explanation=msg,
@@ -802,7 +802,7 @@ class ConstDictVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         self.install_dict_keys_match_guard()
-        return [x.vt for x in self.items.keys()]
+        return [x.vt for x in self.items]
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -819,7 +819,7 @@ class ConstDictVariable(VariableTracker):
                 return ConstantVariable.create(False)
 
         msg = f"hasattr on {self.user_cls} is not supported"
-        unimplemented_v2(
+        unimplemented(
             gb_type="unsupported hasattr operation",
             context=f"Class {self.user_cls}",
             explanation=msg,
@@ -854,7 +854,7 @@ class MappingProxyVariable(VariableTracker):
                 f"Preexisting MappingProxyVariable (source: {self.source}) cannot be reconstructed "
                 "because the connection to the original dict will be lost."
             )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="mapping proxy cannot be reconstructed",
                 context=f"Source: {self.source}",
                 explanation=msg,
@@ -892,7 +892,7 @@ class MappingProxyVariable(VariableTracker):
                 "are trying to access a proxy object."
             )
 
-            unimplemented_v2(
+            unimplemented(
                 gb_type="mapping proxy affected by dictionary mutation",
                 context=f"Source: {self.source}, Dict mutation detected",
                 explanation=msg,
@@ -1027,7 +1027,7 @@ class SetVariable(ConstDictVariable):
         if not self.items:
             return "set()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+            return "{" + ",".join(k.vt.debug_repr() for k in self.items) + "}"
 
     @property
     def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
@@ -1307,7 +1307,7 @@ class FrozensetVariable(SetVariable):
         if not self.items:
             return "frozenset()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+            return "{" + ",".join(k.vt.debug_repr() for k in self.items) + "}"
 
     @property
     def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
@@ -1372,9 +1372,7 @@ class DictKeySetVariable(SetVariable):
             return "dict_keys([])"
         else:
             return (
-                "dict_keys(["
-                + ",".join(k.vt.debug_repr() for k in self.items.keys())
-                + "])"
+                "dict_keys([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
             )
 
     def install_dict_keys_match_guard(self) -> None:

@@ -110,6 +110,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     normalize_name,
     should_assume_input_aligned,
+    should_fallback_by_default,
     SUPPORTED_MKLDNN_DEVICES,
     ValueWithLineMap,
 )
@@ -1636,6 +1637,20 @@ class GraphLowering(torch.fx.Interpreter):
                 )
             elif (
                 n.op == "call_function"
+                and isinstance(
+                    n.target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+                )
+                and should_fallback_by_default(n)
+            ):
+                # this path supports fallback due to inductor lite mode. It supports
+                # both OpOverload and HOPs (e.g., triton_kernel_wrapper_functional).
+                debug("fallback_handler")
+                result = fallback_handler(n.target, add_to_fallback_set=False)(
+                    *args,  # type: ignore[possibly-undefined]
+                    **kwargs,  # type: ignore[possibly-undefined]
+                )
+            elif (
+                n.op == "call_function"
                 and n.target is torch.ops.higher_order.triton_kernel_wrapper_mutation
                 and config.triton_kernel_default_layout_constraint != "flexible_layout"
             ):
@@ -1936,7 +1951,7 @@ class GraphLowering(torch.fx.Interpreter):
         # we already know facts for.
         renamed_unbacked_bindings = OrderedSet(
             V.fake_mode.shape_env.unbacked_renamings.get(s, s)
-            for s in unbacked_bindings.keys()
+            for s in unbacked_bindings
         )
 
         assert new_unbacked_defs >= renamed_unbacked_bindings, (
@@ -2481,7 +2496,7 @@ class GraphLowering(torch.fx.Interpreter):
         # dynamo wraps unspec variable as 0d CPU tensor,
         # need to convert to scalar during codegen (triton only)
         return (
-            name in self.graph_inputs.keys()
+            name in self.graph_inputs
             and self.graph_inputs[name].get_numel() == 1
             and len(self.graph_inputs[name].get_size()) == 0
             and get_device_type(self.graph_inputs[name]) == "cpu"

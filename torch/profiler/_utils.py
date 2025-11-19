@@ -103,7 +103,7 @@ class BasicEvaluation:
         self.metrics: dict[EventKey, EventMetrics] = {}
         self.compute_self_time()
         self.event_keys = sorted(
-            (e for e in self.metrics.keys()), key=lambda x: x.event.start_time_ns
+            self.metrics.keys(), key=lambda x: x.event.start_time_ns
         )
         self.events = [e.event for e in self.event_keys]
         self.cuda_events: list[_KinetoEvent] = []
@@ -265,7 +265,7 @@ class BasicEvaluation:
                 idle_intervals.append(Interval(idle_start, data_point.start))
                 idle = False
 
-        event_list = [e.event for e in self.metrics.keys()]
+        event_list = [e.event for e in self.metrics]
         for event in event_list:
             self.metrics[EventKey(event)].idle_time_ns = EventKey(
                 event
@@ -316,7 +316,7 @@ class BasicEvaluation:
         # Filter out events that are not in the decrease interval
         event_list = [
             event
-            for event in self.metrics.keys()
+            for event in self.metrics
             if event.intervals_overlap(decrease_interval)
         ]
         if event_list:

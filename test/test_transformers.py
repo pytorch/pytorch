@@ -2857,7 +2857,7 @@ class TestSDPACudaOnly(NNTestCase):
         # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
         shape = (20, 4, 4, 32)
         scale = 10
-        for i in range(100):
+        for _ in range(100):
             q = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
             k = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
             v = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale

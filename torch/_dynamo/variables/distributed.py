@@ -29,7 +29,7 @@ from torch.fx.experimental._backward_state import BackwardState
 from .. import compiled_autograd, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..bytecode_transformation import create_call_function
-from ..exc import unimplemented_v2
+from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
@@ -57,7 +57,7 @@ class DistributedVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         if not DistributedVariable.is_available():
-            unimplemented_v2(
+            unimplemented(
                 gb_type="torch.distributed package is not available!",
                 context="",
                 explanation="The PyTorch package doesn't include torch.distributed when building from source.",
@@ -212,7 +212,7 @@ class PlacementVariable(DistributedVariable):
             try:
                 value_type = type(self.value)
                 if inspect.getattr_static(value_type, "__getattr__", None) is not None:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Placement with custom __getattr__ not supported",
                         context=f"{value_type.__name__} with custom __getattr__",
                         explanation="Dynamo does not support Placement types with custom __getattr__ methods",
@@ -394,7 +394,7 @@ class BackwardHookVariable(VariableTracker):
         user_pre_hooks: VariableTracker,
     ) -> "BackwardHookVariable":
         if not compiled_autograd.compiled_autograd_enabled:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Module-level backwards hooks require compiled autograd.",
                 context="",
                 explanation="",
