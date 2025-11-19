@@ -90,6 +90,7 @@ _side_effectful_need_to_be_preserved_pre_dispatch: list[Callable[..., Any]] = [
 _side_effectful_functions: set[Callable[..., Any]] = {
     torch._assert,
     torch._assert_async,
+    _ops.aten._async_error.default,
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
     _ops.aten._assert_tensor_metadata.default,
@@ -496,7 +497,7 @@ class Node(_NodeBase):
         _new_input_nodes: dict[Node, None] = {}
         _fx_map_arg(arg, _new_input_nodes.setdefault)
 
-        for new_use in _new_input_nodes.keys():
+        for new_use in _new_input_nodes:
             if new_use not in self._input_nodes:
                 self._input_nodes.setdefault(new_use)
                 new_use.users.setdefault(self)
@@ -752,25 +753,9 @@ class Node(_NodeBase):
                 # between eager and compiled execution, regardless of generator usage
                 return True
 
-            return self.target in _side_effectful_functions
+            from torch._higher_order_ops.effects import has_effects
 
-        def subgraph_has_impure_ops(module: torch.fx.GraphModule) -> bool:
-            """
-            Return True if a GraphModule type subgraph contains any impure op, else False.
-            """
-            assert isinstance(module, torch.fx.GraphModule), (
-                "caller should only pass GraphModule to subgraph_has_impure_ops check"
-            )
-            for node in module.graph.nodes:
-                if node.op == "call_function" and node.is_impure(impure_random):
-                    return True
-                if (
-                    node.op == "call_module"
-                    and (submodule := module.get_submodule(node.target))
-                    and isinstance(submodule, torch.fx.GraphModule)
-                ):
-                    return subgraph_has_impure_ops(submodule)
-            return False
+            return self.target in _side_effectful_functions or has_effects(self.target)
 
         # Check if an impure module.
         if self.op == "call_module":
@@ -781,10 +766,11 @@ class Node(_NodeBase):
             assert target_mod is not None, (
                 f"Did not find expected submodule target {self.target}"
             )
-            if isinstance(target_mod, torch.fx.GraphModule):
-                return subgraph_has_impure_ops(target_mod)
-            else:
-                return getattr(target_mod, "_is_impure", False)
+            # NOTE: here we can end up considering GraphModule submodules pure,
+            # even if they contain impure ops. It may not be safe to change
+            # because this function is used by graph.eliminate_dead_code,
+            # and some users depend on current elimination behavior.
+            return getattr(target_mod, "_is_impure", False)
 
         return False
 

@@ -544,7 +544,7 @@ def get_default_qat_qconfig_dict(backend="x86", version=1):
     ).to_dict()
 
 
-def _assert_valid_qconfig(qconfig: Optional[QConfig], mod: torch.nn.Module) -> None:
+def _assert_valid_qconfig(qconfig: QConfig | None, mod: torch.nn.Module) -> None:
     """
     Verifies that this `qconfig` is valid.
     """
@@ -566,9 +566,10 @@ def _assert_valid_qconfig(qconfig: Optional[QConfig], mod: torch.nn.Module) -> N
                 torch.ao.quantization.MovingAveragePerChannelMinMaxObserver,
             ),
         )
-        assert not is_per_channel, (
-            "Per channel weight observer is not supported yet for ConvTranspose{n}d."
-        )
+        if is_per_channel:
+            raise AssertionError(
+                "Per channel weight observer is not supported yet for ConvTranspose{n}d."
+            )
 
 
 if sys.version_info < (3, 12):
@@ -577,11 +578,11 @@ if sys.version_info < (3, 12):
 else:
     from typing import TypeAliasType
 
-    QConfigAny = TypeAliasType("QConfigAny", Optional[QConfig])
+    QConfigAny = TypeAliasType("QConfigAny", QConfig | None)
 
 
 def _add_module_to_qconfig_obs_ctr(
-    qconfig: QConfigAny, module: Optional[nn.Module]
+    qconfig: QConfigAny, module: nn.Module | None
 ) -> Any:
     r"""This is a helper function for use in quantization prepare that updates a qconfig so that
     the constructors stored in the qconfig will create observers on the same device that
@@ -600,7 +601,8 @@ def _add_module_to_qconfig_obs_ctr(
         return qconfig
 
     def get_factory_kwargs_based_on_module_device():
-        assert isinstance(module, torch.nn.Module)
+        if not isinstance(module, torch.nn.Module):
+            raise AssertionError("module must be an instance of torch.nn.Module")
         devices = {p.device for p in module.parameters()} | {
             p.device for p in module.buffers()
         }
@@ -672,7 +674,10 @@ def qconfig_equals(q1: QConfigAny, q2: QConfigAny):
     if q1 is None or q2 is None:
         return q1 == q2
     else:
-        assert q1 is not None and q2 is not None
+        if q1 is None or q2 is None:
+            raise AssertionError(
+                "Both q1 and q2 must be non-None for qconfig comparison"
+            )
         try:
             # Qconfig weight and activation can be either a partial wrapper,
             # or an observer class. Special handling is required (above) for
@@ -702,7 +707,7 @@ def _activation_is_memoryless(qconfig: QConfig):
         return _is_memoryless(act)
 
 
-def _is_reuse_input_qconfig(qconfig: Optional[QConfig]):
+def _is_reuse_input_qconfig(qconfig: QConfig | None):
     return (
         qconfig is not None
         and isinstance(qconfig.activation(), ReuseInputObserver)

@@ -79,7 +79,7 @@ auto compilation_unit = std::make_shared<CompilationUnit>();
 
 const std::optional<const FunctionSchema*> getInplaceVariant(
     const FunctionSchema& base_schema) {
-  auto& inplace_variants =
+  auto inplace_variants =
       getAllOperatorsFor(c10::Symbol::fromQualString(base_schema.name() + "_"));
 
   for (const auto& variant : inplace_variants) {

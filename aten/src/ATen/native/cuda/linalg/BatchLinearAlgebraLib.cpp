@@ -753,8 +753,8 @@ static void apply_cholesky_cusolver_potrf_looped(const Tensor& self_working_copy
       handle, params, uplo, n, datatype,
       self_working_copy_ptr + i * matrix_stride,
       lda, datatype,
-      (char*)workdata_device_ptr + i * worksize_device, worksize_device,
-      (char*)workdata_host_ptr + i * worksize_host, worksize_host,
+      static_cast<char*>(workdata_device_ptr) + i * worksize_device, worksize_device,
+      static_cast<char*>(workdata_host_ptr) + i * worksize_host, worksize_host,
       infos_ptr + i
     );
   }
@@ -1624,6 +1624,126 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
   }
 #endif
 }
+
+// cuSOLVER Xgeev (requires cuSOLVER >= 11.7.2, i.e. CUDA 12.8+)
+#if defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
+
+template <typename scalar_t>
+void apply_xgeev(const Tensor& values, const Tensor& vectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input.is_cuda());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_cuda());
+
+  int   n   = cuda_int_cast(input.size(-1), "n");
+  int   lda = std::max<int>(1, n);
+  auto  batch_size = batchCount(input);
+
+  if (n == 0 || batch_size == 0) {
+    // XGeev crashes on empty input, explicitly handle empty input
+    auto values_shape = IntArrayRef(input.sizes().data(), input.dim() - 1);
+    values.resize_(values_shape, MemoryFormat::Contiguous);
+    values.zero_();
+
+    if (compute_eigenvectors) {
+      vectors.resize_(input.sizes(), MemoryFormat::Contiguous);
+      vectors.zero_();
+    } else {
+      vectors.resize_({0});
+    }
+
+    infos.resize_({std::max<int64_t>(1, batch_size)}, MemoryFormat::Contiguous);
+    infos.zero_();
+    return;
+  }
+
+  int64_t vectors_stride = 0;
+  if (compute_eigenvectors){
+    vectors_stride = matrixStride(vectors);
+  }
+
+  auto values_stride = values.size(-1);
+  auto vectors_data = vectors.data_ptr<scalar_t>();
+  auto values_data = values.data_ptr<scalar_t>();
+  auto infos_data = infos.data_ptr<int>();
+
+  cusolverDnParams_t params = nullptr;
+  TORCH_CUSOLVER_CHECK(cusolverDnCreateParams(&params));
+
+  Tensor A_fortran = input.mT().contiguous();
+  auto* A_data = A_fortran.data_ptr<scalar_t>();
+  const auto A_stride = matrixStride(A_fortran);
+  auto handle = at::cuda::getCurrentCUDASolverDnHandle();
+
+  const int ldvl = 1; // ldvl >= 1 if jobvl = CUSOLVER_EIG_MODE_NOVECTOR
+  cusolverEigMode_t jobvl = CUSOLVER_EIG_MODE_NOVECTOR;
+
+  cusolverEigMode_t jobvr;
+  int ldvr;
+  if (compute_eigenvectors) {
+    ldvr = n; // ldvr >= n if jobvr = CUSOLVER_EIG_MODE_VECTOR
+    jobvr = CUSOLVER_EIG_MODE_VECTOR;
+  }
+  else {
+    ldvr = 1; // ldvr >= 1 if jobvr = CUSOLVER_EIG_MODE_NOVECTOR
+    jobvr = CUSOLVER_EIG_MODE_NOVECTOR;
+  }
+
+  scalar_t*   W   = values.data_ptr<scalar_t>();
+  scalar_t*   VL  = nullptr;
+  scalar_t*   VR  = vectors.data_ptr<scalar_t>();
+
+  const scalar_t*   A_const = A_data;
+  const scalar_t*   W_const = W;
+  const scalar_t*   VL_const = VL;
+  const scalar_t*   VR_const = VR;
+
+  size_t ws_dev = 0, ws_host = 0;
+  at::cuda::solver::xgeev_bufferSize<scalar_t>(
+    handle, params,
+    jobvl, jobvr,
+    n,
+    A_const, lda,
+    W_const,
+    VL_const, ldvl,
+    VR_const, ldvr,
+    &ws_dev, &ws_host);
+
+  auto& device_allocator  = *at::cuda::getCUDADeviceAllocator();
+  auto  work_device_data  = device_allocator.allocate(ws_dev);
+  // use pinned memory for best performance.
+  auto& host_allocator    = *at::cuda::getPinnedMemoryAllocator();
+  auto  work_host_data    = host_allocator.allocate(ws_host);
+
+  for (decltype(batch_size) i = 0; i < batch_size; ++i) {
+    scalar_t* Ai   = A_data      + i * A_stride;
+    scalar_t* Wi   = values_data + i * values_stride;
+    scalar_t* VLi  = nullptr; // xgeev does not support computing left evs
+    scalar_t* VRi  = compute_eigenvectors ? (vectors_data + i * vectors_stride) : nullptr;
+    int*      info = infos_data + i;
+
+    at::cuda::solver::xgeev<scalar_t>(
+      handle, params,
+      jobvl, jobvr,
+      n,
+      Ai, lda,
+      Wi,
+      VLi, ldvl,
+      VRi, ldvr,
+      static_cast<scalar_t*>(work_device_data.get()), ws_dev,
+      static_cast<scalar_t*>(work_host_data.get()),  ws_host,
+      info);
+  }
+  TORCH_CUSOLVER_CHECK(cusolverDnDestroyParams(params));
+}
+
+void linalg_eig_cusolver_xgeev(const Tensor& eigenvalues, const Tensor& eigenvectors, const Tensor& input, const Tensor& infos, bool compute_eigenvectors) {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(eigenvectors.scalar_type(), "linalg_eig_cuda", [&] {
+    apply_xgeev<scalar_t>(eigenvalues, eigenvectors, input, infos, compute_eigenvectors);
+  });
+}
+
+#endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
 
 // The 'apply_' word is used for templated by dtype functions that call an API routine
 // underneath. Since the cusolver API has a slightly different structure we do not prepend

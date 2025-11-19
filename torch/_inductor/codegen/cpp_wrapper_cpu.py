@@ -8,7 +8,7 @@ import os
 import sys
 import textwrap
 from itertools import chain, count
-from typing import Any, Callable, Optional, Protocol, TYPE_CHECKING, Union
+from typing import Any, Optional, Protocol, TYPE_CHECKING, Union
 
 import sympy
 
@@ -37,7 +37,7 @@ from .wrapper import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from ..graph import GraphLowering
 
@@ -96,6 +96,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.include_extra_header = functools.lru_cache(None)(  # type: ignore[method-assign]
             self._include_extra_header
         )
+        self.codegen_int_array_var_cache = {}
 
     @staticmethod
     def create(
@@ -221,7 +222,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 """
             )
 
-        self.add_device_include(self.device)
+        for device in V.graph.device_types:
+            if device != "meta":
+                self.add_device_include(device)
 
         if V.graph.aot_mode:
             if config.aot_inductor.dynamic_linkage:
@@ -631,7 +634,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 debug_printer_manager.codegen_model_inputs_value_print(
                     input_args_to_print=[
                         input_key
-                        for input_key in V.graph.graph_inputs.keys()
+                        for input_key in V.graph.graph_inputs
                         if input_key.startswith("arg")
                     ]
                 )
@@ -811,7 +814,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             all_cuda = all(
                 V.graph.get_original_value_of_constant(name).is_cuda
-                for name in V.graph.constants.keys()
+                for name in V.graph.constants
                 if name not in V.graph.folded_constants
             )
             for idx, name in enumerate(V.graph.constants.keys()):
@@ -1423,11 +1426,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         src_is_tensor,
         reduce,
         kwargs,
+        device,
     ):
         reduce = self._get_scatter_reduce_enum(reduce)
 
         # call the ABI shim function instead of the ATen one
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
+        self.add_device_include(device)
+        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         inputs_wrapped = [str(x) for x in inputs]
@@ -1632,14 +1637,33 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_memory_formats.add(memory_format_str)
         return f"cached_torch_memory_format_{memory_format_str}"
 
-    @functools.cache  # noqa: B019
     def codegen_int_array_var(
         self,
         int_array: str,
         writeline: Callable[..., None],
         known_statically=False,
         graph=None,  # for per-graph caching
-    ):
+    ) -> str:
+        # Use id(graph) for caching to avoid circular references
+        cache_key = (
+            int_array,
+            id(writeline),
+            known_statically,
+            id(graph) if graph else None,
+        )
+        if cache_key not in self.codegen_int_array_var_cache:
+            self.codegen_int_array_var_cache[cache_key] = (
+                self._codegen_int_array_var_impl(int_array, writeline, known_statically)
+            )
+
+        return self.codegen_int_array_var_cache[cache_key]
+
+    def _codegen_int_array_var_impl(
+        self,
+        int_array: str,
+        writeline: Callable[..., None],
+        known_statically: bool,
+    ) -> str:
         # Used for size/stride declaration
         #
         # Because the memory planning is done in two passes (see the implementation
@@ -2947,6 +2971,7 @@ if (!custom_op_wrapper) {
                 return functools.reduce(
                     lambda a, b: a | b,
                     [
+                        # pyrefly: ignore [missing-attribute]
                         node.node.get_stack_traces()
                         for node in node_schedule
                         if hasattr(node, "node") and node.node
