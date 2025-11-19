@@ -2259,7 +2259,6 @@ def cached_autotune(
         # Context: When TritonKernel.no_x_dim is True, we hardcode XBLOCK to 1.
         import inspect
 
-        device: DeviceProperties = triton_meta["device"]
         if "XBLOCK" not in inspect.signature(fn.fn).parameters:
             for tconfig in configs:
                 if "XBLOCK" in tconfig.kwargs:

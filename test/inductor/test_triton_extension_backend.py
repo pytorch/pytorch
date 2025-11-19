@@ -51,18 +51,13 @@ from torch._inductor.codegen.common import (
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.utils import get_triton_code, run_and_get_triton_code
 from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
-from torch.testing._internal.inductor_utils import HAS_CPU
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_TRITON
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 if HAS_TRITON:
     import triton
     import triton.language as tl
-
-try:
-    from .test_extension_backend import BaseExtensionBackendTests
-except ImportError:
-    pass
 
 try:
     try:
