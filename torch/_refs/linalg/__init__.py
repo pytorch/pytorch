@@ -270,10 +270,13 @@ def matrix_norm(
         max_min = partial(torch.amax if ord > 0.0 else torch.amin, keepdim=keepdim)
 
         def max_min_wrapper(A, dim):
-            if A.size(dim) == 0:
+            if A.size(dim) == 0 and ord > 0.0:
                 new_size = list(A.size())
-                new_size[dim] = 1
-                return max_min(torch.zeros(new_size, dtype=A.dtype), dim)
+                if keepdim:
+                    new_size[dim] = 1
+                else:
+                    del new_size[dim]
+                return torch.zeros(new_size, dtype=A.dtype)
             else:
                 return max_min(A, dim)
 
