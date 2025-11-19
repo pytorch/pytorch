@@ -138,38 +138,38 @@ def _compute_local_shape_and_global_offset(
     # doing a Sum(size*stride) like computation to determine the location of our
     # shard for each of the shardings on that dim.
     global_offset: list[int | None] = [0] * len(global_shape)
-
     shard_dim_to_global_offsets = {}
 
     for mesh_dim, placement in ordered_placements:
         mesh_dim_size = mesh_shape[mesh_dim]
-        if isinstance(placement, (Shard, _StridedShard)):
-            shard_dim = placement.dim
-            zero_global_offset = global_shape[shard_dim]
-            assert shard_dim < len(local_shape), (
-                f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
-            )
-            shard_size, shard_offsets = placement._local_shard_size_and_offset(
-                local_shape[shard_dim],
-                mesh_dim_size,
-                my_coordinate[mesh_dim],
-            )
+        if not isinstance(placement, (Shard, _StridedShard)):
+            continue
+        
+        shard_dim = placement.dim
+        zero_global_offset = global_shape[shard_dim]
+        assert shard_dim < len(local_shape), (
+            f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
+        )
 
-            if shard_dim not in shard_dim_to_global_offsets:
-                if shard_size > 0:
-                    shard_dim_to_global_offsets[shard_dim] = shard_offsets
-                else:
-                    shard_dim_to_global_offsets[shard_dim] = [zero_global_offset]
-            else:
-                global_shard_offsets = shard_dim_to_global_offsets[shard_dim]
-                if shard_size > 0:
-                    shard_dim_to_global_offsets[shard_dim] = [
-                        global_shard_offsets[i] for i in shard_offsets
-                    ]
-                else:
-                    shard_dim_to_global_offsets[shard_dim] = [zero_global_offset]
+        shard_size, shard_offsets = placement._local_shard_size_and_offset(
+            local_shape[shard_dim],
+            mesh_dim_size,
+            my_coordinate[mesh_dim],
+        )
 
-            local_shape[shard_dim] = shard_size
+        local_shape[shard_dim] = shard_size
+
+        if shard_size == 0:
+            shard_dim_to_global_offsets[shard_dim] = [zero_global_offset]
+            continue
+        
+        if not isinstance(placement, _StridedShard):
+            shard_offsets = list(range(shard_offsets, shard_offsets + shard_size))
+
+        if shard_dim not in shard_dim_to_global_offsets:
+            shard_dim_to_global_offsets[shard_dim] = shard_offsets
+        else:
+            shard_dim_to_global_offsets[shard_dim] = [shard_dim_to_global_offsets[shard_dim][i] for i in shard_offsets]
 
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
         # maybe do a contiuous check and throw error if not
