@@ -913,7 +913,7 @@ def getitem_on_dict_manager(
     example_value: Any,
     guard_manager_enum: GuardManagerType,
 ) -> GuardManager:
-    base_source_name = source.base.name()
+    base_source_name = source.base.name
     if isinstance(source.index, ConstDictKeySource):
         index = source.index.index
     else:
@@ -1042,9 +1042,9 @@ class GuardBuilder(GuardBuilderBase):
         self.key_order_guarded_dict_ids = set()
         assert self.check_fn_manager.output_graph is not None
         for source in self.check_fn_manager.output_graph.guard_on_key_order:
-            dict_obj = self.get(source.name())
+            dict_obj = self.get(source.name)
             if self.save_guards:
-                self.source_get_cache[source.name()] = dict_obj
+                self.source_get_cache[source.name] = dict_obj
             self.key_order_guarded_dict_ids.add(id(dict_obj))
 
         # Keep track of weak references of objects with ID_MATCH guard. This
@@ -1072,7 +1072,7 @@ class GuardBuilder(GuardBuilderBase):
             )
 
         # Iterate over the dicts and install a dict_getitem_manager.
-        dict_source = guard.originating_source.name()
+        dict_source = guard.originating_source.name
 
         # Ensure that we call dict.keys and not value.keys (which can call
         # overridden keys method). In the C++ guards, we relied on PyDict_Next
@@ -1255,7 +1255,7 @@ class GuardBuilder(GuardBuilderBase):
             l1_guard_manager_enum = l2_guard_manager_enum = None
             if l2_key:
                 l1_source = AttrSource(source.base, l1_key)
-                l1_source_name = l1_source.name()
+                l1_source_name = l1_source.name
                 l1_value = mod_dict[l1_key]
                 # do not guard on key order for _parameters etc unless the user code
                 # actually needs the key order (e.g. calling named_parameters)
@@ -1303,7 +1303,7 @@ class GuardBuilder(GuardBuilderBase):
             return l1_mgr
 
     def requires_key_order_guarding(self, source: Source) -> bool:
-        source_name = source.name()
+        source_name = source.name
         if source_name == "":
             return False
         obj_id = id(self.get(source_name))
@@ -1346,7 +1346,7 @@ class GuardBuilder(GuardBuilderBase):
         root_guard_manager = self.guard_manager.root
 
         example_value = None
-        source_name = source.name()
+        source_name = source.name
 
         if source_name != "" and source_name in self._cached_guard_managers:
             return self._cached_guard_managers[source_name]
@@ -1363,7 +1363,7 @@ class GuardBuilder(GuardBuilderBase):
         base_guard_manager = None
         base_guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if isinstance(source, ChainedSource):
-            base_source_name = source.base.name()
+            base_source_name = source.base.name
             base_example_value = self.get(base_source_name)
             base_guard_manager = self.get_guard_manager_from_source(source.base)
             base_guard_manager_enum = self.get_guard_manager_type(
@@ -1747,10 +1747,10 @@ class GuardBuilder(GuardBuilderBase):
             )
         else:
             raise AssertionError(
-                f"missing guard manager builder {source} - {source.name()}"
+                f"missing guard manager builder {source} - {source.name}"
             )
 
-        self._cached_guard_managers[source.name()] = out
+        self._cached_guard_managers[source.name] = out
         return out
 
     def get_guard_manager(self, guard: Guard) -> GuardManager:
@@ -1849,7 +1849,7 @@ class GuardBuilder(GuardBuilderBase):
             return
         assert isinstance(source, AttrSource), f"invalid source {guard.name}"
         base_source = source.base
-        base = base_source.name()
+        base = base_source.name
         attr = source.member
 
         ref = self.arg_ref(base)
@@ -1871,7 +1871,7 @@ class GuardBuilder(GuardBuilderBase):
         if val:
             # Just install a getattr manager. GetAttrGuardAccessor itself
             # acts as hasattr guard.
-            example_value = self.get(source.name())
+            example_value = self.get(source.name)
             base_example_value = self.get(base)
             guard_manager_enum = self.get_guard_manager_type(source, example_value)
 
@@ -1884,7 +1884,7 @@ class GuardBuilder(GuardBuilderBase):
                     base_example_value,
                     example_value,
                     base,
-                    source.name(),
+                    source.name,
                     guard_manager_enum,
                 )
             else:
@@ -2419,7 +2419,7 @@ class GuardBuilder(GuardBuilderBase):
                 self.check_fn_manager.additional_used_global_vars.add(name)
 
         ref_a = self.arg_ref(guard)
-        ref_b = self.arg_ref(source_b.name())
+        ref_b = self.arg_ref(source_b.name)
 
         if is_from_optimizer_source(
             guard.originating_source
@@ -2694,7 +2694,7 @@ class GuardBuilder(GuardBuilderBase):
                     python_fallback = True
                 else:
                     example_value = self.get(
-                        source.name(),
+                        source.name,
                         closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
                     )
                     if isinstance(example_value, int):
@@ -3895,11 +3895,11 @@ class CheckFunctionManager:
             guard_source = source.guard_source()
             if guard_source is GuardSource.CONSTANT:
                 # No need to track constants
-                return source.name()
+                return source.name
             assert w_builder
             r_builder = w_builder()
             assert r_builder is not None
-            return r_builder.arg_ref(source.name())
+            return r_builder.arg_ref(source.name)
 
         builder = GuardBuilder(
             f_code,
@@ -4063,7 +4063,7 @@ class CheckFunctionManager:
             if isinstance(guard, DuplicateInputs):
                 source_a = guard.input_source_a
                 source_b = guard.input_source_b
-                code_part = f"{source_a.name()} is {source_b.name()}"
+                code_part = f"{source_a.name} is {source_b.name}"
                 install_object_aliasing_guard(
                     builder.get_guard_manager_from_source(source_a),
                     builder.get_guard_manager_from_source(source_b),
@@ -4081,8 +4081,8 @@ class CheckFunctionManager:
                 ]
                 code_part = (
                     """check_overlapping("""
-                    f"""overlapping=[{", ".join(s.name() for s in guard.overlapping_sources)}], """
-                    f"""non_overlapping=[{", ".join(s.name() for s in guard.non_overlapping_sources)}])"""
+                    f"""overlapping=[{", ".join(s.name for s in guard.overlapping_sources)}], """
+                    f"""non_overlapping=[{", ".join(s.name for s in guard.non_overlapping_sources)}])"""
                 )
                 install_storage_overlapping_guard(
                     overlapping_guard_managers,
@@ -4533,7 +4533,7 @@ def make_dupe_guard(
             dupe_source
         ) or is_from_flatten_script_object_source(obj_source):
             raise exc.UnsafeScriptObjectError(
-                f"{obj_source.name()} is aliasing {dupe_source.name()}. This is not supported."
+                f"{obj_source.name} is aliasing {dupe_source.name}. This is not supported."
                 f" Please do a clone for corresponding input."
             )
 

@@ -173,7 +173,7 @@ def _try_get_metadata_from_dynamo(
         assert source is None or source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
-        source_name = source.name() if source else str(source)
+        source_name = source.name if source else str(source)
 
         # input[i] in dynamo is now:
         # input[i + len(extra_params)] in AOT,

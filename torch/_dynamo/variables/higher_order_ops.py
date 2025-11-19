@@ -1080,7 +1080,7 @@ def check_aliasing_and_input_mutation(
             unimplemented(
                 gb_type="Encountered input mutation during higher order op tracing",
                 context=context,
-                explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
+                explanation=f"Higher order ops do not support input mutation. Found in {source_target.name}",
                 hints=[
                     "Consider using the debug context to change user code to avoid mutation.",
                     "Please open an issue.",
@@ -1094,7 +1094,7 @@ def check_aliasing_and_input_mutation(
             unimplemented(
                 gb_type="Encountered aliasing during higher order op tracing",
                 context=context,
-                explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
+                explanation=f"Higher order ops do not support aliasing. Found in {source_target.name}",
                 hints=[
                     "Replace `return input` with `return input.clone()` to avoid aliasing.",
                     "Consider using the debug context to change user code to avoid aliasing.",

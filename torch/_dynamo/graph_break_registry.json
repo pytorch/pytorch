@@ -389,7 +389,7 @@
     {
       "Gb_type": "Encountered aliasing during higher order op tracing",
       "Context": "context",
-      "Explanation": "Higher order ops do not support aliasing. Found in {source_target.name()}",
+      "Explanation": "Higher order ops do not support aliasing. Found in {source_target.name}",
       "Hints": [
         "Replace `return input` with `return input.clone()` to avoid aliasing.",
         "Consider using the debug context to change user code to avoid aliasing.",
@@ -401,7 +401,7 @@
     {
       "Gb_type": "Encountered input mutation during higher order op tracing",
       "Context": "context",
-      "Explanation": "Higher order ops do not support input mutation. Found in {source_target.name()}",
+      "Explanation": "Higher order ops do not support input mutation. Found in {source_target.name}",
       "Hints": [
         "Consider using the debug context to change user code to avoid mutation.",
         "Please open an issue."
@@ -1469,7 +1469,7 @@
     {
       "Gb_type": "Unsupported function call (delayed)",
       "Context": "source: {self.source}",
-      "Explanation": "Dynamo determined that a graph break should occur when calling `{self.source.name()}`. Reason: {self.msg}",
+      "Explanation": "Dynamo determined that a graph break should occur when calling `{self.source.name}`. Reason: {self.msg}",
       "Hints": []
     }
   ],

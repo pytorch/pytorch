@@ -870,7 +870,7 @@ class MetaConverter(Generic[_TensorT]):
 
     # This function assumes that it's possible to do the conversion
     # NB: name here is used in a conventional way by Dynamo; it corresponds
-    # precisely to the Source.name() of the tensor we're fakeifying and
+    # precisely to the Source.name of the tensor we're fakeifying and
     # corresponds to a valid Python expression.  When we construct sub-names
     # as part of this process, we will maintain this invariant!  (Even though
     # other users of this may not need it this property to be upheld.)
@@ -1937,7 +1937,7 @@ class MetaConverter(Generic[_TensorT]):
                 metadata_fn=lambda: {
                     "describer_id": self.describer.id,
                     "id": t_desc.id,
-                    "source": source.name(),
+                    "source": source.name,
                 },
             )
 

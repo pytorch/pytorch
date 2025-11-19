@@ -1707,13 +1707,13 @@ def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
             stack = s
             break
         if stack is None:
-            msg = f"{source.name()}, a closed over free variable"
+            msg = f"{source.name}, a closed over free variable"
         else:
             tb = "".join(traceback.format_list(stack))
             extra = ""
             if len(user_stacks) > 1:
                 extra = f"(elided {len(user_stacks) - 1} more accesses)"
-            msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+            msg = f"{source.name}, accessed at:\n{tb}{extra}"
         # TODO: option to print ALL of the stack traces at once
         input_errors.append(msg)
 
