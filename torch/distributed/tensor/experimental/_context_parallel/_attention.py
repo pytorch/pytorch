@@ -17,6 +17,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor import distribute_tensor, DTensor, Shard
+from torch.distributed.tensor._tp_conv import cached_dtensor_propagate_sharding
 from torch.distributed.tensor.parallel import ParallelStyle
 from torch.nn.attention.flex_attention import (
     _mask_mod_signature,
@@ -898,7 +899,7 @@ def _sdpa_handler(
     # TODO: remove the context parallel strategy from the default propagation
     # rule. Either figure out how to dynamically enable it or just don't call
     # propagate.
-    DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+    cached_dtensor_propagate_sharding(op_info)
     output_sharding = op_info.output_sharding
     assert output_sharding is not None, "output sharding should not be None"
     assert not output_sharding.needs_redistribute, "inputs need to be redistributed"

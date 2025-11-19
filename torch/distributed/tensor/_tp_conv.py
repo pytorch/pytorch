@@ -1,14 +1,42 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # implement matrix related ops for distributed tensor
+import threading
+from collections.abc import Callable
+from functools import lru_cache
 from typing import cast
 
 import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
+from torch.distributed.tensor._op_schema import OpInfo
 
 
 aten = torch.ops.aten
+
+
+class LocalLRUCache(threading.local):
+    def __init__(self, user_function: Callable) -> None:
+        self.cache = lru_cache(None)(user_function)
+
+    def __call__(self, *args, **kwargs) -> object:
+        return self.cache(*args, **kwargs)
+
+    def cache_info(self):
+        return self.cache.cache_info()
+
+    def cache_clear(self):
+        return self.cache.cache_clear()
+
+
+def propagate(op_info: OpInfo) -> None:
+    output_sharding = dtensor.DTensor._op_dispatcher.sharding_propagator.propagate_op_sharding_non_cached(
+        op_info.schema
+    )
+    op_info.output_sharding = output_sharding
+
+
+cached_dtensor_propagate_sharding = LocalLRUCache(propagate)
 
 
 def _requires_data_exchange(padding, dim_map) -> bool:
@@ -241,7 +269,7 @@ def convolution_handler(
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
 
     # sharding propagation
-    dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+    cached_dtensor_propagate_sharding(op_info)
     output_sharding = op_info.output_sharding
     assert output_sharding is not None, "output sharding should not be None"
     output_spec = output_sharding.output_spec
@@ -275,7 +303,7 @@ def convolution_backward_handler(
     op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
 
     # sharding propagation
-    dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+    cached_dtensor_propagate_sharding(op_info)
     output_sharding = op_info.output_sharding
     assert output_sharding is not None, "output sharding should not be None"
     assert isinstance(op_info.flat_args_schema[0], dtensor.DTensorSpec)

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import contextlib
-import threading
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import chain
@@ -13,7 +12,6 @@ from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
-    OpInfo,
     OpSchema,
     OpSpec,
     OpStrategy,
@@ -40,20 +38,6 @@ def _length(obj) -> int:
     return len(obj)
 
 
-class LocalLRUCache(threading.local):
-    def __init__(self, user_function: Callable) -> None:
-        self.cache = lru_cache(None)(user_function)
-
-    def __call__(self, *args, **kwargs) -> object:
-        return self.cache(*args, **kwargs)
-
-    def cache_info(self):
-        return self.cache.cache_info()
-
-    def cache_clear(self):
-        return self.cache.cache_clear()
-
-
 class ShardingPropagator:
     def __init__(self) -> None:
         self.op_to_rules: dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
@@ -64,9 +48,6 @@ class ShardingPropagator:
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
         self.op_to_schema_info: dict[OpOverload, RuntimeSchemaInfo] = {}
-        self.propagate_op_sharding = LocalLRUCache(
-            self.propagate_op_sharding_non_cached
-        )
         # op map to save indices of shape (and stride) args which may need to be
         # modified in sharding prop
         self.op_to_shape_and_stride_idx: dict[
@@ -343,19 +324,6 @@ class ShardingPropagator:
             kwargs_schema=kwargs_op_strategy,
             schema_info=op_schema.schema_info,
         )
-
-    def propagate(self, op_info: OpInfo) -> None:
-        # We cannot use an lru cache if we know that inputs will have dynamic shapes,
-        # because SymInts are not hashable.
-        # This is generally ok because this only happens during tracing in torch.compile,
-        # and tracing does not need to be as fast as eagermode DTensor usages.
-        if _are_we_tracing():
-            output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
-        else:
-            output_sharding = cast(
-                OutputSharding, self.propagate_op_sharding(op_info.schema)
-            )
-        op_info.output_sharding = output_sharding
 
     def propagate_op_sharding_non_cached(self, op_schema: OpSchema) -> OutputSharding:
         """
