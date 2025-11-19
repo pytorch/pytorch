@@ -202,16 +202,6 @@ def gb_to_bytes(gb: float) -> int:
     """Convert gigabytes to bytes."""
     return int(gb * 1024 * 1024 * 1024)
 
-
-@dataclass
-class _SplitMmRsConfig:
-    # possible values of num_chunks, if multiple are specified,
-    # the biggest value that satisfies other conditions will be picked
-    num_chunks: list[int]
-    # minimum size of matmul arguments after split
-    min_size_after_split: int = 2048
-
-
 class OverlapScheduler:
     """
     Scheduler that reorders operations to maximize compute-collective overlap.
@@ -247,7 +237,7 @@ class OverlapScheduler:
         max_coll_distance: int,
         custom_runtime_estimation: Callable[[fx.Node], float | None] | None,
         collective_estimator: Literal["analytical", "benchmark"],
-        split_mm_rs_config: _SplitMmRsConfig | None = None,
+        split_mm_rs_config: tuple[int, list[int]] | None = None,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -263,13 +253,15 @@ class OverlapScheduler:
 
         # Build structures
         stable_topological_sort(self.graph)
-        if self.split_mm_rs is not None:
+        if split_mm_rs_config is not None:
             from .decompose_mm import split_mm_rs
+            min_size_after_split = split_mm_rs_config[0]
+            num_chunks = split_mm_rs_config[1]
 
             split_mm_rs(
-                self.graph,
-                split_mm_rs_config.min_size_after_split,
-                split_mm_rs_config.num_chunks,
+                self.gm,
+                min_size_after_split,
+                num_chunks,
             )
         self.nodes = list(self.graph.nodes)
         self.node_idx = {n: i for i, n in enumerate(self.nodes)}
@@ -1021,6 +1013,8 @@ def schedule_overlap_bucketing(
     max_coll_distance: int = 1000,
     custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
+    # split_mm_rs_config: tuple[int, list[int]] | None = None,
+    split_mm_rs_config: tuple[int, list[int]] | None = (2048, [2]),
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1051,4 +1045,5 @@ def schedule_overlap_bucketing(
         collective_bucketing=collective_bucketing,
         insert_overlap_deps=insert_overlap_deps,
         collective_estimator=collective_estimator,
+        split_mm_rs_config=split_mm_rs_config,
     ).run()

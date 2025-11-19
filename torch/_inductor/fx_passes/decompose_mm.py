@@ -15,6 +15,7 @@ from ..pattern_matcher import (
     MULTIPLE,
     PatternExpr,
 )
+from torch._logging import trace_structured
 
 
 aten = torch.ops.aten
@@ -67,8 +68,6 @@ def _mm_split_cat_rs_fn(
     #     dtype=orig_out.dtype,
     #     device=orig_out.device,
     # )
-    # out_flat = out.flatten(0, -2)
-    # out_flat_chunks = out_flat.chunk(num_chunks)
 
     rs_outs = []
     for a_i, b_i in zip(mm_i_a_args, mm_i_b_args):
@@ -76,9 +75,52 @@ def _mm_split_cat_rs_fn(
         for op in post_mm_ops:
             mm_i = op.apply(mm_i, num_chunks)
         if scatter_dim != 0:
-            mm_i_chunks = mm_i.chunk(orig_split_num_chunks)
-            cat = torch.cat(mm_i_chunks, dim=scatter_dim)
+            mm_i_chunks = mm_i.chunk(orig_split_num_chunks, dim=scatter_dim)
+            cat = torch.cat(mm_i_chunks)
             mm_i = cat
+        w = torch.ops._c10d_functional.reduce_scatter_tensor(
+            mm_i, reduce_op, group_size, group_name
+        )
+        rs_out_i = torch.ops._c10d_functional.wait_tensor(w)
+        rs_outs.append(rs_out_i)
+
+    if scatter_dim == 0:
+        # B column wise split
+        rs_out = torch.cat(rs_outs, dim=-1)
+    else:
+        # A row wise split
+        rs_out = torch.cat(rs_outs)
+    return (rs_out,)
+
+def _mm_split_cat_rs_fn_view3d(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    num_chunks: int,
+    orig_out: torch.Tensor,
+    reduce_op: str,
+    group_size: int,
+    group_name: str,
+    scatter_dim: int,
+    orig_split_num_chunks: int,
+    post_mm_ops,
+):
+    assert isinstance(num_chunks, int)
+    mm_i_a_args = [a] * num_chunks
+    mm_i_b_args = [b] * num_chunks
+    a_flat = a.flatten(0, -2)
+    a_flat_chunks = a_flat.chunk(num_chunks)
+    mm_i_a_args = a_flat_chunks
+
+    rs_outs = []
+    for a_i, b_i in zip(mm_i_a_args, mm_i_b_args):
+        mm_i = torch.ops.aten.mm(a_i, b_i)
+        for op in post_mm_ops:
+            mm_i = op.apply(mm_i, num_chunks)
+
+        mm_i_chunks = mm_i.chunk(orig_split_num_chunks, dim=scatter_dim)
+        cat = torch.cat(mm_i_chunks)
+        mm_i = cat
+
         w = torch.ops._c10d_functional.reduce_scatter_tensor(
             mm_i, reduce_op, group_size, group_name
         )
@@ -175,6 +217,16 @@ def split_mm_rs(
     num_chunks: list[int] = [2],
 ):
     g = gm.graph
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": f"pass_split_mm_rs_graph_before",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
 
     def reduce_scatter_template(inp: PatternExpr, users: int):
         return CallFunction(
@@ -252,6 +304,17 @@ def split_mm_rs(
             g, reduce_scatter, min_size_after_split, num_chunks
         )
 
+    trace_structured(
+        "artifact",
+        metadata_fn=lambda: {
+            "name": f"pass_split_mm_rs_graph_after",
+            "encoding": "string",
+        },
+        payload_fn=lambda: gm.print_readable(
+            print_output=False, include_stride=True, include_device=True
+        ),
+    )
+
 
 @dataclasses.dataclass
 class _PostMMOp:
@@ -316,14 +379,24 @@ def _process_matmul_reduce_scatter(
     def _is_pointwise(n):
         return n.target in (torch.ops.prims.convert_element_type.default,)
 
+    reshape_ops_count = 0
+    view3d_n = None
     for n in reversed(ns):
         if n.target in (aten.view.default, aten.reshape.default):
             in_shape = n.args[0].meta["val"].shape
             out_shape = n.args[1]
-            if in_shape[-1] != out_shape[-1]:
+            # support for now post mm view 2D -> 3D,
+            # TODO: handle other views
+            if not(len(in_shape) == 2 and len(out_shape) == 3 and in_shape[-1] == out_shape[-1]):
                 return
-            # TODO: Handle different views
-            post_mm_ops.append(_ViewOp(n, chunk_dim=1))
+
+            # View Ops are not supported yet
+            reshape_ops_count += 1
+            if reshape_ops_count > 1:
+                # Support for now only one 2d -> 3d
+                return
+            post_mm_ops.append(_ViewOp(n, chunk_dim=0))
+            view3d_n = n
             continue
 
         if not _is_pointwise(n):
@@ -334,6 +407,18 @@ def _process_matmul_reduce_scatter(
     arg_b = mm_n.args[1]
     arg_a_t = arg_a.meta["val"]
     arg_b_t = arg_b.meta["val"]
+
+    _fn_to_trace = _mm_split_cat_rs_fn,
+    n_split = None
+    # Pick the greatest number from num_chunks,
+    # that satisfies min_size_after_split
+    sorted_num_chunks = sorted(num_chunks)
+
+    view3d_size_to_split = None
+    if view3d_n is not None:
+        _fn_to_trace = _mm_split_cat_rs_fn_view3d
+        # dim0 of 3d reshape
+        view3d_size_to_split = view3d_n.args[1][0]
 
     size_before_split = 1
     cont_check_t = arg_a_t
@@ -346,12 +431,11 @@ def _process_matmul_reduce_scatter(
         for s in arg_a_t.shape[:-1]:
             size_before_split *= _size_hint(s)
 
-    # Pick the greatest number from num_chunks,
-    # that satisfies min_size_after_split
-    sorted_num_chunks = sorted(num_chunks)
-    n_split = None
     for _n in reversed(sorted_num_chunks):
-        if size_before_split // _n >= min_size_after_split:
+        if view3d_size_to_split is not None and view3d_size_to_split % _n != 0:
+            break
+
+        if size_before_split % _n == 0 and size_before_split // _n >= min_size_after_split:
             n_split = _n
             break
 
@@ -362,6 +446,8 @@ def _process_matmul_reduce_scatter(
     if not (_is_contiguous(cont_check_t) and _is_contiguous(rs_out_t)):
         return
 
+    print(f"XXX PROCESS_SPLIT_MM_RS reduce_scatter:{reduce_scatter} mm_n:{mm_n}")
+    # TODO: just use group_size?
     orig_split_num_chunks = -1
     if orig_scatter_dim != 0:
         orig_split_num_chunks = len(_reduce_scatter_node.args[0].args[0])
@@ -380,7 +466,7 @@ def _process_matmul_reduce_scatter(
     )
     _insert_fn_trace_before_node(
         g,
-        _mm_split_cat_rs_fn,
+        _fn_to_trace,
         trace_args,
         mm_n,  # insert before
         [arg_a, arg_b],
