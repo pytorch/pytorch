@@ -269,6 +269,26 @@ inline torch::stable::Tensor clone(const torch::stable::Tensor& self) {
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+// We expect this to be the stable version of the flatten.using_ints op.
+inline torch::stable::Tensor flatten(
+    const torch::stable::Tensor& self,
+    int64_t start_dim = 0,
+    int64_t end_dim = -1) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(start_dim),
+      torch::stable::detail::from(end_dim)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::flatten", "using_ints", stack.data(), TORCH_ABI_VERSION));
+#else
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::flatten", "using_ints", stack.data()));
+#endif
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // New ops should be added here if they use a brand new shim API
@@ -309,6 +329,8 @@ inline uint32_t get_num_threads() {
 // We expect this to be the stable version of the empty op that takes in
 // device and dtype parameters. The empty op creates a tensor with uninitialized
 // values of the specified size, dtype, and device.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for HeaderOnlyArrayRef<T>, which is only available in 2.10.
 inline torch::stable::Tensor empty(
     torch::headeronly::IntHeaderOnlyArrayRef size,
     std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
@@ -327,22 +349,9 @@ inline torch::stable::Tensor empty(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
-// We expect this to be the stable version of the flatten.using_ints op.
-inline torch::stable::Tensor flatten(
-    const torch::stable::Tensor& self,
-    int64_t start_dim = 0,
-    int64_t end_dim = -1) {
-  const auto num_args = 3;
-  std::array<StableIValue, num_args> stack{
-      torch::stable::detail::from(self),
-      torch::stable::detail::from(start_dim),
-      torch::stable::detail::from(end_dim)};
-  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
-      "aten::flatten", "using_ints", stack.data(), TORCH_ABI_VERSION));
-  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
-}
-
 // We expect this to be the stable version of the reshape op.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for HeaderOnlyArrayRef<T>, which is only available in 2.10.
 inline torch::stable::Tensor reshape(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef shape) {
@@ -355,6 +364,8 @@ inline torch::stable::Tensor reshape(
 }
 
 // We expect this to be the stable version of the view op.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for HeaderOnlyArrayRef<T>, which is only available in 2.10.
 inline torch::stable::Tensor view(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size) {
