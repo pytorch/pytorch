@@ -31,6 +31,7 @@ from torch.testing._internal.common_device_type import (
     e5m2_type,
     E4M3_MAX_POS,
     E5M2_MAX_POS,
+    largeTensorTest,
 )
 
 from torch.testing._internal.common_utils import (
@@ -1143,6 +1144,7 @@ class TestFP8Matmul(TestCase):
     @parametrize("use_fast_accum", [True, False])
     @parametrize("bias_dtype", [None, "same", torch.float32], name_fn=lambda t: f"{t}")
     @with_tf32_off
+    @largeTensorTest("20GB", "cuda")
     def test_float8_rowwise_scaling_numerics(
         self,
         device,
