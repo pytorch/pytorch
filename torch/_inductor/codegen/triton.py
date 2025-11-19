@@ -432,9 +432,9 @@ class BlockDescriptorOptions:
             final_shape += [sympy.S.One] * reduction_ndim
 
         try:
-            # Get permutation to sort strides in descending order.
+            # Get permutation to sort strides in ascending order.
             # This is used as the order argument in tl.make_block_ptr
-            order = utils.argsort_sym(V.graph._shape_env, params.strides, reverse=True)
+            order = utils.argsort_sym(V.graph._shape_env, params.strides)
         except AssertionError:
             # Symbolic shapes, failed to evaluate comparison expression
             order = list(reversed(range(len(params.strides))))
