@@ -142,9 +142,7 @@ class TestOnlineSoftmax(TestCase):
             # Note: split reduction is not triggered for this shape on some xpu devices.
             #       check "num_splits" for more details
             if GPU_TYPE == "xpu":
-                num_sm = torch.xpu.get_device_properties().gpu_subslice_count
-                if 2048 >= num_sm * 2 * 32:
-                    num_kernels = 1
+                num_kernels = 1
 
             # split reduction is triggered. We have multiple kernels
             self.assertTrue(code.count("def triton") >= num_kernels)
