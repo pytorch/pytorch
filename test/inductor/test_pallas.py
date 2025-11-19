@@ -8,7 +8,6 @@ from unittest import mock
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import make_test_cls_with_patches
-from torch._functorch import config as functorch_config
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
@@ -760,7 +759,7 @@ class PallasTestsCPU(PallasTestsMixin, TestCase):
 
 
 @unittest.skipUnless(has_jax_tpu_backend(), "requires JAX TPU backend")
-@functorch_config.patch({"pallas_target_tpu": True})
+@config.patch({"pallas_target_tpu": True})
 class PallasTestsTPU(PallasTestsMixin, TestCase):
     DEVICE = "cpu"
 

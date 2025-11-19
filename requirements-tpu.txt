@@ -2,7 +2,7 @@
 
 # Index for JAX nightly builds for v7x TPUs
 --pre
--i https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/
+-i https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/  # @lint-ignore
 -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
 
 # Newer v7x versions
