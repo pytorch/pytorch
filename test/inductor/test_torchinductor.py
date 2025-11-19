@@ -2517,6 +2517,7 @@ class CommonTemplate:
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
+    @skip_if_halide  # bf16
     def test__dyn_quant_pack_4bit_weight_bf16(self):
         k = 128
         n = 128
@@ -2604,6 +2605,7 @@ class CommonTemplate:
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
     @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
+    @skip_if_halide  # bf16
     def test__dyn_quant_matmul_4bit_bf16_input(self):
         m = 32
         k = 128
