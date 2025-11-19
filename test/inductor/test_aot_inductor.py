@@ -5685,6 +5685,11 @@ class AOTInductorTestsTemplate:
                 "buf5, u0",
                 "buf5, buf6, buf4, u0",
             ]
+        if config.combo_kernels:
+            expected_scalar_args = [
+                "buf4, buf5, buf6, u0, u0, u0",
+                "buf5, buf6, buf4, u0",
+            ]
         # check the new behavior of codegen is expected
         result, code = run_and_get_cpp_code(
             AOTIRunnerUtil.compile, Model(), example_inputs
