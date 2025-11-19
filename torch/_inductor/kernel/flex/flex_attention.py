@@ -59,8 +59,8 @@ def _sanitize_kernel_options_for_triton(
     to avoid passing to triton constexpr dict
     """
     sanitized = dict(kernel_options)
-    force_impl = cast(_Backend, sanitized.pop("BACKEND", "AUTO"))
-    return sanitized, force_impl
+    backend = cast(_Backend, sanitized.pop("BACKEND", "AUTO"))
+    return sanitized, backend
 
 
 @SymbolicGridFn
@@ -182,7 +182,7 @@ def flex_attention(
     )
     freeze_irnodes(mask_graph_buffer)
 
-    kernel_options, force_impl = _sanitize_kernel_options_for_triton(kernel_options)
+    kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -196,11 +196,9 @@ def flex_attention(
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
     )
-    use_decode = (force_impl == "TRITON_DECODE") or (
-        force_impl == "AUTO" and can_use_decode
-    )
+    use_decode = (backend == "TRITON_DECODE") or (backend == "AUTO" and can_use_decode)
 
-    if force_impl == "TRITON_DECODE" and not can_use_decode:
+    if backend == "TRITON_DECODE" and not can_use_decode:
         raise RuntimeError(
             "BACKEND='TRITON_DECODE' was specified but flex_decoding cannot be used for this input. "
             "flex_decoding is only available for short sequence lengths with specific configurations."
@@ -253,7 +251,7 @@ def flex_attention(
         mask_graph,
         kernel_options,
         num_score_mod_placeholders=len(placeholder_inps),
-        force_impl=force_impl,
+        backend=backend,
     ):
         return create_flex_flash_attention_kernel(
             query,
