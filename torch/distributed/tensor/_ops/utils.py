@@ -4,7 +4,7 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-from typing import cast, Optional, TypeVar, Union
+from typing import cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
@@ -56,13 +56,13 @@ def register_prop_rule(
 # MyStrategyType(StrategyType).
 _OpSchemaT = TypeVar("_OpSchemaT", bound=OpSchema)
 _StrategyTypeT = TypeVar("_StrategyTypeT", bound=StrategyType)
-_ShardingStrategyFuncT = Callable[[_OpSchemaT], _StrategyTypeT]
+_ShardingStrategyFunc: TypeAlias = Callable[[_OpSchemaT], _StrategyTypeT]
 
 
 def register_op_strategy(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[[_ShardingStrategyFuncT], _ShardingStrategyFuncT]:
+) -> Callable[[_ShardingStrategyFunc], _ShardingStrategyFunc]:
     # For every ATen op that accepts any args in this list,
     # the arg itself can impact the strides (and potentially the sharding strategy)
     # of the output tensor.
@@ -72,7 +72,7 @@ def register_op_strategy(
         "memory_format",
     ]
 
-    def wrapper(impl: _ShardingStrategyFuncT) -> _ShardingStrategyFuncT:
+    def wrapper(impl: _ShardingStrategyFunc) -> _ShardingStrategyFunc:
         if isinstance(op, list):
             overloads = op
         else:
