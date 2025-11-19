@@ -2324,12 +2324,14 @@ class OutputGraph(OutputGraphCommon):
                         "store_user_object_weakrefs",
                     )
                 )
+
                 tmp_vars = []
                 for constructor in index_to_bytecode_constructor.values():
                     constructor(cg)
                     var_name = (
                         self.new_var()
-                    )  # keep alive any temp objects for the rest of the frame
+                    )  # keep alive any user objects for the rest of the frame
+                    # TODO: we could omit this for objects we create but shouldn't be too much overhead for now
                     cg.store(var_name)
                     tmp_vars.append(var_name)
 

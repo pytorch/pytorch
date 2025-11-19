@@ -517,6 +517,11 @@ static void init_multicast_for_block(
   using McHandleType =
       std::conditional_t<use_fabric_handle, CUmemFabricHandle, int>;
 
+  McHandleType invalidator;
+  std::memset(&invalidator, UINT8_MAX, sizeof(McHandleType));
+
+  // Phase 1: export handle (rank 0 only)
+  McHandleType mc_exported_handle{};
   if (rank == 0) {
     CUmulticastObjectProp mc_prop{};
     mc_prop.numDevices = world_size;
@@ -525,68 +530,82 @@ static void init_multicast_for_block(
 
     // create a multicast object, which acts as a handle that allows multiple
     // devices or processes to access the same memory allocation coherently.
-    auto err = driver_api->cuMulticastCreate_(&mc_handle, &mc_prop);
-    if (err != CUDA_SUCCESS) {
-      const char* err_str;
-      CUresult get_error_str_err = driver_api->cuGetErrorString_(err, &err_str);
-      if (get_error_str_err != CUDA_SUCCESS) {
-        err_str = "unknown cuda driver error";
-      }
-      LOG(WARNING)
-          << "SymmetricMemory: cuMulticastCreate failed with: \"" << err_str
-          << "\". Gracefully skipping multicast initialization. "
-          << "However, this is unexpected. Please report the issue on GitHub.";
+    try {
+      C10_CUDA_DRIVER_CHECK(
+          driver_api->cuMulticastCreate_(&mc_handle, &mc_prop));
+      // using the CUDA Driver API to export a multicast object into a POSIX file
+      // descriptor.
+      C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
+          &mc_exported_handle, mc_handle, handleType, 0));
+    } catch (const std::exception& e) {
       // Allow peers gracefully skip multicast initialization by sending -1
-      // TODO: allow graceful skip for fabric
-      if constexpr (!use_fabric_handle) {
-        ipc_channel.broadcast_fds(rank, 0, pids, -1);
-      }
-      return;
-    }
-
-    McHandleType mc_exported_handle;
-    // using the CUDA Driver API to export a multicast object into a POSIX file
-    // descriptor.
-    C10_CUDA_DRIVER_CHECK(driver_api->cuMemExportToShareableHandle_(
-        &mc_exported_handle, mc_handle, handleType, 0));
-    if constexpr (!use_fabric_handle) {
-      ipc_channel.broadcast_fds(rank, 0, pids, mc_exported_handle);
-      // Ref count is incremented as soon as SCM_RIGHTS send happens
-      close(mc_exported_handle);
-    } else {
-      // TODO implement storeExchange.broadcast
-      storeExchange.all_gather(store, rank, world_size, mc_exported_handle);
-    }
-
-  } else {
-    if constexpr (!use_fabric_handle) {
-      int mc_fd = ipc_channel.broadcast_fds(rank, 0, pids, -1);
-      if (mc_fd == -1) {
-        return;
-      }
-      // Convert back to a handle from the broadcasted POSIX file descriptor.
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
-          &mc_handle,
-          (void*)(uintptr_t)mc_fd,
-          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
-      close(mc_fd);
-    } else {
-      CUmemFabricHandle null_handle{};
-      auto mc_handles =
-          storeExchange.all_gather(store, rank, world_size, null_handle);
-      C10_CUDA_DRIVER_CHECK(driver_api->cuMemImportFromShareableHandle_(
-          &mc_handle, (void*)&(mc_handles[0]), CU_MEM_HANDLE_TYPE_FABRIC));
+      mc_exported_handle = invalidator;
+      LOG(WARNING)
+          << "SymmetricMemory: fail to export multicast handle.\n"
+          << e.what();
     }
   }
 
-  // All rank adds their physical allocation to the multicast object
-  C10_CUDA_DRIVER_CHECK(
-      driver_api->cuMulticastAddDevice_(mc_handle, block->device_idx));
-  C10_CUDA_DRIVER_CHECK(driver_api->cuMulticastBindMem_(
-      mc_handle, 0, block->alloc_ref->handle, 0, block->block_size, 0));
+  // Phase 2: Exchange handle
+  McHandleType recv_handle;
+  if constexpr (!use_fabric_handle) {
+    recv_handle = ipc_channel.broadcast_fds(rank, 0, pids, mc_exported_handle);
+  } else {
+    // TODO implement storeExchange.broadcast
+    auto gathered_handles = storeExchange.all_gather(store, rank, world_size, mc_exported_handle);
+    recv_handle = std::move(gathered_handles[0]);
+  }
 
+  // Check exchange result
+  if (memcmp(&recv_handle, &invalidator, sizeof(McHandleType)) == 0) {
+    LOG(WARNING) << "Gracefully skipping multicast initialization.";
+    return;
+  }
+
+  // Flip to true after all CUDA steps finish
+  bool success_end = false;
+
+  // Phase 3: Import handle (non-0 ranks only)
+  if (rank != 0) {
+    if constexpr (!use_fabric_handle) {
+      // Convert back to a handle from the broadcasted POSIX file descriptor.
+      C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
+          &mc_handle,
+          (void*)(uintptr_t)recv_handle,
+          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR), check_all);
+    } else {
+      C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMemImportFromShareableHandle_(
+          &mc_handle, (void*)&(recv_handle), CU_MEM_HANDLE_TYPE_FABRIC), check_all);
+    }
+  }
+
+  // Phase 4: Bind memory
+  // All rank adds their physical allocation to the multicast object
+  C10_CUDA_DRIVER_CHECK_GOTO(
+      driver_api->cuMulticastAddDevice_(mc_handle, block->device_idx), check_all);
+  C10_CUDA_DRIVER_CHECK_GOTO(driver_api->cuMulticastBindMem_(
+      mc_handle, 0, block->alloc_ref->handle, 0, block->block_size, 0), check_all);
+
+  success_end = true;
+
+check_all:
+  // Whether all ranks have succeeded
+  bool all_succeed = true;
+  auto rank_successes = storeExchange.all_gather(store, rank, world_size, success_end);
+  for (int r = 0; r < world_size; ++r) {
+    all_succeed &= rank_successes[r];
+  }
+  // Close the file descriptor before exit
+  if constexpr (!use_fabric_handle) {
+    close(recv_handle);
+  }
+  if (!all_succeed) {
+    LOG(WARNING) << "Gracefully skipping multicast initialization.";
+    return;
+  }
+
+  // Phase 5: Map to virtual memory
   map_block(&mc_addr, mc_handle, block->block_size, block->device_idx);
-  storeExchange.barrier(store, rank, world_size);
 #endif
 }
 
@@ -699,7 +718,11 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
 #elif defined(USE_ROCM)
     C10_HIP_CHECK(hipMemImportFromShareableHandle(
         &handles[r],
+#if ROCM_VERSION >= 70100
+        reinterpret_cast<void*>(static_cast<uintptr_t>(imported_handles[r])),
+#else
         (void*)(uintptr_t) & (imported_handles[r]),
+#endif
         hipMemHandleTypePosixFileDescriptor));
 #else
     TORCH_CHECK(
