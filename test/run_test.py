@@ -225,7 +225,7 @@ S390X_BLOCKLIST = [
     "inductor/test_inplacing_pass",
     "inductor/test_kernel_benchmark",
     "inductor/test_max_autotune",
-    "inductor/test_move_constructors_to_cuda",
+    "inductor/test_move_constructors_to_gpu",
     "inductor/test_multi_kernel",
     "inductor/test_pattern_matcher",
     "inductor/test_perf",
@@ -413,6 +413,7 @@ AOT_DISPATCH_TESTS = [
     test for test in TESTS if test.startswith("functorch/test_aotdispatch")
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
+DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
 QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
 
@@ -883,7 +884,8 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         if TEST_CUDA or TEST_XPU:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
         if TEST_CUDA:
-            exts_to_build.append((install_cmd, "libtorch_agnostic_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agnostic_2_9_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agnostic_2_10_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
                 cmd,
@@ -911,12 +913,16 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
                 if "-packages" in directory:
                     install_directories.append(os.path.join(root, directory))
 
-        for root, directories, _ in os.walk(
-            os.path.join(cpp_extensions, "libtorch_agnostic_extension", "install")
-        ):
-            for directory in directories:
-                if "-packages" in directory:
-                    install_directories.append(os.path.join(root, directory))
+        for extension_name in [
+            "libtorch_agnostic_2_9_extension",
+            "libtorch_agnostic_2_10_extension",
+        ]:
+            for root, directories, _ in os.walk(
+                os.path.join(cpp_extensions, extension_name, "install")
+            ):
+                for directory in directories:
+                    if "-packages" in directory:
+                        install_directories.append(os.path.join(root, directory))
 
         with extend_python_path(install_directories):
             return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
@@ -1346,6 +1352,16 @@ def parse_args():
         help="Run all distributed tests",
     )
     parser.add_argument(
+        "--include-dynamo-core-tests",
+        "--include-dynamo-core-tests",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run dynamo tests. "
+            "If this flag is not present, we will run all tests "
+            "(including dynamo tests)."
+        ),
+    )
+    parser.add_argument(
         "--functorch",
         "--functorch",
         action="store_true",
@@ -1609,6 +1625,12 @@ def get_selected_tests(options) -> list[str]:
     if options.core:
         selected_tests = list(
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
+        )
+
+    # Filter to only run dynamo tests when --include-dynamo-core-tests option is specified
+    if options.include_dynamo_core_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in DYNAMO_CORE_TESTS, selected_tests)
         )
 
     # Filter to only run functorch tests when --functorch option is specified
