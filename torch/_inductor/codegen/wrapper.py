@@ -140,7 +140,8 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
 
 def codegen_reinterpret_view_helper(data):
     """
-    Collapse a chain of (ReinterpretView <- TensorBox| StorageBox)... <- buffer wrappers if every layer
+    Collapse a chain of ReinterpretView <- StorageBox
+    <- ReinterpretView <- StorageBox.... <- buffer wrappers if every layer
     has the same offset as the innermost (base) buffer.
 
     Returns:
@@ -2070,7 +2071,7 @@ class PythonWrapperCodegen(CodeGen):
         #       ),
         #       layout=(10, 10),
         #     )
-        # In this case, x.data.layout == X.layout is (10, 10), the reinterpret view will return buf0,
+        # In this case, x.data.layout == x.layout is (10, 10), the reinterpret view will return buf0,
         # but buf0 need to be viewed from (2, 5, 10) to (10, 10).
         # So we need to dig into the chain to find the innermost buffer's layout.
         d_size, d_stride, d_offset, d_dtype, collapsible = (
