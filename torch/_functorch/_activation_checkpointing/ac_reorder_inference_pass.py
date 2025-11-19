@@ -1,14 +1,5 @@
 """
-Activation Checkpointing Reordering Pass for Inference Graphs
-
-Minimizes memory by duplicating checkpointed operations for backward use,
-then using DCE to remove unused forward versions.
-
-Strategy:
-1. Apply partitioner's edge case helpers for correctness
-2. Build new graph, duplicating checkpointed nodes just-in-time when needed
-3. DCE cleanup (with custom is_impure_node like partitioner)
-4. raise_getitems pass for better memory
+AC reordering pass: Duplicates checkpointed nodes for backward, then DCE removes unused forward versions.
 """
 
 import torch
@@ -33,19 +24,7 @@ def _is_backward_node(node: fx.Node) -> bool:
 
 def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModule:
     """
-    Remap (rematerialize) checkpointed nodes by duplicating checkpoint regions for backward.
-
-    Strategy:
-    1. Apply partitioner's edge case handling first (MUST_SAVE, collectives, etc.)
-    2. Build new graph, duplicating checkpointed nodes just-in-time when needed
-    3. DCE cleanup (with custom is_impure_node like partitioner)
-    4. raise_getitems pass
-
-    Args:
-        gm: Graph with forward and backward ops (inference mode joint graph)
-
-    Returns:
-        Graph with rematerialized checkpoint regions
+    Duplicate checkpointed nodes for backward use. DCE removes unused forward versions.
     """
     # Early exit if no checkpointed ops
     if not has_recomputable_ops(gm):
@@ -73,17 +52,15 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
 
     # Find backward boundary
     first_node_in_bwd = None
-    for node in gm.graph.nodes:
+    bwd_start = None
+    for idx, node in enumerate(gm.graph.nodes):
         if _is_backward_node(node):
             first_node_in_bwd = node
+            bwd_start = idx
             break
 
     if first_node_in_bwd is None:
         return gm
-
-    # Build ordering
-    order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
-    bwd_start = order[first_node_in_bwd]
 
     # Build reordered graph
     new_graph = fx.Graph()
@@ -115,37 +92,32 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
             if x in recomputed_nodes:
                 return recomputed_nodes[x]
             # Otherwise reuse from forward (checkpoint inputs)
-            return env.get(x, x)
+            assert x in env
+            return env[x]
 
         dup = new_graph.node_copy(node, get_input)
         dup.name = node.name + "_recomputed"
         recomputed_nodes[node] = dup
         return dup
 
-    def insert_fwd_node(node: fx.Node) -> None:
-        """Insert a forward node - simple copy since all deps already in env."""
-        if node in env:
-            return
-        env[node] = new_graph.node_copy(node, lambda x: env[x])
-
     def insert_bwd_node(node: fx.Node) -> None:
         """Insert a backward node - duplicates checkpointed inputs on demand."""
         if node in env or node in recomputed_nodes:
             return
 
-        # Copy node and remap inputs (duplicates checkpointed ones on demand)
-        def remap_input(x: fx.Node) -> fx.Node:
+        def remat_input(x: fx.Node) -> fx.Node:
             if must_recompute(x):
                 return duplicate_checkpoint_chain(x)
-            return env.get(x, x)
+            assert x in env
+            return env[x]
 
-        env[node] = new_graph.node_copy(node, remap_input)
+        env[node] = new_graph.node_copy(node, remat_input)
 
     # Insert forward nodes
     for node in list(gm.graph.nodes)[:bwd_start]:
         if node.op in ("placeholder", "output"):
             continue
-        insert_fwd_node(node)
+        env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     # Insert backward nodes
     for node in list(gm.graph.nodes)[bwd_start:]:
@@ -153,16 +125,16 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
             continue
         insert_bwd_node(node)
 
-    # Handle output
     output_node = list(gm.graph.nodes)[-1]
     assert output_node.op == "output"
 
     def get_output_arg(x):
-        if isinstance(x, fx.Node):
-            if x in recomputed_nodes:
-                return recomputed_nodes[x]
-            return env.get(x, x)
-        return x
+        if not isinstance(x, fx.Node):
+            return x
+        if x in recomputed_nodes:
+            return recomputed_nodes[x]
+        assert x in env
+        return env[x]
 
     new_graph.output(tuple(get_output_arg(arg) for arg in output_node.args[0]))
     new_gm = torch.fx.GraphModule(gm, new_graph)

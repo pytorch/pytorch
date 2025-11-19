@@ -2220,7 +2220,8 @@ def forward(self, arg0_1, arg1_1):
 
         # Should raise error about RNG ops not being supported
         with self.assertRaisesRegex(
-            RuntimeError, "Activation checkpoint reordering does not support RNG ops"
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Activation checkpoint reordering in fullgraph does not support RNG ops",
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True)
 
