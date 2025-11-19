@@ -153,27 +153,6 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
     tensor_dim = gen->get_sharding_spec(local_shape, global_offset, global_shape, global_strides);
   }
 
-  // Debug print for sharding spec arrays
-  printf("[DEBUG] tensor_dim=%llu\n", (unsigned long long)tensor_dim);
-  if (tensor_dim > 0) {
-    printf("[DEBUG] local_shape: ");
-    for (uint64_t i = 0; i < tensor_dim; ++i) {
-      printf("%llu%s", (unsigned long long)local_shape[i], (i < tensor_dim - 1) ? ", " : "\n");
-    }
-    printf("[DEBUG] global_offset: ");
-    for (uint64_t i = 0; i < tensor_dim; ++i) {
-      printf("%llu%s", (unsigned long long)global_offset[i], (i < tensor_dim - 1) ? ", " : "\n");
-    }
-    printf("[DEBUG] global_shape: ");
-    for (uint64_t i = 0; i < tensor_dim; ++i) {
-      printf("%llu%s", (unsigned long long)global_shape[i], (i < tensor_dim - 1) ? ", " : "\n");
-    }
-    printf("[DEBUG] global_strides: ");
-    for (uint64_t i = 0; i < tensor_dim; ++i) {
-      printf("%llu%s", (unsigned long long)global_strides[i], (i < tensor_dim - 1) ? ", " : "\n");
-    }
-  }
-
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
       distribution_nullary_kernel<scalar_t, accscalar_t, dist_func_return_t>(sub_iter, gen, dist_func, transform_func);
@@ -200,46 +179,20 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
   TORCH_CHECK(single_thread_n > 0, "single_thread_n is 0!!!");
 
   auto virtual_idx_func = [=] __device__(uint64_t local_entry_linear_idx) {
-    printf("[DEBUG] virtual_idx_func: local_entry_linear_idx=%llu, tensor_dim=%llu, single_thread_n=%llu\n",
-           local_entry_linear_idx,
-           tensor_dim,
-           single_thread_n);
     if (tensor_dim == 0) { // not a dtensor
-      printf("[DEBUG] tensor_dim==0 branch: returning (%llu, %llu, %llu)\n",
-             local_entry_linear_idx % single_thread_n,
-             local_entry_linear_idx / single_thread_n,
-             single_thread_n);
       return std::make_tuple(
           local_entry_linear_idx % single_thread_n, local_entry_linear_idx / single_thread_n, single_thread_n);
     }
     uint64_t tmp_idx = local_entry_linear_idx;
     uint64_t global_entry_linear_idx = 0;
-    printf("[DEBUG] Starting loop: tmp_idx=%llu, global_entry_linear_idx=%llu\n", tmp_idx, global_entry_linear_idx);
     for (int i = tensor_dim - 1; i >= 0; --i) {
       uint64_t global_idx_at_i = global_offset[i] + tmp_idx % local_shape[i];
-      printf("[DEBUG] Loop i=%d: global_offset[i]=%llu, tmp_idx mod local_shape[i]=%llu, global_idx_at_i=%llu\n",
-             i,
-             global_offset[i],
-             tmp_idx % local_shape[i],
-             global_idx_at_i);
       tmp_idx /= local_shape[i];
       global_entry_linear_idx += global_idx_at_i; // 0*4
-      printf(
-          "[DEBUG] Loop i=%d: global_strides[i]=%llu, global_entry_linear_idx=%llu, tmp_idx=%llu, global_idx_at_i=%llu\n",
-          i,
-          global_strides[i],
-          global_entry_linear_idx,
-          tmp_idx,
-          global_idx_at_i);
     }
     uint64_t virtual_thread_idx = global_entry_linear_idx % single_thread_n;
     uint64_t virtual_offset = global_entry_linear_idx / single_thread_n;
-    printf("[DEBUG] Before adjustment: virtual_thread_idx=%llu, virtual_offset=%llu\n",
-           virtual_thread_idx,
-           virtual_offset);
     virtual_offset *= 4 / unroll_factor;
-    printf("[DEBUG] After adjustment (unroll_factor=%d): virtual_offset=%llu\n", unroll_factor, virtual_offset);
-    printf("[DEBUG] Returning: (%llu, %llu, %llu)\n", virtual_thread_idx, virtual_offset, single_thread_n);
     return std::make_tuple(virtual_thread_idx, virtual_offset, single_thread_n);
   };
 
