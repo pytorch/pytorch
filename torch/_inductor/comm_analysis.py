@@ -321,7 +321,7 @@ def estimate_nccl_collective_runtime_impl(
 
 def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     """
-    Returns estimated NCCL collective runtime in nanoseconds (ns).
+    Returns estimated NCCL collective runtime in nanoseconds (ms).
 
     The following heuristics are copied from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc.
     We aim to estimate the runtime as accurately as possible.
@@ -341,12 +341,58 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
 
 def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
-    sz_bytes = 0
-    for node in fx_node.all_input_nodes:
-        if (t := node.meta.get("val")) is not None:
-            numel = get_size_numel(t.size())
-            sz_bytes += numel * get_dtype_size(t.dtype)
-    return sz_bytes
+    """Estimate the size of a collective operation in bytes, including inputs and outputs."""
+    input_bytes = None
+
+    args, kwargs = fx_node.args, fx_node.kwargs
+    kwargs = dict(kwargs)
+
+    # dont double count pre-allocated buffer passed in
+    kwargs.pop("out", None)
+
+    def tensor_bytes(t) -> int:
+        return get_size_numel(t.size()) * get_dtype_size(t.dtype)
+
+    def add_inp_bytes(inp: torch.fx.Node):
+        t = inp.meta.get("val", None)
+        if t is None:
+            return
+
+        nonlocal input_bytes
+        if input_bytes is None:
+            input_bytes = 0
+        input_bytes += tensor_bytes(t)
+
+    pytree.tree_map_only(
+        torch.fx.Node,
+        add_inp_bytes,
+        (args, kwargs),
+    )
+
+    output_tensor = fx_node.meta.get("val", None)
+
+    if input_bytes is None or output_tensor is None:
+        return 0
+
+    output_bytes = (
+        get_size_numel(output_tensor.size()) * output_tensor.element_size()
+    )  # pyre-ignore
+
+    return input_bytes + output_bytes
+
+
+def estimate_fx_collective_memory_footprint(fx_node: torch.fx.Node) -> int:
+    """Estimate the memory footprint of a collective operation in bytes.
+
+    This returns the total bytes that need to be live concurrently in memory.
+    For all_reduce, we divide by 2 since it can be done in-place.
+    """
+    from torch._inductor.fx_passes.bucketing import (
+        is_all_reduce_tensor as is_all_reduce,
+    )
+
+    size = estimate_fx_collective_size(fx_node)
+    return size if not is_all_reduce(fx_node) else size // 2
 
 
 def estimate_nccl_collective_runtime_from_fx_node(
@@ -355,7 +401,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
     use_nccl_estimator: bool = True,
 ) -> float:
     """
-    Returns estimated NCCL collective runtime in nanoseconds (ns).
+    Returns estimated NCCL collective runtime in nanoseconds (ms).
 
     The following heuristics are copied from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc.
     We aim to estimate the runtime as accurately as possible.
