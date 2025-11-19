@@ -35,7 +35,11 @@ from typing import Any, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
-from torch._dynamo.variables.misc import DatetimeNowVariable, TimedeltaVariable
+from torch._dynamo.variables.misc import (
+    DatetimeNowVariable,
+    DatetimeScalarVariable,
+    TimedeltaVariable,
+)
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -901,7 +905,6 @@ class BuiltinVariable(VariableTracker):
                 (a_proxy, b_proxy),
                 {},
             )
-            # Ideally we'd like to have some Source wrapper for two sources at once
             return TimedeltaVariable(proxy=proxy, source=a.source)
 
         datetime_sub_handlers: list[
@@ -920,6 +923,25 @@ class BuiltinVariable(VariableTracker):
             ),
         ]
         op_handlers[operator.sub].extend(datetime_sub_handlers)
+
+        def datetime_scalar_sub_handler(tx: "InstructionTranslator", a, b):
+            a_proxy = a.as_proxy()
+            b_proxy = b.as_proxy()
+            proxy = tx.output.create_proxy(
+                "call_function",
+                operator.sub,
+                (a_proxy, b_proxy),
+                {},
+            )
+            proxy.node.meta["example_value"] = 0.0
+            return DatetimeScalarVariable(proxy=proxy, source=a.source)
+
+        op_handlers[operator.sub].append(
+            (
+                (DatetimeScalarVariable, DatetimeScalarVariable),
+                datetime_scalar_sub_handler,
+            )
+        )
 
         for op in supported_comparison_ops.values():
             assert callable(op)

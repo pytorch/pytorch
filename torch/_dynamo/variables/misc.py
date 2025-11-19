@@ -2101,6 +2101,10 @@ class WeakRefVariable(VariableTracker):
         codegen.extend_output(create_call_function(2, False))
 
 
+def datetime_now():
+    return datetime.datetime.now()
+
+
 class DatetimeClassVariable(VariableTracker):
     def is_python_constant(self):
         return False
@@ -2120,10 +2124,6 @@ class DatetimeClassVariable(VariableTracker):
             source = AttrSource(self.source, "now")
             return DatetimeNowVariable(source=source, proxy=proxy)
         return super().call_method(tx, name, args, kwargs)
-
-
-def datetime_now():
-    return datetime.datetime.now()
 
 
 class DatetimeNowVariable(VariableTracker):

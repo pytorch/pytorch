@@ -13308,6 +13308,50 @@ fn
 
         self.assertEqual(counter.frame_count, 1)
 
+    def test_multiple_datetime_now_in_graph_stable_compile(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            t1 = datetime.datetime.now()
+            t2 = datetime.datetime.now()
+            elapsed = (t2 - t1).total_seconds()
+            z = x * elapsed
+            t3 = datetime.datetime.now()
+            return z + t3.second
+
+        x = torch.randn(6)
+
+        out1 = fn(x)
+        out2 = fn(x)
+
+        self.assertEqual(out1.shape, x.shape)
+        self.assertEqual(out2.shape, x.shape)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_datetime_now_in_graph_no_recompile_import_as(self):
+        from datetime import datetime as dt
+
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter, fullgraph=True)
+        def fn(x):
+            t = dt.now()
+            return x + t.second
+
+        x = torch.randn(4)
+
+        # multiple runs shouldn't trigger recompile
+        out1 = fn(x)
+        out2 = fn(x)
+
+        self.assertEqual(out1.shape, x.shape)
+        self.assertEqual(out1.dtype, x.dtype)
+        self.assertEqual(out2.shape, x.shape)
+        self.assertEqual(out2.dtype, x.dtype)
+
+        self.assertEqual(counter.frame_count, 1)
+
     def test_datetime_elapsed_total_seconds_scalar_used(self):
         counter = CompileCounter()
 
@@ -13346,16 +13390,104 @@ fn
         out1 = fn(x)
         out2 = fn(x)
 
-        print(f"out1: {out1} {out1.shape} {out1.dtype}")
-        print(f"out2: {out2} {out2.shape} {out2.dtype}")
-        print(f"x: {x} {x.shape} {x.dtype}")
-
         self.assertEqual(out1.shape, x.shape)
         self.assertEqual(out1.dtype, x.dtype)
         self.assertEqual(out2.shape, x.shape)
         self.assertEqual(out2.dtype, x.dtype)
 
         self.assertEqual(counter.frame_count, 1)
+
+    def test_datetime_scalar_cant_be_used_in_control_flow(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            start = datetime.datetime.now()
+            y = x + 1
+            end = datetime.datetime.now()
+            elapsed = end - start
+            s = elapsed.total_seconds()
+            if s > 0.0:
+                return y * 2
+            else:
+                return y
+
+        x = torch.randn(4)
+        out = fn(x)
+        out1 = fn(x)
+        self.assertEqual(out.shape, x.shape)
+        self.assertEqual(counter.frame_count, 0)
+
+    def test_datetime_cant_be_used_in_control_flow(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            if datetime.datetime.now():
+                return x + 1
+            else:
+                return x - 1
+
+        x = torch.randn(4)
+
+        out = fn(x)
+        out1 = fn(x)
+        self.assertEqual(out.shape, x.shape)
+        self.assertEqual(counter.frame_count, 0)
+
+    def test_datetime_used_only_for_logging(self):
+        counter = CompileCounter()
+
+        @torch.compile(backend=counter)
+        def fn(x):
+            t1 = datetime.datetime.now()
+            y = x + 1
+            t2 = datetime.datetime.now()
+            _ = (t2 - t1).total_seconds()
+            return y
+
+        x = torch.randn(4)
+
+        out = fn(x)
+        self.assertEqual(out.shape, x.shape)
+        self.assertGreaterEqual(counter.frame_count, 1)
+
+    def test_datetime_now_not_called_in_tracing(self):
+        import torch._dynamo.variables.misc as misc
+
+        dt_now = misc.datetime_now
+        calls_counter = 0
+
+        def count_now_calls():
+            nonlocal calls_counter
+            calls_counter += 1
+            return dt_now()
+
+        misc.datetime_now = count_now_calls
+        try:
+            counter = CompileCounter()
+
+            @torch.compile(backend=counter)
+            def fn(x):
+                t1 = datetime.datetime.now()
+                t2 = datetime.datetime.now()
+                return x + (t2.second - t1.second)
+
+            x = torch.randn(3)
+
+            # compilation can't call now()
+            self.assertEqual(calls_counter, 0)
+
+            out1 = fn(x)
+            self.assertEqual(calls_counter, 2)
+
+            out2 = fn(x)
+            self.assertEqual(calls_counter, 4)
+
+            self.assertEqual(counter.frame_count, 1)
+
+        finally:
+            misc.datetime_now = dt_now
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
