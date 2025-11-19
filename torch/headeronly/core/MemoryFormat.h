@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <cstdint>
 #include <ostream>
@@ -51,9 +52,7 @@ inline std::ostream& operator<<(
       return stream << "ChannelsLast3d";
     case MemoryFormat::NumOptions:
     default:
-      // Note: We can't use TORCH_CHECK here as it's not header-only
-      // Callers should ensure valid memory format values
-      return stream << "Unknown";
+      STD_TORCH_CHECK(false, "Unknown memory format ", memory_format);
   }
 }
 

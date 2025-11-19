@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/Exception.h>
 
 #include <cstdint>
 #include <ostream>
@@ -48,9 +49,7 @@ inline std::ostream& operator<<(std::ostream& stream, Layout layout) {
       return stream << "Jagged";
     case Layout::NumOptions:
     default:
-      // Note: We can't use TORCH_CHECK here as it's not header-only
-      // Callers should ensure valid layout values
-      return stream << "Unknown";
+      STD_TORCH_CHECK(false, "Unknown layout");
   }
 }
 
