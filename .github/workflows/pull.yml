@@ -343,14 +343,14 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-inductor-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cuda13_0-py3_10-gcc9-inductor-build:
-    name: cuda13.0-py3.10-gcc9-sm75
+  linux-jammy-cuda13_0-py3_10-gcc11-inductor-build:
+    name: cuda13.0-py3.10-gcc11-sm75
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc9-sm75
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm75
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '7.5'
       test-matrix: |
         { include: [
@@ -358,14 +358,14 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-jammy-cuda13_0-py3_10-gcc9-inductor-test:
-    name: cuda13.0-py3.10-gcc9-sm75
+  linux-jammy-cuda13_0-py3_10-gcc11-inductor-test:
+    name: cuda13.0-py3.10-gcc11-sm75
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cuda13_0-py3_10-gcc9-inductor-build
+    needs: linux-jammy-cuda13_0-py3_10-gcc11-inductor-build
     with:
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc9-sm75
-      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm75
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-inductor-build.outputs.test-matrix }}
     secrets: inherit
 
   linux-jammy-xpu-n-py3_10-build:
