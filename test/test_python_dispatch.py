@@ -302,7 +302,7 @@ class TestPythonRegistration(TestCase):
         # 1 for `lib`, 1 for sys.getrefcount' for previous python version (<=3.12)
         # In Python 3.13+, sys.getrefcount() was optimized to not create
         # a temporary reference, so expected counts are 1 less than before
-        expected_refcount = 1 if sys.version_info >= (3, 13) else 2
+        expected_refcount = 1 if sys.version_info >= (3, 14) else 2
         self.assertEqual(sys.getrefcount(lib), expected_refcount)
 
         # We gained an additional reference that gets cleared when the finalizer runs
