@@ -793,15 +793,19 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return {};
   }
 
+  // When using user pools under cudaMallocAsync, we do nothing,
+  // as all memory is redirected to a single cudaMallocAsync backend pool.
   void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)> /*filter*/) override {
-    // We direct all allocations to the cudaMallocAsync mempool.
+    // No operation required.
   }
 
   void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
-      override {}
+      override {
+    // No operation required.
+  }
 
   // CUDAGraph interactions
   void beginAllocateToGraphPool(

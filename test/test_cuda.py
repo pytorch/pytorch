@@ -100,14 +100,13 @@ requiresCppContext = unittest.skipUnless(
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests  # noqa: PLW0127
 
-#try:
-#    import torchvision.models  # noqa: F401
-#    from torchvision.models import resnet18  # noqa: F401
-#
-#    HAS_TORCHVISION = True
-#except ImportError:
-#    HAS_TORCHVISION = False
-HAS_TORCHVISION = False
+try:
+   import torchvision.models  # noqa: F401
+   from torchvision.models import resnet18  # noqa: F401
+
+   HAS_TORCHVISION = True
+except ImportError:
+   HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 TEST_CUDAMALLOCASYNC = TEST_CUDA and (

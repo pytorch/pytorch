@@ -1170,16 +1170,6 @@ class DeviceCachingAllocator {
   // whether they came from private_pools or one of the BlockPools above.
   ska::flat_hash_set<Block*> active_blocks;
 
-  // pool_stack tracks mempool redirection for allocations.
-  // Treated as a stack: we traverse from the back so inner use_mem_pool
-  // contexts override outer ones. Each entry’s filter typically encodes
-  // thread-local context
-  std::vector<std::pair<MempoolId_t, std::function<bool(cudaStream_t)>>>
-      pool_stack;
-
-  // tracks which pools we can use as a last resort before ooming
-  ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
-
   // Map of blocks whose freeing is deferred until after CUDA graph capture.
   //   - Key: Block* to be freed.
   //   - Value: List of "empty nodes" inserted as free markers during capture.
@@ -1224,30 +1214,37 @@ class DeviceCachingAllocator {
   // Ring buffer for memory snapshot TraceEntry's
   RingBuffer<TraceEntry> alloc_buffer;
 
-  // Members specific to CUDA graphs
-
-  // Holds information about the CUDA graph memory pool currently being captured
-  // (if any).
-  struct CapturingGraphPool {
+  // User Memory pool and CUDA Graph memory pool management
+  struct MempoolContext {
     MempoolId_t mempool_id;
     std::function<bool(cudaStream_t)> filter;
     PrivatePool* private_pool;
   };
+
   // The optional currently-active capturing graph pool.
   // When capturing_graph_pool.has_value() is false (the usual case),
   // malloc can skip invoking cudaStreamGetCaptureInfo, for performance on the
   // hot path. We are not multi-threaded capture at this moment, so we don't
   // need to worry about thread-safety.
-  std::optional<CapturingGraphPool> capturing_graph_pool{std::nullopt};
+  std::optional<MempoolContext> capturing_graph_pool{std::nullopt};
 
-  // Map of currently active private pools, used by CUDA graph memory pools or
-  // other mempools.
+  // user_mempool_stack tracks user mempools for allocations.
+  // Treated as a stack: we traverse from the back so inner use_mem_pool
+  // contexts override outer ones. Each entry’s filter typically encodes
+  // thread-local context
+  std::vector<MempoolContext> user_mempool_stack;
+
+  // tracks which pools we can use as a last resort before ooming
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
+
+  // Map of currently active private pools (CUDA Graph memory pools or user
+  // mempools)
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
       private_pools;
-  // Map of private pools that are no longer referenced by any graph or mempool
-  // and thus eligible for block freeing. We use a map for efficient insertion
-  // and removal; alternate container types (e.g. vector, deque, list) are not
-  // required, as access and modifications are infrequent.
+  // Pools is going to be retired. Their BlockPools are eligible for
+  // free_blocks. Can't be a vector or deque because we might erase entries in
+  // any order. Could be an std::list, but we don't care much, access and
+  // insert/erase are rare.
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
       private_pools_freeable;
 
@@ -2523,19 +2520,22 @@ class DeviceCachingAllocator {
         "Under capture we are not allowed to use another mempool");
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
-    for (auto it2 = pool_stack.begin(); it2 != pool_stack.end(); ++it2) {
+    for (auto it2 = user_mempool_stack.begin(); it2 != user_mempool_stack.end();
+         ++it2) {
       TORCH_CHECK(
-          it2->first != mempool_id,
+          it2->mempool_id != mempool_id,
           "beginAllocateToPool: already recording to mempool_id");
     }
-    pool_stack.emplace_back(mempool_id, std::move(filter));
+    user_mempool_stack.emplace_back(MempoolContext{
+        mempool_id, std::move(filter), get_private_pool(mempool_id)});
   }
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
-    for (auto it = pool_stack.begin(); it != pool_stack.end(); ++it) {
-      if (it->first == mempool_id) {
-        pool_stack.erase(it);
+    for (auto it = user_mempool_stack.begin(); it != user_mempool_stack.end();
+         ++it) {
+      if (it->mempool_id == mempool_id) {
+        user_mempool_stack.erase(it);
         return;
       }
     }
@@ -2552,7 +2552,7 @@ class DeviceCachingAllocator {
         "Under capture we are not allowed to use another mempool");
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
-    capturing_graph_pool = CapturingGraphPool{
+    capturing_graph_pool = MempoolContext{
         mempool_id, std::move(filter), get_private_pool(mempool_id)};
   }
 
@@ -2973,24 +2973,26 @@ class DeviceCachingAllocator {
       }
     };
 
-    auto get_memory_pool = [&](MempoolId_t mempool_id) -> BlockPool& {
+    auto get_memory_pool = [&](PrivatePool* private_pool) -> BlockPool& {
       if (size <= kSmallSize) {
-        return get_private_pool(mempool_id)->small_blocks;
+        return private_pool->small_blocks;
       } else {
-        return get_private_pool(mempool_id)->large_blocks;
+        return private_pool->large_blocks;
       }
     };
 
     if (C10_UNLIKELY(capturing_graph_pool.has_value())) {
       if (capturing_graph_pool->filter(stream)) {
-        return get_memory_pool(capturing_graph_pool->mempool_id);
+        return get_memory_pool(capturing_graph_pool->private_pool);
       }
       // stream is not captured, use default pool
-    } else if (C10_UNLIKELY(!pool_stack.empty())) {
-      for (auto it = pool_stack.rbegin(); it != pool_stack.rend(); ++it) {
-        auto& [mempool_id, filter] = *it;
-        if (filter(stream)) {
-          return get_memory_pool(mempool_id);
+    } else if (C10_UNLIKELY(!user_mempool_stack.empty())) {
+      for (auto it = user_mempool_stack.rbegin();
+           it != user_mempool_stack.rend();
+           ++it) {
+        // Filter the pools to select the thread-local context
+        if (it->filter(stream)) {
+          return get_memory_pool(it->private_pool);
         }
       }
       // no matching pool found, use default pool
@@ -3329,7 +3331,8 @@ class DeviceCachingAllocator {
   bool release_cached_blocks(
       const std::shared_ptr<GatheredContext>& context,
       MempoolId_t mempool_id) {
-    if (mempool_id.first == 0 && mempool_id.second == 0 && pool_stack.empty()) {
+    if (mempool_id.first == 0 && mempool_id.second == 0 &&
+        user_mempool_stack.empty()) {
       // If there is no active mempool, we work on releasing *all* blocks.
 
       // First ensure that all blocks that can't currently be allocated due to
@@ -4541,4 +4544,3 @@ std::atomic<CUDAAllocator*> allocator;
 static BackendStaticInitializer backend_static_initializer;
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
-  
