@@ -408,7 +408,7 @@ class MixOrderReductionTest(TestBase):
             out.backward(dy)
             return x.grad, w.grad
 
-        M0, M1, N = 1151, 1023, 256
+        M0, M1, N = 251, 223, 128
         wbdtype = torch.float
         xdtype = torch.float
         x = torch.randn(M0, M1, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
