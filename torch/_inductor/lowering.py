@@ -2453,14 +2453,7 @@ def get_threads_per_round(device: torch.device):
 
 
 @register_lowering(inductor_prims.random, type_promotion_kind=None)
-def inductor_random(
-    size: list[int],
-    seed: TensorBox,
-    mode: str,
-    *,
-    offset: int = 0,
-    align_dtype: torch.dtype = torch.float32,
-):
+def inductor_random(size: list[int], seed: TensorBox, mode: str, *, offset: int = 0, align_dtype: torch.dtype = torch.float32):
     assert not config.fallback_random
     assert mode in ("rand", "randn")
     size = [*size]
@@ -2484,8 +2477,10 @@ def inductor_random(
         vec = _vec_from_dtype(align_dtype)
 
         def inner_fn(index):
-            rng_seed = seed_loader([0])
-            base_offset = seed_loader([1])
+            packed = seed_loader([])  # scalar
+            mask_low = (1 << 32)
+            rng_seed = packed // mask_low
+            base_offset = packed % mask_low
             return ops.rand_eager(
                 rng_seed,
                 base_offset,
