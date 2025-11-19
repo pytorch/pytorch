@@ -4070,9 +4070,10 @@ def should_fallback_by_default(node: torch.fx.Node) -> bool:
         target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
     ), f"Expected OpOverload or HigherOrderOperator, but found {type(target)}"
 
+    if _needs_inductor_fallback(node):
+        return True
+
     if not config.fallback_by_default:
-        if _needs_inductor_fallback(node):
-            return True
         return False
 
     # some ops need special handle due to dynamic shapes. we can avoid
