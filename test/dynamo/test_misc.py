@@ -13290,7 +13290,7 @@ fn
     def test_datetime_now_in_graph_no_recompile(self):
         counter = CompileCounter()
 
-        @torch.compile(backend=counter)
+        @torch.compile(backend=counter, fullgraph=True)
         def fn(x):
             t = datetime.datetime.now()
             return x + t.second
@@ -13300,10 +13300,6 @@ fn
         # multiple runs shouldn't trigger recompile
         out1 = fn(x)
         out2 = fn(x)
-
-        print(f"out1: {out1} {out1.shape} {out1.dtype}")
-        print(f"out2: {out2} {out2.shape} {out2.dtype}")
-        print(f"x: {x} {x.shape} {x.dtype}")
 
         self.assertEqual(out1.shape, x.shape)
         self.assertEqual(out1.dtype, x.dtype)
@@ -13315,7 +13311,7 @@ fn
     def test_datetime_elapsed_total_seconds_scalar_used(self):
         counter = CompileCounter()
 
-        @torch.compile(backend=counter)
+        @torch.compile(backend=counter, fullgraph=True)
         def fn(x):
             start = datetime.datetime.now()
             y = x + 1
@@ -13339,7 +13335,7 @@ fn
     def test_datetime_timestamp_scalar_used(self):
         counter = CompileCounter()
 
-        @torch.compile(backend=counter)
+        @torch.compile(backend=counter, fullgraph=True)
         def fn(x):
             t = datetime.datetime.now()
             ts = t.timestamp()
