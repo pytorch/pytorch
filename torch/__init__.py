@@ -2610,6 +2610,12 @@ def compile(
 
         - "max-autotune-no-cudagraphs" is a mode similar to "max-autotune" but without CUDA graphs
 
+        - "lite" is a mode that skips kernel fusion and graph modification to preserve the exact
+          behavior of eager. You can use `fx_traceback.annotate("compile_with_inductor")` to selectively
+          opt-in to compilation again, and `fx_traceback.annotate("fallback_with_inductor")` to disable
+          compilation. The latter is also available with regular inductor modes as long as the
+          `selective_decompose` option is set.
+
         - To see the exact configs that each mode sets you can call `torch._inductor.list_mode_options()`
 
        options (dict): A dictionary of options to pass to the backend. Some notable ones to try out are
