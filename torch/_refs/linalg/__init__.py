@@ -277,7 +277,7 @@ def matrix_norm(
                     new_size[dim] = 1
                 else:
                     del new_size[dim]
-                return torch.zeros(new_size, dtype=A.dtype)
+                return torch.zeros(new_size, dtype=A.dtype, device=A.device)
             else:
                 return max_min(A, dim)
 
