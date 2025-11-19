@@ -2425,8 +2425,8 @@ class PythonWrapperCodegen(CodeGen):
 
     @classmethod
     def _get_triton_info_kernel_cls(cls):
-        # Other inductor triton backends may be subclass from
-        # the TritonKernel class. An override of this method
+        # Other inductor triton backends may subclass from
+        # the `TritonKernel` class. An override of this method
         # allows them to set which subclass to use to get information
         # such as common triton imports or inductor metadata
         from .triton import TritonKernel
