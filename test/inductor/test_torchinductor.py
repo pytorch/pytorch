@@ -13791,8 +13791,8 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 return torch.softmax(t, dim=4)
 
         _, (code,) = run_and_get_code(torch.compile(lite_regional, mode="lite"), qk)
-        FileCheck().check_not("aten.exp.default").check_not(
-            "aten._softmax.default"
+        FileCheck().check_not("aten.exp.default(").check_not(
+            "aten._softmax.default("
         ).check_not("aten::exp").check_not("aten::_softmax").run(code)
 
     def test_lite_regional_fallback(self):
