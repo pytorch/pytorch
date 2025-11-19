@@ -195,7 +195,7 @@ def _use_flex_flash_attention(
 
     if not can_use:
         raise RuntimeError(
-            f"KERNEL_IMPL='FLASH' but flash attention cannot be used: {reason}"
+            f"BACKEND='FLASH' but flash attention cannot be used: {reason}"
         )
 
     return True

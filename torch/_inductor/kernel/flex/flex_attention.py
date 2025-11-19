@@ -13,7 +13,7 @@ import sympy
 
 import torch
 from torch._inductor.virtualized import V
-from torch.nn.attention.flex_attention import _ForceImpl
+from torch.nn.attention.flex_attention import _Backend
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering
@@ -54,12 +54,12 @@ Expr = sympy.Expr
 
 def _sanitize_kernel_options_for_triton(
     kernel_options: dict[str, Any],
-) -> tuple[dict[str, Any], _ForceImpl]:
+) -> tuple[dict[str, Any], _Backend]:
     """We always strip quotes around str values, we only need this in lowering, so we pop it here
     to avoid passing to triton constexpr dict
     """
     sanitized = dict(kernel_options)
-    force_impl = cast(_ForceImpl, sanitized.pop("KERNEL_IMPL", "AUTO"))
+    force_impl = cast(_Backend, sanitized.pop("BACKEND", "AUTO"))
     return sanitized, force_impl
 
 
@@ -202,7 +202,7 @@ def flex_attention(
 
     if force_impl == "TRITON_DECODE" and not can_use_decode:
         raise RuntimeError(
-            "KERNEL_IMPL='TRITON_DECODE' was specified but flex_decoding cannot be used for this input. "
+            "BACKEND='TRITON_DECODE' was specified but flex_decoding cannot be used for this input. "
             "flex_decoding is only available for short sequence lengths with specific configurations."
         )
 
