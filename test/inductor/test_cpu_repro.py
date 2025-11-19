@@ -4514,6 +4514,7 @@ class CPUReproTests(TestCase):
     @config.patch(emulate_precision_casts=True)
     def test_emulate_precision_casts_cpp_backend_no_error(self):
         """
+        See https://github.com/pytorch/pytorch/issues/167205
         emulate_precision_casts threw TypeError on CPP backend.
 
         Before fix: TypeError: CppVecOverrides.to_dtype() got an unexpected
