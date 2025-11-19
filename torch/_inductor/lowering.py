@@ -7275,6 +7275,12 @@ def cond(pred, true_fn, false_fn, operands):
     return list(map(TensorBox.create, result))
 
 
+@register_lowering(torch.ops.higher_order.print, type_promotion_kind=None)
+def print(format_str: str, **kwargs: object):
+    # ir.HopPrint.create(format_str, **kwargs)
+    return None  # type: ignore[call-overload]
+
+
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
 def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
     if any(

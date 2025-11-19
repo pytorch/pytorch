@@ -8739,6 +8739,70 @@ class InvokeSubgraph(ExternKernel):
 
 
 @ir_dataclass(frozen=False)
+class HopPrint(ExternKernel):
+    format_str: Optional[str] = None
+    print_kwargs: Optional[dict[str, Any]] = None
+
+    def __init__(
+        self,
+        format_str: str,
+        print_kwargs: dict[str, Any],
+        layout: NoneLayout,
+    ) -> None:
+        inputs: list[IRNode] = []
+        kwargs_for_op: dict[str, Any] = {}
+
+        # Separate IRNode inputs from constant kwargs
+        for key, value in print_kwargs.items():
+            if isinstance(value, IRNode):
+                inputs.append(value)
+                kwargs_for_op[key] = value
+            else:
+                kwargs_for_op[key] = value
+
+        super().__init__(
+            name=None,
+            layout=layout,
+            inputs=inputs,
+            constant_args=(format_str,),
+            kwargs=kwargs_for_op,
+            python_kernel_name="torch.ops.higher_order.print",
+        )
+        # self.format_str = format_str
+        # self.print_kwargs = print_kwargs
+        # self.name = V.graph.register_buffer(self)
+        # V.graph.register_operation(self)
+
+    @classmethod
+    def create(
+        cls,
+        format_str: str,
+        **kwargs: object,
+    ) -> list[NoneAsConstantBuffer]:
+        # Realize inputs that are IRNodes
+        realized_kwargs: dict[str, Any] = {}
+        for key, value in kwargs.items():
+            if isinstance(value, (TensorBox, StorageBox)):
+                realized_kwargs[key] = cls.realize_input(value)
+            else:
+                realized_kwargs[key] = value
+
+        # Create the HopPrint node with NoneLayout since print returns None
+        # hop_print = HopPrint(
+        #     format_str=format_str,
+        #     print_kwargs=realized_kwargs,
+        #     layout=NoneLayout(device=None),
+        # )
+
+        # Return a NoneAsConstantBuffer to indicate a side-effecting node with no output
+        return [NoneAsConstantBuffer()]
+
+    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
+        # wrapper.writeline(f'print("{self.format_str}".format(**self.print_kwargs))')
+        return None
+
+
+@ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
     predicate: Optional[IRNode] = None
     operands: Optional[Sequence[IRNode]] = None
