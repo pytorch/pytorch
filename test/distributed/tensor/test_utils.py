@@ -575,32 +575,9 @@ class UtilTest(DTensorTestBase):
         self.assertEqual(local_shape, expected_local_shape)
         self.assertEqual(global_offset, expected_global_offset)
 
-    # TODO: remove this test once we support general meta compute on strided sharding
     @with_comms
     def test_strided_sharding_assumption_in_meta_compute(self):
-        # current ``compute_local_shape_and_global_offset`` does not allow Shard(i)
-        # placement to appear after the strided sharding part has ended. This test
-        # check that ``compute_local_shape_and_global_offset`` does not allow placements
-        # that violate the assumption and does not forbid the allowed ones.
-
-        # Test 0: 2-D mesh
-        mesh_size_0 = 2
-        mesh_size_1 = self.world_size // mesh_size_0
-        global_mesh = init_device_mesh(
-            self.device_type,
-            (mesh_size_0, mesh_size_1),
-            mesh_dim_names=("mesh-0", "mesh-1"),
-        )
         global_tensor_shape = torch.Size([2 * self.world_size, 2 * self.world_size])
-
-        for shard_dim in [0, 1]:
-            placements = [
-                _StridedShard(shard_dim, split_factor=mesh_size_1),
-                Shard(shard_dim),
-            ]
-            _, _ = compute_local_shape_and_global_offset(
-                global_tensor_shape, global_mesh, placements
-            )
 
         # Test 1: 3-D mesh
         mesh_size_0 = 2
@@ -611,29 +588,14 @@ class UtilTest(DTensorTestBase):
             (mesh_size_0, mesh_size_1, mesh_size_2),
             mesh_dim_names=("mesh-0", "mesh-1", "mesh-2"),
         )
-
-        # legal placements: Shard() appear after the strided part but it's on another
-        # tensor dimension.
         placements = [
             _StridedShard(0, split_factor=mesh_size_1),
             Shard(0),
-            Shard(1),
+            Shard(0),
         ]
         _, _ = compute_local_shape_and_global_offset(
             global_tensor_shape, global_mesh, placements
         )
-
-        # illegal placements: Shard() appear after the strided part and it's on the
-        # same tensor dimension.
-        placements = [
-            _StridedShard(0, split_factor=mesh_size_1),
-            Shard(0),
-            Shard(0),
-        ]
-        with self.assertRaisesRegex(NotImplementedError, "the strided part has ended"):
-            _, _ = compute_local_shape_and_global_offset(
-                global_tensor_shape, global_mesh, placements
-            )
 
         # Test 2: 4-D mesh
         mesh_size_0 = 1
@@ -662,18 +624,15 @@ class UtilTest(DTensorTestBase):
         )
         self.assertEqual(local_shape, expected_local_shape)
 
-        # illegal placements: Shard() appear after the strided part and it's on the
-        # same tensor dimension.
         placements = [
             _StridedShard(0, split_factor=mesh_size_1),
             _StridedShard(1, split_factor=mesh_size_3),
             Shard(0),
             Shard(0),
         ]
-        with self.assertRaisesRegex(NotImplementedError, "the strided part has ended"):
-            _, _ = compute_local_shape_and_global_offset(
-                global_tensor_shape, global_mesh, placements
-            )
+        _, _ = compute_local_shape_and_global_offset(
+            global_tensor_shape, global_mesh, placements
+        )
 
 
 class UtilSingleDeviceTest(TestCase):

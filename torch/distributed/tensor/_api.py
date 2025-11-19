@@ -1063,7 +1063,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
 
     # get local tensor shape
     local_shape, _ = compute_local_shape_and_global_offset(
-        size, device_mesh, placements
+        size, device_mesh, placements, skip_offset=True
     )
 
     # initialize the local tensor
