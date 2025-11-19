@@ -9,6 +9,9 @@ from collections.abc import Callable
 from typing import Any, Optional
 
 
+__all__ = ["FlightRecorderLogger"]
+
+
 class FlightRecorderLogger:
     _instance: Optional[Any] = None
     logger: logging.Logger

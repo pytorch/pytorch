@@ -16,7 +16,24 @@ from typing import (  # type: ignore[attr-defined]
     TypeVar,
 )
 
-from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
+from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
+
+
+__all__ = [
+    "Ref",
+    "TypeInfo",
+    "MatchState",
+    "MatchInfo",
+    "Group",
+    "Membership",
+    "Traceback",
+    "Collective",
+    "NCCLCall",
+    "Database",
+    "EntryState",
+    "Op",
+    "MatchStateRecord",
+]
 
 
 T = TypeVar("T", bound=NamedTuple)
@@ -164,7 +181,7 @@ class Database(NamedTuple):
 # TODO: We need to add a schema for the following
 types = [
     TypeInfo.from_type(t)  # type: ignore[type-var]
-    for t in globals().values()
+    for t in [Database, NCCLCall, Collective, Traceback, Membership, Group]
     if (
         isinstance(t, type)
         and issubclass(t, tuple)

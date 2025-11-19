@@ -8,8 +8,8 @@ import argparse
 import math
 from typing import Any
 
-from tools.flight_recorder.components.fr_logger import FlightRecorderLogger
-from tools.flight_recorder.components.types import (
+from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
+from torch.distributed.flight_recorder.components.types import (
     Collective,
     EntryState,
     Group,
@@ -21,6 +21,25 @@ from tools.flight_recorder.components.types import (
     P2P,
 )
 
+
+__all__ = [
+    "add_stack_id_in_entries",
+    "align_trace_from_beginning",
+    "check_current_entry_match",
+    "check_no_missing_dump_files",
+    "check_version",
+    "error_analysis",
+    "find_coalesced_group",
+    "find_coalesced_group_with_non_p2p",
+    "get_version_detail",
+    "just_print_entries",
+    "match_coalesced_groups_with_non_p2p",
+    "match_coalesced_groups",
+    "format_frame",
+    "format_frames",
+    "match_one_event",
+    "check_size_alltoall",
+]
 
 logger: FlightRecorderLogger = FlightRecorderLogger()
 

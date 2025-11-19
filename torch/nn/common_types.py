@@ -1,4 +1,4 @@
-from typing import Optional, TypeAlias as _TypeAlias, TypeVar, Union
+from typing import Optional, TypeAlias as _TypeAlias, TypeVar
 
 from torch import Tensor
 
@@ -11,13 +11,13 @@ from torch import Tensor
 # broadcast to a tuple.
 # Comes in several variants: A tuple of unknown size, and a fixed-size tuple for 1d, 2d, or 3d operations.
 T = TypeVar("T")
-_scalar_or_tuple_any_t: _TypeAlias = Union[T, tuple[T, ...]]
-_scalar_or_tuple_1_t: _TypeAlias = Union[T, tuple[T]]
-_scalar_or_tuple_2_t: _TypeAlias = Union[T, tuple[T, T]]
-_scalar_or_tuple_3_t: _TypeAlias = Union[T, tuple[T, T, T]]
-_scalar_or_tuple_4_t: _TypeAlias = Union[T, tuple[T, T, T, T]]
-_scalar_or_tuple_5_t: _TypeAlias = Union[T, tuple[T, T, T, T, T]]
-_scalar_or_tuple_6_t: _TypeAlias = Union[T, tuple[T, T, T, T, T, T]]
+_scalar_or_tuple_any_t: _TypeAlias = T | tuple[T, ...]
+_scalar_or_tuple_1_t: _TypeAlias = T | tuple[T]
+_scalar_or_tuple_2_t: _TypeAlias = T | tuple[T, T]
+_scalar_or_tuple_3_t: _TypeAlias = T | tuple[T, T, T]
+_scalar_or_tuple_4_t: _TypeAlias = T | tuple[T, T, T, T]
+_scalar_or_tuple_5_t: _TypeAlias = T | tuple[T, T, T, T, T]
+_scalar_or_tuple_6_t: _TypeAlias = T | tuple[T, T, T, T, T, T]
 
 # For arguments which represent size parameters (eg, kernel size, padding)
 _size_any_t: _TypeAlias = _scalar_or_tuple_any_t[int]

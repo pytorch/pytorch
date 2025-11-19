@@ -34,6 +34,9 @@ from torch.testing._internal.common_cuda import (
     SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
     _get_torch_rocm_version,
 )
+from torch.testing._internal.common_quantized import (
+    _bfloat16_to_float4_e2m1fn_x2,
+)
 from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
@@ -153,6 +156,10 @@ if TEST_SCIPY:
     from scipy import stats
     import scipy.spatial
     import scipy.special
+
+
+def round_up(x: int, y: int) -> int:
+    return ((x + y - 1) // y) * y
 
 
 # test if a tensor is close to an integer
@@ -8840,6 +8847,158 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
 
     yield from samples
 
+def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
+    from torch.nn.functional import ScalingType, SwizzleType
+    make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
+
+    make_scale = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
+
+    M, N, K = 15, 32, 16
+    samples = []
+    # two e4m3 tensorwise
+    mat1 = make_mat_e4m3((M, K))
+    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+    scale1 = make_scale((1,))
+    scale2 = make_scale((1,))
+    samples.append(
+        SampleInput(
+            mat1,
+            mat2,
+            [scale1, ],
+            [ScalingType.TensorWise, ],
+            [SwizzleType.NO_SWIZZLE, ],
+            [scale2, ],
+            [ScalingType.TensorWise, ],
+            [SwizzleType.NO_SWIZZLE, ],
+            None,  # bias
+            torch.bfloat16,  # out_dtype
+        )
+    )
+    # two e4m3 rowwise
+    mat1 = make_mat_e4m3((M, K))
+    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+    scale1 = make_scale((M, 1))
+    scale2 = make_scale((1, N))
+    samples.append(
+        SampleInput(
+            mat1,
+            mat2,
+            [scale1, ],
+            [ScalingType.RowWise, ],
+            [SwizzleType.NO_SWIZZLE, ],
+            [scale2, ],
+            [ScalingType.RowWise, ],
+            [SwizzleType.NO_SWIZZLE, ],
+            None,  # bias
+            torch.bfloat16,  # out_dtype
+        )
+    )
+    M, K, N = 256, 512, 768
+    mat1 = make_mat_e4m3((M, K))
+    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
+
+    dmajor, dminor = torch.cuda.get_device_capability()
+
+    if dmajor == 9 and not torch.version.hip:
+        # 1x128 x 1x128
+        scale1 = make_scale((K // 128, M)).t()
+        scale2 = make_scale((K // 128, N)).t()
+        samples.append(
+            SampleInput(
+                mat1,
+                mat2,
+                [scale1, ],
+                [ScalingType.BlockWise1x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                [scale2, ],
+                [ScalingType.BlockWise1x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
+        )
+        # 128x128 x 1x128
+        L4 = round_up(K // 128, 4)
+        scale1 = make_scale((M // 128, L4)).t()
+        scale2 = make_scale((K // 128, N)).t()
+        samples.append(
+            SampleInput(
+                mat1,
+                mat2,
+                [scale1, ],
+                [ScalingType.BlockWise128x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                [scale2, ],
+                [ScalingType.BlockWise1x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
+        )
+        # 1x128 x 128x128
+        L4 = round_up(K // 128, 4)
+        scale1 = make_scale((K // 128, M)).t()
+        scale2 = make_scale((N // 128, L4)).t()
+        samples.append(
+            SampleInput(
+                mat1,
+                mat2,
+                [scale1, ],
+                [ScalingType.BlockWise1x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                [scale2, ],
+                [ScalingType.BlockWise128x128, ],
+                [SwizzleType.NO_SWIZZLE, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
+        )
+
+    if dmajor >= 10:
+        # MXFP8
+        scale1 = make_scale((M, K // 32)).to(torch.float8_e8m0fnu)
+        scale2 = make_scale((K // 32, N)).to(torch.float8_e8m0fnu)
+        samples.append(
+            SampleInput(
+                mat1,
+                mat2,
+                [scale1, ],
+                [ScalingType.BlockWise1x32, ],
+                [SwizzleType.SWIZZLE_32_4_4, ],
+                [scale2, ],
+                [ScalingType.BlockWise1x32, ],
+                [SwizzleType.SWIZZLE_32_4_4, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
+        )
+        # NVFP4
+        # [M, K] -> [M, K // 2]
+        # [K, N] -> [K // 2, N]
+        mat1_fp4 = _bfloat16_to_float4_e2m1fn_x2(mat1.to(torch.bfloat16))
+        mat2_fp4 = _bfloat16_to_float4_e2m1fn_x2(mat2.to(torch.bfloat16).t()).t()
+        scale1 = make_scale((M, K // 16)).to(torch.float8_e4m3fn)
+        global_scale1 = make_scale((1, ))
+        scale2 = make_scale((K // 16, N)).to(torch.float8_e4m3fn)
+        global_scale2 = make_scale((1, ))
+        samples.append(
+            SampleInput(
+                mat1_fp4,
+                mat2_fp4,
+                [scale1, global_scale1],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                [SwizzleType.SWIZZLE_32_4_4, ],
+                [scale2, global_scale2],
+                [ScalingType.BlockWise1x16, ScalingType.TensorWise],
+                [SwizzleType.SWIZZLE_32_4_4, ],
+                None,  # bias
+                torch.bfloat16,  # out_dtype
+            )
+        )
+
+
+    yield from samples
+
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
     batch, seq_q, seq_kv, num_heads, head_dim = 4, 3, 6, 4, 8
@@ -16364,6 +16523,33 @@ op_db: list[OpInfo] = [
                 }),
                 'TestUnaryUfuncs', device_type='cuda',
             ), ],
+    ),
+    OpInfo(
+        'torch._scaled_mm_v2',
+        sample_inputs_func=sample_inputs_scaled_mm_v2,
+        dtypes=float8_types(),
+        dtypesIfCUDA=empty_types() + (torch.float8_e4m3fn,),
+        supports_out=True,
+        supports_forward_ad=False,
+        supports_autograd=False,
+        decorators=[onlyCUDA, skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
+        skips=(
+            # Sample inputs isn't really parametrized on dtype
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+            # "add_stub" not implemented for 'Float8_e4m3fn'
+            # "ufunc_add_CUDA" not implemented for 'Float8_e4m3fn'
+            # https://github.com/pytorch/pytorch/issues/107256
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_out'),
+            # "mul_cuda" not implemented for float8_e4m3fn
+            # "mul_cpu_reduced_float" not implemented for 'Float8_e4m3fn'
+            # https://github.com/pytorch/pytorch/issues/107256
+            DecorateInfo(unittest.skip("Skipped!"), 'TestSchemaCheckModeOpInfo', 'test_schema_correctness'),
+            # aten::_scaled_mm hit the vmap fallback which is currently disabled
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
+                         dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz)),
+        )
     ),
     OpInfo(
         'torch._scaled_mm',

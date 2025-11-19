@@ -7879,9 +7879,8 @@ class TestQuantizedConv(TestCase):
         X_q, X_scale = _quantize_fp8e4m3(X, channelwise=False)
         W = torch.randn(output_shape + kernels, device=device) * 0.1
         W_q, W_scale = _quantize_fp8e4m3(W, channelwise=use_channelwise)
-        bias = torch.randn((output_channels,), device=device) if use_bias else None
-        if use_bias and bfloat16_output:
-            bias = bias.bfloat16()
+        bias_dtype = torch.bfloat16 if bfloat16_output else torch.float
+        bias = torch.randn((output_channels,), dtype=bias_dtype, device=device) if use_bias else None
 
         return X, W, X_q, W_q, X_scale, W_scale, bias
 

@@ -69,7 +69,7 @@ inline torch::stable::Tensor narrow(
 inline torch::stable::Tensor new_empty(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size,
-    std::optional<c10::ScalarType> dtype = std::nullopt) {
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt) {
   int32_t device_type;
   TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &device_type));
 
@@ -108,7 +108,7 @@ inline torch::stable::Tensor new_empty(
 inline torch::stable::Tensor new_zeros(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size,
-    std::optional<c10::ScalarType> dtype = std::nullopt) {
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt) {
   int32_t device_type;
   TORCH_ERROR_CODE_CHECK(aoti_torch_get_device_type(self.get(), &device_type));
 
@@ -304,6 +304,66 @@ inline uint32_t get_num_threads() {
   uint32_t num_threads;
   TORCH_ERROR_CODE_CHECK(torch_get_num_threads(&num_threads));
   return num_threads;
+}
+
+// We expect this to be the stable version of the empty op that takes in
+// device and dtype parameters. The empty op creates a tensor with uninitialized
+// values of the specified size, dtype, and device.
+inline torch::stable::Tensor empty(
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  const auto num_args = 6;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(std::nullopt),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory),
+      torch::stable::detail::from(std::nullopt)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::empty", "memory_format", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the flatten.using_ints op.
+inline torch::stable::Tensor flatten(
+    const torch::stable::Tensor& self,
+    int64_t start_dim = 0,
+    int64_t end_dim = -1) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(start_dim),
+      torch::stable::detail::from(end_dim)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::flatten", "using_ints", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the reshape op.
+inline torch::stable::Tensor reshape(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef shape) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(shape)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::reshape", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the view op.
+inline torch::stable::Tensor view(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef size) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(size)};
+  TORCH_ERROR_CODE_CHECK(
+      torch_call_dispatcher("aten::view", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
 #endif
