@@ -349,6 +349,9 @@ class DTensor(torch.Tensor):
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
         # We just need to have an implementation here; the __torch_dispatch__ machinery
         # calls into a specific C++ fast path that doesn't call here.
+        # See #167051 for details
+        # python_arg_parser.cpp: dispatch_on_subclass()
+        # -> python_variable.cpp: dispatchDTensorOp()
         raise NotImplementedError(
             "DTensor.__torch_dispatch__ should not actually get called"
         )
