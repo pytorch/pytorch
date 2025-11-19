@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-import contextlib
+import logging
 import threading
 from collections.abc import Callable, Sequence
 from functools import lru_cache
@@ -30,6 +30,8 @@ from torch.distributed.tensor._utils import (
 
 
 aten = torch.ops.aten
+
+log = logging.getLogger(__name__)
 
 
 def _length(obj) -> int:
@@ -167,20 +169,9 @@ class ShardingPropagator:
             return None
 
         # NOTE: We must call the tracing in fake tensor mode so that it avoids
-        # materializing memory. Also disable the proxy mode tracing to prevent
-        # these operators to be inserted in the fx graph.
-        from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
-
-        # DTensor.dispatch runs fake tensor prop twice, once here, and once for the actual
-        # local tensor result. The result here is never surfaced to tracing, and so if
-        # the op is data-dependent, can result in PendingUnbackedSymbolNotFound errors.
+        # materializing memory.
         fake_mode = detect_fake_mode() or FakeTensorMode()
-        suppress_fresh_symbols_ctx = (
-            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-            if fake_mode.shape_env
-            else contextlib.nullcontext()
-        )
-        with fake_mode, disable_proxy_modes_tracing(), suppress_fresh_symbols_ctx:
+        with fake_mode:
             fake_args = op_schema.gen_fake_args()
             fake_kwargs = op_schema.gen_fake_kwargs()
             fake_out = op_schema.op(*fake_args, **fake_kwargs)
@@ -589,12 +580,16 @@ class ShardingPropagator:
     def _select_strategy(
         self, strategy: OpStrategy, op_schema: Optional[OpSchema] = None
     ) -> OpSpec:
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
+
         if len(strategy.strategies) == 1:
             # short cut with only one possible OpSpec
             return strategy.strategies[0]
 
-        op_spec_costs: list[float] = []
+        op_spec_costs: list[torch.types.FloatLikeType] = []
         no_redistribute_strategy_index: int = -1
+        negative_cost_index: int = -1
+        zero_cost_index: int = -1
         for strategy_idx, op_spec in enumerate(strategy.strategies):
             assert op_spec.redistribute_cost is not None, (
                 "must set redistribute cost each OpSpec!"
@@ -602,37 +597,45 @@ class ShardingPropagator:
             redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
             op_spec_costs.append(redistribute_cost)
 
-            # If there's no redistribute cost, we record the index of the strategy
-            # which doesn't need redistribute.
+            # If there are strategies with negative/zero/no redistribute cost,
+            # we record those indices.
             # TODO: Currently this only applies to OpStrategy selection. Requires extra
             # logic to make it work for TupleStrategy, if needed.
-            if op_schema is not None and redistribute_cost == 0:
-                needs_redistribute = False
-                for spec_idx, input_spec in enumerate(op_schema.args_spec):
-                    desired_spec = (
-                        op_spec.output_spec
-                        if op_spec.input_specs is None
-                        else op_spec.input_specs[spec_idx]
-                    )
-                    if input_spec.placements != desired_spec.placements:
-                        needs_redistribute = True
-                        break
+            if op_schema is not None:
+                if guard_or_false(redistribute_cost < 0):
+                    if (
+                        negative_cost_index == -1
+                        or redistribute_cost < op_spec_costs[negative_cost_index]
+                        # assume negative costs are coefficients, so we don't need guard_or_false here
+                    ):
+                        negative_cost_index = strategy_idx
+                elif guard_or_false(redistribute_cost == 0):
+                    needs_redistribute = False
+                    for spec_idx, input_spec in enumerate(op_schema.args_spec):
+                        desired_spec = (
+                            op_spec.output_spec
+                            if op_spec.input_specs is None
+                            else op_spec.input_specs[spec_idx]
+                        )
+                        if input_spec.placements != desired_spec.placements:
+                            needs_redistribute = True
+                            break
 
-                if not needs_redistribute:
-                    no_redistribute_strategy_index = strategy_idx
+                    if not needs_redistribute:
+                        no_redistribute_strategy_index = strategy_idx
+                    elif zero_cost_index == -1:
+                        zero_cost_index = strategy_idx
 
-        # for eager execution, we just select the one with the minimal redistribute cost
-        min_cost = min(op_spec_costs)
-        if min_cost < 0:
-            # If there's negative cost, we select the one with the minimal cost,
-            # even if this means we need to redistribute, e.g. via local chunking.
-            # E.g. this can happen for ops in self.op_to_shape_and_stride_idx
-            # when the inputs / outputs are sharded.
-            selected_strategy_index = op_spec_costs.index(min_cost)
-        elif min_cost == 0 and no_redistribute_strategy_index != -1:
-            # If there's no redistribute cost, we select the one with no redistribute.
+        # prioritize negative/zero/no redistribute cost strategies
+        if negative_cost_index != -1:
+            selected_strategy_index = negative_cost_index
+        elif no_redistribute_strategy_index != -1:
             selected_strategy_index = no_redistribute_strategy_index
+        elif zero_cost_index != -1:
+            selected_strategy_index = zero_cost_index
         else:
+            # default to choosing minimal redistribute cost
+            min_cost = min(op_spec_costs)
             selected_strategy_index = op_spec_costs.index(min_cost)
 
         return strategy.strategies[selected_strategy_index]
