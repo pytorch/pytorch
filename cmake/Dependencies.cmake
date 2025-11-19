@@ -162,6 +162,7 @@ set(AT_MKLDNN_ENABLED 0)
 set(AT_MKL_ENABLED 0)
 set(AT_KLEIDIAI_ENABLED 0)
 set(AT_USE_EIGEN_SPARSE 0)
+set(AT_ZENDNN_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -1507,6 +1508,32 @@ if(NOT INTERN_BUILD_MOBILE)
     endif()
   else()
     message("disabling MKLDNN because USE_MKLDNN is not set")
+  endif()
+
+  if(USE_ZENDNN)
+    if(NOT (CMAKE_SYSTEM_NAME MATCHES "Linux"))
+      message(WARNING
+        "USE_ZENDNN is currently only supported on Linux. Detected platform: ${CMAKE_SYSTEM_NAME}. Disabling ZenDNN support.")
+      set(USE_ZENDNN OFF)
+    elseif(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+      message(WARNING
+        "x64 operating system is required for ZenDNN. "
+        "ZenDNN codebase will not be compiled."
+        "Turn this warning off by USE_ZENDNN=OFF.")
+      set(USE_ZENDNN OFF)
+    else()
+      include(${CMAKE_CURRENT_LIST_DIR}/public/zendnn.cmake)
+      if(ZENDNN_FOUND)
+        set(AT_ZENDNN_ENABLED 1)
+        # Add to Caffe2 private dependencies
+        list(APPEND Caffe2_DEPENDENCY_LIBS zendnnl::zendnnl_archive)
+      else()
+        message(WARNING "ZENDNN could not be found.")
+        caffe2_update_option(USE_ZENDNN OFF)
+      endif()
+    endif()
+  else()
+    message(STATUS "disabling ZENDNN because USE_ZENDNN is not set")
   endif()
 
   if(USE_KLEIDIAI)
