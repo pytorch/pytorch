@@ -9758,8 +9758,7 @@
   variants: function
   structured: True
   dispatch:
-    CPU, CUDA: lu_unpack_out
-    MPS: lu_unpack_out_mps
+    CPU, CUDA, MPS: lu_unpack_out
 
 # TODO: remove dispatch section when porting TH CUDA to ATen
 - func: multinomial.out(Tensor self, SymInt num_samples, bool replacement=False, *, Generator? generator=None, Tensor(a!) out) -> Tensor(a!)
@@ -14228,8 +14227,7 @@
   variants: function
   structured: True
   dispatch:
-    CPU, CUDA: linalg_lu_out
-    MPS: linalg_lu_out_mps
+    CPU, CUDA, MPS: linalg_lu_out
 
 # linalg.lu_solve
 - func: linalg_lu_solve(Tensor LU, Tensor pivots, Tensor B, *, bool left=True, bool adjoint=False) -> Tensor

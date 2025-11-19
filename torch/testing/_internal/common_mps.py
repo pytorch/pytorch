@@ -697,14 +697,6 @@ if torch.backends.mps.is_available():
                 torch.float16,
                 torch.float32,
             ],  # missing `aten::lu_solve`.
-            # `linalg.lu_solve`'s backward pass for the `LU` arg calls
-            # `lu_unpack`, and pivots are unpacked if `left == adjoint`. When
-            # unpacking pivots, `lu_unpack` incorrectly raises an error if
-            # `pivots.shape` is zero in any of the batch dims and the last dim
-            # is greater than 1.
-            "linalg.lu_solve": None,
-            # lu_solve only fails on MacOS 14 for some reason
-            "lu_solve": None if MACOS_VERSION < 15.0 else [],
             "linalg.tensorsolve": [
                 torch.float16,
                 torch.float32,
