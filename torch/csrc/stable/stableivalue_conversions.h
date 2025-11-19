@@ -1,6 +1,5 @@
 #pragma once
 
-#include <c10/util/Deprecated.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/device_struct.h>
@@ -8,6 +7,7 @@
 #include <torch/headeronly/core/DeviceType.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/Deprecated.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
 
