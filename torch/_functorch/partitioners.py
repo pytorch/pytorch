@@ -1128,7 +1128,6 @@ def default_partition(
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
             continue
-        # figure out whether is partitioning thing??
         if is_multi_output(node):
             # Must be ordered before MUST_SAVE tags to avoid saving tuples marked MUST_SAVE.
             continue
