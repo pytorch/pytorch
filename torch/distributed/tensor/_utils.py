@@ -130,7 +130,7 @@ def _compute_local_shape_and_global_offset(
     empty_offset = ()
     if my_coordinate is None:
         # if rank not in the mesh, return empty offset
-        return (0,), empty_offset
+        return ((0,), empty_offset)
 
     local_shape = list(global_shape)
     # Perform shard from left to right. For example,
@@ -182,6 +182,7 @@ def _compute_local_shape_and_global_offset(
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
         global_offset[shard_dim] = global_offsets[0]
     return tuple(local_shape), tuple(global_offset)
+
 
 compute_global_tensor_info = torch._C._DTensor_compute_global_tensor_info
 

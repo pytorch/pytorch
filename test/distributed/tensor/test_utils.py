@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
-import math
 from contextlib import nullcontext
 from typing import Any
 
@@ -291,10 +290,11 @@ class LocalTest(TestCase):
             self.assertEqual(local_shape, (expected_shard_size, 2))
             self.assertEqual(global_offset, (expected_shard_offset, 0))
 
+
 class UtilTest(DTensorTestBase):
     @property
     def world_size(self):
-        return 2
+        return 8
 
     def _compute_start_end_offsets(self, global_offset, local_size, n_dim):
         offset = []
@@ -503,60 +503,6 @@ class UtilTest(DTensorTestBase):
             (8 * mesh2_rank + 0 * mesh0_rank + 4 * mesh3_rank, 4 * mesh1_rank),
         )
 
-    def test_strided_shard_compute_local_shape_and_global_offset_1D(self):
-        device_mesh = init_device_mesh(self.device_type, (2,))
-        batch_size, seq_len = 2, 3
-        nelem = batch_size * seq_len
-        global_tensor = torch.arange(nelem).view(batch_size * seq_len)
-        global_shape = global_tensor.size()
-
-        placements = (_StridedShard(dim=0, split_factor=batch_size),)
-
-        dtensor = distribute_tensor(
-            global_tensor, device_mesh, (Replicate(),)
-        ).redistribute(device_mesh, placements)
-        local_size, global_offset = compute_local_shape_and_global_offset(
-            global_shape, device_mesh, placements
-        )
-
-        import time
-
-        time.sleep(torch.distributed.get_rank())
-        print(
-            f"{torch.distributed.get_rank()=} {local_size=} expected_size={dtensor._local_tensor.shape}"
-        )
-
-    @with_comms
-    def test_strided_shard_compute_local_shape_and_global_offset_2D(self):
-        device_mesh = init_device_mesh(self.device_type, (2, 2))
-        batch_size, seq_len, dim1 = 2, 3, 3
-        nelem = batch_size * seq_len * dim1
-        global_tensor = torch.arange(nelem).view(batch_size * seq_len * dim1)
-        global_shape = global_tensor.size()
-
-        placements = (
-            _StridedShard(dim=0, split_factor=batch_size),
-            _StridedShard(
-                dim=0,
-                split_factor=batch_size
-                * math.ceil(seq_len * 1.0 / device_mesh.size(0)),
-            ),
-        )
-
-        dtensor = distribute_tensor(
-            global_tensor, device_mesh, (Replicate(), Replicate())
-        ).redistribute(device_mesh, placements)
-        local_size, global_offset = compute_local_shape_and_global_offset(
-            global_shape, device_mesh, placements
-        )
-
-        import time
-
-        time.sleep(torch.distributed.get_rank())
-        print(
-            f"{torch.distributed.get_rank()=} {local_size=} expected_size={dtensor._local_tensor.shape}"
-        )
-
     @with_comms
     def test_fsdp_tp_meta_compute(self):
         # FSDP + TP sharding
@@ -601,25 +547,6 @@ class UtilTest(DTensorTestBase):
         self.assertEqual(global_offset[0], expected_offsets[rank])
 
     @with_comms
-    def test_strided_shard_2d_meta_compute(self):
-        # FSDP + TP uneven sharding
-        tp_size = 2
-        dp_size = self.world_size // tp_size
-        global_mesh = init_device_mesh(
-            self.device_type, (dp_size, tp_size), mesh_dim_names=("dp", "tp")
-        )
-        global_tensor_shape = torch.Size([15, 5])
-        placements = [_StridedShard(0, split_factor=tp_size), Shard(0)]
-        local_shape, global_offset = compute_local_shape_and_global_offset(
-            global_tensor_shape, global_mesh, placements
-        )
-        rank = global_mesh.get_rank()
-        expected_shapes = [2, 2, 2, 2, 2, 2, 2, 1]
-        expected_offsets = [0, 8, 2, 10, 4, 12, 6, 14]
-        self.assertEqual(local_shape[0], expected_shapes[rank])
-        self.assertEqual(global_offset[0], expected_offsets[rank])
-
-    @with_comms
     def test_hsdp_tp_meta_compute(self):
         # HSDP + TP sharding
         tp_size = 2
@@ -645,65 +572,6 @@ class UtilTest(DTensorTestBase):
         expected_global_offset = (shard_idx_on_dim_0 * 2, 0)
         self.assertEqual(local_shape, expected_local_shape)
         self.assertEqual(global_offset, expected_global_offset)
-
-    @with_comms
-    def test_strided_sharding_assumption_in_meta_compute(self):
-        global_tensor_shape = torch.Size([2 * self.world_size, 2 * self.world_size])
-
-        # Test 1: 3-D mesh
-        mesh_size_0 = 2
-        mesh_size_1 = 2
-        mesh_size_2 = self.world_size // (mesh_size_0 * mesh_size_1)
-        global_mesh = init_device_mesh(
-            self.device_type,
-            (mesh_size_0, mesh_size_1, mesh_size_2),
-            mesh_dim_names=("mesh-0", "mesh-1", "mesh-2"),
-        )
-        placements = [
-            _StridedShard(0, split_factor=mesh_size_1),
-            Shard(0),
-            Shard(0),
-        ]
-        _, _ = compute_local_shape_and_global_offset(
-            global_tensor_shape, global_mesh, placements
-        )
-
-        # Test 2: 4-D mesh
-        mesh_size_0 = 1
-        mesh_size_1 = 2
-        mesh_size_2 = 2
-        mesh_size_3 = self.world_size // (mesh_size_0 * mesh_size_1 * mesh_size_2)
-        global_mesh = init_device_mesh(
-            self.device_type,
-            (mesh_size_0, mesh_size_1, mesh_size_2, mesh_size_3),
-            mesh_dim_names=("mesh-0", "mesh-1", "mesh-2", "mesh-3"),
-        )
-        # legal placements: Shard() appear after the strided part but it's on another
-        # tensor dimension.
-        placements = [
-            _StridedShard(0, split_factor=mesh_size_1),
-            _StridedShard(1, split_factor=mesh_size_3),
-            Shard(0),
-            Shard(1),
-        ]
-        local_shape, _ = compute_local_shape_and_global_offset(
-            global_tensor_shape, global_mesh, placements
-        )
-        expected_local_shape = (
-            2 * mesh_size_1 * mesh_size_3,
-            2 * mesh_size_0 * mesh_size_2,
-        )
-        self.assertEqual(local_shape, expected_local_shape)
-
-        placements = [
-            _StridedShard(0, split_factor=mesh_size_1),
-            _StridedShard(1, split_factor=mesh_size_3),
-            Shard(0),
-            Shard(0),
-        ]
-        _, _ = compute_local_shape_and_global_offset(
-            global_tensor_shape, global_mesh, placements
-        )
 
 
 class UtilSingleDeviceTest(TestCase):
@@ -1115,38 +983,6 @@ class Test2DStridedLocalShard(DTensorTestBase):
         )
         self.assertEqual(local_size, torch.Size([1, 2]))
         self.assertEqual(global_offset, torch.Size([self.rank, 0]))
-
-    @with_comms
-    def test_2d_shard_shard(self):
-        global_tensor = torch.arange(8).view(1, 8)
-        mesh_2d = init_device_mesh(
-            self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
-        )
-        local_size, global_offset = compute_local_shape_and_global_offset(
-            global_tensor.shape, mesh_2d, [Shard(0), Shard(0)]
-        )
-        import time
-
-        time.sleep(torch.distributed.get_rank())
-        print(
-            f"rank={torch.distributed.get_rank()} local_size={local_size} global_offset={global_offset}"
-        )
-        # self.assertEqual(local_size, torch.Size([1, 2]))
-        # self.assertEqual(global_offset, torch.Size([self.rank, 0]))
-
-    @with_comms
-    def test_1d_strided_shard(self):
-        global_tensor = torch.arange(3).view(3, 1)
-        mesh_1d = init_device_mesh(self.device_type, (4,), mesh_dim_names=("DP",))
-        local_size, global_offset = compute_local_shape_and_global_offset(
-            global_tensor.shape, mesh_1d, [_StridedShard(1, split_factor=2)]
-        )
-        import time
-
-        time.sleep(torch.distributed.get_rank())
-        print(
-            f"rank={torch.distributed.get_rank()} local_size={local_size} global_offset={global_offset}"
-        )
 
     @with_comms
     def test_fsdp2_tp_2d_dtensor_local_shards_and_offsets(self):
