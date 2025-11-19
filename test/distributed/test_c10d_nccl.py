@@ -3357,6 +3357,7 @@ class DistributedDataParallelTest(
         for param in ddp_model.parameters():
             self.assertIsNotNone(param.grad)
 
+
 class WorkHookTest(MultiProcessTestCase):
     @property
     def world_size(self):
