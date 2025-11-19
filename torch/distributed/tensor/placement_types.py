@@ -111,9 +111,9 @@ class Shard(torch._C._distributed.Shard):
             full_chunk_size = curr_local_size // num_chunks
             return full_chunk_size, list(range(full_chunk_size * rank, full_chunk_size * rank + full_chunk_size))
 
-        # uneven sharding case
-        full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
-        shard_starting_idx = full_chunk_size * rank
+    #     # uneven sharding case
+    #     full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
+    #     shard_starting_idx = full_chunk_size * rank
 
         if curr_local_size < shard_starting_idx:
             return 0, list(range(curr_local_size))
@@ -709,7 +709,6 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
         offsets = sharded_indices[rank].tolist()
 
-        # offsets from _StridedShard is never used
         return (local_shard_size, offsets)
 
 
