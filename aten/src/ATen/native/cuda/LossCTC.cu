@@ -717,8 +717,8 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       (grad.mutable_data_ptr<scalar_t>(),
        grad_out.const_data_ptr<scalar_t>(), grad_out.stride(0),
        log_alpha.const_data_ptr<scalar_t>(), log_beta.const_data_ptr<scalar_t>(),
-       log_probs.const_data_ptr<scalar_t>(), input_lengths_t.const_data_ptr<int64_t>(),
-       targets.const_data_ptr<target_t>(), target_lengths_t.const_data_ptr<int64_t>(),
+       log_probs.const_data_ptr<scalar_t>(), input_lengths_t.template const_data_ptr<int64_t>(),
+       targets.const_data_ptr<target_t>(), target_lengths_t.template const_data_ptr<int64_t>(),
        neg_log_likelihood.const_data_ptr<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
@@ -747,7 +747,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
-       tg_batch_offsets.const_data_ptr<int64_t>(), tg_target_stride,
+       tg_batch_offsets.template const_data_ptr<int64_t>(), tg_target_stride,
        batch_size, num_labels, BLANK, zero_infinity);
     C10_CUDA_KERNEL_LAUNCH_CHECK(); // catch launch errors
   }
@@ -765,7 +765,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       (batch_size+threads_batch-1)/threads_batch);
     ctc_loss_zero_padded_gradients<scalar_t><<<grid, block, 0, stream>>>(
       grad.mutable_data_ptr<scalar_t>(),
-      input_lengths_t.const_data_ptr<int64_t>(),
+      input_lengths_t.template const_data_ptr<int64_t>(),
       grad.stride(0),
       grad.stride(1),
       grad.stride(2),
