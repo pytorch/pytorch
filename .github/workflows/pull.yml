@@ -66,10 +66,10 @@ jobs:
           { config: "default", shard: 5, num_shards: 5, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "docs_test", shard: 1, num_shards: 1,  runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "jit_legacy", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "backwards_compat", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
           { config: "distributed", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
           { config: "distributed", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "numpy_2_x", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
     secrets: inherit
 
@@ -167,8 +167,8 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-py3-clang12-onnx
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
-          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
+          { config: "default", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.c7i.2xlarge" },
         ]}
     secrets: inherit
 
@@ -342,16 +342,16 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc9-inductor-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-xpu-n-py3_10-build:
-    name: linux-jammy-xpu-n-py3.10
+  linux-noble-xpu-n-py3_10-build:
+    name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       # This should sync with the build in xpu.yml but xpu uses a larger runner
       # sync-tag: linux-xpu-n-build
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      build-environment: linux-jammy-xpu-n-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-py3
+      build-environment: linux-noble-xpu-n-py3.10
+      docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },

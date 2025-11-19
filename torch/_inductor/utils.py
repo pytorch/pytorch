@@ -24,6 +24,7 @@ import textwrap
 import time
 import unittest
 from collections.abc import (
+    Callable,
     Collection,
     Generator,
     Iterator,
@@ -35,25 +36,20 @@ from datetime import datetime
 from io import StringIO
 from typing import (
     Any,
-    Callable,
     cast,
+    Concatenate,
     Generic,
     Literal,
     NamedTuple,
     Optional,
     Protocol,
     TYPE_CHECKING,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import (
-    Concatenate,
-    dataclass_transform,
-    ParamSpec,
-    Self,
-    TypeAlias,
-    TypeGuard,
-)
+from typing_extensions import dataclass_transform, ParamSpec, Self
 from unittest import mock
 
 import sympy
@@ -62,6 +58,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._inductor.analysis.device_info import datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
+from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map_only
@@ -784,9 +781,19 @@ def get_fused_kernel_name(
 ) -> str:
     all_origins = aggregate_origins(node_schedule)
     if descriptive_names == "original_aten":
+
+        def get_origin_meta_str(origin):
+            original_aten = origin.meta["original_aten"]
+            key = ""
+            if isinstance(original_aten, torch._ops.OpOverload):
+                key = original_aten._overloadpacket.__name__
+            elif isinstance(original_aten, torch._ops.HigherOrderOperator):
+                key = str(original_aten.name())
+            return key
+
         # Bases the kernel name off of the top-level aten operator (i.e. pre-decompositions)
         sources = [
-            origin.meta["original_aten"]._overloadpacket.__name__
+            get_origin_meta_str(origin)
             for origin in all_origins
             if origin.op == "call_function"
             and "original_aten" in origin.meta
@@ -797,12 +804,22 @@ def get_fused_kernel_name(
         # Bases the kernel name off of the top-level "torch" operator (i.e. post-dynamo graph)
         sources = []
         for origin in all_origins:
-            if origin.op == "call_function" and "source_fn_stack" in origin.meta:
-                source_fn = origin.meta["source_fn_stack"][-1]
+            if origin.op == "call_function":
+                source_fn = None
+                suffix = ""
+                if "source_fn_stack" in origin.meta:
+                    source_fn = origin.meta["source_fn_stack"][-1]
+                elif "fwd_source_fn_stack" in origin.meta:
+                    # backward nodes have "fwd_source_fn_stack" instead
+                    source_fn = origin.meta["fwd_source_fn_stack"][-1]
+                    suffix = "backward"
+                if not source_fn:
+                    continue
                 if isinstance(source_fn[1], str):
-                    sources.append(source_fn[1])
+                    sources.append(source_fn[1] + suffix)
                 else:
-                    sources.append(source_fn[1].__name__)
+                    sources.append(source_fn[1].__name__ + suffix)
+
         sources = sorted(OrderedSet(sources))
     elif descriptive_names == "inductor_node":
         sources = [
@@ -855,11 +872,20 @@ def get_kernel_metadata(
 
     for node in inductor_nodes:
         if "original_aten" in node.meta and node.meta["original_aten"] is not None:
-            key = str(node.meta["original_aten"]._overloadpacket)
-            original_aten_dict[key].append(node.name)
+            original_aten = node.meta["original_aten"]
+            key = None
+            if isinstance(original_aten, torch._ops.OpOverload):
+                key = str(original_aten._overloadpacket)
+            elif isinstance(original_aten, torch._ops.HigherOrderOperator):
+                key = str(original_aten.name())
+            if key:
+                original_aten_dict[key].append(node.name)
         if "from_node" in node.meta:
             key = node.meta["from_node"][0].name
             from_node_dict[key].append(node.name)
+        elif node.meta.get("partitioner_tag") == "is_backward":
+            # backward nodes currently don't have a "from node"
+            from_node_dict[node.name].append(node.name)
     sort_str = "Topologically Sorted" if single_graph is not None else "Unsorted"
     metadata = (
         f"{wrapper.comment} {sort_str} Source Nodes: [{', '.join(from_node_dict.keys())}], "
@@ -1230,7 +1256,7 @@ def unload_xpu_triton_pyds() -> None:
         if not module_name.startswith("torch._inductor.runtime.compile_tasks."):
             continue
         m = sys.modules[module_name]
-        for attr_name in m.__dict__.keys():
+        for attr_name in m.__dict__:
             if attr_name.startswith("triton_"):
                 kernel = getattr(m, attr_name)
                 if isinstance(
@@ -1915,6 +1941,84 @@ def use_triton_blackwell_tma_template(
     return has_triton_tensor_descriptor_host_tma() and is_datacenter_blackwell_arch()
 
 
+@functools.lru_cache(maxsize=1)
+def ensure_cute_available() -> bool:
+    """Check if CuTeDSL is importable; cache the result for reuse.
+
+    Call ensure_cute_available.cache_clear() after installing CuTeDSL
+    in the same interpreter to retry the import.
+    """
+    try:
+        return importlib.util.find_spec("cutlass.cute") is not None
+    except ImportError:
+        return False
+
+
+def use_blackwell_cutedsl_grouped_mm(
+    mat_a: Any,
+    mat_b: Any,
+    layout: Layout,
+    a_is_2d: bool,
+    b_is_2d: bool,
+    offs: Optional[Any],
+    bias: Optional[Any],
+    scale_result: Optional[Any],
+) -> bool:
+    """
+    Returns True if we can use the blackwell kernel for grouped mm.
+    Required conditions:
+        1. CuTeDSL backend is enabled
+        2. CuTeDSL is available
+        3. We are on a blackwell arch
+        4. The dtype is bf16
+        5. Max autotune or max autotune gemm is enabled
+        6. A, B, and the output are 16B aligned
+        7. We are not using dynamic shapes
+        8. A is 2d
+        9. B is 3d
+        10. Offsets are provided
+        11. Bias and Scale are not provided
+    """
+    if not ensure_cute_available():
+        return False
+
+    if not _use_autotune_backend("CUTEDSL"):
+        return False
+
+    from .codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+
+    if not is_gpu(layout.device.type):
+        return False
+
+    if not is_datacenter_blackwell_arch():
+        return False
+
+    layout_dtypes = [torch.bfloat16]
+    if not _use_template_for_gpu(layout, layout_dtypes):
+        return False
+
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+
+    # Checks for 16B ptr and stride alignment
+    if not can_use_tma(mat_a, mat_b, output_layout=layout):
+        return False
+
+    if any(is_dynamic(x) for x in [mat_a, mat_b]):
+        return False
+
+    if not a_is_2d or b_is_2d:
+        return False
+
+    if offs is None:
+        return False
+
+    if bias is not None or scale_result is not None:
+        return False
+
+    return True
+
+
 def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
 
@@ -2171,9 +2275,21 @@ def use_cpp_bmm_template(
 
     assert isinstance(mat1.layout, Layout)
 
-    return (
-        use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False)
-        and mat1.layout.is_contiguous()
+    # In certain scenarios, such as when the first stride is 0, the entire tensor may not be contiguous.
+    # But the 2D matrix within each batch can still be contiguous, allowing us to apply max autotune.
+    # So here we specifically check for contiguity within the 2D matrix of each batch.
+    mat1_size = mat1.layout.size
+    mat1_stride = mat1.layout.stride
+    mat1_each_batch_is_contiguous = (
+        _use_template_for_cpu(layout)
+        and mat1.get_dtype() == torch.float32
+        and (len(mat1_size) == 3)
+        and (len(mat1_stride) == 3)
+        and (mat1_stride[1] == mat1_size[2])
+        and (mat1_stride[2] == 1)
+    )
+    return use_cpp_gemm_template(layout, mat1, mat2, require_constant_mat2=False) and (
+        mat1.layout.is_contiguous() or mat1_each_batch_is_contiguous
     )
 
 
@@ -2555,11 +2671,14 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
+            # pyrefly: ignore  # missing-argument
             return get_max_tensorcore_tflops(dtype)
 
         if torch.backends.cuda.matmul.allow_tf32:
+            # pyrefly: ignore  # missing-argument
             return get_max_tensorcore_tflops(torch.float32)
         else:
+            # pyrefly: ignore  # missing-argument
             return get_max_simd_tflops(torch.float32)
 
 
@@ -2573,6 +2692,7 @@ def get_gpu_dram_gbps() -> int:
 def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
+    # pyrefly: ignore  # missing-attribute
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
@@ -2639,7 +2759,6 @@ def pass_execution_and_save(
     with tempfile.NamedTemporaryFile(
         mode="w",
         encoding="utf-8",
-        delete=False,
     ) as f:
         before_io = io.StringIO()
         after_io = io.StringIO()
@@ -2737,13 +2856,16 @@ def is_wait(node: Optional[Union[IRNode, Operation]]) -> bool:
     return type(node) is ir._WaitKernel
 
 
-def contains_collective(snode: BaseSchedulerNode) -> bool:
+def contains_collective(
+    snode: BaseSchedulerNode,
+    filter_fn: Optional[Callable[[BaseSchedulerNode], bool]] = None,
+) -> bool:
     from torch._inductor.scheduler import GroupedSchedulerNode
 
     if isinstance(snode, GroupedSchedulerNode):
         return any(contains_collective(x) for x in snode.snodes)
 
-    return is_collective(snode.node)
+    return is_collective(snode.node) and (filter_fn is None or filter_fn(snode))
 
 
 def contains_wait(snode: BaseSchedulerNode) -> bool:
@@ -2913,19 +3035,10 @@ def device_need_guard(device: str) -> bool:
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
-    # tl.atomic add has bfloat16 support in fbcode
-    # but not in OSS https://github.com/pytorch/pytorch/issues/97016
-    # we will fallback until the code is upstreamed to OSS
-    if (
-        config.is_fbcode()
-        and dtype == torch.bfloat16
-        and torch.cuda.is_available()
-        and torch.cuda.get_device_capability() >= (9, 0)
-        and config.bfloat16_atomic_adds_enabled
-    ):
-        return False
+    if dtype == torch.bfloat16 and torch.cuda.is_available():
+        return torch.cuda.get_device_capability() < (9, 0)
     else:
-        return dtype in OrderedSet([torch.int64, torch.bool, torch.bfloat16])
+        return dtype in (torch.int64, torch.bool)
 
 
 def use_scatter_fallback(
@@ -3181,6 +3294,10 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     int_max = torch.iinfo(torch.int32).max
     size_hint = V.graph.sizevars.size_hint
     has_hint = V.graph.sizevars.shape_env.has_hint
+
+    if config.assume_32bit_indexing:
+        V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
+        return True
 
     # Allow for unhinted e as long as we can still statically prove
     # (e.g., via ValueRanges) that it is still in bounds
@@ -3944,3 +4061,40 @@ def load_template(name: str, template_dir: Path) -> str:
     """Load a template file and return its content."""
     with open(template_dir / f"{name}.py.jinja") as f:
         return f.read()
+
+
+def should_fallback_by_default(node: torch.fx.Node) -> bool:
+    """Decide whether fallback for a node. This is only used in inductor lite mode."""
+    target = node.target
+
+    assert isinstance(
+        target, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)
+    ), f"Expected OpOverload or HigherOrderOperator, but found {type(target)}"
+
+    if not config.fallback_by_default:
+        return False
+
+    # some ops need special handle due to dynamic shapes. we can avoid
+    # fallback if they do not impact numerics.
+    skip_fallback_due_to_dynamic_shape = OrderedSet(
+        [
+            torch.ops.aten._assert_scalar.default,
+            torch.ops.aten.lift_fresh_copy.default,
+        ]
+    )
+
+    if target in skip_fallback_due_to_dynamic_shape:
+        return False
+
+    # Most hops have registered lowering. We should follow the lowering and not fallback.
+    # However, in rare cases, hops may not register lowering, such as
+    # torch.ops.higher_order.triton_kernel_wrapper_functional. We should fallback for
+    # these hops.
+    fallback_hops = OrderedSet(
+        [torch.ops.higher_order.triton_kernel_wrapper_functional]
+    )
+
+    if isinstance(target, torch._ops.HigherOrderOperator):
+        return target in fallback_hops
+
+    return not _needs_inductor_compile(node)

@@ -4,7 +4,7 @@ import collections
 import dataclasses
 import heapq
 import logging
-from typing import Callable, Optional, TYPE_CHECKING, TypedDict, Union
+from typing import Optional, TYPE_CHECKING, TypedDict, Union
 
 from torch._environment import is_fbcode
 from torch._utils_internal import signpost_event
@@ -17,6 +17,8 @@ from .virtualized import V
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .dependencies import Dep
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 
@@ -227,7 +229,7 @@ def assign_memory_planning_info_for_scheduler_buffers(
 
     # populate the MemoryPlanningInfoForBuffer attribute to each scheduler buffer
     # note: there are scheduler buffers not in dep_name_to_succ_nodes (e.g., graph outputs)
-    for buf_name in name_to_buf.keys():
+    for buf_name in name_to_buf:
         name_to_buf[buf_name].mpi_buffer = MemoryPlanningInfoForBuffer(
             size_alloc=sched_buf_to_size[buf_name][0],
             size_free=sched_buf_to_size[buf_name][1],

@@ -308,6 +308,12 @@ TypePtr ScriptTypeParser::parseTypeFromExprImpl(const Expr& expr) const {
     if (auto custom_class_type = getCustomClass(*name)) {
       return custom_class_type;
     }
+    // Check if the type is a custom class. This is done by checking
+    // if type_name starts with "torch.classes."
+    if (name->find("torch.classes.") == 0) {
+      auto custom_class_type = getCustomClass("__torch__." + *name);
+      return custom_class_type;
+    }
 
     throw ErrorReport(expr) << "Unknown type name '" << *name << "'";
   }

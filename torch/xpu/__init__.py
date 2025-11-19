@@ -94,7 +94,7 @@ def is_initialized():
     return _initialized and not _is_in_bad_fork()
 
 
-def _lazy_call(callable, **kwargs):
+def _lazy_call(callable, **kwargs) -> None:
     if is_initialized():
         callable()
     else:
@@ -108,7 +108,7 @@ def _lazy_call(callable, **kwargs):
             _queued_calls.append((callable, traceback.format_stack()))
 
 
-def init():
+def init() -> None:
     r"""Initialize PyTorch's XPU state.
     This is a Python API about lazy initialization that avoids initializing
     XPU until the first time it is accessed. Does nothing if the XPU state is
@@ -117,7 +117,7 @@ def init():
     _lazy_init()
 
 
-def _lazy_init():
+def _lazy_init() -> None:
     global _initialized, _queued_calls
     if is_initialized() or hasattr(_tls, "is_initializing"):
         return
@@ -158,7 +158,7 @@ def _lazy_init():
 
 
 class _DeviceGuard:
-    def __init__(self, index: int):
+    def __init__(self, index: int) -> None:
         self.idx = index
         self.prev_idx = -1
 
@@ -178,7 +178,7 @@ class device:
             this argument is a negative integer or ``None``.
     """
 
-    def __init__(self, device: Any):
+    def __init__(self, device: Any) -> None:
         self.idx = _get_device_index(device, optional=True)
         self.prev_idx = -1
 
@@ -200,7 +200,7 @@ class device_of(device):
         obj (Tensor or Storage): object allocated on the selected device.
     """
 
-    def __init__(self, obj):
+    def __init__(self, obj) -> None:
         idx = obj.get_device() if obj.is_xpu else -1
         super().__init__(idx)
 
@@ -324,7 +324,7 @@ class StreamContext:
 
     cur_stream: Optional["torch.xpu.Stream"]
 
-    def __init__(self, stream: Optional["torch.xpu.Stream"]):
+    def __init__(self, stream: Optional["torch.xpu.Stream"]) -> None:
         self.stream = stream
         self.idx = _get_device_index(None, True)
         if self.idx is None:
@@ -362,7 +362,7 @@ def stream(stream: Optional["torch.xpu.Stream"]) -> StreamContext:
     return StreamContext(stream)
 
 
-def _set_stream_by_id(stream_id, device_index, device_type):
+def _set_stream_by_id(stream_id, device_index, device_type) -> None:
     r"""set stream specified by the stream id, device index and device type
 
     Args: stream_id (int): not visible to the user, used to assigned to the specific stream.
@@ -376,7 +376,7 @@ def _set_stream_by_id(stream_id, device_index, device_type):
     )
 
 
-def set_stream(stream: Stream):
+def set_stream(stream: Stream) -> None:
     r"""Set the current stream.This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
@@ -495,7 +495,7 @@ def _set_rng_state_offset(
     """
     final_device = _get_device(device)
 
-    def cb():
+    def cb() -> None:
         default_generator = _get_generator(final_device)
         default_generator.set_offset(offset)
 
