@@ -668,7 +668,6 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             str(traced.graph)
         )
 
-
     def test_split_mm(self):
         def func(a, b):
             a = a * 2
@@ -754,10 +753,10 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ins = inps()
             gm = make_fx(func)(*ins)
 
-        from torch._inductor.fx_passes.decompose_mm import split_mm_rs
+        from torch._inductor.fx_passes.decompose_mm import _split_mm_rs
 
         num_chunks = 2
-        split_mm_rs(gm, 1, [num_chunks])
+        _split_mm_rs(gm, [num_chunks], 1)
         graph_str = str(gm.graph)
         FileCheck().check_count(
             "torch.ops.aten.mm",
@@ -842,10 +841,10 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ins = inps()
             gm = make_fx(func)(*ins)
 
-        from torch._inductor.fx_passes.decompose_mm import split_mm_rs
+        from torch._inductor.fx_passes.decompose_mm import _split_mm_rs
 
         num_chunks = 2
-        split_mm_rs(gm, 8192, [num_chunks])
+        _split_mm_rs(gm, [num_chunks], 8192)
         graph_str = str(gm.graph)
         FileCheck().check_count(
             "torch.ops.aten.mm",

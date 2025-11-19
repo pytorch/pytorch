@@ -202,6 +202,7 @@ def gb_to_bytes(gb: float) -> int:
     """Convert gigabytes to bytes."""
     return int(gb * 1024 * 1024 * 1024)
 
+
 class OverlapScheduler:
     """
     Scheduler that reorders operations to maximize compute-collective overlap.
@@ -237,7 +238,7 @@ class OverlapScheduler:
         max_coll_distance: int,
         custom_runtime_estimation: Callable[[fx.Node], float | None] | None,
         collective_estimator: Literal["analytical", "benchmark"],
-        split_mm_rs_config: tuple[int, list[int]] | None = None,
+        split_mm_rs_config: tuple[list[int], int] | None = None,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -254,14 +255,15 @@ class OverlapScheduler:
         # Build structures
         stable_topological_sort(self.graph)
         if split_mm_rs_config is not None:
-            from .decompose_mm import split_mm_rs
-            min_size_after_split = split_mm_rs_config[0]
-            num_chunks = split_mm_rs_config[1]
+            from torch._inductor.fx_passes.decompose_mm import _split_mm_rs
 
-            split_mm_rs(
+            num_chunks = split_mm_rs_config[0]
+            min_size_after_split = split_mm_rs_config[1]
+
+            _split_mm_rs(
                 self.gm,
-                min_size_after_split,
                 num_chunks,
+                min_size_after_split,
             )
         self.nodes = list(self.graph.nodes)
         self.node_idx = {n: i for i, n in enumerate(self.nodes)}
@@ -1014,7 +1016,7 @@ def schedule_overlap_bucketing(
     custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
     # split_mm_rs_config: tuple[int, list[int]] | None = None,
-    split_mm_rs_config: tuple[int, list[int]] | None = (2048, [2]),
+    split_mm_rs_config: tuple[list[int], int] | None = ([2, 4], 2048),
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1033,6 +1035,12 @@ def schedule_overlap_bucketing(
             If None, uses default estimations. This is currently limited to collectives and compute nodes.
         collective_estimator: Method for estimating collective runtime. "analytical" uses bandwidth formulas,
             "benchmark" uses CUDA events with power-of-2 rounding and interpolation.
+        split_mm_rs_config: If is not None, split matmul-reduce_scatter will be applied for
+            more fine grained overlapping.
+            This is tuple, that contains list of number of possible chunks and
+            minimal size of dimension after split.
+            E.g. ([2, 4, 8], 2048) means that greatest number from the list will be picked,
+            that makes split dimension not less than 2048.
     """
 
     return OverlapScheduler(
