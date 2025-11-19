@@ -1217,6 +1217,7 @@ class DeviceCachingAllocator {
   std::vector<c10::DeviceIndex> devices_with_peer_access_;
 
   bool record_history = false;
+  bool skip_free_requested = false;
 
   std::atomic<CreateContextFn> context_recorder_;
   RecordContext record_context_ = RecordContext::NEVER;
@@ -1270,10 +1271,12 @@ class DeviceCachingAllocator {
       CreateContextFn context_recorder,
       size_t alloc_buffer_max_entries,
       RecordContext when,
-      bool clearHistory) {
+      bool clearHistory,
+      bool skip_free_requested) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
+    this->skip_free_requested = skip_free_requested;
     context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
@@ -3699,7 +3702,10 @@ class DeviceCachingAllocator {
     }
 
     if (record_history) {
-      alloc_buffer.insertEntries(te);
+      // skip if flag skip_free_requested is True and the action is free requested
+      if (!(skip_free_requested && action == TraceEntry::Action::FREE_REQUESTED)) {
+        alloc_buffer.insertEntries(te);
+      }
     }
   }
 };
@@ -3884,7 +3890,8 @@ class NativeCachingAllocator : public CUDAAllocator {
       CreateContextFn context_recorder,
       size_t alloc_buffer_max_entries,
       RecordContext when,
-      bool clearHistory) override {
+      bool clearHistory,
+      bool skip_free_requested) override {
     record_history = enabled;
     annotation_buffer.setMaxEntries(alloc_buffer_max_entries);
     annotation_buffer.clear();
@@ -3894,7 +3901,8 @@ class NativeCachingAllocator : public CUDAAllocator {
           context_recorder,
           alloc_buffer_max_entries,
           when,
-          clearHistory);
+          clearHistory,
+          skip_free_requested);
     }
   }
 

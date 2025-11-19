@@ -123,7 +123,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
       c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       c10::cuda::CUDACachingAllocator::RecordContext when,
-      bool clearHistory) override;
+      bool clearHistory,
+      bool skip_free_requested) override;
   void attachOutOfMemoryObserver(
       c10::cuda::CUDACachingAllocator::OutOfMemoryObserver observer) override;
   void attachAllocatorTraceTracker(

@@ -907,6 +907,7 @@ def _record_memory_history_legacy(
     clear_history=False,
     compile_context=False,
     global_record_annotations=False,
+    skip_free_requested=False,
 ):
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
@@ -918,6 +919,7 @@ def _record_memory_history_legacy(
         clear_history,
         compile_context,
         global_record_annotations,
+        skip_free_requested,
     )
 
 
@@ -1005,6 +1007,7 @@ def _record_memory_history_impl(
     clear_history: bool = False,
     compile_context: bool = False,
     global_record_annotations: bool = False,
+    skip_free_requested: bool = False,
 ):
     _C._cuda_record_memory_history(  # type: ignore[call-arg]
         enabled,
@@ -1014,6 +1017,7 @@ def _record_memory_history_impl(
         clear_history,
         compile_context,
         global_record_annotations,
+        skip_free_requested,
     )
 
 

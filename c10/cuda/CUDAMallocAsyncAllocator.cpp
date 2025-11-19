@@ -653,7 +653,8 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       RecordContext when,
-      bool clearHistory) override {
+      bool clearHistory,
+      bool skip_free_requested) override {
     TORCH_CHECK(
         false,
         "cudaMallocAsync does not yet support recordHistory. "

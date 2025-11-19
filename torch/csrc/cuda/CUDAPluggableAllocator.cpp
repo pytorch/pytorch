@@ -280,7 +280,8 @@ void CUDAPluggableAllocator::recordHistory(
     c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
     c10::cuda::CUDACachingAllocator::RecordContext when,
-    bool clearHistory) {
+    bool clearHistory,
+    bool skip_free_requested) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support recordHistory. "
