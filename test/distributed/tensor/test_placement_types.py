@@ -25,7 +25,7 @@ class PlacementTypesTestCase(TestCase):
 
         ident_tests = (
             (shard, True, False, False),
-            (strided_shard, True, False, False),
+            (strided_shard, False, False, False),
             (partial_sum, False, True, False),
             (partial_max, False, True, False),
             (replicate, False, False, True),
@@ -73,9 +73,6 @@ class PlacementTypesTestCase(TestCase):
         with self.assertRaises(TypeError):
             _StridedShard(3, 4)
         _StridedShard(3, split_factor=4)
-
-    def test_strided_shard_isinstance_shard(self):
-        assert isinstance(_StridedShard(dim=3, split_factor=7), Shard)
 
     def test_dynamo_can_identify_placement_classes(self):
         for cls in (Replicate, Shard, _StridedShard, Partial):

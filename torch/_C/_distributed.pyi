@@ -9,7 +9,8 @@ class Shard(Placement):
     dim: int
     def __init__(self, dim: int): ...
 
-class StridedShard(Shard):
+class StridedShard(Placement):
+    dim: int
     split_factor: int
     def __init__(self, dim: int, *, split_factor: int): ...
 
