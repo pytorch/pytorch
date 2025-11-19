@@ -15,7 +15,6 @@ aspects of contributing to PyTorch.
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
 - [Spin](#spin)
-  - [Building](#building)
   - [Linting](#linting)
     - [default lint](#default-lint)
   - [Regenerating](#regenerating)
