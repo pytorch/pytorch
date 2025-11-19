@@ -50,14 +50,15 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
 
     force_save_bw_mutation_src(gm)
 
-    # Find backward boundary
+    # Find backward boundary and build ordering
     first_node_in_bwd = None
     bwd_start = None
+    order = {}
     for idx, node in enumerate(gm.graph.nodes):
-        if _is_backward_node(node):
+        order[node] = idx
+        if _is_backward_node(node) and first_node_in_bwd is None:
             first_node_in_bwd = node
             bwd_start = idx
-            break
 
     if first_node_in_bwd is None:
         return gm
@@ -79,11 +80,14 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
         if node in recomputed_nodes:
             return recomputed_nodes[node]
 
-        # Recursively duplicate checkpointed dependencies first
-        for inp in node.all_input_nodes:
-            if inp.op == "placeholder":
-                continue
-            if must_recompute(inp) and inp not in recomputed_nodes:
+        # Recursively duplicate checkpointed dependencies first, in original forward order
+        checkpointed_inputs = [
+            inp for inp in node.all_input_nodes
+            if inp.op != "placeholder" and must_recompute(inp)
+        ]
+        # Sort by original order to preserve forward ordering
+        for inp in sorted(checkpointed_inputs, key=lambda n: order[n]):
+            if inp not in recomputed_nodes:
                 duplicate_checkpoint_chain(inp)
 
         # Create duplicate node
