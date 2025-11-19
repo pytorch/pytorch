@@ -188,11 +188,11 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
     for (int i = tensor_dim - 1; i >= 0; --i) {
       uint64_t global_idx_at_i = global_offset[i] + tmp_idx % local_shape[i];
       tmp_idx /= local_shape[i];
-      global_entry_linear_idx += global_idx_at_i; // 0*4
+      global_entry_linear_idx += global_idx_at_i * global_strides[i];
     }
     uint64_t virtual_thread_idx = global_entry_linear_idx % single_thread_n;
     uint64_t virtual_offset = global_entry_linear_idx / single_thread_n;
-    virtual_offset *= 4 / unroll_factor;
+    virtual_offset *= max_generator_offsets_per_curand_call / unroll_factor;
     return std::make_tuple(virtual_thread_idx, virtual_offset, single_thread_n);
   };
 
