@@ -33,10 +33,9 @@ from torch.utils._debug_mode import get_active_debug_mode
 logger = logging.getLogger(__name__)
 
 # Global configuration flag to control the redistribution planning strategy.
-# When None, the algorithm is automatically selected based on shard order complexity.
 # When True, forces the graph-based algorithm using Dijkstra's shortest path.
 # When False, forces the greedy algorithm for faster planning.
-_FORCE_MIN_COST_REDISTRIBUTION_PLAN = None
+_FORCE_MIN_COST_REDISTRIBUTION_PLAN: Optional[bool] = None
 
 
 @contextlib.contextmanager
@@ -51,7 +50,7 @@ def use_min_cost_redistribution_plan(enabled: bool = True):
     - **Graph-based**: Uses Dijkstra's algorithm to find the minimum-cost path
       through all possible placement transformations. This approach considers the global
       cost of all collective operations and finds the optimal sequence. Best for complex
-      redistribution patterns where minimizing communication cost is critical.
+      redistribution patterns where reducing communication cost and memory overhead is critical.
 
     - **Greedy**: Uses a heuristic approach that makes locally optimal choices
       at each step. This is faster to compute but may not produce the globally optimal
