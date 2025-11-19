@@ -94,6 +94,8 @@ from .exc import (
     BackendCompilerFailed,
     collapse_resume_frames,
     format_graph_break_message,
+    format_loop_skip_frame_message,
+    format_skip_frame_message,
     get_stack_above_dynamo,
     ResumePrologueTracingError,
     StepUnsupported,
@@ -605,9 +607,9 @@ def generic_jump(
         )
         # compile a partial subgraph prefix then jump into user code
         if self.maybe_has_backedge():
-            msg = (
-                "Skipping frame because there is a graph break in a for/while loop\n"
-                f"{self.frame_summary()}"
+            msg = format_loop_skip_frame_message(
+                self.f_code,
+                "".join(traceback.format_list([self.frame_summary()])),
             )
             log.info(msg)
             raise exc.SkipFrame(msg)
@@ -883,9 +885,9 @@ def break_graph_if_unsupported(
                 )
 
                 if self.maybe_has_backedge():
-                    msg = (
-                        "Skipping frame because there is a graph break in a for/while loop\n"
-                        f"{self.frame_summary()}"
+                    msg = format_loop_skip_frame_message(
+                        self.f_code,
+                        "".join(traceback.format_list([self.frame_summary()])),
                     )
                     log.info(msg)
                     raise exc.SkipFrame(msg) from excp
@@ -4626,8 +4628,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
         ):
-            raise exc.SkipFrame("because no content in function call")
-
+            raise exc.SkipFrame(
+                format_skip_frame_message(self.f_code, "no content in function call")
+            )
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
