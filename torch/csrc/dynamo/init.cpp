@@ -251,8 +251,6 @@ void initDynamoBindings(PyObject* torch) {
       .def_readwrite("cur_action", &FrameExecStrategy::cur_action)
       .def_readwrite("recursive_action", &FrameExecStrategy::recursive_action);
 
-  m.def("set_code_exec_strategy", &dynamo_set_code_exec_strategy);
-
   m.def("set_c_recursion_limit", &dynamo_set_c_recursion_limit);
   m.def("get_c_recursion_limit", &dynamo_get_c_recursion_limit);
 
