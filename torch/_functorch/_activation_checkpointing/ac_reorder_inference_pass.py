@@ -17,9 +17,9 @@ def _is_backward_node(node: fx.Node) -> bool:
     return node.meta.get("custom", {}).get("backward") is not None
 
 
-def remap_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModule:
+def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModule:
     """
-    Remap (rematerialize) checkpointed nodes by duplicating checkpoint regions for backward.
+    Rematerialize checkpointed nodes by duplicating checkpoint regions for backward.
 
     This follows the same pattern as reordering_to_mimic_autograd_engine in partitioners.py:
     1. Walk through graph node by node
@@ -99,19 +99,16 @@ def remap_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModule:
         Pattern from reordering_to_mimic_autograd_engine.
         """
 
-        # Skip condition: already in env (but in backward, may need to duplicate AC nodes)
+        # Skip condition: already in env or already recomputed
         def skip_condition(n: fx.Node) -> bool:
             if n in recomputed_nodes:
                 return True
             if n in env:
-                # In backward, we need to duplicate checkpointed nodes even if in env
-                if for_backward and must_recompute(n) and n in checkpointed_in_bwd:
-                    return False
                 return True
             return False
 
         # Collect dependencies
-        insertable_nodes = collect_deps_with_filter(node, order, skip_condition)
+        insertable_nodes = collect_deps_with_filter(node, skip_condition)
 
         # Insert nodes in original order
         for n in sorted(insertable_nodes, key=lambda x: order[x]):

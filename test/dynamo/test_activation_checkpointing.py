@@ -1895,6 +1895,7 @@ class ACReorderingTests(torch._dynamo.test_case.TestCase):
 
         return result, captured_gm
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_reordering_simple_forward_backward(self):
         """AC reordering with checkpoint used in both forward and backward."""
         torch._dynamo.allow_in_graph(torch.autograd.grad)
@@ -1949,6 +1950,7 @@ def forward(self, arg0_1, arg1_1):
     return (detach_3, detach_4)""",
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_reordering_defers_backward_only_nodes(self):
         """AC nodes only used in backward are deferred (DCE removes forward version)."""
         torch._dynamo.allow_in_graph(torch.autograd.grad)
@@ -1979,7 +1981,7 @@ def forward(self, arg0_1):
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
     detach = torch.ops.aten.detach.default(mul);  mul = None
-    return (detach,)"""
+    return (detach,)""",
         )
 
         self.assertExpectedInline(
@@ -1993,7 +1995,7 @@ def forward(self, arg0_1):
     cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
     mul = torch.ops.aten.mul.Tensor(expand, cos);  expand = cos = None
     detach = torch.ops.aten.detach.default(mul);  mul = None
-    return (detach,)"""
+    return (detach,)""",
         )
 
         # Verify correctness
@@ -2009,6 +2011,7 @@ def forward(self, arg0_1):
         # sin is needed for forward, so it's kept (DCE doesn't remove it)
         self.assertEqual(ac_in_fwd, 1)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_reordering_graph_structure(self):
         """Verify graph structure with AC reordering enabled."""
         torch._dynamo.allow_in_graph(torch.autograd.grad)
@@ -2047,6 +2050,7 @@ def forward(self, arg0_1, arg1_1):
     return (detach, detach_1)""",
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_reordering_duplicates_nodes_used_in_both_regions(self):
         """AC nodes used in both forward and backward are duplicated."""
         torch._dynamo.allow_in_graph(torch.autograd.grad)
@@ -2103,6 +2107,7 @@ def forward(self, arg0_1, arg1_1):
     return (detach_3, detach_4, detach_5)""",
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_reordering_recomputes_checkpointed_ops(self):
         """Verify AC nodes are recomputed in backward (not just deferred)."""
         torch._dynamo.allow_in_graph(torch.autograd.grad)
@@ -2150,6 +2155,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(sigmoid_with, 2, "sigmoid should be recomputed in backward")
         self.assertEqual(sigmoid_without, 1)
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_reordering_chain_not_needed_for_forward(self):
         """AC chain not needed for forward output is fully deferred."""
         torch._dynamo.allow_in_graph(torch.autograd.grad)

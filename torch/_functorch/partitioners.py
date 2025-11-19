@@ -1267,7 +1267,6 @@ def sort_depths(args, depth_map: dict[fx.Node, int]) -> list[tuple[fx.Node, int]
 
 def collect_deps_with_filter(
     node: fx.Node,
-    order: dict[fx.Node, int],
     skip_condition: Callable[[fx.Node], bool],
 ) -> OrderedSet[fx.Node]:
     """
@@ -1279,7 +1278,6 @@ def collect_deps_with_filter(
 
     Args:
         node: The node whose dependencies to collect
-        order: Mapping from node to its original position in the graph
         skip_condition: Function that returns True if a node should be skipped
 
     Returns:
@@ -1364,7 +1362,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     def insert_node_in_graph(node):
         # Collect dependencies that need to be inserted
         # Skip condition: already in env
-        insertable_nodes = collect_deps_with_filter(node, order, lambda n: n in env)
+        insertable_nodes = collect_deps_with_filter(node, lambda n: n in env)
 
         # Insert in original order
         insert_nodes_in_original_order(insertable_nodes, order, new_graph, env)
