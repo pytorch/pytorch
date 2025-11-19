@@ -1732,6 +1732,7 @@ class SIMDScheduling(BaseScheduling):
                 if node.get_outputs()[0].node.get_name() not in rename:
                     node.mark_run()
 
+        V.graph.wrapper_code.make_comment("# Call mix order reduction kernel")
         self.codegen_comment(node_schedule, None)
         # workspace args is still needed after the call
         kernel.call_kernel(kernel.kernel_name, deallocate_ws=False)
@@ -1740,7 +1741,9 @@ class SIMDScheduling(BaseScheduling):
 
         # a extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
-        nsplit = V.graph.wrapper_code.codegen_python_sizevar((numel + split_size - 1) // split_size)
+        nsplit = V.graph.wrapper_code.codegen_python_sizevar(
+            (numel + split_size - 1) // split_size
+        )
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
 

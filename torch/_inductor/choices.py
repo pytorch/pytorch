@@ -565,9 +565,7 @@ class InductorChoices:
             # For mix order reduction, we disregard shared data or
             # distance.
             return True
-        if (
-            shared_data_score < config.score_fusion_memory_threshold
-        ):
+        if shared_data_score < config.score_fusion_memory_threshold:
             WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
             return False
         if scheduler.are_long_distant_nodes(node1, node2):
@@ -610,7 +608,7 @@ class InductorChoices:
 
         # pyrefly: ignore [bad-return]
         return (
-            # MixOrderReduction.can_fuse(node1, node2),
+            MixOrderReduction.can_fuse(node1, node2),
             template_score,
             node1.is_reduction() == node2.is_reduction() and memory_score > 0,
             memory_score,

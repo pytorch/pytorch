@@ -2681,9 +2681,6 @@ class Scheduler:
             self.compute_ancestors()
 
         self.nodes = self.fuse_nodes(self.nodes)
-        # n551 = self.name_to_fused_node["op551"]
-        # n552 = self.name_to_fused_node["op552"]
-        # breakpoint()
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
