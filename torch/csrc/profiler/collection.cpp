@@ -768,7 +768,7 @@ void mark_finished(std::shared_ptr<Result>& r) {
 // Assumption: Total threads number will not exceed 2^16-1, and total ops will
 // not exceed 2^48 -1.
 static uint64_t getForwardThreadKey(uint64_t tid, uint64_t seqNr) {
-  return (((tid) << 48) | ((seqNr) & (((uint64_t)1 << 48) - 1)));
+  return ((tid << 48) | (seqNr & (((uint64_t)1 << 48) - 1)));
 }
 
 void generateForwardBackwardLink(

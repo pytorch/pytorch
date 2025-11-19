@@ -1708,9 +1708,9 @@ bool isValidDLPackCapsule(PyObject* data) {
 
 Tensor tensor_fromDLPack(PyObject* data) {
   const char* bad_capsule =
-      ("from_dlpack received an invalid capsule. "
-       "Note that DLTensor capsules can be consumed only once, "
-       "so you might have already constructed a tensor from it once.");
+      "from_dlpack received an invalid capsule. "
+      "Note that DLTensor capsules can be consumed only once, "
+      "so you might have already constructed a tensor from it once.";
 
   if (PyCapsule_IsValid(
           data, at::DLPackTraits<DLManagedTensorVersioned>::capsule)) {

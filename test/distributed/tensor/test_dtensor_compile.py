@@ -464,6 +464,25 @@ def forward(self, b_parametrizations_buffer_original0, x):
         run(g, 64, 8)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_dtensor_requires_grad_recompile(self):
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def f(x):
+            y = x * x
+            return y.to_local()
+
+        full_x = torch.randn(8, 8, requires_grad=False)
+        x = distribute_tensor(full_x, mesh, [Shard(0)])
+        f(x)
+
+        full_x = torch.randn(8, 8, requires_grad=True)
+        x = distribute_tensor(full_x, mesh, [Shard(0)])
+        f(x)
+
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_dtensor_attribute_access_on_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 

@@ -2,8 +2,9 @@ import itertools
 import logging
 import textwrap
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import sympy
 from sympy import Integer, Symbol
@@ -97,7 +98,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         ]
         short_reduction = [n for n in reduction if n not in long_reduction]
         if long_reduction:
-            log.warning(
+            log.debug(
                 "ComboKernels: %d long reduction nodes are separated",
                 len(long_reduction),
             )
@@ -111,7 +112,7 @@ def _default_custom_combo_kernel_horizontal_partition(
         ]
         if large_pointwise:
             # TODO benchmark the performance when large pointwise nodes combining with others
-            log.warning(
+            log.debug(
                 "ComboKernels: %d large pointwise nodes are separated",
                 len(large_pointwise),
             )
@@ -698,7 +699,7 @@ class ComboKernel(Kernel):
                 block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
         self.block_args = list(block_names.keys())
 
-        return [ConstexprArg(x) for x in block_names.keys()]
+        return [ConstexprArg(x) for x in block_names]
 
     def add_numel_to_args(
         self, argdefs: list[ArgName], signature: list[Any]
@@ -896,6 +897,7 @@ class ComboKernel(Kernel):
             result.writeline(f"return {', '.join(var_names)},")
 
         result.writelines(["\n", "\n", "def call(args):"])
+        device = V.graph.get_current_device_or_throw()
         index = V.graph.get_current_device_or_throw().index
         with result.indent():
             result.writeline(f"with {V.graph.device_ops.device_guard(index)}:")
@@ -930,7 +932,7 @@ class ComboKernel(Kernel):
 
             result.writeline("args = get_args()")
             result.writeline(
-                "ms = benchmarker.benchmark_gpu(lambda: call(args), rep=40)"
+                f"ms = benchmarker.benchmark(call, fn_args=(args,), device={device.type},rep=40)"
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")

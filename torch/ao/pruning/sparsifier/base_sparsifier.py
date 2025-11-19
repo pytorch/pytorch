@@ -2,7 +2,7 @@
 import abc
 import copy
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import nn
@@ -52,7 +52,7 @@ class BaseSparsifier(abc.ABC):
         >>> sparsifier = BaseSparsifier(config, defaults)
     """
 
-    def __init__(self, defaults: Optional[dict[str, Any]] = None):
+    def __init__(self, defaults: dict[str, Any] | None = None):
         super().__init__()
         self.defaults: dict[str, Any] = defaults or {}
 
@@ -196,7 +196,7 @@ class BaseSparsifier(abc.ABC):
 
             # check that whatever was put into local_args agrees with what was obtained
             # from tensor_fqn
-            for key in info_from_tensor_fqn.keys():
+            for key in info_from_tensor_fqn:
                 if key in local_args:
                     if not (
                         info_from_tensor_fqn[key] == local_args[key]
@@ -227,8 +227,8 @@ class BaseSparsifier(abc.ABC):
 
     def squash_mask(
         self,
-        params_to_keep: Optional[tuple[str, ...]] = None,
-        params_to_keep_per_layer: Optional[dict[str, tuple[str, ...]]] = None,
+        params_to_keep: tuple[str, ...] | None = None,
+        params_to_keep_per_layer: dict[str, tuple[str, ...]] | None = None,
         *args,
         **kwargs,
     ):
@@ -306,7 +306,7 @@ class BaseSparsifier(abc.ABC):
     def convert(
         self,
         module: nn.Module,
-        mapping: Optional[dict[type[nn.Module], type[nn.Module]]] = None,
+        mapping: dict[type[nn.Module], type[nn.Module]] | None = None,
         inplace: bool = False,
         parameterization: type[nn.Module] = FakeSparsity,
     ):
