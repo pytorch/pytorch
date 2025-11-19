@@ -18,7 +18,9 @@ static Tensor& bincount_mps_impl(const Tensor& self, const Tensor& weights, Tens
   MPSStream* stream = getCurrentMPSStream();
   bool has_weights = weights.defined();
 
-  TORCH_CHECK(self.scalar_type() != kBool);
+  // Crashes with
+  // MPSGraphUtilities.mm:190:0: error: 'mps.scatter' op operand #2 must be tensor of int values, but got 'tensor<5xi1>'
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kBool, "bincount is not supported for Bool");
 
   @autoreleasepool {
     std::string key = "bincount_mps_impl" + getTensorsStringKey({self, weights});
