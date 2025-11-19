@@ -2552,6 +2552,7 @@ if torch._C._has_mkldnn:
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
     @register_meta(torch.ops.onednn.qconv_pointwise.default)
+    @register_meta(torch.ops.onednn.qconv_pointwise.tensor)
     def meta_qconv_pointwise(
         x,
         x_scale,
@@ -2603,6 +2604,7 @@ if torch._C._has_mkldnn:
         return out
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.binary)
+    @register_meta(torch.ops.onednn.qconv2d_pointwise.binary_tensor)
     def meta_qconv2d_pointwise_binary(
         x,
         x_scale,
