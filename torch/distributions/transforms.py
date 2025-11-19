@@ -19,7 +19,7 @@ from torch.distributions.utils import (
     vec_to_tril_matrix,
 )
 from torch.nn.functional import pad, softplus
-from torch.types import _Number
+from torch.types import Number
 
 
 __all__ = [
@@ -796,14 +796,14 @@ class AffineTransform(Transform):
         if not isinstance(other, AffineTransform):
             return False
 
-        if isinstance(self.loc, _Number) and isinstance(other.loc, _Number):
+        if isinstance(self.loc, Number) and isinstance(other.loc, Number):
             if self.loc != other.loc:
                 return False
         else:
             if not (self.loc == other.loc).all().item():  # type: ignore[union-attr]
                 return False
 
-        if isinstance(self.scale, _Number) and isinstance(other.scale, _Number):
+        if isinstance(self.scale, Number) and isinstance(other.scale, Number):
             if self.scale != other.scale:
                 return False
         else:
@@ -814,7 +814,7 @@ class AffineTransform(Transform):
 
     @property
     def sign(self) -> Union[Tensor, int]:  # type: ignore[override]
-        if isinstance(self.scale, _Number):
+        if isinstance(self.scale, Number):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()
 
@@ -827,7 +827,7 @@ class AffineTransform(Transform):
     def log_abs_det_jacobian(self, x, y):
         shape = x.shape
         scale = self.scale
-        if isinstance(scale, _Number):
+        if isinstance(scale, Number):
             result = torch.full_like(x, math.log(abs(scale)))
         else:
             result = torch.abs(scale).log()

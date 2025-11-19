@@ -14,7 +14,7 @@ from torch.distributions.utils import (
     logits_to_probs,
     probs_to_logits,
 )
-from torch.types import _Number, _size, Number
+from torch.types import _size, Number
 
 
 __all__ = ["LogitRelaxedBernoulli", "RelaxedBernoulli"]
@@ -57,12 +57,12 @@ class LogitRelaxedBernoulli(Distribution):
                 "Either `probs` or `logits` must be specified, but not both."
             )
         if probs is not None:
-            is_scalar = isinstance(probs, _Number)
+            is_scalar = isinstance(probs, Number)
             # pyrefly: ignore [read-only]
             (self.probs,) = broadcast_all(probs)
         else:
             assert logits is not None  # helps mypy
-            is_scalar = isinstance(logits, _Number)
+            is_scalar = isinstance(logits, Number)
             # pyrefly: ignore [read-only]
             (self.logits,) = broadcast_all(logits)
         self._param = self.probs if probs is not None else self.logits
