@@ -256,7 +256,13 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
 
     for n, batch, rhs in product(ns, batches, nrhs):
         A = make_a(*(batch + (n, n)))
-        LU, pivots = torch.linalg.lu_factor(A)
+        if torch.device(device).type == "mps":
+            # TODO: Fix lu_factor for MPS, because it does not work for all of
+            # these cases. So we resort to the CPU impl here and move the
+            # outputs back to MPS.
+            LU, pivots = (x.to(device) for x in torch.linalg.lu_factor(A.cpu()))
+        else:
+            LU, pivots = torch.linalg.lu_factor(A)
 
         B = make_b(batch + (n, rhs))
 
