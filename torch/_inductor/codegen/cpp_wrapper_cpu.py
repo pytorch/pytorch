@@ -96,6 +96,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.include_extra_header = functools.lru_cache(None)(  # type: ignore[method-assign]
             self._include_extra_header
         )
+        self.codegen_int_array_var_cache = {}
 
     @staticmethod
     def create(
@@ -1636,14 +1637,33 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_memory_formats.add(memory_format_str)
         return f"cached_torch_memory_format_{memory_format_str}"
 
-    @functools.cache  # noqa: B019
     def codegen_int_array_var(
         self,
         int_array: str,
         writeline: Callable[..., None],
         known_statically=False,
         graph=None,  # for per-graph caching
-    ):
+    ) -> str:
+        # Use id(graph) for caching to avoid circular references
+        cache_key = (
+            int_array,
+            id(writeline),
+            known_statically,
+            id(graph) if graph else None,
+        )
+        if cache_key not in self.codegen_int_array_var_cache:
+            self.codegen_int_array_var_cache[cache_key] = (
+                self._codegen_int_array_var_impl(int_array, writeline, known_statically)
+            )
+
+        return self.codegen_int_array_var_cache[cache_key]
+
+    def _codegen_int_array_var_impl(
+        self,
+        int_array: str,
+        writeline: Callable[..., None],
+        known_statically: bool,
+    ) -> str:
         # Used for size/stride declaration
         #
         # Because the memory planning is done in two passes (see the implementation
