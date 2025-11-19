@@ -689,14 +689,18 @@ class Partial(Placement):
         # Partial placement contract #3:
         # _partition_value: partition the value of a replicated tensor on the mesh dimension
 
-        # _partition_value is the conjugate operation of _reduce_value
-        # - i.e. _partition_value on a sum reduce op is just a division operation
-        # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
-        # TODO: if the reduce_op is min/max, etc. the _partition_value should be a
-        # different operation
-        assert self.reduce_op == "sum", "only support replicate to PartialSUM for now!"
+        # _partition_value is the conjugate operation of _reduce_value, e.g.
+        # - _partition_value on a sum reduce op is just a division operation
+        # - _reduce_value on a sum reduce op would just be a sum(allreduce) operation
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-        return tensor / num_chunks
+        if self.reduce_op == "sum":
+            return tensor / num_chunks
+        elif self.reduce_op in ("avg", "min", "max"):
+            return tensor
+        else:
+            raise ValueError(
+                f"Replicate to Partial({self.reduce_op}) conversion is not supported."
+            )
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Partial):
