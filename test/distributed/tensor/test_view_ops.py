@@ -3,6 +3,7 @@
 
 import itertools
 from typing import cast
+import math
 
 import torch
 import torch.distributed as dist
@@ -43,6 +44,11 @@ class TestViewOps(DTensorTestBase):
         return 6
 
     def test_view_groups(self):
+        # result = view_groups([3, 4, 1, 5], [12, 5])
+        # self.assertEqual(
+        #     result,
+        #     (Flatten((InputDim(0), InputDim(1), InputDim(2))), InputDim(3))
+        # )
         self.assertEqual(
             view_groups([2, 3], [3, 2]),
             (
@@ -50,6 +56,7 @@ class TestViewOps(DTensorTestBase):
                 Split(Flatten((InputDim(0), InputDim(1))), (3, 2), 1),
             ),
         )
+        view_groups([3, 4, 5], [12, 5])
         self.assertEqual(
             view_groups([3, 4, 5], [12, 5]),
             (Flatten((InputDim(0), InputDim(1))), InputDim(2)),
@@ -633,6 +640,127 @@ class TestViewOps(DTensorTestBase):
                 self.assertEqual(len(comm_mode.get_comm_counts()), 0)
 
     @with_comms
+    def test_dtensor_flatten_1d(self):
+        mesh: DeviceMesh = init_device_mesh(self.device_type, (self.world_size,))
+        # cover uneven sharding with mesh size +/- 1
+        for seq_len in [mesh.size(0) - 1, mesh.size(0), mesh.size(0) + 1]:
+            self._test_dtensor_flatten_1d(mesh, seq_len)
+
+    def _test_dtensor_flatten_1d(self, mesh, seq_len):
+        batch_size, dim = 6, 3
+        global_inps: Tensor = torch.arange(batch_size * seq_len * dim).view(batch_size, seq_len, dim)
+        global_inps_replicate: DTensor = distribute_tensor(global_inps, mesh, (Replicate(), ))
+        inps = global_inps_replicate.redistribute(mesh, (Shard(1),))
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            inps_viewed = inps.view(batch_size * seq_len, dim)
+        expected_placements = (_StridedShard(dim=0, split_factor=batch_size),)
+        expected_local_tensor = distribute_tensor(global_inps.view(batch_size * seq_len, dim), mesh, (Replicate(), )).redistribute(mesh, expected_placements)._local_tensor
+        self.assertEqual(inps_viewed.placements, expected_placements)
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    def test_dtensor_flatten_2d(self):
+        mesh: DeviceMesh = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+        # cover uneven sharding with mesh size +/- 1
+        # for seq_len in [mesh.size(0) - 1, mesh.size(0), mesh.size(0) + 1]:
+        #     for dim1 in [mesh.size(1) - 1, mesh.size(1), mesh.size(1) + 1]:
+        
+        for seq_len in [mesh.size(0) * 2]:
+            for dim1 in [mesh.size(1) * 2 - 1, mesh.size(1) * 2, mesh.size(1) * 2 + 1]:
+                self._test_dtensor_flatten_2d(mesh, seq_len, dim1)
+
+        for seq_len in [mesh.size(0) * 2 - 1, mesh.size(0) * 2 + 1]:
+            for dim1 in [mesh.size(1) * 2]:
+                # expect error
+                pass
+
+    def _test_dtensor_flatten_2d(self, mesh, seq_len, dim1):
+        # S1, S2
+        batch_size, dim2 = 6, 3
+        global_inps = torch.arange(batch_size * seq_len * dim1 * dim2).view(
+            batch_size, seq_len, dim1, dim2
+        )
+        inps = distribute_tensor(global_inps, mesh, (Shard(1), Shard(2)))
+        print(f"distribute_tensor: {torch.distributed.get_rank()=}", flush=True)
+        # comm_mode = CommDebugMode()
+        # with comm_mode:
+        inps_viewed = inps.view(batch_size * seq_len * dim1, dim2)
+        print(f"inps_viewed: {torch.distributed.get_rank()=}", flush=True)
+        expected_placements = (
+            _StridedShard(dim=0, split_factor=batch_size),
+            _StridedShard(dim=0, split_factor=batch_size * math.ceil(seq_len * 1.0 / mesh.size(0))),
+        )
+        self.assertEqual(inps_viewed.placements, expected_placements)
+        # self.assertEqual(comm_mode.get_total_counts(), 0)
+
+        # import fbvscode
+        # fbvscode.set_trace()
+
+        # R, S2
+        # global_inps = torch.arange(batch_size * seq_len * dim1 * dim2).view(
+        #     batch_size, seq_len, dim1, dim2
+        # )
+        # inps = distribute_tensor(global_inps, mesh, (Replicate(), Shard(2)))
+        # comm_mode = CommDebugMode()
+        # with comm_mode:
+        #     inps_viewed = inps.view(batch_size * seq_len * dim1, dim2)
+        # expected_placements = (
+        #     Replicate(),
+        #     _StridedShard(dim=0, split_factor=36),
+        # )
+        # self.assertEqual(inps_viewed.placements, expected_placements)
+        # self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    def test_dtensor_unflatten(self):
+        # 1D case
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+        batch_size, seq_len, dim = 6, 6, 3
+        global_inps = torch.arange(batch_size * seq_len * dim).view(
+            batch_size * seq_len, dim
+        )
+        inps = distribute_tensor(global_inps, mesh, (_StridedShard(0, split_factor=6),))
+        inps_viewed = inps.view(batch_size, seq_len, dim)
+        expected_placements = (Shard(1),)
+        self.assertEqual(inps_viewed.placements, expected_placements)
+
+        # 2D case: S1, S2
+        mesh = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+        batch_size, seq_len, dim1, dim2 = 6, 6, 6, 3
+        global_inps = torch.arange(batch_size * seq_len * dim1 * dim2).view(
+            batch_size * seq_len * dim1, dim2
+        )
+        inps = distribute_tensor(
+            global_inps,
+            mesh,
+            (
+                _StridedShard(dim=0, split_factor=6),
+                _StridedShard(dim=0, split_factor=12),
+            ),
+        )
+        inps_viewed = inps.view(batch_size, seq_len, dim1, dim2)
+        expected_placements = (Shard(1), Shard(2))
+        self.assertEqual(inps_viewed.placements, expected_placements)
+
+        # 2D case: R, S2
+        mesh = init_device_mesh(self.device_type, (self.world_size // 2, 2))
+        batch_size, seq_len, dim1, dim2 = 6, 6, 6, 3
+        global_inps = torch.arange(batch_size * seq_len * dim1 * dim2).view(
+            batch_size * seq_len * dim1, dim2
+        )
+        inps = distribute_tensor(
+            global_inps, mesh, (Replicate(), _StridedShard(dim=0, split_factor=36))
+        )
+        inps_viewed = inps.view(batch_size, seq_len, dim1, dim2)
+        expected_placements = (
+            Replicate(),
+            Shard(2),
+        )
+        self.assertEqual(inps_viewed.placements, expected_placements)
+
+    @with_comms
     def test_view_redistribution(self):
         """
         This test is added to demonstrate "incorrect" view ops behavior if redistribution happens.
@@ -765,6 +893,8 @@ TestViewOpsWithLocalTensor = create_local_tensor_test_class(
     skipped_tests=[
         # Comparing data pointers is not supported for local tensor
         "test_dtensor_view_op_uneven",
+        "test_dtensor_flatten_1d",
+        "test_dtensor_flatten_2d",
     ],
 )
 

@@ -111,9 +111,9 @@ class Shard(torch._C._distributed.Shard):
             full_chunk_size = curr_local_size // num_chunks
             return full_chunk_size, full_chunk_size * rank
 
-        # uneven sharding case
-        full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
-        shard_starting_idx = full_chunk_size * rank
+    #     # uneven sharding case
+    #     full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
+    #     shard_starting_idx = full_chunk_size * rank
 
         if curr_local_size < shard_starting_idx:
             return 0, curr_local_size
@@ -129,7 +129,7 @@ class Shard(torch._C._distributed.Shard):
         curr_local_size: int,
         num_chunks: int,
         rank: int,
-    ) -> tuple[int, Optional[int]]:
+    ) -> tuple[int, int]:
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod

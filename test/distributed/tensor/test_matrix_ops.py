@@ -31,6 +31,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     skip_unless_torch_gpu,
     with_comms,
 )
+from torch.distributed.tensor.placement_types import (
+    _StridedShard,
+)
 
 
 funcol = torch.ops.c10d_functional
@@ -239,6 +242,19 @@ class DistMatrixOpsTest(DTensorTestBase):
             dy = torch.matmul(dx, dA)
 
         self.assertEqual(y, dy.full_tensor())
+
+    @with_comms
+    def test_mm_with_strided_input(self):
+        mesh = self.build_device_mesh()
+        batch_size, seq_len, contract_dim, out_dim = 2, 4, 3, 7
+        global_inps = torch.arange(batch_size * seq_len * contract_dim, device="cuda").float().view(batch_size, seq_len, contract_dim)
+        inps = distribute_tensor(global_inps, mesh, (Shard(1), ))
+        inps_viewed = inps.view(batch_size * seq_len, contract_dim)
+        global_weight = torch.arange(contract_dim * out_dim).float().view(contract_dim, out_dim)
+        weight = distribute_tensor(global_weight, mesh, (Replicate(), ))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (_StridedShard(dim=0, split_factor=2),)
+        self.assertEqual(out.placements, expected_placements)
 
     @with_comms
     def test_t(self):
