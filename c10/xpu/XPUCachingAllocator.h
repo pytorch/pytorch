@@ -10,7 +10,7 @@ C10_XPU_API Allocator* get();
 
 C10_XPU_API void init(DeviceIndex device_count);
 
-C10_XPU_API void emptyCache();
+C10_XPU_API void emptyCache(MempoolId_t mempool_id = {0, 0});
 
 C10_XPU_API void resetPeakStats(DeviceIndex device);
 
