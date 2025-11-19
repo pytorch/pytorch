@@ -35,6 +35,7 @@ from typing import Any, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
+from torch._dynamo.variables.misc import DatetimeNowVariable, TimedeltaVariable
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -890,6 +891,35 @@ class BuiltinVariable(VariableTracker):
                 result.append(((VariableTracker, VariableTracker), handle_is))  # type: ignore[arg-type]
 
             return result
+
+        def datetime_sub_handler(tx: "InstructionTranslator", a, b) -> Any:
+            a_proxy = a.as_proxy()
+            b_proxy = b.as_proxy()
+            proxy = tx.output.create_proxy(
+                "call_function",
+                operator.sub,
+                (a_proxy, b_proxy),
+                {},
+            )
+            source = AttrSource(a.source, b.source, "-")
+            return TimedeltaVariable(proxy=proxy, source=source)
+
+        datetime_sub_handlers: list[
+            tuple[
+                tuple[type[VariableTracker], type[VariableTracker]],
+                _HandlerCallback,
+            ]
+        ] = [
+            (
+                (DatetimeNowVariable, DatetimeNowVariable),
+                datetime_sub_handler,
+            ),
+            (
+                (TimedeltaVariable, TimedeltaVariable),
+                datetime_sub_handler,
+            ),
+        ]
+        op_handlers[operator.sub].extend(datetime_sub_handlers)
 
         for op in supported_comparison_ops.values():
             assert callable(op)

@@ -2162,6 +2162,9 @@ class DatetimeNowVariable(VariableTracker):
             return DatetimeScalarVariable(proxy=proxy, source=self.source)
         return super().call_method(tx, name, args, kwargs)
 
+    def make_guard(self, fn):
+        return
+
 
 class TimedeltaVariable(VariableTracker):
     def __init__(
@@ -2198,6 +2201,9 @@ class TimedeltaVariable(VariableTracker):
             return DatetimeScalarVariable(proxy=proxy, source=source)
         return super().call_method(tx, name, args, kwargs)
 
+    def make_guard(self, fn):
+        return
+
 
 class DatetimeScalarVariable(VariableTracker):
     def __init__(self, proxy, source, **kwargs):
@@ -2215,3 +2221,6 @@ class DatetimeScalarVariable(VariableTracker):
 
     def as_python_constant(self):
         raise AsPythonConstantNotImplementedError(self)
+
+    def make_guard(self, fn):
+        return
