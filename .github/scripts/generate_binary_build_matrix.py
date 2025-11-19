@@ -122,12 +122,12 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cufile==1.15.1.6; platform_system == 'Linux'"
     ),
     "xpu": (
-        "intel-cmplr-lib-rt==2025.3.0 | "
-        "intel-cmplr-lib-ur==2025.3.0 | "
-        "intel-cmplr-lic-rt==2025.3.0 | "
-        "intel-sycl-rt==2025.3.0 | "
-        "oneccl-devel==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
-        "oneccl==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "intel-cmplr-lib-rt==2025.3.1 | "
+        "intel-cmplr-lib-ur==2025.3.1 | "
+        "intel-cmplr-lic-rt==2025.3.1 | "
+        "intel-sycl-rt==2025.3.1 | "
+        "oneccl-devel==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
+        "oneccl==2021.17.1; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "impi-rt==2021.17.0; platform_system == 'Linux' and platform_machine == 'x86_64' | "
         "onemkl-license==2025.3.0 | "
         "onemkl-sycl-blas==2025.3.0 | "
@@ -135,14 +135,14 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "onemkl-sycl-lapack==2025.3.0 | "
         "onemkl-sycl-rng==2025.3.0 | "
         "onemkl-sycl-sparse==2025.3.0 | "
-        "dpcpp-cpp-rt==2025.3.0 | "
-        "intel-opencl-rt==2025.3.0 | "
+        "dpcpp-cpp-rt==2025.3.1 | "
+        "intel-opencl-rt==2025.3.1 | "
         "mkl==2025.3.0 | "
-        "intel-openmp==2025.3.0 | "
+        "intel-openmp==2025.3.1 | "
         "tbb==2022.3.0 | "
         "tcmlib==1.4.1 | "
         "umf==1.0.2 | "
-        "intel-pti==0.14.0"
+        "intel-pti==0.15.0"
     ),
 }
 
