@@ -86,7 +86,9 @@ bool can_use_cudnn_attention(sdp::sdp_params const& params, bool debug) {
   return false;
 }
 
-bool can_use_mem_efficient_attention(sdp::sdp_params const& params, bool debug) {
+bool can_use_mem_efficient_attention(
+    sdp::sdp_params const& params,
+    bool debug) {
   return true;
 }
 
