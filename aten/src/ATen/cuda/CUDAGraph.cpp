@@ -98,7 +98,7 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
   // Addendum: beginAllocateStreamToPool is now called before cudaStreamBeginCapture to prevent an
   // autograd thread's free() call triggering an invalid cudaEventRecord in the caching allocator
   // due to the capture status being updated _after_ a capture had already started.
-  c10::cuda::CUDACachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](cudaStream_t stream) {
+  c10::cuda::CUDACachingAllocator::beginAllocateToGraphPool(capture_dev_, mempool_id_, [this](cudaStream_t stream) {
       cudaStreamCaptureStatus status{};
       CaptureId_t stream_capture_id = 0;
       AT_CUDA_CHECK(cudaStreamGetCaptureInfo(stream, &status, &stream_capture_id));
@@ -124,7 +124,7 @@ void CUDAGraph::capture_end() {
 
   AT_CUDA_CHECK(cudaStreamEndCapture(capture_stream_, &graph_));
 
-  c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  c10::cuda::CUDACachingAllocator::endAllocateToGraphPool(capture_dev_, mempool_id_);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 

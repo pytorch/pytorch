@@ -956,7 +956,7 @@ struct PrivatePool {
   int use_count{1};
   // Number of unfreed cudaMallocs made for this pool. When use_count and
   // cudaMalloc_count drop to zero, we can delete this PrivatePool from
-  // graph_pools.
+  // private_pools.
   int cudaMalloc_count{0};
   // Instead of maintaining private BlockPools here, I could stuff all blocks
   // (private or no) into the top-level large_blocks and small_blocks, and
@@ -1167,15 +1167,15 @@ class DeviceCachingAllocator {
   BlockPool small_blocks;
 
   // allocated or in use by a stream. Holds all active allocations,
-  // whether they came from graph_pools or one of the BlockPools above.
+  // whether they came from private_pools or one of the BlockPools above.
   ska::flat_hash_set<Block*> active_blocks;
 
-  // captures_underway tracks if we are diverting some
-  // allocations to a specific pool.
-  // Most of the time it's empty, in which case malloc can avoid calling
-  // cudaStreamGetCaptureInfo in the hot path.
+  // pool_stack tracks mempool redirection for allocations.
+  // Treated as a stack: we traverse from the back so inner use_mem_pool
+  // contexts override outer ones. Each entry’s filter typically encodes
+  // thread-local context
   std::vector<std::pair<MempoolId_t, std::function<bool(cudaStream_t)>>>
-      captures_underway;
+      pool_stack;
 
   // tracks which pools we can use as a last resort before ooming
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
@@ -1226,15 +1226,30 @@ class DeviceCachingAllocator {
 
   // Members specific to CUDA graphs
 
-  // Private pools for CUDA graphs
+  // Holds information about the CUDA graph memory pool currently being captured
+  // (if any).
+  struct CapturingGraphPool {
+    MempoolId_t mempool_id;
+    std::function<bool(cudaStream_t)> filter;
+    PrivatePool* private_pool;
+  };
+  // The optional currently-active capturing graph pool.
+  // When capturing_graph_pool.has_value() is false (the usual case),
+  // malloc can skip invoking cudaStreamGetCaptureInfo, for performance on the
+  // hot path. We are not multi-threaded capture at this moment, so we don't
+  // need to worry about thread-safety.
+  std::optional<CapturingGraphPool> capturing_graph_pool{std::nullopt};
+
+  // Map of currently active private pools, used by CUDA graph memory pools or
+  // other mempools.
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
-      graph_pools;
-  // Pools no longer referenced by any graph. Their BlockPools are eligible for
-  // free_blocks. Can't be a vector or deque because we might erase entries in
-  // any order. Could be an std::list, but we don't care much, access and
-  // insert/erase are rare.
+      private_pools;
+  // Map of private pools that are no longer referenced by any graph or mempool
+  // and thus eligible for block freeing. We use a map for efficient insertion
+  // and removal; alternate container types (e.g. vector, deque, list) are not
+  // required, as access and modifications are infrequent.
   ska::flat_hash_map<MempoolId_t, PrivatePool*, MempoolIdHash>
-      graph_pools_freeable;
+      private_pools_freeable;
 
   // XXX - maybe we should generalize and have multiple events
   std::vector<OutOfMemoryObserver> oom_observers_;
@@ -1309,12 +1324,7 @@ class DeviceCachingAllocator {
       const std::unordered_set<void*>& expected_live_allocations) const {
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
-    PrivatePool* pool = nullptr;
-    auto pool_it = graph_pools.find(mempool_id);
-    TORCH_CHECK(pool_it != graph_pools.end(), "Could not find pool of id");
-    pool = pool_it->second.get();
-
-    TORCH_INTERNAL_ASSERT(pool != nullptr);
+    PrivatePool* pool = get_private_pool(mempool_id);
 
     size_t allocated_pool_blocks = 0;
 
@@ -1360,7 +1370,7 @@ class DeviceCachingAllocator {
 
     std::unique_lock<std::recursive_mutex> lock(mutex);
 
-    if (C10_LIKELY(captures_underway.empty())) {
+    if (C10_LIKELY(!capturing_graph_pool.has_value())) {
       // Processes end-of-life events for outstanding allocations used on
       // multiple streams (checks if their GPU-side uses are complete and
       // recycles their memory if so)
@@ -1411,7 +1421,7 @@ class DeviceCachingAllocator {
           || (release_available_cached_blocks(params, context) &&
               alloc_block(params, false, context, lock))
           // Free all non-split cached blocks and retry alloc.
-          || (C10_LIKELY(captures_underway.empty()) &&
+          || (C10_LIKELY(!capturing_graph_pool.has_value()) &&
               release_cached_blocks(context, {0, 0}) &&
               alloc_block(params, true, context, lock));
     }
@@ -1426,6 +1436,9 @@ class DeviceCachingAllocator {
           auto filter = [tid](cudaStream_t) {
             return std::this_thread::get_id() == tid;
           };
+          TORCH_CHECK(
+              C10_LIKELY(!capturing_graph_pool.has_value()),
+              "We will never try to use another mempool as a last resort under capture");
           beginAllocateToPool(mempool_id, filter);
           auto& mempool = get_pool(size, stream);
           AllocParams mempool_params(
@@ -1493,7 +1506,7 @@ class DeviceCachingAllocator {
         }
         return res;
       };
-      for (const auto& p : graph_pools) {
+      for (const auto& p : private_pools) {
         allocated_in_private_pools += get_size_block(p.second->large_blocks);
         allocated_in_private_pools += get_size_block(p.second->small_blocks);
       }
@@ -1832,22 +1845,8 @@ class DeviceCachingAllocator {
     }
     if (graph_reuse_context.find(info.capture_id) ==
         graph_reuse_context.end()) {
-      bool found = false;
-      for (auto& entry : captures_underway) {
-        if (entry.second(stream)) {
-          auto graph_pool = graph_pools.find(entry.first);
-          TORCH_INTERNAL_ASSERT(
-              graph_pool != graph_pools.end(),
-              "Could not find graph pool for capture.");
-          auto mempool_id = graph_pool->first;
-          graph_reuse_context[info.capture_id] = GraphReuseContext{};
-          mempool_to_capture_id[mempool_id] = info.capture_id;
-          found = true;
-          break;
-        }
-      }
-      TORCH_INTERNAL_ASSERT(
-          found, "Could not find memory pool id for capture.");
+      graph_reuse_context[info.capture_id] = GraphReuseContext{};
+      mempool_to_capture_id[capturing_graph_pool->mempool_id] = info.capture_id;
     }
     auto& graph_context = graph_reuse_context[info.capture_id];
     auto& visited = graph_context.visited[stream];
@@ -1924,7 +1923,7 @@ class DeviceCachingAllocator {
 
     // If the block has been used on more than one stream, handle accordingly.
     if (!block->stream_uses.empty()) {
-      if (C10_UNLIKELY(!captures_underway.empty())) {
+      if (C10_UNLIKELY(capturing_graph_pool.has_value())) {
         if (CUDAAllocatorConfig::graph_capture_record_stream_reuse()) {
           // record_free_markers returns a vector of free markers,
           // or an empty vector if any associated stream is not currently
@@ -2005,7 +2004,7 @@ class DeviceCachingAllocator {
       return;
     }
     block->stream_uses.insert(stream);
-    if (C10_UNLIKELY(!captures_underway.empty())) {
+    if (C10_UNLIKELY(capturing_graph_pool.has_value())) {
       block_to_cudagraph_stream_uses[block].insert(stream);
     }
   }
@@ -2069,7 +2068,7 @@ class DeviceCachingAllocator {
     }
     cache_info_aux(large_blocks, largest);
     cache_info_aux(small_blocks, largest);
-    for (const auto& gp : graph_pools) {
+    for (const auto& gp : private_pools) {
       cache_info_aux(gp.second->large_blocks, largest);
       cache_info_aux(gp.second->small_blocks, largest);
     }
@@ -2134,12 +2133,12 @@ class DeviceCachingAllocator {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     insert_events_deferred_until_no_capture(context);
 
-    auto pool = graph_pools.find(id);
-    if (pool != graph_pools.end()) {
+    auto pool = private_pools.find(id);
+    if (pool != private_pools.end()) {
       auto private_pool_head_blocks =
           get_private_pool_head_blocks(pool->second.get());
       return std::make_unique<PrivatePoolState>(id, private_pool_head_blocks);
-    } else if (graph_pools_freeable.count(id)) {
+    } else if (private_pools_freeable.count(id)) {
       TORCH_CHECK(false, "Not expected to checkpoint freeable graph");
     } else {
       TORCH_CHECK(false, "Could not find pool of id");
@@ -2339,13 +2338,10 @@ class DeviceCachingAllocator {
     RestoreResult rr;
 
     TORCH_CHECK(
-        !graph_pools_freeable.count(pps.owner_id),
+        !private_pools_freeable.count(pps.owner_id),
         "Not expected to checkpoint freeable graph");
 
-    auto pool = graph_pools.find(pps.owner_id);
-    TORCH_CHECK(pool != graph_pools.end(), "Could not find private pool id");
-
-    PrivatePool* private_pool = pool->second.get();
+    PrivatePool* private_pool = get_private_pool(pps.owner_id);
 
     freeBlocksAllocatedToPool(private_pool, rr);
 
@@ -2378,9 +2374,9 @@ class DeviceCachingAllocator {
 
     if (mempool_id.first != 0 || mempool_id.second != 0) {
       // If there is an active mempool, we find the corresponding PrivatePool
-      // in graph_pools and only return the blocks from it.
-      auto pool = graph_pools.find(mempool_id);
-      if (pool != graph_pools.end()) {
+      // in private_pools and only return the blocks from it.
+      auto pool = private_pools.find(mempool_id);
+      if (pool != private_pools.end()) {
         all_blocks = get_private_pool_head_blocks(pool->second.get());
       }
     } else {
@@ -2519,25 +2515,50 @@ class DeviceCachingAllocator {
 
   // See Note [Interaction with CUDA graph capture]
 
-  // Called by CUDAGraph::capture_begin
   void beginAllocateToPool(
       MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)> filter) {
+    TORCH_CHECK(
+        !capturing_graph_pool.has_value(),
+        "Under capture we are not allowed to use another mempool");
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
-    for (auto it2 = captures_underway.begin(); it2 != captures_underway.end();
-         ++it2) {
+    for (auto it2 = pool_stack.begin(); it2 != pool_stack.end(); ++it2) {
       TORCH_CHECK(
           it2->first != mempool_id,
           "beginAllocateToPool: already recording to mempool_id");
     }
-    captures_underway.emplace_back(mempool_id, std::move(filter));
+    pool_stack.emplace_back(mempool_id, std::move(filter));
   }
-
-  // Called by CUDAGraph::capture_end
   void endAllocateToPool(MempoolId_t mempool_id) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
 
+    for (auto it = pool_stack.begin(); it != pool_stack.end(); ++it) {
+      if (it->first == mempool_id) {
+        pool_stack.erase(it);
+        return;
+      }
+    }
+    TORCH_CHECK(
+        false, "endAllocatePool: not currently recording to mempool_id");
+  }
+
+  // Called by CUDAGraph::capture_begin
+  void beginAllocateToGraphPool(
+      MempoolId_t mempool_id,
+      std::function<bool(cudaStream_t)> filter) {
+    TORCH_CHECK(
+        !capturing_graph_pool.has_value(),
+        "Under capture we are not allowed to use another mempool");
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    create_or_incref_pool(mempool_id);
+    capturing_graph_pool = CapturingGraphPool{
+        mempool_id, std::move(filter), get_private_pool(mempool_id)};
+  }
+
+  // Called by CUDAGraph::capture_end
+  void endAllocateToGraphPool(MempoolId_t mempool_id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
     if (CUDAAllocatorConfig::graph_capture_record_stream_reuse() &&
         !graph_reuse_context.empty()) {
       auto capture_id = mempool_to_capture_id[mempool_id];
@@ -2552,15 +2573,7 @@ class DeviceCachingAllocator {
       mempool_to_capture_id.erase(mempool_id);
     }
 
-    for (auto it = captures_underway.begin(); it != captures_underway.end();
-         ++it) {
-      if (it->first == mempool_id) {
-        captures_underway.erase(it);
-        return;
-      }
-    }
-    TORCH_CHECK(
-        false, "endAllocatePool: not currently recording to mempool_id");
+    capturing_graph_pool = std::nullopt;
   }
 
   // Called by CUDAGraph::reset and MemPool::~MemPool()
@@ -2582,7 +2595,7 @@ class DeviceCachingAllocator {
       // Allows free_cached_blocks to begin cudaFreeing this pool's memory,
       // and makes sure this pool wasn't somehow made freeable already.
       // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-      bool inserted = graph_pools_freeable.insert({mempool_id, pp}).second;
+      bool inserted = private_pools_freeable.insert({mempool_id, pp}).second;
       TORCH_INTERNAL_ASSERT(inserted);
     }
   }
@@ -2624,7 +2637,7 @@ class DeviceCachingAllocator {
         blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
     blocks.insert(
         blocks.end(), large_blocks.blocks.begin(), large_blocks.blocks.end());
-    for (const auto& gp : graph_pools) {
+    for (const auto& gp : private_pools) {
       blocks.insert(
           blocks.end(),
           gp.second->small_blocks.blocks.begin(),
@@ -2664,13 +2677,13 @@ class DeviceCachingAllocator {
   void create_or_incref_pool(
       MempoolId_t mempool_id,
       CUDAAllocator* allocator = nullptr) {
-    auto it = graph_pools.find(mempool_id);
-    if (it == graph_pools.end()) {
+    auto it = private_pools.find(mempool_id);
+    if (it == private_pools.end()) {
       // mempool_id does not reference an existing pool.
       // Make a new pool for CUDAGraph capture or torch.cuda.use_mem_pool
       // usage. use_count is initially 1, which means the pool is
       // being used since somebody called createOrIncrefPool.
-      graph_pools.emplace(
+      private_pools.emplace(
           mempool_id, std::make_unique<PrivatePool>(mempool_id, allocator));
     } else {
       // mempool_id references an existing pool, which the current CUDAGraph
@@ -2684,8 +2697,8 @@ class DeviceCachingAllocator {
   }
 
   PrivatePool* get_private_pool(MempoolId_t mempool_id) const {
-    auto it = graph_pools.find(mempool_id);
-    TORCH_INTERNAL_ASSERT(it != graph_pools.end());
+    auto it = private_pools.find(mempool_id);
+    TORCH_INTERNAL_ASSERT(it != private_pools.end());
     return it->second.get();
   }
 
@@ -2952,28 +2965,38 @@ class DeviceCachingAllocator {
   }
 
   BlockPool& get_pool(size_t size, cudaStream_t stream) {
-    // captures_underway is a conservative guess that the current stream may be
-    // capturing. It's only non-empty if some thread has begun and not yet ended
-    // a capture, so it's usually 0, and we can short-circuit
-    // cudaStreamCaptureStatus (which does a TLS lookup).
-    if (C10_UNLIKELY(!captures_underway.empty())) {
-      for (auto& entry : captures_underway) {
-        if (entry.second(stream)) {
-          auto it1 = graph_pools.find(entry.first);
-          TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
-          if (size <= kSmallSize) {
-            return it1->second->small_blocks;
-          } else {
-            return it1->second->large_blocks;
-          }
+    auto get_default_pool = [&]() -> BlockPool& {
+      if (size <= kSmallSize) {
+        return small_blocks;
+      } else {
+        return large_blocks;
+      }
+    };
+
+    auto get_memory_pool = [&](MempoolId_t mempool_id) -> BlockPool& {
+      if (size <= kSmallSize) {
+        return get_private_pool(mempool_id)->small_blocks;
+      } else {
+        return get_private_pool(mempool_id)->large_blocks;
+      }
+    };
+
+    if (C10_UNLIKELY(capturing_graph_pool.has_value())) {
+      if (capturing_graph_pool->filter(stream)) {
+        return get_memory_pool(capturing_graph_pool->mempool_id);
+      }
+      // stream is not captured, use default pool
+    } else if (C10_UNLIKELY(!pool_stack.empty())) {
+      for (auto it = pool_stack.rbegin(); it != pool_stack.rend(); ++it) {
+        auto& [mempool_id, filter] = *it;
+        if (filter(stream)) {
+          return get_memory_pool(mempool_id);
         }
       }
+      // no matching pool found, use default pool
     }
-    if (size <= kSmallSize) {
-      return small_blocks;
-    } else {
-      return large_blocks;
-    }
+
+    return get_default_pool();
   }
 
   StatTypes get_stat_types_for_pool(const BlockPool& pool) {
@@ -3306,8 +3329,7 @@ class DeviceCachingAllocator {
   bool release_cached_blocks(
       const std::shared_ptr<GatheredContext>& context,
       MempoolId_t mempool_id) {
-    if (mempool_id.first == 0 && mempool_id.second == 0 &&
-        captures_underway.empty()) {
+    if (mempool_id.first == 0 && mempool_id.second == 0 && pool_stack.empty()) {
       // If there is no active mempool, we work on releasing *all* blocks.
 
       // First ensure that all blocks that can't currently be allocated due to
@@ -3319,8 +3341,8 @@ class DeviceCachingAllocator {
       release_blocks(small_blocks, context);
     }
 
-    for (auto it = graph_pools_freeable.begin();
-         it != graph_pools_freeable.end();) {
+    for (auto it = private_pools_freeable.begin();
+         it != private_pools_freeable.end();) {
       if (mempool_id.first != 0 || mempool_id.second != 0) {
         if (it->first == mempool_id) {
           // If there is an active mempool, we sync only the events
@@ -3337,9 +3359,9 @@ class DeviceCachingAllocator {
       release_blocks(it->second->small_blocks, context);
       release_blocks(it->second->large_blocks, context);
       if (it->second->cudaMalloc_count == 0) {
-        auto erase_count = graph_pools.erase(it->first);
+        auto erase_count = private_pools.erase(it->first);
         TORCH_INTERNAL_ASSERT(erase_count == 1);
-        it = graph_pools_freeable.erase(it);
+        it = private_pools_freeable.erase(it);
       } else {
         ++it;
       }
@@ -3522,7 +3544,7 @@ class DeviceCachingAllocator {
 
     // This function syncs, so capture should not be underway. Might as well
     // make sure capture-deferred end of life events get processed too.
-    TORCH_INTERNAL_ASSERT(captures_underway.empty());
+    TORCH_INTERNAL_ASSERT(!capturing_graph_pool.has_value());
     insert_events_deferred_until_no_capture(context);
 
     for (auto it = cuda_events.begin(); it != cuda_events.end();) {
@@ -4184,6 +4206,21 @@ class NativeCachingAllocator : public CUDAAllocator {
   }
 
   // CUDAGraph interactions
+  void beginAllocateToGraphPool(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      std::function<bool(cudaStream_t)> filter) override {
+    assertValidDevice(device);
+    device_allocator[device]->beginAllocateToGraphPool(
+        std::move(mempool_id), std::move(filter));
+  }
+
+  void endAllocateToGraphPool(c10::DeviceIndex device, MempoolId_t mempool_id)
+      override {
+    assertValidDevice(device);
+    device_allocator[device]->endAllocateToGraphPool(mempool_id);
+  }
+
   void beginAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
@@ -4504,3 +4541,4 @@ std::atomic<CUDAAllocator*> allocator;
 static BackendStaticInitializer backend_static_initializer;
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
+  

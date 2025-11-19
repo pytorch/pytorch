@@ -793,8 +793,18 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     return {};
   }
 
-  // CUDAGraph interactions
   void beginAllocateToPool(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      std::function<bool(cudaStream_t)> /*filter*/) override {
+    // We direct all allocations to the cudaMallocAsync mempool.
+  }
+
+  void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
+      override {}
+
+  // CUDAGraph interactions
+  void beginAllocateToGraphPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
       std::function<bool(cudaStream_t)> /*filter*/) override {
@@ -807,7 +817,7 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
     capture_underway = true;
   }
 
-  void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id)
+  void endAllocateToGraphPool(c10::DeviceIndex device, MempoolId_t mempool_id)
       override {
     assertValidDevice(device);
 
