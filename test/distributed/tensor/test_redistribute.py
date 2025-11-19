@@ -913,11 +913,6 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 input_data.clone(), mesh, src_placement, shard_order=src_order
             )
 
-            # Context managers:
-            # 1. disable_graph_based_transform: Controls algorithm selection
-            #    - disabled=False (idx=0): Allow graph-based (optimal paths)
-            #    - disabled=True (idx=1): Force greedy (simpler but longer paths)
-            # 2. DebugMode: Captures redistribution trace for validation
             with (
                 use_min_cost_redistribution_plan(enabled=enable_graph),
                 DebugMode(record_torchfunction=False) as debug_mode,
