@@ -1200,25 +1200,27 @@ get_thread_local_native_sharding_propagator_cache() {
         py::reinterpret_borrow<py::dict>(PyThreadState_GetDict());
     // We need to clean up before Python detaches from the thread if
     // the thread is being destroyed.
-    thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
-        py::capsule(new std::thread::id(this_thread_id), [](void* p) {
-          auto* ptid = reinterpret_cast<std::thread::id*>(p);
-          {
-            std::lock_guard<std::mutex> inner_lock(
-                native_sharding_propagator_cache_cleanup_mutex);
-            auto it = all_thread_caches.find(*ptid);
-            if (it != all_thread_caches.end()) {
-              // We need to both:
-              // 1) free python objects, and
-              it->second->reset();
-              // 2) make sure we don't try to come back and mess with
-              // a destroyed thread-local at module unload (e.g.,
-              // process exit) time.
-              all_thread_caches.erase(it);
+    if (!thread_dict.contains("__DTensor_fastpath_thread_cache_cleanup")) {
+      thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
+          py::capsule(new std::thread::id(this_thread_id), [](void* p) {
+            auto* ptid = reinterpret_cast<std::thread::id*>(p);
+            {
+              std::lock_guard<std::mutex> inner_lock(
+                  native_sharding_propagator_cache_cleanup_mutex);
+              auto it = all_thread_caches.find(*ptid);
+              if (it != all_thread_caches.end()) {
+                // We need to both:
+                // 1) free python objects, and
+                it->second->reset();
+                // 2) make sure we don't try to come back and mess with
+                // a destroyed thread-local at module unload (e.g.,
+                // process exit) time.
+                all_thread_caches.erase(it);
+              }
             }
-          }
-          delete ptid;
-        });
+            delete ptid;
+          });
+    }
   }
   return native_sharding_propagator_cache_DO_NOT_USE.value();
 }
