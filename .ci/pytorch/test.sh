@@ -1763,8 +1763,10 @@ test_operator_microbenchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
 
+  test_inductor_set_cpu_affinity
+
   cd benchmarks/operator_benchmark/pt_extension
-  python -m pip install .
+  python -m pip install . -v --no-build-isolation
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 

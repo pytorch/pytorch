@@ -19,55 +19,39 @@ optimizer_list = op_bench.op_list(
 )
 
 optimizer_configs_long = op_bench.cross_product_configs(
-    num_params=[1, 10, 100],
-    param_size=[100000, 1000000, 10000000],
+    shape=[(100000,), (1000000,), (10000000,)],
     device=["cuda"],
     tags=["long"],
 )
 
 
 class OptimizerBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, op_func, device, shape=None, num_params=None, param_size=None):
-        if shape is not None:
-            num_params = num_params if num_params is not None else 1
-            self.params = [
-                torch.randn(shape, device=device, requires_grad=True)
-                for _ in range(num_params)
-            ]
-            for param in self.params:
-                param.grad = torch.randn(shape, device=device)
-        else:
-            self.params = [
-                torch.randn(param_size, device=device, requires_grad=True)
-                for _ in range(num_params)
-            ]
-            for param in self.params:
-                param.grad = torch.randn_like(param)
+    def init(self, op_func, device, shape):
+        self.op_func = op_func
+        self.param = torch.randn(shape, device=device, requires_grad=True, dtype=torch.float32)
+        self.param.grad = torch.randn(shape, device=device)
 
         kwargs = {"momentum": 0.9} if op_func == optim.SGD else {}
-        self.optimizer = op_func(self.params, lr=0.001, **kwargs)
+        self.optimizer = op_func([self.param], lr=0.001, **kwargs)
 
-        # Memory traffic calculation for bandwidth
-        self.total_elements = sum(p.numel() for p in self.params)
-        self.bytes_per_element = self.params[0].element_size()
-        # SGD w/ momentum: read(param, grad, momentum) + write(param, momentum) = 5x
-        # Adam/AdamW: read(param, grad, exp_avg, exp_avg_sq) + write(param, exp_avg, exp_avg_sq) = 7x
-        # Adagrad/RMSprop: read(param, grad, state) + write(param, state) = 5x
-        if op_func in (optim.Adam, optim.AdamW):
-            self.memory_multiplier = 7
-        else:
-            self.memory_multiplier = 5
-
-        self.inputs = {"dummy": self.params[0]}
+        self.inputs = {"dummy": self.param}
 
     def forward(self, dummy):
         self.optimizer.step()
-        for param in self.params:
-            param.grad = torch.randn_like(param)
-        return self.params[0]
+        return self.param
 
     def get_memory_traffic_bytes(self):
-        return self.total_elements * self.bytes_per_element * self.memory_multiplier
+        # Memory traffic calculation for bandwidth
+        total_elements = self.param.numel()
+        bytes_per_element = self.param.element_size()
+        # SGD w/ momentum: read(param, grad, momentum) + write(param, momentum) = 5x
+        # Adam/AdamW: read(param, grad, exp_avg, exp_avg_sq) + write(param, exp_avg, exp_avg_sq) = 7x
+        # Adagrad/RMSprop: read(param, grad, state) + write(param, state) = 5x
+        if self.op_func in (optim.Adam, optim.AdamW):
+            memory_multiplier = 7
+        else:
+            memory_multiplier = 5
+        return total_elements * bytes_per_element * memory_multiplier
 
 
 op_bench.generate_pt_tests_from_op_list(

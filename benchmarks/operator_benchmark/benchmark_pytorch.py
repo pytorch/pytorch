@@ -121,16 +121,21 @@ class TorchBenchmarkBase(torch.nn.Module):
     def get_memory_traffic_bytes(self):
         """Return the number of bytes read/written by this operator.
 
-        Override this method in subclasses to enable memory bandwidth calculation.
+        Override this method in subclasses for operations with non-standard memory patterns
+        (e.g., matmul which is compute-bound rather than memory-bound).
+
         The framework will use this value along with execution time to compute
         and report memory bandwidth in GB/s.
 
-        This provides automatic calculation for matmul-like operations by
-        inferring dimensions from input tensor shapes:
-        - 2D inputs: (M, N) @ (N, K) → matmul, mm
-        - 3D inputs: (B, M, N) @ (B, N, K) → bmm, baddbmm
+        Default implementation assumes a pointwise-like operation:
+        - Reads: all input tensors
+        - Writes: output tensor (estimated as size of largest input)
 
-        For custom memory patterns, override this method.
+        This default works correctly for:
+        - Element-wise operations (add, mul, relu, etc.)
+        - Activations (gelu, sigmoid, etc.)
+        - Optimizers (SGD, Adam, etc.)
+        - Reductions (sum, mean, etc. - may underestimate writes)
 
         Returns:
             int or None: Total bytes transferred (reads + writes), or None if not applicable
@@ -139,32 +144,17 @@ class TorchBenchmarkBase(torch.nn.Module):
             return None
 
         input_tensors = [v for v in self.inputs.values() if isinstance(v, torch.Tensor)]
-        if len(input_tensors) < 2:
+        if not input_tensors:
             return None
 
-        input_a, input_b = input_tensors[0], input_tensors[1]
-
-        if input_a.dim() != input_b.dim() or input_a.dim() not in (2, 3):
-            return None
-
-        bytes_per_element = input_a.element_size()
-
-        if input_a.dim() == 3:
-            B_a, M, N_a = input_a.shape
-            B_b, N_b, K = input_b.shape
-            if B_a != B_b or N_a != N_b:
-                return None
-            B = B_a
-        else:
-            M, N_a = input_a.shape
-            N_b, K = input_b.shape
-            if N_a != N_b:
-                return None
-            B = 1
-
-        N = N_a
-        total_elements = B * (M * N + N * K + M * K)
-        return total_elements * bytes_per_element
+        # Calculate total bytes read from all inputs
+        bytes_read = sum(t.numel() * t.element_size() for t in input_tensors)
+        
+        # Estimate output size as the largest input (common for pointwise ops)
+        largest_input = max(input_tensors, key=lambda t: t.numel())
+        bytes_written = largest_input.numel() * largest_input.element_size()
+        
+        return bytes_read + bytes_written
 
 
 class PyTorchOperatorTestCase:
