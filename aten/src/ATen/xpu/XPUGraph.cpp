@@ -65,7 +65,7 @@ void XPUGraph::capture_begin(MempoolId_t pool) {
   }
 
   c10::xpu::XPUCachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](sycl::queue* queue) {
-    return queue->ext_oneapi_get_state() == queue_state::executing && queue == &capture_stream_.queue();
+    return queue->ext_oneapi_get_state() == queue_state::recording && queue == &capture_stream_.queue();
   });
 
   auto graph_impl = xpuGraph_t(capture_stream_.queue());
