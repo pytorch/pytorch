@@ -561,9 +561,13 @@ class InductorChoices:
         shared_data_score: int,
     ) -> bool:
         """Hook for heuristics to prevent horizontal (consumer/consumer) fusions"""
+        if MixOrderReduction.can_fuse(node1, node2):
+            # For mix order reduction, we disregard shared data or
+            # distance.
+            return True
         if (
             shared_data_score < config.score_fusion_memory_threshold
-        ) and not MixOrderReduction.can_fuse(node1, node2):
+        ):
             WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
             return False
         if scheduler.are_long_distant_nodes(node1, node2):
@@ -606,6 +610,7 @@ class InductorChoices:
 
         # pyrefly: ignore [bad-return]
         return (
+            # MixOrderReduction.can_fuse(node1, node2),
             template_score,
             node1.is_reduction() == node2.is_reduction() and memory_score > 0,
             memory_score,
