@@ -1,58 +1,18 @@
-import itertools
-import math
-from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, cast, NamedTuple, Optional
 
 import torch
+import torch.distributed.tensor.placement_utils as putils
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
-    _StridedShard,
-    MaskPartial,
     Partial,
     Placement,
     Replicate,
     Shard,
 )
+from torch.distributed.tensor.placement_utils import ShardOrder
 from torch.utils._debug_mode import _stringify_shape
 from torch.utils._dtype_abbrs import dtype_abbrs
-
-
-class ShardOrderEntry(NamedTuple):
-    """
-    Represents how a single tensor dimension is sharded across mesh dimensions.
-
-    Attributes:
-        tensor_dim: The tensor dimension being sharded (e.g., 0, 1, 2 for a 3D tensor).
-        mesh_dims: Tuple of mesh dimensions across which this tensor dimension is sharded,
-                   in execution order. The first mesh dim is applied first, second is applied
-                   second, etc. This tuple is guaranteed to be non-empty.
-
-    Examples:
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_DISTRIBUTED)
-        >>> # Tensor dim 1 sharded across mesh dim 2, then mesh dim 0
-        >>> ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0))
-
-        >>> # Tensor dim 0 sharded only on mesh dim 1
-        >>> ShardOrderEntry(tensor_dim=0, mesh_dims=(1,))
-    """
-
-    tensor_dim: int
-    mesh_dims: tuple[int, ...]  # guaranteed to be non-empty
-
-
-# Type alias for the complete shard order specification
-# A tuple of ShardOrderEntry, one per sharded tensor dimension
-#
-# Example:
-#   shard_order = (
-#       ShardOrderEntry(tensor_dim=0, mesh_dims=(1,)),
-#       ShardOrderEntry(tensor_dim=2, mesh_dims=(0, 3)),
-#   )
-#   This means:
-#     - Tensor dimension 0 is sharded on mesh dimension 1
-#     - Tensor dimension 2 is sharded on mesh dimension 0 first, then mesh dimension 3
-ShardOrder = tuple[ShardOrderEntry, ...]
 
 
 class TensorMeta(NamedTuple):
@@ -64,7 +24,66 @@ class TensorMeta(NamedTuple):
     dtype: torch.dtype
 
 
-# used internally to propagate the placements
+# Note [Sharding representation in DTensorSpec]
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#
+# DTensorSpec uses two complementary representations for expressing how tensor dimensions
+# are sharded across device mesh dimensions:
+#
+# 1. **Placements with _StridedShard** (internal representation stored in DTensorSpec.placements):
+#    A tuple of Placement objects where each position corresponds to a mesh dimension.
+#    When a tensor dimension is sharded across multiple mesh dimensions in a specific order,
+#    we use _StridedShard to encode that ordering information via split_factor.
+#
+# 2. **ShardOrder** (logical representation):
+#    A tuple of ShardOrderEntry objects that explicitly describe the sharding execution order.
+#    Each ShardOrderEntry specifies which tensor dimension is sharded and the ordered sequence
+#    of mesh dimensions used for sharding.
+#
+# Why two representations?
+# - Placements align with the device mesh structure (one placement per mesh dimension)
+# - ShardOrder provides an intuitive, execution-order view of how sharding is applied
+# - _StridedShard.split_factor encodes the ordering information needed to recover ShardOrder
+#
+# Example: Sharding a tensor dimension across mesh dims [2, 0, 1] in that order
+# Given:
+#   - mesh = DeviceMesh([4, 3, 6])  # mesh.size(0)=4, mesh.size(1)=3, mesh.size(2)=6
+#   - tensor dim 1 should be sharded first on mesh dim 2, then mesh dim 0, then mesh dim 1
+#
+# ShardOrder representation:
+#   shard_order = (ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0, 1)),)
+#   This clearly states: "shard tensor dim 1 on mesh dim 2, then 0, then 1"
+#
+# Placements representation (using _StridedShard):
+#   placements = (_StridedShard(1, split_factor=6), _StridedShard(1, split_factor=6), Shard(1))
+#   Position 0 (mesh dim 0): _StridedShard(1, sf=6) - shard tensor dim 1, accounting for prior shards on mesh dim 2
+#   Position 1 (mesh dim 1): _StridedShard(1, sf=6) - shard tensor dim 1, accounting for prior shards on mesh dim 2
+#   Position 2 (mesh dim 2): Shard(1) - first shard of tensor dim 1, no split_factor needed
+#
+# The split_factor calculation:
+# For each mesh dimension in ShardOrder, split_factor is the product of mesh.size() for all
+# mesh dimensions that:
+#   1. Appear earlier in the shard order (lower index in mesh_dims), AND
+#   2. Have a higher mesh dimension index (later in the placements tuple)
+#
+# For mesh dim 0 (index 1 in mesh_dims=(2,0,1)):
+#   - Mesh dim 2 appears earlier (index 0) and has higher dim index (2 > 0)
+#   - split_factor = mesh.size(2) = 6
+# For mesh dim 1 (index 2 in mesh_dims=(2,0,1)):
+#   - Mesh dim 2 appears earlier (index 0) and has higher dim index (2 > 1)
+#   - split_factor = mesh.size(2) = 6
+# For mesh dim 2 (index 0 in mesh_dims=(2,0,1)):
+#   - No earlier mesh dims, split_factor = 1, so use regular Shard(1)
+#
+# Conversion between representations:
+# - putils.convert_shard_order_to_StridedShard(): ShardOrder -> Placements with _StridedShard
+# - putils.maybe_convert_StridedShard_to_shard_order(): Placements -> ShardOrder and replace _StridedShard
+#       with Shard in Placements (if possible)
+# - DTensorSpec.shard_order property: Returns ShardOrder derived from placements
+#
+# See https://github.com/pytorch/pytorch/pull/166740 for the detailed algorithm illustration
+
+
 @dataclass
 class DTensorSpec:
     mesh: DeviceMesh
@@ -73,271 +92,12 @@ class DTensorSpec:
     # tensor meta will only be set during sharding propagation
     tensor_meta: Optional[TensorMeta] = None
 
-    # When a tensor dimension is sharded across multiple mesh axes,
-    # `shard_order` specifies the sequence in which these shardings are applied.
-    # This order determines how tensor shards are mapped and distributed across
-    # devices.
-    #
-    # Example:
-    #   For a tensor of shape [8, 16] and a 3D device mesh, if dim 0 is sharded over
-    #   mesh dim 1, and dim 1 is sharded over mesh dim 0 and then mesh dim 2,
-    #   the shard_order would be:
-    #     shard_order = (
-    #         ShardOrderEntry(tensor_dim=0, mesh_dims=(1,)),
-    #         ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 2)),
-    #     )
-    shard_order: ShardOrder = None  # type: ignore[assignment]
-
     def __post_init__(self) -> None:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
-        if self.shard_order is None:
-            # pyrefly: ignore [bad-assignment]
-            self.shard_order = DTensorSpec.compute_default_shard_order(self.placements)
         self._hash: int | None = None
 
-    @staticmethod
-    def compute_default_shard_order(
-        placements: tuple[Placement, ...],
-    ) -> ShardOrder:
-        """
-        Compute the default shard order from placements.
-
-        Returns a ShardOrder where each ShardOrderEntry maps a tensor dimension
-        to the mesh dimensions it's sharded on, in left-to-right order.
-        """
-        # follow default left-to-right device order if shard_order is not specified
-        tensor_dim_to_mesh_dims: defaultdict[int, list[int]] = defaultdict(list)
-        mesh_ndim = len(placements)
-        for mesh_dim in range(mesh_ndim):
-            # shard_order doesn't work with _StridedShard
-            if isinstance(placements[mesh_dim], _StridedShard):
-                return ()
-            if isinstance(placements[mesh_dim], Shard):
-                placement = cast(Shard, placements[mesh_dim])
-                shard_dim = placement.dim
-                assert shard_dim >= 0, (
-                    f"Shard dim {shard_dim} in placements {placements} must be normalized"
-                )
-                tensor_dim_to_mesh_dims[shard_dim].append(mesh_dim)
-
-        # Convert dict into ShardOrderEntry tuples
-        default_shard_order = tuple(
-            ShardOrderEntry(tensor_dim=key, mesh_dims=tuple(value))
-            for key, value in sorted(tensor_dim_to_mesh_dims.items())
-            if value
-        )
-        return default_shard_order
-
-    @staticmethod
-    def _convert_shard_order_to_StridedShard(
-        shard_order: ShardOrder, placements: tuple[Placement, ...], mesh: DeviceMesh
-    ) -> tuple[Placement, ...]:
-        """
-        Convert ShardOrder to placements with _StridedShard.
-
-        This function converts a ShardOrder specification into a tuple of Placement objects,
-        using _StridedShard when a tensor dimension is sharded across multiple mesh dimensions
-        in a non-default order. The split_factor of each _StridedShard is determined by the
-        product of mesh dimension sizes that appear earlier in the shard order but later in
-        the placement tuple.
-
-        Args:
-            shard_order: ShardOrder specification indicating which tensor dimensions are
-                sharded on which mesh dimensions and in what execution order.
-            placements: Tuple of Placement objects that does not contain _StridedShard.
-            mesh: DeviceMesh containing the size information for each mesh dimension.
-
-        Returns:
-            Updated tuple of Placement objects with Shard or _StridedShard placements.
-
-        Algorithm:
-            For each ShardOrderEntry in shard_order:
-              - For each mesh dimension in the entry's mesh_dims (in order):
-                - Calculate split_factor as the product of mesh sizes for all mesh dimensions
-                  that appear:
-                  1. Earlier in the shard order (lower index in mesh_dims), and
-                  2. Later in the placement tuple (higher mesh dimension index)
-                - If split_factor == 1: use normal Shard
-                - Otherwise: use _StridedShard with the calculated split_factor
-
-        Example:
-            >>> # xdoctest: +SKIP("Requires DeviceMesh")
-            >>> # Tensor dimension 0 sharded on mesh dims [2, 0, 1] in that order
-            >>> # mesh = DeviceMesh([4, 3, 2])  # sizes: mesh[0]=4, mesh[1]=3, mesh[2]=2
-            >>> shard_order = (ShardOrderEntry(tensor_dim=0, mesh_dims=(2, 0, 1)),)
-            >>> placements = (Shard(0), Shard(0), Shard(0))
-            >>> # For mesh_dim=2 (index 0 in mesh_dims): no earlier dims, split_factor=1
-            >>> #   -> placements[2] = Shard(0)
-            >>> # For mesh_dim=0 (index 1 in mesh_dims): mesh_dim=2 is earlier and has index 2>0
-            >>> #   -> split_factor = mesh.size(2) = 2
-            >>> #   -> placements[0] = _StridedShard(0, split_factor=2)
-            >>> # For mesh_dim=1 (index 2 in mesh_dims): mesh_dim=2 is earlier and has index 2>1
-            >>> #   -> split_factor = mesh.size(2) = 2
-            >>> #   -> placements[1] = _StridedShard(0, split_factor=2)
-            >>> # Result: (_StridedShard(0, sf=2), _StridedShard(0, sf=2), Shard(0))
-        """
-        placements_list = list(placements)
-        for entry in shard_order:
-            tensor_dim = entry.tensor_dim
-            mesh_dims = entry.mesh_dims
-            for idx in range(len(mesh_dims)):
-                # TODO(zpcore): split_factor from `view` and `shard order`
-                # should be able to be multiplied into one. Need to loosen the
-                # condition here.
-                mesh_dim = mesh_dims[idx]
-                if type(placements[mesh_dim]) is not Shard:
-                    raise ValueError(
-                        f"Only Shard placement can be converted to _StridedShard, "
-                        f"found {placements[mesh_dim]} in {placements=}."
-                    )
-                split_factor = math.prod(
-                    mesh.size(i) for i in mesh_dims[:idx] if i > mesh_dim
-                )
-                if split_factor == 1:
-                    # use normal Shard
-                    placements_list[mesh_dim] = Shard(tensor_dim)
-                else:
-                    placements_list[mesh_dim] = _StridedShard(
-                        tensor_dim, split_factor=split_factor
-                    )
-        return tuple(placements_list)
-
-    @staticmethod
-    def _maybe_convert_StridedShard_to_shard_order(
-        placements: tuple[Placement, ...], mesh: DeviceMesh
-    ) -> Optional[ShardOrder]:
-        """
-        Try to convert _StridedShard placements to ShardOrder.
-
-        This is the inverse of `_convert_shard_order_to_StridedShard`. It reconstructs the shard
-        order by examining the split_factor of each _StridedShard and determining its position
-        in the execution order. If the _StridedShard configuration cannot be represented as a
-        valid ShardOrder (i.e., there's no shard order that produces the observed split_factors),
-        this function returns None.
-
-        Args:
-            placements: Tuple of Placement objects that may contain _StridedShard.
-            mesh: DeviceMesh containing the size information for each mesh dimension.
-
-        Returns:
-            ShardOrder if conversion is possible, None otherwise. For placements without
-            _StridedShard, returns the default shard order.
-
-          Algorithm:
-              1. If no _StridedShard in placements, return default shard order
-              2. Create an empty list for each tensor dimension to represent mesh dim ordering
-              3. Iterate through placements in reverse order (right to left):
-                 - For each Shard/_StridedShard on a tensor dimension:
-                   - Extract its split_factor (1 for Shard, split_factor for _StridedShard)
-                   - Find the position in mesh_dims_order where accumulated_sf equals split_factor
-                   - accumulated_sf is the product of mesh sizes of mesh dimensions that appear
-                     earlier in mesh_dims_order (lower indices)
-                   - Insert mesh_dim at the found position
-              4. If no valid position found for any split_factor, return None (unable to convert)
-              5. Construct ShardOrderEntry for each tensor dimension from mesh_dims_order
-
-        Example:
-            >>> # xdoctest: +SKIP("Requires DeviceMesh")
-            >>> # mesh = DeviceMesh([4, 3, 2])  # sizes: mesh[0]=4, mesh[1]=3, mesh[2]=2
-            >>> # placements = (_StridedShard(0, sf=2), _StridedShard(0, sf=2), Shard(0))
-            >>> # Process tensor_dim=0 from right to left:
-            >>> #   - mesh_dim=2: Shard(0) with sf=1
-            >>> #     Try position 0: accumulated_sf=1, matches! Insert at position 0
-            >>> #     Current mesh_dims_order order: [2]
-            >>> #   - mesh_dim=1: _StridedShard(0, sf=2) with sf=2
-            >>> #     Try position 0: accumulated_sf=1, no match
-            >>> #     Try position 1: accumulated_sf=1*mesh.size(2)=2, matches! Insert at position 1
-            >>> #     Current mesh_dims_order order: [2, 1]
-            >>> #   - mesh_dim=0: _StridedShard(0, sf=2) with sf=2
-            >>> #     Try position 0: accumulated_sf=1, no match
-            >>> #     Try position 1: accumulated_sf=1*mesh.size(2)=2, matches! Insert at position 1
-            >>> #     Final mesh_dims_order order: [2, 0, 1]
-            >>> # Result: ShardOrder((ShardOrderEntry(tensor_dim=0, mesh_dims=(2, 0, 1)),))
-            >>> # This means: first shard on mesh_dim=2, then mesh_dim=0, then mesh_dim=1
-
-        Note:
-            This function validates that _StridedShard can be represented as a ShardOrder.
-            Not all _StridedShard configurations are valid - the split_factor must match
-            the product of mesh sizes in some execution order.
-        """
-        if not any(isinstance(p, _StridedShard) for p in placements):
-            return DTensorSpec.compute_default_shard_order(placements)
-        max_tensor_dim = (
-            max([i.dim for i in placements if isinstance(i, Shard | _StridedShard)]) + 1
-        )
-        shard_order = []
-
-        tensor_dim_to_mesh_dims_order: list[list[int]] = [
-            [] for i in range(max_tensor_dim)
-        ]
-        for mesh_dim in reversed(range(len(placements))):
-            cur_placement = placements[mesh_dim]
-            # _StridedShard may not be a subclass of Shard in the future, so write in this way:
-            if isinstance(cur_placement, Shard | _StridedShard):
-                tensor_dim = cur_placement.dim
-                mesh_dims_order = tensor_dim_to_mesh_dims_order[tensor_dim]
-                cur_sf = 1
-                if isinstance(cur_placement, _StridedShard):
-                    cur_sf = cur_placement.split_factor
-                accumulated_sf = 1
-                find_order = False
-                for i in range(len(mesh_dims_order) + 1):
-                    if accumulated_sf == cur_sf:
-                        mesh_dims_order.insert(i, mesh_dim)
-                        find_order = True
-                        break
-                    if i < len(mesh_dims_order):
-                        accumulated_sf *= mesh.size(mesh_dims_order[i])
-                if not find_order:
-                    # _StridedShard is not convertible to ShardOrder
-                    return None
-            else:
-                if not isinstance(cur_placement, Replicate | Partial | MaskPartial):
-                    raise ValueError(
-                        f"Unsupported placement type {type(cur_placement)} encountered in "
-                        f"{placements}; expected Replicate, Partial, or MaskPartial."
-                    )
-        for tensor_dim in range(max_tensor_dim):
-            if len(tensor_dim_to_mesh_dims_order[tensor_dim]) > 0:
-                shard_order.append(
-                    ShardOrderEntry(
-                        tensor_dim=tensor_dim,
-                        mesh_dims=tuple(tensor_dim_to_mesh_dims_order[tensor_dim]),
-                    )
-                )
-        return tuple(shard_order)
-
-    def _verify_shard_order(self, shard_order: ShardOrder) -> None:
-        """Verify that the shard_order is valid and matches the placements."""
-        total_shard = 0
-        if any(isinstance(p, _StridedShard) for p in self.placements):
-            return
-        prev_tensor_dim = -1
-        for entry in shard_order:
-            tensor_dim = entry.tensor_dim
-            mesh_dims = entry.mesh_dims
-            assert len(mesh_dims) > 0, f"shard_order {shard_order} has empty mesh dim"
-            assert tensor_dim >= 0, (
-                f"shard_order {shard_order} has invalid tensor dim {tensor_dim}"
-            )
-            assert tensor_dim > prev_tensor_dim, (
-                "tensor dim should be sorted in shard_order"
-            )
-            prev_tensor_dim = tensor_dim
-            total_shard += len(mesh_dims)
-            for mesh_dim in mesh_dims:
-                assert 0 <= mesh_dim < len(self.placements), (
-                    f"shard_order {shard_order} has invalid mesh dim {mesh_dims}"
-                )
-                assert self.placements[mesh_dim] == Shard(tensor_dim), (
-                    f"placement[{mesh_dim}] doesn't have a matching shard in shard_order"
-                )
-        assert total_shard == sum(1 for p in self.placements if isinstance(p, Shard))
-
     def __setattr__(self, attr: str, value: Any) -> None:
-        if attr == "shard_order" and value is not None:
-            self._verify_shard_order(value)
         super().__setattr__(attr, value)
         # Make sure to recompute the hash in case any of the hashed attributes
         # change (though we do not expect `mesh`, `placements` or `shard_order`
@@ -346,7 +106,6 @@ class DTensorSpec:
             "mesh",
             "placements",
             "tensor_meta",
-            "shard_order",
         ):
             self._hash = None
         # This assert was triggered by buggy handling for dict outputs in some
@@ -360,6 +119,28 @@ class DTensorSpec:
             # but I actually can't reproduce it, maybe it is also a bug!
             assert isinstance(value, TensorMeta | TensorMetadata), value
 
+    def _maybe_update_placements_given_shard_order(
+        self, shard_order: ShardOrder
+    ) -> bool:
+        """Check if original placements can be normalized and updated given a shard order. Update if can."""
+        # check to see if original placements can be normalized into normal
+        # placements w/o StridedShard plus shard order
+        normalized_placements, original_shard_order = (
+            putils._normalize_placements_into_shard_order(self.placements, self.mesh)
+        )
+        if original_shard_order is None:
+            return False
+        try:
+            putils._verify_shard_order(normalized_placements, shard_order)
+        except Exception:
+            # invalid shard_order argument
+            return False
+        strided_placements = putils.convert_shard_order_to_StridedShard(
+            shard_order, self.placements, self.mesh
+        )
+        self.__setattr__("placements", strided_placements)
+        return True
+
     def _hash_impl(self) -> int:
         # hashing and equality check for DTensorSpec are used to cache the sharding
         # propagation results. We only need to consider the mesh, placements, shape
@@ -371,13 +152,12 @@ class DTensorSpec:
                 (
                     self.mesh,
                     self.placements,
-                    self.shard_order,
                     self.tensor_meta.shape,
                     self.tensor_meta.stride,
                     self.tensor_meta.dtype,
                 )
             )
-        return hash((self.mesh, self.placements, self.shard_order))
+        return hash((self.mesh, self.placements))
 
     def __hash__(self) -> int:
         # We lazily cache the spec to avoid recomputing the hash upon each
@@ -393,7 +173,6 @@ class DTensorSpec:
             isinstance(other, DTensorSpec)
             and self.mesh == other.mesh
             and self.placements == other.placements
-            and self.shard_order == other.shard_order
         ):
             return False
         if self.tensor_meta is None or other.tensor_meta is None:
@@ -414,7 +193,7 @@ class DTensorSpec:
         """
         human readable representation of the DTensorSpec
         """
-        placement_str = self.format_shard_order_str(self.placements, self.shard_order)
+        placement_str = putils.format_shard_order_str(self.placements, self.shard_order)
         if self.tensor_meta is not None:
             tensor_shape = _stringify_shape(self.tensor_meta.shape)
             tensor_dtype = dtype_abbrs[self.tensor_meta.dtype]
@@ -423,88 +202,6 @@ class DTensorSpec:
             tensor_dtype = "unknown dtype"
 
         return f"Spec({tensor_dtype}{tensor_shape}({placement_str}))"
-
-    @staticmethod
-    def is_default_device_order(shard_order: ShardOrder) -> bool:
-        """
-        Check if the device order is the default left-to-right order.
-        """
-        for entry in shard_order:
-            mesh_dims = entry.mesh_dims
-            is_increasing = all(
-                prev < nxt for prev, nxt in itertools.pairwise(mesh_dims)
-            )
-            if not is_increasing:
-                return False
-        return True
-
-    @staticmethod
-    def format_shard_order_str(
-        placements: tuple[Placement, ...],
-        shard_order: Optional[ShardOrder] = None,
-    ) -> str:
-        """
-        Format DTensor sharding information as a human-readable string.
-
-        This method formats the sharding pattern in mesh-centric order, showing the placement
-        for each mesh dimension sequentially. When a tensor dimension is sharded across multiple
-        mesh dimensions, the order index indicates the execution sequence of the sharding operations.
-
-        Args:
-            placements: Tuple of placement objects for each mesh dimension.
-            shard_order: Optional ShardOrder specifying the sharding order.
-
-        Returns:
-            String representation of the sharding pattern in mesh-centric format.
-
-        Example:
-            For a 3D tensor on a 2x2x2x2 mesh (16 devices) with::
-
-                placements = [Partial(), Shard(1), Shard(1), Replicate()]
-                shard_order = (ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 1)),)
-
-            Mesh configuration:
-                - mesh_dim_0: Partial reduction (sum)
-                - mesh_dim_1: Shard tensor dimension 1 (executed second, order index 1)
-                - mesh_dim_2: Shard tensor dimension 1 (executed first, order index 0)
-                - mesh_dim_3: Replicate
-
-            Output: ``"PS(1)[1]S(1)[0]R"``
-
-            Explanation:
-                - ``P``: mesh dimension 0 has partial reduction
-                - ``S(1)[1]``: mesh dimension 1 shards tensor dimension 1 (order index 1 means second)
-                - ``S(1)[0]``: mesh dimension 2 shards tensor dimension 1 (order index 0 means first)
-                - ``R``: mesh dimension 3 replicates
-
-            The format follows mesh dimension order (0, 1, 2, 3), and when a tensor dimension
-            is sharded across multiple mesh dimensions, the bracketed index shows the execution
-            order: ``[0]`` is executed first, ``[1]`` is executed second, etc.
-        """
-        out_str = ""
-        # native dtensor-style sharding representation: map from mesh
-        # dim to tensor dim
-        for mesh_dim, placement in enumerate(placements):
-            if isinstance(placement, Shard):
-                if shard_order is not None:
-                    for entry in shard_order:
-                        tensor_dim = entry.tensor_dim
-                        mesh_dims = entry.mesh_dims
-
-                        if placement.dim == tensor_dim:
-                            assert mesh_dim in mesh_dims
-                            if len(mesh_dims) > 1:
-                                out_str += f"{placement}[{mesh_dims.index(mesh_dim)}]"
-                            else:
-                                # no need to show device order if the tensor dim is
-                                # only sharded in one mesh dim
-                                out_str += str(placement)
-                            break
-                else:
-                    out_str += str(placement)
-            else:
-                out_str += str(placement)
-        return out_str
 
     @property
     def shape(self) -> torch.Size:
@@ -537,6 +234,30 @@ class DTensorSpec:
         # simple aliasing for the mesh field, make some
         # checks that mixes DTensor/DTensorSpec easier
         return self.mesh
+
+    @property
+    def shard_order(self) -> ShardOrder:
+        """
+        Returns the shard order specifying the ordered mesh dims over all
+        sharded tensor dimensions.
+
+        This property attempts to convert _StridedShard placements to a shard
+        order. If conversion is unsuccessful (i.e., no _StridedShard placements
+        exist or they cannot be decoded), falls back to computing the default
+        left-to-right shard order from the current placements.
+
+        Returns:
+            ShardOrder: The derived shard order from _StridedShard placements,
+            or the default left-to-right shard order if derivation fails.
+        """
+        derived_order = putils.maybe_convert_StridedShard_to_shard_order(
+            self.placements, self.mesh
+        )
+        if derived_order is None:
+            # use the default left-to-right order if unable to decode
+            # _StridedShard to shard_order
+            return putils._compute_default_shard_order(self.placements)
+        return derived_order
 
     @property
     def dim_map(self) -> list[int]:

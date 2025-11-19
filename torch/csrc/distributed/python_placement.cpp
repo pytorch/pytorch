@@ -55,7 +55,9 @@ void initPlacementBindings(PyObject* module) {
       .def_readonly("split_factor", &StridedShard::split_factor)
       .def(
           "__eq__",
-          [](const StridedShard& lhs, const Shard& rhs) { return lhs == rhs; },
+          [](const StridedShard& lhs, const StridedShard& rhs) {
+            return lhs == rhs;
+          },
           py::is_operator())
       .def(py::pickle(
           [](const StridedShard& shard) {

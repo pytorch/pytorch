@@ -102,9 +102,9 @@ def _stringify_attributes(tensor, attributes) -> str:
 
 
 def _stringify_dtensor_spec(spec) -> str:
-    from torch.distributed.tensor._dtensor_spec import DTensorSpec
+    from torch.distributed.tensor.placement_utils import format_shard_order_str
 
-    return DTensorSpec.format_shard_order_str(spec.placements, spec.shard_order)
+    return format_shard_order_str(spec.placements, spec.shard_order)
 
 
 class TensorIdTracker:

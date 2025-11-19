@@ -40,8 +40,11 @@ class PlacementTypesTestCase(TestCase):
 
     def test_equality(self):
         equivalence_classes = (
-            (Shard(3), _StridedShard(dim=3, split_factor=7)),
-            (Shard(4), _StridedShard(dim=4, split_factor=9)),
+            (Shard(3),),
+            (Shard(4),),
+            (_StridedShard(dim=3, split_factor=1),),
+            (_StridedShard(dim=3, split_factor=2),),
+            (_StridedShard(dim=4, split_factor=9),),
             (Replicate(),),
             (Partial("sum"),),
             (Partial("max"),),
@@ -59,12 +62,6 @@ class PlacementTypesTestCase(TestCase):
                     continue
                 for lhs, rhs in itertools.product(eq_class, other_class):
                     self.assertNotEqual(lhs, rhs)
-
-        # Testing this case doesn't seem to fit neatly into the above equivalence class
-        # framework.
-        self.assertNotEqual(
-            _StridedShard(dim=3, split_factor=1), _StridedShard(dim=3, split_factor=2)
-        )
 
     @unittest.skipIf(
         sys.version_info < (3, 10), "kw_only is only available in python >= 3.10"

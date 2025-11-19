@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <typeinfo>
 
 namespace torch::distributed {
 
@@ -47,8 +48,17 @@ class Shard : public Placement {
     return !dim_.has_value() || *dim_ == dim;
   }
 
-  bool operator==(const Shard& rhs) const {
+  // Virtual method for polymorphic comparison
+  virtual bool equals(const Shard& rhs) const {
+    // Only equal if both are exactly Shard type and have same dim
+    if (typeid(*this) != typeid(rhs)) {
+      return false;
+    }
     return dim == rhs.dim;
+  }
+
+  bool operator==(const Shard& rhs) const {
+    return equals(rhs);
   }
 
   bool operator!=(const Shard& rhs) const {
@@ -63,21 +73,23 @@ class StridedShard : public Placement {
   explicit StridedShard(std::int64_t dim, std::int64_t split_factor_)
       : Shard(dim), split_factor(split_factor_) {}
 
+  // Override virtual equals to handle polymorphic comparison correctly
+  // TODO(zpcore): once _StridedShard is not a subclass of Shard, we can clean
+  // those up
+  bool equals(const Shard& rhs) const override {
+    // Only equal if rhs is also StridedShard with same dim and split_factor
+    if (typeid(*this) != typeid(rhs)) {
+      return false;
+    }
+    const auto& rhs_strided = static_cast<const StridedShard&>(rhs);
+    return *this == rhs_strided;
+  }
+
   bool operator==(const StridedShard& rhs) const {
     return dim == rhs.dim && split_factor == rhs.split_factor;
   }
 
-  bool operator==(const Shard& rhs) const {
-    if (auto* rhs_strided = dynamic_cast<const StridedShard*>(&rhs)) {
-      return operator==(*rhs_strided);
-    }
-    // TODO: this is to avoid extra all-gather in dtensor op dispatch
-    // note that sharding prop would not produce _StridedShard and a
-    // placement inequality would introduce an all-gather for resharding
-    return dim == rhs.dim;
-  }
-
-  bool operator!=(const Shard& rhs) const {
+  bool operator!=(const StridedShard& rhs) const {
     return !operator==(rhs);
   }
 };
