@@ -1213,7 +1213,7 @@ class TestFP8Matmul(TestCase):
         out_dq = x_dq @ y_dq.t()
 
         if bias is not None:
-            out_dq += bias.float()
+            out_dq += bias.to(base_dtype).float()
 
         out_dq = out_dq.to(base_dtype)
 
