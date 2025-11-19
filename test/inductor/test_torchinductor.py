@@ -15893,8 +15893,6 @@ if RUN_GPU:
             _, code = run_and_get_code(wrapper, inp, weight)
             self.assertTrue("in_out_ptr" in code[1])
 
-        # TODO: Enable this case after pad_mm is enabled on XPU.
-        @expectedFailureXPU
         @torch._functorch.config.patch("donated_buffer", True)
         @torch._inductor.config.patch("force_shape_pad", True)
         def test_donated_buffer_inplace_gpt(self):
