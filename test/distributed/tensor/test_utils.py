@@ -16,6 +16,7 @@ from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._utils import (
     _compute_local_shape_and_global_offset,
+    _explicit_order_placements,
     compute_global_tensor_info,
     compute_global_tensor_shape,
     compute_local_shape_and_global_offset,
@@ -53,7 +54,7 @@ class LocalTest(TestCase):
         TP = 8
         mesh_shape = (DP, TP)
         placements = [_StridedShard(0, split_factor=8), Shard(0)]
-        TP_shard_size = int(global_shape[0] / TP)
+        TP_shard_size = global_shape[0] / TP
         for my_coordinate in itertools.product(range(DP), range(TP)):
             local_shape, global_offset = _compute_local_shape_and_global_offset(
                 global_shape, mesh_shape, list(my_coordinate), placements
