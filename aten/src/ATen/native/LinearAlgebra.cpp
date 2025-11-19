@@ -1936,7 +1936,7 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
 
   // We order the tensors. t1 will be the larger tensor
   // We can always transpose tensor2 as the dimensions are always >= 1 (precondition from matmul)
-  // and tensor1_larger iff tensor2.dim() > tensor1.dim()
+  // and tensor1_larger iff tensor2.dim() > tensor1.dim(9
   const auto t1 = tensor1_larger ? MaybeOwned<Tensor>::borrowed(tensor1)
                                  : MaybeOwned<Tensor>::owned(tensor2.mT());
   const int64_t dim_t1 = t1->dim();
@@ -1948,11 +1948,20 @@ static bool should_fold(const Tensor& tensor1, const Tensor& tensor2, bool has_o
     return false;
   }
 
-  // If we require a gradient, we should fold to minimize backward memory usage - even if this
-  // leads to a copy in forward because is needed in backward,
-  // only time we avoid this strict pre-allocated memory usage (has_out = True)
-  bool requires_grad = tensor1.requires_grad() || tensor2.requires_grad();
-  if (requires_grad && !has_out) {
+  // In this case we *do* incur in an extra copy to avoid creating an unnecessary large tensor in the backward
+  // Suppose we don't fold here. Let t1.shape = [b, m, n] t2.shape = [n, k] like in a transformer
+  // t2 will be expanded to a tensor of shape [b, n, k] and then we do t1.bmm(t2_expanded)
+  // The issue appears in the backward.
+  // The output gradient g of this operation would have shape [b, m, k]
+  // The backward wrt. t2 of bmm would be given by t1.mH @ g, which has shape [b, n, k]
+  // Then, the backward of expand is simply `sum(0)`. As such, we are instantiating a tensor
+  // of shape [b, n, k] unnecessarily, which may cause a large memory footprint, and in the
+  // worst case, an OOM
+  bool t2_requires_grad = tensor1_larger ? tensor2.requires_grad() : tensor1.requires_grad();
+  if (t2_requires_grad && !has_out) {
+    // We should be checking !at::GradMode::is_enabled(), but apparently
+    // this regresses performance in some cases:
+    // https://github.com/pytorch/pytorch/issues/118548#issuecomment-1916022394
     return true;
   }
 

@@ -36,6 +36,7 @@ __all__ = [
     "skip_guard_on_all_nn_modules_unsafe",
     "keep_tensor_guards_unsafe",
     "skip_guard_on_globals_unsafe",
+    "skip_all_guards_unsafe",
     "nested_compile_region",
 ]
 
@@ -615,6 +616,23 @@ def skip_guard_on_globals_unsafe(guard_entries):
     """
 
     return [not entry.is_global for entry in guard_entries]
+
+
+def skip_all_guards_unsafe(guard_entries):
+    """
+    A function for skipping all guards on a compiled function.
+
+    WARNING: This function will drop all the safety guarantees from Dynamo
+             compiled function. Use this with caution.
+
+    To use this API, use guard_filter_fn argument while calling torch.compile
+
+    >> opt_mod = torch.compile(
+    >>     mod,
+    >>     options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe},
+    >> )
+    """
+    return [False for entry in guard_entries]
 
 
 def nested_compile_region(fn=None):

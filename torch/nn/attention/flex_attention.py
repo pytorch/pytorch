@@ -10,7 +10,7 @@ import operator
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, NamedTuple, Union
+from typing import Any, NamedTuple
 
 import torch
 from torch import Tensor
@@ -295,7 +295,7 @@ def _vmap_for_bhqkv(
     fn: Callable,
     prefix: tuple[int | None, ...],
     suffix: tuple[int | None, ...] = (),
-    out_dims: Union[int, list[int | None]] = 0,
+    out_dims: int | list[int | None] = 0,
     group_dim: bool = False,
 ):
     """Used to vmap both score_mods and mask_mods over 4-dimensional/5-dimension inputs.
@@ -581,7 +581,7 @@ class BlockMask:
         kv_indices: Tensor,
         full_kv_num_blocks: Tensor | None = None,
         full_kv_indices: Tensor | None = None,
-        BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
+        BLOCK_SIZE: int | tuple[int, int] = _DEFAULT_SPARSE_BLOCK_SIZE,
         mask_mod: _mask_mod_signature | None = None,
         seq_lengths: tuple[int, int] | None = None,
         compute_q_blocks: bool = True,
@@ -907,7 +907,7 @@ class BlockMask:
 
         return "\n".join(total_vis)
 
-    def to(self, device: Union[torch.device, str]) -> "BlockMask":
+    def to(self, device: torch.device | str) -> "BlockMask":
         """Moves the BlockMask to the specified device.
 
         Args:
@@ -1083,7 +1083,7 @@ def _create_sparse_block_from_block_mask(
 
 
 def create_mask(
-    mod_fn: Union[_score_mod_signature, _mask_mod_signature],
+    mod_fn: _score_mod_signature | _mask_mod_signature,
     B: int | None,
     H: int | None,
     Q_LEN: int,
@@ -1140,7 +1140,7 @@ def create_block_mask(
     Q_LEN: int,
     KV_LEN: int,
     device: DeviceLikeType | None = None,
-    BLOCK_SIZE: Union[int, tuple[int, int]] = _DEFAULT_SPARSE_BLOCK_SIZE,
+    BLOCK_SIZE: int | tuple[int, int] = _DEFAULT_SPARSE_BLOCK_SIZE,
     _compile=False,
 ) -> BlockMask:
     r"""This function creates a block mask tuple from a mask_mod function.
@@ -1378,7 +1378,7 @@ def flex_attention(
     kernel_options: FlexKernelOptions | None = None,
     *,
     return_aux: AuxRequest | None = None,
-) -> Union[Tensor, tuple[Tensor, Tensor], tuple[Tensor, AuxOutput]]:
+) -> Tensor | tuple[Tensor, Tensor] | tuple[Tensor, AuxOutput]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -1622,7 +1622,7 @@ def flex_attention(
             with _temp_remove_pre_dispatch_torch_function_mode():
                 with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                     if metadata_mode:
-                        backend: Union[str, Callable[..., Any]] = (
+                        backend: str | Callable[..., Any] = (
                             make_eager_backend_with_torch_function_mode(metadata_mode)
                         )
                     else:
