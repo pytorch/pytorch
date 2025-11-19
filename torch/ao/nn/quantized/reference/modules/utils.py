@@ -87,9 +87,9 @@ class ReferenceQuantizedModule(torch.nn.Module):
         # for capturing `.item` operations
         self.weight_axis_int: int = self.weight_axis.item()  # type: ignore[operator, assignment]
         # pyrefly: ignore [bad-assignment]
-        self.weight_quant_min: typing.Optional[int] = weight_qparams.get("quant_min")
+        self.weight_quant_min: int | None = weight_qparams.get("quant_min")
         # pyrefly: ignore [bad-assignment]
-        self.weight_quant_max: typing.Optional[int] = weight_qparams.get("quant_max")
+        self.weight_quant_max: int | None = weight_qparams.get("quant_max")
 
     def get_weight(self):
         """
@@ -196,8 +196,8 @@ def _quantize_weight_decomposed(
     weight_scale: torch.Tensor,
     weight_zero_point: torch.Tensor,
     weight_axis: int,
-    weight_quant_min: typing.Optional[int],
-    weight_quant_max: typing.Optional[int],
+    weight_quant_min: int | None,
+    weight_quant_max: int | None,
 ) -> torch.Tensor:
     _DTYPE_TO_QVALUE_BOUNDS: dict[torch.dtype, tuple[int, int]] = {
         torch.uint8: (0, 255),
@@ -258,8 +258,8 @@ def _dequantize_weight_decomposed(
     weight_scale: torch.Tensor,
     weight_zero_point: torch.Tensor,
     weight_axis: int,
-    weight_quant_min: typing.Optional[int],
-    weight_quant_max: typing.Optional[int],
+    weight_quant_min: int | None,
+    weight_quant_max: int | None,
 ) -> torch.Tensor:
     # TODO: get the quant_min and quant_max from activation_post_process
     _DTYPE_TO_QVALUE_BOUNDS: dict[torch.dtype, tuple[int, int]] = {
@@ -343,8 +343,8 @@ def _quantize_and_dequantize_weight_decomposed(
     weight_scale: torch.Tensor,
     weight_zero_point: torch.Tensor,
     weight_axis_int: int,
-    weight_quant_min: typing.Optional[int],
-    weight_quant_max: typing.Optional[int],
+    weight_quant_min: int | None,
+    weight_quant_max: int | None,
 ) -> torch.Tensor:
     """Quantize and then dequantize the weight based on
     the quantization parameters

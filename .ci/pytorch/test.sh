@@ -208,6 +208,8 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/pti/latest/env/vars.sh
   # Check XPU status before testing
   timeout 30 xpu-smi discovery || true
 fi
@@ -337,13 +339,23 @@ test_python() {
 
 test_python_smoke() {
   # Smoke tests for H100/B200
-  time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 inductor/test_max_autotune inductor/test_cutedsl_grouped_mm $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
 test_python_smoke_b200() {
-  # Targeted smoke tests for B200 - staged approach to avoid too many failures
-  time python test/run_test.py --include test_matmul_cuda test_scaled_matmul_cuda inductor/test_fp8 $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  # Targeted smoke tests for B200 including FlashAttention CuTe coverage
+  install_flash_attn_cute
+  time python test/run_test.py \
+    --include \
+      test_matmul_cuda \
+      test_scaled_matmul_cuda \
+      inductor/test_fp8 \
+      nn/attention/test_fa4 \
+      nn/attention/test_open_registry \
+      inductor/test_flex_flash \
+    $PYTHON_TEST_EXTRA_OPTION \
+    --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -377,6 +389,13 @@ test_lazy_tensor_meta_reference_disabled() {
   export -n TORCH_DISABLE_FUNCTIONALIZATION_META_REFERENCE
 }
 
+test_dynamo_core() {
+  time python test/run_test.py \
+    --include-dynamo-core-tests \
+    --verbose \
+    --upload-artifacts-while-running
+  assert_git_not_dirty
+}
 
 test_dynamo_wrapped_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
@@ -824,6 +843,11 @@ test_inductor_halide() {
   assert_git_not_dirty
 }
 
+test_inductor_pallas() {
+  python test/run_test.py --include inductor/test_pallas.py --verbose
+  assert_git_not_dirty
+}
+
 test_inductor_triton_cpu() {
   python test/run_test.py --include inductor/test_triton_cpu_backend.py inductor/test_torchinductor_strided_blocks.py --verbose
   assert_git_not_dirty
@@ -1224,6 +1248,97 @@ test_custom_script_ops() {
   build/test_custom_ops ./model.pt
   popd
   assert_git_not_dirty
+}
+
+test_libtorch_agnostic_targetting() {
+    echo "Testing libtorch_agnostic runs correctly on TORCH_TARGET_VERSION"
+
+    REPO_DIR=$(pwd)
+    WHEEL_DIR="${REPO_DIR}/test/cpp_extensions/.wheels"
+
+    # Build wheel with current PyTorch (this has TORCH_TARGET_VERSION 2_9_0)
+    echo "Building 2.9 extension wheel with current PyTorch..."
+    pushd test/cpp_extensions/libtorch_agnostic_2_9_extension
+    time python setup.py bdist_wheel
+
+    # Save the wheel
+    mkdir -p "$WHEEL_DIR"
+    cp dist/*.whl "$WHEEL_DIR/"
+    WHEEL_FILE=$(find "$WHEEL_DIR" -maxdepth 1 -name "*.whl" -type f | head -1)
+    echo "Built wheel: $(basename "$WHEEL_FILE")"
+    popd
+
+    # Create venv and install PyTorch 2.9
+    python -m venv venv_pytorch_2_9
+    # shellcheck disable=SC1091
+    . venv_pytorch_2_9/bin/activate
+
+    # Clear PYTHONPATH to avoid using the development PyTorch
+    echo "Clearing PYTHONPATH to use only venv packages..."
+    unset PYTHONPATH
+
+    # Upgrade pip to latest version
+    echo "Upgrading pip to latest version..."
+    pip install --upgrade pip
+    pip --version
+
+    echo "Installing PyTorch 2.9..."
+
+    # Install from release channel only
+    PYTORCH_VERSION="2.9.0"
+
+    # Extract CUDA version from BUILD_ENVIRONMENT (e.g., "cuda12.1" -> "cu121")
+    if [[ "$BUILD_ENVIRONMENT" =~ cuda([0-9]+)\.([0-9]+) ]]; then
+        CUDA_MAJOR="${BASH_REMATCH[1]}"
+        CUDA_MINOR="${BASH_REMATCH[2]}"
+        CUDA_VERSION="cu${CUDA_MAJOR}${CUDA_MINOR}"
+        echo "  Detected CUDA ${CUDA_MAJOR}.${CUDA_MINOR} from BUILD_ENVIRONMENT, using ${CUDA_VERSION}"
+    else
+        # Default to CPU build
+        CUDA_VERSION="cpu"
+        echo "  No CUDA detected in BUILD_ENVIRONMENT, using CPU build"
+    fi
+
+    if pip install torch=="${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/${CUDA_VERSION}/; then
+        echo "Installed PyTorch ${PYTORCH_VERSION} from release channel (${CUDA_VERSION})"
+    else
+        echo "  FAILED to install PyTorch 2.9.0 from release channel"
+        echo "  URL: https://download.pytorch.org/whl/${CUDA_VERSION}/"
+        deactivate
+        rm -rf venv_pytorch_2_9
+        return 1
+    fi
+
+    INSTALLED_VERSION=$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")
+    echo "  Installed version: $INSTALLED_VERSION"
+
+    # Install test dependencies
+    echo "Installing test dependencies..."
+    pip install expecttest numpy unittest-xml-reporting
+
+    # Install the pre-built wheel
+    echo ""
+    echo "Installing pre-built 2.9 extension wheel (built with PyTorch 2.10)..."
+    pip install "$WHEEL_FILE"
+    echo "Installed $(basename "$WHEEL_FILE") into PyTorch 2.9 environment"
+
+    # Run tests with PyTorch 2.9 runtime (2.10 tests will be skipped automatically)
+    echo ""
+    echo "Running tests with PyTorch 2.9 runtime (using wheel built on PyTorch 2.10)..."
+    if time python test/cpp_extensions/test_libtorch_agnostic.py -v; then
+        echo ""
+        echo "  Wheel built with current torch and TORCH_TARGET_VERSION 2_9_0 works with PyTorch 2.9 runtime!"
+    else
+        echo "targeting test failed"
+        deactivate
+        rm -rf venv_pytorch_2_9 "$WHEEL_DIR"
+        return 1
+    fi
+
+    deactivate
+    rm -rf venv_pytorch_2_9 "$WHEEL_DIR"
+
+    assert_git_not_dirty
 }
 
 test_jit_hooks() {
@@ -1653,7 +1768,7 @@ test_operator_microbenchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
-  for OP_BENCHMARK_TESTS in matmul mm addmm bmm; do
+  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
@@ -1661,6 +1776,22 @@ test_operator_microbenchmark() {
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}.json" \
       --benchmark-name "PyTorch operator microbenchmark"
   done
+}
+
+test_attention_microbenchmark() {
+  TEST_REPORTS_DIR=$(pwd)/test/test-reports
+  mkdir -p "$TEST_REPORTS_DIR"
+  TEST_DIR=$(pwd)
+
+  # Install attention-gym dependency
+  echo "Installing attention-gym..."
+  python -m pip install git+https://github.com/meta-pytorch/attention-gym.git@main
+  pip show triton
+
+  cd "${TEST_DIR}"/benchmarks/transformer
+
+  $TASKSET python score_mod.py --config configs/config_basic.yaml \
+    --output-json-for-dashboard "${TEST_REPORTS_DIR}/attention_microbenchmark.json"
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -1682,6 +1813,8 @@ elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" == 'default' ]];
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
+elif [[ "${TEST_CONFIG}" == *libtorch_agnostic_targetting* ]]; then
+  test_libtorch_agnostic_targetting
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
   build_xla
@@ -1720,10 +1853,14 @@ elif [[ "${TEST_CONFIG}" == *operator_benchmark* ]]; then
   fi
 elif [[ "${TEST_CONFIG}" == *operator_microbenchmark* ]]; then
   test_operator_microbenchmark
+elif [[ "${TEST_CONFIG}" == *attention_microbenchmark* ]]; then
+  test_attention_microbenchmark
 elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
+elif [[ "${TEST_CONFIG}" == *inductor-pallas* ]]; then
+  test_inductor_pallas
 elif [[ "${TEST_CONFIG}" == *inductor-triton-cpu* ]]; then
   test_inductor_triton_cpu
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
@@ -1777,6 +1914,8 @@ elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   test_inductor_shard "${SHARD_NUMBER}"
 elif [[ "${TEST_CONFIG}" == *einops* ]]; then
   test_einops
+elif [[ "${TEST_CONFIG}" == *dynamo_core* ]]; then
+  test_dynamo_core
 elif [[ "${TEST_CONFIG}" == *dynamo_wrapped* ]]; then
   install_torchvision
   test_dynamo_wrapped_shard "${SHARD_NUMBER}"

@@ -440,7 +440,7 @@ bool MPSHeapAllocatorImpl::release_cached_buffers() {
   // we need to release the lock temporarily as synchronizing may cause deadlock with completion handlers.
   m_mutex.unlock();
   auto stream = getDefaultMPSStream();
-  dispatch_sync(stream->queue(), ^() {
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   m_mutex.lock();
