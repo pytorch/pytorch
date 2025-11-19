@@ -209,7 +209,7 @@ struct CodeTemplate {
   // to indent correctly in the context.
   void emitIndent(std::ostream& out, size_t indent) const {
     for ([[maybe_unused]] const auto i : c10::irange(indent)) {
-      out << " ";
+      out << ' ';
     }
   }
   void emitStringWithIndents(
