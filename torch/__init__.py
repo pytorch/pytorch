@@ -1148,19 +1148,32 @@ def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]]:
+def is_storage(obj: _Any, /) -> builtins.bool:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
         obj (Object): Object to test
     Example::
 
-        >>> x = torch.tensor([1, 2, 3])
-        >>> torch.is_storage(x)
-        False
-        >>> torch.is_storage(x.untyped_storage())
+        >>> import torch
+        >>> # UntypedStorage (recommended)
+        >>> tensor = torch.tensor([1, 2, 3])
+        >>> storage = tensor.untyped_storage()
+        >>> torch.is_storage(storage)
         True
-
+        >>>
+        >>> # TypedStorage (legacy)
+        >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
+        >>> torch.is_storage(typed_storage)
+        True
+        >>>
+        >>> # regular tensor (should return False)
+        >>> torch.is_storage(tensor)
+        False
+        >>>
+        >>> # non-storage object
+        >>> torch.is_storage([1, 2, 3])
+        False
     """
     return type(obj) in _storage_classes
 
@@ -2649,8 +2662,8 @@ def compile(
     import sysconfig
 
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("torch.compile is not supported on Python 3.14+")
+    if sys.version_info >= (3, 15):
+        raise RuntimeError("torch.compile is not supported on Python 3.15+")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
