@@ -83,7 +83,7 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
-_ForceImpl: TypeAlias = Literal["DEFAULT", "TRITON", "FLASH", "DECODE"]
+_ForceImpl: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
 
 
 # pyrefly: ignore [invalid-inheritance]
@@ -221,18 +221,18 @@ class FlexKernelOptions(TypedDict, total=False):
     """ROCm-specific waves per execution unit."""
 
     # pyrefly: ignore [invalid-annotation]
-    FORCE_IMPL: NotRequired[_ForceImpl]
-    """Forces a specific kernel implementation instead of using heuristics.
+    KERNEL_IMPL: NotRequired[_ForceImpl]
+    """Selects a specific kernel implementation.
 
     Options:
-        - "DEFAULT": Use current heuristics (typically Triton-based kernels with
+        - "AUTO": Use current heuristics (typically Triton-based kernels with
           automatic selection between flex_attention and flex_decoding)
         - "TRITON": Standard Triton flex_attention kernel
-        - "DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
+        - "TRITON_DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
         - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
 
     This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
-    Raises an error if the requested implementation cannot be used. Default: "DEFAULT"
+    Raises an error if the requested implementation cannot be used. Default: "AUTO"
     """
 
 
@@ -1250,25 +1250,25 @@ def _apply_kernel_options(
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
-    if "FORCE_IMPL" in kernel_options and kernel_options.get(
+    if "KERNEL_IMPL" in kernel_options and kernel_options.get(
         "FORCE_USE_FLEX_ATTENTION", False
     ):
-        # TODO: remove FORCE_USE_FLEX_ATTENTION once FORCE_IMPL is fully adopted.
+        # TODO: remove FORCE_USE_FLEX_ATTENTION once KERNEL_IMPL is fully adopted.
         raise RuntimeError(
-            "FORCE_IMPL cannot be combined with legacy FORCE_USE_FLEX_ATTENTION. "
-            "FORCE_IMPL supersedes the legacy knob; please drop FORCE_USE_FLEX_ATTENTION "
-            "and only specify the desired FORCE_IMPL."
+            "KERNEL_IMPL cannot be combined with legacy FORCE_USE_FLEX_ATTENTION. "
+            "KERNEL_IMPL supersedes the legacy knob; please drop FORCE_USE_FLEX_ATTENTION "
+            "and only specify the desired KERNEL_IMPL."
         )
 
-    if "FORCE_IMPL" in kernel_options:
+    if "KERNEL_IMPL" in kernel_options:
         valid_impls = typing.get_args(_ForceImpl)
-        if kernel_options["FORCE_IMPL"] not in valid_impls:
+        if kernel_options["KERNEL_IMPL"] not in valid_impls:
             raise ValueError(
-                f"Invalid FORCE_IMPL value '{kernel_options['FORCE_IMPL']}'. "
+                f"Invalid KERNEL_IMPL value '{kernel_options['KERNEL_IMPL']}'. "
                 f"Must be one of {valid_impls}"
             )
 
-    kernel_options.setdefault("FORCE_IMPL", "DEFAULT")
+    kernel_options.setdefault("KERNEL_IMPL", "AUTO")
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)

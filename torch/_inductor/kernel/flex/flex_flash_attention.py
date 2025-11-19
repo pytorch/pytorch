@@ -171,7 +171,7 @@ def _use_flex_flash_attention(
     mask_graph: Subgraph,
     kernel_options: dict[str, Any],
     num_score_mod_placeholders: int,
-    force_impl: Literal["DEFAULT", "TRITON", "FLASH", "DECODE"],
+    force_impl: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
 ) -> bool:
     """Determine if we should use flex flash attention for the given inputs.
 
@@ -180,7 +180,7 @@ def _use_flex_flash_attention(
         mask_graph: The mask modification subgraph
         kernel_options: Kernel configuration options
         num_score_mod_placeholders: Number of placeholders in score_mod
-        force_impl: Implementation selector (DEFAULT, TRITON, FLASH, DECODE)
+        force_impl: Implementation selector (AUTO, TRITON, FLASH, TRITON_DECODE)
 
     Returns:
         True if flash attention should be used, False otherwise
@@ -195,7 +195,7 @@ def _use_flex_flash_attention(
 
     if not can_use:
         raise RuntimeError(
-            f"FORCE_IMPL='FLASH' but flash attention cannot be used: {reason}"
+            f"KERNEL_IMPL='FLASH' but flash attention cannot be used: {reason}"
         )
 
     return True

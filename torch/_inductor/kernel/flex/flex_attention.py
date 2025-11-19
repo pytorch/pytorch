@@ -59,7 +59,7 @@ def _sanitize_kernel_options_for_triton(
     to avoid passing to triton constexpr dict
     """
     sanitized = dict(kernel_options)
-    force_impl = cast(_ForceImpl, sanitized.pop("FORCE_IMPL", "DEFAULT"))
+    force_impl = cast(_ForceImpl, sanitized.pop("KERNEL_IMPL", "AUTO"))
     return sanitized, force_impl
 
 
@@ -196,13 +196,13 @@ def flex_attention(
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
     )
-    use_decode = (force_impl == "DECODE") or (
-        force_impl == "DEFAULT" and can_use_decode
+    use_decode = (force_impl == "TRITON_DECODE") or (
+        force_impl == "AUTO" and can_use_decode
     )
 
-    if force_impl == "DECODE" and not can_use_decode:
+    if force_impl == "TRITON_DECODE" and not can_use_decode:
         raise RuntimeError(
-            "FORCE_IMPL='DECODE' was specified but flex_decoding cannot be used for this input. "
+            "KERNEL_IMPL='TRITON_DECODE' was specified but flex_decoding cannot be used for this input. "
             "flex_decoding is only available for short sequence lengths with specific configurations."
         )
 
