@@ -6811,7 +6811,22 @@ def _internal_new_from_data(
         return NotImplemented
     else:
         if torch.device(device).type == "meta":
-            return NotImplemented
+            # Check if FakeTensorMode is active. If so, we need to handle meta device
+            # using the Python path so that FakeTensorMode can wrap the result.
+            # Otherwise, fall back to C++ implementation.
+            from torch._guards import active_fake_mode
+            
+            fake_mode = active_fake_mode()
+            if fake_mode is None:
+                return NotImplemented
+            
+            # FakeTensorMode is active, so create tensor on meta device using Python path
+            # This allows FakeTensorMode to intercept and wrap it as a FakeTensor
+            tensor = _recursive_build(inferred_scalar_type, data)
+            tensor = tensor.to(device, inferred_scalar_type, non_blocking=False, copy=False)
+            # FakeTensorMode will automatically wrap meta tensors when they're returned
+            # from operations, so we don't need to manually wrap here
+            return tensor
 
         # In the C implementation, we would directly start poking the memory
         # of a freshly allocated CPU tensor.  Here, we're going to do an
