@@ -2056,11 +2056,20 @@ def _load(
                         f"variable was set: Incorrect offset for {name}, got {storage_offset} expected "
                         f"{zip_file.get_record_offset(name)}"
                     )
-            storage = (
-                zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)
-                ._typed_storage()
-                ._untyped_storage
-            )
+
+            if os.environ.get("SKIP_READING_DATA", "0") == "1":
+                storage = torch.UntypedStorage(0, device="meta")
+                if can_calculate_storage_offsets:
+                    storage._checkpoint_offset = _get_offset(key, name, numel)
+                else:
+                    storage._checkpoint_offset = zip_file.get_record_offset(name)
+            else:
+                storage = (
+                    zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)
+                    ._typed_storage()
+                    ._untyped_storage
+                )
+
         # swap here if byteswapping is needed
         if byteorderdata is not None:
             if byteorderdata.decode() != sys.byteorder:
