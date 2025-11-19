@@ -2,11 +2,12 @@
 #include <nccl.h>
 #include <torch/csrc/cuda/nccl.h>
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 1)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 7)
 #define NCCL_HAS_SYMMEM_SUPPORT
 #endif
 
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
+#include <nccl_device.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
@@ -43,13 +44,15 @@ class NCCLSymmetricMemory : public SymmetricMemory {
       std::shared_ptr<NCCLAllocation> allocation,
       const std::string& group_name,
       ncclWindow_t handle,
-      ncclWindow_t signal_handle)
+      ncclWindow_t signal_handle,
+      ncclDevComm devComm)
       : allocation_(allocation),
         buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(group_name),
         handle_(handle),
-        signal_handle_(signal_handle) {
+        signal_handle_(signal_handle),
+        devComm_(devComm) {
     c10::cuda::CUDAGuard guard(device_idx_);
 
     // We need some API like nvshmem_extension::nvshmem_ptr()
@@ -125,6 +128,14 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     return rank_to_global_rank_dev_;
   };
 
+  ncclWindow_t get_nccl_window() {
+    return handle_;
+  }
+
+  ncclDevComm get_nccl_dev_comm() {
+    return devComm_;
+  }
+
  private:
   std::shared_ptr<NCCLAllocation> allocation_;
   size_t buffer_size_;
@@ -139,6 +150,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   std::string group_name_;
   ncclWindow_t handle_;
   ncclWindow_t signal_handle_;
+  ncclDevComm devComm_;
 
   std::vector<int> rank_to_global_rank_;
   int* rank_to_global_rank_dev_;
@@ -240,8 +252,16 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         " on ncclComm_ ",
         comm));
 
+    // Create device communicator
+    ncclDevComm devComm;
+    ncclDevCommRequirements reqs;
+    memset(&reqs, 0, sizeof(ncclDevCommRequirements));
+    int nCTAs = 16;
+    reqs.lsaBarrierCount = nCTAs;
+    C10D_NCCL_CHECK(ncclDevCommCreate(comm, &reqs, &devComm), "ncclDevCommCreate failed");
+
     auto symm_mem =
-        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle));
+        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle), std::move(devComm));
 
     symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
     return symm_mem;

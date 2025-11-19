@@ -247,8 +247,18 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
         foo()
 
-        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         symm_mem.rendezvous(out, group=group_name)
+        c10d.all_reduce(out)
+        torch.cuda.synchronize()
+        self.assertEqual(
+            out, torch.full_like(out, (self.world_size - 1) * self.world_size / 2)
+        )
+
+        inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        symm_mem.rendezvous(inp, group=group_name)
+        res = torch.ops.symm_mem.multimem_one_shot_all_reduce(inp, "sum", group_name)
+        # self.assertEqual(out, res)
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")
