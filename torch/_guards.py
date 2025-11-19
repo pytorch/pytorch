@@ -1074,6 +1074,7 @@ class Source:
     def guard_source(self) -> GuardSource:
         raise NotImplementedError
 
+    @functools.cached_property
     def name(self) -> str:
         raise NotImplementedError
 
