@@ -685,7 +685,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         return len(sharded_indices[rank])
 
     # delete pyre-ignore once separating _StridedShard from Shard
-    def _local_shard_size_and_offset(  # pyre-ignore
+    def _local_shard_size_and_offset(  # pyre-ignore[bad-override]
         self,
         curr_local_size: int,
         num_chunks: int,
