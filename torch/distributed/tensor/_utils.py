@@ -208,9 +208,6 @@ def _compute_local_shape_and_global_offset(
                 mesh_dim_size,
                 my_coordinate[mesh_dim],
             )
-            if my_coordinate == [0, 0]:
-                import fbvscode
-                fbvscode.set_trace()
             
             if shard_dim not in shard_dim_to_global_offsets:
                 if shard_size > 0:
@@ -220,11 +217,7 @@ def _compute_local_shape_and_global_offset(
             else:
                 global_shard_offsets = shard_dim_to_global_offsets[shard_dim]
                 if shard_size > 0:
-                    try:
-                        shard_dim_to_global_offsets[shard_dim] = [global_shard_offsets[i] for i in shard_offsets]
-                    except:
-                        import fbvscode
-                        fbvscode.set_trace()
+                    shard_dim_to_global_offsets[shard_dim] = [global_shard_offsets[i] for i in shard_offsets]
                 else:
                     shard_dim_to_global_offsets[shard_dim] = [zero_global_offset]
 
