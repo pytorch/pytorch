@@ -8054,7 +8054,7 @@ def sample_inputs_convolution_backward(op_info, device, dtype, requires_grad, **
                 [True, False],
                 [True, False],
                 [1, 4],
-                [[M, M, M, L, L], [M, M, S, L, L]]
+                [[S, M, M, L, L], [S, M, S, L, L]]
         ):
             [N, C_in, C_out, H_out, W_out] = tensor_sizes
             C_in = (C_in // groups) * groups
@@ -21088,6 +21088,8 @@ op_db: list[OpInfo] = [
                          'TestConsistency', 'test_output_match', device_type="mps"),
             DecorateInfo(unittest.expectedFailure,
                          'TestConsistency', 'test_output_grad_match', device_type="mps"),
+            # Tuples not supported
+            DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo'),
         ),
         sample_inputs_func=sample_inputs_convolution_backward
     ),
