@@ -286,10 +286,8 @@ class TestEmbeddingNN(NNTestCase):
         self.assertEqual(ref_out, out2)
 
     def test_embeddingbag_2d_include_last_offset(self):
-        # Test case from https://https://github.com/pytorch/pytorch/issues/167974
-        embedding_sum = torch.nn.EmbeddingBag(
-            10, 3, mode='sum', include_last_offset=True
-        )
+        # Test case from https://github.com/pytorch/pytorch/issues/167974
+        embedding_sum = torch.nn.EmbeddingBag(10, 3, include_last_offset=True)
         input = torch.tensor([[1, 2, 4, 5], [4, 3, 2, 9]], dtype=torch.long)
         res = embedding_sum(input)
         # Check if number of bags matches
