@@ -90,9 +90,9 @@ class FakeTensorUpdater:
     fake tensors stop changing.
 
     Since this runs in the context of Inductor, we assume that the input and
-    output semantics for the graph (and any subgraphs) are not subject to change
-    after class initialization.  Any violations of this assumption may result in
-    undefined behavior.
+    output semantics for the outermost graph are not subject to change after class
+    initialization, but we do *not* make the same assumption for subgraphs.  Any
+    violations of this assumption may result in undefined behavior.
     """
 
     def __init__(self, gm: torch.fx.GraphModule) -> None:

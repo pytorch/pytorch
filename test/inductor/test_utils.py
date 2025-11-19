@@ -302,9 +302,6 @@ class TestFakeTensorUpdater(TestCase):
         self._modify_node(deepcopy(backend.graphs[0]))
         self._insert_clone(deepcopy(backend.graphs[0]))
 
-    # TODO: remove this XFAIL by resolving our failure to update into torch.cond
-    # subgraphs.
-    # @unittest.expectedFailure
     def test_hop_implicit_subgraph_inputs(self):
         def fn(x: torch.Tensor) -> torch.Tensor:
             return torch.cond(torch.sum(x) < 0, torch.sin, torch.cos, (x,))
