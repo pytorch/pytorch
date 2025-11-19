@@ -711,6 +711,15 @@ if not IS_WINDOWS:
             expected_flat = t.view([-1])
             self.assertEqual(result_flat, expected_flat)
 
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_shape(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            expected = (3, 5)
+            t = torch.rand(*expected, device=device)
+            shape = libtorch_agnostic.ops.my_shape(t)
+            self.assertEqual(shape, expected)
+
         def test_mv_tensor_accessor(self, device):
             import libtorch_agnostic_2_9 as libtorch_agnostic
 
