@@ -2,7 +2,6 @@
 import functools
 import random
 import string
-import sys
 import unittest
 from pathlib import Path
 from typing import Any, Optional
@@ -55,19 +54,14 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU_AN
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
+try:
+    from .test_extension_backend import BaseExtensionBackendTests
+except ImportError:
+    from test_extension_backend import BaseExtensionBackendTests
+
 if HAS_GPU_AND_TRITON:
     import triton
     import triton.language as tl
-
-try:
-    try:
-        from . import test_torchinductor
-    except ImportError:
-        import test_torchinductor  # @manual=fbcode//caffe2/test/inductor:test_inductor-library
-except unittest.SkipTest:
-    if __name__ == "__main__":
-        sys.exit(0)
-    raise
 
 
 def mock_triton_hash_with_backend(*args, **kwargs):
@@ -77,7 +71,7 @@ def mock_triton_hash_with_backend(*args, **kwargs):
 
 
 @unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
-class TritonExtensionBackendTests(test_torchinductor.TestCase):
+class TritonExtensionBackendTests(BaseExtensionBackendTests):
     """
     Test creating a backend for inductor with Triton scheduling.
     """
@@ -197,7 +191,7 @@ class TritonExtensionBackendTests(test_torchinductor.TestCase):
 
     @requires_cuda_and_triton
     def test_codegen_with_custom_heuristics_module(self):
-        self._custom_triton_backend_registration_fixture(GPU_TYPE)
+        self._register_custom_backend_with_heuristics(GPU_TYPE)
 
         def add(x, y):
             return x + y
@@ -213,7 +207,7 @@ class TritonExtensionBackendTests(test_torchinductor.TestCase):
 
     @requires_cuda_and_triton
     def test_codegen_with_custom_heuristics_module_udtk(self):
-        self._custom_triton_backend_registration_fixture(GPU_TYPE)
+        self._register_custom_backend_with_heuristics(GPU_TYPE)
 
         @triton.jit
         def add_kernel(
