@@ -189,12 +189,10 @@ kSparseBsr
 kSparseBsc
 kMkldnn
 kJagged
-<<
 
 # torch/headeronly/core/MemoryFormat.h
 MemoryFormat
 get_contiguous_memory_format
-<<
 
 # torch/headeronly/core/Dispatch_v2.h
 THO_DISPATCH_V2_TMPL

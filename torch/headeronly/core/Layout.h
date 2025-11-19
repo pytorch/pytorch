@@ -29,30 +29,6 @@ constexpr auto kSparseBsr = Layout::SparseBsr;
 constexpr auto kSparseBsc = Layout::SparseBsc;
 constexpr auto kJagged = Layout::Jagged;
 
-inline std::ostream& operator<<(std::ostream& stream, Layout layout) {
-  switch (layout) {
-    case kStrided:
-      return stream << "Strided";
-    case kSparse:
-      return stream << "Sparse";
-    case kSparseCsr:
-      return stream << "SparseCsr";
-    case kSparseCsc:
-      return stream << "SparseCsc";
-    case kSparseBsr:
-      return stream << "SparseBsr";
-    case kSparseBsc:
-      return stream << "SparseBsc";
-    case kMkldnn:
-      return stream << "Mkldnn";
-    case kJagged:
-      return stream << "Jagged";
-    case Layout::NumOptions:
-    default:
-      STD_TORCH_CHECK(false, "Unknown layout");
-  }
-}
-
 } // namespace c10
 
 HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
@@ -65,5 +41,4 @@ using c10::kSparseCsc;
 using c10::kSparseCsr;
 using c10::kStrided;
 using c10::Layout;
-using c10::operator<<;
 HIDDEN_NAMESPACE_END(torch, headeronly)
