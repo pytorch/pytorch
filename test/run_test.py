@@ -196,7 +196,6 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "test_openreg",
 ]
 
 S390X_BLOCKLIST = [
@@ -262,13 +261,11 @@ S390X_BLOCKLIST = [
     # depend on z3-solver
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
-    "test_openreg",
 ]
 
 XPU_BLOCKLIST = [
     "test_autograd",
     "profiler/test_memory_profiler",
-    "test_openreg",
 ]
 
 XPU_TEST = [
@@ -286,7 +283,6 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
-    "test_openreg",
     "test_overrides",
     "test_show_pickle",
     "test_tensorexpr",
@@ -964,6 +960,32 @@ def _test_autoload(test_directory, options, enable=True):
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
 
 
+# test_openreg is designed to run all tests under torch_openreg, which
+# is an torch backend similar to CUDA or MPS and implemented by using
+# third-party accelerator integration mechanism. Therefore, if all the
+# tests under torch_openreg are passing, it can means that the mechanism
+# mentioned above is working as expected.
+def test_openreg(test_module, test_directory, options):
+    openreg_dir = os.path.join(
+        test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
+    )
+    install_dir, return_code = install_cpp_extensions(openreg_dir)
+    if return_code != 0:
+        return return_code
+
+    with extend_python_path([install_dir]):
+        cmd = [
+            sys.executable,
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            os.path.join(openreg_dir, "tests"),
+            "-v",
+        ]
+        return shell(cmd, cwd=test_directory, env=os.environ)
+
+
 def test_distributed(test_module, test_directory, options):
     mpi_available = shutil.which("mpiexec")
     if options.verbose and not mpi_available:
@@ -1292,6 +1314,7 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
+    "test_openreg": test_openreg,
 }
 
 
@@ -1375,6 +1398,12 @@ def parse_args():
         "--xpu",
         action="store_true",
         help=("If this flag is present, we will run xpu tests except XPU_BLOCK_LIST"),
+    )
+    parser.add_argument(
+        "--openreg",
+        "--openreg",
+        action="store_true",
+        help=("If this flag is present, we will only run test_openreg"),
     )
     parser.add_argument(
         "--cpp",
@@ -1670,6 +1699,11 @@ def get_selected_tests(options) -> list[str]:
     else:
         # Exclude all xpu specific tests otherwise
         options.exclude.extend(XPU_TEST)
+
+    if options.openreg:
+        selected_tests = ["test_openreg"]
+    else:
+        options.exclude.append("test_openreg")
 
     # Filter to only run onnx tests when --onnx option is specified
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]

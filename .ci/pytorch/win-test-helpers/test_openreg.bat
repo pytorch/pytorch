@@ -9,7 +9,7 @@ if not errorlevel 0 (
 pushd test
 
 echo Run openreg tests
-python run_test.py --verbose -i test_openreg
+python run_test.py --test_openreg --verbose
 if ERRORLEVEL 1 goto fail
 
 popd

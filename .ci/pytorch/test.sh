@@ -1823,7 +1823,7 @@ test_attention_microbenchmark() {
 }
 
 test_openreg() {
-  python test/run_test.py --verbose -i test_openreg
+  python test/run_test.py --openreg --verbose
   assert_git_not_dirty
 }
 

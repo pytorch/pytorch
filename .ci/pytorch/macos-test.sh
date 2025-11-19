@@ -49,7 +49,7 @@ test_python_mps() {
 test_python_openreg() {
   setup_test_python
 
-  time python test/run_test.py --verbose -i test_openreg
+  time python test/run_test.py --openreg --verbose
 
   assert_git_not_dirty
 }
