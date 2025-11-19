@@ -760,25 +760,8 @@ class PallasTestsCPU(PallasTestsMixin, TestCase):
 
 
 @unittest.skipUnless(has_jax_tpu_backend(), "requires JAX TPU backend")
-@functorch_config.patch({"pallas_target_tpu": True})
 class PallasTestsTPU(PallasTestsMixin, TestCase):
-    DEVICE = "cpu"
-
-    @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
-    def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
-        def fn(a, b):
-            return a + b
-
-        with self.assertRaisesRegex(
-            RuntimeError,
-            (
-                "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                "Please make sure that you have a TPU available and that JAX is configured correctly."
-            ),
-        ):
-            torch.compile(fn, backend="inductor", options={"cpu_backend": "pallas"})(
-                torch.randn(16), torch.randn(16)
-            )
+    DEVICE = "xla"
 
 
 if test_torchinductor.HAS_CPU and HAS_PALLAS:

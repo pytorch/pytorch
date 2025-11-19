@@ -887,7 +887,8 @@ class PallasKernel(SIMDKernel):
 
         kernel_name = name or "<KERNEL_NAME>"
         interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
-        is_tpu = torch._functorch.config.pallas_target_tpu
+        device_type = V.graph.get_current_device_or_throw().type
+        is_tpu = device_type == "xla"
         if is_tpu and not has_tpu_pallas():
             raise RuntimeError(
                 "PALLAS_TARGET_TPU is set, but no TPU device was found. "
