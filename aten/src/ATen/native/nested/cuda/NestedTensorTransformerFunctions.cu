@@ -5,6 +5,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/KernelUtils.h>
@@ -1452,12 +1453,10 @@ at::Tensor _fbgemm_jagged_to_padded_dense_forward(
   Tensor padded_values_view =
       D_folded ? padded_values.unsqueeze(-1) : padded_values;
 
-  AT_DISPATCH_ALL_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
+  AT_DISPATCH_V2(
       values.scalar_type(),
       "jagged_to_padded_dense",
-      [&] {
+      AT_WRAP([&] {
         scalar_t fill_value = _get_padding_value<scalar_t>(padding_value, values.is_floating_point());  // Clamp infinite sentinels to dtype min/max to avoid overflow
         jagged_dense_elementwise_dense_output_<scalar_t>(
             values_canonicalized,
@@ -1468,7 +1467,9 @@ at::Tensor _fbgemm_jagged_to_padded_dense_forward(
               return x;
             },
             fill_value);
-      });
+      }),
+      AT_EXPAND(AT_ALL_TYPES),
+      kBool, kHalf, kBFloat16);
 
   return padded_values;
 }
