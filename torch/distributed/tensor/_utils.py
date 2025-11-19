@@ -127,19 +127,21 @@ def _compute_local_shape_and_global_offset(
         # if rank not in the mesh, return empty offset
         return ((0,), ())
 
-    ordered_placements: Sequence[tuple[int, Placement]] = [
-        (mesh_dim, p) for (mesh_dim, p) in enumerate(placements)
-    ]
-
     local_shape = list(global_shape)
-    # We'll compute the data for where the shard begins on a per-dim basis.
-    # However, a single dim can be sharded multiple times, so we will end up
-    # doing a Sum(size*stride) like computation to determine the location of our
-    # shard for each of the shardings on that dim.
-    global_offset = [0] * len(global_shape)
+    # Perform shard from left to right. For example, 
+    #   global tensor: [0, 1, 2, 3, 4, 5, 6, 7]
+    #   placements: S(0), SS(0, split_factor=2)
+    #   mesh_shape: (2, 2)
+    # After S(0), shard_dim_to_global_offsets are
+    #   {0: [0, 1, 2, 3]} on my_coordinate [0, 0] [0, 1]
+    #   {0: [4, 5, 6, 7]} on my_coordinate [1, 0] [1, 1]
+    # After SS(0, split_factor=2), shard_dim_to_global_offsets are
+    #   {0: [0, 2]} on my_coordinate [0, 0]
+    #   {0: [1, 3]} on my_coordinate [0, 1]
+    #   {0: [4, 6]} on my_coordinate [1, 0]
+    #   {0: [5, 7]} on my_coordinate [1, 1]
     shard_dim_to_global_offsets = {}
-
-    for mesh_dim, placement in ordered_placements:
+    for mesh_dim, placement in enumerate(placements):
         mesh_dim_size = mesh_shape[mesh_dim]
         if not isinstance(placement, (Shard, _StridedShard)):
             continue
@@ -175,6 +177,7 @@ def _compute_local_shape_and_global_offset(
                 shard_dim_to_global_offsets[shard_dim][i] for i in shard_offsets
             ]
 
+    global_offset = [0] * len(global_shape)
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
         global_offset[shard_dim] = global_offsets[0]
 
