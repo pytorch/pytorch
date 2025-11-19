@@ -11,6 +11,7 @@ import math
 import operator
 import os
 import re
+import sys
 import traceback
 import unittest
 import warnings
@@ -739,18 +740,26 @@ class TestExport(TestCase):
                 dynamic_shapes={"x": {0: Dim("b")}, "y": None},
             )
 
+        # clean up _torchdynamo related meta data as it could vary depending on the caller
+        # https://github.com/pytorch/pytorch/issues/167432
+        for node in ep.graph.nodes:
+            if "custom" in node.meta:
+                node.meta["custom"] = {
+                    k: v
+                    for k, v in node.meta["custom"].items()
+                    if "_torchdynamo_disable" not in k
+                }
+
         custom_metadata = torch.fx.traceback._get_custom_metadata(ep.module())
+
         self.assertExpectedInline(
             str(custom_metadata),
             """\
-('placeholder', 'x', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
-('placeholder', 'y', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
-('call_function', 'cat', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', 'item', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', 'ge_1', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', '_assert_scalar_default', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', 'mul', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('output', 'output', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})""",
+('call_function', 'cat', {'moo': 0})
+('call_function', 'item', {'moo': 0})
+('call_function', 'ge_1', {'moo': 0})
+('call_function', '_assert_scalar_default', {'moo': 0})
+('call_function', 'mul', {'moo': 0})""",
         )
 
     @requires_gpu
@@ -12257,8 +12266,15 @@ graph():
             def forward(self, x):
                 return x + 2
 
-        def fancy_forward(x, y):
-            return x + 2 + y
+        if sys.version_info >= (3, 14):
+            # functools.partial is now a method descriptor:
+            # https://docs.python.org/3/whatsnew/3.14.html#changes-in-the-python-api
+            def fancy_forward(self, x, y):
+                return x + 2 + y
+        else:
+
+            def fancy_forward(x, y):
+                return x + 2 + y
 
         Foo.forward = functools.partial(fancy_forward, y=torch.randn(4, 4))
         x = torch.randn(4, 4)
@@ -15295,12 +15311,12 @@ graph():
             def forward(self, block):
                 return block.a + block.b
 
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError, "It looks like one of the inputs with type"
         ):
-            _dynamo_graph_capture_for_export(Foo())(
+            dynamo_graph_capture_for_export(Foo())(
                 Block(torch.randn(4, 4), torch.randn(4, 4))
             )
 

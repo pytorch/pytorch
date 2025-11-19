@@ -3,6 +3,7 @@
 import copy
 import types
 import unittest
+import warnings
 from dataclasses import dataclass
 from typing import Dict, List, Tuple
 
@@ -16,6 +17,9 @@ from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import TEST_CUDA
+
+
+GLOBAL_LIST = []
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
@@ -452,6 +456,31 @@ def forward(self, x):
         test_inputs = make_inputs()
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
 
+    def test_dynamo_graph_capture_with_call_override(self):
+        class _InterestingModule(torch.nn.Module):
+            def __init__(self, module):
+                super().__init__()
+                self._module = module
+
+            def __call__(self, *args, **kwargs):
+                return self._module(*args, **kwargs)
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        foo = _InterestingModule(MyModel())
+
+        def make_inputs():
+            return (torch.randn(2, 3),)
+
+        trace_inputs = make_inputs()
+        gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
+        test_inputs = make_inputs()
+        self.assertEqual(gm(*test_inputs), foo(*test_inputs))
+        self.assertEqual(len(list(gm.buffers())), len(list(foo.buffers())))
+        self.assertEqual(len(list(gm.parameters())), len(list(foo.parameters())))
+
     def test_dynamo_graph_capture_custom_pytree_type(self):
         import torch.utils._pytree as pytree
 
@@ -585,9 +614,9 @@ def forward(self, args_0):
     _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
     L_args_0_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
     l_args_0_ = L_args_0_
-    add = l_args_0_ + 1
+    add = l_args_0_ + 1;  add = None
     mul = l_args_0_ * 2;  l_args_0_ = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, mul, add), self._out_spec)""",
+    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, mul), self._out_spec)""",
         )
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
 
@@ -610,6 +639,34 @@ def forward(self, args_0):
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
         self.assertEqual(len(list(gm.buffers())), len(list(foo.buffers())))
         self.assertEqual(len(list(gm.parameters())), len(list(foo.parameters())))
+
+    def test_dynamo_graph_capture_side_effects(self):
+        GLOBAL_LIST.clear()
+
+        def foo(x):
+            z = x + 1
+            GLOBAL_LIST.append(z)
+            return z
+
+        def make_inputs():
+            return (torch.randn(2, 3),)
+
+        trace_inputs = make_inputs()
+        with warnings.catch_warnings(record=True) as w:
+            gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
+            cnt = 0
+            for entry in w:
+                if "While compiling, we found certain side effects happened" in str(
+                    entry.message
+                ):
+                    cnt += 1
+            self.assertEqual(cnt, 1)
+        self.assertEqual(len(GLOBAL_LIST), 0)
+        test_inputs = make_inputs()
+        gm_results = gm(*test_inputs)
+        self.assertEqual(len(GLOBAL_LIST), 0)
+        self.assertEqual(gm_results, foo(*test_inputs))
+        self.assertEqual(len(GLOBAL_LIST), 1)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self):
