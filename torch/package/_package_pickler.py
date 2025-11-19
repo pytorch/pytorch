@@ -67,8 +67,13 @@ class PackagePickler(_PyTorchLegacyPickler):
         module = self.importer.import_module(module_name)
         if sys.version_info >= (3, 14):
             # pickle._getattribute signature changes in 3.14
-            # to take iterable and return just one object
-            parent = _getattribute(module, name.split("."))
+            # to take iterable and return just the object (not tuple)
+            # We need to get the parent object that contains the attribute
+            name_parts = name.split(".")
+            if len(name_parts) == 1:
+                parent = module
+            else:
+                parent = _getattribute(module, name_parts[:-1])
         else:
             _, parent = _getattribute(module, name)
         # END CHANGED
