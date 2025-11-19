@@ -1236,13 +1236,13 @@ class TestPatternMatcher(TestCase):
             ),
         )
         for activation in fusable_activations:
+
+            def f(b, m1, m2, beta, alpha):
+                return activation(torch.addmm(b, m1, m2, **beta, **alpha))
+
+            fc = torch.compile(f)
+
             for beta, alpha in itertools.product(betas, alphas):
-
-                def f(b, m1, m2, beta, alpha):
-                    return activation(torch.addmm(b, m1, m2, **beta, **alpha))
-
-                fc = torch.compile(f)
-
                 expected = f(b, m1, m2, beta, alpha)
                 actual = fc(b, m1, m2, beta, alpha)
                 torch.testing.assert_close(expected, actual)
