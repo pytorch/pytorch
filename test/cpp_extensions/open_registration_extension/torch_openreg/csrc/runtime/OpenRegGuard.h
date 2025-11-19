@@ -31,14 +31,14 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   /**
    * Set the current device to device d, and return the previous Device.
    */
-  // LITERALINCLUDE START: GUARD DEVICE MANAGEMENT
+  // LITERALINCLUDE START: OPENREG GUARD DEVICE MANAGEMENT
   Device exchangeDevice(Device d) const override {
     TORCH_CHECK(d.is_privateuseone(), "Expected a PrivateUse1 device, but got ", d);
 
     auto old_device_index = ExchangeDevice(d.index());
     return Device(static_type, old_device_index);
   }
-  // LITERALINCLUDE END: GUARD DEVICE MANAGEMENT
+  // LITERALINCLUDE END: OPENREG GUARD DEVICE MANAGEMENT
 
   /**
    * Get the current device.
@@ -139,7 +139,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
    * it notifies all streams waiting on / blocked by that version of the
    * event to continue and marks that version as recorded.
    * */
-  // LITERALINCLUDE START: GUARD EVENT RECORD
+  // LITERALINCLUDE START: OPENREG GUARD EVENT RECORD
   void record(void** event, const Stream& stream, const DeviceIndex device_index, const EventFlag flag) const override {
     TORCH_CHECK(device_index == -1 || device_index == stream.device_index(),
                 "Event device index ",
@@ -175,7 +175,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     set_device(orig_device);
   }
-  // LITERALINCLUDE END: GUARD EVENT RECORD
+  // LITERALINCLUDE END: OPENREG GUARD EVENT RECORD
 
   /**
    * Does nothing if the event has not been scheduled to be recorded.

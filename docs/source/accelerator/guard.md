@@ -84,8 +84,8 @@ The guard implementation is registered using the `C10_REGISTER_GUARD_IMPL` macro
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegGuard.cpp
     :language: c++
-    :start-after: LITERALINCLUDE START: GUARD REGISTRATION
-    :end-before: LITERALINCLUDE END: GUARD REGISTRATION
+    :start-after: LITERALINCLUDE START: OPENREG GUARD REGISTRATION
+    :end-before: LITERALINCLUDE END: OPENREG GUARD REGISTRATION
     :linenos:
 ```
 
@@ -94,8 +94,8 @@ The `record` method demonstrates the key implementation pattern used throughout 
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegGuard.h
     :language: c++
-    :start-after: LITERALINCLUDE START: GUARD EVENT RECORD
-    :end-before: LITERALINCLUDE END: GUARD EVENT RECORD
+    :start-after: LITERALINCLUDE START: OPENREG GUARD EVENT RECORD
+    :end-before: LITERALINCLUDE END: OPENREG GUARD EVENT RECORD
     :linenos:
 ```
 
@@ -187,8 +187,8 @@ The actual device switching implementation:
 ```{eval-rst}
 .. literalinclude:: ../../../test/cpp_extensions/open_registration_extension/torch_openreg/csrc/runtime/OpenRegGuard.h
     :language: c++
-    :start-after: LITERALINCLUDE START: GUARD DEVICE MANAGEMENT
-    :end-before: LITERALINCLUDE END: GUARD DEVICE MANAGEMENT
+    :start-after: LITERALINCLUDE START: OPENREG GUARD DEVICE MANAGEMENT
+    :end-before: LITERALINCLUDE END: OPENREG GUARD DEVICE MANAGEMENT
     :linenos:
 ```
 
