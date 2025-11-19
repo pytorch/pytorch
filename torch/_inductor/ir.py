@@ -8766,10 +8766,10 @@ class HopPrint(ExternKernel):
             kwargs=kwargs_for_op,
             python_kernel_name="torch.ops.higher_order.print",
         )
-        self.format_str = format_str
-        self.print_kwargs = print_kwargs
-        self.name = V.graph.register_buffer(self)
-        V.graph.register_operation(self)
+        # self.format_str = format_str
+        # self.print_kwargs = print_kwargs
+        # self.name = V.graph.register_buffer(self)
+        # V.graph.register_operation(self)
 
     @classmethod
     def create(
@@ -8779,7 +8779,6 @@ class HopPrint(ExternKernel):
     ) -> list[NoneAsConstantBuffer]:
         # Realize inputs that are IRNodes
         realized_kwargs: dict[str, Any] = {}
-        breakpoint()
         for key, value in kwargs.items():
             if isinstance(value, (TensorBox, StorageBox)):
                 realized_kwargs[key] = cls.realize_input(value)
@@ -8787,17 +8786,18 @@ class HopPrint(ExternKernel):
                 realized_kwargs[key] = value
 
         # Create the HopPrint node with NoneLayout since print returns None
-        hop_print = HopPrint(
-            format_str=format_str,
-            print_kwargs=realized_kwargs,
-            layout=NoneLayout(device=None),
-        )
+        # hop_print = HopPrint(
+        #     format_str=format_str,
+        #     print_kwargs=realized_kwargs,
+        #     layout=NoneLayout(device=None),
+        # )
 
         # Return a NoneAsConstantBuffer to indicate a side-effecting node with no output
         return [NoneAsConstantBuffer()]
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        wrapper.writeline(f'print("{self.format_str}".format(**self.print_kwargs))')
+        # wrapper.writeline(f'print("{self.format_str}".format(**self.print_kwargs))')
+        return None
 
 
 @ir_dataclass(frozen=False)

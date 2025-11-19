@@ -187,7 +187,7 @@ x = add_1, y = add_2);  getitem = None
             """print(str format_str) -> ()""",
         )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_reorder_print_no_graph_break(self, backend):
         def f(x):
             x1 = x + x
@@ -221,7 +221,7 @@ x = add_1, y = add_2);  getitem = None
             f"moo {x_new * 2}\nmoo {x_new * 2 * x_new * 2}",
         )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_constant_mutation(self, backend):
         def f(x):
             alist = [x]
