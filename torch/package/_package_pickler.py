@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 # pyrefly: ignore [missing-module-attribute]
+import sys
 from pickle import (  # type: ignore[attr-defined]
     _compat_pickle,
     _extension_registry,
@@ -64,7 +65,12 @@ class PackagePickler(_PyTorchLegacyPickler):
             raise PicklingError(f"Can't pickle {obj}: {str(err)}") from err
 
         module = self.importer.import_module(module_name)
-        _, parent = _getattribute(module, name)
+        if sys.version_info >= (3, 14):
+            # pickle._getattribute signature changes in 3.14
+            # to take iterable and return just one object
+            parent = _getattribute(module, name.split("."))
+        else:
+            _, parent = _getattribute(module, name)
         # END CHANGED
 
         if self.proto >= 2:  # type: ignore[attr-defined]
