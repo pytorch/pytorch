@@ -34,7 +34,11 @@ from torch.distributed.tensor._ops.utils import (
     register_op_strategy,
     replicate_op_strategy,
 )
-from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.debug import (
+    _clear_fast_path_sharding_prop_cache,
+    _clear_python_sharding_prop_cache,
+    CommDebugMode,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -479,7 +483,8 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
                 del propagator.op_to_schema_info[op_overload]
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
-        propagator.propagate_op_sharding.cache.cache_clear()
+        _clear_fast_path_sharding_prop_cache()
+        _clear_python_sharding_prop_cache()
 
 
 def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
@@ -643,6 +648,28 @@ class TestStrategyHashing(DTensorTestBase):
         with op_strategy_context(torch.ops.aten.sort.default, replicate_op_strategy):
             out2, _ = torch.sort(sharded_dtensor, dim=1)
         self.assertEqual(out1.full_tensor(), out2.full_tensor())
+
+
+class TestStrategyOperation(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 2
+
+    @with_comms
+    def test_cache_clean(self):
+        mesh = self.build_device_mesh()
+        test_op = torch.ops.mylib.numpy_sin
+        x = torch.randn(2, device=self.device_type)
+        y = torch.randn(2, device=self.device_type)
+        x_dt = distribute_tensor(x, mesh, [Shard(0)])
+        y_dt = distribute_tensor(y, mesh, [Shard(0)])
+        with op_strategy_context(test_op.default, replicate_op_strategy):
+            self._test_op_on_dtensor(test_op, x_dt, y_dt)
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            f"Operator {test_op.default} does not have a sharding strategy registered",
+        ):
+            self._test_op_on_dtensor(test_op, x_dt, y_dt)
 
 
 DistTensorReplicateStrategyRegistrationTestWithLocalTensor = (

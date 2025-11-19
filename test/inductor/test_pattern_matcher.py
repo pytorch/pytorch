@@ -41,7 +41,6 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
     skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils import _pytree as pytree
@@ -1298,7 +1297,6 @@ class TestPatternMatcher(TestCase):
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
-    @skipIfXpu
     @xfailIfSM89
     @inductor_config.patch(
         {
@@ -1831,6 +1829,138 @@ class TestPatternMatcher(TestCase):
         )
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
+
+    @inductor_config.patch(is_predispatch=True)
+    def test_remove_noop_pass_with_remove_passes(self):
+        def fn_with_noop(x):
+            batch_size, dim = x.shape
+            y = x.view(batch_size, dim)
+            return y + 1
+
+        def count_view_ops(graph_module):
+            count = 0
+            for node in graph_module.graph.nodes:
+                if node.op == "call_function" and node.target in [
+                    torch.ops.aten.view.default,
+                    torch.ops.aten.reshape.default,
+                ]:
+                    count += 1
+            return count
+
+        device = "cuda" if HAS_GPU else "cpu"
+        input_tensor = torch.randn(8, 16, device=device)
+
+        with inductor_config.patch(remove_pre_grad_passes=None):
+            compiled_fn_default = torch.compile(fn_with_noop, fullgraph=True)
+            result_default = compiled_fn_default(input_tensor)
+
+        with inductor_config.patch(remove_pre_grad_passes="remove_noop"):
+            compiled_fn_skip_noop = torch.compile(fn_with_noop, fullgraph=True)
+            result_skip_noop = compiled_fn_skip_noop(input_tensor)
+
+        expected = fn_with_noop(input_tensor)
+        torch.testing.assert_close(result_default, expected)
+        torch.testing.assert_close(result_skip_noop, expected)
+
+        from torch._inductor.fx_passes.pre_grad import pre_grad_passes
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with inductor_config.patch(
+            is_predispatch=True, pattern_matcher=True, remove_pre_grad_passes=None
+        ):
+            gm_default = make_fx(fn_with_noop)(input_tensor)
+            gm_default_processed = pre_grad_passes(
+                gm_default, [input_tensor], add_passes=None, remove_passes=None
+            )
+            view_count_default = count_view_ops(gm_default_processed)
+
+        with inductor_config.patch(
+            is_predispatch=True,
+            pattern_matcher=True,
+            remove_pre_grad_passes="remove_noop",
+        ):
+            gm_skip_noop = make_fx(fn_with_noop)(input_tensor)
+            gm_skip_noop_processed = pre_grad_passes(
+                gm_skip_noop,
+                [input_tensor],
+                add_passes=None,
+                remove_passes="remove_noop",
+            )
+            view_count_skip_noop = count_view_ops(gm_skip_noop_processed)
+
+        self.assertGreaterEqual(
+            view_count_skip_noop,
+            view_count_default,
+            f"Expected view count with remove_noop disabled ({view_count_skip_noop}) "
+            f"to be >= view count with remove_noop enabled ({view_count_default})",
+        )
+
+    def test_bound_method_pattern_matcher(self):
+        class ReluSumPattern:
+            def __init__(self, e: float):
+                self.e = e
+
+            def pattern(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return x.pow(self.e) + y.pow(self.e) + z.pow(self.e)
+
+            def replacement(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return (x + y + z).pow(self.e)
+
+            def inputs(self):
+                return [
+                    torch.empty(5, 5),  # x
+                    torch.empty(5, 5),  # y
+                    torch.empty(5, 5),  # z
+                ]
+
+            def register(self, pm: PatternMatcherPass):
+                register_replacement(
+                    self.pattern, self.replacement, self.inputs(), fwd_only, pm
+                )
+
+        my_patterns = PatternMatcherPass()
+        ReluSumPattern(4).register(my_patterns)
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+            nonlocal count
+            count = my_patterns.apply(graph)
+            graph.eliminate_dead_code()
+            return graph
+
+        def custom_backend(graph: torch.fx.GraphModule, example_inputs):
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_custom_post_pass"] = custom_pass
+            current_config["enable_auto_functionalized_v2"] = False
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def fn(x):
+            y = x.relu()
+            z = y.tanh()
+            z2 = x.pow(2) + y.pow(2) + z.pow(2)
+            z3 = x.pow(3) + y.pow(3) + z2.pow(3)
+            z4 = x.pow(4) + y.pow(4) + z3.pow(4)
+            return z4 + 5
+
+        def fn_replaced(x):
+            y = x.relu()
+            z = y.tanh()
+            z2 = x.pow(2) + y.pow(2) + z.pow(2)
+            z3 = x.pow(3) + y.pow(3) + z2.pow(3)
+            z4 = (x + y + z3).pow(4)
+            return z4 + 5
+
+        x = [torch.ones((5, 4))]
+        fn_result = fn(*x)
+        fn_replaced_result = fn_replaced(*x)
+        self.assertEqual(count, 1)
+        self.assertEqual(fn_result, fn_replaced_result)
 
 
 if __name__ == "__main__":
