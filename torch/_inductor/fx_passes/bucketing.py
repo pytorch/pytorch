@@ -489,15 +489,34 @@ def all_reduce_merge_fn_to_trace(
     return new_outs
 
 
+# List of all torch dtypes for serialization through custom ops
+# TODO: custom ops support list[dtype] input
+_ALL_DTYPES = tuple(
+    [
+        getattr(torch, attr)
+        for attr in dir(torch)
+        if isinstance(getattr(torch, attr), torch.dtype)
+    ]
+)
+
+
 @torch.library.custom_op("bucketing::_pre_bucket_all_gather", mutates_args={})
 def _pre_bucket_all_gather(
     ag_ins: list[torch.Tensor],
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtype_ints: list[
+        int
+    ],  # dtype enum values, that inputs are converted to before all_gather
     rank: int,
 ) -> torch.Tensor:
-    ins_split_sizes_bytes = [ag_in.numel() * ag_in.element_size() for ag_in in ag_ins]
+    # Convert int indices back to torch.dtype
+    out_dtypes = [_ALL_DTYPES[d] for d in out_dtype_ints]
+    ins_split_sizes_bytes = [
+        ag_in.numel() * out_dtype.itemsize
+        for ag_in, out_dtype in zip(ag_ins, out_dtypes, strict=True)
+    ]
     bucket_dtype_size_bytes = dtype.itemsize
     ins_split_sizes = [
         _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
@@ -507,8 +526,14 @@ def _pre_bucket_all_gather(
     new_ag_out = torch.empty(ag_input_numel * group_size, dtype=dtype, device=device)
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     foreach_copy_dsts = torch.split(new_ag_in, ins_split_sizes)
-    ag_ins_flattened = [ag_in.reshape(-1).view(dtype) for ag_in in ag_ins]
-    torch._foreach_copy_(foreach_copy_dsts, ag_ins_flattened)
+    # View each destination slice as its output dtype, then copy
+    # The copy operation handles dtype conversion from input dtype to output dtype
+    foreach_copy_dsts_typed = [
+        dst.view(out_dtype)
+        for dst, out_dtype in zip(foreach_copy_dsts, out_dtypes, strict=True)
+    ]
+    ag_ins_flattened = [ag_in.reshape(-1) for ag_in in ag_ins]
+    torch._foreach_copy_(foreach_copy_dsts_typed, ag_ins_flattened)
     return new_ag_out
 
 
@@ -517,9 +542,14 @@ def _pre_bucket_all_gather_fake(
     group_size: int,
     group_name: str,
     dtype: torch.dtype,  # type: ignore[name-defined]
+    out_dtype_ints: list[int],
     rank: int,
 ) -> torch.Tensor:
-    ins_split_sizes_bytes = [ag_in.numel() * ag_in.element_size() for ag_in in ag_ins]
+    out_dtypes = [_ALL_DTYPES[d] for d in out_dtype_ints]
+    ins_split_sizes_bytes = [
+        ag_in.numel() * out_dtype.itemsize
+        for ag_in, out_dtype in zip(ag_ins, out_dtypes, strict=True)
+    ]
     bucket_dtype_size_bytes = dtype.itemsize
     ins_split_sizes = [
         _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
@@ -541,12 +571,9 @@ def all_gather_merge_fn_to_trace_custom_ops(
     out_dtypes: list[torch.dtype],  # type: ignore[name-defined]
     rank: int,
 ) -> list[torch.Tensor]:
-    ag_ins = [
-        torch._prims.convert_element_type(_ag_in, out_dtype)
-        if _ag_in.dtype != out_dtype
-        else _ag_in
-        for _ag_in, out_dtype in zip(_ag_ins, out_dtypes)
-    ]
+    # Don't create convert_element_type ops - _pre_bucket_all_gather handles conversion
+    # by viewing destination slices as output dtypes and letting copy do the conversion
+    ag_ins = _ag_ins
     ins_sizes = [ag_in.shape for ag_in in ag_ins]
     ins_split_sizes_bytes = [
         ag_in.numel() * out_dtype.itemsize
@@ -557,8 +584,13 @@ def all_gather_merge_fn_to_trace_custom_ops(
         _bytes // bucket_dtype_size_bytes for _bytes in ins_split_sizes_bytes
     ]
     ag_input_numel = sum(ins_split_sizes)
+
+    # Convert out_dtypes to indices for custom_op
+    # TODO: custom ops support list[dtype] input
+    out_dtype_ints = [_ALL_DTYPES.index(dt) for dt in out_dtypes]
+
     new_ag_out = torch.ops.bucketing._pre_bucket_all_gather(
-        ag_ins, group_size, group_name, dtype, rank
+        ag_ins, group_size, group_name, dtype, out_dtype_ints, rank
     )
     new_ag_in = new_ag_out.narrow(0, ag_input_numel * rank, ag_input_numel)
     wait_tensor = torch.ops.c10d_functional.wait_tensor(
@@ -721,6 +753,20 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
         return replacements, new_nodes
 
 
+def has_mergeable_all_gather_convert_dtype(n: torch.fx.Node) -> bool:
+    node_in = n.args[0]
+    return (
+        is_all_gather_into_tensor(n)
+        and isinstance(node_in, torch.fx.Node)
+        and node_in.op == "call_function"
+        and (
+            node_in.target is torch.ops.prims.convert_element_type.default
+            or node_in.target is torch.ops.aten._to_copy.default
+        )
+        and len(node_in.users) == 1
+    )
+
+
 def process_collective_bucket(
     g: torch.fx.Graph,
     bucket_nodes: list[torch.fx.Node],
@@ -755,13 +801,7 @@ def process_collective_bucket(
 
         # Handle convert_element_type operations (for all_gather)
         node_in = n.args[0]
-        if (
-            is_all_gather_into_tensor(n)
-            and isinstance(node_in, torch.fx.Node)  # Add type check
-            and node_in.op == "call_function"
-            and node_in.target is torch.ops.prims.convert_element_type.default
-            and len(node_in.users) == 1
-        ):
+        if has_mergeable_all_gather_convert_dtype(n):
             ag_node_to_pre_nodes[n].append(node_in)
             node_in = node_in.args[0]
 

@@ -212,8 +212,8 @@ static PyObject* THPModule_initExtension(
         }
         auto frame_id = s_tb[idx];
         const auto& frame = s_tbs.all_frames.at(frame_id);
-        oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
-            << ":" << frame.lineno << '\n';
+        oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
+            << ':' << frame.lineno << '\n';
       }
       return oss.str();
     });
@@ -2298,8 +2298,6 @@ Call this whenever a new thread is created in order to propagate values from
       set_module_attr("has_lapack", at::hasLAPACK() ? Py_True : Py_False));
   ASSERT_TRUE(set_module_attr(
       "_has_eigen_sparse", at::hasEigenSparse() ? Py_True : Py_False));
-  ASSERT_TRUE(
-      set_module_attr("has_zendnn", at::hasZenDNN() ? Py_True : Py_False));
 
   py_module.def("_valgrind_supported_platform", []() {
 #if defined(USE_VALGRIND)
@@ -2774,8 +2772,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_dump_local_tls_set", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-    std::cout << "Included: " << toString(local_keyset.included_) << "\n";
-    std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
+    std::cout << "Included: " << toString(local_keyset.included_) << '\n';
+    std::cout << "Excluded: " << toString(local_keyset.excluded_) << '\n';
   });
 
   py_module.def(
