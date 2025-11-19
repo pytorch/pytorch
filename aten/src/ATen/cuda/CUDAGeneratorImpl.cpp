@@ -615,8 +615,6 @@ std::shared_ptr<CUDAGeneratorImpl> CUDAGeneratorImpl::clone() const {
 CUDAGeneratorImpl* CUDAGeneratorImpl::clone_impl() const {
   at::cuda::assertNotCapturing("Cannot call CUDAGeneratorImpl::clone_impl");
   auto gen = new CUDAGeneratorImpl(this->device().index(), state_->clone());
-  gen->set_current_seed(this->seed_);
-  gen->set_philox_offset_per_thread(this->philox_offset_per_thread_);
   gen->set_sharding_spec(
       this->tensor_dim_,
       this->local_shape_,
