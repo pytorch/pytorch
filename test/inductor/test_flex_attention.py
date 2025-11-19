@@ -3526,7 +3526,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     def test_force_impl_default_matches_triton_large(self, device):
-        """FORCE_IMPL='DEFAULT' should follow Triton heuristics on large shapes."""
+        """KERNEL_IMPL='AUTO' should follow Triton heuristics on large shapes."""
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 256, 64),
@@ -3545,8 +3545,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 kernel_options=kernel_options,
             )
 
-        default_out, default_code = compile_and_run({"FORCE_IMPL": "DEFAULT"})
-        triton_out, triton_code = compile_and_run({"FORCE_IMPL": "TRITON"})
+        default_out, default_code = compile_and_run({"KERNEL_IMPL": "AUTO"})
+        triton_out, triton_code = compile_and_run({"KERNEL_IMPL": "TRITON"})
 
         torch.testing.assert_close(default_out, triton_out, atol=5e-3, rtol=5e-3)
 
@@ -3559,7 +3559,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     def test_force_impl_decode_matches_default(self, device):
-        """FORCE_IMPL='DECODE' should match heuristics on decode-friendly shapes."""
+        """KERNEL_IMPL='TRITON_DECODE' should match heuristics on decode-friendly shapes."""
         make_tensor = functools.partial(
             torch.randn,
             (1, 2, 64, 64),
@@ -3585,7 +3585,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             "create_flex_decoding_kernel",
             wraps=flex_kernel_mod.create_flex_decoding_kernel,
         ) as decode_kernel:
-            default_out, _ = compile_and_run({"FORCE_IMPL": "DEFAULT"})
+            default_out, _ = compile_and_run({"KERNEL_IMPL": "AUTO"})
             self.assertTrue(
                 decode_kernel.called,
                 "Expected heuristics to dispatch to flex decoding kernel.",
@@ -3596,10 +3596,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             "create_flex_decoding_kernel",
             wraps=flex_kernel_mod.create_flex_decoding_kernel,
         ) as decode_kernel:
-            decode_out, _ = compile_and_run({"FORCE_IMPL": "DECODE"})
+            decode_out, _ = compile_and_run({"KERNEL_IMPL": "TRITON_DECODE"})
             self.assertTrue(
                 decode_kernel.called,
-                "Expected explicit FORCE_IMPL='DECODE' to use flex decoding kernel.",
+                "Expected explicit KERNEL_IMPL='TRITON_DECODE' to use flex decoding kernel.",
             )
 
         self.assertEqual(decode_out.shape, (1, 2, 64, 64))
@@ -3621,14 +3621,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         flex_compiled = torch.compile(flex_attention, fullgraph=True)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"FORCE_IMPL='DECODE' was specified but flex_decoding cannot be used",
+            r"KERNEL_IMPL='TRITON_DECODE' was specified but flex_decoding cannot be used",
         ):
-            flex_compiled(q, k, v, kernel_options={"FORCE_IMPL": "DECODE"})
+            flex_compiled(q, k, v, kernel_options={"KERNEL_IMPL": "TRITON_DECODE"})
 
     @supported_platform
     @skip_on_cpu
     def test_force_impl_decode_errors_with_non_power_of_two_gqa(self, device):
-        """FORCE_IMPL='DECODE' should fail when GQA ratio is not a power of two."""
+        """KERNEL_IMPL='TRITON_DECODE' should fail when GQA ratio is not a power of two."""
         q = torch.randn(
             1, 3, 64, 64, device=device, dtype=torch.float16, requires_grad=False
         )
@@ -3642,20 +3642,20 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         flex_compiled = torch.compile(flex_attention, fullgraph=True)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"FORCE_IMPL='DECODE' was specified but flex_decoding cannot be used",
+            r"KERNEL_IMPL='TRITON_DECODE' was specified but flex_decoding cannot be used",
         ):
             flex_compiled(
                 q,
                 k,
                 v,
                 enable_gqa=True,
-                kernel_options={"FORCE_IMPL": "DECODE"},
+                kernel_options={"KERNEL_IMPL": "TRITON_DECODE"},
             )
 
     @supported_platform
     @skip_on_cpu
     def test_force_impl_rejects_legacy_force_use_flag(self, device):
-        """Combining FORCE_IMPL with FORCE_USE_FLEX_ATTENTION should raise an error."""
+        """Combining KERNEL_IMPL with FORCE_USE_FLEX_ATTENTION should raise an error."""
         make_tensor = functools.partial(
             torch.randn,
             (2, 2, 128, 64),
@@ -3668,14 +3668,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         flex_compiled = torch.compile(flex_attention, fullgraph=True)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"FORCE_IMPL cannot be combined with legacy FORCE_USE_FLEX_ATTENTION",
+            r"KERNEL_IMPL cannot be combined with legacy FORCE_USE_FLEX_ATTENTION",
         ):
             flex_compiled(
                 q,
                 k,
                 v,
                 kernel_options={
-                    "FORCE_IMPL": "TRITON",
+                    "KERNEL_IMPL": "TRITON",
                     "FORCE_USE_FLEX_ATTENTION": True,
                 },
             )
@@ -3690,15 +3690,15 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         kernel_options = _apply_kernel_options(
             query, key, value, return_lse=True, kernel_options={}
         )
-        self.assertEqual(kernel_options["FORCE_IMPL"], "DEFAULT")
+        self.assertEqual(kernel_options["KERNEL_IMPL"], "AUTO")
 
-        with self.assertRaisesRegex(ValueError, r"Invalid FORCE_IMPL value 'INVALID'"):
+        with self.assertRaisesRegex(ValueError, r"Invalid KERNEL_IMPL value 'INVALID'"):
             _apply_kernel_options(
                 query,
                 key,
                 value,
                 return_lse=True,
-                kernel_options={"FORCE_IMPL": "INVALID"},
+                kernel_options={"KERNEL_IMPL": "INVALID"},
             )
 
     @supported_platform
