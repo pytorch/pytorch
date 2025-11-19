@@ -889,17 +889,29 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-        (
-            FileCheck()
-            .check("buf0 = empty_strided")
-            .check(".run(arg0_1, buf0")
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
-            .check("buf5 = empty_strided")
-            .check(".run(buf5, 16")
-            .check("return (buf0, buf5")
-            .run(code)
-        )
+        if torch._inductor.config.combo_kernels:
+            (
+                FileCheck()
+                .check("buf0 = empty_strided")
+                .check("buf5 = empty_strided")
+                .check(".run(arg0_1, buf0, buf5")
+                .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+                .check("return (buf0, buf5")
+                .run(code)
+            )
+        else:
+            (
+                FileCheck()
+                .check("buf0 = empty_strided")
+                .check(".run(arg0_1, buf0")
+                .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+                .check("buf5 = empty_strided")
+                .check(".run(buf5, 16")
+                .check("return (buf0, buf5")
+                .run(code)
+            )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
@@ -924,19 +936,33 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         # NOTE: Make sure we are not unnecessarily copying the outputs of
         # wait_tensors before they are returned from the graph.
-        (
-            FileCheck()
-            .check("buf0 = empty_strided")
-            .check("buf1 = buf0")
-            .check("buf6 = empty_strided")
-            .check(".run(buf1, arg0_1, buf6, 16")
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf1")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
-            .check("buf7 = empty_strided")
-            .check(".run(buf7, 16")
-            .check("return (buf1, buf6, buf7")
-            .run(code)
-        )
+        if torch._inductor.config.combo_kernels:
+            (
+                FileCheck()
+                .check("buf0 = empty_strided")
+                .check("buf1 = buf0")
+                .check("buf6 = empty_strided")
+                .check("buf7 = empty_strided")
+                .check(".run(buf1, arg0_1, buf6, buf7")
+                .check("torch.ops._c10d_functional.all_reduce_.default(buf1")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
+                .check("return (buf1, buf6, buf7")
+                .run(code)
+            )
+        else:
+            (
+                FileCheck()
+                .check("buf0 = empty_strided")
+                .check("buf1 = buf0")
+                .check("buf6 = empty_strided")
+                .check(".run(buf1, arg0_1, buf6, 16")
+                .check("torch.ops._c10d_functional.all_reduce_.default(buf1")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
+                .check("buf7 = empty_strided")
+                .check(".run(buf7, 16")
+                .check("return (buf1, buf6, buf7")
+                .run(code)
+            )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
@@ -1399,24 +1425,43 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         # NOTE: Make sure we are not unnecessarily copying the outputs of
-        # wait_tensors before they are returned from the graph.
-        (
-            FileCheck()
-            .check("buf0 = empty_strided")
-            .check("buf6 = empty_strided")
-            .check(".run(arg0_1, buf0, buf6, 16")
-            .check(
-                "buf1 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced.default([buf0, arg0_1]"
+        # wait_tensors before they are returned from the graph.'
+        if torch._inductor.config.combo_kernels:
+            (
+                FileCheck()
+                .check("buf0 = empty_strided")
+                .check("buf6 = empty_strided")
+                .check("buf7 = empty_strided")
+                .check("triton_poi__0.run(arg0_1, buf0, buf6, buf7")
+                .check(
+                    "buf1 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced.default([buf0, arg0_1]"
+                )
+                .check("buf2 = buf1[0]")
+                .check("buf3 = buf1[1]")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+                .check("del buf0")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+                .check("return (buf2, buf6, buf7, buf3")
+                .run(code)
             )
-            .check("buf2 = buf1[0]")
-            .check("buf3 = buf1[1]")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
-            .check("buf7 = buf0; del buf0  # reuse")
-            .check(".run(buf7, 16")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
-            .check("return (buf2, buf6, buf7, buf3")
-            .run(code)
-        )
+        else:
+            (
+                FileCheck()
+                .check("buf0 = empty_strided")
+                .check("buf6 = empty_strided")
+                .check(".run(arg0_1, buf0, buf6, 16")
+                .check(
+                    "buf1 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced.default([buf0, arg0_1]"
+                )
+                .check("buf2 = buf1[0]")
+                .check("buf3 = buf1[1]")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+                .check("buf7 = buf0; del buf0  # reuse")
+                .check(".run(buf7, 16")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+                .check("return (buf2, buf6, buf7, buf3")
+                .run(code)
+            )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
@@ -1447,23 +1492,41 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
-        (
-            FileCheck()
-            .check("buf0 = empty_strided")
-            .check("buf6 = empty_strided")
-            .check(".run(arg0_1, buf0, buf6, 16")
-            .check(
-                "buf1 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default([buf0, arg0_1]"
+        if torch._inductor.config.combo_kernels:
+            (
+                FileCheck()
+                .check("buf0 = empty_strided")
+                .check("buf6 = empty_strided")
+                .check("buf7 = empty_strided")
+                .check(".run(arg0_1, buf0, buf6, buf7")
+                .check(
+                    "buf1 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default([buf0, arg0_1]"
+                )
+                .check("buf2 = buf1[0]")
+                .check("buf3 = buf1[1]")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+                .check("return (buf2, buf6, buf7, buf3")
+                .run(code)
             )
-            .check("buf2 = buf1[0]")
-            .check("buf3 = buf1[1]")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
-            .check("buf7 = buf0; del buf0  # reuse")
-            .check(".run(buf7, 16")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
-            .check("return (buf2, buf6, buf7, buf3")
-            .run(code)
-        )
+        else:
+            (
+                FileCheck()
+                .check("buf0 = empty_strided")
+                .check("buf6 = empty_strided")
+                .check(".run(arg0_1, buf0, buf6, 16")
+                .check(
+                    "buf1 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default([buf0, arg0_1]"
+                )
+                .check("buf2 = buf1[0]")
+                .check("buf3 = buf1[1]")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+                .check("buf7 = buf0; del buf0  # reuse")
+                .check(".run(buf7, 16")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+                .check("return (buf2, buf6, buf7, buf3")
+                .run(code)
+            )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
@@ -1519,23 +1582,39 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
-        (
-            FileCheck()
-            .check("buf0 = empty_strided")
-            .check("buf6 = empty_strided")
-            .check(".run(arg0_1, buf0, buf6, 16")
-            .check(
-                "buf1 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default([buf0, arg0_1]"
+        if torch._inductor.config.combo_kernels:
+            (
+                FileCheck()
+                .check("buf0 = empty_strided")
+                .check("buf6 = empty_strided")
+                .check("buf7 = empty_strided")
+                .check(".run(arg0_1, buf0, buf6, buf7")
+                .check(
+                    "buf1 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default([buf0, arg0_1]"
+                )
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+                .check("return (buf2, buf6, buf7, buf3")
+                .run(code)
             )
-            # .check("buf2 = buf1[0]")
-            # .check("buf3 = buf1[1]")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
-            # .check("buf7 = buf0; del buf0  # reuse")
-            # .check(".run(buf7, 16")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
-            .check("return (buf2, buf6, buf7, buf3")
-            .run(code)
-        )
+        else:
+            (
+                FileCheck()
+                .check("buf0 = empty_strided")
+                .check("buf6 = empty_strided")
+                .check(".run(arg0_1, buf0, buf6, 16")
+                .check(
+                    "buf1 = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced.default([buf0, arg0_1]"
+                )
+                # .check("buf2 = buf1[0]")
+                # .check("buf3 = buf1[1]")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
+                # .check("buf7 = buf0; del buf0  # reuse")
+                # .check(".run(buf7, 16")
+                .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
+                .check("return (buf2, buf6, buf7, buf3")
+                .run(code)
+            )
         out = compiled(inputs, **self.get_world_trs())
         correct = func(inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"
@@ -2009,36 +2088,52 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
         if not torch._inductor.config.triton.native_matmul:
-            (
-                FileCheck()
-                .check_count(
-                    "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
-                    count=2,
-                    exactly=True,
+            if torch._inductor.config.combo_kernels:
+                (
+                    FileCheck()
+                    .check("torch.ops._c10d_functional.reduce_scatter_tensor.default(")
+                    .check(
+                        "torch.ops._c10d_functional.all_gather_into_tensor_out.default("
+                    )
+                    .check("torch.ops._c10d_functional.reduce_scatter_tensor.default(")
+                    .check("extern_kernels.mm")
+                    .check("extern_kernels.addmm")
+                    .check(
+                        "torch.ops._c10d_functional.all_gather_into_tensor_out.default("
+                    )
+                    .run(code)
                 )
-                .check(
-                    "extern_kernels.mm",
+            else:
+                (
+                    FileCheck()
+                    .check_count(
+                        "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                        count=2,
+                        exactly=True,
+                    )
+                    .check(
+                        "extern_kernels.mm",
+                    )
+                    .check(
+                        "extern_kernels.addmm",
+                    )
+                    .run(code)
                 )
-                .check(
-                    "extern_kernels.addmm",
+                (
+                    FileCheck()
+                    .check_count(
+                        "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                        count=2,
+                        exactly=True,
+                    )
+                    .check(
+                        "extern_kernels.mm",
+                    )
+                    .check(
+                        "extern_kernels.addmm",
+                    )
+                    .run(code)
                 )
-                .run(code)
-            )
-            (
-                FileCheck()
-                .check_count(
-                    "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-                    count=2,
-                    exactly=True,
-                )
-                .check(
-                    "extern_kernels.mm",
-                )
-                .check(
-                    "extern_kernels.addmm",
-                )
-                .run(code)
-            )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"

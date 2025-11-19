@@ -3506,7 +3506,10 @@ class TestPrologueFusion(TestCase):
         # into an unaligned load
         out, code = run_and_get_code(torch.compile(foo), x, y)
         self.assertEqual(out, foo(x, y), atol=0.05, rtol=0.05)
-        self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
+        if config.combo_kernels:
+            self.check_code(code[0], num_kernels=2, num_allocs=3, num_deallocs=4)
+        else:
+            self.check_code(code[0], num_kernels=3, num_allocs=3, num_deallocs=4)
 
 
 if __name__ == "__main__":

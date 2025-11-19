@@ -1397,6 +1397,7 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    @config.patch({"combo_kernels": False})
     def test_small_block_mask(self, device):
         compiled_create_block_mask = torch.compile(create_block_mask)
 
