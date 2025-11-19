@@ -66,14 +66,14 @@ const char* backend_to_string(const at::Backend& backend) {
 
 std::string options_to_string(const at::TensorOptions& options) {
   std::ostringstream ss;
-  ss << backend_to_string(options.backend()) << "."
+  ss << backend_to_string(options.backend()) << '.'
      << toString(at::typeMetaToScalarType(options.dtype())) << "Tensor";
   return ss.str();
 }
 
 std::string type_to_string(const at::DeprecatedTypeProperties& type) {
   std::ostringstream ss;
-  ss << backend_to_string(type.backend()) << "." << toString(type.scalarType())
+  ss << backend_to_string(type.backend()) << '.' << toString(type.scalarType())
      << "Tensor";
   return ss.str();
 }

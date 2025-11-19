@@ -995,7 +995,6 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_permute(self, device, dtype, coalesced, gradcheck):
@@ -1035,7 +1034,8 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_())
+                    kwargs = {"eps": 1e-4} if device == "mps:0" else {}
+                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_(), **kwargs)
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"

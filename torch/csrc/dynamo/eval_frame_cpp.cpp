@@ -54,7 +54,7 @@ static py::handle _callback_from_action(
 
 static int32_t c_recursion_limit = -1;
 
-void set_c_recursion_limit(int32_t limit) {
+void dynamo_set_c_recursion_limit(int32_t limit) {
   if (limit < 1) {
     throw std::range_error("recursion limit must be greater or equal than 1");
   }
@@ -63,7 +63,7 @@ void set_c_recursion_limit(int32_t limit) {
   Py_SetRecursionLimit(limit); // also set the Python limit
 }
 
-int32_t get_c_recursion_limit() {
+int32_t dynamo_get_c_recursion_limit() {
   return c_recursion_limit;
 }
 
@@ -73,7 +73,7 @@ struct CRecursionLimitRAII {
   PyThreadState* tstate;
   int32_t old_recursion_remaining;
   CRecursionLimitRAII(PyThreadState* tstate) : tstate{tstate} {
-    auto limit = get_c_recursion_limit();
+    auto limit = dynamo_get_c_recursion_limit();
     auto& remaining = tstate->c_recursion_remaining;
     this->old_recursion_remaining = remaining;
     if (limit < 0) {
@@ -377,7 +377,7 @@ PyObject* dynamo__custom_eval_frame(
   return eval_result;
 }
 
-PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
+PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
   PyObject* code_obj = nullptr;
   PyObject* strategy_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &code_obj, &strategy_obj)) {
@@ -401,7 +401,7 @@ PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
   Py_RETURN_NONE;
 }
 
-void skip_code_recursive(PyCodeObject* code) {
+void dynamo_skip_code_recursive(PyCodeObject* code) {
   ExtraState* extra = get_extra_state(code);
   if (extra == nullptr) {
     extra = init_and_set_extra_state(code);

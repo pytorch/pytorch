@@ -61,7 +61,7 @@ class StoreExchange {
     peer_keys.reserve(world_size);
     for (int r = 0; r < world_size; ++r) {
       std::ostringstream oss;
-      oss << store_prefix_ << "/" << seq_id_ << "/" << r;
+      oss << store_prefix_ << '/' << seq_id_ << '/' << r;
       peer_keys.push_back(oss.str());
     }
     ++seq_id_;
