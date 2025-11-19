@@ -306,6 +306,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return a / b
 
     @staticmethod
+    def int_truediv(a, b):
+        return a / b
+
+    @staticmethod
     def pow(a, b):
         return a**b
 

@@ -15,7 +15,6 @@ import torch
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
 from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import (
@@ -44,7 +43,6 @@ if TYPE_CHECKING:
         set_guard_error_hook,
         unsupported,
     )
-
     from .variables import VariableTracker
 else:
     for name in dir(torch._C._dynamo.eval_frame):
@@ -575,9 +573,12 @@ def mark_unbacked(
         specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
             If provided, Dynamo will generate specialized compiled regions for each criterion in addition to a generic trace.
     """
-    # You could have copied the mark_dynamic behavior but I'm not convinced
-    # it's what you want
-    assert not is_traceable_wrapper_subclass(t), "not implemented yet"
+    if isinstance(t, torch.distributed.tensor.DTensor):
+        _apply_func_to_inner_tensors_of_same_dim(mark_unbacked, t, index)
+    elif is_traceable_wrapper_subclass(t):
+        # You could have copied the mark_dynamic behavior but I'm not convinced
+        # it's what you want
+        assert not is_traceable_wrapper_subclass(t), "not implemented yet"
 
     if isinstance(index, int):
         if strict:
