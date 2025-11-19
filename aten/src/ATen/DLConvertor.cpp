@@ -425,10 +425,20 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
   Device device = getATenDevice(dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
   ScalarType stype = toScalarType(dl_tensor.dtype);
 
+  int64_t storage_offset = 0;
+  if(dl_tensor.byte_offset > 0) {
+    size_t element_size = c10::elementSize(stype);
+    TORCH_CHECK(
+      dl_tensor.byte_offset % element_size == 0,
+      "byte_offset (", dl_tensor.byte_offset, ") must be a multiple of element size (", element_size, ")");
+    storage_offset = dl_tensor.byte_offset / element_size;
+  }
+
   if (!dl_tensor.strides) {
     return at::from_blob(
         dl_tensor.data,
         IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
+        storage_offset,
         std::move(deleter),
         at::device(device).dtype(stype),
         {device});
@@ -437,6 +447,7 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
       dl_tensor.data,
       IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
       IntArrayRef(dl_tensor.strides, dl_tensor.ndim),
+      storage_offset,
       deleter,
       at::device(device).dtype(stype),
       {device});
