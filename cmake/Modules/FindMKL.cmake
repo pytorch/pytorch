@@ -281,6 +281,10 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES OPENMP_TYPE OPENMP_LIBRARY _name _list _flag
       ELSEIF(${_library} STREQUAL "tbb")
         # Separately handling compiled TBB
         SET(_found_tbb TRUE)
+      ELSEIF(${_library} MATCHES "^(pthread|m|dl)$")
+        # Use -l to find these system libraries so that we honor the
+	# compiler library path when searching for them
+        SET(${_prefix}_${_library}_LIBRARY "-l${_library}")
       ELSE()
         IF(MSVC)
           SET(lib_names ${_library}_dll)
