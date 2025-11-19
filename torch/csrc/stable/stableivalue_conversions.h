@@ -1,5 +1,6 @@
 #pragma once
 
+#include <c10/util/Deprecated.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
 #include <torch/csrc/stable/c/shim.h>
 #include <torch/csrc/stable/device_struct.h>
@@ -281,10 +282,10 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
       TORCH_ERROR_CODE_CHECK(
           torch_new_list_reserve_size(val.size(), &new_list_handle));
       for (const auto& elem : val) {
-        TORCH_ERROR_CODE_CHECK(torch_list_push_back(
-            new_list_handle, torch::stable::detail::from(elem)));
+        TORCH_ERROR_CODE_CHECK(
+            torch_list_push_back(new_list_handle, from(elem)));
       }
-      return torch::stable::detail::from(new_list_handle);
+      return from(new_list_handle);
     } catch (const std::runtime_error&) {
       if (new_list_handle != nullptr) {
         // clean up memory if an error was thrown
@@ -653,31 +654,11 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 // WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
 // note]
 template <typename T>
-[[deprecated("Use torch::stable::detail::from instead.")]]
-inline StableIValue from(T val) {
-  return torch::stable::detail::from(val);
-}
+C10_DEPRECATED_MESSAGE("Use torch::stable::detail::from instead.")
+auto from = &torch::stable::detail::from<T>;
 
 // WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
 // note]
 template <typename T>
-[[deprecated("Use torch::stable::detail::from instead.")]]
-inline StableIValue from(const std::optional<T>& val) {
-  return torch::stable::detail::from(val);
-}
-
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-[[deprecated(
-    "Use torch::stable::detail::from instead.")]] [[maybe_unused]] inline StableIValue
-from(const torch::stable::Tensor& val) {
-  return torch::stable::detail::from(val);
-}
-
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-template <typename T>
-[[deprecated("Use torch::stable::detail::to instead.")]]
-inline T to(StableIValue val) {
-  return torch::stable::detail::to<T>(val);
-}
+C10_DEPRECATED_MESSAGE("Use torch::stable::detail::to instead.")
+auto to = &torch::stable::detail::to<T>;
