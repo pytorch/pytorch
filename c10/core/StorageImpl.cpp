@@ -48,7 +48,7 @@ void warnDeprecatedDataPtr() {
   TORCH_CHECK(false, "Cannot access data pointer of Storage that is invalid.");
 }
 
-void StorageImpl::incref_pyobject() const {
+void StorageImpl::incref_pyobject() const noexcept {
   // Because intrusive_ptr incref uses relaxed memory order, we need to
   // do an acquire fence to ensure that the kHasPyObject bit was
   // observed before the load of the PyObject* below.
@@ -59,12 +59,12 @@ void StorageImpl::incref_pyobject() const {
   (*pyobj_slot_.pyobj_interpreter())->incref(obj);
 }
 
-void StorageImpl::decref_pyobject() const {
+void StorageImpl::decref_pyobject() const noexcept {
   PyObject* obj = pyobj_slot_.load_pyobj();
   (*pyobj_slot_.pyobj_interpreter())->decref(obj);
 }
 
-bool StorageImpl::try_incref_pyobject() const {
+bool StorageImpl::try_incref_pyobject() const noexcept {
   c10::impl::PyInterpreter* interp = pyobj_slot_.pyobj_interpreter();
   if (C10_UNLIKELY(!interp)) {
     return false;
