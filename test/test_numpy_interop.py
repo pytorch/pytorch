@@ -308,8 +308,11 @@ class TestNumPyInterop(TestCase):
             except TypeError:
                 pass
         final_refcount = sys.getrefcount(x)
-        self.assertEqual(final_refcount, initial_refcount,
-                         f"Memory leak detected: refcount increased from {initial_refcount} to {final_refcount}")
+        self.assertEqual(
+            final_refcount,
+            initial_refcount,
+            f"Memory leak detected: refcount increased from {initial_refcount} to {final_refcount}",
+        )
 
     @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
     @onlyCPU
