@@ -3095,6 +3095,8 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten.index_reduce)
 make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 
+make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
+
 
 # Register with type_promotion_kind None.
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
@@ -7506,12 +7508,14 @@ def with_effects(token, op, *args, **kwargs):
         prev_effect_buffer = V.graph.effectful_ops.get(effect_type)
         for new_op in V.graph.operations[operation_len:]:
             # Patch has_side_effects to return True
-            new_op.has_side_effects = lambda: True
+            new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
             if prev_effect_buffer:
-                op_name = new_op.get_name()
+                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
-        V.graph.effectful_ops[effect_type] = new_op
+        V.graph.effectful_ops[effect_type] = (  # pyrefly: ignore[missing-attribute]
+            new_op  # pyrefly: ignore[unsupported-operation]
+        )
 
     if isinstance(result, (list, tuple)):
         return (token, *result)
