@@ -431,9 +431,8 @@ __host__ __device__
            0);                                                        \
   }
 #ifdef __SYCL_DEVICE_ONLY__
-// SYCL Device assertions on Windows do not work properly so we define these
-// wrappers around the STL assertion headers cassert and assert.h where we
-// redefine the assert macro to call __devicelib_assert_fail directly and
+// SYCL Device assertions on Windows do not work properly so we define
+// SYCL_KERNEL_ASSERT macro to call __devicelib_assert_fail directly and
 // bypass _wassert.
 #define SYCL_KERNEL_ASSERT(cond)        \
   if (C10_UNLIKELY(!(cond))) {          \
