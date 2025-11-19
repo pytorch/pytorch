@@ -109,20 +109,20 @@ class Shard(torch._C._distributed.Shard):
         # Compute the chunk size inline with ``torch.chunk``
         if curr_local_size % num_chunks == 0:
             full_chunk_size = curr_local_size // num_chunks
-            return full_chunk_size, list(range(full_chunk_size * rank, full_chunk_size * rank + full_chunk_size))
+            return full_chunk_size, full_chunk_size * rank
 
     #     # uneven sharding case
     #     full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
     #     shard_starting_idx = full_chunk_size * rank
 
         if curr_local_size < shard_starting_idx:
-            return 0, list(range(curr_local_size))
+            return 0, curr_local_size
         else:
             local_shard_size = (
                 min(curr_local_size, shard_starting_idx + full_chunk_size)
                 - shard_starting_idx
             )
-            return local_shard_size, list(range(shard_starting_idx, shard_starting_idx + local_shard_size))
+            return local_shard_size, shard_starting_idx
 
     def _local_shard_size_and_offset(
         self,
@@ -689,7 +689,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         curr_local_size: int,
         num_chunks: int,
         rank: int,
-    ) -> tuple[int, int]:
+    ) -> tuple[int, list[int]]:
         # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
         # so that we can reuse self._split_tensor which splits on self.dim
         shape = [1] * self.dim + [curr_local_size]
@@ -709,7 +709,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
         offsets = sharded_indices[rank].tolist()
 
-        return (local_shard_size, offsets)
+        return local_shard_size, offsets
 
 
 class Replicate(torch._C._distributed.Replicate):
