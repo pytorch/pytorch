@@ -211,8 +211,8 @@ def forward(self, b_parametrizations_buffer_original0, x):
     _assert_tensor_metadata = torch.ops.aten._assert_tensor_metadata.default(x, None, None, torch.float64, device = device(type='cpu'), layout = torch.strided);  _assert_tensor_metadata = None
     _to_copy = torch.ops.aten._to_copy.default(x, dtype = torch.float64, layout = torch.strided, device = device(type='cuda', index=0));  x = None
     view = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
-    add_1 = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
-    view_1 = torch.ops.aten.view.default(add_1, [4, 4]);  add_1 = None
+    add = torch.ops.aten.add.Tensor(b_parametrizations_buffer_original0, view);  b_parametrizations_buffer_original0 = view = None
+    view_1 = torch.ops.aten.view.default(add, [4, 4]);  add = None
     return (view_1,)""",  # noqa: B950
         )
 
@@ -458,6 +458,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         run(g, 64, 8)
         self.assertEqual(cnt.frame_count, 2)
 
+    @unittest.skipIf(not HAS_GPU, "requires GPU for RNG support")
     def test_dtensor_unbacked_matmuls(self):
         from torch.distributed.tensor import randn as d_randn
 
