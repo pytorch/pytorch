@@ -35,24 +35,24 @@ struct OpenRegMethods : public ProfilerStubs {
       ProfilerVoidEventStub* event,
       int64_t* cpu_ns) const override {
     auto stream = c10::openreg::getCurrentOpenRegStream();
-    
+
     // Get current device if requested
     if (device) {
       *device = c10::openreg::current_device();
     }
-    
+
     // Create OpenReg event
     orEvent_t openreg_event_ptr{nullptr};
     TORCH_OPENREG_CHECK(orEventCreateWithFlags(&openreg_event_ptr, orEventEnableTiming));
     *event = std::shared_ptr<orEvent>(openreg_event_ptr, [](orEvent_t ptr) {
       orEventDestroy(ptr);
     });
-    
+
     // Record CPU timestamp if requested
     if (cpu_ns) {
       *cpu_ns = c10::getTime();
     }
-    
+
     // Record event on stream
     TORCH_OPENREG_CHECK(orEventRecord(openreg_event_ptr, stream.stream()));
   }
@@ -63,15 +63,15 @@ struct OpenRegMethods : public ProfilerStubs {
     // Cast to shared_ptr<orEvent> - similar to CUDA's ProfilerEventStub cast
     auto event = reinterpret_cast<const std::shared_ptr<orEvent>*>(event_);
     auto event2 = reinterpret_cast<const std::shared_ptr<orEvent>*>(event2_);
-    
+
     // Check if events are valid
     if (!event || !(*event) || !event2 || !(*event2)) {
       return 0.0f;
     }
-    
+
     TORCH_OPENREG_CHECK(orEventSynchronize(event->get()));
     TORCH_OPENREG_CHECK(orEventSynchronize(event2->get()));
-    
+
     float ms = 0;
     TORCH_OPENREG_CHECK(orEventElapsedTime(&ms, event->get(), event2->get()));
     // Convert milliseconds to microseconds
