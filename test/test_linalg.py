@@ -2061,7 +2061,7 @@ class TestLinalg(TestCase):
 
     # TODO this is redundant with test_norm_matrix_degenerate_shapes above,
     # remove when old numpy versions are dropped
-    @skipIf(np.lib.NumpyVersion(np.__version__) >='2.3.0', 'Numpy changed handling of degenerate inputs in 2.3.0')
+    @skipIf(np.lib.NumpyVersion(np.__version__) >= '2.3.0', 'Numpy changed handling of degenerate inputs in 2.3.0')
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
