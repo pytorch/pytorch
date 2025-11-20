@@ -175,6 +175,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.view_as_real.default": {},
     "aten.view.dtype": {},
     "aten._weight_int4pack_mm_with_scales_and_zeros.default": {},
+    "aten.zendnn_linear_binary_binary.default": {},
     "aten.zendnn_linear_unary.default": {},
     "aten.zendnn_linear_unary_binary.default": {},
     "aten.zendnn_weight_prepack_for_linear.default": {},
