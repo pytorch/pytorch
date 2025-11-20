@@ -13,11 +13,7 @@ import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import _schedulable_wait_node, is_wait_tensor
-from torch._inductor.fx_passes.memory_estimator import (
-    _is_releasable,
-    build_memory_profile,
-    MemoryTracker,
-)
+from torch._inductor.fx_passes.memory_estimator import MemoryTracker
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
@@ -25,9 +21,30 @@ from torch.utils._python_dispatch import _disable_current_modes
 
 log = logging.getLogger(__name__)
 
-from torch._inductor.fx_passes.bucketing import bucket_key, is_reduce_scatter_tensor
+from torch._inductor.fx_passes.bucketing import bucket_key
 
 from ..pattern_matcher import stable_topological_sort
+
+
+@dataclass
+class WhyNoOverlap:
+    """Track reasons why a collective cannot overlap with compute."""
+
+    compute_name: str
+    collective_name: str
+
+    def __init__(self, compute_node: fx.Node, collective_node: fx.Node) -> None:
+        self.compute_name = compute_node.name
+        self.collective_name = collective_node.name
+
+    def __call__(self, reason: str, *args: Any) -> None:
+        if log.isEnabledFor(logging.DEBUG):
+            log.debug(
+                "cannot overlap %s with %s: " + reason,  # noqa: G003
+                self.collective_name,
+                self.compute_name,
+                *args,
+            )
 
 
 def get_group_name(n: fx.Node) -> str:
@@ -247,7 +264,8 @@ class OverlapScheduler:
         max_coll_distance: int,
         custom_runtime_estimation: Callable[[fx.Node, int | None], float | None] | None,
         collective_estimator: Literal["analytical", "benchmark"],
-        max_memory_increase_gb: float,
+        max_memory_increase_gb: float | None,
+        max_memory_increase_ratio: float | None,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -281,8 +299,22 @@ class OverlapScheduler:
         self.original_peak_memory = 0
         self._compute_baseline_memory()
 
-        # How much we allow ourselves to go above baseline
-        self.max_memory_increase_bytes = gb_to_bytes(max_memory_increase_gb)
+        # Maximum allowed peak memory = baseline + min(absolute, ratio * baseline)
+        # Compute the effective memory budget from both absolute and ratio limits
+        memory_increase_bytes = sys.maxsize
+        if max_memory_increase_gb is not None:
+            memory_increase_bytes = min(
+                memory_increase_bytes, gb_to_bytes(max_memory_increase_gb)
+            )
+        if max_memory_increase_ratio is not None:
+            memory_increase_bytes = min(
+                memory_increase_bytes,
+                int(self.original_peak_memory * max_memory_increase_ratio),
+            )
+
+        self.allowed_peak_memory_bytes = (
+            self.original_peak_memory + memory_increase_bytes
+        )
 
         # Track cumulative prefetch memory at each compute index
         # When we prefetch a collective at compute index i that will be used at index j,
@@ -329,97 +361,80 @@ class OverlapScheduler:
     def _compute_baseline_memory(self) -> None:
         """
         Simulate the original schedule to compute baseline memory profile.
-
-        Records memory before each compute node and tracks peak memory.
-        This provides the baseline against which we compare reordered schedules.
         """
         baseline_tracker = MemoryTracker(self.graph)
 
+        last_compute_max_memory = 0
+
         for node in self.nodes:
-            if is_compute_node(node):
-                # Record memory before this compute node
-                self.original_mem_before_compute_index.append(
-                    baseline_tracker.current_memory_bytes
-                )
-
-            # Schedule the node
             baseline_tracker.schedule_node(node)
+            current_mem = baseline_tracker.current_memory_bytes
 
-            # Track peak
-            self.original_peak_memory = max(
-                self.original_peak_memory, baseline_tracker.current_memory_bytes
-            )
+            # Record the max memory between this and previous compute node
+            last_compute_max_memory = max(last_compute_max_memory, current_mem)
 
-    def _get_allowed_peak_memory(self) -> int:
-        """Get the maximum allowed peak memory (baseline + budget)."""
-        return self.original_peak_memory + self.max_memory_increase_bytes
+            if is_compute_node(node):
+                self.original_mem_before_compute_index.append(last_compute_max_memory)
+                last_compute_max_memory = current_mem
 
-    def _current_extra_memory_vs_baseline(self) -> int:
-        """
-        How much extra memory we currently have relative to the original schedule
-        at the "position" of the current compute index.
-
-        We call this before scheduling compute_nodes[self.current_compute_index].
-        """
-        if not self.compute_nodes:
-            baseline = 0
-        elif self.current_compute_index < len(self.original_mem_before_compute_index):
-            baseline = self.original_mem_before_compute_index[
-                self.current_compute_index
-            ]
-        else:
-            # After last compute, just compare against original peak.
-            baseline = self.original_peak_memory
-
-        return self.memory_tracker.current_memory_bytes - baseline
+            self.original_peak_memory = max(self.original_peak_memory, current_mem)
 
     def _prefetch_would_exceed_memory_budget(self, start_node: fx.Node) -> bool:
         """
         Check if prefetching this collective would exceed memory budget at ANY compute node
         between now and when it's used.
-
-        When we prefetch a collective at compute index i that will be used at index j,
-        the collective's memory is live from i through j. We need to check that for
-        EACH compute index in that range, the baseline memory + cumulative prefetch memory
-        doesn't exceed the budget.
         """
         info = self.collective_info[start_node]
         size = info.size_bytes
 
-        # Determine the range of compute indices this collective will be live for
-        # From current index to the index it dominates
         domination_index = self.compute_index_domination[start_node]
 
-        # If off-path (doesn't dominate any compute), it won't add memory pressure
+        # If off-path, assume it doesn't increase memory
         if domination_index == sys.maxsize:
             return False
 
+        # check current mem
+        if (
+            self.memory_tracker.current_memory_bytes + size
+            > self.allowed_peak_memory_bytes
+        ):
+            return True
+
         start_index = self.current_compute_index
-        end_index = domination_index
 
-        # Check each compute index in the range
-        for compute_idx in range(start_index, min(end_index + 1, len(self.compute_nodes))):
+        # then, check future mem
+        for compute_idx in range(start_index, domination_index):
+            cumulative_prefetch = self.cumulative_prefetch_mem_by_compute_index[
+                compute_idx
+            ]
+
+            # Check 1: Would cumulative prefetch exceed in-flight limit?
+            if (cumulative_prefetch + size) > self.max_in_flight_bytes:
+                return True
+
+            # Check 2: Would total memory (baseline + cumulative prefetch) exceed budget?
             baseline_mem = self.original_mem_before_compute_index[compute_idx]
-            cumulative_prefetch = self.cumulative_prefetch_mem_by_compute_index[compute_idx]
             projected = baseline_mem + cumulative_prefetch + size
-            allowed = baseline_mem + self.max_memory_increase_bytes
 
-            if projected > allowed:
-                log.debug(
-                    "Memory budget check failed for %s at compute_idx=%d: "
-                    "projected=%d > allowed=%d "
-                    "(baseline=%d, cumulative=%d, size=%d)",
-                    start_node.name,
-                    compute_idx,
-                    projected,
-                    allowed,
-                    baseline_mem,
-                    cumulative_prefetch,
-                    size,
-                )
+            if projected > self.allowed_peak_memory_bytes:
                 return True
 
         return False
+
+    def _update_cumulative_prefetch_memory(
+        self, collective: fx.Node, info: CollectiveInfo
+    ) -> None:
+        """
+        Update cumulative prefetch memory for all compute indices this collective will be live.
+        """
+        domination_index = self.compute_index_domination[collective]
+        if domination_index == sys.maxsize:
+            return
+
+        for compute_idx in range(self.current_compute_index, domination_index):
+            self.cumulative_prefetch_mem_by_compute_index[compute_idx] += (
+                info.size_bytes
+            )
 
     def off_compute_path(self, n: fx.Node) -> bool:
         """Check if a node is off the compute path (doesn't block any compute)."""
@@ -627,7 +642,7 @@ class OverlapScheduler:
         # All ranks must make identical decisions on overlap reordering,
         # Thus we must have identical runtime estimations across ranks.
         # For now we do benchmarking only for compute nodes.
-        # self._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
+        self._align_compute_nodes_runtime_estimations_across_all_distributed_ranks()
 
         while self.ready:
             if self._should_force_wait_for_memory():
@@ -643,19 +658,6 @@ class OverlapScheduler:
             if node.op == "placeholder":
                 self._schedule(node)
             elif node in self.collective_info:
-                # Before scheduling a collective, check if it would exceed memory budget
-                # If so, force waits until we have room
-                log.debug(
-                    "About to schedule collective %s: current_mem=%d, allowed_peak=%d",
-                    node.name,
-                    self.memory_tracker.current_memory_bytes,
-                    self._get_allowed_peak_memory(),
-                )
-                while (
-                    self.in_flight
-                    and self._would_collective_exceed_budget(node)
-                ):
-                    self._force_oldest_wait()
                 self._handle_collective_start(node)
             elif _schedulable_wait_node(node):
                 self._handle_wait(node)
@@ -702,8 +704,7 @@ class OverlapScheduler:
     def get_non_collective_runtime_estimate(self, node: fx.Node) -> float | None:
         """Get runtime estimation for a node in ms. Returns None if no estimation is available."""
 
-        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion group.
-        # TODO: move get collective runtime into here as well.
+        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion grou
         if is_compute_node(node):
             return benchmark_node(node, self.custom_runtime_estimation)
 
@@ -715,15 +716,8 @@ class OverlapScheduler:
     def _reduce_exposed_time_of_in_flight_collectives(
         self, node: fx.Node, available_compute: float
     ) -> float:
-        """Reduce exposed time of in-flight collectives using available compute time.
+        """Reduce exposed time of in-flight collectives using available compute time and return available time"""
 
-        Args:
-            node: The node providing the compute time to hide collectives
-            available_compute: Available compute time in ms
-
-        Returns:
-            Remaining available compute time after overlapping with in-flight collectives
-        """
         # TODO: separate overlap time per process group
         for info in self.in_flight.values():
             if info.exposed_time_ms == 0:
@@ -741,8 +735,7 @@ class OverlapScheduler:
         runtime_estimate = self.get_non_collective_runtime_estimate(node)
 
         # TODO: we could consider skipping overlapping for overlapable, unary chains to collectives.
-        # using these nodes for overlap prevents bucketing. potentially just if the chain time < latency of
-        # collective
+        # using these nodes for overlap prevents bucketing. potentially if chain time < latency
         if runtime_estimate is None:
             assert not is_compute_node(node), "should have estimate for compute nodes"
             self._schedule(node)
@@ -786,23 +779,17 @@ class OverlapScheduler:
             info = self.collective_info[self.wait_to_start[node]]
             # defer waits locally if they are exposed.
             compute_local_priority = int(info.is_exposed)
-        elif node in self.collective_info:
-            if self.in_overlappable_collective_unary_chain(node):
-                # if we're scheduling this collective via its queue, then it was not
-                # pre-fetched. we might as well maximize overlap for the
-                # local, non-mm nodes prior to the next compute node.
-                compute_local_priority = -1
-            else:
-                compute_local_priority = 0
         else:
-            # For other nodes
+            # if we're scheduling this collective via its queue, then it was not
+            # pre-fetched. we might as well maximize overlap for the
+            # local, non-mm nodes prior to the next compute node.
             if self.in_overlappable_collective_unary_chain(node):
                 compute_local_priority = -1
             else:
                 compute_local_priority = 0
 
         return (
-            domination,  # what index compute it blocks
+            self.compute_index_domination[node],  # what index compute it blocks
             compute_local_priority,  # collective_start=-1, wait=1, or neither=0
             self.node_idx[node],  # Original order for stability
         )
@@ -832,52 +819,14 @@ class OverlapScheduler:
 
         return False
 
-    def _would_collective_exceed_budget(self, start_node: fx.Node) -> bool:
-        """
-        Check if scheduling this collective start NOW would push memory over budget.
-
-        This is a simpler check than _prefetch_would_exceed_memory_budget - we just
-        check if adding this collective's memory would push current memory over the limit.
-        """
-        info = self.collective_info[start_node]
-        projected = self.memory_tracker.current_memory_bytes + info.size_bytes
-
-        if projected > self._get_allowed_peak_memory():
-            log.debug(
-                "Collective %s would exceed budget: projected=%d > allowed=%d",
-                start_node.name,
-                projected,
-                self._get_allowed_peak_memory(),
-            )
-            return True
-
-        return False
-
     def _should_force_wait_for_memory(self) -> bool:
         """Check if we need to force a wait due to memory pressure"""
         if not self.in_flight:
             return False
 
-        if self.in_flight_bytes >= self.max_in_flight_bytes:
-            log.debug(
-                "Forcing wait: in_flight_bytes=%d >= max=%d",
-                self.in_flight_bytes,
-                self.max_in_flight_bytes,
-            )
-            return True
-
-        # Check if peak memory has exceeded global peak + allowed increase
-        if self.memory_tracker.peak_memory > self._get_allowed_peak_memory():
-            log.debug(
-                "Peak memory exceeded: peak_memory=%d > allowed_peak=%d (original=%d + budget=%d)",
-                self.memory_tracker.peak_memory,
-                self._get_allowed_peak_memory(),
-                self.original_peak_memory,
-                self.max_memory_increase_bytes,
-            )
-            return True
-
-        return False
+        return (
+            self.in_flight_bytes >= self.max_in_flight_bytes
+        )
 
     def _force_oldest_wait(self) -> None:
         """Schedule the oldest in flight wait"""
@@ -898,15 +847,6 @@ class OverlapScheduler:
         self.in_flight_bytes += info.size_bytes
         self.unscheduled_collectives.discard(node)
         self._schedule(node)
-
-        log.debug(
-            "Scheduled collective %s: size=%d, current_mem=%d, peak_so_far=%d, allowed_peak=%d",
-            node.name,
-            info.size_bytes,
-            self.memory_tracker.current_memory_bytes,
-            self.memory_tracker.peak_memory,
-            self._get_allowed_peak_memory(),
-        )
 
     def _handle_wait(self, node: fx.Node) -> None:
         """Handle scheduling a wait."""
@@ -939,96 +879,61 @@ class OverlapScheduler:
         if available_compute_time == 0:
             return
 
+        reduced_time = initial_time - available_compute_time
         compute_ancestors = self.node_ancestors[compute_node]
 
-        # Track how much time we've already used for hiding in-flight collectives
-        # This allows us to add back some time from pre-fetched paths
-        reduced_time = (
-            initial_time - available_compute_time
-        )  # How much of initial time we've already used
-
-        # Filter collectives by distance and compute index domination
-        # Check if we're above peak memory - if so, prioritize off-path reduce_scatters
-        above_peak = self.memory_tracker.peak_memory > self._get_allowed_peak_memory()
-
-        # Filter collectives by distance (compile-time / search bound)
-        possible_collectives = []
-        distance_filtered = 0
-        compute_index_filtered = 0
-        memory_filtered = 0
-
+        # Compile-time filtering: limit candidates by distance to bound O(compute * collectives) cost
+        candidates = []
         for collective in self.unscheduled_collectives:
             distance = abs(self.node_idx[compute_node] - self.node_idx[collective])
             if distance > self.max_node_distance:
-                distance_filtered += 1
-                break
+                continue  # Skip collectives too far away
 
-            is_offpath = self.off_compute_path(collective)
-
-            # assume off path collectives reduce memory, always allow
-            if is_offpath:
-                possible_collectives.append(collective)
-                continue
-
-            # Skip collectives that are too far ahead in compute index
-            # TODO - delete now that we have mem tracking
-            if abs(
-                self.compute_index_domination[collective]
+            if (
+                not self.off_compute_path(collective)
+                and self.compute_index_domination[collective]
                 - self.current_compute_index
-            ) > self.max_compute_pre_fetch:
-                log.debug(
-                    "Skipping prefetch of %s due to pre fetching limit",
-                    collective.name,
-                )
-                compute_index_filtered += 1
-                continue
-                    
-            # Memory-based gating: check if prefetch would exceed budget
-            # assume off path reduces memory
-            if above_peak or self._prefetch_would_exceed_memory_budget(collective):
-                memory_filtered += 1
-                log.debug(
-                    "Skipping prefetch of %s due to memory budget check",
-                    collective.name,
-                )
+                > self.max_compute_pre_fetch
+            ):
                 continue
 
-            possible_collectives.append(collective)
+            candidates.append(collective)
 
-        if distance_filtered > 0 or compute_index_filtered > 0 or memory_filtered > 0:
-            log.info(
-                "Prefetch filtering for %s: distance_filtered=%d, compute_index_filtered=%d, memory_filtered=%d, candidates=%d",
-                compute_node.name,
-                distance_filtered,
-                compute_index_filtered,
-                memory_filtered,
-                len(possible_collectives),
-            )
-
-        possible_collectives = sorted(
-            possible_collectives,
-            key=lambda n: (self.compute_index_domination[n] if above_peak else -self.compute_index_domination[n], self.node_idx[n]),
+        # Sort by domination index (priority)
+        candidates = sorted(
+            candidates,
+            key=lambda n: (self.compute_index_domination[n], self.node_idx[n]),
         )
 
+        # Runtime scheduling: try to schedule each candidate
         scheduled_count = 0
         dependency_blocked = 0
         in_flight_blocked = 0
         path_blocked = 0
 
-        for collective in possible_collectives:
+        for collective in candidates:
             if available_compute_time == 0:
                 break
 
+            why = WhyNoOverlap(compute_node, collective)
             info = self.collective_info[collective]
 
-            # Skip if compute depends on collective or vice versa
+            # Check dependency conflicts
             if (
                 collective in compute_ancestors
                 or compute_node in self.node_ancestors[collective]
             ):
+                why("dependency conflict")
                 dependency_blocked += 1
                 continue
 
+            # Check if prefetching would exceed memory budget
+            if self._prefetch_would_exceed_memory_budget(collective):
+                why("prefetch would exceed memory budget")
+                in_flight_blocked += 1
+                continue
+
+            # Check in-flight memory limit
             while (
                 self.in_flight
                 and (self.max_in_flight_bytes - self.in_flight_bytes) < info.size_bytes
@@ -1037,88 +942,53 @@ class OverlapScheduler:
                 self._force_oldest_wait()
 
             if (self.max_in_flight_bytes - self.in_flight_bytes) < info.size_bytes:
+                why("in-flight memory limit")
                 in_flight_blocked += 1
                 continue
 
-            # Check if we can reach this collective without scheduling compute, other collectives, or waits
-            path = self._find_schedulable_path(collective, compute_node)
+            # Find path to collective
+            path = self._find_schedulable_path(collective, compute_node, why)
             if path is None:
                 path_blocked += 1
                 continue
 
-            log.debug(
-                "Overlapping collective %s with compute %s: coll_domination=%d, current_depth=%d",
-                collective.name,
-                compute_node.name,
-                self.compute_index_domination[collective],
-                self.current_compute_index,
-            )
-
-            # Track compute runtime of nodes we must schedule to reach collective and
-            # add back available overlap time corresponding to prior in-flight collectives
+            # Add back time from path nodes
             path_estimates = [self.get_non_collective_runtime_estimate(p) for p in path]
             path_time = sum(p for p in path_estimates if p is not None)
             additional_time = min(path_time, reduced_time)
             reduced_time -= additional_time
-            available_compute_time += additional_time
+            # available_compute_time += additional_time
 
-            # Schedule path to this collective
+            # Schedule path and collective
             self._schedule_path_to_collective(path, compute_node)
-
-            # Final check: ensure scheduling this collective NOW won't exceed budget
-            while (
-                self.in_flight
-                and self._would_collective_exceed_budget(collective)
-            ):
-                log.debug(
-                    "Forcing wait before scheduling prefetched collective %s",
-                    collective.name,
-                )
-                self._force_oldest_wait()
-
             self._handle_collective_start(collective)
-            scheduled_count += 1
+            self._update_cumulative_prefetch_memory(collective, info)
 
-            # Update cumulative prefetch memory for all compute indices this collective will be live
-            domination_index = self.compute_index_domination[collective]
-            if domination_index != sys.maxsize:
-                start_idx = self.current_compute_index
-                end_idx = domination_index
-                for compute_idx in range(start_idx, min(end_idx + 1, len(self.compute_nodes))):
-                    self.cumulative_prefetch_mem_by_compute_index[compute_idx] += info.size_bytes
-                log.debug(
-                    "Prefetched %s: adding %d bytes to compute indices [%d, %d]",
-                    collective.name,
-                    info.size_bytes,
-                    start_idx,
-                    min(end_idx, len(self.compute_nodes) - 1),
-                )
-
-            # Update the exposed time for this newly scheduled collective
-            # after scheduling, which will account for latency reduction of bucketing
+            # Update exposed time
             overlap_amount = min(available_compute_time, info.exposed_time_ms)
             info.exposed_time_ms -= overlap_amount
             info.hiding_nodes.add(compute_node)
             available_compute_time -= overlap_amount
-            reduced_time += overlap_amount  # Track how much time we've used
 
-        # Track any remaining compute time that couldn't be used to hide collectives
-        if available_compute_time > 0:
-            self.wasted_compute += available_compute_time
+            scheduled_count += 1
 
-        if len(possible_collectives) > 0:
-            log.info(
-                "Overlap scheduling for %s: candidates=%d, scheduled=%d, dependency_blocked=%d, in_flight_blocked=%d, path_blocked=%d",
-                compute_node.name,
-                len(possible_collectives),
-                scheduled_count,
-                dependency_blocked,
-                in_flight_blocked,
-                path_blocked,
-            )
+        self.wasted_compute += available_compute_time
+
+        log.info(
+            "Overlap scheduling for %s, wasted compute %.2f: "
+            "candidates=%d, scheduled=%d, dependency_blocked=%d, "
+            "in_flight_blocked=%d, path_blocked=%d",
+            compute_node.name,
+            available_compute_time,
+            len(candidates),
+            scheduled_count,
+            dependency_blocked,
+            in_flight_blocked,
+            path_blocked,
+        )
 
     def _find_schedulable_path(
-        self, target: fx.Node, curr_compute_node: fx.Node | None
+        self, target: fx.Node, curr_compute_node: fx.Node | None, why: WhyNoOverlap
     ) -> OrderedSet[fx.Node] | None:
         """Find path to target by collecting unscheduled dependencies."""
         # Get unscheduled ancestors
@@ -1127,9 +997,11 @@ class OverlapScheduler:
         # only schedule non distributed, non compute nodes
         for node in unscheduled_ancestors:
             if is_compute_node(node):
+                why("path blocked by compute node %s", node.name)
                 return None
 
             if node in self.unscheduled_collectives:
+                why("path blocked by unscheduled collective %s", node.name)
                 return None
 
             # if we schedule a wait tensor whose start collective is hidden by the
@@ -1141,8 +1013,13 @@ class OverlapScheduler:
             if _schedulable_wait_node(node):
                 info = self.collective_info[self.wait_to_start[node]]
                 if info.hiding_nodes and curr_compute_node not in info.hiding_nodes:
+                    why(
+                        "path blocked by wait node %s with different hiding compute",
+                        node.name,
+                    )
                     continue
                 elif node not in self.potentially_hidden_waits:
+                    why("path blocked by wait node %s that could be hidden", node.name)
                     continue
 
                 return None
@@ -1226,6 +1103,10 @@ class OverlapScheduler:
 
         # Compute total exposed and potential exposed time
         total_exposed = sum(c.exposed_time_ms for c in self.collective_info.values())
+        hideable_exposed_ms = sum(
+            self.collective_info[c].exposed_time_ms
+            for c in potentially_hidden_collectives
+        )
         total_potential_exposed = sum(
             c.estimated_time_ms for c in self.collective_info.values()
         )
@@ -1241,7 +1122,7 @@ class OverlapScheduler:
         log.info(
             "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
             "original_peak_memory=%d bytes, rescheduled_peak_memory=%d bytes, "
-            "total_exposed_ms=%.2f, total_potential_exposed_ms=%.2f, "
+            "total_exposed_ms=%.2f, hideable_exposed_ms=%.2f, total_potential_exposed_ms=%.2f, "
             "wasted_compute_ms=%.2f",
             len(exposed),
             len(bad_exposed),
@@ -1249,6 +1130,7 @@ class OverlapScheduler:
             self.original_peak_memory,
             self.memory_tracker.peak_memory,
             total_exposed,
+            hideable_exposed_ms,
             total_potential_exposed,
             self.wasted_compute,
         )
@@ -1323,16 +1205,17 @@ class OverlapScheduler:
 
 def schedule_overlap_bucketing(
     gm: torch.fx.GraphModule,
-    max_in_flight_gb: float = 5,
-    max_compute_pre_fetch: int = 100,
+    max_in_flight_gb: float = 1000,
+    max_compute_pre_fetch: int = 200,
     collective_bucketing: bool = False,
     insert_overlap_deps: bool = False,
     compute_overlap_multipler: float = 1.0,
-    max_coll_distance: int = 2000,
+    max_coll_distance: int = 200,
     custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
     | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
-    max_memory_increase_gb: float = 5.0,
+    max_memory_increase_gb: float | None = None,
+    max_memory_increase_ratio: float | None = 0.05,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1340,18 +1223,21 @@ def schedule_overlap_bucketing(
         gm: Input graph module to optimize.
         max_in_flight_gb: Maximum GB of concurrent collective data. Too much in flight memory
             can cause memory fragmentation within the CUDA Caching Allocator.
-        max_compute_pre_fetch: Maximum compute node prefetch distance.
+        max_compute_pre_fetch: Maximum mm nodes to pre fetch. Note: should already be limited by max_in_flight_gb and
+            max_memory_increase_gb
         collective_bucketing: Enable overlap-preserving collective bucketing.
         insert_overlap_deps: Insert overlap dependencies using control deps operator. This should only be used if
             compiling with inductor, or for subsequent passes before removing the ops prior to execution.
         compute_overlap_multipler: Scale factor for compute time used to hide collectives. This can be used
             to address over or under aggressive overlapping.
-        max_coll_distance: Maximum node distance for overlap or bucketing. Mostly intended to reduce compile time.
+        max_coll_distance: Maximum pre fetch or bucketing candidates. Mainly intended for compile time
         custom_runtime_estimation: Custom runtime estimation function that estimates runtime in ms for an fx node.
             If None, uses default estimations. This is currently limited to collectives and compute nodes.
         collective_estimator: Method for estimating collective runtime. "analytical" uses bandwidth formulas,
             "benchmark" uses CUDA events with power-of-2 rounding and interpolation.
-        max_memory_increase_gb: Maximum GB increase above baseline memory allowed for prefetch operations.
+        max_memory_increase_gb: Maximum GB increase above baseline memory (absolute cap). If None, no absolute limit.
+        max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
+            Uses minimum of absolute and ratio limits when both are specified.
     """
     return OverlapScheduler(
         gm,
@@ -1364,4 +1250,5 @@ def schedule_overlap_bucketing(
         insert_overlap_deps=insert_overlap_deps,
         collective_estimator=collective_estimator,
         max_memory_increase_gb=max_memory_increase_gb,
+        max_memory_increase_ratio=max_memory_increase_ratio,
     ).run()
