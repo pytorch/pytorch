@@ -1013,7 +1013,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x_dt)
-        self.assertEqual(ref, res)
+        self.assertEqual(ref.to_local(), res.to_local())
 
     @skipIfHpu
     def test_graph_input_is_async(self):

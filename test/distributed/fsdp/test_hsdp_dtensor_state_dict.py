@@ -225,12 +225,14 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
                 k2, v2 = ref_optim_hyper_param
                 # check whether keys are the same
                 self.assertEqual(k1, k2)
-                # check whether DTensor are the same
-                self.assertEqual(v1, v2)
 
                 if k1 != "step":
                     self.assertEqual(type(v1), DTensor)
                     self.assertEqual(type(v2), DTensor)
+                    # check whether DTensor are the same
+                    self.assertEqual(v1.to_local(), v2.to_local())
+                else:
+                    self.assertEqual(v1, v2)
 
     @with_comms
     @skip_if_lt_x_gpu(4)
@@ -269,7 +271,7 @@ class TestHSDPWithDeviceMeshAndDTensor(DTensorTestBase):
             self.assertEqual(type(v1), DTensor)
             self.assertEqual(type(v2), DTensor)
             # check whether DTensor are the same
-            self.assertEqual(v1, v2)
+            self.assertEqual(v1.to_local(), v2.to_local())
 
     @with_comms
     @skip_if_lt_x_gpu(4)
