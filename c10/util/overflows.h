@@ -99,7 +99,7 @@ std::enable_if_t<is_complex<From>::value, bool> overflows(
              typename From::value_type>(f.real(), strict_unsigned) ||
       overflows<
              typename scalar_value_type<To>::type,
-           typename From::value_type>(f.imag(), strict_unsigned);
+             typename From::value_type>(f.imag(), strict_unsigned);
 }
 } // namespace c10
 
