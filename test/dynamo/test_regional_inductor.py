@@ -2,6 +2,7 @@
 
 import functools
 from typing import TYPE_CHECKING
+import warnings
 
 import torch
 import torch._inductor.test_case
@@ -53,6 +54,7 @@ def aot_eager_regional_inductor(serialize=False):
     if serialize:
 
         def regional_inductor_pickle(gm, *example_args):
+            from torch.fx.passes.regional_inductor import _BoxedCallWrapper
             result = regional_inductor(gm, *example_args)
             serialized = GraphPickler.dumps(result)
 
@@ -63,7 +65,8 @@ def aot_eager_regional_inductor(serialize=False):
             context = torch._guards.TracingContext(fake_mode)
             with torch._guards.tracing(context):
                 result = GraphPickler.loads(serialized, fake_mode)
-                assert isinstance(result, torch.fx.GraphModule)
+                # Result can be either a GraphModule or a _BoxedCallWrapper
+                assert isinstance(result, (torch.fx.GraphModule, _BoxedCallWrapper))
                 result.recompile()
                 return result
 
@@ -101,6 +104,32 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         # Check that inductor compilation is called twice
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
         self.assertEqual(len(codes), 2)
+
+    def test_boxed_calling_convention(self):
+        def fn(x, y):
+            sin = torch.sin(x)
+
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                mul = sin * y
+                add = mul + 1
+
+            return torch.sin(add)
+
+        opt_fn = torch.compile(
+            fn, backend=aot_eager_regional_inductor(serialize=False), fullgraph=True
+        )
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+
+        # Check that inductor compilation is called twice
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
+
+        msgs = [str(warn.message) for warn in w]
+        self.assertTrue(
+            not any("Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments" in m for m in msgs)
+        )
 
     @parametrize("serialize", [False, True])
     def test_repeated_blocks(self, serialize):
