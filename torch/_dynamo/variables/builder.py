@@ -495,6 +495,8 @@ class VariableBuilder:
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
         self.tx.output.variable_tracker_cache.add(value, self.source, vt)
+
+        self.tx.fake_mode.fake_tensor_converter.meta_converter.describer.lookup_tensor.clear()
         return vt
 
     def _can_lift_attrs_to_inputs(self, vt):
