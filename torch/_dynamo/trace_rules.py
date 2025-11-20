@@ -65,7 +65,6 @@ from .variables import (
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
     PyTreeGetNodeTypeFunctionVariable,
-    PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
@@ -381,7 +380,6 @@ manual_torch_name_rule_map: dict[
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch.utils._pytree._get_node_type": PyTreeGetNodeTypeFunctionVariable,
-    "torch.utils._pytree.tree_is_leaf": PyTreeTreeIsLeafFunctionVariable,
 }
 
 
