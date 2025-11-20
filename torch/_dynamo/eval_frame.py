@@ -787,6 +787,11 @@ class _TorchDynamoContext:
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
 
+            if torch._inductor.config.force_disable_caches:
+                raise RuntimeError(
+                    "Cannot precompile with torch._inductor.config.force_disable_caches=True; caching is required."
+                )
+
             if not self.fullgraph:
                 raise RuntimeError(
                     "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
