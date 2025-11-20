@@ -112,41 +112,8 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   std::map<size_t, std::stack<ID>> opStack;
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
-  std::map<const void*, ID> objectId;
 
-  using weak_storage_ptr = c10::weak_intrusive_ptr<StorageImpl>;
-  std::unordered_map<const void*, ID> data_ptr_to_storage_id;
-  std::unordered_map<const void*, weak_storage_ptr>
-      data_ptr_to_weak_storage_ptr;
-
-  ID get_tensor_storage_ID(const c10::Storage& t_storage) {
-    const std::lock_guard<std::recursive_mutex> lock(gMutex);
-
-    const void* raw_data_ptr = t_storage.data();
-    auto iter = data_ptr_to_weak_storage_ptr.find(raw_data_ptr);
-    if (iter == data_ptr_to_weak_storage_ptr.end()) {
-      ID id = storage_id_++;
-      data_ptr_to_storage_id.emplace(raw_data_ptr, id);
-      data_ptr_to_weak_storage_ptr.emplace(
-          raw_data_ptr, t_storage.getWeakStorageImpl());
-      return id;
-    } else {
-      // check if the storage is still alive
-      if (iter->second.expired()) {
-        ID id = storage_id_++;
-        // std::unorder_map does not change if the key is already in the map.
-        // So we need to remove the key and insert the key with the new value.
-        data_ptr_to_storage_id.erase(raw_data_ptr);
-        data_ptr_to_storage_id[raw_data_ptr] = id;
-        data_ptr_to_weak_storage_ptr.insert_or_assign(
-            raw_data_ptr, t_storage.getWeakStorageImpl());
-        return id;
-      } else {
-        return data_ptr_to_storage_id[raw_data_ptr];
-      }
-    }
-  }
-
+  std::map<const void*, ID> objectId{};
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
@@ -209,8 +176,6 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // 1 -> root ID
   // 2 ... -> regular node ID
   std::atomic<ID> id_{2};
-
-  std::atomic<ID> storage_id_{1};
 };
 
 // Using a singleton manager here to allow init and delete the observer object.
@@ -481,8 +446,8 @@ convertIValue(
     // symbolic sizes/strides implies t->storage_offset() will fail
     if (tensor_impl->has_storage() &&
         !tensor_impl->has_symbolic_sizes_strides()) {
-      const c10::Storage& t_storage = tensor_impl->storage();
-      storage_id = ob.get_tensor_storage_ID(t_storage);
+      auto& t_storage = tensor_impl->storage();
+      storage_id = getObjectID(ob, t_storage.data());
       offset = tensor_impl->storage_offset();
       numel = tensor_impl->numel();
       itemsize = tensor_impl->itemsize();
