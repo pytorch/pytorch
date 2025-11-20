@@ -111,6 +111,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cpu-shared-with-deps-release-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cpu-shared-with-deps-release-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cpu-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda12_6-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -179,6 +203,31 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda12_6-shared-with-deps-release-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_6-shared-with-deps-release-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.6
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda12_6-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda12_8-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -247,6 +296,31 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda12_8-shared-with-deps-release-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_8-shared-with-deps-release-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda12_8-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda12_9-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -315,6 +389,31 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda12_9-shared-with-deps-release-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda12_9-shared-with-deps-release-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda12_9-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-cuda13_0-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -383,6 +482,31 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  libtorch-cuda13_0-shared-with-deps-release-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-cuda13_0-shared-with-deps-release-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda13.0
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-cuda13_0-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-rocm7_0-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -501,6 +625,31 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  libtorch-rocm7_0-shared-with-deps-release-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-rocm7_0-shared-with-deps-release-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-rocm7_0-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   libtorch-rocm7_1-shared-with-deps-release-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -619,3 +768,28 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  libtorch-rocm7_1-shared-with-deps-release-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: libtorch-rocm7_1-shared-with-deps-release-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: libtorch
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: libtorch-cxx11-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
+      LIBTORCH_CONFIG: release
+      LIBTORCH_VARIANT: shared-with-deps
+      build_name: libtorch-rocm7_1-shared-with-deps-release
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml

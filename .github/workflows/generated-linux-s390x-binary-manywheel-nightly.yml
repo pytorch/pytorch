@@ -110,6 +110,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_10-cpu-s390x-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-cpu-s390x-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu-s390x
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-cpu-s390x
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -174,6 +197,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-cpu-s390x-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-cpu-s390x-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu-s390x
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cpu-s390x
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -238,6 +284,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_12-cpu-s390x-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-cpu-s390x-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu-s390x
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
+      DESIRED_PYTHON: "3.12"
+      build_name: manywheel-py3_12-cpu-s390x
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -302,6 +371,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13-cpu-s390x-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-cpu-s390x-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu-s390x
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-cpu-s390x
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -366,6 +458,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13t-cpu-s390x-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-cpu-s390x-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu-s390x
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-cpu-s390x
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -430,6 +545,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14-cpu-s390x-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14-cpu-s390x-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu-s390x
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
+      DESIRED_PYTHON: "3.14"
+      build_name: manywheel-py3_14-cpu-s390x
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cpu-s390x-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -494,3 +632,26 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14t-cpu-s390x-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14t-cpu-s390x-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu-s390x
+      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
+      DESIRED_PYTHON: "3.14t"
+      build_name: manywheel-py3_14t-cpu-s390x
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml

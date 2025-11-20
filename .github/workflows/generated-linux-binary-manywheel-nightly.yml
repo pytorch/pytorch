@@ -108,6 +108,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_10-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -174,6 +197,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_10-cuda12_6-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-cuda12_6-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.6
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-cuda12_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -240,6 +287,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_10-cuda12_8-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-cuda12_8-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-cuda12_8
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -306,6 +377,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_10-cuda12_9-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-cuda12_9-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-cuda12_9
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -372,6 +467,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_10-cuda13_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-cuda13_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda13.0
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-cuda13_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-rocm7_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -487,6 +606,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_10-rocm7_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-rocm7_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-rocm7_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-rocm7_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -602,6 +745,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_10-rocm7_1-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-rocm7_1-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-rocm7_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_10-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -712,6 +879,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_10-xpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_10-xpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: xpu
+      GPU_ARCH_TYPE: xpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: xpu
+      DESIRED_PYTHON: "3.10"
+      build_name: manywheel-py3_10-xpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -774,6 +964,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -840,6 +1053,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-cuda12_6-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-cuda12_6-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.6
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda12_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -906,6 +1143,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-cuda12_8-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-cuda12_8-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda12_8
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -972,6 +1233,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-cuda12_9-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-cuda12_9-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda12_9
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1038,6 +1323,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-cuda13_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-cuda13_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda13.0
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-cuda13_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-rocm7_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1153,6 +1462,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-rocm7_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-rocm7_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-rocm7_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-rocm7_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1268,6 +1601,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-rocm7_1-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-rocm7_1-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-rocm7_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_11-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1378,6 +1735,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_11-xpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_11-xpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: xpu
+      GPU_ARCH_TYPE: xpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: xpu
+      DESIRED_PYTHON: "3.11"
+      build_name: manywheel-py3_11-xpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1440,6 +1820,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_12-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.12"
+      build_name: manywheel-py3_12-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1506,6 +1909,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_12-cuda12_6-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-cuda12_6-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.6
+      DESIRED_PYTHON: "3.12"
+      build_name: manywheel-py3_12-cuda12_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1572,6 +1999,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_12-cuda12_8-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-cuda12_8-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DESIRED_PYTHON: "3.12"
+      build_name: manywheel-py3_12-cuda12_8
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1638,6 +2089,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_12-cuda12_9-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-cuda12_9-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      DESIRED_PYTHON: "3.12"
+      build_name: manywheel-py3_12-cuda12_9
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1704,6 +2179,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_12-cuda13_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-cuda13_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda13.0
+      DESIRED_PYTHON: "3.12"
+      build_name: manywheel-py3_12-cuda13_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-rocm7_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1819,6 +2318,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_12-rocm7_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-rocm7_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
+      DESIRED_PYTHON: "3.12"
+      build_name: manywheel-py3_12-rocm7_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-rocm7_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -1934,6 +2457,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_12-rocm7_1-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-rocm7_1-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
+      DESIRED_PYTHON: "3.12"
+      build_name: manywheel-py3_12-rocm7_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_12-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2044,6 +2591,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_12-xpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_12-xpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: xpu
+      GPU_ARCH_TYPE: xpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: xpu
+      DESIRED_PYTHON: "3.12"
+      build_name: manywheel-py3_12-xpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2106,6 +2676,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2172,6 +2765,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13-cuda12_6-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-cuda12_6-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.6
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-cuda12_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2238,6 +2855,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13-cuda12_8-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-cuda12_8-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-cuda12_8
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2304,6 +2945,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13-cuda12_9-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-cuda12_9-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-cuda12_9
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2370,6 +3035,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13-cuda13_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-cuda13_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda13.0
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-cuda13_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-rocm7_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2485,6 +3174,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13-rocm7_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-rocm7_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-rocm7_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-rocm7_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2600,6 +3313,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13-rocm7_1-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-rocm7_1-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-rocm7_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2710,6 +3447,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13-xpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13-xpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: xpu
+      GPU_ARCH_TYPE: xpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: xpu
+      DESIRED_PYTHON: "3.13"
+      build_name: manywheel-py3_13-xpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2772,6 +3532,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13t-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2838,6 +3621,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13t-cuda12_6-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-cuda12_6-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.6
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-cuda12_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2904,6 +3711,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13t-cuda12_8-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-cuda12_8-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-cuda12_8
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -2970,6 +3801,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13t-cuda12_9-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-cuda12_9-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-cuda12_9
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3036,6 +3891,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13t-cuda13_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-cuda13_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda13.0
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-cuda13_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-rocm7_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3151,6 +4030,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13t-rocm7_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-rocm7_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-rocm7_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-rocm7_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3266,6 +4169,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13t-rocm7_1-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-rocm7_1-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-rocm7_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_13t-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3376,6 +4303,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_13t-xpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_13t-xpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: xpu
+      GPU_ARCH_TYPE: xpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: xpu
+      DESIRED_PYTHON: "3.13t"
+      build_name: manywheel-py3_13t-xpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3438,6 +4388,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.14"
+      build_name: manywheel-py3_14-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3504,6 +4477,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14-cuda12_6-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14-cuda12_6-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.6
+      DESIRED_PYTHON: "3.14"
+      build_name: manywheel-py3_14-cuda12_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3570,6 +4567,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14-cuda12_8-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14-cuda12_8-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DESIRED_PYTHON: "3.14"
+      build_name: manywheel-py3_14-cuda12_8
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3636,6 +4657,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14-cuda12_9-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14-cuda12_9-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      DESIRED_PYTHON: "3.14"
+      build_name: manywheel-py3_14-cuda12_9
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3702,6 +4747,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14-cuda13_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14-cuda13_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda13.0
+      DESIRED_PYTHON: "3.14"
+      build_name: manywheel-py3_14-cuda13_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-rocm7_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3817,6 +4886,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14-rocm7_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14-rocm7_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
+      DESIRED_PYTHON: "3.14"
+      build_name: manywheel-py3_14-rocm7_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-rocm7_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -3932,6 +5025,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14-rocm7_1-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14-rocm7_1-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
+      DESIRED_PYTHON: "3.14"
+      build_name: manywheel-py3_14-rocm7_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4042,6 +5159,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14-xpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14-xpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: xpu
+      GPU_ARCH_TYPE: xpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: xpu
+      DESIRED_PYTHON: "3.14"
+      build_name: manywheel-py3_14-xpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4104,6 +5244,29 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14t-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14t-cpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.14t"
+      build_name: manywheel-py3_14t-cpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda12_6-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4170,6 +5333,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14t-cuda12_6-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14t-cuda12_6-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu126
+      GPU_ARCH_VERSION: "12.6"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.6
+      DESIRED_PYTHON: "3.14t"
+      build_name: manywheel-py3_14t-cuda12_6
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda12_8-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4236,6 +5423,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14t-cuda12_8-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14t-cuda12_8-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu128
+      GPU_ARCH_VERSION: "12.8"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.8
+      DESIRED_PYTHON: "3.14t"
+      build_name: manywheel-py3_14t-cuda12_8
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda12_9-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4302,6 +5513,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14t-cuda12_9-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14t-cuda12_9-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu129
+      GPU_ARCH_VERSION: "12.9"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda12.9
+      DESIRED_PYTHON: "3.14t"
+      build_name: manywheel-py3_14t-cuda12_9
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-cuda13_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4368,6 +5603,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14t-cuda13_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14t-cuda13_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cu130
+      GPU_ARCH_VERSION: "13.0"
+      GPU_ARCH_TYPE: cuda
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cuda13.0
+      DESIRED_PYTHON: "3.14t"
+      build_name: manywheel-py3_14t-cuda13_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-rocm7_0-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4483,6 +5742,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14t-rocm7_0-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14t-rocm7_0-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.0
+      GPU_ARCH_VERSION: "7.0"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.0
+      DESIRED_PYTHON: "3.14t"
+      build_name: manywheel-py3_14t-rocm7_0
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-rocm7_1-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4598,6 +5881,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14t-rocm7_1-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14t-rocm7_1-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: rocm7.1
+      GPU_ARCH_VERSION: "7.1"
+      GPU_ARCH_TYPE: rocm
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: rocm7.1
+      DESIRED_PYTHON: "3.14t"
+      build_name: manywheel-py3_14t-rocm7_1
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 
   manywheel-py3_14t-xpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -4708,3 +6015,26 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  manywheel-py3_14t-xpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: manywheel-py3_14t-xpu-test
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: manywheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: xpu
+      GPU_ARCH_TYPE: xpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: xpu
+      DESIRED_PYTHON: "3.14t"
+      build_name: manywheel-py3_14t-xpu
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml

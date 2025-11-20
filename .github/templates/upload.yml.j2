@@ -41,7 +41,6 @@
 {%- endif %}
 {%- endmacro %}
 
-
 {%- macro upload_binaries(config, is_windows=False, has_test=True, use_s3=True) -%}
 !{{ config["build_name"] }}-upload:  # Uploading
     if: ${{ github.repository_owner == 'pytorch' }}
@@ -65,4 +64,29 @@
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  !{{ config["build_name"] }}-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+{%- if has_test %}
+    {%- if config["gpu_arch_type"] == "cuda-aarch64" %}
+    needs: !{{ config["build_name"] }}-build
+    {%- else %}
+    needs: !{{ config["build_name"] }}-test
+    {%- endif %}
+{%- else %}
+    needs: !{{ config["build_name"] }}-build
+{%- endif %}
+    with:!{{ binary_env_as_input(config, is_windows) }}
+      build_name: !{{ config["build_name"] }}
+      {%- if not use_s3 %}
+      use_s3: False
+      {%- endif %}
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
 {%- endmacro %}

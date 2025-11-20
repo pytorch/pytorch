@@ -139,6 +139,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  wheel-py3_10-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: wheel-py3_10-cpu-build
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.10"
+      build_name: wheel-py3_10-cpu
+      use_s3: False
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_11-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-14-xlarge
@@ -248,6 +272,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  wheel-py3_11-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: wheel-py3_11-cpu-build
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.11"
+      build_name: wheel-py3_11-cpu
+      use_s3: False
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_12-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-14-xlarge
@@ -357,6 +405,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  wheel-py3_12-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: wheel-py3_12-cpu-build
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.12"
+      build_name: wheel-py3_12-cpu
+      use_s3: False
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-14-xlarge
@@ -466,6 +538,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  wheel-py3_13-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: wheel-py3_13-cpu-build
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.13"
+      build_name: wheel-py3_13-cpu
+      use_s3: False
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_13t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-14-xlarge
@@ -575,6 +671,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  wheel-py3_13t-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: wheel-py3_13t-cpu-build
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.13t"
+      build_name: wheel-py3_13t-cpu
+      use_s3: False
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-14-xlarge
@@ -684,6 +804,30 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  wheel-py3_14-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: wheel-py3_14-cpu-build
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.14"
+      build_name: wheel-py3_14-cpu
+      use_s3: False
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
   wheel-py3_14t-cpu-build:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: macos-14-xlarge
@@ -793,3 +937,27 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
     uses: ./.github/workflows/_binary-upload.yml
+  wheel-py3_14t-cpu-upload-r2:  # Uploading to r2
+    if: ${{ github.repository_owner == 'pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
+    needs: wheel-py3_14t-cpu-build
+    with:
+      PYTORCH_ROOT: /pytorch
+      PACKAGE_TYPE: wheel
+      # TODO: This is a legacy variable that we eventually want to get rid of in
+      #       favor of GPU_ARCH_VERSION
+      DESIRED_CUDA: cpu
+      GPU_ARCH_TYPE: cpu
+      DOCKER_IMAGE: manylinux2_28-builder
+      DOCKER_IMAGE_TAG_PREFIX: cpu
+      DESIRED_PYTHON: "3.14t"
+      build_name: wheel-py3_14t-cpu
+      use_s3: False
+    secrets:
+      github-token: ${{ secrets.GITHUB_TOKEN }}
+      r2-account-id: ${{ secrets.R2_ACCOUNT_ID }}
+      r2-access-key-id: ${{ secrets.R2_ACCESS_KEY_ID }}
+      r2-secret-access-key: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+    uses: ./.github/workflows/_binary-upload-r2.yml
