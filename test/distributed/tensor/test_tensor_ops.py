@@ -736,11 +736,11 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_dtensor_dtype_conversion(self):
         from torch.distributed.tensor.debug import (
-            _clear_fast_path_sharding_prop_cache,
+            _clear_sharding_prop_cache,
             _get_fast_path_sharding_prop_cache_stats,
         )
 
-        _clear_fast_path_sharding_prop_cache()
+        _clear_sharding_prop_cache()
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
