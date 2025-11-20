@@ -190,7 +190,7 @@ at::Tensor& embedding_lookup_fallback_impl(
   return output;
 }
 
-#ifdef __aarch64__
+#if !defined(USE_FBGEMM) && defined(__aarch64__) && (__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__)
 static inline void embedding_neon_kernel(
     const uint8_t* weight_ptr,
     float32x4_t& output1,

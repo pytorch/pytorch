@@ -69,11 +69,19 @@ at::Tensor PackedLinearWeight::apply_dynamic_impl(
 
   // Calculate statistics for quantization of the input Tensor
   float x_min = std::numeric_limits<float>::quiet_NaN(), x_max = std::numeric_limits<float>::quiet_NaN();
+#if defined(__AVX__)
   fbgemm::FindMinMax(
       /*m=*/input_ptr,
       /*min=*/&x_min,
       /*max=*/&x_max,
       /*len=*/input.numel());
+#else
+  if (input_contig.numel() > 0) {
+    auto [t_min, t_max] = at::aminmax(input_contig);
+    x_max = t_max.item<float>();
+    x_min = t_min.item<float>();
+  }
+#endif
 
   // Input tensor is quantized as 8-bit unsigned values
   static constexpr int precision = 8;
@@ -512,7 +520,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   x.init(input_desc, input_contig.data_ptr());
   // Find quantization parameters
   float x_max = 0, x_min = 0;
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && defined(__AVX__)
   // Use FBGEMM's FindMinMax if available since it's faster
   fbgemm::FindMinMax(
       /*m=*/input_contig.data_ptr<float>(),
@@ -738,7 +746,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
     // Find quantization parameters
     float x_max = 0, x_min = 0;
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && defined(__AVX__)
     // Use FBGEMM's FindMinMax if available since it's faster
     fbgemm::FindMinMax(
         /*m=*/input_contig.data_ptr<float>(),
