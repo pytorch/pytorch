@@ -435,9 +435,7 @@ class _ViewOp(_PostMMOp):
     chunk_dim: int
 
     def apply(self, t, num_chunks):
-        shape = list(
-            s for s in self.n.args[1]  # pyrefly: ignore[not-callable,not-iterable]
-        )
+        shape = list(self.n.args[1])  # pyrefly: ignore[no-matching-overload]
         if shape[self.chunk_dim] != -1:
             shape[self.chunk_dim] //= num_chunks
         return self.n.target(t, shape)  # pyrefly: ignore[not-callable]
