@@ -37,7 +37,7 @@ on:
       runner:
         required: false
         type: string
-        default: "linux.2xlarge"
+        default: "linux.c7i.2xlarge"
         description: |
           Label of the runner this job should run on.
       test-matrix:

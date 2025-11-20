@@ -35,7 +35,7 @@ class TestAsync(JitTestCase):
     def test_async_future_type_python(self):
         def foo(inp):
             futures = torch.jit.annotate(List[torch.jit.Future[torch.Tensor]], [])
-            for i in range(5):
+            for _ in range(5):
                 futures.append(torch.jit.fork(lambda x: x, inp))
             all_outputs = []
             for future in futures:
@@ -458,7 +458,7 @@ class TestAsync(JitTestCase):
         class TestListFutureModule(nn.Module):
             def forward(self, input):
                 input_list = []
-                for i in range(3):
+                for _ in range(3):
                     input_list.append(input)
 
                 fut_list: List[Future[torch.Tensor]] = []

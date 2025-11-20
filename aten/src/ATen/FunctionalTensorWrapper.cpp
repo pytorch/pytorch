@@ -122,7 +122,7 @@ void FunctionalTensorWrapper::freeze_storage() const {
 //          |   have their own storages, but backends like functorch      |
 //         \/   are allowed to re-alias underneath the pass               \/
 // . - - - - - - - - - - - - - .                             . - - - - - - - - - - - - - - - .
-// |    underyling_storage     |                             |      underyling_storage       |
+// |    underlying_storage     |                             |      underlying_storage       |
 // . - - - - - - - - - - - - - .                             . - - - - - - - - - - - - - - - .
 //
 // This constructor is only used by view ops.

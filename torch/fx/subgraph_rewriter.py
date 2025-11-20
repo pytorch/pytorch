@@ -1,6 +1,7 @@
 import copy
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
 

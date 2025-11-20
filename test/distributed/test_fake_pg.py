@@ -273,12 +273,7 @@ class TestFakePG(TestCase):
                     kwargs = {}
                 return func(*args, **kwargs)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"FakeProcessGroup cannot be constructed directly\. "
-            r"Use torch\.distributed\.init_process_group\(backend='fake'\) instead to ensure "
-            r"proper dispatch system integration\.",
-        ):
+        with self.assertRaisesRegex(TypeError, r"No constructor defined"):
             fake_pg = FakeProcessGroup(rank=0, world_size=3)
 
             with SimpleTensorMode():

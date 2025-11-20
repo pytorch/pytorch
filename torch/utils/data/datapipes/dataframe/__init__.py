@@ -8,4 +8,5 @@ from torch.utils.data.datapipes.dataframe.datapipes import DataFramesAsTuplesPip
 __all__ = ["CaptureDataFrame", "DFIterDataPipe", "DataFramesAsTuplesPipe"]
 
 # Please keep this list sorted
-assert __all__ == sorted(__all__)
+if __all__ != sorted(__all__):
+    raise AssertionError("__all__ is not sorted")

@@ -24,7 +24,7 @@ These schema definitions enable the DTensor system to:
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, Optional, Union
 from typing_extensions import deprecated
@@ -205,7 +205,7 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.mesh_shape
-        return f"OpStragety[{strategy_list_str}] @ mesh: {mesh_shape}"
+        return f"OpStrategy[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -334,8 +334,6 @@ class OpSchema:
     schema_info: Optional[RuntimeSchemaInfo] = None
 
     _comparison_key: Optional[tuple[object, ...]] = None
-
-    has_symints: bool = field(init=False)
 
     @property
     def args_spec(self) -> tuple[DTensorSpec, ...]:

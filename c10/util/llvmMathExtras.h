@@ -370,7 +370,7 @@ constexpr inline bool isShiftedInt(int64_t x) {
 template <unsigned N>
 constexpr inline std::enable_if_t<(N < 64), bool> isUInt(uint64_t X) {
   static_assert(N > 0, "isUInt<0> doesn't make sense");
-  return X < (UINT64_C(1) << (N));
+  return X < (UINT64_C(1) << N);
 }
 template <unsigned N>
 constexpr inline std::enable_if_t<N >= 64, bool> isUInt(uint64_t /*X*/) {

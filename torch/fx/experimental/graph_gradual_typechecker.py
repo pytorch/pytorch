@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 import sympy
@@ -100,11 +101,11 @@ def broadcast_types(t1, t2):
         # We make the types the same length which is the first requirement
         # for consistency
         if s1 > s2:
-            for i in range(s1 - s2):
+            for _ in range(s1 - s2):
                 new_t2.insert(0, 1)
 
         elif s2 > s1:
-            for i in range(s2 - s1):
+            for _ in range(s2 - s1):
                 new_t1.insert(0, 1)
 
         # we replace occurrences of "1" with each tensor with
@@ -180,12 +181,12 @@ def add_inference_rule(n: Node):
     t2 = n.args[1].type
 
     # handle scalar addition
-    if t1 == int and isinstance(t2, TensorType):
+    if t1 is int and isinstance(t2, TensorType):
         n.type = t2
         return n.type
 
     # handle scalar addition
-    elif t2 == int and isinstance(t1, TensorType):
+    elif t2 is int and isinstance(t1, TensorType):
         n.type = t1
         return n.type
 
@@ -249,7 +250,7 @@ def transpose_inference_rule(n: Node):
     We check that dimensions for the transpose operations
     are within range of the tensor type of the node
     """
-    if n.target == torch.transpose:
+    if n.target is torch.transpose:
         assert isinstance(n.args[0], Node)
         t = n.args[0].type
 
@@ -673,7 +674,7 @@ class GraphTypeChecker:
             return n.type
 
         elif n.op == "call_function":
-            if n.target == getattr:
+            if n.target is getattr:
                 assert getattr in _INFERENCE_RULES
                 return _INFERENCE_RULES[n.target](n, self.traced)
 

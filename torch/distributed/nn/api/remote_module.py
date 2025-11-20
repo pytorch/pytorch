@@ -356,7 +356,7 @@ class _RemoteModule(nn.Module):
     def register_backward_hook(  # type: ignore[return]
         self,
         hook: Callable[[Module, _grad_t, _grad_t], Union[None, _grad_t]],
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 
@@ -371,7 +371,7 @@ class _RemoteModule(nn.Module):
         ],
         prepend: bool = False,
         with_kwargs: bool = False,
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_pre_hook.__name__)
 
@@ -383,7 +383,7 @@ class _RemoteModule(nn.Module):
         ],
         prepend: bool = False,
         with_kwargs: bool = False,
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_hook.__name__)
 
@@ -408,7 +408,7 @@ class _RemoteModule(nn.Module):
         prefix: str = "",
         recurse: bool = True,
         remove_duplicate: bool = True,
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
     ) -> Iterator[tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
@@ -420,7 +420,7 @@ class _RemoteModule(nn.Module):
         prefix: str = "",
         recurse: bool = True,
         remove_duplicate: bool = True,
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
     ) -> Iterator[tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 
@@ -493,7 +493,7 @@ class _RemoteModule(nn.Module):
 
     def _check_attribute_picklability(self):
         """Check if all the attribute has explicitly defined whether to be pickled (i.e., picklability)."""
-        for k in self.__dict__.keys():
+        for k in self.__dict__:
             if (
                 k not in _REMOTE_MODULE_PICKLED_ATTRIBUTES
                 and k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
@@ -584,31 +584,31 @@ class _RemoteModule(nn.Module):
 
         remote_module = object.__new__(RemoteModule)
 
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         enable_moving_cpu_tensors_to_cuda = remote_module._prepare_init(remote_device)
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             remote_module.is_scriptable = True
 
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             remote_module._init_template(
                 _module_interface_cls, enable_moving_cpu_tensors_to_cuda
             )
         else:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             remote_module.is_scriptable = False
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             remote_module.generated_methods = (
                 _NON_SCRIPTABLE_REMOTE_MODULE_MODULE._generated_methods
             )
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         remote_module.module_rref = module_rref
 
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         remote_module._install_generated_methods()
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         remote_module._check_attribute_picklability()
 
         return remote_module
@@ -711,11 +711,11 @@ def _remote_module_receiver(
     m.__dict__.update(serialized_remote_module._asdict())
 
     # Unpickling the attribute `module_rref` must invoke RRef's `_deserialize()` method.
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     m.module_rref = rpc.PyRRef._deserialize(m.module_rref)
 
     # Install generated methods when unpickled.
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     for method in m.generated_methods:
         method_name = method.__name__
         method = torch.jit.export(method)
