@@ -3,12 +3,14 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
+import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
     bucket_key,
     BucketMode,
+    has_mergeable_all_gather_convert_dtype,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
     is_wait_tensor,
@@ -207,6 +209,7 @@ class OverlapPreservingBucketer:
 
             prev_event = event
             position += 1
+
         return head
 
     def _populate_node_to_event(self, pg: str) -> None:
@@ -231,7 +234,6 @@ class OverlapPreservingBucketer:
                 self.aug_graph.add_extra_dep(n=info.wait_node, dep=hn)
 
     def bucket_collectives(self) -> None:
-        """Main entry point for bucketing collectives."""
         # Group collectives by PG first
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start in self.collective_info:
@@ -280,6 +282,15 @@ class OverlapPreservingBucketer:
 
         # Apply topological sort with all dependencies
         from torch._dynamo.graph_deduplication import _stable_topological_sort
+
+        for n, deps in additional_deps.items():
+            torch._check(
+                not n._erased, lambda: f"Erased node deps not transferred: {n}"
+            )
+            for d in deps:
+                torch._check(
+                    not d._erased, lambda: f"Erased node deps not transferred: {d}"
+                )
 
         _stable_topological_sort(self.graph, additional_deps)
 
@@ -762,6 +773,11 @@ class OverlapPreservingBucketer:
         old_starts = list(bucket)
         old_waits = [self.collective_info[n].wait_node for n in bucket]
 
+        fused_convert_dtypes = []
+        for n in old_starts:
+            if has_mergeable_all_gather_convert_dtype(n):
+                fused_convert_dtypes.append(n.args[0])
+
         # Find where to place the bucketed operations
         next_node = bucket[0]
         while next_node in bucket:
@@ -808,6 +824,22 @@ class OverlapPreservingBucketer:
             erased_to_new[old_start] = new_start
         for old_wait in old_waits:
             erased_to_new[old_wait] = new_wait
+
+        # Handle convert_element_type nodes that were fused and erased
+        # The bucketed operation may have a _pre_bucket op that handles dtype conversion
+        if fused_convert_dtypes:
+            # all gather bucketing may fuse in dtype conversion into the bucketing
+            # if so, we need to transfer hiding deps from the old dtype conversion
+            # to the new bucketing node
+            new_convert_dtypes_node = new_start.kwargs["out"]
+            assert isinstance(new_convert_dtypes_node, fx.Node)
+            assert (
+                new_convert_dtypes_node.target
+                == torch.ops.bucketing._pre_bucket_all_gather.default
+            )
+
+            for n in fused_convert_dtypes:
+                erased_to_new[n] = new_convert_dtypes_node
 
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
