@@ -26,6 +26,66 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
+def _expand_single_dim_strategy_to_mesh(
+    single_dim_strategy: Callable[[OpSchema], list[list[Placement]]],
+) -> Callable[[OpSchema], StrategyType]:
+    """
+    Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
+    sharding types used by inputs.
+    """
+
+    def expanded_strategy(op_schema: OpSchema) -> StrategyType:
+        strategies_over_one_mesh_dim = single_dim_strategy(op_schema)
+        args_strategy = [
+            s for s in op_schema.args_strategy if isinstance(s, OpStrategy)
+        ]
+        assert len(args_strategy) > 0, "expected at least one Tensor arg"
+        mesh = args_strategy[0].mesh
+
+        # implicitly allow replicating output, all inputs
+        strategies_over_one_mesh_dim.append([Replicate()] * (1 + len(args_strategy)))
+
+        # TODO: handle 'ShardingPlaceholder' expansion (doesn't exist yet)
+        # TODO: identify differences between this and 'expand_' util
+        all_mesh_dim_strategies = [strategies_over_one_mesh_dim] * mesh.ndim
+        strategy_combs = itertools.product(*all_mesh_dim_strategies)
+        all_strategies = []
+        for strategy_comb in strategy_combs:
+            spec_list = [
+                DTensorSpec(mesh, tuple(specs)) for specs in zip(*strategy_comb)
+            ]
+            arg_specs = spec_list[1:]
+            src_strategies = [
+                s for s in op_schema.args_schema if isinstance(s, OpStrategy)
+            ]
+            if any(
+                not is_tensor_shardable(src_strat.shape, arg_spec)
+                for src_strat, arg_spec in zip(src_strategies, arg_specs)
+            ):
+                # Note: since we don't look at mesh dims inside single_dim_strategies, we can't tell if tensors are 'shardable'
+                # instead, we filter out unshardable strategies after mesh expansion
+                # TODO: make this more robust after adding ShardingPlaceholder, allowing us to say inside a single_dim_strategy
+                # whether we care about even-sharding or other specific properties
+                continue
+
+            assert len(arg_specs) == len(src_strategies), (
+                "expected one src strategy per arg spec"
+            )
+            all_strategies.append(
+                OpSpec(
+                    output_specs=spec_list[0],
+                    input_specs=spec_list[1:],
+                    redistribute_cost=[
+                        generate_redistribute_costs(src_strategy, arg_spec)
+                        for (src_strategy, arg_spec) in zip(src_strategies, arg_specs)
+                    ],
+                )
+            )
+        return OpStrategy(all_strategies)
+
+    return expanded_strategy
+
+
 def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
     """
     Fallback strategy all use Replication()
