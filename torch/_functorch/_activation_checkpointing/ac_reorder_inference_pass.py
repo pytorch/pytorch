@@ -57,8 +57,7 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
 
     # Apply partitioner's edge case handling FIRST
     # This marks nodes that must be saved (MUST_SAVE, collectives, mutations, etc.)
-    if has_recomputable_ops(gm):
-        gm = cleanup_recompute_tags(gm, is_default_partition=False)
+    gm = cleanup_recompute_tags(gm, is_default_partition=False)
 
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(gm)
