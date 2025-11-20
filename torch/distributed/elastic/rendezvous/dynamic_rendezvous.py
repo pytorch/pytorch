@@ -14,11 +14,10 @@ import threading
 import time
 import weakref
 from abc import ABC, abstractmethod
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 import torch.distributed as dist
 from torch.distributed import Store
@@ -1020,6 +1019,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         timeout: Optional[RendezvousTimeout] = None,
         keep_alive_interval: int = 5,
         keep_alive_max_attempt: int = 3,
+        endpoint: Optional[str] = None,
     ):
         """Create a new :py:class:`DynamicRendezvousHandler`.
 
@@ -1059,7 +1059,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
         state_holder = _BackendRendezvousStateHolder(backend, settings)
 
-        return cls(node, settings, backend.name, store, state_holder)
+        return cls(node, settings, backend.name, store, state_holder, endpoint)
 
     def __init__(
         self,
@@ -1068,6 +1068,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         backend_name: str,
         store: Store,
         state_holder: _RendezvousStateHolder,
+        endpoint: Optional[str] = None,
     ) -> None:
         if not settings.run_id:
             raise ValueError("The run id must be a non-empty string.")
@@ -1092,7 +1093,7 @@ class DynamicRendezvousHandler(RendezvousHandler):
         self._store = store
 
         self._state_holder = state_holder
-
+        self._endpoint = endpoint
         self._op_executor = _DistributedRendezvousOpExecutor(
             self._this_node, self._state_holder, self._settings
         )
@@ -1266,10 +1267,61 @@ class DynamicRendezvousHandler(RendezvousHandler):
                 return len(self._state_holder.state.wait_list)
 
         except Exception as e:
+            """
+            # 如果master节点挂掉了，这里会抛异常，因为在同步阶段，
+            # 所有的节点都需要访问master上面开启的TCPStore
+            # master挂掉后TCPStore服务也挂掉，在sync()的时候，会出错抛出异常
+            # 修改异常逻辑，使用新的master_addr即可完成
+            # 最后返回1,表示所有worker都需要等master这一个节点，
+            # 并且新一轮的所有worker都使用了新的master_addr
+            """
             self._record(
                 message=f"{type(e).__name__}: {str(e)}",
                 node_state=NodeState.FAILED,
             )
+            print(f"{type(e).__name__}: {str(e)}")
+            print(
+                "master has failed , and we will wait it to restart and try to reconnect"
+            )
+            from .c10d_rendezvous_backend import (
+                _create_tcp_store,
+                C10dRendezvousBackend,
+                RendezvousParameters,
+            )
+
+            self._stop_heartbeats()
+            reconnection_times = 0
+            while reconnection_times < 10:
+                time.sleep(5)
+                try:
+                    reconnection_times += 1
+                    params = RendezvousParameters(
+                        backend=self._backend_name,
+                        endpoint=self._endpoint,
+                        run_id=self._settings.run_id,
+                        min_nodes=self._settings.min_nodes,
+                        max_nodes=self._settings.max_nodes,
+                    )
+                    self._store = _create_tcp_store(params)
+                    # 2. self._state_holder 需要重新构建
+                    backend = C10dRendezvousBackend(self._store, self._settings.run_id)
+                    self._state_holder = _BackendRendezvousStateHolder(
+                        backend, self._settings
+                    )
+                    print(
+                        f"new state participants: {self._state_holder.state.participants}"
+                    )
+                    # 3. self._op_executor 也需要重新构建
+                    self._op_executor = _DistributedRendezvousOpExecutor(
+                        self._this_node, self._state_holder, self._settings
+                    )
+                    return 1
+                except Exception as ex:
+                    print(
+                        f"Reconnection attempt {reconnection_times} failed: {type(ex).__name__}: {str(ex)}"
+                    )
+                    continue
+
             raise
 
     def get_run_id(self) -> str:
@@ -1446,6 +1498,7 @@ def create_handler(
             timeout,
             keep_alive_interval=keep_alive_interval,
             keep_alive_max_attempt=keep_alive_max_attempt,
+            endpoint=params.endpoint,
         )
     except Exception as e:
         construct_and_record_rdzv_event(
