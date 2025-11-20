@@ -85,7 +85,7 @@ across models. Example usage::
 
 import collections
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.ao.quantization.quantize_fx as quantize_fx
@@ -156,8 +156,8 @@ class OutputLogger(nn.Module):
         results_type: str,
         index_within_arg: int,
         index_of_arg: int,
-        fqn: Optional[str],
-        qconfig_str: Optional[str] = "",
+        fqn: str | None,
+        qconfig_str: str | None = "",
     ):
         super().__init__()
         self.stats: list[torch.Tensor] = []
@@ -306,9 +306,8 @@ def _extract_weights_one_model(
     model: GraphModule,
     nodes_and_names_to_instrument: list[tuple[Node, str]],
     results: NSResultsType,
-    op_to_type_to_weight_extraction_fn: Optional[
-        dict[str, dict[Callable, Callable]]
-    ] = None,
+    op_to_type_to_weight_extraction_fn: dict[str, dict[Callable, Callable]]
+    | None = None,
 ) -> None:
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite_fx._extract_weights_one_model"
@@ -329,11 +328,10 @@ def _extract_weights_impl(
     gm_a: GraphModule,
     model_name_b: str,
     gm_b: GraphModule,
-    base_name_to_sets_of_related_ops: Optional[dict[str, set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
-    op_to_type_to_weight_extraction_fn: Optional[
-        dict[str, dict[Callable, Callable]]
-    ] = None,
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]] | None = None,
+    unmatchable_types_map: dict[str, set[NSNodeTargetType]] | None = None,
+    op_to_type_to_weight_extraction_fn: dict[str, dict[Callable, Callable]]
+    | None = None,
 ) -> NSResultsType:
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite_fx._extract_weights_impl"
@@ -381,11 +379,10 @@ def extract_weights(
     model_a: nn.Module,
     model_name_b: str,
     model_b: nn.Module,
-    base_name_to_sets_of_related_ops: Optional[dict[str, set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
-    op_to_type_to_weight_extraction_fn: Optional[
-        dict[str, dict[Callable, Callable]]
-    ] = None,
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]] | None = None,
+    unmatchable_types_map: dict[str, set[NSNodeTargetType]] | None = None,
+    op_to_type_to_weight_extraction_fn: dict[str, dict[Callable, Callable]]
+    | None = None,
 ) -> NSResultsType:
     """
     Extract weights from model A and model B, and return a comparison.
@@ -473,8 +470,8 @@ def _add_loggers_impl(
     gm_b: GraphModule,
     logger_cls: Callable,
     should_log_inputs: bool,
-    base_name_to_sets_of_related_ops: Optional[dict[str, set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]] | None = None,
+    unmatchable_types_map: dict[str, set[NSNodeTargetType]] | None = None,
 ) -> tuple[nn.Module, nn.Module]:
     torch._C._log_api_usage_once("quantization_api._numeric_suite_fx._add_loggers_impl")
     matched_subgraph_pairs = get_matching_subgraph_pairs(
@@ -529,8 +526,8 @@ def add_loggers(
     model_b: nn.Module,
     logger_cls: Callable,
     should_log_inputs: bool = False,
-    base_name_to_sets_of_related_ops: Optional[dict[str, set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]] | None = None,
+    unmatchable_types_map: dict[str, set[NSNodeTargetType]] | None = None,
 ) -> tuple[nn.Module, nn.Module]:
     """
     Instrument model A and model B with loggers.
@@ -674,9 +671,9 @@ def _add_shadow_loggers_impl(
     gm_b: GraphModule,
     logger_cls: Callable,
     should_log_inputs: bool,
-    base_name_to_sets_of_related_ops: Optional[dict[str, set[NSNodeTargetType]]] = None,
-    node_type_to_io_type_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]] | None = None,
+    node_type_to_io_type_map: dict[str, set[NSNodeTargetType]] | None = None,
+    unmatchable_types_map: dict[str, set[NSNodeTargetType]] | None = None,
 ) -> nn.Module:
     torch._C._log_api_usage_once(
         "quantization_api._numeric_suite_fx._add_shadow_loggers_impl"
@@ -704,9 +701,9 @@ def add_shadow_loggers(
     model_b: nn.Module,
     logger_cls: Callable,
     should_log_inputs: bool = False,
-    base_name_to_sets_of_related_ops: Optional[dict[str, set[NSNodeTargetType]]] = None,
-    node_type_to_io_type_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
-    unmatchable_types_map: Optional[dict[str, set[NSNodeTargetType]]] = None,
+    base_name_to_sets_of_related_ops: dict[str, set[NSNodeTargetType]] | None = None,
+    node_type_to_io_type_map: dict[str, set[NSNodeTargetType]] | None = None,
+    unmatchable_types_map: dict[str, set[NSNodeTargetType]] | None = None,
 ) -> nn.Module:
     """
     Instrument model A and model B with shadow loggers.
@@ -846,8 +843,8 @@ def prepare_n_shadows_model(
     example_inputs: Any,
     qconfig_multi_mapping: QConfigMultiMapping,
     backend_config: BackendConfig,
-    custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Optional[dict[str, Any]] = None,
+    custom_prepare_fn: Callable | None = None,
+    custom_prepare_kwargs: dict[str, Any] | None = None,
     custom_tracer: Any = None,
 ) -> GraphModule:
     """
@@ -1083,8 +1080,8 @@ def loggers_set_save_activations(
 
 def convert_n_shadows_model(
     model: GraphModule,
-    custom_convert_fn: Optional[Callable] = None,
-    custom_convert_kwargs: Optional[dict[str, Any]] = None,
+    custom_convert_fn: Callable | None = None,
+    custom_convert_kwargs: dict[str, Any] | None = None,
 ) -> GraphModule:
     """
     Given a model from `prepare_n_shadows_model`, runs `convert_fx`

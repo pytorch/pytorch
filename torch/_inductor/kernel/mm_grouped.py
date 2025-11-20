@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 from torch._inductor.runtime.triton_compat import tl
+from torch._inductor.template_heuristics.cutedsl import get_groupgemm_configs
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
@@ -22,11 +24,13 @@ from ..utils import (
     get_num_sms,
     has_free_symbols,
     use_aten_gemm_kernels,
+    use_blackwell_cutedsl_grouped_mm,
     use_triton_template,
 )
 from .mm_common import (
     _is_static_problem,
     check_supported_striding,
+    load_kernel_template,
     persistent_grouped_mm_grid,
 )
 
@@ -513,6 +517,11 @@ triton_scaled_grouped_mm_template = TritonTemplate(
     source=triton_grouped_mm_source,
 )
 
+cutedsl_grouped_mm_template = CuteDSLTemplate(
+    name="grouped_gemm_cutedsl",
+    source=load_kernel_template("cutedsl_mm_grouped"),
+)
+
 
 def grouped_mm_args(
     mat1: TensorBox,
@@ -714,43 +723,44 @@ def _tuned_grouped_mm_common(
     # Checking only for the equality of corresponding dims of
     # multiplicands here, relying on meta function checks for
     # everything else.
+    if len(m1_size) == 2:
+        if len(m2_size) == 2:
+            m, k1 = m1_size
+            k2, _ = m2_size
+            # pyrefly: ignore [missing-attribute]
+            g = offs.get_size()[0]
+            V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = True, True
+        else:
+            # pyrefly: ignore [missing-attribute]
+            g1 = offs.layout.size[0]
+            m, k1 = m1_size
+            g2, k2, _ = m2_size
+            g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+            V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = True, False
+    else:
+        if len(m2_size) == 2:
+            # pyrefly: ignore [missing-attribute]
+            g1 = offs.layout.size[0]
+            g2, m, k1 = m1_size
+            k2, _ = m2_size
+            g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+            V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = False, True
+        else:
+            g1, m, k1 = m1_size
+            g2, k2, _ = m2_size
+            g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+            V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = False, False
+
     if (
         is_nonzero
         and use_triton_template(layout)
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
     ):
         scaled = scale_a is not None
-        if len(m1_size) == 2:
-            if len(m2_size) == 2:
-                m, k1 = m1_size
-                k2, _ = m2_size
-                # pyrefly: ignore [missing-attribute]
-                g = offs.get_size()[0]
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = True, True
-            else:
-                # pyrefly: ignore [missing-attribute]
-                g1 = offs.layout.size[0]
-                m, k1 = m1_size
-                g2, k2, _ = m2_size
-                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = True, False
-        else:
-            if len(m2_size) == 2:
-                # pyrefly: ignore [missing-attribute]
-                g1 = offs.layout.size[0]
-                g2, m, k1 = m1_size
-                k2, _ = m2_size
-                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = False, True
-            else:
-                g1, m, k1 = m1_size
-                g2, k2, _ = m2_size
-                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = False, False
 
         a_is_k_major = mat_a.get_stride()[-1] == 1
         b_is_k_major = mat_b.get_stride()[-2] == 1
@@ -786,6 +796,22 @@ def _tuned_grouped_mm_common(
                 num_warps=config.num_warps,
                 **kwargs,
                 **config.kwargs,
+            )
+
+    if use_blackwell_cutedsl_grouped_mm(
+        mat_a, mat_b, layout, a_is_2d, b_is_2d, offs, bias, scale_result
+    ):
+        for config in get_groupgemm_configs():
+            kwargs = dict(
+                ACC_DTYPE="cutlass.Float32",
+            )
+
+            cutedsl_grouped_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=layout,
+                **kwargs,
+                **asdict(config),
             )
 
     input_gen_fns = {

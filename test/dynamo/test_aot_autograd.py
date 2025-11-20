@@ -950,7 +950,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 2|aten.threshold_backward.default||relu
 1|aten.native_batch_norm_backward.default||batch_norm
 0|aten.convolution_backward.default||conv2d
-11|aten.add.Tensor||l1_loss
+11|aten.add.Tensor||
 """
             ),
         )
