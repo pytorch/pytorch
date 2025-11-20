@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+import unittest
 
 import torch
 from torch.distributed.tensor import (
@@ -13,6 +14,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
@@ -333,6 +335,36 @@ class DistTensorOpsTest(DTensorTestBase):
             stack_dim1_shard1_dt.full_tensor(),
             torch.stack([global_input, global_input], dim=1),
         )
+
+    @with_comms
+    def test_stack_cache(self):
+        device_mesh = self.build_device_mesh()
+
+        shape = (4, 8)
+        placements = [Replicate()]
+        dtensor_list = []
+        for _ in range(3):
+            local_tensor = torch.randn(shape)
+            dt = DTensor.from_local(local_tensor, device_mesh, placements)
+            dtensor_list.append(dt)
+
+        result1 = torch.stack(dtensor_list)
+
+        dtensor_list2 = []
+        for _ in range(3):
+            local_tensor = torch.randn(shape)
+            dt = DTensor.from_local(local_tensor, device_mesh, placements)
+            dtensor_list2.append(dt)
+
+        old_propagate = ShardingPropagator.propagate_op_sharding_non_cached
+
+        def error(*args, **kwargs):
+            assert False
+
+        with unittest.mock.patch.object(
+            ShardingPropagator, "_propagate_tensor_meta_non_cached", error
+        ):
+            result2 = torch.stack(dtensor_list2)
 
     @with_comms
     def test_equal(self):
