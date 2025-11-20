@@ -754,6 +754,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         f.check_count("%all_gather_into_tensor", 1, exactly=True)
         f.check("pre_bucket_all_gather").check("wait_tensor").check(
             "%all_gather_into_tensor_out"
+        )
 
     def test_split_mm(self):
         def func(a, b):
