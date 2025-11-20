@@ -7,7 +7,7 @@ that calls into the optimized Flash Attention kernels.
 
 import logging
 from functools import lru_cache
-from typing import Any, NamedTuple, Union
+from typing import Any, NamedTuple
 
 import torch
 
@@ -134,7 +134,7 @@ def varlen_attn(
     max_k: int,
     is_causal: bool = False,
     return_aux: AuxRequest | None = None,
-) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Compute variable-length attention using Flash Attention.
     This function is similar to scaled_dot_product_attention but optimized for

@@ -5,7 +5,9 @@
 # Flow:
 # 1. Builds PyTorch with CUDA 12.8+ and sm100 architecture for B200
 # 2. Runs smoke tests on linux.dgx.b200 runner
-# 3. Tests executed are defined in .ci/pytorch/test.sh -> test_python_smoke() function
+# 3. Tests executed are defined in .ci/pytorch/test.sh -> test_python_smoke_b200() function
+#    - Includes matmul, scaled_matmul, FP8, and FlashAttention CuTe tests
+#    - FlashAttention CuTe DSL is installed as part of test execution
 #
 # Triggered by:
 # - Pull requests modifying this workflow file
