@@ -164,7 +164,7 @@ jobs:
     needs: get-label-type
     strategy:
       matrix:
-        python-version: ['3.11', '3.12']
+        python-version: ['3.11', '3.12', '3.13']
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang12
@@ -182,7 +182,7 @@ jobs:
     needs: [get-label-type, inductor-cpu-core-build]
     strategy:
       matrix:
-        python-version: ['3.11', '3.12']
+        python-version: ['3.11', '3.12', '3.13']
     with:
       build-environment: linux-jammy-py${{ matrix.python-version }}-clang12
       docker-image: ci-image:pytorch-linux-jammy-py${{ matrix.python-version }}-clang12
