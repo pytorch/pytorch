@@ -179,7 +179,6 @@ ignore = [
     "SIM117",
     "SIM118",
     "SIM300", # Yoda condition detected
-    "UP007", # keep-runtime-typing (TODO: Fix all violations first, then remove this)
     "UP045", # keep-runtime-typing
     "TC006",
     # TODO: Remove Python-3.10 specific suppressions
