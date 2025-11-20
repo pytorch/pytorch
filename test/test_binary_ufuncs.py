@@ -3058,6 +3058,18 @@ class TestBinaryUfuncs(TestCase):
             with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
                 a // b
 
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_floor_divide_int_min(self, device, dtype):
+        int_min = torch.iinfo(dtype).min
+        a = torch.tensor([int_min], dtype=dtype, device=device)
+        b = torch.tensor([-1], dtype=dtype, device=device)
+
+        result = torch.floor_divide(a, b)
+        result_ = a // b
+
+        self.assertEqual(result, a)
+        self.assertEqual(result_, a)
+
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_muldiv_scalar(self, device, dtype):
         x = make_tensor((10, 3), dtype=dtype, device=device, low=None, high=None)
