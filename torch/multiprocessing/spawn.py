@@ -46,14 +46,6 @@ class ProcessException(Exception):
 class ProcessRaisedException(ProcessException):
     """Exception raised when a process failed due to an exception raised by the code."""
 
-    def __init__(
-        self,
-        msg: str,
-        error_index: int,
-        error_pid: int,
-    ):
-        super().__init__(msg, error_index, error_pid)
-
 
 class ProcessExitedException(ProcessException):
     """Exception raised when a process failed due to signal or exited with a specific code."""
