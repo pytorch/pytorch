@@ -526,6 +526,40 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_tensor_out_inductor(self):
+        def example(a, b, rs_out, *, tag, ranks, group_size):
+            c = torch.matmul(a, b)
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag = torch.ops._c10d_functional.reduce_scatter_tensor_out(
+                c, "sum", group_size, group_name, out=rs_out
+            )
+            ag = torch.ops._c10d_functional.wait_tensor(ag)
+            return (rs_out,)
+
+        def compile(func, example_inputs):
+            graph = make_fx(func)(*example_inputs)
+            return inductor_compile_fx(graph, example_inputs)
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            example = functools.partial(
+                example,
+                **self.get_world_trs(),
+            )
+            rs_out = torch.empty(4 // self.world_size, 4, device=self.device)
+            inputs = (
+                torch.ones(4, 4, device=self.device) + self.rank,
+                torch.ones(4, 4, device=self.device) + self.rank,
+                rs_out,
+            )
+            eager_out = example(*inputs)
+            compiled_fn = compile(example, inputs)
+            inductor_out = compiled_fn(*inputs)
+            self.assertTrue(same(eager_out, inductor_out, tol=0.001))
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     def test_all_to_all_single_inductor(self):
         def example(
