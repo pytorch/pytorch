@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import cast, Optional
 
@@ -26,6 +27,37 @@ __all__ = ["Placement", "Shard", "Replicate", "Partial", "MaskPartial"]
 
 # Appease TestPublicBindings.test_correct_module_names
 Placement.__module__ = "torch.distributed.tensor.placement_types"
+
+
+class PlacementPlaceholder(ABC):
+    """
+    Define single-dim sharding rules using a placeholder whenever possible, to allow
+    expanding to real Placement types at runtime.
+    """
+
+    @abstractmethod
+    def check_placement(self, placement: Placement) -> bool:
+        pass
+
+
+class ShardingPlaceholder(PlacementPlaceholder):
+    """
+    Any type of sharding can be used.
+
+    # TODO: how shall we opt shardings into this? hardcode in 'check' fn? subclass relationship?
+    # TODO: express 'even' sharding requirement via placeholder?
+    """
+
+    def __init__(self, dim: int) -> None:
+        self.dim = dim
+
+    def check(self, placement: Placement) -> bool:
+        """
+        Check if the given placement is compatible with the placeholder.
+        """
+        return (
+            isinstance(placement, (Shard, _StridedShard)) and placement.dim == self.dim
+        )
 
 
 class Shard(torch._C._distributed.Shard):
