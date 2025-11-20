@@ -296,8 +296,8 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(dist_tensor.dtype, torch.float32)
         self.assertEqual(zeros_like_dt.dtype, torch.bfloat16)
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     def test_stack(self):
         mesh_2d = DeviceMesh(
             self.device_type, torch.arange(self.world_size).reshape(2, 2)
@@ -706,11 +706,11 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_dtensor_dtype_conversion(self):
         from torch.distributed.tensor.debug import (
-            _clear_sharding_prop_cache,
-            _get_sharding_prop_cache_info,
+            _clear_fast_path_sharding_prop_cache,
+            _get_fast_path_sharding_prop_cache_stats,
         )
 
-        _clear_sharding_prop_cache()
+        _clear_fast_path_sharding_prop_cache()
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
@@ -730,13 +730,13 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(bf16_sharded_dtensor1.to_local().dtype, torch.bfloat16)
 
         # by this point we only have cache misses
-        hits, misses, _, _ = _get_sharding_prop_cache_info()
+        hits, misses = _get_fast_path_sharding_prop_cache_stats()
         self.assertEqual(hits, 0)
         self.assertEqual(misses, 2)
 
         # convert to fp32 again and see if there's cache hit
         bf16_sharded_dtensor1.float()
-        hits, misses, _, _ = _get_sharding_prop_cache_info()
+        hits, misses = _get_fast_path_sharding_prop_cache_stats()
         # by now we should have cache hit
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)
