@@ -21,6 +21,26 @@ inline data_type_t get_zendnn_dtype(const at::Tensor& tensor) {
   TORCH_CHECK(false, "ZenDNN only supports Float32 and BFloat16.");
 }
 
+// Check if a 3D tensor is transposed (transposed version of a contiguous
+// tensor) in the last two dimensions.
+// For a transposed tensor
+// [B, M, K] -> [B, K, M]:
+// - stride[0] should be M*K (batch stride unchanged)
+// - stride[1] should be 1 (innermost dimension after transpose)
+// - stride[2] should be M (step size for original rows, now columns)
+inline auto is_transposed = [](const at::Tensor& t) {
+  const auto dim = t.dim();
+  const auto sizes = t.sizes();
+  const auto strides = t.strides();
+  if (dim == 2) {
+    return t.strides()[0] == 1 && t.strides()[1] == t.sizes()[0];
+  } else if (dim == 3) {
+    return strides[0] == sizes[1] * sizes[2] && strides[1] == 1 &&
+        strides[2] == sizes[1];
+  }
+  return false;
+};
+
 inline bool is_tensor_2d_and_transposed(const at::Tensor& t) {
   if (t.dim() == 2) {
     return t.strides()[0] == 1 && t.strides()[1] == t.sizes()[0];
