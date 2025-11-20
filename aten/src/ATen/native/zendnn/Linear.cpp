@@ -31,6 +31,7 @@ inline void zendnn_linear_impl(
     const at::Tensor& weight,
     const at::Tensor& bias,
     at::Tensor& result,
+    const std::string_view& post_op_id,
     bool is_weight_prepacked) {
   // Get appropriately processed tensors (2D input, transposed weight, 2D
   // result)
@@ -68,8 +69,16 @@ inline void zendnn_linear_impl(
   matmul_dtype.dst = get_zendnn_dtype(result_2d);
   matmul_dtype.bias =
       (bias.defined()) ? get_zendnn_dtype(bias) : data_type_t::none;
+  std::vector<zendnnl::lowoha::postop> post_op;
+  if (post_op_id != "none") {
+    // Set post-op parameters
+    zendnnl::lowoha::postop op1;
+    op1.po_type = post_op_map.find(post_op_id)->second;
+    post_op.push_back(op1);
+  }
   zendnnl::lowoha::lowoha_params params;
   params.dtypes = matmul_dtype;
+  params.postop_ = std::move(post_op);
   params.mem_format_a = 'n';
   params.mem_format_b = is_weight_prepacked ? 'r' : 'n';
 
@@ -108,7 +117,8 @@ at::Tensor zendnn_linear_unary(
   // Create output tensor with appropriate size and strides
   at::Tensor result = create_linear_output_tensor(input, weight);
   // Perform ZENDNN linear operation
-  zendnn_linear_impl(input, weight, bias_t, result, is_weight_prepacked);
+  zendnn_linear_impl(
+      input, weight, bias_t, result, post_op, is_weight_prepacked);
   return result;
 }
 } // namespace at::native
