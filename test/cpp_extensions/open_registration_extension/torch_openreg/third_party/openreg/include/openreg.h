@@ -104,6 +104,11 @@ orEventElapsedTime(float* ms, orEvent_t start, orEvent_t end);
 #ifdef __cplusplus
 
 #define OPENREG_H
+#include <cstdint>
+namespace openreg {
+constexpr int kOpenRegMaxStreamPriorities = 2;
+}
+
 #include "openreg.inl"
 
 #endif

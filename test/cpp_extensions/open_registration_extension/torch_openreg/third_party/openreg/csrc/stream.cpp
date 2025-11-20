@@ -1,5 +1,4 @@
 #include <include/openreg.h>
-
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -210,7 +209,7 @@ orError_t orStreamCreate(orStream_t* stream) {
   int min_p, max_p;
   orDeviceGetStreamPriorityRange(&min_p, &max_p);
 
-  return orStreamCreateWithPriority(stream, 0, max_p);
+  return orStreamCreateWithPriority(stream, min_p, max_p);
 }
 
 orError_t orStreamGetPriority(
@@ -283,9 +282,9 @@ orError_t orDeviceGetStreamPriorityRange(
     return orErrorUnknown;
   }
 
-  // OpenReg have only one priority now.
+  // OpenReg priority levels are 0 .. kOpenRegMaxStreamPriorities-1
   *leastPriority = 0;
-  *greatestPriority = 0;
+  *greatestPriority = openreg::kOpenRegMaxStreamPriorities;
   return orSuccess;
 }
 
