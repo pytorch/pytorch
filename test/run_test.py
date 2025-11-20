@@ -1476,6 +1476,7 @@ def parse_args():
         help="Set a timeout based on the test times json file.  Only works if there are test times available",
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
+    GITHUB_WORKFLOW = os.environ.get("GITHUB_WORKFLOW", "slow")
     parser.add_argument(
         "--enable-td",
         action="store_true",
@@ -1486,15 +1487,15 @@ def parse_args():
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and os.environ.get("GITHUB_WORKFLOW", "slow")
-        in ("trunk", "pull", "rocm", "rocm-mi300"),
+        and (GITHUB_WORKFLOW in ("trunk", "pull")
+        or GITHUB_WORKFLOW.startswith(("rocm-", "periodic-rocm-"))),
     )
     parser.add_argument(
         "--shard",
         nargs=2,
         type=int,
         help="runs a shard of the tests (taking into account other selections), e.g., "
-        "--shard 2 3 will break up the selected tests into 3 shards and run the tests "
+        "--shard 2 3 will break upthee selected tests into 3 shards and run the tests "
         "in the 2nd shard (the first number should not exceed the second)",
     )
     parser.add_argument(
