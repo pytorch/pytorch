@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import pathlib
 
 import torch
 import torch._inductor.config as inductor_config
@@ -20,6 +21,9 @@ from torch.testing._internal.inductor_utils import (
     HAS_CUDA_AND_TRITON,
     IS_BIG_GPU,
 )
+
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 
 
 @instantiate_parametrized_tests
@@ -118,6 +122,10 @@ class DeterministicTest(TestCase):
         The test assumes benchmarks/dynamo/huggingface.py can be found from
         the current working directory.
         """
+        # XXX log to remove
+        # step1: fail since benchmark script not found
+        # step2: found the benchmark script but fail numeric check <==
+        # step3: run the benchmark script and pass
 
         # if not os.path.exists("benchmarks/dynamo/huggingface.py"): self.skipTest("Skip due to benchmarks/dynamo/huggingface.py not found.")
 
@@ -134,7 +142,7 @@ class DeterministicTest(TestCase):
         with tempfile.TemporaryDirectory() as tmpdir:
             saved_pkl = os.path.join(tmpdir, "saved.pkl")
             cmd = (
-                f"{sys.executable} benchmarks/dynamo/huggingface.py --backend inductor"
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --save-model-outputs-to={saved_pkl}"
             )
@@ -150,7 +158,7 @@ class DeterministicTest(TestCase):
             # self.assertTrue("pass" in out.stdout.decode())
 
             cmd = (
-                f"{sys.executable} benchmarks/dynamo/huggingface.py --backend inductor"
+                f"{sys.executable} {REPO_ROOT}/benchmarks/dynamo/huggingface.py --backend inductor"
                 + f" --{precision} --accuracy --only {model_name} --{training_or_inference}"
                 + f" --disable-cudagraphs --compare-model-outputs-with={saved_pkl}"
             )
