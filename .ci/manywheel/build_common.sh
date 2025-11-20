@@ -36,7 +36,7 @@ if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
             PLATFORM="manylinux_2_28_aarch64"
             ;;
         *)
-            echo "Other architecture: $ARCH"
+            echo "Other architectures: $ARCH, not setting PLATFORM"
             ;;
     esac
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
