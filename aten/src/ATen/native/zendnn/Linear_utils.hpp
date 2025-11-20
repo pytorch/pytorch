@@ -11,11 +11,20 @@
 #include <functional> // For std::reference_wrapper, std::ref, std::cref
 #include <iostream>
 #include <optional> // For std::optional, std::nullopt
+#include <string>
 #include <unordered_map>
 
 #if AT_ZENDNN_ENABLED()
 namespace at::native {
 using namespace zendnnl::interface;
+
+static const std::unordered_map<std::string_view, post_op_type_t> post_op_map =
+    {{"relu", post_op_type_t::relu},
+     {"gelu_tanh", post_op_type_t::gelu_tanh},
+     {"gelu_erf", post_op_type_t::gelu_erf},
+     {"silu", post_op_type_t::swish},
+     {"sigmoid", post_op_type_t::sigmoid},
+     {"tanh", post_op_type_t::tanh}};
 
 inline std::vector<int64_t> get_2d_size_for_tensor(
     const at::Tensor& inp_tensor) {
@@ -45,6 +54,7 @@ inline std::vector<int64_t> compute_linear_output_sizes(
   output_size.emplace_back(weights_last_dim_size);
   return output_size;
 }
+
 // Returns output strides for linear (input @ weights) and linear operations
 inline std::vector<int64_t> compute_linear_output_strides(
     const std::vector<int64_t>& output_size) {
