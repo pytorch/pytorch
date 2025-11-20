@@ -3,6 +3,7 @@
 # If you want to rebuild, run this with REBUILD=1
 # If you want to build with CUDA, run this with USE_CUDA=1
 # If you want to build without CUDA, run this with USE_CUDA=0
+# If you want to build with ROCm, run this with BUILD_ENVIRONMENT=*-rocm-*
 
 if [ ! -f setup.py ]; then
   echo "ERROR: Please run this build script from PyTorch root directory."
@@ -14,6 +15,17 @@ SCRIPT_PARENT_DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 source "$SCRIPT_PARENT_DIR/common.sh"
 # shellcheck source=./common-build.sh
 source "$SCRIPT_PARENT_DIR/common-build.sh"
+
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # Note: this assumes that the rocm python packages are already installed.
+
+  # shellcheck source=./rocm_sdk-build.sh
+  source "$SCRIPT_PARENT_DIR/rocm_sdk-build.sh"
+
+  # Prepare sources: hipify then write bootstrap script.
+  python tools/amd_build/build_amd.py
+  python tools/amd_build/write_rocm_init.py
+fi
 
 export TMP_DIR="${PWD}/build/win_tmp"
 TMP_DIR_WIN=$(cygpath -w "${TMP_DIR}")
