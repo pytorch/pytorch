@@ -1,7 +1,6 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Callable
-from typing import Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import Optional, TypeAlias, TypeVar, Union
 
 import torch
 from torch.distributed.tensor._api import DTensor
@@ -9,11 +8,8 @@ from torch.distributed.tensor._op_schema import (
     OpSchema,
     OutputSharding,
     RuntimeSchemaInfo,
+    StrategyType,
 )
-
-
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
 
 
 # convenient wrapper to register sharding propagation rules
@@ -36,11 +32,20 @@ def register_prop_rule(
     return wrapper
 
 
-def register_op_strategy(
-    op, schema_info=None
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    # pyre-fixme[2]: Parameter must be annotated.
+# Note:
+# using TypeVar here allows the registration decorator to preserve the specific type info of the wrapped strategy,
+# while hardcoding the typing on the wrapper (e.g. Callable[[OpSchema], StrategyType]) would mean mypy would treat
+# the return value of the wrapped strategy as always being a `StrategyType` even if it were a derived class like
+# MyStrategyType(StrategyType).
+_OpSchemaT = TypeVar("_OpSchemaT", bound=OpSchema)
+_StrategyTypeT = TypeVar("_StrategyTypeT", bound=StrategyType)
+_ShardingStrategyFunc: TypeAlias = Callable[[_OpSchemaT], _StrategyTypeT]
 
+
+def register_op_strategy(
+    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
+    schema_info: Optional[RuntimeSchemaInfo] = None,
+) -> Callable[[_ShardingStrategyFunc], _ShardingStrategyFunc]:
     # For every ATen op that accepts any args in this list,
     # the arg itself can impact the strides (and potentially the sharding strategy)
     # of the output tensor.
@@ -50,7 +55,7 @@ def register_op_strategy(
         "memory_format",
     ]
 
-    def wrapper(impl):
+    def wrapper(impl: _ShardingStrategyFunc) -> _ShardingStrategyFunc:
         if isinstance(op, list):
             overloads = op
         else:
