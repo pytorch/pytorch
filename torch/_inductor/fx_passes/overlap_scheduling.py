@@ -580,8 +580,7 @@ class OverlapScheduler:
     def get_non_collective_runtime_estimate(self, node: fx.Node) -> float | None:
         """Get runtime estimation for a node in ms. Returns None if no estimation is available."""
 
-        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion group
-        # TODO: move get collective runtime into here as well.
+        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion grou
         if is_compute_node(node):
             return benchmark_node(node, self.custom_runtime_estimation)
 
@@ -612,8 +611,7 @@ class OverlapScheduler:
         runtime_estimate = self.get_non_collective_runtime_estimate(node)
 
         # TODO: we could consider skipping overlapping for overlapable, unary chains to collectives.
-        # using these nodes for overlap prevents bucketing. potentially just if the chain time < latency of
-        # collective
+        # using these nodes for overlap prevents bucketing. potentially if chain time < latency
         if runtime_estimate is None:
             assert not is_compute_node(node), "should have estimate for compute nodes"
             self._schedule(node)
