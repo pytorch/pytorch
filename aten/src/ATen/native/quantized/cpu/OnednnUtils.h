@@ -466,7 +466,6 @@ at::Tensor _qconv_prepack_onednn(
 
 struct QlinearForwardParams {
   dnnl::matmul primitive;
-  // dnnl::matmul::primitive_desc primitive_desc;
   ideep::exec_args args;
   ideep::tensor packed_weight;
   ideep::tensor weight_scales;

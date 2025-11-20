@@ -1177,10 +1177,10 @@ static at::Tensor linear_int8_with_onednn_weight(
   // Fast path with cache of params
   static const char* env_var = std::getenv(CACHE_ONEDNN_CONTEXT_FLAG);
   static const std::string cache_flag_str = env_var ? std::string(env_var) : "";
-  static const bool enable_primitive_cache = cache_flag_str != "" && cache_flag_str == "1";
+  static const bool context_cache_enabled = cache_flag_str != "" && cache_flag_str == "1";
   static std::unordered_map<int64_t, QlinearForwardParams> qlinear_forward_params_map;
   int64_t weight_addr = at::native::data_ptr_from_mkldnn(onednn_weight);
-  if (enable_primitive_cache) {
+  if (context_cache_enabled) {
     auto it = qlinear_forward_params_map.find(weight_addr);
     if (it != qlinear_forward_params_map.end()) {
       auto& params = it->second;
@@ -1199,7 +1199,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   auto packed_weight = at::native::itensor_from_mkldnn(onednn_weight);
   tensor onednn_bias;
   if (with_bias) {
-    at::Tensor bias_val_float = bias.value(); // .to(at::kFloat);
+    at::Tensor bias_val_float = bias.value();
     if (bias_val_float.dim() == 1) {
       auto b_reshape = bias_val_float.reshape({1, bias_val_float.size(0)});
       onednn_bias = at::native::itensor_view_from_dense(b_reshape);
@@ -1296,7 +1296,7 @@ static at::Tensor linear_int8_with_onednn_weight(
   }
   primitive.execute(ideep::stream::default_stream(), args);
   // Update cache if needed
-  if (enable_primitive_cache) {
+  if (context_cache_enabled) {
     QlinearForwardParams params;
     params.primitive = primitive;
     params.packed_weight = expected_weight;
