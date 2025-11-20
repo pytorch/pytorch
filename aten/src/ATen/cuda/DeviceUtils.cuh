@@ -110,11 +110,16 @@ __device__ __forceinline__ c10::complex<T> WARP_SHFL_DOWN(c10::complex<T> value,
 
 /**
  * For CC 3.5+, perform a load using __ldg
+ * For ROCm, use non-caching load (equivalent performance benefit)
  */
 template <typename T>
 __device__ __forceinline__ T doLdg(const T* p) {
 #if __CUDA_ARCH__ >= 350 && !defined(USE_ROCM)
   return __ldg(p);
+#elif defined(USE_ROCM) && defined(__gfx9__)
+  // ROCm on CDNA: Use non-temporal (non-caching) load via builtin
+  // This reduces cache pollution for streaming reads (similar to __ldg on CUDA)
+  return __builtin_nontemporal_load(p);
 #else
   return *p;
 #endif
