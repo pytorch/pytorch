@@ -4,8 +4,7 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-from typing import cast, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
@@ -30,10 +29,6 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
-
-
 # convenient wrapper to register sharding propagation rules
 def register_prop_rule(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
@@ -54,11 +49,20 @@ def register_prop_rule(
     return wrapper
 
 
-def register_op_strategy(
-    op, schema_info=None
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    # pyre-fixme[2]: Parameter must be annotated.
+# Note:
+# using TypeVar here allows the registration decorator to preserve the specific type info of the wrapped strategy,
+# while hardcoding the typing on the wrapper (e.g. Callable[[OpSchema], StrategyType]) would mean mypy would treat
+# the return value of the wrapped strategy as always being a `StrategyType` even if it were a derived class like
+# MyStrategyType(StrategyType).
+_OpSchemaT = TypeVar("_OpSchemaT", bound=OpSchema)
+_StrategyTypeT = TypeVar("_StrategyTypeT", bound=StrategyType)
+_ShardingStrategyFunc: TypeAlias = Callable[[_OpSchemaT], _StrategyTypeT]
 
+
+def register_op_strategy(
+    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
+    schema_info: Optional[RuntimeSchemaInfo] = None,
+) -> Callable[[_ShardingStrategyFunc], _ShardingStrategyFunc]:
     # For every ATen op that accepts any args in this list,
     # the arg itself can impact the strides (and potentially the sharding strategy)
     # of the output tensor.
@@ -68,7 +72,7 @@ def register_op_strategy(
         "memory_format",
     ]
 
-    def wrapper(impl):
+    def wrapper(impl: _ShardingStrategyFunc) -> _ShardingStrategyFunc:
         if isinstance(op, list):
             overloads = op
         else:
@@ -159,7 +163,10 @@ def prod(xs: Iterable[int]) -> int:
 
 
 def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
-    """Check if the shape is shardable according to the spec."""
+    """Check if the spec matches these criteria:
+    * any Shard placements in spec refer to valid tensor dims
+    * no empty local tensors (uneven sharding OK, as long as last rank has >0 size)
+    """
     # number of shards in each tensor dimension
     shards_map = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
@@ -225,6 +232,9 @@ def infer_broadcast_dims_map(
 ) -> list[int]:
     # infer the broadcast dims map, where it maps from the common shape dim to the input shape dim
     # this is aligned with the broadcast semantics
+    # e.g. if common_shape = [1, 2, 3, 4] and input_shape = [2, 3, 4],
+    # broadcast_dims_map will be [-1, 0, 1, 2]
+    # meaning that dim 0 in the output has no mapping to the input, and dim 1 in the output maps to dim 0 in the input
     common_ndim = len(common_shape)
     input_ndim = len(input_shape)
     broadcast_dims_map = [-1] * common_ndim

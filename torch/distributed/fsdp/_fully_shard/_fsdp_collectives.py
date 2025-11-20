@@ -547,8 +547,12 @@ def foreach_reduce(
                 op=reduce_scatter_op,
             )
         else:
-            # For single GPU, just copy the input to output (no actual reduce-scatter needed)
-            reduce_output.copy_(reduce_scatter_input)
+            # For single GPU, just copy the input to output (no actual reduce-scatter needed), and
+            # account for a possible gradient_divide_factor.
+            if gradient_divide_factor is not None:
+                reduce_output.copy_(reduce_scatter_input / gradient_divide_factor)
+            else:
+                reduce_output.copy_(reduce_scatter_input)
         reduce_scatter_event = reduce_scatter_stream.record_event()
         post_reduce_stream = reduce_scatter_stream
         if all_reduce_group is not None:  # HSDP or DDP/replicate
@@ -721,20 +725,21 @@ def _get_gradient_divide_factors(
     if all_reduce_group is not None:
         data_parallel_size *= all_reduce_group.size()
 
-    if factor is None:
-        factor = float(data_parallel_size)
-
     if not overflow_risk and not force_sum_reduction_for_comms:
-        if factor == data_parallel_size:
+        if factor is None:
             # Warning: NCCL ReduceOp.AVG may produce incorrect results with
             # world size 1.
             if data_parallel_size == 1:
                 return None, None, ReduceOp.SUM, ReduceOp.SUM
             return None, None, ReduceOp.AVG, ReduceOp.AVG
+        if reduce_scatter_group is not None and factor == reduce_scatter_group.size():
+            reduce_scatter_op = ReduceOp.AVG
         else:
             reduce_scatter_op = torch.distributed._make_nccl_premul_sum(1 / factor)
-            return None, None, reduce_scatter_op, ReduceOp.SUM
+        return None, None, reduce_scatter_op, ReduceOp.SUM
 
+    if factor is None:
+        factor = float(data_parallel_size)
     pre_factor: Optional[float]
     if overflow_risk:
         # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid

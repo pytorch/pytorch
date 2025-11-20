@@ -222,6 +222,18 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
         collectives_bucketing = True
 
+    if config.bucket_all_reduces_fx != "none":
+        from torch._inductor.fx_passes.bucketing import bucket_all_reduce
+
+        GraphTransformObserver(gm, "bucket_all_reduce").apply_graph_pass(
+            lambda graph: bucket_all_reduce(
+                graph.owning_module,
+                config.bucket_all_reduces_fx_bucket_size_determinator,
+                config.bucket_all_reduces_fx,  # type: ignore[arg-type]
+            )
+        )
+        collectives_bucketing = True
+
     # Fx all_gather bucketing introduces mutation op
     # Keeping it in the end to keep invariant of functional graph for previous passes.
     if config.bucket_all_gathers_fx != "none":
