@@ -177,7 +177,7 @@ has_side_effect(torch.ops.streams.wait_stream.default)
 
 @custom_op("streams::sync_dealloc", mutates_args=())
 def sync_dealloc(
-    src_stream_index: int, wait_event_index: int, to_dealloc: torch.Tensor
+    wait_event_index: int, src_stream_index: int, to_dealloc: torch.Tensor
 ) -> None:
     """An op which waits on an event and moves the last usage of to_dealloc
     after the wait, so that after the sync occurs, the deallocation or
@@ -192,7 +192,7 @@ has_side_effect(torch.ops.streams.sync_dealloc.default)
 
 
 @custom_op("streams::record_stream", mutates_args=())
-def record_stream(tensor: torch.Tensor, stream_index: int):
+def record_stream(tensor: torch.Tensor, stream_index: int) -> None:
     tensor.record_stream(_get_stream_by_index(stream_index))
 
 

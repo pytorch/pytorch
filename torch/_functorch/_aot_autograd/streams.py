@@ -53,7 +53,8 @@ def is_gradient_acc(node: Node) -> bool:
 
 
 def is_bwd_node(node: Node) -> bool:
-    return node.meta.get("partitioner_tag") == "is_backward"
+    tag = node.meta.get("partitioner_tag")
+    return tag == "is_backward" or tag == "must_be_in_backward"
 
 
 def get_device(node: Node) -> torch.device:
@@ -82,7 +83,7 @@ def set_stream(node: Node, ind: int) -> None:
         node.meta["custom"] = {"stream": ind}
 
 
-def insert_record_event_after_node(graph: Graph, node: Node, event_ind: int) -> None:
+def insert_record_event_after_node(graph: Graph, node: Node, event_ind: int) -> Node:
     with graph.inserting_after(node):
         node = graph.call_function(
             torch.ops.streams.record_event.default,
@@ -93,8 +94,10 @@ def insert_record_event_after_node(graph: Graph, node: Node, event_ind: int) -> 
         )
         node.meta["partitioner_tag"] = "must_be_in_backward"
 
+    return node
 
-def insert_wait_event_before_node(graph: Graph, node: Node, event_ind: int) -> None:
+
+def insert_wait_event_before_node(graph: Graph, node: Node, event_ind: int) -> Node:
     with graph.inserting_before(node):
         node = graph.call_function(
             torch.ops.streams.wait_event.default,
@@ -104,6 +107,8 @@ def insert_wait_event_before_node(graph: Graph, node: Node, event_ind: int) -> N
             ),
         )
         node.meta["partitioner_tag"] = "must_be_in_backward"
+
+    return node
 
 
 K = TypeVar("K")
@@ -115,7 +120,7 @@ V = TypeVar("V")
 class IndexedDict(MutableMapping[K, V], Generic[K, V]):
     """A dict that maintains insertion order with O(1) index access."""
 
-    __slots__ = ("dict", "keys", "key_to_index")
+    __slots__ = ("_dict", "_keys", "_key_to_index")
 
     def __init__(self) -> None:
         self._dict: dict[K, V] = {}
@@ -167,7 +172,7 @@ def populate_stream_timeline(
         stream_to_timeline[stream_index] = IndexedDict()
         total_time = 0.0
         for node in graph.nodes:
-            # mlazos: not sure if we should forward here too but don't think it matters
+            # mlazos: not sure if we should include forward here too but don't think it matters
             if is_bwd_node(node) and get_stream(node) == stream_index:
                 total_time += get_roofline_estimate(node)
                 stream_to_timeline[stream_index][node] = (
@@ -215,9 +220,12 @@ def handle_synced_deallocation(
     allocating_stream_trace = populate_stream_timeline(
         stream_to_exec_trace, graph, allocating_stream
     )
+    side_stream_trace = populate_stream_timeline(
+        stream_to_exec_trace, graph, side_stream
+    )
 
     alloc_ptr = node
-    target_side_stream_time = allocating_stream_trace[last_usage]
+    target_side_stream_time = side_stream_trace[last_usage]
     # linear search from first usage of tensor to a point in time after the side stream has finished
     while alloc_ptr is not None:
         alloc_time = allocating_stream_trace[alloc_ptr]
@@ -232,11 +240,11 @@ def handle_synced_deallocation(
                 break
 
     wait_event = new_event()
-    insert_record_event_after_node(graph, last_usage, wait_event)
-    with graph.inserting_after(alloc_ptr):
+    record_node = insert_record_event_after_node(graph, last_usage, wait_event)
+    with graph.inserting_after(max(alloc_ptr, record_node)):
         graph.call_function(
-            torch.ops.streams.async_wait_event.default,
-            (get_stream_or_current_stream(node), wait_event, node),
+            torch.ops.streams.sync_dealloc.default,
+            (wait_event, get_stream_or_current_stream(alloc_ptr), node),
             {},
         )
         node.meta["partitioner_tag"] = "must_be_in_backward"
@@ -311,7 +319,12 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
     for node in gm.graph.nodes:
         if is_bwd_node(node):
             allocating_stream = get_stream(node)
-            last_user = max(user for user in node.users.keys())
+            users = list(node.users.keys())
+            if not users:
+                continue
+            last_user = max(user for user in users)
+            if last_user.op == "output":
+                continue
             side_stream = get_stream(last_user)
             if allocating_stream != side_stream:
                 handle_synced_deallocation(

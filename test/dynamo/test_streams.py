@@ -708,6 +708,45 @@ class <lambda>(torch.nn.Module):
 
             return z0, z
 
+        inp = (torch.ones(2, 2, device="cuda", requires_grad=True),)
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, *inp)
+
+        actual[1].sum().backward()
+
+        self.assertExpectedInline(
+            print_graph(bw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        ones: "f32[2, 2]" = torch.ops.aten.ones.default([2, 2], device = device(type='cuda', index=0), pin_memory = False)
+
+        # Annotation: {'stream': 2}
+        mul_1: "f32[2, 2]" = torch.ops.aten.mul.Tensor(ones, 2)
+        mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, mul_1);  tangents_1 = mul_1 = None
+
+        # Annotation: {'stream': 1}
+        mul_4: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, ones);  tangents_2 = ones = None
+
+        # No stacktrace found for following nodes
+        record_event_default = torch.ops.streams.record_event.default(3, 1);  record_event_default = None
+        wait_event_default = torch.ops.streams.wait_event.default(3, 2);  wait_event_default = None
+
+        # Annotation: {'stream': 2}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_3, mul_4);  mul_3 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_1 = torch.ops.streams.record_event.default(4, 2);  record_event_default_1 = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(4, 1, mul_4);  mul_4 = sync_dealloc_default = None
+        return (add,)
+""",
+        )
+
     @requires_cuda
     def test_record_stream_problem_interleaved(self):
         # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
