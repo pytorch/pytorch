@@ -627,7 +627,7 @@ class ComboKernel(Kernel):
         if heuristics == "foreach":
             heuristics_line = f"""
                 @triton_heuristics.foreach(
-                    num_warps={self.num_warps},
+                    filename=__file__,
                     triton_meta={triton_meta!r},
                     inductor_meta={inductor_meta!r},
                 )
