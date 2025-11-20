@@ -7431,6 +7431,7 @@ class DeviceCopy(ExternKernelOut):
     def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
         if (
             not x.is_extern()
+            and x.get_name() not in V.graph.mutated_buffers
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
