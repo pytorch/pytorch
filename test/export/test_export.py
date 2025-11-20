@@ -10046,10 +10046,26 @@ def forward(self, p_lin_weight, p_lin_bias, x):
         ep_decompose_linear = ep_has_linear_convd.run_decompositions(
             decomp_table={torch.ops.aten.linear.default: _decompose_linear_custom}
         )
-
-        self.assertExpectedInline(
-            str(ep_decompose_linear.graph_module.code).strip(),
-            """\
+        if is_strict_v2_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep_decompose_linear.graph_module.code).strip(),
+                """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
+    mul_30 = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
+    add_36 = torch.ops.aten.add.Tensor(matmul, mul_30);  matmul = mul_30 = None
+    cos = torch.ops.aten.cos.default(add_36);  add_36 = None
+    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    add_47 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add_47,)""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep_decompose_linear.graph_module.code).strip(),
+                """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
@@ -10061,7 +10077,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
     add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add_1,)""",
-        )
+            )
 
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
