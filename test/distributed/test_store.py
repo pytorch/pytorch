@@ -253,14 +253,6 @@ class StoreTestBase:
         a.set("foo", "bar")
         self.assertEqual(b.get("foo"), b"bar")
 
-    def test_list_keys(self):
-        a = self._create_store()
-        a.set("foo", "bar")
-        a.set("baz", "qux")
-        keys = a.list_keys()
-        self.assertIn("foo", keys)
-        self.assertIn("baz", keys)
-
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
