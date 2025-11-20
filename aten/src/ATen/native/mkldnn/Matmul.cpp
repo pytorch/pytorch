@@ -545,61 +545,87 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   primitive.execute(ideep::stream::default_stream(), args);
 }
 
+template <typename a_type>
 static void _mkldnn_gemm_i8i8i32_with_blas(
-  const Tensor& self,
+  const Tensor& mat1,
   const Tensor& mat2,
   const Tensor& result) {
     const int m = result.size(0);
     const int n = result.size(1);
-    const int k = self.size(1);
+    const int k = mat1.size(1);
 
-    const char transa = self.strides()[1] == 1 ? 'N' : 'T';
+    const char transa = mat1.strides()[1] == 1 ? 'N' : 'T';
     const char transb = mat2.strides()[1] == 1 ? 'N' : 'T';
     const char offsetc = 'F';
 
-    const int lda = transa == 'T' ? self.stride(1) : self.stride(0);
+    const int lda = transa == 'T' ? mat1.stride(1) : mat1.stride(0);
     const int ldb = transb == 'T' ? mat2.stride(1) : mat2.stride(0);
     const int ldc = n;
 
     const float alpha = 1;
     const float beta = 0;
 
-    int8_t ao = 0;
+    a_type ao=0;
     int8_t bo = 0;
     int32_t co = 0;
 
-    dnnl::gemm_s8s8s32(
-        transa,
-        transb,
-        offsetc,
-        m,
-        n,
-        k,
-        alpha,
-        static_cast<int8_t*>(self.data_ptr()),
-        lda,
-        ao,
-        static_cast<int8_t*>(mat2.data_ptr()),
-        ldb,
-        bo,
-        beta,
-        static_cast<int32_t*>(result.data_ptr()),
-        ldc,
-        &co);
+    if (mat1.scalar_type() == at::kByte) {//uint8
+      dnnl::gemm_u8s8s32(
+          transa,
+          transb,
+          offsetc,
+          m,
+          n,
+          k,
+          alpha,
+          static_cast<uint8_t*>(mat1.data_ptr()),
+          lda,
+          ao,
+          static_cast<int8_t*>(mat2.data_ptr()),
+          ldb,
+          bo,
+          beta,
+          static_cast<int32_t*>(result.data_ptr()),
+          ldc,
+          &co);
+    } else {
+      dnnl::gemm_s8s8s32(//int8
+          transa,
+          transb,
+          offsetc,
+          m,
+          n,
+          k,
+          alpha,
+          static_cast<int8_t*>(mat1.data_ptr()),
+          lda,
+          ao,
+          static_cast<int8_t*>(mat2.data_ptr()),
+          ldb,
+          bo,
+          beta,
+          static_cast<int32_t*>(result.data_ptr()),
+          ldc,
+          &co);
+    }
   }
 
 void mkldnn_matmul_i8i8i32(
     const Tensor &mat1,
     const Tensor &mat2,
     const Tensor &result) {
-  // x:s8 * w:s8 -> y:s32
+  // x:u8 or s8 * w:s8 -> y:s32
   // both inputs should be 2d
   // In most cases, using DNNL blas API is faster but it requires a/b contiguous along one dimentsion
   bool a_is_contigous = (mat1.stride(0) == 1 || mat1.stride(1) == 1);
   bool b_is_contigous = (mat2.stride(0) == 1 || mat2.stride(1) == 1);
 
   if (a_is_contigous && b_is_contigous) {
-    _mkldnn_gemm_i8i8i32_with_blas(mat1, mat2, result);
+    if (mat1.scalar_type() == at::kByte) {
+      _mkldnn_gemm_i8i8i32_with_blas<uint8_t>(mat1, mat2, result);
+    } else {
+      _mkldnn_gemm_i8i8i32_with_blas<int8_t>(mat1, mat2, result);
+    }
   } else {
     _mkldnn_matmul_i8i8i32_with_primitive(mat1, mat2, result);
   }
