@@ -108,15 +108,14 @@ inline bool check_flash_attention_head_dim_size(
     return false;
   }
 
-  constexpr auto supported_headdim = std::array<int, 4>({64, 96, 128, 192});
-  if (std::find(
-          supported_headdim.begin(),
-          supported_headdim.end(),
-          query_size_last) == supported_headdim.end()) {
+  constexpr auto max_supported_headdim = 192;
+  if (query_size_last > max_supported_headdim) {
     if (debug) {
       TORCH_WARN(
-          "FlashAttentionXPU requires q,k,v to have last dimension in {64, 96, 128, 192}.",
-          " Got head_dim: ",
+          "FlashAttentionXPU supports head dimension up to ",
+          max_supported_headdim,
+          ". ",
+          "Got head dimension: ",
           query_size_last,
           " instead.");
     }
@@ -125,10 +124,10 @@ inline bool check_flash_attention_head_dim_size(
   return true;
 }
 
-inline bool check_flash_attention_bshd_layout(
+inline bool check_flash_attention_layout(
     sdp_params const& params,
     bool debug) {
-  return sycltla::check_flash_attention_bshd_layout(params, debug);
+  return sycltla::check_flash_attention_layout(params, debug);
 }
 
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
@@ -144,10 +143,8 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
           check_nonzero_sequence_lengths_dense,
           check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>,
           check_flash_attention_datatype,
-          check_flash_attention_head_dim_size, // backward requires q,k,v have
-                                               // same head dim
-          check_flash_attention_bshd_layout // forward does not support bhsd
-                                            // layout
+          check_flash_attention_head_dim_size,
+          check_flash_attention_layout
       };
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {

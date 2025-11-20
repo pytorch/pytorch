@@ -4577,23 +4577,23 @@ class TestSDPAXpuOnly(NNTestCase):
                 F.scaled_dot_product_attention(q, k, v)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_XPU_FLASH_ATTENTION, "XPU Flash Attention is not supported")
-    @parametrize("head_dim", [64, 96, 128, 192])
-    def test_flash_attention_headdim_size(self, device, head_dim):
+    def test_flash_attention_headdim_size(self, device):
         dtype = torch.bfloat16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
         batch, num_heads, seqlen = 32, 2, 32
         
-        q_shape = SdpaShape(batch, seqlen, num_heads, head_dim)
-        k_shape = SdpaShape(batch, seqlen, num_heads, head_dim)
-        v_shape = SdpaShape(batch, seqlen, num_heads, head_dim)
+        max_supported_head_dim = 192
+        q_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)
+        k_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)
+        v_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)
         q, k, v = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
         q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
             F.scaled_dot_product_attention(q, k, v)
 
-        q_shape = SdpaShape(batch, seqlen, num_heads, head_dim+1)
-        k_shape = SdpaShape(batch, seqlen, num_heads, head_dim+1)
-        v_shape = SdpaShape(batch, seqlen, num_heads, head_dim+1)
+        q_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim+1)
+        k_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim+1)
+        v_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim+1)
         q, k, v = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
         q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
