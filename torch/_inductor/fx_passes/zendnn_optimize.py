@@ -9,7 +9,7 @@ from .zendnn_unary_post_op_fusions import zendnn_unary_post_op_fusions
 def optimize(graph: GraphModule) -> GraphModule:
     # replace aten ops with zendnn ops
     opt_graph = replace_with_zendnn_ops(graph)
-    if config.freezing and config.cpp.weight_prepack:
+    if config.freezing and config.zendnn_weight_prepack:
         # replace zendnn ops with zendnn custom passes
         opt_graph = add_zendnn_weight_prepack_ops(opt_graph)
     # unary post-op fusion passes
