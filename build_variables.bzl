@@ -875,6 +875,7 @@ libtorch_python_xpu_sources = [
     "torch/csrc/xpu/Stream.cpp",
     "torch/csrc/inductor/aoti_runner/model_container_runner_xpu.cpp",
     "torch/csrc/inductor/aoti_torch/shim_xpu.cpp",
+    "torch/csrc/distributed/rpc/tensorpipe_xpu.cpp",
 ]
 
 libtorch_xpu_sources = libtorch_python_xpu_sources
