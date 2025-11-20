@@ -301,6 +301,10 @@ std::string getArrayRefString(const IntArrayRef s) {
   return fmt::to_string(fmt::join(s, ","));
 }
 
+std::string to_hex_key(float f) {
+  return fmt::format("{:a}", f);
+}
+
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
   fmt::basic_memory_buffer<char, 100> buffer;
   auto buf_iterator = std::back_inserter(buffer);
