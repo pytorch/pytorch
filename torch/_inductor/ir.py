@@ -7429,9 +7429,14 @@ class IndexPutFallback(ExternKernel):
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
+        try:
+            x_name = x.get_name()
+        except Exception:
+            x_name = None
         if (
             not x.is_extern()
-            and x.get_name() not in V.graph.mutated_buffers
+            # Can not apply this optimization if x has been mutated
+            and x_name not in V.graph.mutated_buffers
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
