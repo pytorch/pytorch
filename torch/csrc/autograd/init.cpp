@@ -396,11 +396,11 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
 #endif // (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
-#if (!defined(LIBKINETO_NOXPUPTI))
+    // #if (!defined(LIBKINETO_NOXPUPTI))
     if (at::hasXPU()) {
       activities.insert(torch::profiler::impl::ActivityType::XPU);
     }
-#endif // (!defined(LIBKINETO_NOXPUPTI))
+    // #endif // (!defined(LIBKINETO_NOXPUPTI))
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
