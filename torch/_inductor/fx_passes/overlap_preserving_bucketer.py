@@ -188,9 +188,15 @@ class OverlapPreservingBucketer:
                 node_type = "starts"
                 hiding_nodes |= self.collective_info[node].hiding_nodes
             elif is_wait_tensor(node):
-                wait_input = node.args[0]
-                if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
-                    node_type = "waits"
+                if isinstance(node.args[0].target, str):
+                    node_type = "compute"
+                else:
+                    wait_input = node.args[0]
+                    if (
+                        isinstance(wait_input, fx.Node)
+                        and get_group_name(wait_input) == pg
+                    ):
+                        node_type = "waits"
             elif is_compute_node(node) or node in hiding_nodes:
                 node_type = "compute"
 

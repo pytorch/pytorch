@@ -38,8 +38,7 @@ def _fn(a: torch.Tensor, b: torch.Tensor, num_chunks: int, orig_out: torch.Tenso
         torch.ops.aten.mm.out(a_flat_chunks[i], b, out=out_flat_chunks[i])
     return (out,)
 
-
-def _mm_split_cat_rs_fn(
+def _mm_rs_scatter_dim_0_fn(
     a: torch.Tensor,
     b: torch.Tensor,
     num_chunks: int,
@@ -54,13 +53,8 @@ def _mm_split_cat_rs_fn(
     assert isinstance(num_chunks, int)
     mm_i_a_args = [a] * num_chunks
     mm_i_b_args = [b] * num_chunks
-    if scatter_dim == 0:
-        b_chunks = b.chunk(num_chunks, dim=-1)
-        mm_i_b_args = b_chunks
-    else:
-        a_flat = a.flatten(0, -2)
-        a_flat_chunks = a_flat.chunk(num_chunks)
-        mm_i_a_args = a_flat_chunks
+    b_chunks = b.chunk(num_chunks, dim=-1)
+    mm_i_b_args = b_chunks
 
     # TODO: add reduce scatter into tensor and remove last cat
     # out = torch.empty_strided(
@@ -75,22 +69,55 @@ def _mm_split_cat_rs_fn(
         mm_i = torch.ops.aten.mm(a_i, b_i)
         for op in post_mm_ops:
             mm_i = op.apply(mm_i, num_chunks)
-        if scatter_dim != 0:
-            mm_i_chunks = mm_i.chunk(orig_split_num_chunks, dim=scatter_dim)
-            cat = torch.cat(mm_i_chunks)
-            mm_i = cat
         w = torch.ops._c10d_functional.reduce_scatter_tensor(
             mm_i, reduce_op, group_size, group_name
         )
         rs_out_i = torch.ops._c10d_functional.wait_tensor(w)
         rs_outs.append(rs_out_i)
 
-    if scatter_dim == 0:
-        # B column wise split
-        rs_out = torch.cat(rs_outs, dim=-1)
-    else:
-        # A row wise split
-        rs_out = torch.cat(rs_outs)
+    # B column wise split
+    rs_out = torch.cat(rs_outs, dim=-1)
+    return (rs_out,)
+
+def _mm_rs_scatter_dim_non0_fn(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    num_chunks: int,
+    orig_out: torch.Tensor,
+    reduce_op: str,
+    group_size: int,
+    group_name: str,
+    scatter_dim: int,
+    orig_split_num_chunks: int,
+    post_mm_ops,
+):
+    assert isinstance(num_chunks, int)
+    mm_i_a_args = [a] * num_chunks
+    mm_i_b_args = [b] * num_chunks
+    a_flat = a.flatten(0, -2)
+    a_flat_chunks = a_flat.chunk(num_chunks)
+    mm_i_a_args = a_flat_chunks
+
+    out = torch.empty_strided(
+        size=orig_out.shape,
+        stride=orig_out.stride(),
+        dtype=orig_out.dtype,
+        device=orig_out.device,
+    )
+
+    out_chunks = out.chunk(num_chunks)
+    for i in range(num_chunks):# a_i, b_i in zip(mm_i_a_args, mm_i_b_args):
+        mm_i = torch.ops.aten.mm(a_i, b_i)
+        for op in post_mm_ops:
+            mm_i = op.apply(mm_i, num_chunks)
+        mm_i_chunks = mm_i.chunk(orig_split_num_chunks, dim=scatter_dim)
+        cat = torch.cat(mm_i_chunks)
+        w = torch.ops._c10d_functional.reduce_scatter_tensor(
+            cat, reduce_op, group_size, group_name, out=out_chunks[i]
+        )
+        torch.ops._c10d_functional.wait_tensor(w)
+
+    # A row wise split
     return (rs_out,)
 
 
