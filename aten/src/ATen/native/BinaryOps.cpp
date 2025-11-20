@@ -18,6 +18,7 @@
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_test_serialization_subcmul_native.h>
 #include <ATen/ops/_to_copy.h>
+#include <ATen/ops/abs.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/add_ops.h>
@@ -35,6 +36,7 @@
 #include <ATen/ops/bitwise_right_shift_native.h>
 #include <ATen/ops/bitwise_xor.h>
 #include <ATen/ops/bitwise_xor_native.h>
+#include <ATen/ops/complex.h>
 #include <ATen/ops/copysign.h>
 #include <ATen/ops/copysign_native.h>
 #include <ATen/ops/div.h>
@@ -63,6 +65,7 @@
 #include <ATen/ops/igamma_native.h>
 #include <ATen/ops/igammac.h>
 #include <ATen/ops/igammac_native.h>
+#include <ATen/ops/imag.h>
 #include <ATen/ops/lcm_native.h>
 #include <ATen/ops/ldexp.h>
 #include <ATen/ops/ldexp_native.h>
@@ -72,6 +75,7 @@
 #include <ATen/ops/less_native.h>
 #include <ATen/ops/linalg_cross_native.h>
 #include <ATen/ops/linalg_cross_ops.h>
+#include <ATen/ops/log2.h>
 #include <ATen/ops/logaddexp2_native.h>
 #include <ATen/ops/logaddexp_native.h>
 #include <ATen/ops/logical_and.h>
@@ -100,11 +104,13 @@
 #include <ATen/ops/not_equal_native.h>
 #include <ATen/ops/or_native.h>
 #include <ATen/ops/pow.h>
+#include <ATen/ops/real.h>
 #include <ATen/ops/remainder.h>
 #include <ATen/ops/remainder_native.h>
 #include <ATen/ops/rshift_native.h>
 #include <ATen/ops/rsub_native.h>
 #include <ATen/ops/sigmoid_backward_native.h>
+#include <ATen/ops/sign.h>
 #include <ATen/ops/special_chebyshev_polynomial_t.h>
 #include <ATen/ops/special_chebyshev_polynomial_t_native.h>
 #include <ATen/ops/special_chebyshev_polynomial_u.h>
@@ -1569,12 +1575,32 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  return at::mul_out(result, self, _pow2(self, other));
+  // if (isComplexType(self.scalar_type())) {
+  //   auto real_part = at::ldexp(at::real(self), other);
+  //   auto imag_part = at::ldexp(at::imag(self), other);
+  //   return at::complex_out(result, real_part, imag_part);
+  // } else if (self.scalar_type() == ScalarType::Bool) {
+  //   return at::mul_out(result, self, _pow2(self, other));;
+  // }
+
+  auto log2_self_plus_other = at::log2(at::abs(self)).add(other);
+  auto pow2_result = _pow2(self, log2_self_plus_other);
+  auto sign_self = at::sign(self);
+  return at::mul_out(result, sign_self, pow2_result);
 }
 
-
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  return at::mul(self, _pow2(self, other));
+  // if (isComplexType(self.scalar_type())) {
+  //   auto real_part = at::ldexp(at::real(self), other);
+  //   auto imag_part = at::ldexp(at::imag(self), other);
+  //   return at::complex(real_part, imag_part);
+  // } else if (self.scalar_type() == ScalarType::Bool) {
+  //   return at::mul(self, _pow2(self, other));
+  // }
+
+  auto log2_self_plus_other = at::log2(at::abs(self)).add(other);
+  auto pow2_result = _pow2(self, log2_self_plus_other);
+  return at::sign(self).mul(pow2_result);
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
