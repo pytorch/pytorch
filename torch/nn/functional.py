@@ -4,7 +4,7 @@ import importlib
 import math
 import warnings
 from collections.abc import Callable
-from typing import Any as _Any, Optional, TYPE_CHECKING, Union
+from typing import Any as _Any, Optional, TYPE_CHECKING
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
@@ -1078,7 +1078,7 @@ def max_unpool3d(
 
 def lp_pool3d(
     input: Tensor,
-    norm_type: Union[int, float],
+    norm_type: int | float,
     kernel_size: BroadcastingList3[int],
     stride: Optional[BroadcastingList3[int]] = None,
     ceil_mode: bool = False,
@@ -1119,7 +1119,7 @@ def lp_pool3d(
 
 def lp_pool2d(
     input: Tensor,
-    norm_type: Union[int, float],
+    norm_type: int | float,
     kernel_size: BroadcastingList2[int],
     stride: Optional[BroadcastingList2[int]] = None,
     ceil_mode: bool = False,
@@ -1158,7 +1158,7 @@ def lp_pool2d(
 
 def lp_pool1d(
     input: Tensor,
-    norm_type: Union[int, float],
+    norm_type: int | float,
     kernel_size: int,
     stride: Optional[BroadcastingList1[int]] = None,
     ceil_mode: bool = False,
@@ -3247,7 +3247,7 @@ def poisson_nll_loss(
 def gaussian_nll_loss(
     input: Tensor,
     target: Tensor,
-    var: Union[Tensor, float],
+    var: Tensor | float,
     full: bool = False,
     eps: float = 1e-6,
     reduction: str = "mean",
