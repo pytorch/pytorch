@@ -51,10 +51,9 @@ qconv_get_md(
   wgh_usr_md = dnnl::memory::desc(wgh_tz, wei_data_t, fmt_wgh);
 
   if (bias.has_value()) {
+    auto bias_dt = get_onednn_dtype(bias.value());
     bias_usr_md = dnnl::memory::desc(
-        bias.value().sizes().vec(),
-        dnnl::memory::data_type::f32,
-        dnnl::memory::format_tag::x);
+        bias.value().sizes().vec(), bias_dt, dnnl::memory::format_tag::x);
   }
 
   return {src_usr_md, wgh_usr_md, bias_usr_md, dst_usr_md};
