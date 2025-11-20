@@ -203,7 +203,7 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
   return outputs;
 }
 
-std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
+static std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
     std::vector<at::Tensor> inputs,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
     std::string reduce_op,
