@@ -280,7 +280,7 @@ struct boxer {
       uint64_t num_outputs) {
     boxer_impl<
         typename FunctionTraits::return_type,
-        torch::headeronly::guts::typelist::map_t<std::remove_reference_t, typename FunctionTrait::parameter_types>,
+        torch::headeronly::guts::typelist::map_t<std::remove_reference_t, typename FunctionTraits::parameter_types>,
         FuncT,
         func>::boxed_fn(stack, num_args, num_outputs);
   }
