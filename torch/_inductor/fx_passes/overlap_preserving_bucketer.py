@@ -130,7 +130,6 @@ class OverlapPreservingBucketer:
         self,
         graph: fx.Graph,
         collective_info: dict[fx.Node, CollectiveInfo],
-        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]],
         scheduled: OrderedSet[fx.Node],
         max_bucket_memory_gb: float = 1.0,
         max_coll_distance: int = 1000,
@@ -140,21 +139,62 @@ class OverlapPreservingBucketer:
         self.graph = graph
         max_coll_distance = 20
         self.collective_info = collective_info
-        self.node_ancestors = node_ancestors
         self.scheduled = scheduled
         self.max_bucket_memory_gb = max_bucket_memory_gb
         self.node_idx = {n: i for i, n in enumerate(scheduled)}
-        self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
         self.bucket_mode = bucket_mode
         self.node_to_event: dict[fx.Node, PGEvent] = {}
-        self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
 
+        # Compute ancestors including original graph edges and hiding interval dependencies
+        self.node_ancestors = self._compute_node_ancestors()
+        self.augmented_ancestors = self.node_ancestors
+
+        # Create aug_graph with computed ancestors
+        self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
+
+        # Build timelines and add constraints to aug_graph
+        self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
         self._add_hiding_interval_constraints()
 
-        # Recompute ancestors with hiding interval dependencies for fast O(1) checks
-        self._recompute_augmented_ancestors()
+    def _compute_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
+        """
+        Compute ancestor sets for all nodes including:
+        1. Original graph edges
+        2. Hiding interval deps: collective_start -> hiding_node -> wait
+
+        We do NOT include timeline sequential dependencies, as those are too restrictive
+        and would prevent valid buckets. We only care about preserving the hiding intervals.
+
+        This allows O(1) has_path checks for ancestor conflicts instead of O(V+E) graph traversals.
+        """
+        # Build adjacency list with original edges + hiding interval edges
+        augmented_inputs: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+
+        # Add original graph edges
+        for node in self.scheduled:
+            for input_node in node.all_input_nodes:
+                augmented_inputs[node].add(input_node)
+
+        # Add hiding interval constraints: start -> hiding_node -> wait
+        for start, info in self.collective_info.items():
+            if info.is_exposed:
+                continue
+            for hiding_node in info.hiding_nodes:
+                # hiding_node depends on start
+                augmented_inputs[hiding_node].add(start)
+                # wait depends on hiding_node
+                augmented_inputs[info.wait_node].add(hiding_node)
+
+        # Compute transitive closure
+        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        for node in self.scheduled:
+            for input_node in augmented_inputs[node]:
+                node_ancestors[node].add(input_node)
+                node_ancestors[node] |= node_ancestors[input_node]
+
+        return node_ancestors
 
     def build_timelines(self) -> dict[str, Optional[PGEvent]]:
         "Construct each process groups ordered series of event"
@@ -236,49 +276,6 @@ class OverlapPreservingBucketer:
                 # Enforce: start -> compute -> wait
                 self.aug_graph.add_extra_dep(n=hn, dep=start)
                 self.aug_graph.add_extra_dep(n=info.wait_node, dep=hn)
-
-    def _recompute_augmented_ancestors(self) -> None:
-        """
-        Recompute node ancestors including ONLY hiding interval dependencies.
-
-        The augmented ancestor set includes all reachability through:
-        1. Original graph edges
-        2. Hiding interval deps: collective_start -> hiding_node -> wait
-
-        We do NOT include timeline sequential dependencies, as those are too restrictive
-        and would prevent valid buckets. We only care about preserving the hiding intervals.
-
-        This allows O(1) has_path checks for ancestor conflicts instead of O(V+E) graph traversals.
-        """
-        # Start with original ancestors
-        self.augmented_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = {
-            n: self.node_ancestors[n].copy() for n in self.scheduled
-        }
-
-        # Build adjacency list with ONLY hiding interval edges
-        hiding_edges: dict[fx.Node, list[fx.Node]] = defaultdict(list)
-
-        # Add hiding interval constraints: start -> hiding_node -> wait
-        for start, info in self.collective_info.items():
-            if info.is_exposed:
-                continue
-            for hiding_node in info.hiding_nodes:
-                # hiding_node depends on start
-                hiding_edges[hiding_node].append(start)
-                # wait depends on hiding_node
-                hiding_edges[info.wait_node].append(hiding_node)
-
-        # Compute transitive closure using topological order
-        # Process nodes in reverse topological order to efficiently propagate ancestors
-        for node in reversed(list(self.scheduled)):
-            node_ancestors = self.augmented_ancestors[node]
-
-            # Add hiding interval predecessors and their ancestors
-            for pred in hiding_edges[node]:
-                if pred not in node_ancestors:
-                    node_ancestors.add(pred)
-                # Add all of predecessor's ancestors
-                node_ancestors |= self.augmented_ancestors[pred]
 
     def bucket_collectives(self) -> None:
         # Group collectives by PG first
