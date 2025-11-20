@@ -11,7 +11,8 @@ from typing import Any, Literal
 import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.fx_passes.bucketing import is_wait_tensor
+from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
+from torch._inductor.fx_passes.bucketing import _schedulable_wait_node, is_wait_tensor
 from torch._inductor.fx_passes.memory_estimator import (
     _is_releasable,
     build_memory_profile,
@@ -44,37 +45,32 @@ def get_group_name(n: fx.Node) -> str:
 
 def get_custom_estimation(
     n: fx.Node,
-    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
+    override_size: int | None = None,
 ) -> float | None:
     if custom_runtime_estimation is None:
         return None
 
-    return custom_runtime_estimation(n)
+    return custom_runtime_estimation(n, override_size)
 
 
 def estimate_collective_time(
     n: fx.Node,
     override_size: int | None = None,
-    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
 ) -> float:
     """Estimate the runtime of a collective operation, optionally with an overridden size."""
-    if (est := get_custom_estimation(n, custom_runtime_estimation)) is not None:
+    if (
+        est := get_custom_estimation(n, custom_runtime_estimation, override_size)
+    ) is not None:
         return est
 
     # Use analytical model (benchmarking is handled separately in alignment)
     return torch._inductor.comm_analysis.estimate_nccl_collective_runtime_from_fx_node(
         n, override_size
     )
-
-
-def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
-    size = 0
-    for node in fx_node.all_input_nodes:
-        if (t := node.meta.get("val")) is not None:
-            # todo - symbolic
-            size += t.numel() * t.element_size()
-
-    return size
 
 
 def is_compute_node(n: fx.Node) -> bool:
@@ -108,7 +104,8 @@ def get_collective_do_bench() -> Callable[[Callable[[], Any]], float]:
 
 def benchmark_node_with_cache_key(
     n: fx.Node,
-    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
 ) -> tuple[float, str | None]:
     """Benchmark a compute node and return (runtime, cache_key)."""
     assert is_compute_node(n)
@@ -151,7 +148,9 @@ def benchmark_node_with_cache_key(
         if unbacked_tensor:
             return 0, key
 
-        if (est := get_custom_estimation(n, custom_runtime_estimation)) is not None:
+        if (
+            est := get_custom_estimation(n, custom_runtime_estimation, None)
+        ) is not None:
             set_cached_node_time(key, est)
             return est, key
 
@@ -163,7 +162,8 @@ def benchmark_node_with_cache_key(
 
 def benchmark_node(
     n: fx.Node,
-    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
 ) -> float:
     return benchmark_node_with_cache_key(n, custom_runtime_estimation)[0]
 
@@ -245,7 +245,7 @@ class OverlapScheduler:
         insert_overlap_deps: bool,
         compute_overlap_multipler: float,
         max_coll_distance: int,
-        custom_runtime_estimation: Callable[[fx.Node], float | None] | None,
+        custom_runtime_estimation: Callable[[fx.Node, int | None], float | None] | None,
         collective_estimator: Literal["analytical", "benchmark"],
     ):
         self.gm = gm
@@ -318,7 +318,7 @@ class OverlapScheduler:
     def _identify_collectives(self) -> None:
         """Identify all collective operations."""
         for node in self.nodes:
-            if is_wait_tensor(node):
+            if _schedulable_wait_node(node):
                 start = node.args[0]
                 coll_time_ms = estimate_collective_time(
                     start, custom_runtime_estimation=self.custom_runtime_estimation
@@ -327,7 +327,7 @@ class OverlapScheduler:
                 info = CollectiveInfo(
                     start_node=start,
                     wait_node=node,
-                    size_bytes=estimate_fx_collective_size(start),
+                    size_bytes=estimate_fx_collective_memory_footprint(start),
                     estimated_time_ms=coll_time_ms,
                     exposed_time_ms=coll_time_ms,  # Initially fully exposed
                 )
@@ -440,7 +440,10 @@ class OverlapScheduler:
             # Benchmark CUDA events (non-deterministic, needs alignment)
             # Skip collectives with custom estimation
             for n in collective_nodes:
-                if get_custom_estimation(n, self.custom_runtime_estimation) is not None:
+                if (
+                    get_custom_estimation(n, self.custom_runtime_estimation, None)
+                    is not None
+                ):
                     continue
 
                 # Benchmark actual size
@@ -531,7 +534,7 @@ class OverlapScheduler:
                 self._handle_compute(node)
             elif node in self.collective_info:
                 self._handle_collective_start(node)
-            elif is_wait_tensor(node):
+            elif _schedulable_wait_node(node):
                 self._handle_wait(node)
             elif node.op == "placeholder":
                 self._schedule(node)
@@ -600,7 +603,7 @@ class OverlapScheduler:
     def _compute_score(self, node: fx.Node) -> object:
         """Compute priority score for a node"""
 
-        if is_wait_tensor(node):
+        if _schedulable_wait_node(node):
             info = self.collective_info[self.wait_to_start[node]]
             # defer waits locally if they are exposed.
             compute_local_priority = int(info.is_exposed)
@@ -829,7 +832,7 @@ class OverlapScheduler:
             # thus forcing it to be exposed.
             # however, if it is already hidden or it cannot be possible hidden,
             # it's fine to schedule it
-            if is_wait_tensor(node):
+            if _schedulable_wait_node(node):
                 info = self.collective_info[self.wait_to_start[node]]
                 if info.hiding_nodes and curr_compute_node not in info.hiding_nodes:
                     continue
@@ -877,7 +880,7 @@ class OverlapScheduler:
         assert all(n not in self.scheduled for n in path)
         for node in sorted(path, key=lambda n: self.node_idx[n]):
             assert not (is_compute_node(node) or node in self.unscheduled_collectives)
-            if is_wait_tensor(node):
+            if _schedulable_wait_node(node):
                 # When we schedule wait tensors, we also force realization of all
                 # collectives enqueued prior to their corresponding collective.
                 # It's possible the scheduling of one wait tensor here has forced
@@ -1009,7 +1012,8 @@ def schedule_overlap_bucketing(
     insert_overlap_deps: bool = False,
     compute_overlap_multipler: float = 1.0,
     max_coll_distance: int = 1000,
-    custom_runtime_estimation: Callable[[fx.Node], float | None] | None = None,
+    custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
+    | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
