@@ -6,7 +6,11 @@ from contextlib import contextmanager
 import torch
 from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.nn.attention.flex_attention import create_block_mask, flex_attention
+from torch.nn.attention.flex_attention import (
+    _DEFAULT_SPARSE_BLOCK_SIZE,
+    create_block_mask,
+    flex_attention,
+)
 from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -103,6 +107,28 @@ def create_test_tensors(
     k = torch.randn(shape, device=device, dtype=dtype, requires_grad=False)
     v = torch.randn(shape, device=device, dtype=dtype, requires_grad=False)
     return q, k, v
+
+
+def _create_block_mask_for_device(
+    mask_mod, batch_size, num_heads, q_len, kv_len, *, device
+):
+    """Match FlexAttention's block-height expectations per compute capability."""
+    q_block = _DEFAULT_SPARSE_BLOCK_SIZE
+    kv_block = _DEFAULT_SPARSE_BLOCK_SIZE
+    dev = torch.device(device)
+    if dev.type == "cuda":
+        major, _ = torch.cuda.get_device_capability(dev)
+        if major >= 10:
+            q_block *= 2
+    return create_block_mask(
+        mask_mod,
+        batch_size,
+        num_heads,
+        q_len,
+        kv_len,
+        device=device,
+        BLOCK_SIZE=(q_block, kv_block),
+    )
 
 
 @contextmanager
@@ -312,7 +338,9 @@ class TestFlexFlash(InductorTestCase):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 2, 4, 512, 512, device=device)
+        block_mask = _create_block_mask_for_device(
+            causal_mask, 2, 4, 512, 512, device=device
+        )
         flash_vs_triton(q, k, v, block_mask=block_mask)
 
     @dtypes(torch.float16, torch.bfloat16)
@@ -323,7 +351,9 @@ class TestFlexFlash(InductorTestCase):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 2, 4, 512, 512, device=device)
+        block_mask = _create_block_mask_for_device(
+            causal_mask, 2, 4, 512, 512, device=device
+        )
         flash_vs_triton(q, k, v, score_mod=_times_two, block_mask=block_mask)
 
     @dtypes(torch.float16, torch.bfloat16)
@@ -339,7 +369,9 @@ class TestFlexFlash(InductorTestCase):
             bias_value = mask_bias[h]
             return (q_idx >= kv_idx) | (bias_value > 0)
 
-        block_mask = create_block_mask(custom_mask, 2, 4, 512, 512, device=device)
+        block_mask = _create_block_mask_for_device(
+            custom_mask, 2, 4, 512, 512, device=device
+        )
         flash_vs_triton(q, k, v, block_mask=block_mask)
 
     @dtypes(torch.float16, torch.bfloat16)
@@ -368,7 +400,7 @@ class TestFlexFlash(InductorTestCase):
             doc_id_kv = document_ids[b, kv_idx]
             return doc_id_q == doc_id_kv
 
-        block_mask = create_block_mask(
+        block_mask = _create_block_mask_for_device(
             document_mask, 2, 1, seq_len, seq_len, device=device
         )
         flash_vs_triton(q, k, v, block_mask=block_mask)
@@ -390,7 +422,7 @@ class TestFlexFlash(InductorTestCase):
             double_bias = bias_value * 2
             return (q_idx >= kv_idx) | (double_bias > 0)
 
-        block_mask = create_block_mask(
+        block_mask = _create_block_mask_for_device(
             mask_with_view_buffer,
             batch_size,
             num_heads,
@@ -418,7 +450,7 @@ class TestFlexFlash(InductorTestCase):
             bias_cond = (head_term + batch_term).to(torch.float32) > 0
             return causal | bias_cond
 
-        block_mask = create_block_mask(
+        block_mask = _create_block_mask_for_device(
             dual_buffer_mask, batch_size, num_heads, seq_len, seq_len, device=device
         )
         flash_vs_triton(q, k, v, block_mask=block_mask)
@@ -461,7 +493,9 @@ class TestFlexFlash(InductorTestCase):
             bias_value = mask_bias[h]
             return (q_idx >= kv_idx) | (bias_value > 0)
 
-        block_mask = create_block_mask(mask_with_buffer, 2, 4, 512, 512, device=device)
+        block_mask = _create_block_mask_for_device(
+            mask_with_buffer, 2, 4, 512, 512, device=device
+        )
         flash_vs_triton(q, k, v, score_mod=score_with_buffer, block_mask=block_mask)
 
 

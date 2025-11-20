@@ -271,6 +271,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             ),
         )
 
+    @skip_unless_torch_gpu
     def test_dropout_errors(self):
         device_mesh = self.build_device_mesh()
         with self.assertRaisesRegex(RuntimeError, "supported"):
