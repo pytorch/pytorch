@@ -1338,6 +1338,8 @@ class Graph:
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
     ) -> Node:
+        if "all_gather_into_tensor_out" in str(target):
+            breakpoint()
         """
         Create a ``Node`` and add it to the ``Graph`` at the current insert-point.
         Note that the current insert-point can be set via :meth:`Graph.inserting_before`

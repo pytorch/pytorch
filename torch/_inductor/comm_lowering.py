@@ -312,7 +312,7 @@ def register_comm_lowerings():
         )
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_out)
-    def _reduce_scatter_tensor(inp, reduce_op, group_size, group_name, *, out):
+    def _reduce_scatter_tensor_out(inp, reduce_op, group_size, group_name, *, out):
         ir._CollectiveKernel.create_inplace(
             c10d.reduce_scatter_tensor_out.default,
             inp,
