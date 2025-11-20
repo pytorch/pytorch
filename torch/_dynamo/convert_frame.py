@@ -1506,14 +1506,12 @@ def _compile(
         CleanupManager.instance[out_code] = output.cleanups
         nonlocal cache_entry
         with dynamo_timed("build_guards", log_pt2_compile_event=True):
-            with cProfile.Profile() as pr:
-                check_fn = dynamo_output.build_guards(
-                    code,
-                    hooks=hooks,
-                    save=package is not None,
-                    cache_entry=cache_entry,
-                )
-                pr.print_stats("tottime")
+            check_fn = dynamo_output.build_guards(
+                code,
+                hooks=hooks,
+                save=package is not None,
+                cache_entry=cache_entry,
+            )
 
         if package is not None:
             assert check_fn.guards_state is not None
