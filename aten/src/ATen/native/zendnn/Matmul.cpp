@@ -29,20 +29,6 @@ void zendnn_baddbmm(
   const int64_t N = b2.size(2);
   const int64_t K = b1.size(2);
 
-  // Check if a 3D tensor is transposed (transposed version of a contiguous
-  // tensor) in the last two dimensions.
-  // For a transposed tensor
-  // [B, M, K] -> [B, K, M]:
-  // - stride[0] should be M*K (batch stride unchanged)
-  // - stride[1] should be 1 (innermost dimension after transpose)
-  // - stride[2] should be M (step size for original rows, now columns)
-  auto is_transposed = [](const Tensor& t) {
-    const auto sizes = t.sizes();
-    const auto strides = t.strides();
-    return strides[0] == sizes[1] * sizes[2] && strides[1] == 1 &&
-        strides[2] == sizes[1];
-  };
-
   // check if tensor is transposed
   bool transa = is_transposed(b1);
   bool transb = is_transposed(b2);
