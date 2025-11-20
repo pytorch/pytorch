@@ -39,6 +39,9 @@ class LearnedHeuristic:
 
 
 class LearnedHeuristicRegression(LearnedHeuristic):
+    def __init__(self) -> None:
+        super().__init__()
+
     def get_feedback(self, context: AHContext, choice: Choice) -> float:
         return 1.0
 
@@ -61,6 +64,9 @@ class LearnedHeuristicRegression(LearnedHeuristic):
 
 
 class LearnedHeuristicDecision(LearnedHeuristic):
+    def __init__(self) -> None:
+        super().__init__()
+
     def get_choice(self, idx: int) -> Optional[str]:
         return None
 
