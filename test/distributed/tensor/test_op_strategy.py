@@ -34,11 +34,7 @@ from torch.distributed.tensor._ops.utils import (
     register_op_strategy,
     replicate_op_strategy,
 )
-from torch.distributed.tensor.debug import (
-    _clear_fast_path_sharding_prop_cache,
-    _clear_python_sharding_prop_cache,
-    CommDebugMode,
-)
+from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -483,8 +479,7 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
                 del propagator.op_to_schema_info[op_overload]
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
-        _clear_fast_path_sharding_prop_cache()
-        _clear_python_sharding_prop_cache()
+        _clear_sharding_prop_cache()
 
 
 def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
