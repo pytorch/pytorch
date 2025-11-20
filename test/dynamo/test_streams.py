@@ -27,7 +27,7 @@ def remove_file_comment(gm_str: str) -> str:
 
 
 def print_graph(graph: torch.fx.GraphModule) -> str:
-    return remove_file_comment(graph.print_readable())
+    return remove_file_comment(graph.print_readable(print_output=False))
 
 
 class TestStreams(torch._dynamo.test_case.TestCase):
