@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch._C import _get_privateuse1_backend_name, _rename_privateuse1_backend
@@ -90,7 +89,7 @@ def _check_register_once(module, attr) -> None:
 
 
 def _normalization_device(
-    custom_backend_name: str, device: Optional[Union[int, str, torch.device]] = None
+    custom_backend_name: str, device: int | str | torch.device | None = None
 ) -> int:
     def _get_current_device_index():
         _get_device_index = "current_device"
@@ -137,7 +136,7 @@ def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -
 
     def wrap_tensor_to(
         self: torch.Tensor,
-        device: Optional[Union[int, torch.device]] = None,
+        device: int | torch.device | None = None,
         non_blocking=False,
         **kwargs,
     ) -> torch.Tensor:
@@ -188,7 +187,7 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
 
     def wrap_module_to(
         self: torch.nn.modules.module.T,
-        device: Optional[Union[int, torch.device]] = None,
+        device: int | torch.device | None = None,
     ) -> torch.nn.modules.module.T:
         r"""Move all model parameters and buffers to the custom device.
 
@@ -268,7 +267,7 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(
 
 
 def _generate_storage_methods_for_privateuse1_backend(
-    custom_backend_name: str, unsupported_dtype: Optional[list[torch.dtype]] = None
+    custom_backend_name: str, unsupported_dtype: list[torch.dtype] | None = None
 ) -> None:
     # Attribute is registered in the _StorageBase class
     # and UntypedStorage obtains through inheritance.
@@ -355,7 +354,7 @@ def generate_methods_for_privateuse1_backend(
     for_module: bool = True,
     for_packed_sequence: bool = True,
     for_storage: bool = False,
-    unsupported_dtype: Optional[list[torch.dtype]] = None,
+    unsupported_dtype: list[torch.dtype] | None = None,
 ) -> None:
     r"""
     Automatically generate attributes and methods for the custom backend after rename privateuse1 backend.

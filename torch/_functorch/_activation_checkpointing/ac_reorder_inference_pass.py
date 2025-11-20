@@ -82,16 +82,22 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     env: dict[fx.Node, fx.Node] = {}
     recomputed_nodes: dict[fx.Node, fx.Node] = {}
 
+    def remat_input(x):
+        # fx.Node can be int or float
+        if not isinstance(x, fx.Node):
+            return x
+        return recomputed_nodes.get(x, env[x])
+
     # Add placeholders
     for node in gm.graph.find_nodes(op="placeholder"):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     def gather_checkpointed_deps(node: fx.Node, visited: set) -> None:
-        if node in visited:
+        if node in visited or node in recomputed_nodes:
             return
         visited.add(node)
         for inp in node.all_input_nodes:
-            if inp.op != "placeholder" and must_recompute(inp):
+            if must_recompute(inp):
                 gather_checkpointed_deps(inp, visited)
 
     # Insert forward nodes
@@ -111,39 +117,18 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
             if must_recompute(inp):
                 gather_checkpointed_deps(inp, deps)
 
-        # Insert deps in forward order, skipping already-inserted ones
+        # Insert deps in forward order (guaranteed disjoint from already-inserted)
         for dep in sorted(deps, key=lambda n: order[n]):
-            if dep not in recomputed_nodes:
-
-                def get_input(x):
-                    if not isinstance(x, fx.Node):
-                        return x
-                    return recomputed_nodes.get(x, env[x])
-
-                dup = new_graph.node_copy(dep, get_input)
-                dup.name = dep.name + "_recomputed"
-                recomputed_nodes[dep] = dup
-
-        # Insert the backward node
-        def remat_input(x):
-            if not isinstance(x, fx.Node):
-                return x
-            return recomputed_nodes.get(x, env[x])
+            assert dep not in recomputed_nodes, "We shouldn't have recomputed it before"
+            dup = new_graph.node_copy(dep, remat_input)
+            dup.name = dep.name + "_recomputed"
+            recomputed_nodes[dep] = dup
 
         env[node] = new_graph.node_copy(node, remat_input)
 
     output_node = list(gm.graph.nodes)[-1]
     assert output_node.op == "output"
-
-    def get_output_arg(x):
-        if not isinstance(x, fx.Node):
-            return x
-        if x in recomputed_nodes:
-            return recomputed_nodes[x]
-        assert x in env
-        return env[x]
-
-    new_graph.output(tuple(get_output_arg(arg) for arg in output_node.args[0]))
+    new_graph.node_copy(output_node, remat_input)
     new_gm = torch.fx.GraphModule(gm, new_graph)
 
     # DCE with custom is_impure_node (like default_partition)

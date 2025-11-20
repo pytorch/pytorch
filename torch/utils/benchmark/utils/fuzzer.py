@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
 import itertools as it
-from typing import Any, Optional, Union
+from typing import Any
 from collections.abc import Callable
 
 import torch
@@ -25,9 +25,9 @@ class FuzzedParameter:
     def __init__(
         self,
         name: str,
-        minval: Optional[Union[int, float]] = None,
-        maxval: Optional[Union[int, float]] = None,
-        distribution: Optional[Union[str, dict[Any, float]]] = None,
+        minval: int | float | None = None,
+        maxval: int | float | None = None,
+        distribution: str | dict[Any, float] | None = None,
         strict: bool = False,
     ) -> None:
         """
@@ -188,17 +188,17 @@ class FuzzedTensor:
     def __init__(
         self,
         name: str,
-        size: tuple[Union[str, int], ...],
-        steps: Optional[tuple[Union[str, int], ...]] = None,
+        size: tuple[str | int, ...],
+        steps: tuple[str | int, ...] | None = None,
         probability_contiguous: float = 0.5,
-        min_elements: Optional[int] = None,
-        max_elements: Optional[int] = None,
-        max_allocation_bytes: Optional[int] = None,
-        dim_parameter: Optional[str] = None,
-        roll_parameter: Optional[str] = None,
+        min_elements: int | None = None,
+        max_elements: int | None = None,
+        max_allocation_bytes: int | None = None,
+        dim_parameter: str | None = None,
+        roll_parameter: str | None = None,
         dtype=torch.float32,
         cuda=False,
-        tensor_constructor: Optional[Callable] = None
+        tensor_constructor: Callable | None = None
     ) -> None:
         """
         Args:
@@ -353,10 +353,10 @@ class FuzzedTensor:
 class Fuzzer:
     def __init__(
         self,
-        parameters: list[Union[FuzzedParameter, list[FuzzedParameter]]],
-        tensors: list[Union[FuzzedTensor, list[FuzzedTensor]]],
-        constraints: Optional[list[Callable]] = None,
-        seed: Optional[int] = None
+        parameters: list[FuzzedParameter | list[FuzzedParameter]],
+        tensors: list[FuzzedTensor | list[FuzzedTensor]],
+        constraints: list[Callable] | None = None,
+        seed: int | None = None
     ) -> None:
         """
         Args:
@@ -422,9 +422,9 @@ class Fuzzer:
         return self._rejections / self._total_generated
 
     def _generate(self, state):
-        strict_params: dict[str, Union[float, int, ParameterAlias]] = {}
+        strict_params: dict[str, float | int | ParameterAlias] = {}
         for _ in range(1000):
-            candidate_params: dict[str, Union[float, int, ParameterAlias]] = {}
+            candidate_params: dict[str, float | int | ParameterAlias] = {}
             for p in self._parameters:
                 if p.strict:
                     if p.name in strict_params:

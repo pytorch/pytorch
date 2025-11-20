@@ -34,7 +34,6 @@ import hashlib
 import os.path
 import struct
 from collections import defaultdict
-from typing import Optional
 
 import torch
 import torch._prims as prims
@@ -193,9 +192,9 @@ class ContentStoreWriter:
 class ContentStoreReader:
     def __init__(self, loc: str, *, cache=True) -> None:
         self.loc = loc
-        self.storage_cache: Optional[
-            dict[Optional[torch.device], dict[str, StorageWeakRef]]
-        ] = None
+        self.storage_cache: (
+            dict[torch.device | None, dict[str, StorageWeakRef]] | None
+        ) = None
         if cache:
             self.storage_cache = defaultdict(dict)
 
@@ -207,7 +206,7 @@ class ContentStoreReader:
             if self.storage_cache is not None
             else None
         )
-        s: Optional[torch.UntypedStorage]
+        s: torch.UntypedStorage | None
         if ws is not None:
             s = torch.UntypedStorage._new_with_weak_ptr(ws.cdata)
             if s is not None:
