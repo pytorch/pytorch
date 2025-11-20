@@ -131,7 +131,13 @@ def register_patterns(
             extra_check=extra_check,
         )
         def replacement_fn(
-            match: Match, mat_1: Any, mat_2: Any, bias: Any, *, is_weight_prepacked: Any
+            match: Match,
+            mat_1: Any,
+            mat_2: Any,
+            bias: Any,
+            *,
+            is_weight_prepacked: Any,
+            approximate: Any = None,
         ) -> None:
             def repl(
                 mat_1: Any, mat_2: Any, bias: Any, is_weight_prepacked: Any
@@ -156,7 +162,12 @@ def register_patterns(
             extra_check=extra_check,
         )
         def replacement_fn(
-            match: Match, mat_1: Any, mat_2: Any, *, is_weight_prepacked: Any
+            match: Match,
+            mat_1: Any,
+            mat_2: Any,
+            *,
+            is_weight_prepacked: Any,
+            approximate: Any = None,
         ) -> None:
             def repl(mat_1: Any, mat_2: Any, is_weight_prepacked: Any) -> torch.Tensor:
                 counters["zendnn"]["zendnn_linear_" + post_op_name] += 1
