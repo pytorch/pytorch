@@ -7345,7 +7345,14 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
             output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
         else:
             assert node not in V.graph.env
-            V.graph.env[node] = V.graph.run_node(node)
+            # Temporarily set current_node to this node from the subgraph
+            # so that lowerings can access the correct node metadata
+            saved_current_node = V.graph.current_node
+            try:
+                V.graph.current_node = node
+                V.graph.env[node] = V.graph.run_node(node)
+            finally:
+                V.graph.current_node = saved_current_node
 
     if output is None:
         raise RuntimeError("No output node found in graph")

@@ -19,6 +19,14 @@ from torch.utils._ordered_set import OrderedSet
 
 log = logging.getLogger(__name__)
 
+# ============================================================================
+# 🧪 TEST MODE: Force different implementations for different ranges
+# ============================================================================
+# When enabled, bypasses autotuning and forces each range to use a different
+# implementation (cycling through available impls). This is useful for testing
+# the dispatch logic without needing to actually benchmark.
+_FORCE_DIFFERENT_RANGE_IMPLS = False
+
 
 def _detect_collective_ops(choices: list) -> bool:
     """
@@ -259,10 +267,114 @@ def _merge_identical_implementations(
 
     if len(merged) < len(range_to_best_impl):
         log.info(
-            f"Range merging: reduced from {len(range_to_best_impl)} to {len(merged)} ranges"
+            "Range merging: reduced from %d to %d ranges",
+            len(range_to_best_impl),
+            len(merged),
         )
 
     return merged
+
+
+@torch._dynamo.allow_in_graph
+def _build_torch_cond_dispatch_recursive(
+    range_idx: int,
+    range_endpoints: list[int],
+    impl_wrappers: list[Callable],
+    tensors: tuple[torch.Tensor, ...],
+    dispatch_dim: torch.SymInt,
+) -> torch.Tensor:
+    """Build nested torch.cond recursively without using functools.partial.
+
+    This function is designed to work around Dynamo's limitations with functools.partial.
+    Instead of using partial, we use simple recursion with index-based selection.
+
+    """
+    if range_idx >= len(impl_wrappers):
+        raise IndexError(
+            f"range_idx {range_idx} out of bounds (len={len(impl_wrappers)})"
+        )
+
+    if range_idx == len(impl_wrappers) - 1:
+        # Last range: just call the wrapper directly
+        return impl_wrappers[range_idx](*tensors)
+
+    # Not last range: create conditional
+    endpoint = range_endpoints[range_idx]
+
+    # Define true/false branches as simple nested functions
+    # These are NOT closures over tensors - they will receive tensors as args
+    def true_fn():
+        return impl_wrappers[range_idx](*tensors)
+
+    def false_fn():
+        return _build_torch_cond_dispatch_recursive(
+            range_idx + 1,
+            range_endpoints,
+            impl_wrappers,
+            tensors,
+            dispatch_dim,
+        )
+
+    # 🔍 DEBUG: Print what torch.cond actually receives
+    print("\n" + "=" * 80)
+    print(f"🔍 DEBUG: torch.cond branches at range_idx={range_idx}")
+    print("=" * 80)
+    print(f"Predicate: dispatch_dim <= {endpoint}")
+    print(f"dispatch_dim type: {type(dispatch_dim)}, value: {dispatch_dim}")
+    print(f"\ntrue_fn:")
+    print(f"  type: {type(true_fn)}")
+    print(f"  __name__: {true_fn.__name__}")
+    print(f"  __qualname__: {true_fn.__qualname__}")
+    print(f"  __module__: {true_fn.__module__}")
+
+    if true_fn.__closure__:
+        print(f"  Closure ({len(true_fn.__closure__)} items):")
+        for i, cell in enumerate(true_fn.__closure__):
+            try:
+                content = cell.cell_contents
+                print(
+                    f"    [{i}] {type(content).__name__}: {content if not callable(content) else f'<function {content.__name__}>'}"
+                )
+            except:
+                print(f"    [{i}] <error accessing>")
+    else:
+        print(f"  Closure: None")
+
+    print(f"\nfalse_fn:")
+    print(f"  type: {type(false_fn)}")
+    print(f"  __name__: {false_fn.__name__}")
+    print(f"  __qualname__: {false_fn.__qualname__}")
+    print(f"  __module__: {false_fn.__module__}")
+
+    if false_fn.__closure__:
+        print(f"  Closure ({len(false_fn.__closure__)} items):")
+        for i, cell in enumerate(false_fn.__closure__):
+            try:
+                content = cell.cell_contents
+                print(
+                    f"    [{i}] {type(content).__name__}: {content if not callable(content) else f'<function {content.__name__}>'}"
+                )
+            except:
+                print(f"    [{i}] <error accessing>")
+    else:
+        print(f"  Closure: None")
+
+    # Print bytecode
+    import dis
+
+    print(f"\ntrue_fn bytecode:")
+    dis.dis(true_fn)
+
+    print(f"\nfalse_fn bytecode:")
+    dis.dis(false_fn)
+
+    print("=" * 80 + "\n")
+
+    return torch.cond(
+        dispatch_dim <= endpoint,
+        true_fn,
+        false_fn,
+    )
 
 
 def _split_points_to_ranges(
@@ -517,6 +629,20 @@ def autotune_custom_op(
                 fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
                 fake_output = op_overload(*fake_inputs, **fallback_kwargs)
 
+            # Convert SymInt to Expr for FixedLayout
+            # FixedLayout expects Expr (sympy expressions) or int, not torch.SymInt
+            # Extract .node.expr from SymInt to get the underlying sympy.Expr
+            def convert_symint_to_expr(val):
+                """Convert SymInt to Expr, leave int as is."""
+                if isinstance(val, torch.SymInt):
+                    return val.node.expr
+                return val
+
+            output_size = tuple(convert_symint_to_expr(s) for s in fake_output.shape)
+            output_stride = tuple(
+                convert_symint_to_expr(s) for s in fake_output.stride()
+            )
+
             fallback_choice = _create_fallback_choice(
                 name, op_overload, fake_output, fallback_kwargs
             )
@@ -526,8 +652,8 @@ def autotune_custom_op(
                 layout=FixedLayout(
                     device=fake_output.device,
                     dtype=fake_output.dtype,
-                    size=fake_output.shape,
-                    stride=fake_output.stride(),
+                    size=output_size,
+                    stride=output_stride,
                 ),
             )
 
@@ -989,47 +1115,74 @@ def _range_based_lowering_fn(
         merged_kwargs = _merge_config_and_runtime_kwargs(cfg.params, runtime_kwargs)
         non_tensor_args.append(merged_kwargs)
 
-    for range_start, range_end in ranges:
-        # Create range-specific input generator
-        range_input_gen_fns = None
-        if input_gen_fns and tensor_name in input_gen_fns:
-            base_gen_fn = input_gen_fns[tensor_name]
-            range_gen_fn = _create_range_input_gen_fn(
-                base_gen_fn, dim_index, range_start, range_end
+    # TEST MODE: Force different implementations for different ranges
+    if _FORCE_DIFFERENT_RANGE_IMPLS:
+        for range_idx, (range_start, range_end) in enumerate(ranges):
+            # Force each range to use a different implementation
+            forced_impl_idx = range_idx % len(decompositions)
+            impl = decompositions[forced_impl_idx]
+            impl_kwargs = non_tensor_args[forced_impl_idx]
+
+            range_to_best_impl[(range_start, range_end)] = (
+                impl,
+                impl_kwargs,
+                impl.__name__,
             )
-            range_input_gen_fns = {**input_gen_fns, tensor_name: range_gen_fn}
 
-        range_name = f"{name}_range_{int(range_start)}_{int(range_end) if range_end != float('inf') else 'inf'}"
+            log.warning(
+                "   Range [%s, %s] -> FORCED to use impl[%d]: %s",
+                range_start,
+                range_end if range_end != float("inf") else "inf",
+                forced_impl_idx,
+                impl.__name__,
+            )
 
-        # Run autotuning for this range
-        autotuned_result, winning_choice = autotune_custom_op(
-            name=range_name,
-            decompositions=decompositions,
-            inputs=tensor_inputs,
-            non_tensor_args=non_tensor_args,
-            op_overload=op_overload,
-            user_input_gen_fns=range_input_gen_fns,
-            return_choice=True,
-        )
+        log.warning("=" * 80)
+    else:
+        # Normal autotuning path
+        for range_start, range_end in ranges:
+            # Create range-specific input generator
+            range_input_gen_fns = None
+            if input_gen_fns and tensor_name in input_gen_fns:
+                base_gen_fn = input_gen_fns[tensor_name]
+                range_gen_fn = _create_range_input_gen_fn(
+                    base_gen_fn, dim_index, range_start, range_end
+                )
+                range_input_gen_fns = {**input_gen_fns, tensor_name: range_gen_fn}
 
-        # Extract winning implementation
-        choice_name = getattr(winning_choice, "name", "")
-        winning_idx = _extract_winning_decomposition_index(choice_name, decompositions)
-        impl = decompositions[winning_idx]
-        impl_kwargs = non_tensor_args[winning_idx]
+            range_name = f"{name}_range_{int(range_start)}_{int(range_end) if range_end != float('inf') else 'inf'}"
 
-        range_to_best_impl[(range_start, range_end)] = (
-            impl,
-            impl_kwargs,
-            impl.__name__,
-        )
+            # Run autotuning for this range
+            autotuned_result, winning_choice = autotune_custom_op(
+                name=range_name,
+                decompositions=decompositions,
+                inputs=tensor_inputs,
+                non_tensor_args=non_tensor_args,
+                op_overload=op_overload,
+                user_input_gen_fns=range_input_gen_fns,
+                return_choice=True,
+            )
 
-        log.info(
-            "Range [%s, %s]: Selected %s",
-            range_start,
-            range_end if range_end != float("inf") else "inf",
-            impl.__name__,
-        )
+            # Extract winning implementation
+            choice_name = getattr(winning_choice, "name", "")
+            winning_idx = _extract_winning_decomposition_index(
+                choice_name, decompositions
+            )
+            impl = decompositions[winning_idx]
+            impl_kwargs = non_tensor_args[winning_idx]
+
+            range_to_best_impl[(range_start, range_end)] = (
+                impl,
+                impl_kwargs,
+                impl.__name__,
+            )
+
+            log.info(
+                "Range [%s, %s]: Selected %s",
+                range_start,
+                range_end if range_end != float("inf") else "inf",
+                impl.__name__,
+            )
 
     log.info("Completed autotuning for %d ranges", len(range_to_best_impl))
 
@@ -1042,9 +1195,7 @@ def _range_based_lowering_fn(
         len(merged_range_to_best_impl),
     )
 
-    # Step 3: Check if all ranges merged into one (all ranges use same implementation)
-    # Since ranges are consecutive and merge function combines consecutive identical impls,
-    # len == 1 means all ranges use the same impl+kwargs
+    # Step 3: Check if all ranges merged into one
     if len(merged_range_to_best_impl) == 1:
         log.info(
             "All ranges selected the same implementation - skipping dispatch, using direct inline"
@@ -1054,65 +1205,84 @@ def _range_based_lowering_fn(
             single_impl, single_kwargs, runtime_kwargs, tensor_inputs, name
         )
 
-    # Step 4: Create runtime dispatch for multiple implementations
-    log.info("Creating runtime dispatch for %d ranges", len(merged_range_to_best_impl))
+    # Step 4: Create dispatch using torch.cond traced with make_fx
+    log.info(
+        "Creating torch.cond dispatch for %d ranges", len(merged_range_to_best_impl)
+    )
 
     from torch.fx.experimental.proxy_tensor import make_fx
     from ..decomposition import select_decomp_table
-    from ..ir import FixedLayout, SubgraphBuffer, TensorBox
+    from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
 
     sorted_ranges = sorted(merged_range_to_best_impl.items())
 
-    # Trace each implementation independently
-    range_gms = []
+    # Build dispatch function for 2 ranges
+    def dispatch_fn(*fake_tensors):
+        """Main dispatch function that will be traced by make_fx.
+
+        Currently supports only 2 ranges.
+        For 2 ranges: torch.cond(pred1, impl1, impl2)
+        """
+        if len(sorted_ranges) != 2:
+            raise NotImplementedError(
+                f"Range-based dispatch currently supports only 2 ranges, got {len(sorted_ranges)}. "
+                f"Support for 3+ ranges requires a different approach to avoid data-dependent branching issues."
+            )
+
+        dispatch_tensor = fake_tensors[0]
+        dim_value = dispatch_tensor.size(dim_index)
+
+        # Simple case: just one torch.cond for 2 ranges
+        (r1_start, r1_end), (impl1, impl1_kwargs, _) = sorted_ranges[0]
+        (r2_start, r2_end), (impl2, impl2_kwargs, _) = sorted_ranges[1]
+
+        merged_kwargs1 = {**runtime_kwargs, **impl1_kwargs}
+        merged_kwargs2 = {**runtime_kwargs, **impl2_kwargs}
+
+        @torch._dynamo.dont_skip_tracing
+        def true_fn(*ops):
+            return impl1(*ops, **merged_kwargs1)
+
+        @torch._dynamo.dont_skip_tracing
+        def false_fn(*ops):
+            return impl2(*ops, **merged_kwargs2)
+
+        return torch.cond(
+            pred=dim_value <= r1_end,
+            true_fn=true_fn,
+            false_fn=false_fn,
+            operands=list(fake_tensors),
+        )
+
+    # Trace with make_fx using fake mode
     with V.fake_mode:
         fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)
         decomposition_table = select_decomp_table()
 
-        for (range_start, range_end), (impl_fn, impl_kwargs, _) in sorted_ranges:
-            log.debug(
-                "Compiling range [%s, %s]: %s",
-                range_start,
-                range_end if range_end != float("inf") else "inf",
-                impl_fn.__name__,
-            )
+        log.info("Tracing torch.cond dispatch with symbolic shapes...")
 
-            def impl_wrapper(*tensors):
-                return impl_fn(*tensors, **{**runtime_kwargs, **impl_kwargs})
-
-            impl_gm = make_fx(
-                impl_wrapper,
+        try:
+            dispatch_gm = make_fx(
+                dispatch_fn,
                 decomposition_table=decomposition_table,
                 tracing_mode="symbolic",
             )(*fake_inputs)
 
-            range_gms.append(((range_start, range_end), impl_gm))
+            log.info("Successfully traced torch.cond dispatch")
+            log.debug(
+                f"GraphModule created with {len(list(dispatch_gm.graph.nodes))} nodes"
+            )
 
-        # Get output layout from any implementation (they all have same output shape)
-        fake_output = impl_gm(*fake_inputs)
-        output_layout = FixedLayout(
-            device=fake_output.device,
-            dtype=fake_output.dtype,
-            size=fake_output.shape,
-            stride=fake_output.stride(),
-        )
+        except Exception as e:
+            log.error("make_fx tracing FAILED: %s", e)
+            raise
 
-    log.info("Compiled %d range implementations", len(range_gms))
-
-    # Create SubgraphBuffer with multi-range dispatch
-    result = TensorBox.create(
-        SubgraphBuffer(
-            layout=output_layout,
-            input_nodes=tensor_inputs,
-            gm=range_gms,  # List of (range, gm) tuples triggers multi-range dispatch
-            example_inputs=list(fake_inputs),
-            subgraph_name=f"{name}_autotuned",
-            dispatch_dim_index=dim_index,
-        )
-    )
+    # Inline the dispatch graph
+    log.info("Inlining torch.cond dispatch graph...")
+    result = inline_subgraph_to_ir_nodes(dispatch_gm, tensor_inputs, f"{name}_dispatch")
 
     log.info(
-        "Created SubgraphBuffer with multi-range dispatch (%d ranges)", len(range_gms)
+        "Successfully created torch.cond dispatch for %d ranges", len(sorted_ranges)
     )
 
     validate_ir(result)
