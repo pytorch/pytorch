@@ -591,6 +591,10 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        # record_stream is not a kernel dispatch, skip it
+        if str(func) == "aten.record_stream.default":
+            return func(*args, **kwargs)
+
         is_factory = bool(FACTORY_FUNCTION_REGEX.match(func._schema.name))
 
         argument_handler = ArgumentHandler()
