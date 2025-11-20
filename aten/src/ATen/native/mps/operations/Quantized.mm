@@ -11,6 +11,7 @@
 #endif
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/operations/QuantizedMatmulMPS.h>
 #include <fmt/format.h>
 
 // #define _CAPTURE_KERNEL 1
@@ -67,6 +68,81 @@ Tensor _convert_weight_to_int4pack_mps(const Tensor& in, int64_t innerKTiles) {
     }
   });
   return weight_packed;
+}
+
+Tensor _quantized_matmul_bf16i4bf16_rowwise_mps(const Tensor& input,
+                                                const Tensor& weight,
+                                                const Tensor& scales,
+                                                const Tensor& zeros) {
+  using namespace mps;
+
+  auto input_sizes = input.sizes();
+  auto weight_sizes = weight.sizes();
+
+  int64_t M = input_sizes[0];
+  int64_t K = input_sizes[1];
+  int64_t N = weight_sizes[0];
+
+  TORCH_CHECK(input.is_mps(), "Input tensor must be on MPS device");
+  TORCH_CHECK(weight.is_mps(), "Weight tensor must be on MPS device");
+  TORCH_CHECK(scales.is_mps(), "Scales tensor must be on MPS device");
+
+  TORCH_CHECK(input.dtype() == kBFloat16, "Input must be bfloat16");
+
+  TORCH_CHECK(input_sizes.size() == 2, "Input must be 2D");
+  TORCH_CHECK(weight_sizes.size() == 2, "Weight must be 2D");
+
+  auto weight_shape = @[ @(N), @(K) ];
+
+  TORCH_CHECK(K % 2 == 0, "K dimension must be even for int4 packing");
+
+  auto output = at::zeros({M, N}, input.options());
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+
+  const std::string key = "mps_bf16i4bf16_matmul_rowwise" + getTensorsStringKey({input, weight}, true, true);
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+      auto inputArray = getMPSNDArray(input, input.sizes(), input.strides());
+      auto outputArray = getMPSNDArray(output, output.sizes(), output.strides());
+
+      id<MTLBuffer> sBuf = getMTLBufferStorage(scales);
+      MPSNDArrayDescriptor* sTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:getMPSDataType(scales)
+                                                                                 shape:getMPSShape(scales)];
+      sTensorDesc.preferPackedRows = YES;
+      [sTensorDesc transposeDimension:0 withDimension:1];
+      MPSNDArray* scalesArray = [[MPSNDArray alloc] initWithBuffer:sBuf offset:0 descriptor:sTensorDesc];
+
+      MPSDataType mpsDataType = MPSDataTypeInt4;
+      id<MTLBuffer> wBuf = getMTLBufferStorage(weight);
+      MPSNDArrayDescriptor* wTensorDesc = [MPSNDArrayDescriptor descriptorWithDataType:mpsDataType shape:weight_shape];
+      wTensorDesc.preferPackedRows = YES;
+      [wTensorDesc transposeDimension:0 withDimension:1];
+      MPSNDArray* weightArray = [[MPSNDArray alloc] initWithBuffer:wBuf offset:0 descriptor:wTensorDesc];
+
+      MPSNDArrayAffineQuantizationDescriptor* weightQuantDesc =
+          [[MPSNDArrayAffineQuantizationDescriptor alloc] initWithDataType:mpsDataType
+                                                              hasZeroPoint:false
+                                                               hasMinValue:false];
+      weightQuantDesc.implicitZeroPoint = false;
+
+      MPSNDArrayQuantizedMatrixMultiplication* matmul =
+          [[MPSNDArrayQuantizedMatrixMultiplication alloc] initWithDevice:mpsStream->device()
+                                               leftQuantizationDescriptor:nil
+                                              rightQuantizationDescriptor:weightQuantDesc];
+
+      [matmul encodeToCommandBuffer:commandBuffer
+                       sourceArrays:@[ inputArray, weightArray, scalesArray ]
+                   destinationArray:outputArray];
+    }
+  });
+
+  return output;
 }
 
 Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupSize, const Tensor& qScaleAndZeros) {

@@ -4243,6 +4243,10 @@
     CUDA: _convert_weight_to_int4pack_cuda
     MPS: _convert_weight_to_int4pack_mps
 
+- func: _quantized_matmul_bf16i4bf16_rowwise(Tensor self, Tensor weight, Tensor scales, Tensor zeros) -> Tensor
+  dispatch:
+    MPS: _quantized_matmul_bf16i4bf16_rowwise_mps
+
 - func: _weight_int4pack_mm(Tensor self, Tensor mat2, int qGroupSize, Tensor qScaleAndZeros) -> Tensor
   dispatch:
     MPS: _weight_int4pack_mm_mps
