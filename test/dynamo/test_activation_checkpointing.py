@@ -2402,6 +2402,69 @@ graph():
             f"Expected relu_recomputed but got: {recomputed_nodes}",
         )
 
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_ac_reordering_transitive_dependency_sorting(self):
+        """Verify transitive dependencies are sorted correctly in forward order.
+
+        This tests the fix for the bug where processing inputs one at a time
+        could violate forward topological order. With inputs a, b, c (where c=a+b),
+        and d, if backward node processes [d, c], we must get order a, b, c, d
+        (not d, a, b, c).
+        """
+        torch._dynamo.allow_in_graph(torch.autograd.grad)
+
+        x_data = torch.randn(4, 4)
+        y_data = torch.randn(4, 4)
+        z_data = torch.randn(4, 4)
+
+        def fwd_bwd_with_transitive_deps():
+            x = x_data.detach().requires_grad_(True)
+            y = y_data.detach().requires_grad_(True)
+            z = z_data.detach().requires_grad_(True)
+
+            # Forward region - all checkpointed
+            a = torch.utils.checkpoint.checkpoint(
+                lambda t: t.clone(), x, use_reentrant=False
+            )
+            b = torch.utils.checkpoint.checkpoint(
+                lambda t: t.clone(), y, use_reentrant=False
+            )
+            c = torch.utils.checkpoint.checkpoint(
+                lambda t1, t2: t1 + t2, a, b, use_reentrant=False
+            )
+            d = torch.utils.checkpoint.checkpoint(
+                lambda t: t.clone(), z, use_reentrant=False
+            )
+
+            # Backward region starts here
+            # Using d + c (instead of c + d) to trigger the bug where
+            # all_input_nodes returns [d, c] in the wrong order
+            with torch.fx.traceback.annotate({"backward": 0}):
+                e = d + c
+                loss = e.sum()
+                dx = torch.autograd.grad(loss, x)[0]
+
+            return dx.detach()
+
+        _, captured_gm = self._compile_and_capture(fwd_bwd_with_transitive_deps, True)
+
+        # Verify correct forward topological order: a, b, c, d (not d, a, b, c)
+        self.assertExpectedInline(
+            captured_gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    clone_1 = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    add_recomputed = torch.ops.aten.add.Tensor(clone, clone_1);  clone = clone_1 = None
+    clone_2_recomputed = torch.ops.aten.clone.default(arg2_1);  arg2_1 = None
+    add_2 = torch.ops.aten.add.Tensor(clone_2_recomputed, add_recomputed);  clone_2_recomputed = add_recomputed = None
+    sum_1 = torch.ops.aten.sum.default(add_2);  add_2 = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    detach = torch.ops.aten.detach.default(expand);  expand = None
+    return (detach,)""",
+        )
+
 
 devices = ["cuda", "hpu"]
 instantiate_device_type_tests(

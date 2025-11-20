@@ -87,55 +87,17 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     for node in gm.graph.find_nodes(op="placeholder"):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
-    def duplicate_checkpoint_chain(node: fx.Node) -> fx.Node:
-        """
-        Duplicate a checkpointed node and its checkpointed dependencies.
-        Stops at non-checkpointed nodes (checkpoint inputs) - reuses those from forward.
-        """
-        if node in recomputed_nodes:
-            return recomputed_nodes[node]
-
-        # Recursively duplicate checkpointed dependencies first, in original forward order
-        checkpointed_inputs = [
-            inp
-            for inp in node.all_input_nodes
-            if inp.op != "placeholder" and must_recompute(inp)
-        ]
-        # Sort by original order to preserve forward ordering
-        for inp in sorted(checkpointed_inputs, key=lambda n: order[n]):
-            if inp not in recomputed_nodes:
-                duplicate_checkpoint_chain(inp)
-
-        # Create duplicate node
-        def get_input(x: fx.Node) -> fx.Node:
-            # Use recomputed version if available
-            if x in recomputed_nodes:
-                return recomputed_nodes[x]
-            # Otherwise reuse from forward (checkpoint inputs)
-            assert x in env
-            return env[x]
-
-        dup = new_graph.node_copy(node, get_input)
-        dup.name = node.name + "_recomputed"
-        recomputed_nodes[node] = dup
-        return dup
-
-    def insert_bwd_node(node: fx.Node) -> None:
-        """Insert a backward node - duplicates checkpointed inputs on demand."""
-        if node in env or node in recomputed_nodes:
+    def gather_checkpointed_deps(node: fx.Node, visited: set) -> None:
+        if node in visited:
             return
-
-        def remat_input(x: fx.Node) -> fx.Node:
-            if must_recompute(x):
-                return duplicate_checkpoint_chain(x)
-            assert x in env
-            return env[x]
-
-        env[node] = new_graph.node_copy(node, remat_input)
+        visited.add(node)
+        for inp in node.all_input_nodes:
+            if inp.op != "placeholder" and must_recompute(inp):
+                gather_checkpointed_deps(inp, visited)
 
     # Insert forward nodes
     for node in list(gm.graph.nodes)[:bwd_start]:
-        if node.op in ("placeholder", "output"):
+        if node.op == "placeholder":
             continue
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
@@ -143,7 +105,33 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     for node in list(gm.graph.nodes)[bwd_start:]:
         if node.op == "output":
             continue
-        insert_bwd_node(node)
+
+        # Gather ALL checkpointed deps needed by this node
+        deps = set()
+        for inp in node.all_input_nodes:
+            if must_recompute(inp):
+                gather_checkpointed_deps(inp, deps)
+
+        # Insert deps in forward order, skipping already-inserted ones
+        for dep in sorted(deps, key=lambda n: order[n]):
+            if dep not in recomputed_nodes:
+
+                def get_input(x):
+                    if not isinstance(x, fx.Node):
+                        return x
+                    return recomputed_nodes.get(x, env[x])
+
+                dup = new_graph.node_copy(dep, get_input)
+                dup.name = dep.name + "_recomputed"
+                recomputed_nodes[dep] = dup
+
+        # Insert the backward node
+        def remat_input(x):
+            if not isinstance(x, fx.Node):
+                return x
+            return recomputed_nodes.get(x, env[x])
+
+        env[node] = new_graph.node_copy(node, remat_input)
 
     output_node = list(gm.graph.nodes)[-1]
     assert output_node.op == "output"
