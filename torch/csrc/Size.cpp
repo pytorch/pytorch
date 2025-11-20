@@ -225,10 +225,10 @@ static Py_hash_t THPSize_hash(PyObject* self) {
   Python 3.14 introduce a caching mechanism for tuple hashing which is stored
   in the `ob_hash` field. The caching mechanism relies on a sentinel value (-1)
   to indicate the hash has not yet been computed.
-  For some unknown reason, this field is initialized with 0 when Size is created,
-  which causes the caching logic to behave incorrectly.
+  For some unknown reason, this field is initialized with 0 when Size is
+  created, which causes the caching logic to behave incorrectly.
   */
-  PyTupleObject *v = _PyTuple_CAST(self);
+  PyTupleObject* v = _PyTuple_CAST(self);
   // reset ob_hash and force hash to be recomputed
   Py_hash_t sentinel = -1;
   v->ob_hash = sentinel;
