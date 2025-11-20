@@ -1109,6 +1109,8 @@ def default_partition(
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
             continue
+        if node.target is torch.ops.aten._assert_scalar.default:
+            continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
