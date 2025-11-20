@@ -104,6 +104,8 @@ HAS_OMEGACONG = importlib.util.find_spec("omegaconf")
 if HAS_OMEGACONG:
     from omegaconf import OmegaConf
 
+HAS_CUDA = torch.cuda.is_available()
+
 
 def exists(val):
     return val is not None
@@ -8183,6 +8185,65 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             return x + 1
 
         self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
+
+    @unittest.skipIf(not HAS_CUDA, "Tests moving from cuda to cpu and back")
+    def test_move_subclass(self):
+        aten = torch.ops.aten
+
+        class Subclass(torch.Tensor):
+            def __new__(cls, data):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls, data.shape, dtype=data.dtype, device=data.device
+                )
+
+            def __init__(self, data):
+                self._data = data
+
+            def __repr__(self):
+                return f"{self.__class__.__name__}(data={self._data})"
+
+            def __tensor_flatten__(self):
+                return ["_data"], []
+
+            @classmethod
+            def __tensor_unflatten__(cls, inner_tensors, ctx, outer_size, outer_stride):
+                return cls(inner_tensors["_data"])
+
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if func == torch.nn.functional.linear:
+                    return func(args[0], args[1]._data, *args[2:])
+
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **(kwargs or dict()))
+
+            def __torch_dispatch__(self, func, types, args, kwargs):
+                if func in (aten._to_copy.default, aten.detach.default):
+                    args = [x._data if isinstance(x, Subclass) else x for x in args]
+                    out = func(*args, **kwargs)
+                    return Subclass(out)
+
+                raise NotImplementedError(f"{func=}")
+
+        # Compile on cuda
+        device = "cuda"
+        linear = torch.nn.Linear(2, 2, device=device)
+        linear.weight = torch.nn.Parameter(Subclass(linear.weight.detach()))
+        linear.compile()
+        linear(torch.randn(1, 2, device=device))
+
+        # Check that there are no weakrefs
+        t1 = linear.weight
+        self.assertEqual(len(weakref.getweakrefs(t1)), 0)
+
+        # Move to cpu. Should work with no weakrefs
+        linear.cpu()
+
+        # Move back to cuda and check that there is no recompile
+        linear.to(device)
+        prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get("ok", 0)
+        linear(torch.randn(1, 2, device=device))
+        new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get("ok", 0)
+        assert new_frame_count == prev_frame_count, "linear() call caused a recompile"
 
 
 instantiate_parametrized_tests(ReproTests)
