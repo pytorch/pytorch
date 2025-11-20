@@ -388,12 +388,20 @@ class Subset(Dataset[_T_co]):
     Subset of a dataset at specified indices.
 
     .. note::
-        When subclassing `Subset` to create a custom implementation, overriding the
-        `__getitem__` method will cause the `DataLoader` to access samples one by one.
-        This may bypass batch-level optimizations (like `__getitems__`) present in
-        the underlying dataset, potentially leading to a performance degradation.
-        For performance-critical applications, consider overriding `__getitems__` as
-        well to implement your custom batch-aware logic.
+        When subclassing `Subset` and overriding `__getitem__`, you **must** also
+        override `__getitems__` to ensure `DataLoader` works correctly with your
+        custom logic. If you override only `__getitem__`, a `NotImplementedError`
+        will be raised when using `DataLoader`.
+
+        A simple implementation of `__getitems__` can delegate to `__getitem__`:
+
+        .. code-block:: python
+
+            def __getitems__(self, indices):
+                return [self.__getitem__(idx) for idx in indices]
+
+        For better performance, consider implementing batch-aware logic in
+        `__getitems__` instead of calling `__getitem__` multiple times.
 
     Args:
         dataset (Dataset): The whole Dataset
@@ -413,8 +421,16 @@ class Subset(Dataset[_T_co]):
         return self.dataset[self.indices[idx]]
 
     def __getitems__(self, indices: list[int]) -> list[_T_co]:
+        # if __getitem__ is overridden but __getitems__ is not, raise an error
         if type(self).__getitem__ is not Subset.__getitem__:
-            return [self.__getitem__(idx) for idx in indices]
+            raise NotImplementedError(
+                f"{type(self).__name__} overrides __getitem__ but not __getitems__. "
+                "When subclassing Subset and overriding __getitem__, you must also override "
+                "__getitems__ to ensure DataLoader works correctly with your custom logic. "
+                "A simple implementation:\n\n"
+                "def __getitems__(self, indices):\n"
+                "    return [self.__getitem__(idx) for idx in indices]"
+            )
 
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher

@@ -2501,6 +2501,9 @@ except RuntimeError as e:
                 value = self.dataset[original_idx]
                 return value * 2
 
+            def __getitems__(self, indices):
+                return [self.__getitem__(idx) for idx in indices]
+
         dataset = SimpleDataset()
         subset = TransformSubset(dataset, [0, 1, 2, 3])
 
@@ -2536,6 +2539,9 @@ except RuntimeError as e:
                 a, b = self.dataset[original_idx]
                 return a + b
 
+            def __getitems__(self, indices):
+                return [self.__getitem__(idx) for idx in indices]
+
         dataset = TupleDataset()
         subset = SumSubset(dataset, [0, 1, 2, 3])
 
@@ -2547,6 +2553,40 @@ except RuntimeError as e:
 
         self.assertTrue(torch.equal(batches[0], torch.tensor([100, 102])))
         self.assertTrue(torch.equal(batches[1], torch.tensor([104, 106])))
+
+    def test_subset_override_getitem_requires_getitems(self):
+        """
+        Test that subclassing Subset and overriding only __getitem__ without
+        __getitems__ raises a NotImplementedError with a helpful message.
+        """
+
+        class SimpleDataset(Dataset):
+            def __init__(self):
+                self.data = torch.arange(10)
+
+            def __len__(self):
+                return 10
+
+            def __getitem__(self, idx):
+                return self.data[idx]
+
+        class IncompleteSubset(Subset):
+            def __getitem__(self, idx):
+                original_idx = self.indices[idx]
+                return self.dataset[original_idx] * 2
+
+        dataset = SimpleDataset()
+        subset = IncompleteSubset(dataset, [0, 1, 2, 3])
+        self.assertEqual(subset[0].item(), 0)
+
+        with self.assertRaises(NotImplementedError) as cm:
+            loader = self._get_data_loader(subset, batch_size=2, shuffle=False)
+            list(loader)
+
+        error_message = str(cm.exception)
+        self.assertIn("IncompleteSubset", error_message)
+        self.assertIn("__getitem__", error_message)
+        self.assertIn("__getitems__", error_message)
 
     @unittest.skipIf(IS_WINDOWS, "FIXME: stuck test")
     def test_partial_workers(self):
