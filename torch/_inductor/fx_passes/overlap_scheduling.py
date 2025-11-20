@@ -296,8 +296,7 @@ class OverlapScheduler:
 
         # Compute baseline memory profile from original schedule
         self.original_mem_before_compute_index: list[int] = []
-        self.original_peak_memory = 0
-        self._compute_baseline_memory()
+        self.original_peak_memory = self._compute_baseline_memory()
 
         # Maximum allowed peak memory = baseline + max(absolute, ratio * baseline)
         # When both limits are specified, use the more permissive one
@@ -360,13 +359,15 @@ class OverlapScheduler:
 
         return ancestors
 
-    def _compute_baseline_memory(self) -> None:
+    def _compute_baseline_memory(self) -> int:
         """
         Simulate the original schedule to compute baseline memory profile.
+        Returns the peak memory observed during simulation.
         """
         baseline_tracker = MemoryTracker(self.graph)
 
         last_compute_max_memory = 0
+        peak_memory = 0
 
         for node in self.nodes:
             baseline_tracker.schedule_node(node)
@@ -379,7 +380,9 @@ class OverlapScheduler:
                 self.original_mem_before_compute_index.append(last_compute_max_memory)
                 last_compute_max_memory = current_mem
 
-            self.original_peak_memory = max(self.original_peak_memory, current_mem)
+            peak_memory = max(peak_memory, current_mem)
+
+        return peak_memory
 
     def _prefetch_would_exceed_memory_budget(self, start_node: fx.Node) -> bool:
         """
@@ -903,12 +906,6 @@ class OverlapScheduler:
             key=lambda n: (self.compute_index_domination[n], self.node_idx[n]),
         )
 
-        # Runtime scheduling: try to schedule each candidate
-        scheduled_count = 0
-        dependency_blocked = 0
-        in_flight_blocked = 0
-        path_blocked = 0
-
         for collective in candidates:
             if available_compute_time == 0:
                 break
@@ -916,22 +913,18 @@ class OverlapScheduler:
             why = WhyNoOverlap(compute_node, collective)
             info = self.collective_info[collective]
 
-            # Check dependency conflicts
             if (
                 collective in compute_ancestors
                 or compute_node in self.node_ancestors[collective]
             ):
                 why("dependency conflict")
-                dependency_blocked += 1
                 continue
 
             # Check if prefetching would exceed memory budget
             if self._prefetch_would_exceed_memory_budget(collective):
                 why("prefetch would exceed memory budget")
-                in_flight_blocked += 1
                 continue
 
-            # Check in-flight memory limit
             while (
                 self.in_flight
                 and (self.max_in_flight_bytes - self.in_flight_bytes) < info.size_bytes
@@ -941,23 +934,29 @@ class OverlapScheduler:
 
             if (self.max_in_flight_bytes - self.in_flight_bytes) < info.size_bytes:
                 why("in-flight memory limit")
-                in_flight_blocked += 1
                 continue
 
-            # Find path to collective
+            # Check if we can reach this collective without scheduling compute, other collectives, or waits
             path = self._find_schedulable_path(collective, compute_node, why)
             if path is None:
-                path_blocked += 1
                 continue
 
-            # Add back time from path nodes
+            log.debug(
+                "Overlapping collective %s with compute %s: coll_domination=%d, current_depth=%d",
+                collective.name,
+                compute_node.name,
+                self.compute_index_domination[collective],
+                self.current_compute_index,
+            )
+
+            # Track compute runtime of nodes we must schedule to reach collective and
+            # add back available overlap time corresponding to prior in-flight collectives
             path_estimates = [self.get_non_collective_runtime_estimate(p) for p in path]
             path_time = sum(p for p in path_estimates if p is not None)
             additional_time = min(path_time, reduced_time)
             reduced_time -= additional_time
-            # available_compute_time += additional_time
+            available_compute_time += additional_time
 
-            # Schedule path and collective
             self._schedule_path_to_collective(path, compute_node)
             self._handle_collective_start(collective)
             self._update_cumulative_prefetch_memory(collective, info)
@@ -968,22 +967,7 @@ class OverlapScheduler:
             info.hiding_nodes.add(compute_node)
             available_compute_time -= overlap_amount
 
-            scheduled_count += 1
-
         self.wasted_compute += available_compute_time
-
-        log.info(
-            "Overlap scheduling for %s, wasted compute %.2f: "
-            "candidates=%d, scheduled=%d, dependency_blocked=%d, "
-            "in_flight_blocked=%d, path_blocked=%d",
-            compute_node.name,
-            available_compute_time,
-            len(candidates),
-            scheduled_count,
-            dependency_blocked,
-            in_flight_blocked,
-            path_blocked,
-        )
 
     def _find_schedulable_path(
         self, target: fx.Node, curr_compute_node: fx.Node | None, why: WhyNoOverlap
