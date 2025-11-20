@@ -156,20 +156,24 @@ def test_get_num_threads() -> int:
     return torch.ops.libtorch_agnostic_2_10.test_get_num_threads.default()
 
 
-def my_empty(size, dtype=None, device=None, pin_memory=None) -> Tensor:
+def my_empty(
+    size, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
+) -> Tensor:
     """
-    Creates an empty tensor with the specified size, dtype, device, and pin_memory.
+    Creates an empty tensor with the specified size, dtype, layout, device, pin_memory, and memory_format.
 
     Args:
         size: list[int] - size of the tensor to create
         dtype: ScalarType or None - data type of the tensor
+        layout: Layout or None - layout of the tensor
         device: Device or None - device on which to create the tensor
         pin_memory: bool or None - whether to use pinned memory
+        memory_format: MemoryFormat or None - memory format of the tensor
 
     Returns: Tensor - an uninitialized tensor with the specified properties
     """
     return torch.ops.libtorch_agnostic_2_10.my_empty.default(
-        size, dtype, device, pin_memory
+        size, dtype, layout, device, pin_memory, memory_format
     )
 
 
