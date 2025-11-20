@@ -103,6 +103,13 @@ AOTI_TORCH_EXPORT AOTITorchError torch_get_const_data_ptr(
     const void** ret_data_ptr // returns borrowed reference
 );
 
+#ifdef USE_CUDA
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_current_cuda_blas_handle(void** ret_handle);
+
+#endif // USE_CUDA
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #ifdef __cplusplus
