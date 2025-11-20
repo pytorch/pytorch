@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 from dataclasses import dataclass, field, fields
 from enum import auto, Enum
 from typing import Any, TYPE_CHECKING
@@ -15,6 +16,7 @@ from torch._subclasses.complex_tensor._ops.common import (
     FORCE_TEST_LIST,
     OpOverloadPacket,
 )
+from torch.autograd.gradcheck import gradcheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import TestCase as PytorchTestCase
 from torch.utils._pytree import tree_flatten
@@ -49,9 +51,25 @@ def _as_complex_dtensor(arg: torch.Tensor | Any) -> torch.Tensor | Any:
     return dist.tensor.DTensor.from_local(_as_complex_tensor(arg))
 
 
+def _as_gradcheck_tensor(
+    arg: torch.Tensor | Any, input_list: list[torch.Tensor]
+) -> torch.Tensor | Any:
+    if not isinstance(arg, torch.Tensor):
+        return arg
+    arg = _as_complex_tensor(arg)
+    if not (arg.dtype.is_floating_point or arg.dtype.is_complex):
+        input_list.append(arg)
+        return arg
+
+    arg = arg.requires_grad_()
+    input_list.append(arg)
+    return arg
+
+
 TRANSFORM_FUNCS = {
     Variant.Op: _as_complex_tensor,
     Variant.Distributed: _as_complex_dtensor,
+    Variant.GradCheck: _as_gradcheck_tensor,
 }
 
 
@@ -149,20 +167,54 @@ class TestCase(PytorchTestCase):
         transform_fn = TRANSFORM_FUNCS[variant]
 
         for sample_input in sample_inputs:
+            if variant != Variant.GradCheck:
 
-            def expected(sample_input=sample_input):
-                return op(sample_input.input, *sample_input.args, **sample_input.kwargs)
+                def expected(sample_input=sample_input):
+                    return op(
+                        sample_input.input, *sample_input.args, **sample_input.kwargs
+                    )
 
-            subclass_sample = sample_input.transform(transform_fn)
+                subclass_sample = sample_input.transform(transform_fn)
 
-            def actual(subclass_sample=subclass_sample):
-                return op(
-                    subclass_sample.input,
-                    *subclass_sample.args,
-                    **subclass_sample.kwargs,
+                def actual(subclass_sample=subclass_sample):
+                    return op(
+                        subclass_sample.input,
+                        *subclass_sample.args,
+                        **subclass_sample.kwargs,
+                    )
+
+                self.assertSameResult(expected, actual, **kwargs)
+            else:
+                input_list = []
+                # Mark all applicable tensors with `requires_grad=True`
+                # Come up with a list of applicable tensors.
+                subclass_sample = sample_input.transform(
+                    functools.partial(transform_fn, input_list=input_list)
                 )
 
-            self.assertSameResult(expected, actual, **kwargs)
+                # The function to gradcheck is the op, replacing the appropriate tensors
+                # with the input ones
+                def func(*t: torch.Tensor):
+                    it = iter(t)
+
+                    def f(x):
+                        if not isinstance(x, torch.Tensor):
+                            return x
+                        return next(it)
+
+                    input_sample = sample_input.transform(f)
+                    return op(
+                        input_sample.input, *input_sample.args, **input_sample.kwargs
+                    )
+
+                # Do the actual gradcheck
+                gradcheck(
+                    func,
+                    input_list,
+                    raise_exception=True,
+                    fast_mode=True,
+                    check_batched_grad=True,
+                )
 
 
 aten = torch.ops.aten
