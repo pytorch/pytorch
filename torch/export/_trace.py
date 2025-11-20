@@ -279,13 +279,14 @@ def _extract_fake_inputs(gm, args, kwargs):
 
     if in_shuffle_graph := getattr(gm, "_in_shuffle_graph", None):
         flat_args = pytree.tree_leaves((args, kwargs))
-        node_map = {
-            node: i
-            for i, node in enumerate(
-                next(iter(reversed(in_shuffle_graph.graph.nodes))).args[0]
-            )
-            if node.op == "placeholder"
-        }
+        # Build node_map: maps placeholder nodes to their position among placeholders in output
+        node_map = {}
+        placeholder_idx = 0
+        for node in next(iter(reversed(in_shuffle_graph.graph.nodes))).args[0]:
+            if node.op == "placeholder":
+                node_map[node] = placeholder_idx
+                placeholder_idx += 1
+
         new_fake_inps: list[Any] = []
         for i, node in enumerate(
             in_shuffle_graph.graph.find_nodes(op="placeholder")[1:]

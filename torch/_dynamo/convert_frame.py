@@ -1000,7 +1000,11 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
     """
     import inspect
 
-    if isinstance(mod, torch.nn.Module):
+    # Check for GraphModule first to ensure we always use _call_impl for proper inlining
+    # This preserves node metadata (including stack traces) during re-export
+    if isinstance(mod, torch.fx.GraphModule):
+        mod = mod._call_impl
+    elif isinstance(mod, torch.nn.Module):
         # Mirrored from NNModuleVariable.call_function:
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
         if (
@@ -1014,8 +1018,6 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             and len(torch.nn.modules.module._global_backward_hooks) == 0
         ):
             mod = mod.forward
-        elif isinstance(mod, torch.fx.GraphModule):
-            mod = mod._call_impl
         else:
             mod = mod.__call__
 

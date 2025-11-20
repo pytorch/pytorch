@@ -774,6 +774,9 @@ def dynamo_graph_capture_for_export(
             )
             annotations = torch.nn.Module.__dict__.get("__annotations__", None)
             for name, value in pyt.root.__dict__.items():
+                # Skip graph-related attributes to preserve the codegen we just set up
+                if name in ("_graph", "_code", "_lineno_map", "_prologue_start"):
+                    continue
                 if annotations and name not in annotations:
                     graph_module.__dict__[name] = value
         graph_module._in_spec = pyt.in_spec
