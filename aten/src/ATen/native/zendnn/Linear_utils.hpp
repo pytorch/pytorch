@@ -18,6 +18,16 @@
 namespace at::native {
 using namespace zendnnl::interface;
 
+static const std::unordered_map<std::string_view, post_op_type_t> post_op_map =
+    {{"relu", post_op_type_t::relu},
+     {"gelu_tanh", post_op_type_t::gelu_tanh},
+     {"gelu_erf", post_op_type_t::gelu_erf},
+     {"silu", post_op_type_t::swish},
+     {"sigmoid", post_op_type_t::sigmoid},
+     {"tanh", post_op_type_t::tanh},
+     {"mul", post_op_type_t::binary_mul},
+     {"add", post_op_type_t::binary_add}};
+
 inline std::vector<int64_t> get_2d_size_for_tensor(
     const at::Tensor& inp_tensor) {
   const int64_t dim = inp_tensor.dim();
@@ -142,48 +152,5 @@ inline void check_tensor_dtypes_for_linear(
   }
 }
 
-inline void set_linear_context_attributes(
-    matmul_context_t& matmul_context,
-    tensor_t& weights,
-    const std::vector<std::string_view>& post_op_ids,
-    std::optional<std::reference_wrapper<tensor_t>> bias_opt_ref =
-        std::nullopt) {
-  matmul_context.set_param("weights", weights);
-  if (bias_opt_ref.has_value()) {
-    tensor_t& bias = bias_opt_ref->get();
-    matmul_context.set_param("bias", bias);
-  }
-  static const std::unordered_map<std::string_view, post_op_type_t>
-      post_op_map = {
-          {"relu", post_op_type_t::relu},
-          {"gelu_tanh", post_op_type_t::gelu_tanh},
-          {"gelu_erf", post_op_type_t::gelu_erf},
-          {"silu", post_op_type_t::swish},
-          {"sigmoid", post_op_type_t::sigmoid},
-          {"tanh", post_op_type_t::tanh},
-          {"mul", post_op_type_t::binary_mul},
-          {"add", post_op_type_t::binary_add}};
-  for (const auto& op_str : post_op_ids) {
-    if (op_str == "none")
-      continue;
-    auto it = post_op_map.find(op_str);
-    if (it == post_op_map.end()) {
-      std::string supported_ops;
-      for (const auto& kv : post_op_map) {
-        if (!supported_ops.empty()) {
-          supported_ops += ", ";
-        }
-        supported_ops += std::string(kv.first);
-      }
-      TORCH_CHECK(
-          false,
-          "Unsupported post operation. Supported ops: ",
-          supported_ops,
-          " for ZenDNN_linear");
-    }
-    auto post_op = post_op_t{it->second};
-    matmul_context.set_post_op(post_op);
-  }
-}
 } // namespace at::native
 #endif // AT_ZENDNN_ENABLED()
