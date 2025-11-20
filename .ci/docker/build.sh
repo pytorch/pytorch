@@ -136,10 +136,10 @@ case "$tag" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc9-inductor-benchmarks)
+  pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=13.0.0
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
