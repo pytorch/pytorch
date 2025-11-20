@@ -578,22 +578,12 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
             ):
-                print(
-                    "before set rng: ",
-                    torch.distributed.get_rank(),
-                    state.state.view(dtype=torch.int64),
-                )
                 self._device_handle.set_rng_state(state.state)
                 try:
                     yield  # execute the region code
                 finally:
                     # update offset to synchronize among ranks
                     self._set_post_op_offset(state, spec, old_offset)
-                    print(
-                        "after post: ",
-                        torch.distributed.get_rank(),
-                        state.state.view(dtype=torch.int64),
-                    )
         else:
             yield
 
@@ -676,7 +666,10 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
 
                 local_shape, global_offset = tuple(local_shape), tuple(global_offset)
 
-            global_strides = spec.tensor_meta.stride
+            # spec.mesh._layout and spec.tensor_meta have different stride, spec.tensor_meta.stride as hardcode value 0
+            global_strides = (1,)
+            for dim in reversed(spec.tensor_meta.shape[1:]):
+                global_strides = (global_strides[0] * dim,) + global_strides
 
             if (local_shape, global_offset) == ((), ()):  # a out-of-mesh rank
                 local_shape = tuple([0] * len(global_shape))
@@ -708,7 +701,6 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
         from torch.distributed.tensor._ops.utils import prod
 
         numel = prod(dtensor_shape)
-
         grid_x = min(self.max_grid, (numel + self.block_size - 1) // self.block_size)
         offset_incr = (
             (numel - 1) // (self.block_size * grid_x * self.unroll) + 1

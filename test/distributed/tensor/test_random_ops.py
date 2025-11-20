@@ -15,6 +15,7 @@ from torch.distributed.tensor import (
     DTensor,
     Replicate,
     Shard,
+    Partial,
 )
 from torch.distributed.tensor._random import (
     is_rng_supported_mesh,
@@ -600,39 +601,53 @@ class DistTensorRandomOpTest(DTensorTestBase):
         2. DTensor randn produces the same global tensor as torch.randn with identical seeds
         3. Multiple consecutive random operations maintain consistency
         """
-        # Setup 2x2 mesh for testing
-        mesh = torch.arange(self.world_size)
+        mesh = torch.arange(self.world_size).view(2, 2)
         device_mesh = DeviceMesh(self.device_type, mesh)
 
         # Generate reference tensors using regular torch.randn
         torch.manual_seed(42)
-        reference_tensor_1 = torch.randn(4, device=self.device_type)
-        reference_tensor_2 = torch.randn(4, device=self.device_type)
+        reference_tensor_1 = torch.randn(8, 8, device=self.device_type)
+        reference_tensor_2 = torch.randn(8, 8, device=self.device_type)
 
-        # Generate DTensor tensors with the same seed
-        torch.manual_seed(42)
-        dtensor_1 = torch.distributed.tensor.randn(
-            (4,), device_mesh=device_mesh, placements=[Shard(0)]
-        )
-        # Gather distributed tensor to replicate for comparison
-        gathered_tensor_1 = dtensor_1.redistribute(placements=[Replicate()]).to_local()
+        placements_list = [  # this list of placements should be enough to cover
+            [Shard(0), Shard(1)],
+            [Shard(0), Replicate()],
+            [Shard(1), Shard(0)],
+            [Shard(1), Replicate()],
+            [Replicate(), Shard(0)],
+            [Replicate(), Shard(1)],
+            [Replicate(), Replicate()],
+        ]
+        for placements in placements_list:
+            # Generate DTensor tensors with the same seed
+            torch.manual_seed(42)
+            dtensor_1 = torch.distributed.tensor.randn(
+                (8, 8), device_mesh=device_mesh, placements=placements
+            )
+            # Gather distributed tensor to replicate for comparison
+            gathered_tensor_1 = dtensor_1.redistribute(
+                placements=[Replicate(), Replicate()]
+            ).to_local()
 
-        dtensor_2 = torch.distributed.tensor.randn(
-            (4,), device_mesh=device_mesh, placements=[Shard(0)]
-        )
-        gathered_tensor_2 = dtensor_2.redistribute(placements=[Replicate()]).to_local()
+            dtensor_2 = torch.distributed.tensor.randn(
+                (8, 8), device_mesh=device_mesh, placements=placements
+            )
+            gathered_tensor_2 = dtensor_2.redistribute(
+                placements=[Replicate(), Replicate()]
+            ).to_local()
 
-        # Verify DTensor produces identical results to regular torch tensors
-        self.assertTrue(
-            torch.allclose(reference_tensor_1, gathered_tensor_1),
-            f"First DTensor randn call does not match torch.randn with same seed. "
-            f"Expected: {reference_tensor_1.tolist()}, Got: {gathered_tensor_1.tolist()}",
-        )
-        self.assertTrue(
-            torch.allclose(reference_tensor_2, gathered_tensor_2),
-            f"Second DTensor randn call does not match torch.randn with same seed. "
-            f"Expected: {reference_tensor_2.tolist()}, Got: {gathered_tensor_2.tolist()}",
-        )
+            # Verify DTensor produces identical results to regular torch tensors
+            torch.distributed.breakpoint()
+            self.assertTrue(
+                torch.allclose(reference_tensor_1, gathered_tensor_1),
+                f"First DTensor at {placements} randn call does not match torch.randn with same seed. "
+                f"Expected: {reference_tensor_1.tolist()}, Got: {gathered_tensor_1.tolist()}",
+            )
+            self.assertTrue(
+                torch.allclose(reference_tensor_2, gathered_tensor_2),
+                f"Second DTensor randn call does not match torch.randn with same seed. "
+                f"Expected: {reference_tensor_2.tolist()}, Got: {gathered_tensor_2.tolist()}",
+            )
 
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):
