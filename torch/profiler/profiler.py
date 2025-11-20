@@ -38,12 +38,12 @@ __all__ = [
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
 
-_warned_messages = set()
+_WARNINGS_SHOWN = set()
 
 
 def _warn_once(msg, category=UserWarning, stacklevel=2):
-    if msg not in _warned_messages:
-        _warned_messages.add(msg)
+    if msg not in _WARNINGS_SHOWN:
+        _WARNINGS_SHOWN.add(msg)
         warn(msg, category=category, stacklevel=stacklevel)
 
 
