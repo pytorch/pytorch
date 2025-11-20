@@ -483,8 +483,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertExpectedInline(
                 gm.code.strip("\r\n "),
                 """\
-def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, args_0,))
+def forward(self, bar):
+    _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, bar,))
     L_bar_x , L_bar_y , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2)
     l_bar_x = L_bar_x
     l_bar_y = L_bar_y
@@ -521,8 +521,8 @@ def forward(self, arg0_1, arg1_1):
         self.assertExpectedInline(
             ep.code.strip("\r\n "),
             """\
-def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
+def forward(self, x):
+    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, x,))
     L_x_ , L_outer_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
     l_x_ = L_x_
     l_outer_ = L_outer_
@@ -581,8 +581,8 @@ def forward(self, args_0):
         self.assertExpectedInline(
             gm.code.strip("\r\n "),
             """\
-def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
+def forward(self, x):
+    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, x,))
     L_args_0_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
     l_args_0_ = L_args_0_
     add = l_args_0_ + 1
