@@ -479,8 +479,7 @@ MessageLogger::MessageLogger(
           << std::setfill('0') << ' ' << std::setw(2) << timeinfo->tm_hour
           << ':' << std::setw(2) << timeinfo->tm_min << ':' << std::setw(2)
           << timeinfo->tm_sec << '.' << std::setw(9) << ns << ' '
-          << c10::filesystem::path(file).filename() << ':' << line
-          << "] ";
+          << c10::filesystem::path(file).filename() << ':' << line << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
