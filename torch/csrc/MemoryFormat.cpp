@@ -29,7 +29,7 @@ static PyObject* THPMemoryFormat_repr(THPMemoryFormat* self) {
 }
 
 static PyObject* THPMemoryFormat_reduce(PyObject* _self, PyObject* noargs) {
-  auto* self = (THPMemoryFormat*)_self;
+  auto* self = reinterpret_cast<THPMemoryFormat*>(_self);
   return THPUtils_packString(self->name);
 }
 
@@ -49,7 +49,7 @@ PyTypeObject THPMemoryFormatType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    (reprfunc)THPMemoryFormat_repr, /* tp_repr */
+    reinterpret_cast<reprfunc>(THPMemoryFormat_repr), /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
@@ -86,7 +86,9 @@ void THPMemoryFormat_init(PyObject* module) {
   }
   Py_INCREF(&THPMemoryFormatType);
   if (PyModule_AddObject(
-          module, "memory_format", (PyObject*)&THPMemoryFormatType) != 0) {
+          module,
+          "memory_format",
+          reinterpret_cast<PyObject*>(&THPMemoryFormatType)) != 0) {
     throw python_error();
   }
 }

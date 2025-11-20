@@ -76,14 +76,21 @@ bool priority_order_init_ = false;
 // TODO(eqy): more benchmarking to determine whether this should include sm86/89
 // Needs to be kept in-sync with test_fused_chocie in test_transformers.py
 bool check_prefer_cudnn_attention() {
-  static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_PREFERRED") != false;
+  static const bool prefer_cudnn = c10::utils::check_env("TORCH_CUDNN_SDPA_DEPRIORITIZED") != true;
   if (!prefer_cudnn) {
     return false;
   }
 #if (defined(CUDNN_VERSION) && (CUDNN_VERSION >= 90900))
-  auto dprops = at::cuda::getCurrentDeviceProperties();
-  auto major = dprops->major;
-  return (major == 9 || major == 10) && !dprops->minor;
+  try {
+    auto dprops = at::cuda::getCurrentDeviceProperties();
+    auto major = dprops->major;
+    return (major == 9 || major == 10) && !dprops->minor;
+  } catch (c10::Error const& e) {
+#ifdef DEBUG
+    TORCH_WARN("check_prefer_cudnn_attention() caught exception ", e.what());
+#endif
+    return false;
+  }
 #else
   return false;
 #endif
@@ -471,7 +478,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto s_k = params.key.sym_size(2);
   const auto d_qk = params.query.sym_size(3);
   const auto d_v = params.value.sym_size(3);
-  long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
+  long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
   if (cudnn_version < 8903) {
     if (debug) {
       TORCH_WARN("SDPA fprop requires cudnn 8.9.3 or higher");
@@ -702,7 +709,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   return false;
 #endif
 #if defined(CUDNN_VERSION)
-  static auto cudnn_version = cudnnGetVersion();
+  static auto cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
   if (params.dropout > 0.0 && cudnn_version > 91100 && cudnn_version < 91400) {
     if (debug) {
       TORCH_WARN(CUDNN_VERSION, " cuDNN version does not support droppout in SDPA (9.11 - 9.13).");

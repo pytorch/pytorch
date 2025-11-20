@@ -3,13 +3,19 @@
 from typing import Optional
 
 from torchfuzz.operators.arg import ArgOperator
+from torchfuzz.operators.argsort import ArgsortOperator
 from torchfuzz.operators.base import Operator
 from torchfuzz.operators.constant import ConstantOperator
+from torchfuzz.operators.gather import GatherOperator
+from torchfuzz.operators.index_select import IndexSelectOperator
 from torchfuzz.operators.item import ItemOperator
 from torchfuzz.operators.layout import (
+    CatOperator,
+    ChunkOperator,
     FlattenOperator,
     ReshapeOperator,
     SqueezeOperator,
+    StackOperator,
     UnsqueezeOperator,
     ViewOperator,
 )
@@ -30,8 +36,10 @@ from torchfuzz.operators.nn_functional import (
     LayerNormOperator,
     LeakyReLUOperator,
     LinearOperator,
+    MultiHeadAttentionForwardOperator,
     ReLUOperator,
     RMSNormOperator,
+    ScaledDotProductAttentionOperator,
     SigmoidOperator,
     SiLUOperator,
     SoftmaxOperator,
@@ -46,6 +54,8 @@ from torchfuzz.operators.scalar_pointwise import (
 )
 from torchfuzz.operators.tensor_pointwise import (
     AddOperator,
+    ClampOperator,
+    CumsumOperator,
     DivOperator,
     MulOperator,
     SubOperator,
@@ -68,6 +78,8 @@ class OperatorRegistry:
         self.register(MulOperator())
         self.register(SubOperator())
         self.register(DivOperator())
+        self.register(ClampOperator())
+        self.register(CumsumOperator())
 
         # Individual scalar pointwise operators (preferred)
         self.register(ScalarAddOperator())
@@ -82,6 +94,9 @@ class OperatorRegistry:
         # # Data-dependent operators
         self.register(NonzeroOperator())
         self.register(MaskedSelectOperator())
+        self.register(GatherOperator())
+        self.register(IndexSelectOperator())
+        self.register(ArgsortOperator())
         self.register(ItemOperator())
         self.register(UniqueOperator())
 
@@ -91,6 +106,9 @@ class OperatorRegistry:
         self.register(FlattenOperator())
         self.register(SqueezeOperator())
         self.register(UnsqueezeOperator())
+        self.register(CatOperator())
+        self.register(StackOperator())
+        self.register(ChunkOperator())
 
         # Matrix multiplication operators
         self.register(MMOperator())
@@ -101,6 +119,8 @@ class OperatorRegistry:
         # Neural network functional operators
         self.register(EmbeddingOperator())
         self.register(LinearOperator())
+        self.register(ScaledDotProductAttentionOperator())
+        self.register(MultiHeadAttentionForwardOperator())
 
         # Activation functions
         self.register(ReLUOperator())

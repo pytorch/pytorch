@@ -678,7 +678,7 @@ def gen_aoti_c_shim_files(
         # Use "aten" as the device name when dispatch_key is Generic
         device_name = "aten" if dispatch_key is None else dispatch_key.lower()
 
-        # header files were checked in for ABI-compatiblilty checking
+        # header files were checked in for ABI-compatibility checking
         header_file_name = f"c_shim_{device_name}.h"
         new_header = gen_aoti_c_shim(
             fallback_native_functions,

@@ -162,7 +162,7 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
   }
   cached_inlined_callstacks_[tup] = cs_ptr;
   // Invoking move constructor
-  // It is not clear if copy-ellision can happen since
+  // It is not clear if copy-elision can happen since
   // cs_ptr is copied into map above.
   // This is to help avoid ref count update
   return cs_ptr;

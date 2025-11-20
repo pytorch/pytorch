@@ -60,7 +60,7 @@ void PropertyPropBase::propagateBlock(Block* block, bool insert_expands) {
   for (Node* node : block->nodes()) {
     try {
       propagateNode(node, insert_expands);
-    } catch (propagation_error& e) {
+    } catch (propagation_error&) {
       setUnshapedType(node);
     } catch (std::exception& e) {
       throw(
@@ -1906,7 +1906,7 @@ class ShapePropagator : public PropertyPropBase {
             "aten::sub(Tensor self, Scalar other, Scalar alpha) -> Tensor") ||
         node->matches("aten::div(Tensor self, Scalar other) -> Tensor") ||
         node->matches("aten::mul(Tensor self, Scalar other) -> Tensor")) {
-      auto first_scalar_type = (tensor_types)[0]->scalarType();
+      auto first_scalar_type = tensor_types[0]->scalarType();
       auto second_scalar_type =
           tryScalarTypeFromJitType(*node->inputs()[1]->type());
       if (!first_scalar_type || !second_scalar_type) {

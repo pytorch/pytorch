@@ -10,6 +10,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/aminmax.h>
 #include <ATen/ops/avg_pool2d.h>
 #include <ATen/ops/avg_pool2d_backward.h>
 #include <ATen/ops/avg_pool2d_backward_native.h>
@@ -544,8 +545,9 @@ static void max_unpool_out_mps_template(const Tensor& input,
   if (indices.defined() && indices.numel() > 0) {
     auto output_image_size = c10::multiply_integers(output_size_);
 
-    int64_t min_idx = indices.min().item<int64_t>();
-    int64_t max_idx = indices.max().item<int64_t>();
+    auto [min_idx_tensor, max_idx_tensor] = indices.aminmax();
+    int64_t min_idx = min_idx_tensor.item<int64_t>();
+    int64_t max_idx = max_idx_tensor.item<int64_t>();
 
     if (min_idx < 0 || max_idx >= output_image_size) {
       int64_t error_idx = (min_idx < 0) ? min_idx : max_idx;
@@ -595,6 +597,7 @@ static void avg_pool2d_template(const Tensor& input,
                                 bool count_include_pad,
                                 const std::optional<int64_t> divisor_override,
                                 const std::string& op_name) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()), "Not implemented for complex");
   const Tensor& grad_output = *(at::borrow_from_optional_tensor(grad_output_opt));
   const bool is_backward_pass = grad_output.defined();
   const bool use_divisor = divisor_override.has_value() && divisor_override.value() != 0;
@@ -913,6 +916,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_out_mps)
  bool ceil_mode,
  const Tensor& output,
  const Tensor& indices) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "Max pooling for complex is not supported for MPS");
   bool use_graph = use_graph_for_max_pool2d(kernel_size, stride);
   if (use_graph) {
     auto indices_memory_format = indices.suggest_memory_format();
@@ -965,6 +970,8 @@ TORCH_IMPL_FUNC(max_pool2d_with_indices_backward_out_mps)
  bool ceil_mode,
  const Tensor& indices,
  const Tensor& grad_input) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "Max pooling for complex is not supported for MPS");
   mps::PoolingOpBlock pooling_op_block = ^PoolingOpFn(cachedGraph, desc) {
     MPSGraph* mpsGraph = cachedGraph.graph();
     return [mpsGraph maxPooling2DGradientWithGradientTensor:cachedGraph.gradOutputTensor

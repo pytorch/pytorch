@@ -153,7 +153,7 @@ namespace at::native {
 namespace {
 
 template <typename scalar_t>
-static void avg_pool3d_out_frame(
+void avg_pool3d_out_frame(
           const scalar_t *input_p,
           scalar_t *output_p,
           int64_t nslices,
@@ -198,9 +198,9 @@ static void avg_pool3d_out_frame(
             int64_t hend = std::min(hstart + kH, iheight + padH);
             int64_t wend = std::min(wstart + kW, iwidth + padW);
             int64_t pool_size = (tend - tstart) * (hend - hstart) * (wend - wstart);
-            tstart = std::max(tstart, (int64_t) 0);
-            hstart = std::max(hstart, (int64_t) 0);
-            wstart = std::max(wstart, (int64_t) 0);
+            tstart = std::max(tstart, static_cast<int64_t>(0));
+            hstart = std::max(hstart, static_cast<int64_t>(0));
+            wstart = std::max(wstart, static_cast<int64_t>(0));
             tend = std::min(tend, itime);
             hend = std::min(hend, iheight);
             wend = std::min(wend, iwidth);
@@ -333,7 +333,7 @@ TORCH_IMPL_FUNC(avg_pool3d_out_cpu) (
 namespace {
 
 template <typename scalar_t>
-static void avg_pool3d_backward_out_frame(
+void avg_pool3d_backward_out_frame(
           scalar_t *gradInput_p,
           const scalar_t *gradOutput_p,
           int64_t nslices,
@@ -377,9 +377,9 @@ static void avg_pool3d_backward_out_frame(
             int64_t hend = std::min(hstart + kH, iheight + padH);
             int64_t wend = std::min(wstart + kW, iwidth + padW);
             int64_t pool_size = (tend -tstart) * (hend - hstart) * (wend - wstart);
-            tstart = std::max(tstart, (int64_t) 0);
-            hstart = std::max(hstart, (int64_t) 0);
-            wstart = std::max(wstart, (int64_t) 0);
+            tstart = std::max(tstart, static_cast<int64_t>(0));
+            hstart = std::max(hstart, static_cast<int64_t>(0));
+            wstart = std::max(wstart, static_cast<int64_t>(0));
             tend = std::min(tend, itime);
             hend = std::min(hend, iheight);
             wend = std::min(wend, iwidth);

@@ -15,12 +15,14 @@ if(NOT __AOTRITON_INCLUDED)
       "manylinux_2_28"  # rocm6.3
       "manylinux_2_28"  # rocm6.4
       "manylinux_2_28"  # rocm7.0
+      "manylinux_2_28"  # rocm7.1
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.2"
       "rocm6.3"
       "rocm6.4"
       "rocm7.0"
+      "rocm7.1"
       )
   set(__AOTRITON_CI_COMMIT "972223c501ffc22068bb035ac5d64cf54318d895")
   set(__AOTRITON_SHA256_LIST
@@ -28,6 +30,7 @@ if(NOT __AOTRITON_INCLUDED)
       "72a153549ea20707331e8a1f1e3d1b8de2913f9d5af2b900c56235d578b57efe"  # rocm6.3
       "c7f319dd7448cbbbab81889dd8a37d47dbc25ebcbd89760f09e6a0904e556393"  # rocm6.4
       "a2a974e0ad929a5e5827c0f896c59bda4872459cbaf8dd8e0a00407f404491cf"  # rocm7.0
+      "d4eb24c9f1a0cfedb35f9292efb41d16589cf5a4b98c3c0940181bbefc49d722"  # rocm7.1
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
@@ -244,7 +247,8 @@ if(NOT __AOTRITON_INCLUDED)
   else()
     set(__AOTRITON_SYSTEM_ROCM "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}")
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_SYSTEM_ROCM}" __AOTRITON_RUNTIME_INDEX)
-    if(${__AOTRITON_RUNTIME_INDEX} LESS 0)
+    # Always build aotriton runtime from source on Windows due to lack of pre-built binaries
+    if(${__AOTRITON_RUNTIME_INDEX} LESS 0 OR WIN32)
       message(STATUS "Cannot find AOTriton runtime for ROCM ${__AOTRITON_SYSTEM_ROCM}. \
       Build runtime from source")
       aotriton_build_from_source(ON aotriton_runtime)

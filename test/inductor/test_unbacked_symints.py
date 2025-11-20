@@ -38,10 +38,6 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
-    @skipIfXpu(
-        msg="The OP aten.nonzero implemented by XPU has different memory layout with fake tensor."
-        " Remove this skip after #146883 fixed."
-    )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
     def test_expand_ok_with_runtime_assert(self, device):
@@ -649,6 +645,31 @@ class TestUnbackedSymints(InductorTestCase):
 
         example_inputs = (torch.randn(32, device=device, dtype=torch.float16),)
         torch._dynamo.mark_dynamic(example_inputs[0], 0)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
+    @skipIfXpu(
+        msg="Invalid SPIR-V modul,https://github.com/intel/torch-xpu-ops/issues/2329"
+    )
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @inductor_config.patch({"max_autotune": True})
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_autotune_with_unbacked_stride(self, device):
+        def fn(x, y, a):
+            u0 = a.item()
+            torch._check(u0 != 1)
+            unbacked = x.expand(8, u0, *x.shape).clone()
+            unbacked = torch.permute(unbacked, [0, 2, 1])
+            y = y.expand(8, *y.shape)
+            bmm = torch.ops.aten.bmm(unbacked, y)
+            return bmm
+
+        example_inputs = (
+            torch.randn((32,), dtype=torch.bfloat16, device=device),
+            torch.randn((128, 64), dtype=torch.bfloat16, device=device),
+            torch.tensor(128, device=device),
+        )
         actual = torch.compile(fn, fullgraph=True)(*example_inputs)
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)

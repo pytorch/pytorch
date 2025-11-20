@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 from torch._inductor.runtime.triton_compat import tl
+from torch._inductor.template_heuristics.cutedsl import get_groupgemm_configs
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
@@ -22,11 +24,13 @@ from ..utils import (
     get_num_sms,
     has_free_symbols,
     use_aten_gemm_kernels,
+    use_blackwell_cutedsl_grouped_mm,
     use_triton_template,
 )
 from .mm_common import (
     _is_static_problem,
     check_supported_striding,
+    load_kernel_template,
     persistent_grouped_mm_grid,
 )
 
@@ -121,6 +125,71 @@ def early_config_prune(g, m, dtsize, configs, named_args):
 
 
 triton_grouped_mm_source = r"""
+import triton
+import triton.language as tl
+
+@triton.jit
+def do_tma_loads(
+    g, a_desc, b_desc, m_offset, n_offset, k_offset,
+    BLOCK_M: tl.constexpr, BLOCK_N: tl.constexpr, BLOCK_K: tl.constexpr,
+):
+{%- if A_IS_2D %}
+{%- if A_IS_K_MAJOR %}
+    a = a_desc.load([m_offset, k_offset])
+{%- else %}
+    a = a_desc.load([k_offset, m_offset])
+{%- endif %}
+{%- else %}
+{%- if A_IS_K_MAJOR %}
+    a = a_desc.load([g, m_offset, k_offset]).reshape(BLOCK_M, BLOCK_K)
+{%- else %}
+    a = a_desc.load([g, k_offset, m_offset]).reshape(BLOCK_K, BLOCK_M)
+{%- endif %}
+{%- endif %}
+{%- if B_IS_2D %}
+{%- if B_IS_K_MAJOR %}
+    b = b_desc.load([n_offset, k_offset])
+{%- else %}
+    b = b_desc.load([k_offset, n_offset])
+{%- endif %}
+{%- else %}
+{%- if B_IS_K_MAJOR %}
+    b = b_desc.load([g, n_offset, k_offset]).reshape(BLOCK_N, BLOCK_K)
+{%- else %}
+    b = b_desc.load([g, k_offset, n_offset]).reshape(BLOCK_K, BLOCK_N)
+{%- endif %}
+{%- endif %}
+
+    return (a, b)
+
+
+@triton.jit
+def do_mma(a, b, accumulator):
+{%- if USE_FAST_ACCUM %}
+{%- if A_IS_K_MAJOR and B_IS_K_MAJOR %}
+    accumulator = tl.dot(a, b.T, accumulator)
+{%- elif A_IS_K_MAJOR and not B_IS_K_MAJOR %}
+    accumulator = tl.dot(a, b, accumulator)
+{%- elif not A_IS_K_MAJOR and B_IS_K_MAJOR %}
+    accumulator = tl.dot(a.T, b.T, accumulator)
+{%- else %}
+    accumulator = tl.dot(a.T, b, accumulator)
+{%- endif %}
+{%- else %}
+{%- if A_IS_K_MAJOR and B_IS_K_MAJOR %}
+    accumulator += tl.dot(a, b.T)
+{%- elif A_IS_K_MAJOR and not B_IS_K_MAJOR %}
+    accumulator += tl.dot(a, b)
+{%- elif not A_IS_K_MAJOR and B_IS_K_MAJOR %}
+    accumulator += tl.dot(a.T, b.T)
+{%- else %}
+    accumulator += tl.dot(a.T, b)
+{%- endif %}
+{%- endif %}
+
+    return accumulator
+
+
 {%- if SCALED %}
 {%- if A_IS_2D or B_IS_2D %}
 {{def_kernel("a_ptr", "b_ptr", "scale_a_ptr", "scale_b_ptr", "offsets_ptr")}}
@@ -318,71 +387,37 @@ triton_grouped_mm_source = r"""
                 m_offset = (m_start_offset + m_tile_offset).to(tl.int32)
                 n_offset = (n_start_offset + n_tile_offset).to(tl.int32)
 
-                for k_block_offset in range(0, k_size, BLOCK_K):
-{%- if A_IS_2D %}
-{%- if A_IS_K_MAJOR %}
-                    a = a_desc.load([m_offset, k_start_offset + k_block_offset])
-{%- else %}
-                    a = a_desc.load([k_start_offset + k_block_offset, m_offset])
-{%- endif %}
-{%- else %}
-{%- if A_IS_K_MAJOR %}
-                    a = a_desc.load([g, m_offset, k_start_offset + k_block_offset]).reshape(BLOCK_M, BLOCK_K)
-{%- else %}
-                    a = a_desc.load([g, k_start_offset + k_block_offset, m_offset]).reshape(BLOCK_K, BLOCK_M)
-{%- endif %}
-{%- endif %}
-{%- if B_IS_2D %}
-{%- if B_IS_K_MAJOR %}
-                    b = b_desc.load([n_offset, k_start_offset + k_block_offset])
-{%- else %}
-                    b = b_desc.load([k_start_offset + k_block_offset, n_offset])
-{%- endif %}
-{%- else %}
-{%- if B_IS_K_MAJOR %}
-                    b = b_desc.load([g, n_offset, k_start_offset + k_block_offset]).reshape(BLOCK_N, BLOCK_K)
-{%- else %}
-                    b = b_desc.load([g, k_start_offset + k_block_offset, n_offset]).reshape(BLOCK_K, BLOCK_N)
-{%- endif %}
-{%- endif %}
+                k_block_offset = 0
+                for k in range(k_size // BLOCK_K):
+                    k_offset = k_start_offset + k_block_offset
+                    a, b = do_tma_loads(
+                        g, a_desc, b_desc, m_offset, n_offset, k_offset,
+                        BLOCK_M, BLOCK_N, BLOCK_K
+                    )
+                    accumulator = do_mma(a, b, accumulator)
+                    k_block_offset += BLOCK_K
 
+                if k_size % BLOCK_K != 0:
+                    k_offset = k_start_offset + k_block_offset
+                    a, b = do_tma_loads(
+                        g, a_desc, b_desc, m_offset, n_offset, k_offset,
+                        BLOCK_M, BLOCK_N, BLOCK_K
+                    )
 {%- if K_IS_VARYING %}
-                    if k_block_offset + BLOCK_K > k_size:
-                        group_offs = k_block_offset + tl.arange(0, BLOCK_K)
-                        k_mask = group_offs < k_size
+                    group_offs = k_block_offset + tl.arange(0, BLOCK_K)
+                    k_mask = group_offs < k_size
 {%- if A_IS_K_MAJOR %}
-                        a = tl.where(k_mask[None, :], a, 0)
+                    a = tl.where(k_mask[None, :], a, 0)
 {%- else %}
-                        a = tl.where(k_mask[:, None], a, 0)
+                    a = tl.where(k_mask[:, None], a, 0)
 {%- endif %}
 {%- if B_IS_K_MAJOR %}
-                        b = tl.where(k_mask[None, :], b, 0)
+                    b = tl.where(k_mask[None, :], b, 0)
 {%- else %}
-                        b = tl.where(k_mask[:, None], b, 0)
+                    b = tl.where(k_mask[:, None], b, 0)
 {%- endif %}
 {%- endif %}
-
-{%- if USE_FAST_ACCUM %}
-{%- if A_IS_K_MAJOR and B_IS_K_MAJOR %}
-                    accumulator = tl.dot(a, b.T, accumulator)
-{%- elif A_IS_K_MAJOR and not B_IS_K_MAJOR %}
-                    accumulator = tl.dot(a, b, accumulator)
-{%- elif not A_IS_K_MAJOR and B_IS_K_MAJOR %}
-                    accumulator = tl.dot(a.T, b.T, accumulator)
-{%- else %}
-                    accumulator = tl.dot(a.T, b, accumulator)
-{%- endif %}
-{%- else %}
-{%- if A_IS_K_MAJOR and B_IS_K_MAJOR %}
-                    accumulator += tl.dot(a, b.T)
-{%- elif A_IS_K_MAJOR and not B_IS_K_MAJOR %}
-                    accumulator += tl.dot(a, b)
-{%- elif not A_IS_K_MAJOR and B_IS_K_MAJOR %}
-                    accumulator += tl.dot(a.T, b.T)
-{%- else %}
-                    accumulator += tl.dot(a.T, b)
-{%- endif %}
-{%- endif %}
+                    accumulator = do_mma(a, b, accumulator)
 {%- else %}
                 offs_am = tile_m_idx * BLOCK_M + tl.arange(0, BLOCK_M)
                 offs_bn = tile_n_idx * BLOCK_N + tl.arange(0, BLOCK_N)
@@ -480,6 +515,11 @@ triton_scaled_grouped_mm_template = TritonTemplate(
     name="scaled_grouped_mm",
     grid=persistent_grouped_mm_grid,
     source=triton_grouped_mm_source,
+)
+
+cutedsl_grouped_mm_template = CuteDSLTemplate(
+    name="grouped_gemm_cutedsl",
+    source=load_kernel_template("cutedsl_mm_grouped"),
 )
 
 
@@ -683,43 +723,44 @@ def _tuned_grouped_mm_common(
     # Checking only for the equality of corresponding dims of
     # multiplicands here, relying on meta function checks for
     # everything else.
+    if len(m1_size) == 2:
+        if len(m2_size) == 2:
+            m, k1 = m1_size
+            k2, _ = m2_size
+            # pyrefly: ignore [missing-attribute]
+            g = offs.get_size()[0]
+            V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = True, True
+        else:
+            # pyrefly: ignore [missing-attribute]
+            g1 = offs.layout.size[0]
+            m, k1 = m1_size
+            g2, k2, _ = m2_size
+            g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+            V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = True, False
+    else:
+        if len(m2_size) == 2:
+            # pyrefly: ignore [missing-attribute]
+            g1 = offs.layout.size[0]
+            g2, m, k1 = m1_size
+            k2, _ = m2_size
+            g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+            V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = False, True
+        else:
+            g1, m, k1 = m1_size
+            g2, k2, _ = m2_size
+            g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+            V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = False, False
+
     if (
         is_nonzero
         and use_triton_template(layout)
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
     ):
         scaled = scale_a is not None
-        if len(m1_size) == 2:
-            if len(m2_size) == 2:
-                m, k1 = m1_size
-                k2, _ = m2_size
-                # pyrefly: ignore  # missing-attribute
-                g = offs.get_size()[0]
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = True, True
-            else:
-                # pyrefly: ignore  # missing-attribute
-                g1 = offs.layout.size[0]
-                m, k1 = m1_size
-                g2, k2, _ = m2_size
-                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = True, False
-        else:
-            if len(m2_size) == 2:
-                # pyrefly: ignore  # missing-attribute
-                g1 = offs.layout.size[0]
-                g2, m, k1 = m1_size
-                k2, _ = m2_size
-                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = False, True
-            else:
-                g1, m, k1 = m1_size
-                g2, k2, _ = m2_size
-                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = False, False
 
         a_is_k_major = mat_a.get_stride()[-1] == 1
         b_is_k_major = mat_b.get_stride()[-2] == 1
@@ -755,6 +796,22 @@ def _tuned_grouped_mm_common(
                 num_warps=config.num_warps,
                 **kwargs,
                 **config.kwargs,
+            )
+
+    if use_blackwell_cutedsl_grouped_mm(
+        mat_a, mat_b, layout, a_is_2d, b_is_2d, offs, bias, scale_result
+    ):
+        for config in get_groupgemm_configs():
+            kwargs = dict(
+                ACC_DTYPE="cutlass.Float32",
+            )
+
+            cutedsl_grouped_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=layout,
+                **kwargs,
+                **asdict(config),
             )
 
     input_gen_fns = {

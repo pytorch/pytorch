@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 import sympy
 
@@ -20,8 +19,8 @@ _MIRROR_REL_OP: dict[type[sympy.Basic], type[sympy.Rel]] = {
 INEQUALITY_TYPES = (sympy.Gt, sympy.Ge, sympy.Lt, sympy.Le)
 
 
-def mirror_rel_op(type: type) -> Optional[type[sympy.Rel]]:
-    return _MIRROR_REL_OP.get(type, None)
+def mirror_rel_op(type: type) -> type[sympy.Rel] | None:
+    return _MIRROR_REL_OP.get(type)
 
 
 # Tries to simplify 'expr', so as to leave only 'thing' in the left-hand side.
@@ -43,7 +42,7 @@ def try_solve(
     thing: sympy.Basic,
     trials: int = 5,
     floordiv_inequality: bool = True,
-) -> Optional[tuple[sympy.Rel, sympy.Expr]]:
+) -> tuple[sympy.Rel, sympy.Expr] | None:
     mirror = mirror_rel_op(type(expr))
 
     # Ignore unsupported expressions:
@@ -77,7 +76,8 @@ def try_solve(
         if e is None:
             continue
 
-        assert isinstance(e, sympy.Rel)
+        if not isinstance(e, sympy.Rel):
+            raise AssertionError("expected sympy.Rel")
 
         for _ in range(trials):
             trial = _try_isolate_lhs(e, thing, floordiv_inequality=floordiv_inequality)
@@ -128,7 +128,8 @@ def _try_isolate_lhs(
             if isinstance(e, INEQUALITY_TYPES) and other.is_negative:
                 op = mirror_rel_op(op)  # type: ignore[assignment]
 
-            assert op is not None
+            if op is None:
+                raise AssertionError("expected op to be not None")
             e = op(lhs, rhs)
 
     ################################################################################

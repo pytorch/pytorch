@@ -154,7 +154,7 @@ REGISTER_CUDA_DISPATCH(lstsq_stub, &lazy_lstsq_kernel)
 
 // Old style dispatches
 // torch_cuda_linalg dynamic library should have a global constructor
-// that calls regiserLinaglDispatch so in order ot lazy bind
+// that calls registerLinalgDispatch so in order ot lazy bind
 // old style dispatch all one have to do is to load library and call disp.func_name
 // Protect from infinite recursion by initializing dispatch to self and checking
 // that values are different after linalg library were loaded

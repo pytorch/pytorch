@@ -1,6 +1,5 @@
 import warnings
 from itertools import chain
-from typing import Optional
 
 import torch
 from torch._utils import _get_device_index
@@ -71,7 +70,8 @@ class Gather(Function):
             warnings.warn(
                 "Was asked to gather along dimension 0, but all "
                 "input tensors were scalars; will instead unsqueeze "
-                "and return a vector."
+                "and return a vector.",
+                stacklevel=2,
             )
             ctx.unsqueezed_scalar = True
         else:
@@ -115,7 +115,7 @@ class Scatter(Function):
 
 
 # background streams used for copying
-_streams: Optional[list[Optional[torch.Stream]]] = None
+_streams: list[torch.Stream | None] | None = None
 
 
 def _get_stream(device: torch.device):

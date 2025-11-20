@@ -1740,7 +1740,7 @@ Vectorized<int16_t> inline shift_256_16(
 
   // Control masks for shuffle operation, treating 256 bits as an
   // array of 16-bit elements, and considering pairs of neighboring
-  // elements.  Specifially, a mask named "ctl_M_N" (M,N in [0,1], and
+  // elements.  Specifically, a mask named "ctl_M_N" (M,N in [0,1], and
   // M!=N) is set so that shuffle will move element with index M from
   // input pair into element with index N in output pair, and element
   // with index M in output pair will be set to all 0s.
@@ -1875,7 +1875,7 @@ Vectorized<T> inline shift_256_8(
 
   // Control masks for shuffle operation, treating 256 bits as an
   // array of 8-bit elements, and considering quadruples of
-  // neighboring elements.  Specifially, a mask named "ctl_M_N" (M,N
+  // neighboring elements.  Specifically, a mask named "ctl_M_N" (M,N
   // in [0,1,2,3], and M!=N) is set so that shuffle will move element
   // with index M from input quadruple into element with index N in
   // output quadruple, and other elements in output quadruple will be

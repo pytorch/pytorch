@@ -21,11 +21,6 @@ using namespace at::native;
 
 namespace at::native {
 
-// TODO: remove this when CUDA <11.6 is no longer supported
-bool disable_sort_for_topk() {
-  return CUB_SUPPORTS_SCAN_BY_KEY();
-}
-
 namespace sbtopk { // single_block_topk
 
 template <typename T>
@@ -418,10 +413,6 @@ __global__ void computeBlockwiseWithinKCounts(
   }
   __syncthreads();
 
-#if !CUB_SUPPORTS_SCAN_BY_KEY()
-  return;
-#endif
-
   Bitwise desired_digit = at::cuda::Bitfield<Bitwise>::getBitfield(desired, current_bit, RADIX_BITS);
 
   // if largest, then only threads that has tidx > desired_digit are active
@@ -477,7 +468,6 @@ __global__ void computeBlockwiseWithinKCounts(
   }
 }
 
-#if CUB_SUPPORTS_SCAN_BY_KEY()
 // Assumption: slice_size can not be larger than UINT32_MAX
 template <typename Bitwise>
 __global__ void computeBlockwiseKthCounts(
@@ -609,7 +599,6 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     }
   }
 }
-#endif
 
 int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
   // occupancy of this kernel is limited by registers per threads
@@ -687,16 +676,12 @@ void launch(
   uint32_t* digit_cum_sum = reinterpret_cast<uint32_t*>(digit_cum_sum_buffer.get());
   AT_CUDA_CHECK(cudaMemsetAsync(digit_cum_sum, 0, numInputSlices * RADIX_DIGITS * sizeof(uint32_t), stream));
 
-#if CUB_SUPPORTS_SCAN_BY_KEY()
   auto withinKCounts_buffer = allocator.allocate(num_blocks * sizeof(uint32_t));
   uint32_t* withinKCounts = reinterpret_cast<uint32_t*>(withinKCounts_buffer.get());
   AT_CUDA_CHECK(cudaMemsetAsync(withinKCounts, 0, num_blocks * sizeof(uint32_t), stream));
 
   auto kthCounts_buffer = allocator.allocate(num_blocks * sizeof(uint32_t));
   uint32_t* kthCounts = reinterpret_cast<uint32_t*>(kthCounts_buffer.get());
-#else
-  uint32_t* withinKCounts = nullptr;
-#endif
 
   Bitwise desiredMask = 0;
   dim3 grid;
@@ -743,7 +728,6 @@ void launch(
   }
   desired = desired_in;
 
-#if CUB_SUPPORTS_SCAN_BY_KEY()
   computeBlockwiseKthCounts<Bitwise><<<std::min(((int64_t)numInputSlices + 255) / 256, (int64_t)1073741824), 256, 0, stream>>>(
     desired, counts, num_blocks, blocks_per_slice, kthCounts);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -759,28 +743,6 @@ void launch(
     topK, topKWithinSliceStride, indices, indicesWithinSliceStride, items_per_thread,
     blocks_per_slice, kthValues, withinKCounts, kthCounts, num_blocks);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-#else
-  // Find topk values based on kth values
-  {
-    dim3 grid;
-    TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
-    int warp_size = at::cuda::warp_size();
-    dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) * (int64_t)warp_size, (int64_t)1024));
-    sbtopk::gatherTopK<T, IndexType, Dim, /* WithKthValues= */true><<<grid, block, 0, stream>>>(
-        input,
-        inputSliceSize,
-        outputSliceSize,
-        largest,
-        numInputSlices,
-        inputWithinSliceStride,
-        topK,
-        topKWithinSliceStride,
-        indices,
-        indicesWithinSliceStride,
-        kthValues);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  }
-#endif
 }
 
 } // namespace mbtopk
@@ -788,7 +750,6 @@ void launch(
 bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
   if (num_slices > std::numeric_limits<uint32_t>::max() ||
       slice_size > std::numeric_limits<uint32_t>::max()) return false;
-#if CUB_SUPPORTS_SCAN_BY_KEY()
   // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/74267
   return (num_slices <= 20 && slice_size >= 20000) ||
       (num_slices > 20 && num_slices <= 40 && slice_size >= 10000) ||
@@ -797,12 +758,6 @@ bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
       (num_slices >= 200 && num_slices < 800 && slice_size >= 3000) ||
       (num_slices >= 800 && num_slices <= 4000 && slice_size >= 800) ||
       (num_slices > 4000 && slice_size >= 400);
-#else
-  // This heuristics is based on the experiment in https://github.com/pytorch/pytorch/pull/71081
-  return (num_slices <= 400 && slice_size >= 5000) ||
-      (num_slices > 400 && num_slices < 4000 && slice_size >= 1000) ||
-      (num_slices >= 4000 && slice_size >= 300);
-#endif
 }
 
 void launch_gather_topk_kernel(
