@@ -1217,7 +1217,7 @@ class DeviceCachingAllocator {
   std::vector<c10::DeviceIndex> devices_with_peer_access_;
 
   bool record_history = false;
-  bool skip_free_requested = false;
+  std::unordered_set<TraceEntry::Action> skip_actions;
 
   std::atomic<CreateContextFn> context_recorder_;
   RecordContext record_context_ = RecordContext::NEVER;
@@ -1272,11 +1272,31 @@ class DeviceCachingAllocator {
       size_t alloc_buffer_max_entries,
       RecordContext when,
       bool clearHistory,
-      bool skip_free_requested) {
+      const std::vector<std::string>& skip_actions_list) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
-    skip_free_requested = skip_free_requested;
+    
+    // Convert string list to action enum set
+    skip_actions.clear();
+    for (const auto& action_str : skip_actions_list) {
+      if (action_str == "alloc") {
+        skip_actions.insert(TraceEntry::Action::ALLOC);
+      } else if (action_str == "free_requested") {
+        skip_actions.insert(TraceEntry::Action::FREE_REQUESTED);
+      } else if (action_str == "free_completed") {
+        skip_actions.insert(TraceEntry::Action::FREE_COMPLETED);
+      } else if (action_str == "segment_alloc") {
+        skip_actions.insert(TraceEntry::Action::SEGMENT_ALLOC);
+      } else if (action_str == "segment_free") {
+        skip_actions.insert(TraceEntry::Action::SEGMENT_FREE);
+      } else if (action_str == "oom") {
+        skip_actions.insert(TraceEntry::Action::OOM);
+      } else if (action_str == "snapshot") {
+        skip_actions.insert(TraceEntry::Action::SNAPSHOT);
+      }
+    }
+    
     context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
@@ -3702,10 +3722,8 @@ class DeviceCachingAllocator {
     }
 
     if (record_history) {
-      // Skip if flag skip_free_requested is True and the action is
-      // FREE_REQUESTED
-      bool should_skip =
-          skip_free_requested && action == TraceEntry::Action::FREE_REQUESTED;
+      // Skip if action is in the skip_actions set
+      bool should_skip = skip_actions.count(action) > 0;
       if (!should_skip) {
         alloc_buffer.insertEntries(te);
       }
@@ -3894,7 +3912,7 @@ class NativeCachingAllocator : public CUDAAllocator {
       size_t alloc_buffer_max_entries,
       RecordContext when,
       bool clearHistory,
-      bool skip_free_requested) override {
+      const std::vector<std::string>& skip_actions) override {
     record_history = enabled;
     annotation_buffer.setMaxEntries(alloc_buffer_max_entries);
     annotation_buffer.clear();
@@ -3905,7 +3923,7 @@ class NativeCachingAllocator : public CUDAAllocator {
           alloc_buffer_max_entries,
           when,
           clearHistory,
-          skip_free_requested);
+          skip_actions);
     }
   }
 

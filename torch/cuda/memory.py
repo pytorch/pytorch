@@ -907,7 +907,7 @@ def _record_memory_history_legacy(
     clear_history=False,
     compile_context=False,
     global_record_annotations=False,
-    skip_free_requested=False,
+    skip_actions=None,
 ):
     _C._cuda_record_memory_history_legacy(  # type: ignore[call-arg]
         enabled,
@@ -919,7 +919,7 @@ def _record_memory_history_legacy(
         clear_history,
         compile_context,
         global_record_annotations,
-        skip_free_requested,
+        skip_actions if skip_actions is not None else [],
     )
 
 
@@ -991,6 +991,7 @@ def _record_memory_history(
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
+        
     """
     if isinstance(enabled, bool):
         return _record_memory_history_legacy(enabled, *args, **kwargs)
@@ -1007,7 +1008,7 @@ def _record_memory_history_impl(
     clear_history: bool = False,
     compile_context: bool = False,
     global_record_annotations: bool = False,
-    skip_free_requested: bool = False,
+    skip_actions: Optional[list[str]] = None,
 ):
     _C._cuda_record_memory_history(  # type: ignore[call-arg]
         enabled,
@@ -1017,7 +1018,7 @@ def _record_memory_history_impl(
         clear_history,
         compile_context,
         global_record_annotations,
-        skip_free_requested,
+        skip_actions if skip_actions is not None else [],
     )
 
 

@@ -18,7 +18,7 @@ TORCH_CUDA_CU_API void _record_memory_history(
     bool clearHistory = false,
     bool compileContext = false,
     bool globalRecordAllocations = false,
-    bool skip_free_requested = false);
+    const std::vector<std::string>& skip_actions = {});
 
 TORCH_CUDA_CU_API void _record_memory_history(
     std::optional<std::string> enabled = "all",
@@ -28,7 +28,7 @@ TORCH_CUDA_CU_API void _record_memory_history(
     bool clearHistory = false,
     bool compileContext = false,
     bool globalRecordAllocations = false,
-    bool skip_free_requested = false);
+    const std::vector<std::string>& skip_actions = {});
 
 TORCH_CUDA_CU_API std::string _memory_snapshot_pickled();
 

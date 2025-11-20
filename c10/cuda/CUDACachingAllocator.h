@@ -296,8 +296,8 @@ class CUDAAllocator : public DeviceAllocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       RecordContext when,
-      bool clearHistory,
-      bool skip_free_requested) = 0;
+      bool clearHistory, 
+      const std::vector<std::string>& skip_actions) = 0;
   virtual void recordAnnotation(
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
@@ -467,14 +467,9 @@ inline void recordHistory(
     size_t alloc_trace_max_entries,
     RecordContext when,
     bool clearHistory,
-    bool skip_free_requested) {
+    const std::vector<std::string>& skip_actions) {
   get()->recordHistory(
-      enabled,
-      context_recorder,
-      alloc_trace_max_entries,
-      when,
-      clearHistory,
-      skip_free_requested);
+      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory, skip_actions);
 }
 
 inline void recordAnnotation(
