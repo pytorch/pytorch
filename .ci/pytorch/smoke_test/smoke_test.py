@@ -28,6 +28,8 @@ BASE_DIR = Path(__file__).parent.parent.parent
 is_cuda_system = gpu_arch_type == "cuda"
 NIGHTLY_ALLOWED_DELTA = 3
 
+# adding comment to triiger the ci
+
 MODULES = [
     {
         "name": "torchvision",
