@@ -15,6 +15,10 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
+from torch.distributed.tensor._ops.registration import (
+    register_op_strategy,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -22,8 +26,6 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_shardable,
     map_placements_after_broadcast,
     prod,
-    register_op_strategy,
-    register_single_dim_strategy,
 )
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
@@ -278,8 +280,8 @@ def gen_single_dim_einsum_strategies(
     edims = EinsumDims.parse_dims(input_dims, output_dim)
 
     # generate strategies for each mesh dim and do cartesian product for final strategy. E.g., for a 2D mesh, we can have [P(),R,R]
-    strategies_over_one_mesh_dim = []
-
+    strategies_over_one_mesh_dim: list[list[Placement]] = []
+    placement_list: list[Placement]
     # split batch dim
     for batch_dim in edims.batch_dims:
         output_batch_dim = output_dim.index(batch_dim)
@@ -337,7 +339,7 @@ def gen_single_dim_einsum_strategies(
 
 
 @register_single_dim_strategy(aten.mm.default)
-def mm_single_dim_strategy(op_schema: OpSchema) -> list[Placement]:
+def mm_single_dim_strategy(op_schema: OpSchema) -> list[list[Placement]]:
     self_strategy, mat2_strategy = op_schema.args_schema
     if not isinstance(self_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
