@@ -1740,6 +1740,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
   std::string exitReason;
+  bool exitIsWatchdogHang = false;
   bool checkDumpSignal = (dumpOnTimeoutOrEx_ && pg_->getUid() == 0);
   int monitorPollInterval = checkDumpSignal ? coordCheckIntervalMilSec_
                                             : heartbeatTimeoutInSec_ * 1000;
@@ -1871,6 +1872,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
             "If either of aforementioned helps, feel free to file an issue to PyTorch about the short timeout "
             "or false positive abort; otherwise, please attempt to debug the hang. ");
         exitReason = "ProcessGroupNCCL watchdog hang";
+        exitIsWatchdogHang = true;
         break;
       }
     }
@@ -1984,8 +1986,7 @@ void ProcessGroupNCCL::HeartbeatMonitor::runLoop() {
   //
   // Or we get stuck in destructors, we will sleep for some time before calling
   // std::abort() to kill the whole process.
-  if ((pg_->terminateProcessGroup_.load() || shouldDump_.load()) &&
-      !terminateHeartbeatMonitorThread_.load()) {
+  if (!terminateHeartbeatMonitorThread_.load() && !exitIsWatchdogHang) {
     std::this_thread::sleep_for(std::chrono::seconds(heartbeatTimeoutInSec_));
     LOG(INFO)
         << pg_->logPrefix() << "slept for " << heartbeatTimeoutInSec_
