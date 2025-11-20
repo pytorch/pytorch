@@ -1,5 +1,9 @@
 #pragma once
 
+#pragma clang diagnostic push
+// ExecuTorch depends on these files and is pinned to C++17
+#pragma clang diagnostic error "-Wpre-c++20-compat"
+
 /// Defines the Half type (half-precision floating-point) including conversions
 /// to standard C types and basic arithmetic operations. Note that arithmetic
 /// operations are implemented by converting to floating point and
@@ -786,3 +790,5 @@ class numeric_limits<c10::Half> {
 };
 
 } // namespace std
+
+#pragma clang diagnostic pop

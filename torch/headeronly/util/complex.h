@@ -1,5 +1,9 @@
 #pragma once
 
+#pragma clang diagnostic push
+// ExecuTorch depends on these files and is pinned to C++17
+#pragma clang diagnostic error "-Wpre-c++20-compat"
+
 #include <complex>
 
 #include <torch/headeronly/macros/Macros.h>
@@ -614,3 +618,5 @@ using c10::complex_literals::operator""_id;
 HIDDEN_NAMESPACE_END(torch, headeronly)
 
 C10_CLANG_DIAGNOSTIC_POP()
+
+#pragma clang diagnostic pop

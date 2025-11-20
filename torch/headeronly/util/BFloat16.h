@@ -1,5 +1,9 @@
 #pragma once
 
+#pragma clang diagnostic push
+// ExecuTorch depends on these files and is pinned to C++17
+#pragma clang diagnostic error "-Wpre-c++20-compat"
+
 // Defines the bloat16 type (brain floating-point). This representation uses
 // 1 bit for the sign, 8 bits for the exponent and 7 bits for the mantissa.
 
@@ -478,3 +482,5 @@ class numeric_limits<c10::BFloat16> {
 };
 
 } // namespace std
+
+#pragma clang diagnostic pop

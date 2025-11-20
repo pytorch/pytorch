@@ -1,4 +1,9 @@
 #pragma once
+
+#pragma clang diagnostic push
+// ExecuTorch depends on these files and is pinned to C++17
+#pragma clang diagnostic error "-Wpre-c++20-compat"
+
 #include <c10/macros/Macros.h>
 
 #include <cstddef>
@@ -97,3 +102,5 @@ bool safe_multiplies_u64(const Container& c, uint64_t* out) {
 }
 
 } // namespace c10
+
+#pragma clang diagnostic pop

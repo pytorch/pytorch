@@ -1,5 +1,9 @@
 #pragma once
 
+#pragma clang diagnostic push
+// ExecuTorch depends on these files and is pinned to C++17
+#pragma clang diagnostic error "-Wpre-c++20-compat"
+
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/complex.h>
@@ -95,6 +99,8 @@ std::enable_if_t<is_complex<From>::value, bool> overflows(
              typename From::value_type>(f.real(), strict_unsigned) ||
       overflows<
              typename scalar_value_type<To>::type,
-             typename From::value_type>(f.imag(), strict_unsigned);
+           typename From::value_type>(f.imag(), strict_unsigned);
 }
 } // namespace c10
+
+#pragma clang diagnostic pop

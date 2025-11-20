@@ -1,5 +1,9 @@
 #pragma once
 
+#pragma clang diagnostic push
+// ExecuTorch depends on these files and is pinned to C++17
+#pragma clang diagnostic error "-Wpre-c++20-compat"
+
 #ifndef C10_MACROS_EXPORT_H_
 #define C10_MACROS_EXPORT_H_
 
@@ -151,3 +155,5 @@
 #define C10_API_ENUM
 #endif
 #endif // C10_MACROS_EXPORT_H_
+
+#pragma clang diagnostic pop
