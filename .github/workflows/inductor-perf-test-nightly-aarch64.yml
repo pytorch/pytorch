@@ -72,7 +72,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runner: linux.arm64.m7g.4xlarge
       build-environment: linux-jammy-aarch64-py3.10
-      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
+      docker-image-name: ci-image:pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
       test-matrix: |
         { include: [
           { config: "inductor_huggingface_perf_cpu_aarch64", shard: 1, num_shards: 9, runner: "linux.arm64.m7g.metal" },

@@ -41,7 +41,7 @@ class RMSprop(Optimizer):  # noqa: D101
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -280,7 +280,7 @@ def _single_tensor_rmsprop(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -357,7 +357,7 @@ def _multi_tensor_rmsprop(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
@@ -495,7 +495,7 @@ def rmsprop(
     weight_decay: float,
     momentum: float,
     centered: bool,
-):
+) -> None:
     r"""Functional API that performs rmsprop algorithm computation.
 
     See :class:`~torch.optim.RMSProp` for details.

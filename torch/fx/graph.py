@@ -297,7 +297,9 @@ class _ParsedStackTrace:
 
 
 # get File:lineno code from stack_trace
-def _parse_stack_trace(stack_trace: str):
+def _parse_stack_trace(
+    stack_trace: str, filter_fn: Optional[Callable[[str, str, str], bool]] = None
+):
     if stack_trace is None:
         return None
     pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
@@ -314,6 +316,8 @@ def _parse_stack_trace(stack_trace: str):
             name = matches.group(3)
             # next line should be the code
             code = lines[idx + 1].strip()
+            if filter_fn and not filter_fn(file, name, code):
+                continue
             return _ParsedStackTrace(file, lineno, name, code)
     return None
 
@@ -1145,7 +1149,7 @@ class _FindNodesLookupTable:
             return [*self.table[(op, None)].keys()]
 
         # op is call_method, get_attr, call_module
-        return [node for node in self.table[(op, None)].keys() if node.target == target]
+        return [node for node in self.table[(op, None)] if node.target == target]
 
 
 @compatibility(is_backward_compatible=True)

@@ -24,6 +24,22 @@ from torch._inductor.virtualized import V
 log = logging.getLogger(__name__)
 
 
+def inline_subgraph_to_ir_nodes(
+    gm: torch.fx.GraphModule, inputs: list[Any], name: str
+) -> Any:
+    """Inline a subgraph by converting its FX operations to individual IR nodes.
+
+    This converts a subgraph to multiple ComputedBuffer nodes (fusable),
+    enabling epilogue fusion with subsequent operations.
+
+    Returns:
+        TensorBox containing the final operation result as individual IR nodes
+    """
+    from torch._inductor.lowering import process_subgraph_nodes
+
+    return process_subgraph_nodes(gm, inputs)
+
+
 class SubgraphChoiceCaller(ir.ChoiceCaller):
     """
     Represents a Subgraph Autotuning choice, and the subgraph can be any arbitrary
@@ -261,7 +277,14 @@ class SubgraphTemplate(KernelTemplate):
                 # decomp_kwargs contains all merged parameters: CustomOpConfig params + runtime kwargs
                 from torch.fx.experimental.proxy_tensor import make_fx
 
-                return make_fx(functools.partial(decomp, **decomp_kwargs))(*args)
+                from ..decomposition import select_decomp_table
+
+                decomposition_table = select_decomp_table()
+
+                return make_fx(
+                    functools.partial(decomp, **decomp_kwargs),
+                    decomposition_table=decomposition_table,
+                )(*args)
 
             # Generate descriptive name for this variant
             variant_name = self._generate_variant_name(decomp, decomp_kwargs)

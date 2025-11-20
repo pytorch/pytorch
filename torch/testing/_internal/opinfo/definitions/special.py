@@ -648,6 +648,16 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         ref=lambda x: scipy.special.spherical_jn(0, x) if TEST_SCIPY else None,
         supports_autograd=False,
+        skips=(
+            DecorateInfo(
+                unittest.skip(
+                    "Scipy doesn't support bool inputs to spherical_bessel_j0"
+                ),
+                "TestUnaryUfuncs",
+                "test_reference_numerics_normal",
+                dtypes=(torch.bool,),
+            ),
+        ),
     ),
 ]
 
@@ -766,6 +776,16 @@ python_ref_db: list[OpInfo] = [
                     torch.float32: tol(atol=1e-03, rtol=1e-03),
                     torch.float64: tol(atol=1e-05, rtol=1e-03),
                 }
+            ),
+        ),
+        skips=(
+            DecorateInfo(
+                unittest.skip(
+                    "Scipy doesn't support bool inputs to spherical_bessel_j0"
+                ),
+                "TestUnaryUfuncs",
+                "test_reference_numerics_normal",
+                dtypes=(torch.bool,),
             ),
         ),
     ),

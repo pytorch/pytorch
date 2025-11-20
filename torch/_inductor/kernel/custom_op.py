@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any, Optional, Union
 
 import torch
+from torch._inductor import config
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, TensorBox
 from torch._inductor.lowering import lowerings, validate_ir
@@ -158,7 +159,6 @@ def _adapt_user_input_gen_fns(
 
     Uses V.graph.sizevars.size_hints() to guess best for dynamic shapes.
     """
-    from torch._inductor import config
 
     name_to_index = {name: i for i, name in enumerate(arg_names)}
     index_based_fns = {}
@@ -238,6 +238,7 @@ def autotune_custom_op(
 
     This function generates multiple implementation choices for a custom operation and
     uses Inductor's autotuning system to select the best performing variant at runtime.
+    After selecting the best choice, applies inline fusion if the winning choice has a graph.
 
     Args:
         name: Unique identifier for the autotuning operation
@@ -320,13 +321,33 @@ def autotune_custom_op(
         )
         input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
-    return autotune_select_algorithm(
+    # Run autotuning and get both result and winning choice
+    selected_result, winning_choice = autotune_select_algorithm(
         name=name,
         choices=choices,
         input_nodes=list(inputs),
         layout=choices[0].layout,
         input_gen_fns=input_gen_fns,
+        return_choice=True,
     )
+
+    # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
+    if winning_choice.gm is not None:
+        log.debug(
+            "Inlining winning choice: %s (name=%s)",
+            getattr(winning_choice, "name", type(winning_choice).__name__),
+            name,
+        )
+        from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
+
+        return inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)
+
+    log.debug(
+        "Winning choice does not support inlining: %s (name=%s)",
+        getattr(winning_choice, "name", type(winning_choice).__name__),
+        name,
+    )
+    return selected_result
 
 
 def register_custom_op_autotuning(
@@ -360,7 +381,7 @@ def register_custom_op_autotuning(
                 "query": lambda fake: torch.randn_like(fake, device='cuda'),
                 "key": lambda fake: torch.randn_like(fake, device='cuda'),
                 "value": lambda fake: torch.randn_like(fake, device='cuda'),
-            }
+            },
         )
     """
     from torch._library.custom_ops import CustomOpDef
@@ -378,12 +399,12 @@ def register_custom_op_autotuning(
         raise TypeError(f"configs must be a list or tuple, got {type(configs)}")
 
     processed_configs = []
-    for config in configs:
-        if isinstance(config, CustomOpConfig):
-            processed_configs.append(config)
+    for cfg in configs:
+        if isinstance(cfg, CustomOpConfig):
+            processed_configs.append(cfg)
         else:
             raise TypeError(
-                f"Each config must be a CustomOpConfig object, got {type(config)}"
+                f"Each config must be a CustomOpConfig object, got {type(cfg)}"
             )
 
     if not processed_configs:
@@ -402,14 +423,12 @@ def register_custom_op_autotuning(
         decompositions = []
         non_tensor_args = []
 
-        for config in processed_configs:
-            decomp = config.get_decomposition(default_impl=default_impl)
+        for cfg in processed_configs:
+            decomp = cfg.get_decomposition(default_impl=default_impl)
             decompositions.append(decomp)
 
             # Merge config params with runtime kwargs (runtime takes precedence)
-            merged_kwargs = _merge_config_and_runtime_kwargs(
-                config.params, runtime_kwargs
-            )
+            merged_kwargs = _merge_config_and_runtime_kwargs(cfg.params, runtime_kwargs)
             non_tensor_args.append(merged_kwargs)
 
         result = autotune_custom_op(

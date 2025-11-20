@@ -571,7 +571,7 @@ def export(
     return None
 
 
-def _is_constant_tensor_list(node):
+def _is_constant_tensor_list(node) -> bool | None:
     if node.kind() != "prim::Constant":
         return False
     output_type = node.output().type()
@@ -585,7 +585,7 @@ def _is_constant_tensor_list(node):
 # get generated in constant prop. So we split them back into prim::ListConstructs
 
 
-def _split_tensor_list_constants(g, block):
+def _split_tensor_list_constants(g, block) -> None:
     for node in block.nodes():
         for subblock in node.blocks():
             _split_tensor_list_constants(g, subblock)
@@ -722,7 +722,7 @@ def _optimize_graph(
     return graph
 
 
-def warn_on_static_input_change(input_states):
+def warn_on_static_input_change(input_states) -> None:
     """Warns that changes to input dictionaries and strings won't take effect in the traced ONNX graph.
 
     We accept dictionaries and strings as ONNX inputs, but they should be only for
@@ -932,7 +932,7 @@ def _get_param_count_list(method_graph, args_params):
     return param_count_list
 
 
-def _check_flatten_did_not_remove(original, jit_flattened):
+def _check_flatten_did_not_remove(original, jit_flattened) -> None:
     """torch.jit._flatten removes None. Check if it did so in this case."""
 
     def flatten(x):
@@ -1286,13 +1286,13 @@ def _setup_trace_module_map(
     model: torch.nn.Module | torch.jit.ScriptModule,
     export_modules_as_functions: bool | Collection[type[torch.nn.Module]],
 ) -> set[str]:
-    def __register_attribute_hook():
+    def __register_attribute_hook() -> None:
         attr_name = "_onnx_attrs"
 
-        def _track_module_attributes_forward_pre_hook(module, input):
+        def _track_module_attributes_forward_pre_hook(module, input) -> None:
             setattr(module, attr_name, _get_module_attributes(module))
 
-        def _track_module_attributes_forward_hook(module, input, output):
+        def _track_module_attributes_forward_hook(module, input, output) -> None:
             tracing_state = _C._get_tracing_state()
             if not tracing_state:
                 return
@@ -1359,7 +1359,7 @@ def _setup_trace_module_map(
     return module_typenames
 
 
-def _reset_trace_module_map():
+def _reset_trace_module_map() -> None:
     torch.jit._trace._trace_module_map = None
     _C._jit_pass_onnx_clear_scope_records()
 
@@ -1388,7 +1388,7 @@ def _get_module_attributes(module):
     return attrs
 
 
-def _trigger_symbolic_function_registration():
+def _trigger_symbolic_function_registration() -> None:
     """Trigger the registration of symbolic functions for all supported opsets."""
 
     from torch.onnx._internal.torchscript_exporter import (  # noqa: F401
@@ -1599,7 +1599,7 @@ def _export(
     return torch_out
 
 
-def _apply_friendly_debug_names(graph, params):
+def _apply_friendly_debug_names(graph, params) -> None:
     for n in graph.nodes():
         for v in n.inputs():
             old_name = v.debugName()
@@ -1611,8 +1611,8 @@ def _apply_friendly_debug_names(graph, params):
                 params[new_name] = params.pop(old_name)
 
 
-def _set_input_and_output_names(graph, input_names, output_names):
-    def set_names(node_list, name_list, descriptor):
+def _set_input_and_output_names(graph, input_names, output_names) -> None:
+    def set_names(node_list, name_list, descriptor) -> None:
         if name_list is None:
             return
         if len(name_list) > len(node_list):
@@ -1681,7 +1681,7 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
 
 def _should_aten_fallback(
     name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
-):
+) -> bool:
     # For all builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
     #   an aten::ATen operator is created regardless of symbolics existence
 
@@ -1822,7 +1822,7 @@ def _run_symbolic_function(
         raise
 
 
-def _verify_custom_op_name(symbolic_name: str):
+def _verify_custom_op_name(symbolic_name: str) -> None:
     if not re.match(r"^[a-zA-Z0-9-_]+::[a-zA-Z-_]+[a-zA-Z0-9-_]*$", symbolic_name):
         raise errors.OnnxExporterError(
             f"Failed to register operator {symbolic_name}. "
@@ -1842,7 +1842,7 @@ def register_custom_op_symbolic(
     symbolic_name: str,
     symbolic_fn: Callable,
     opset_version: int,
-):
+) -> None:
     """Registers a symbolic function for a custom operator.
 
     When the user registers symbolic for custom/contrib ops,
@@ -1868,7 +1868,7 @@ def register_custom_op_symbolic(
     registration.custom_onnx_symbolic(symbolic_name, opset_version)(symbolic_fn)
 
 
-def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
+def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int) -> None:
     """Unregisters ``symbolic_name``.
 
     See "Custom Operators" in the module documentation for an example usage.
@@ -1886,7 +1886,7 @@ def unregister_custom_op_symbolic(symbolic_name: str, opset_version: int):
     registration.registry.unregister(symbolic_name, opset_version)
 
 
-def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names):
+def _validate_dynamic_axes(dynamic_axes, model, input_names, output_names) -> None:
     """Ensures dynamic axes argument is follows the expected format."""
     if len(dynamic_axes) == 0:
         return
