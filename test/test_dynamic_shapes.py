@@ -500,6 +500,12 @@ class TestPySymInt(TestCase):
         r = torch.empty(a0, device="meta")
         self.assertIsInstance(r.shape[0], SymInt)
 
+    def test_hash_size(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 2)
+        r = torch.empty(a0, device="meta")
+        self.assertRaises(TypeError, lambda: hash(r.shape))
+
     def test_guard_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 2)
