@@ -1,3 +1,4 @@
+import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -163,34 +164,20 @@ class OverlapPreservingBucketer:
         Compute ancestor sets for all nodes including:
         1. Original graph edges
         2. Hiding interval deps: collective_start -> hiding_node -> wait
-
-        We do NOT include timeline sequential dependencies, as those are too restrictive
-        and would prevent valid buckets. We only care about preserving the hiding intervals.
-
-        This allows O(1) has_path checks for ancestor conflicts instead of O(V+E) graph traversals.
         """
-        # Build adjacency list with original edges + hiding interval edges
         augmented_inputs: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-
-        # Add original graph edges
-        for node in self.scheduled:
-            for input_node in node.all_input_nodes:
-                augmented_inputs[node].add(input_node)
-
-        # Add hiding interval constraints: start -> hiding_node -> wait
         for start, info in self.collective_info.items():
             if info.is_exposed:
                 continue
             for hiding_node in info.hiding_nodes:
-                # hiding_node depends on start
                 augmented_inputs[hiding_node].add(start)
-                # wait depends on hiding_node
                 augmented_inputs[info.wait_node].add(hiding_node)
 
-        # Compute transitive closure
         node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for node in self.scheduled:
-            for input_node in augmented_inputs[node]:
+            for input_node in itertools.chain(
+                augmented_inputs[node], node.all_input_nodes
+            ):
                 node_ancestors[node].add(input_node)
                 node_ancestors[node] |= node_ancestors[input_node]
 

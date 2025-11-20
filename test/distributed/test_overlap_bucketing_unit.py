@@ -93,28 +93,6 @@ def build_collective_info(graph, hiding_annotations):
     return collective_info
 
 
-def compute_ancestors(graph):
-    """Compute ancestor sets for all nodes in the graph."""
-    node_ancestors = {}
-
-    for node in graph.nodes:
-        ancestors = OrderedSet()
-        stack = list(node.all_input_nodes)
-        visited = set()
-
-        while stack:
-            current = stack.pop()
-            if current in visited:
-                continue
-            visited.add(current)
-            ancestors.add(current)
-            stack.extend(current.all_input_nodes)
-
-        node_ancestors[node] = ancestors
-
-    return node_ancestors
-
-
 @requires_accelerator_dist_backend()
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 @instantiate_parametrized_tests

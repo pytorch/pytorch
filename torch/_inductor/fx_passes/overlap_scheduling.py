@@ -264,8 +264,8 @@ class OverlapScheduler:
         max_coll_distance: int,
         custom_runtime_estimation: Callable[[fx.Node, int | None], float | None] | None,
         collective_estimator: Literal["analytical", "benchmark"],
-        max_memory_increase_gb: float | None,
-        max_memory_increase_ratio: float | None,
+        max_memory_increase_gb: float | None = 1.0,
+        max_memory_increase_ratio: float | None = 0.05,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -1186,7 +1186,7 @@ class OverlapScheduler:
 
 def schedule_overlap_bucketing(
     gm: torch.fx.GraphModule,
-    max_in_flight_gb: float = 1000,
+    max_in_flight_gb: float = 5,
     max_compute_pre_fetch: int = 200,
     collective_bucketing: bool = False,
     insert_overlap_deps: bool = False,
@@ -1195,7 +1195,7 @@ def schedule_overlap_bucketing(
     custom_runtime_estimation: Callable[[fx.Node, int | None], float | None]
     | None = None,
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
-    max_memory_increase_gb: float | None = None,
+    max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
