@@ -17,6 +17,21 @@ from torch._functorch.partitioners import (
 )
 
 
+def is_impure_node_for_dce(node):
+    # Check for special collectives that should be treated as pure
+    if not is_not_collective(node):
+        # It's a collective (wait_tensor, all_gather_into_tensor, etc.)
+        # Treat as pure - can be eliminated if unused
+        return False
+
+    # For everything else, fall back to the DEFAULT logic
+    # This is what eliminate_dead_code() calls when is_impure_node=None
+    impure_random = True
+    if torch._guards.TracingContext.try_get():
+        impure_random = torch._inductor.config.fallback_random
+    return node.is_impure(impure_random)
+
+
 def _is_backward_node(node: fx.Node) -> bool:
     """Check if node is in backward region via annotation"""
     return node.meta.get("custom", {}).get("backward") is not None
@@ -145,8 +160,8 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     new_gm = torch.fx.GraphModule(gm, new_graph)
 
     # DCE with custom is_impure_node (like default_partition)
-    # Override to treat certain collectives as pure for DCE purposes
-    new_gm.graph.eliminate_dead_code(is_impure_node=is_not_collective)
+    # Treats certain collectives as pure while delegating to default impurity logic
+    new_gm.graph.eliminate_dead_code(is_impure_node=is_impure_node_for_dce)
 
     # raise_getitems pass for better memory (like default_partition)
     new_gm = raise_getitems(new_gm)

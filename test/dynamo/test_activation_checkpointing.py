@@ -1933,7 +1933,6 @@ class ACReorderingTests(torch._dynamo.test_case.TestCase):
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
     sigmoid = torch.ops.aten.sigmoid.default(mm);  mm = None
-    detach = torch.ops.aten.detach.default(sigmoid);  detach = None
     sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
     expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
@@ -2088,7 +2087,6 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, arg0_1, arg1_1):
     mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
     relu = torch.ops.aten.relu.default(mm);  mm = None
-    detach = torch.ops.aten.detach.default(relu);  detach = None
     mul = torch.ops.aten.mul.Tensor(relu, 2.0);  relu = None
     sum_1 = torch.ops.aten.sum.default(mul)
     ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
