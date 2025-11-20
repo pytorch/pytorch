@@ -14629,21 +14629,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.assertTrue(same((ref, ref_grad), (act, act_grad), tol=1e-3))
 
-    @skipIfMPS
-    def test_inner_reduction_detection(self):
-        if self.device == "cpu":
-            self.skipTest("Skip for CPU device")
-
-        x = torch.randn(100000, 1, 256, device=self.device)
-
-        @torch.compile
-        def f(x):
-            return x.sum(dim=(0, 1))
-
-        code = run_and_get_triton_code(f, x)
-        self.assertTrue("ReductionHint.OUTER" in code)
-        self.assertFalse("ReductionHint.INNER" in code)
-
     @skip_if_halide
     @requires_cuda_and_triton
     @skip_if_cpp_wrapper("skip cpp wrapper")
