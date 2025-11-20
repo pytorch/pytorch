@@ -403,6 +403,20 @@ class TestAutograd(TestCase):
         out = Func.apply(a)[0]
         out.backward()
 
+    def test_unused_grad_requires_grad_with_materialize(self):
+        """Test that unused gradients have requires_grad=False when create_graph=False"""
+
+        x = torch.ones(10, requires_grad=True)
+        y = torch.ones(10, requires_grad=True)
+        z = (x**2).sum()
+
+        g = torch.autograd.grad(
+            z, (x, y), allow_unused=True, materialize_grads=True, create_graph=False
+        )
+
+        self.assertFalse(g[0].requires_grad)
+        self.assertFalse(g[1].requires_grad)
+
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
