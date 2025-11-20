@@ -11,8 +11,8 @@ from torch._functorch.utils import exposed_in
 @exposed_in("torch.func")
 def functional_call(
     module: "torch.nn.Module",
-    parameter_and_buffer_dicts: Union[dict[str, Tensor], Sequence[dict[str, Tensor]]],
-    args: Optional[Union[Any, tuple]] = None,
+    parameter_and_buffer_dicts: dict[str, Tensor] | Sequence[dict[str, Tensor]],
+    args: Optional[Any | tuple] = None,
     kwargs: Optional[dict[str, Any]] = None,
     *,
     tie_weights: bool = True,
@@ -162,7 +162,7 @@ def functional_call(
 
 @exposed_in("torch.func")
 def stack_module_state(
-    models: Union[Sequence[nn.Module], nn.ModuleList],
+    models: Sequence[nn.Module] | nn.ModuleList,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """stack_module_state(models) -> params, buffers
 
@@ -249,7 +249,7 @@ def stack_module_state(
 
 
 def construct_stacked_leaf(
-    tensors: Union[tuple[Tensor, ...], list[Tensor]], name: str
+    tensors: tuple[Tensor, ...] | list[Tensor], name: str
 ) -> Tensor:
     all_requires_grad = all(t.requires_grad for t in tensors)
     none_requires_grad = all(not t.requires_grad for t in tensors)

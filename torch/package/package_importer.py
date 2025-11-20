@@ -85,7 +85,7 @@ class PackageImporter(Importer):
 
     def __init__(
         self,
-        file_or_buffer: Union[FileLike, torch._C.PyTorchFileReader],
+        file_or_buffer: FileLike | torch._C.PyTorchFileReader,
         module_allowed: Callable[[str], bool] = lambda module_name: True,
     ):
         """Open ``file_or_buffer`` for importing. This checks that the imported package only requires modules
@@ -643,7 +643,7 @@ class PackageImporter(Importer):
 
     def _get_or_create_package(
         self, atoms: list[str]
-    ) -> "Union[_PackageNode, _ExternNode]":
+    ) -> "_PackageNode | _ExternNode":
         cur = self.root
         for i, atom in enumerate(atoms):
             node = cur.children.get(atom, None)

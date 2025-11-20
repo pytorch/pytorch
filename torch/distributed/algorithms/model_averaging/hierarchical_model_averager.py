@@ -160,9 +160,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
 
     def average_parameters(
         self,
-        params: Union[
-            Iterable[torch.nn.Parameter], Iterable[dict[str, torch.nn.Parameter]]
-        ],
+        params: Iterable[torch.nn.Parameter] | Iterable[dict[str, torch.nn.Parameter]],
     ):
         """
         Averages parameters or parameter groups of an optimizer.

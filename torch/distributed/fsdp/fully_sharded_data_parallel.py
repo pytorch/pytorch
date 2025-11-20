@@ -400,20 +400,18 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         sharding_strategy: Optional[ShardingStrategy] = None,
         cpu_offload: Optional[CPUOffload] = None,
         auto_wrap_policy: Optional[
-            Union[Callable, ModuleWrapPolicy, CustomPolicy]
+            Callable | ModuleWrapPolicy | CustomPolicy
         ] = None,
         backward_prefetch: Optional[BackwardPrefetch] = BackwardPrefetch.BACKWARD_PRE,
         mixed_precision: Optional[MixedPrecision] = None,
         ignored_modules: Optional[Iterable[torch.nn.Module]] = None,
         param_init_fn: Optional[Callable[[nn.Module], None]] = None,
-        device_id: Optional[Union[int, torch.device]] = None,
+        device_id: Optional[int | torch.device] = None,
         sync_module_states: bool = False,
         forward_prefetch: bool = False,
         limit_all_gathers: bool = True,
         use_orig_params: bool = False,
-        ignored_states: Union[
-            Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
-        ] = None,
+        ignored_states: Optional[Iterable[torch.nn.Parameter]] | Optional[Iterable[torch.nn.Module]] = None,
         device_mesh: Optional[DeviceMesh] = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
@@ -1008,7 +1006,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 param_name = param_name.replace(FSDP_PREFIX, "")
             yield (param_name, param)
 
-    def _assert_state(self, state: Union[TrainingState, list[TrainingState]]) -> None:
+    def _assert_state(self, state: TrainingState | list[TrainingState]) -> None:
         """Assert we are in the given state."""
         # Since assert can be turned off and this error checking
         # is really important, we use explicit error checking
@@ -1070,7 +1068,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
 
     @torch.no_grad()
     def clip_grad_norm_(
-        self, max_norm: Union[float, int], norm_type: Union[float, int] = 2.0
+        self, max_norm: float | int, norm_type: float | int = 2.0
     ) -> torch.Tensor:
         """Clip the gradient norm of all parameters.
 
@@ -1256,10 +1254,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         optim: torch.optim.Optimizer,
         optim_state_dict: dict[str, Any],
         optim_input: Optional[
-            Union[
-                list[dict[str, Any]],
-                Iterable[torch.nn.Parameter],
-            ]
+            list[dict[str, Any]] | Iterable[torch.nn.Parameter]
         ] = None,
         rank0_only: bool = True,
         full_state_dict: bool = True,
@@ -1319,10 +1314,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         optim_state_dict: dict[str, Any],
         model: torch.nn.Module,
         optim_input: Optional[
-            Union[
-                list[dict[str, Any]],
-                Iterable[torch.nn.Parameter],
-            ]
+            list[dict[str, Any]] | Iterable[torch.nn.Parameter]
         ] = None,
         optim: Optional[torch.optim.Optimizer] = None,
         full_state_dict: bool = True,
@@ -1386,10 +1378,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         model: torch.nn.Module,
         optim: torch.optim.Optimizer,
         optim_input: Optional[
-            Union[
-                list[dict[str, Any]],
-                Iterable[torch.nn.Parameter],
-            ]
+            list[dict[str, Any]] | Iterable[torch.nn.Parameter]
         ] = None,
         rank0_only: bool = True,
         group: Optional[dist.ProcessGroup] = None,
@@ -1496,10 +1485,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         full_optim_state_dict: dict[str, Any],
         model: torch.nn.Module,
         optim_input: Optional[
-            Union[
-                list[dict[str, Any]],
-                Iterable[torch.nn.Parameter],
-            ]
+            list[dict[str, Any]] | Iterable[torch.nn.Parameter]
         ] = None,
         optim: Optional[torch.optim.Optimizer] = None,
     ) -> dict[str, Any]:
@@ -1614,10 +1600,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         full_optim_state_dict: Optional[dict[str, Any]],
         model: torch.nn.Module,
         optim_input: Optional[
-            Union[
-                list[dict[str, Any]],
-                Iterable[torch.nn.Parameter],
-            ]
+            list[dict[str, Any]] | Iterable[torch.nn.Parameter]
         ] = None,
         optim: Optional[torch.optim.Optimizer] = None,
         group: Optional[Any] = None,
@@ -1699,10 +1682,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         optim_state_key_type: OptimStateKeyType,
         model: torch.nn.Module,
         optim_input: Optional[
-            Union[
-                list[dict[str, Any]],
-                Iterable[torch.nn.Parameter],
-            ]
+            list[dict[str, Any]] | Iterable[torch.nn.Parameter]
         ] = None,
         optim: Optional[torch.optim.Optimizer] = None,
     ) -> dict[str, Any]:

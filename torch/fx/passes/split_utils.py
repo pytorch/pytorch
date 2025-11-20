@@ -71,7 +71,7 @@ def split_by_tags(
     return_fqn_mapping: bool = False,
     return_tuple: bool = False,
     GraphModuleCls: type[torch.fx.GraphModule] = torch.fx.GraphModule,
-) -> Union[torch.fx.GraphModule, tuple[torch.fx.GraphModule, dict[str, str]]]:
+) -> torch.fx.GraphModule | tuple[torch.fx.GraphModule, dict[str, str]]:
     """
     Splits a GraphModule using tags on its graph nodes. We honor the order of
     tags. For example, we have tags = ["a", "b", "c"], the function will create

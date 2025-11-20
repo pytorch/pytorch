@@ -1050,7 +1050,7 @@ class ops(_TestParametrizer):
         self,
         op_list,
         *,
-        dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
+        dtypes: OpDTypes | Sequence[torch.dtype] = OpDTypes.supported,
         allowed_dtypes: Optional[Sequence[torch.dtype]] = None,
         skip_if_dynamo=True,
     ):
@@ -1073,7 +1073,7 @@ class ops(_TestParametrizer):
         op = check_exhausted_iterator = object()
         for op in self.op_list:
             # Determine the set of dtypes to use.
-            dtypes: Union[set[torch.dtype], set[None]]
+            dtypes: set[torch.dtype] | set[None]
             if isinstance(self.opinfo_dtypes, Sequence):
                 dtypes = set(self.opinfo_dtypes)
             elif self.opinfo_dtypes == OpDTypes.unsupported_backward:
@@ -1422,7 +1422,7 @@ class expectedFailure:
 
 
 class onlyOn:
-    def __init__(self, device_type: Union[str, list]):
+    def __init__(self, device_type: str | list):
         self.device_type = device_type
 
     def __call__(self, fn):

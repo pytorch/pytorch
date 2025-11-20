@@ -62,7 +62,7 @@ class _NamedOptimizer(optim.Optimizer):
 
     def __init__(
         self,
-        named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
+        named_parameters: Mapping[str, torch.Tensor | ShardedTensor],
         optimizer_class: optim.Optimizer,
         param_groups: Optional[Collection[Mapping[str, Any]]] = None,
         module: Optional[nn.Module] = None,

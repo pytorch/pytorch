@@ -32,8 +32,8 @@ class Pareto(TransformedDistribution):
 
     def __init__(
         self,
-        scale: Union[Tensor, float],
-        alpha: Union[Tensor, float],
+        scale: Tensor | float,
+        alpha: Tensor | float,
         validate_args: Optional[bool] = None,
     ) -> None:
         self.scale, self.alpha = broadcast_all(scale, alpha)

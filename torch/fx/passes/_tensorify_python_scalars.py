@@ -152,7 +152,7 @@ def tensorify_python_scalars(
         # cache constants, why not
         if isinstance(expr, (Integer, Number, BooleanAtom)):
             dtype = None
-            c: Union[bool, int, float]
+            c: bool | int | float
             if isinstance(expr, BooleanAtom):
                 dtype = torch.bool
                 c = bool(expr)

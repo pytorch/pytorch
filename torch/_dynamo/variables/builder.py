@@ -330,7 +330,7 @@ class GraphArg:
     # TODO: storing a SymInt here but not a FakeTensor is a pretty strange
     # thing to do.  Probably should have example (which stores an int) and
     # fake_example
-    _example: Union[TensorWeakRef, torch.SymInt]
+    _example: TensorWeakRef | torch.SymInt
     # When True, this indicates that this GraphArg is a Python quantity (e.g.,
     # a float or int) which we pass to the FX graph as a Tensor.  This
     # controls how we codegen calls into the Dynamo graph: we will call
@@ -1814,7 +1814,7 @@ class VariableBuilder:
         result = ListIteratorVariable(items, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
 
-    def wrap_slice_range(self, value: Union[slice, range]):
+    def wrap_slice_range(self, value: slice | range):
         items = [
             VariableBuilder(self.tx, AttrSource(self.get_source(), k))(
                 getattr(value, k)

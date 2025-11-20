@@ -26,7 +26,7 @@ def _debug_iterative_memory_recompute(
     snodes_allocfree: dict[BaseSchedulerNode, SNodeMemory],
     tlparse_name: str,
     gn_to_bufs_last_use: dict[
-        BaseSchedulerNode, list[Union[FreeableInputBuffer, SchedulerBuffer]]
+        BaseSchedulerNode, list[FreeableInputBuffer | SchedulerBuffer]
     ],
 ) -> bool:
     iterative_recompute_error = False

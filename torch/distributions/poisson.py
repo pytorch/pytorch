@@ -50,7 +50,7 @@ class Poisson(ExponentialFamily):
 
     def __init__(
         self,
-        rate: Union[Tensor, Number],
+        rate: Tensor | Number,
         validate_args: Optional[bool] = None,
     ) -> None:
         (self.rate,) = broadcast_all(rate)

@@ -98,7 +98,7 @@ def diagonal(
 
 
 def _check_vector_norm_args(
-    x: TensorLikeType, ord: Union[float, int] = 2, dim: Optional[DimsType] = None
+    x: TensorLikeType, ord: float | int = 2, dim: Optional[DimsType] = None
 ):
     from torch.fx.experimental.symbolic_shapes import sym_or
 
@@ -129,7 +129,7 @@ def _check_vector_norm_args(
 @out_wrapper(exact_dtype=True)
 def vector_norm(
     x: TensorLikeType,
-    ord: Union[float, int] = 2,
+    ord: float | int = 2,
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
@@ -207,7 +207,7 @@ def _inverse_permutation(perm):
 @out_wrapper(exact_dtype=True)
 def matrix_norm(
     A: TensorLikeType,
-    ord: Union[float, str] = "fro",
+    ord: float | str = "fro",
     dim: DimsType = (-2, -1),
     keepdim: bool = False,
     *,
@@ -307,7 +307,7 @@ def matrix_norm(
 @out_wrapper(exact_dtype=True)
 def norm(
     A: TensorLikeType,
-    ord: Optional[Union[float, str]] = None,
+    ord: Optional[float | str] = None,
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,

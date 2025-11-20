@@ -69,7 +69,7 @@ def _validate_and_get_batch_size(
     return batch_sizes[0]
 
 
-def _num_outputs(batched_outputs: Union[Tensor, tuple[Tensor, ...]]) -> int:
+def _num_outputs(batched_outputs: Tensor | tuple[Tensor, ...]) -> int:
     if isinstance(batched_outputs, tuple):
         return len(batched_outputs)
     return 1
@@ -186,7 +186,7 @@ def _maybe_remove_batch_dim(name, batched_output, vmap_level, batch_size, out_di
 
 # Undos the batching (and any batch dimensions) associated with the `vmap_level`.
 def _unwrap_batched(
-    batched_outputs: Union[Tensor, tuple[Tensor, ...]],
+    batched_outputs: Tensor | tuple[Tensor, ...],
     out_dims: out_dims_t,
     vmap_level: int,
     batch_size: int,

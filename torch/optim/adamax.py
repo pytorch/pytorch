@@ -30,7 +30,7 @@ class Adamax(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 2e-3,
+        lr: float | Tensor = 2e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
@@ -402,7 +402,7 @@ def _multi_tensor_adamax(
         torch._foreach_add_(grouped_grads, eps)
         torch._foreach_maximum_(grouped_exp_infs, grouped_grads)
 
-        bias_corrections: Union[tuple[Tensor, ...], list[Tensor]]
+        bias_corrections: tuple[Tensor, ...] | list[Tensor]
         if capturable:
             bias_corrections = torch._foreach_pow(beta1, grouped_state_steps)
             # foreach_sub doesn't allow a scalar as the first arg

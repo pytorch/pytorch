@@ -57,8 +57,8 @@ class Uniform(Distribution):
 
     def __init__(
         self,
-        low: Union[Tensor, float],
-        high: Union[Tensor, float],
+        low: Tensor | float,
+        high: Tensor | float,
         validate_args: Optional[bool] = None,
     ) -> None:
         self.low, self.high = broadcast_all(low, high)

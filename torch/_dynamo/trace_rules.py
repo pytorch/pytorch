@@ -151,11 +151,7 @@ If you are removing an existing torch level API:
 """
 manual_torch_name_rule_map: dict[
     str,
-    Union[
-        type[TorchInGraphFunctionVariable],
-        type[SkipFunctionVariable],
-        type[UserFunctionVariable],
-    ],
+    type[TorchInGraphFunctionVariable] | type[SkipFunctionVariable] | type[UserFunctionVariable],
 ] = {
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
@@ -3103,7 +3099,7 @@ class FunctionIdSet:
     function_names: Optional[dict[int, str]] = None
 
     def __init__(
-        self, lazy_initializer: Callable[[], Union[dict[int, str], set[int]]]
+        self, lazy_initializer: Callable[[], dict[int, str] | set[int]]
     ) -> None:
         self.lazy_initializer = lazy_initializer
 
@@ -3915,7 +3911,7 @@ def lookup_inner(
     name: Optional[str] = None,
     filename: Optional[str] = None,
     is_direct_call: bool = True,
-    reasons: Union[None, set[str]] = None,
+    reasons: None | set[str] = None,
 ) -> Optional[type[VariableTracker]]:
     result = _lookup_inner(
         obj,

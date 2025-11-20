@@ -242,9 +242,9 @@ class SubclassCreationMeta:
     # meta and attrs are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__
-    attrs: dict[str, Union[SubclassCreationMeta, PlainTensorMeta]]
-    outer_size: Iterable[Union[None, int, torch.SymInt]]
-    outer_stride: Iterable[Union[None, int, torch.SymInt]]
+    attrs: dict[str, SubclassCreationMeta | PlainTensorMeta]
+    outer_size: Iterable[None | int | torch.SymInt]
+    outer_stride: Iterable[None | int | torch.SymInt]
     meta: Any
     # Stores the original subclass itself.
     # This is needed because we need the autograd metadata on the original subclass
@@ -333,7 +333,7 @@ class SubclassCreationMeta:
         return rebuilt
 
     def make_runtime_safe(self):
-        def _make_size_runtime_safe(x: Union[None, int, torch.SymInt]) -> Optional[int]:
+        def _make_size_runtime_safe(x: None | int | torch.SymInt) -> Optional[int]:
             dummy = -1
             if isinstance(x, torch.SymInt):
                 # Replace nested ints by a dummy value (-1) as NJT ignores
@@ -412,7 +412,7 @@ class ViewAndMutationMeta:
     #      inputs[3] and inputs[4] of the plain-tensor graph".
 
     # length = # user inputs
-    subclass_inp_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
+    subclass_inp_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # So, the full set of outputs to the forward graph looks something like:
     # (*mutated_inps, *user_outs, *intermediate_bases, *saved_for_bw_tensors)
     # where the first 3 of those 4 can be subclasses
@@ -420,9 +420,9 @@ class ViewAndMutationMeta:
     # and not user visible, so there's no point in wrapping/unwrapping them at runtime).
     # This list contains subclass information on all of the fw graph outputs
     # except for saved_for_bw_tensors.
-    subclass_fw_graph_out_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
+    subclass_fw_graph_out_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # length = # backward graph inputs
-    subclass_tangent_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
+    subclass_tangent_meta: list[PlainTensorMeta | SubclassCreationMeta]
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
@@ -728,7 +728,7 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[list[Union[PlainTensorMeta, SubclassCreationMeta]]] = (
+    grad_input_metas: Optional[list[PlainTensorMeta | SubclassCreationMeta]] = (
         None
     )
 
@@ -1194,11 +1194,9 @@ class AOTGraphCapture:  # Produced by aot_stage1_graph_capture
     # larger than the original flat_args as all tangents get inputs.  The
     # tuple organizes into primals and tangents.  When not autograd it's just
     # a plain list.
-    updated_flat_args: Union[list[Any], tuple[list[Any], list[Any]]]
+    updated_flat_args: list[Any] | tuple[list[Any], list[Any]]
 
-    updated_flat_args_descs: Union[
-        list[AOTInput], tuple[list[AOTInput], list[AOTInput]]
-    ]
+    updated_flat_args_descs: list[AOTInput] | tuple[list[AOTInput], list[AOTInput]]
 
     # Metadata about subclass inputs/outputs in the graph trace.
     maybe_subclass_meta: Any

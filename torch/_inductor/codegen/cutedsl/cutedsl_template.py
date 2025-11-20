@@ -161,7 +161,7 @@ class CuteDSLTemplateCaller(ChoiceCaller):
         """Benchmark the kernel execution."""
         return self.bmreq.benchmark(*args, out=out)
 
-    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def output_node(self) -> TensorBox | ShapeAsConstantBuffer:
         """Create the output node for this template choice."""
         return TensorBox.create(
             CuteDSLTemplateBuffer(

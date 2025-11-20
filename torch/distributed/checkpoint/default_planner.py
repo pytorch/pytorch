@@ -251,7 +251,7 @@ class DefaultSavePlanner(SavePlanner):
         self.plan = finished_plan
         return self.plan
 
-    def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
+    def resolve_data(self, write_item: WriteItem) -> torch.Tensor | io.BytesIO:
         object = self.lookup_object(write_item.index)
         return self.transform_object(write_item, object)
 

@@ -323,19 +323,19 @@ class _RemoteModule(nn.Module):
     def apply(self, fn: Callable[[Module], None]) -> Self:  # type: ignore[return]
         _raise_not_supported(self.apply.__name__)
 
-    def cuda(self, device: Optional[Union[int, device]] = None) -> Self:  # type: ignore[return]
+    def cuda(self, device: Optional[int | device] = None) -> Self:  # type: ignore[return]
         _raise_not_supported(self.cuda.__name__)
 
-    def ipu(self, device: Optional[Union[int, device]] = None) -> Self:  # type: ignore[return]
+    def ipu(self, device: Optional[int | device] = None) -> Self:  # type: ignore[return]
         _raise_not_supported(self.ipu.__name__)
 
-    def xpu(self, device: Optional[Union[int, device]] = None) -> Self:  # type: ignore[return]
+    def xpu(self, device: Optional[int | device] = None) -> Self:  # type: ignore[return]
         _raise_not_supported(self.xpu.__name__)
 
     def cpu(self) -> Self:  # type: ignore[return]
         _raise_not_supported(self.cpu.__name__)
 
-    def type(self, dst_type: Union[dtype, str]) -> Self:  # type: ignore[return]
+    def type(self, dst_type: dtype | str) -> Self:  # type: ignore[return]
         _raise_not_supported(self.type.__name__)
 
     def float(self) -> Self:  # type: ignore[return]
@@ -355,20 +355,14 @@ class _RemoteModule(nn.Module):
 
     def register_backward_hook(  # type: ignore[return]
         self,
-        hook: Callable[[Module, _grad_t, _grad_t], Union[None, _grad_t]],
+        hook: Callable[[Module, _grad_t, _grad_t], None | _grad_t],
         # pyrefly: ignore [bad-return]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 
     def register_forward_pre_hook(  # type: ignore[return]
         self,
-        hook: Union[
-            Callable[[T, tuple[Any, ...]], Optional[Any]],
-            Callable[
-                [T, tuple[Any, ...], dict[str, Any]],
-                Optional[tuple[Any, dict[str, Any]]],
-            ],
-        ],
+        hook: Callable[[T, tuple[Any, ...]], Optional[Any]] | Callable[[T, tuple[Any, ...], dict[str, Any]], Optional[tuple[Any, dict[str, Any]]]],
         prepend: bool = False,
         with_kwargs: bool = False,
         # pyrefly: ignore [bad-return]
@@ -377,10 +371,7 @@ class _RemoteModule(nn.Module):
 
     def register_forward_hook(  # type: ignore[return, override]
         self,
-        hook: Union[
-            Callable[[T, tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, tuple[Any, ...], dict[str, Any], Any], Optional[Any]],
-        ],
+        hook: Callable[[T, tuple[Any, ...], Any], Optional[Any]] | Callable[[T, tuple[Any, ...], dict[str, Any], Any], Optional[Any]],
         prepend: bool = False,
         with_kwargs: bool = False,
         # pyrefly: ignore [bad-return]

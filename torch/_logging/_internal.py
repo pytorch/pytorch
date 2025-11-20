@@ -102,7 +102,7 @@ class LogRegistry:
         return alias in self.log_alias_to_log_qnames
 
     # register a log with an alias
-    def register_log(self, alias, log_qnames: Union[str, list[str]]) -> None:
+    def register_log(self, alias, log_qnames: str | list[str]) -> None:
         if isinstance(log_qnames, str):
             log_qnames = [log_qnames]
         self.log_alias_to_log_qnames[alias] = log_qnames
@@ -244,7 +244,7 @@ def set_logs(
     fusion: bool = False,
     overlap: bool = False,
     export: Optional[int] = None,
-    modules: Optional[dict[str, Union[int, bool]]] = None,
+    modules: Optional[dict[str, int | bool]] = None,
     cudagraphs: bool = False,
     sym_node: bool = False,
     compiled_autograd: bool = False,
@@ -1293,7 +1293,7 @@ def get_structured_logging_overhead() -> Optional[float]:
 def trace_structured_artifact(
     name: str,  # this will go in metadata
     encoding: str,
-    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    payload_fn: Callable[[], Optional[str | object]] = lambda: None,
     compile_id: Optional[CompileId] = None,
 ) -> None:
     trace_structured(
@@ -1311,9 +1311,9 @@ def trace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
     # Tuple[str, int] is a special case for string interning
-    metadata_fn: Callable[[], Union[dict[str, Any], tuple[str, int]]] = dict,
+    metadata_fn: Callable[[], dict[str, Any] | tuple[str, int]] = dict,
     *,
-    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    payload_fn: Callable[[], Optional[str | object]] = lambda: None,
     suppress_context: bool = False,
     expect_trace_id: bool = True,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging
@@ -1411,9 +1411,9 @@ def dtrace_structured(
     name: str,
     # NB: metadata expected to be dict so adding more info is forward compatible
     # Tuple[str, int] is a special case for string interning
-    metadata_fn: Callable[[], Union[dict[str, Any], tuple[str, int]]] = dict,
+    metadata_fn: Callable[[], dict[str, Any] | tuple[str, int]] = dict,
     *,
-    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    payload_fn: Callable[[], Optional[str | object]] = lambda: None,
     suppress_context: bool = False,
     expect_trace_id: bool = False,  # Whether or not we expect to have a current trace id
     record_logging_overhead: bool = True,  # Whether or not to record the time spent on structured logging

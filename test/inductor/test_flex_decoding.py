@@ -841,7 +841,7 @@ class TestFlexDecoding(InductorTestCase):
         device,
         dtype: torch.dtype,
         score_mod: Callable,
-        BLOCK_SIZE: Union[int, tuple[int, int]],
+        BLOCK_SIZE: int | tuple[int, int],
     ):
         block_mask = create_block_mask(
             noop_mask, B, 1, 1, S, BLOCK_SIZE=BLOCK_SIZE, device=device

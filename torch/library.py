@@ -570,7 +570,7 @@ def _(lib: Library, schema, alias_analysis=""):
 @overload
 def impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
+    types: str | Sequence[str],
     func: None = None,
     *,
     lib: Optional[Library] = None,
@@ -580,7 +580,7 @@ def impl(
 @overload
 def impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
+    types: str | Sequence[str],
     func: Callable[..., object],
     *,
     lib: Optional[Library] = None,
@@ -599,7 +599,7 @@ def impl(
 @functools.singledispatch
 def impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
+    types: str | Sequence[str],
     func: Optional[Callable[_P, _T]] = None,
     *,
     lib: Optional[Library] = None,
@@ -683,7 +683,7 @@ if not TYPE_CHECKING:
 @overload
 def _impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
+    types: str | Sequence[str],
     func: None = None,
     *,
     lib: Optional[Library] = None,
@@ -694,7 +694,7 @@ def _impl(
 @overload
 def _impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
+    types: str | Sequence[str],
     func: Callable[..., object],
     *,
     lib: Optional[Library] = None,
@@ -704,7 +704,7 @@ def _impl(
 
 def _impl(
     qualname: str,
-    types: Union[str, Sequence[str]],
+    types: str | Sequence[str],
     func: Optional[Callable[..., object]] = None,
     *,
     lib: Optional[Library] = None,
@@ -1525,7 +1525,7 @@ def get_ctx() -> "torch._library.fake_impl.FakeImplCtx":
 
 
 def get_kernel(
-    op: _op_identifier, dispatch_key: Union[str, torch.DispatchKey]
+    op: _op_identifier, dispatch_key: str | torch.DispatchKey
 ) -> torch._C._SafeKernelFunction:
     """Returns the computed kernel for a given operator and dispatch key.
 
@@ -1607,11 +1607,11 @@ _OPCHECK_DEFAULT_UTILS = (
 
 
 def opcheck(
-    op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
+    op: torch._ops.OpOverload | torch._ops.OpOverloadPacket | CustomOpDef,
     args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
-    test_utils: Union[str, Sequence[str]] = _OPCHECK_DEFAULT_UTILS,
+    test_utils: str | Sequence[str] = _OPCHECK_DEFAULT_UTILS,
     raise_exception: bool = True,
     atol=None,
     rtol=None,

@@ -157,7 +157,7 @@ class Std(IntFlag):
 
 
 def to_map(
-    val_or_map: Union[Std, dict[int, Std]], local_world_size: int
+    val_or_map: Std | dict[int, Std], local_world_size: int
 ) -> dict[int, Std]:
     """
     Certain APIs take redirect settings either as a single value (e.g. apply to all
@@ -217,8 +217,8 @@ class LogsSpecs(ABC):
     def __init__(
         self,
         log_dir: Optional[str] = None,
-        redirects: Union[Std, dict[int, Std]] = Std.NONE,
-        tee: Union[Std, dict[int, Std]] = Std.NONE,
+        redirects: Std | dict[int, Std] = Std.NONE,
+        tee: Std | dict[int, Std] = Std.NONE,
         local_ranks_filter: Optional[set[int]] = None,
     ) -> None:
         self._root_log_dir = log_dir
@@ -255,8 +255,8 @@ class DefaultLogsSpecs(LogsSpecs):
     def __init__(
         self,
         log_dir: Optional[str] = None,
-        redirects: Union[Std, dict[int, Std]] = Std.NONE,
-        tee: Union[Std, dict[int, Std]] = Std.NONE,
+        redirects: Std | dict[int, Std] = Std.NONE,
+        tee: Std | dict[int, Std] = Std.NONE,
         local_ranks_filter: Optional[set[int]] = None,
     ) -> None:
         if log_dir != os.devnull:
@@ -465,7 +465,7 @@ class PContext(abc.ABC):
     def __init__(
         self,
         name: str,
-        entrypoint: Union[Callable, str],
+        entrypoint: Callable | str,
         args: dict[int, tuple],
         envs: dict[int, dict[str, str]],
         logs_specs: LogsSpecs,

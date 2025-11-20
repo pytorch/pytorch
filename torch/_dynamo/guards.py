@@ -808,7 +808,7 @@ def get_verbose_code_part(code_part: str, guard: Optional[Guard]) -> str:
 
 
 def get_verbose_code_parts(
-    code_parts: Union[str, list[str]],
+    code_parts: str | list[str],
     guard: Optional[Guard],
     recompile_hint: Optional[str] = None,
 ) -> list[str]:
@@ -907,7 +907,7 @@ class NNModuleAttrAccessorInfo:
 
 
 def getitem_on_dict_manager(
-    source: Union[DictGetItemSource, DictSubclassGetItemSource],
+    source: DictGetItemSource | DictSubclassGetItemSource,
     base_guard_manager: DictGuardManager,
     base_example_value: Any,
     example_value: Any,
@@ -1313,7 +1313,7 @@ class GuardBuilder(GuardBuilderBase):
         self,
         source: Source,
         example_value: Optional[
-            Union[KeysView[Any], set[Any], frozenset[Any], dict[Any, Any]]
+            KeysView[Any] | set[Any] | frozenset[Any] | dict[Any, Any]
         ],
     ) -> GuardManagerType:
         guard_manager_enum = GuardManagerType.GUARD_MANAGER
@@ -1807,7 +1807,7 @@ class GuardBuilder(GuardBuilderBase):
     # to call this before generating some code that makes use of 'guard',
     # because without this call, we won't actually bind the variable
     # you reference in the actual guard closure (oops!)
-    def arg_ref(self, guard: Union[str, Guard]) -> str:
+    def arg_ref(self, guard: str | Guard) -> str:
         name: str
         if isinstance(guard, str):
             name = guard
@@ -2581,7 +2581,7 @@ class GuardBuilder(GuardBuilderBase):
                 names: dict[str, tuple[int, int]] = {}
                 source_pairs: list[tuple[Source, Source]] = []
                 derived_equalities: list[  # type: ignore[type-arg]
-                    tuple[Source, Union[Source, Symbol], Callable]
+                    tuple[Source, Source | Symbol, Callable]
                 ] = []
                 phantom_symbols: dict[str, Symbol] = {}
                 relaxed_sources: set[Source] = set()
@@ -3328,7 +3328,7 @@ class GuardsStatePickler(pickle.Pickler):
     # pyrefly: ignore [bad-override]
     def reducer_override(
         self, obj: Any
-    ) -> Union[tuple[Callable[..., Any], tuple[Any, ...]], Any]:
+    ) -> tuple[Callable[..., Any], tuple[Any, ...]] | Any:
         import sympy
 
         if id(obj) in self.empty_values:

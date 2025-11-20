@@ -528,7 +528,7 @@ class ExplainWithBackend:
         print(eb.output())
     """
 
-    def __init__(self, backend: Union[CompilerFn, str]) -> None:
+    def __init__(self, backend: CompilerFn | str) -> None:
         from .registry import lookup_backend
 
         self.backend = lookup_backend(backend)

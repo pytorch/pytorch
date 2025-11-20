@@ -105,7 +105,7 @@ class TestRuntimeEstimator(TestCase):
     def _init_model_and_args(
         self,
         model_type: str,
-        model_args: Union[ConvArgs, ModelArgs],
+        model_args: ConvArgs | ModelArgs,
         bsz: int,
     ) -> tuple[nn.Module, optim.Optimizer, torch.Tensor]:
         dev = torch.cuda.current_device()

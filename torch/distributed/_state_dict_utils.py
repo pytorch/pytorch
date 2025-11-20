@@ -800,7 +800,7 @@ def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None
     for i in range(1, len(path)):
         prev_key = path[i - 1]
         key = path[i]
-        def_val: Union[CONTAINER_TYPE, list[Any]] = {} if type(key) is str else []
+        def_val: CONTAINER_TYPE | list[Any] = {} if type(key) is str else []
 
         if isinstance(cur_container, Mapping):
             cur_container = cast(

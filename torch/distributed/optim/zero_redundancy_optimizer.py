@@ -1403,7 +1403,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     def _verify_and_init_params(
         self,
         params: Any,
-    ) -> Union[list[torch.Tensor], list[dict]]:
+    ) -> list[torch.Tensor] | list[dict]:
         r"""
         Verify the type of ``params`` and initializes ``self._all_params`` as a :class:`list` of all parameters.
 

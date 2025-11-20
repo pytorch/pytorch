@@ -46,8 +46,8 @@ class InverseGamma(TransformedDistribution):
 
     def __init__(
         self,
-        concentration: Union[Tensor, float],
-        rate: Union[Tensor, float],
+        concentration: Tensor | float,
+        rate: Tensor | float,
         validate_args: Optional[bool] = None,
     ) -> None:
         base_dist = Gamma(concentration, rate, validate_args=validate_args)

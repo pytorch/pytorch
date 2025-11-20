@@ -216,7 +216,7 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
     return tuple(mapping)
 
 
-def normalize_sizes(sizes: Union[Shape, tuple[Shape]]) -> Shape:
+def normalize_sizes(sizes: Shape | tuple[Shape]) -> Shape:
     if isinstance(sizes[0], int):
         return cast(Shape, sizes)
     elif len(sizes) == 1:

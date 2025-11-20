@@ -57,7 +57,7 @@ def two_tensor_fsdp_post_all_gather(
     param_dtype: torch.dtype,
     *,
     out: Optional[torch.Tensor] = None,
-) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
+) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
     assert metadata is None, f"{metadata}"
     a, b = all_gather_outputs
     if out is not None:
@@ -123,7 +123,7 @@ class BFloat16AllGatherTensor(torch.Tensor):
         param_dtype: torch.dtype,
         *,
         out: Optional[torch.Tensor] = None,
-    ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
+    ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
         assert metadata is None, f"{metadata}"
         (tensor,) = all_gather_outputs
         assert tensor.dtype == torch.bfloat16, f"{tensor.dtype}"
@@ -332,7 +332,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             param_dtype: torch.dtype,
             *,
             out: Optional[torch.Tensor] = None,
-        ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
             (tensor,) = all_gather_outputs
             assert metadata is None, f"{metadata}"
             assert tensor.dtype == torch.bfloat16, f"{tensor.dtype}"
@@ -436,7 +436,7 @@ class TestFullyShardAllGatherExtensionsMultiThread(
             param_dtype: torch.dtype,
             *,
             out: Optional[torch.Tensor] = None,
-        ) -> Union[tuple[torch.Tensor, tuple[torch.Tensor, ...]], None]:
+        ) -> tuple[torch.Tensor, tuple[torch.Tensor, ...]] | None:
             (tensor,) = all_gather_outputs
             if out is not None:
                 return

@@ -237,7 +237,7 @@ class CustomPolicy(_Policy):
         >>> fsdp_model = FSDP(model, auto_wrap_policy=policy)
     """
 
-    def __init__(self, lambda_fn: Callable[[nn.Module], Union[bool, dict[str, Any]]]):
+    def __init__(self, lambda_fn: Callable[[nn.Module], bool | dict[str, Any]]):
         self._lambda_fn = lambda_fn
 
     def _run_policy(

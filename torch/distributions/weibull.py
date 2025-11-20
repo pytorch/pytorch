@@ -40,8 +40,8 @@ class Weibull(TransformedDistribution):
 
     def __init__(
         self,
-        scale: Union[Tensor, float],
-        concentration: Union[Tensor, float],
+        scale: Tensor | float,
+        concentration: Tensor | float,
         validate_args: Optional[bool] = None,
     ) -> None:
         self.scale, self.concentration = broadcast_all(scale, concentration)

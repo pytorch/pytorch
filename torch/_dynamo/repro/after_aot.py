@@ -498,7 +498,7 @@ def save_graph_repro(
     stable_output: bool = False,
     save_dir: Optional[str] = None,
     command: str = "run",
-    accuracy: Optional[Union[str, bool]] = None,
+    accuracy: Optional[str | bool] = None,
     tracing_mode: Optional[str] = None,
     check_str: Optional[str] = None,
     stable_hash: bool = False,
@@ -577,7 +577,7 @@ def dump_compiler_graph_state(
     args: Sequence[Any],
     compiler_name: str,
     *,
-    accuracy: Optional[Union[str, bool]] = None,
+    accuracy: Optional[str | bool] = None,
 ) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
     if not os.path.exists(subdir):
@@ -624,7 +624,7 @@ def isolate_fails(
     compiler_name: str,
     env: Optional[dict[str, Any]] = None,
     save_dir: Optional[str] = None,
-    accuracy: Optional[Union[bool, str]] = None,
+    accuracy: Optional[bool | str] = None,
     tracing_mode: Optional[str] = None,
     check_str: Optional[str] = None,
 ) -> bool:
@@ -1043,7 +1043,7 @@ def run_repro(
     load_args: Any,
     *,
     command: str = "run",
-    accuracy: Union[bool, str] = "",
+    accuracy: bool | str = "",
     save_dir: Optional[str] = None,
     tracing_mode: Optional[str] = None,
     patch_code: Optional[str] = None,

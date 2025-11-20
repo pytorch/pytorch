@@ -103,8 +103,8 @@ def is_sdpa_error(func, idx, e):
 
 
 def try_convert_fake_to_real(
-    ten_list: list[Union[FakeTensor, Any]],
-) -> list[Union[FakeTensor, torch.Tensor, Any]]:
+    ten_list: list[FakeTensor | Any],
+) -> list[FakeTensor | torch.Tensor | Any]:
     """
     Attempt to convert fake tensors to a corresponding real tensor with the correct underlying storage by looking up
     the FakeTensorMode meta to real storage mapping. On failure to find the storage mapping, the FakeTensor will
@@ -206,7 +206,7 @@ def _check_fake_real_tensors(
 class CrossRefFakeMode(TorchDispatchMode):
     def __init__(
         self,
-        ignore_op_fn: Union[Callable[[OpOverload], bool], None] = None,
+        ignore_op_fn: Callable[[OpOverload], bool] | None = None,
         *,
         check_strides=True,
         check_aliasing=True,

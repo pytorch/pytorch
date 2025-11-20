@@ -55,7 +55,7 @@ class TestFullyShardAutograd(FSDPTest):
             self._test_unused_forward_output,
         )
 
-    def _test_unused_forward_output(self, reshard_after_forward: Union[bool, int]):
+    def _test_unused_forward_output(self, reshard_after_forward: bool | int):
         torch.manual_seed(42)
         local_batch_size = 2
         global_batch_size, dim = (self.world_size * local_batch_size, 24)
@@ -101,7 +101,7 @@ class TestFullyShardAutograd(FSDPTest):
             self._test_unused_forward_module,
         )
 
-    def _test_unused_forward_module(self, reshard_after_forward: Union[bool, int]):
+    def _test_unused_forward_module(self, reshard_after_forward: bool | int):
         torch.manual_seed(42)
         local_batch_size, dim = (2, 24)
         global_batch_size = self.world_size * local_batch_size

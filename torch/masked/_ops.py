@@ -869,7 +869,7 @@ def _where(mask: Tensor, input: Tensor, fill_value: Tensor) -> Tensor:
         )
 
 
-def _input_mask(input: Union[Tensor, MaskedTensor], *args, **kwargs) -> Tensor:
+def _input_mask(input: Tensor | MaskedTensor, *args, **kwargs) -> Tensor:
     """Return canonical input mask.
 
     A canonical input mask is defined as a boolean mask tensor that
@@ -1001,7 +1001,7 @@ def _output_mask(op, input: Tensor, *args, **kwargs) -> Tensor:
 
 
 def _combine_input_and_mask(
-    op, input: Union[MaskedTensor, Tensor], mask, *args
+    op, input: MaskedTensor | Tensor, mask, *args
 ) -> Tensor:
     def helper(input, mask):
         if mask is None:
@@ -1046,7 +1046,7 @@ def _combine_input_and_mask(
 
 @_apply_docstring_templates
 def sum(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: DimOrDims = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1099,7 +1099,7 @@ def sum(
 
 @_apply_docstring_templates
 def prod(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: DimOrDims = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1216,7 +1216,7 @@ def cumprod(
 
 @_apply_docstring_templates
 def amax(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: DimOrDims = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1266,7 +1266,7 @@ def amax(
 
 @_apply_docstring_templates
 def amin(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: DimOrDims = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1316,7 +1316,7 @@ def amin(
 
 @_apply_docstring_templates
 def argmax(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: Optional[int] = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1342,7 +1342,7 @@ def argmax(
 
 @_apply_docstring_templates
 def argmin(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: Optional[int] = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1368,7 +1368,7 @@ def argmin(
 
 @_apply_docstring_templates
 def mean(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: DimOrDims = None,
     *,
     keepdim: Optional[bool] = False,
@@ -1435,7 +1435,7 @@ elements, have ``nan`` values.
 
 @_apply_docstring_templates
 def median(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: int = -1,
     *,
     keepdim: bool = False,
@@ -1499,8 +1499,8 @@ def logsumexp(
 
 # Cannot use _apply_docstring_templates as it is only set up for reductions and normalizations
 def logaddexp(
-    input: Union[Tensor, MaskedTensor],
-    other: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
+    other: Tensor | MaskedTensor,
     *,
     dtype: Optional[DType] = None,
     input_mask: Optional[Tensor] = None,
@@ -1561,7 +1561,7 @@ def logaddexp(
 
 @_apply_docstring_templates
 def norm(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     ord: Optional[float] = 2.0,
     dim: DimOrDims = None,
     *,
@@ -1596,11 +1596,11 @@ reduction, is ``{identity_float32}``, except for ``ord=-inf`` it is
 
 
 def _std_var(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: DimOrDims,
     unbiased: Optional[bool],
     *,
-    correction_opt: Optional[Union[int, float]],
+    correction_opt: Optional[int | float],
     keepdim: Optional[bool],
     dtype: Optional[DType],
     mask: Optional[Tensor],
@@ -1677,11 +1677,11 @@ def _std_var(
 
 @_apply_docstring_templates
 def var(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: DimOrDims = None,
     unbiased: Optional[bool] = None,
     *,
-    correction: Optional[Union[int, float]] = None,
+    correction: Optional[int | float] = None,
     keepdim: Optional[bool] = False,
     dtype: Optional[DType] = None,
     mask: Optional[Tensor] = None,
@@ -1708,7 +1708,7 @@ fully masked-out elements, have ``nan`` values.
 
 @_apply_docstring_templates
 def std(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: DimOrDims = None,
     unbiased: Optional[bool] = None,
     *,
@@ -1739,7 +1739,7 @@ fully masked-out elements, have ``nan`` values.
 
 @_apply_docstring_templates
 def softmax(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: int,
     *,
     dtype: Optional[DType] = None,
@@ -1759,7 +1759,7 @@ def softmax(
 
 @_apply_docstring_templates
 def log_softmax(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: int,
     *,
     dtype: Optional[DType] = None,
@@ -1779,7 +1779,7 @@ def log_softmax(
 
 @_apply_docstring_templates
 def softmin(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     dim: int,
     *,
     dtype: Optional[DType] = None,
@@ -1799,7 +1799,7 @@ def softmin(
 
 @_apply_docstring_templates
 def normalize(
-    input: Union[Tensor, MaskedTensor],
+    input: Tensor | MaskedTensor,
     ord: float,
     dim: int,
     *,

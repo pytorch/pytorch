@@ -144,7 +144,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             ]
         )
 
-    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
+    def output_node(self) -> ir.TensorBox | ir.ShapeAsConstantBuffer:
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,

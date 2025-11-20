@@ -347,7 +347,7 @@ def get_manager(
     return get_container(device_index).tree_manager
 
 
-def is_cudagraph_capture_sizes(int_key: Union[int, tuple[int, ...]]) -> bool:
+def is_cudagraph_capture_sizes(int_key: int | tuple[int, ...]) -> bool:
     """
     Returns true if all dynamic shapes should be captured or the dynamic shape
     int_key should be captured.
@@ -485,7 +485,7 @@ class StorageWeakRefWrapper:
 
     def __init__(
         self,
-        inp: Union[Tensor, UntypedStorage],
+        inp: Tensor | UntypedStorage,
         extra_ref_check: Optional[Callable[[], bool]] = None,
     ) -> None:
         """
@@ -634,7 +634,7 @@ class CUDAWarmupNode:
     def __init__(
         self,
         wrapped_function: WrappedFunction,
-        parent: Optional[Union[CUDAGraphNode, CUDAWarmupNode]],
+        parent: Optional[CUDAGraphNode | CUDAWarmupNode],
         cuda_graphs_pool: tuple[int, int],
         existing_cuda_graph: Optional[torch.cuda.CUDAGraph],
         device_index: int,
@@ -644,7 +644,7 @@ class CUDAWarmupNode:
         id: GraphID,
     ) -> None:
         self.wrapped_function = wrapped_function
-        self.parent: Optional[Union[CUDAGraphNode, CUDAWarmupNode]] = parent
+        self.parent: Optional[CUDAGraphNode | CUDAWarmupNode] = parent
         self.cuda_graphs_pool = cuda_graphs_pool
         self.outputs_weakrefs: list[Optional[StorageWeakRefWrapper]] = []
         self.tensor_weakrefs: list[Optional[TensorWeakRef]] = []
@@ -730,9 +730,9 @@ class CUDAWarmupNode:
     @property
     def _path_from_root(
         self,
-    ) -> Generator[Union[CUDAGraphNode, CUDAWarmupNode], None, None]:
+    ) -> Generator[CUDAGraphNode | CUDAWarmupNode, None, None]:
         nodes = []
-        node: Union[CUDAGraphNode, CUDAWarmupNode] = self
+        node: CUDAGraphNode | CUDAWarmupNode = self
         while node:
             nodes.append(node)
             node = node.parent  # type: ignore[assignment]
@@ -1046,7 +1046,7 @@ class CUDAGraphNode:
             self.recording_outputs: Optional[OutputType] = self._record(
                 wrapped_function.model, recording_inputs
             )
-        self.outputs_metadata: OutputList[Union[dict[str, Any], int, None]] = []
+        self.outputs_metadata: OutputList[dict[str, Any] | int | None] = []
 
         # As with inputs, we do not want to keep the outputs permanently alive because that would prevent
         # their memory being reclaimed in subsequent cuda graph recordings. We record the tensor metadata
@@ -1193,8 +1193,8 @@ class CUDAGraphNode:
     def prepare_alias_info_for_tensor_construction(
         self,
         out_alias_info: Optional[OutputAliasInfo],
-        metadata: Union[dict[str, Any], int, None],
-    ) -> Union[UntypedStorage, None, int]:
+        metadata: dict[str, Any] | int | None,
+    ) -> UntypedStorage | None | int:
         if (
             isinstance(metadata, (int, type(None)))
             or out_alias_info is UnaliasedStorage
@@ -1212,7 +1212,7 @@ class CUDAGraphNode:
 
     def prepare_storages_for_construction(
         self,
-    ) -> list[Union[UntypedStorage, None, int]]:
+    ) -> list[UntypedStorage | None | int]:
         output_storages = []
         for output_storage_alias, metadata in zip(
             self.output_storage_alias, self.outputs_metadata
@@ -1985,7 +1985,7 @@ class CUDAGraphTreeManager:
         # when there is no output from a previous recording or execution whose memory
         # we need to respect in the cuda caching allocation. If you incremented generation,
         # this will also be none, as ignore those allocations.
-        self.current_node: Optional[Union[CUDAGraphNode, CUDAWarmupNode]] = None
+        self.current_node: Optional[CUDAGraphNode | CUDAWarmupNode] = None
 
         # current generation of cudagraph invocations. when torch.compile is run
         # we increment the current generation. are willing to ignore live outputs
@@ -2349,12 +2349,12 @@ class CUDAGraphTreeManager:
             yield from nodes
 
     @property
-    def current_node(self) -> Optional[Union[CUDAGraphNode, CUDAWarmupNode]]:
+    def current_node(self) -> Optional[CUDAGraphNode | CUDAWarmupNode]:
         return self._current_node
 
     @current_node.setter
     def current_node(
-        self, value: Optional[Union[CUDAGraphNode, CUDAWarmupNode]]
+        self, value: Optional[CUDAGraphNode | CUDAWarmupNode]
     ) -> None:
         self._current_node = value
         if value is None:

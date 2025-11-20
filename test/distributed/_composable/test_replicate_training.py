@@ -869,7 +869,7 @@ class TestReplicateGradientAccumulation(FSDPTest):
     def _test_gradient_accumulation(
         self,
         mesh: DeviceMesh,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         mode: str,
         reshard_after_backward: bool,
         offload_policy: OffloadPolicy,

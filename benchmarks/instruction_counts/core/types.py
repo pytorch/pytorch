@@ -70,7 +70,7 @@ Label = tuple[str, ...]
 _Label = Union[Label, Optional[str]]
 
 _Value = Union[
-    Union[TimerArgs, GroupedBenchmark],
+    TimerArgs | GroupedBenchmark,
     dict[_Label, "_Value"],
 ]
 
@@ -79,7 +79,7 @@ Definition = dict[_Label, _Value]
 # We initially have to parse (flatten) to an intermediate state in order to
 # build TorchScript models since multiple entries will share the same model
 # artifact.
-FlatIntermediateDefinition = dict[Label, Union[TimerArgs, GroupedBenchmark]]
+FlatIntermediateDefinition = dict[Label, TimerArgs | GroupedBenchmark]
 
 # Final parsed schema.
 FlatDefinition = tuple[tuple[Label, AutoLabels, TimerArgs], ...]

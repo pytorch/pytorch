@@ -218,7 +218,7 @@ class CustomOp:
 
     def impl(
         self,
-        device_types: typing.Union[str, typing.Iterable[str]],
+        device_types: str | typing.Iterable[str],
         _stacklevel=2,
     ) -> typing.Callable:
         r"""

@@ -36,8 +36,8 @@ class FisherSnedecor(Distribution):
 
     def __init__(
         self,
-        df1: Union[Tensor, float],
-        df2: Union[Tensor, float],
+        df1: Tensor | float,
+        df2: Tensor | float,
         validate_args: Optional[bool] = None,
     ) -> None:
         self.df1, self.df2 = broadcast_all(df1, df2)

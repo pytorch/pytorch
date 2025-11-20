@@ -80,7 +80,7 @@ def _create_colwise_spec(
         ]
     return ChunkShardingSpec(
         dim=0,
-        placements=cast(list[Union[_remote_device, str]], placements),
+        placements=cast(list[_remote_device | str], placements),
     )
 
 

@@ -297,7 +297,7 @@ class _LoggerState:
         self.loggers = {}
 
         def filter(
-            logger: Union[logging.Logger, logging.PlaceHolder],
+            logger: logging.Logger | logging.PlaceHolder,
         ) -> TypeGuard[logging.Logger]:
             if not isinstance(logger, logging.Logger):
                 # Assume that Placeholders propagate

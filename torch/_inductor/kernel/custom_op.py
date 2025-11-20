@@ -230,7 +230,7 @@ def autotune_custom_op(
     user_input_gen_fns: Optional[
         dict[str, Callable[[torch.Tensor], torch.Tensor]]
     ] = None,
-) -> Union[TensorBox, Any]:
+) -> TensorBox | Any:
     """Autotune custom operations by comparing multiple decomposition implementations.
 
     Currently supports SINGLE OUTPUT custom ops only.
@@ -352,7 +352,7 @@ def autotune_custom_op(
 
 def register_custom_op_autotuning(
     custom_op: torch._library.custom_ops.CustomOpDef,
-    configs: Union[list[CustomOpConfig], list[Callable[..., Any]]],
+    configs: list[CustomOpConfig] | list[Callable[..., Any]],
     name: Optional[str] = None,
     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,
 ) -> None:

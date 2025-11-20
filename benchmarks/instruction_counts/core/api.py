@@ -175,7 +175,7 @@ class GroupedBenchmark:
         signature: Optional[str] = None,
         torchscript: bool = False,
         autograd: bool = False,
-        num_threads: Union[int, tuple[int, ...]] = 1,
+        num_threads: int | tuple[int, ...] = 1,
     ) -> "GroupedBenchmark":
         """Create a set of benchmarks from free-form statements.
 
@@ -223,7 +223,7 @@ class GroupedBenchmark:
         signature: Optional[str] = None,
         torchscript: bool = False,
         autograd: bool = False,
-        num_threads: Union[int, tuple[int, ...]] = 1,
+        num_threads: int | tuple[int, ...] = 1,
     ) -> "GroupedBenchmark":
         """Create a set of benchmarks using torch.nn Modules.
 
@@ -260,8 +260,8 @@ class GroupedBenchmark:
         cls,
         py_block: str = "",
         cpp_block: str = "",
-        num_threads: Union[int, tuple[int, ...]] = 1,
-    ) -> dict[Union[tuple[str, ...], Optional[str]], "GroupedBenchmark"]:
+        num_threads: int | tuple[int, ...] = 1,
+    ) -> dict[tuple[str, ...] | Optional[str], "GroupedBenchmark"]:
         py_cases, py_setup, py_global_setup = cls._parse_variants(
             py_block, Language.PYTHON
         )
@@ -279,7 +279,7 @@ class GroupedBenchmark:
         # NB: The key is actually `Tuple[str, ...]`, however MyPy gets confused
         #     and we use the superset `Union[Tuple[str, ...], Optional[str]` to
         #     match the expected signature.
-        variants: dict[Union[tuple[str, ...], Optional[str]], GroupedBenchmark] = {}
+        variants: dict[tuple[str, ...] | Optional[str], GroupedBenchmark] = {}
 
         seen_labels: set[str] = set()
         for label in it.chain(py_cases.keys(), cpp_cases.keys()):

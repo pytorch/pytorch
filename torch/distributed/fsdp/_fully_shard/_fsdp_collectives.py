@@ -51,7 +51,7 @@ lib.define(
 class DefaultAllocMixin:
     def allocate(
         self,
-        size: Sequence[Union[int, torch.SymInt]],
+        size: Sequence[int | torch.SymInt],
         *,
         dtype: torch.dtype,
         device: torch.device,
@@ -66,7 +66,7 @@ class ProcessGroupAllocMixin:
 
     def allocate(
         self,
-        size: Sequence[Union[int, torch.SymInt]],
+        size: Sequence[int | torch.SymInt],
         *,
         dtype: torch.dtype,
         device: torch.device,
@@ -707,8 +707,8 @@ def _get_gradient_divide_factors(
 ) -> tuple[
     Optional[float],
     Optional[float],
-    Union[dist.ReduceOp, dist.ReduceOp.RedOpType],
-    Union[dist.ReduceOp, dist.ReduceOp.RedOpType],
+    dist.ReduceOp | dist.ReduceOp.RedOpType,
+    dist.ReduceOp | dist.ReduceOp.RedOpType,
 ]:
     # MTIA appears to only support SUM reduction, hence we force it implicitly
     if device_type == "mtia":

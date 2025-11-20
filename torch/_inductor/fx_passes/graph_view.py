@@ -169,7 +169,7 @@ def make_graph_view(graph: fx.Graph) -> Optional[GraphView]:
 
 
 def get_subgraph_by_path(
-    graph_view: GraphView, paths: Union[str, list[str]]
+    graph_view: GraphView, paths: str | list[str]
 ) -> list[fx.Node]:
     """
     Get subgraph by path(s).

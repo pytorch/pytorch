@@ -90,7 +90,7 @@ def triton_op(
     fn: Optional[Callable] = None,
     /,
     *,
-    mutates_args: Union[str, Iterable[str]],
+    mutates_args: str | Iterable[str],
     schema: Optional[str] = None,
 ) -> Callable:
     """Create a custom operator whose implementation is backed by 1+ triton kernels.

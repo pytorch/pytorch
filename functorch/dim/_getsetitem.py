@@ -192,7 +192,7 @@ def setitem(self: Any, index: Any, rhs: Any) -> None:
 
                 if not found:
                     # Create tuple representation of result levels for error message
-                    result_dims: list[Union[int, Dim]] = []
+                    result_dims: list[int | Dim] = []
                     for rl in iinfo.result_levels:
                         if rl.is_positional():
                             result_dims.append(rl.position())

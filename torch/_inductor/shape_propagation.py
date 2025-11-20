@@ -9,7 +9,7 @@ import torch
 from .virtualized import OpsValue, V
 
 
-BlockShapeType = Optional[Sequence[Union[int, str]]]
+BlockShapeType = Optional[Sequence[int | str]]
 
 
 class ShapeVar(Protocol):
@@ -35,8 +35,8 @@ def get_broadcasted_shape(a: BlockShapeType, b: BlockShapeType) -> BlockShapeTyp
     else:
 
         def _get_broadcasted_dim(
-            d1: Union[int, str], d2: Union[int, str]
-        ) -> Union[int, str]:
+            d1: int | str, d2: int | str
+        ) -> int | str:
             if str(d1) == "1":
                 return d2
             elif str(d2) == "1":
@@ -102,8 +102,8 @@ class ShapePropagationOpsHandler:
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: str,
-        value: Union[ShapeArg, tuple[ShapeArg, ...]],
-    ) -> Union[BlockShapeType, tuple[BlockShapeType, ...]]:
+        value: ShapeArg | tuple[ShapeArg, ...],
+    ) -> BlockShapeType | tuple[BlockShapeType, ...]:
         raise NotImplementedError
 
     @staticmethod
@@ -140,7 +140,7 @@ class ShapePropagationOpsHandler:
     @staticmethod
     def indirect_indexing(
         var: ShapeArg,
-        size: Union[sympy.Expr, int],
+        size: sympy.Expr | int,
         check: bool = True,
         wrap_neg: bool = True,
     ) -> None:

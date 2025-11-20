@@ -34,7 +34,7 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: dict[
-            Union[int, torch.Tensor, FakeScriptObject, torch.utils._pytree.TreeSpec],
+            int | torch.Tensor | FakeScriptObject | torch.utils._pytree.TreeSpec,
             list[Any],
         ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for

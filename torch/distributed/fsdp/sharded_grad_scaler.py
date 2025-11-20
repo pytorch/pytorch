@@ -127,8 +127,8 @@ class ShardedGradScaler(GradScaler):
     def scale(self, outputs: Iterable[torch.Tensor]) -> Iterable[torch.Tensor]: ...
 
     def scale(
-        self, outputs: Union[torch.Tensor, Iterable[torch.Tensor]]
-    ) -> Union[torch.Tensor, Iterable[torch.Tensor]]:
+        self, outputs: torch.Tensor | Iterable[torch.Tensor]
+    ) -> torch.Tensor | Iterable[torch.Tensor]:
         if not self._enabled:
             return outputs
 
@@ -149,7 +149,7 @@ class ShardedGradScaler(GradScaler):
 
         stash: list[_GeneralMultiDeviceReplicator] = []
 
-        def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
+        def apply_scale(val: torch.Tensor | Iterable[torch.Tensor]):
             if isinstance(val, torch.Tensor):
                 if not _is_supported_device(val):
                     raise AssertionError(f"Expected supported device, got {val.device}")
@@ -306,7 +306,7 @@ class ShardedGradScaler(GradScaler):
             else:
                 self._growth_tracker = successful
 
-    def update(self, new_scale: Optional[Union[float, torch.Tensor]] = None) -> None:
+    def update(self, new_scale: Optional[float | torch.Tensor] = None) -> None:
         """
         Updates the scale factor.
         If any optimizer steps were skipped the scale is multiplied by ``backoff_factor``

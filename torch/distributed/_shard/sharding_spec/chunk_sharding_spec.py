@@ -53,7 +53,7 @@ class ChunkShardingSpec(ShardingSpec):
     ShardingDim = Union[int, str]
 
     dim: ShardingDim
-    placements: list[Union[torch.distributed._remote_device, str]]
+    placements: list[torch.distributed._remote_device | str]
 
     def __post_init__(self):
         self._verify_dim(self.dim)

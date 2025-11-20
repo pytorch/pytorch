@@ -247,7 +247,7 @@ class LBFGS(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1,
+        lr: float | Tensor = 1,
         max_iter: int = 20,
         max_eval: Optional[int] = None,
         tolerance_grad: float = 1e-7,

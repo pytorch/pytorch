@@ -120,7 +120,7 @@ def broadcast_shapes(*shapes):
 
 def split(
     tensor: Tensor,
-    split_size_or_sections: Union[int, list[int]],
+    split_size_or_sections: int | list[int],
     dim: int = 0,
 ) -> tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
@@ -387,7 +387,7 @@ def einsum(*args: Any) -> Tensor:
 if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
     def meshgrid(
-        *tensors: Union[Tensor, list[Tensor]], indexing: Optional[str] = None
+        *tensors: Tensor | list[Tensor], indexing: Optional[str] = None
     ) -> tuple[Tensor, ...]:
         return _meshgrid(*tensors, indexing=indexing)
 
@@ -1659,7 +1659,7 @@ else:
 
 def norm(  # noqa: F811
     input,
-    p: Optional[Union[float, str]] = "fro",
+    p: Optional[float | str] = "fro",
     dim=None,
     keepdim=False,
     out=None,
@@ -1882,7 +1882,7 @@ def norm(  # noqa: F811
 
 def unravel_index(
     indices: Tensor,
-    shape: Union[int, Sequence[int], torch.Size],
+    shape: int | Sequence[int] | torch.Size,
 ) -> tuple[Tensor, ...]:
     r"""Converts a tensor of flat indices into a tuple of coordinate tensors that
     index into an arbitrary tensor of the specified shape.
@@ -1938,7 +1938,7 @@ def unravel_index(
     return res_tensor.unbind(-1)
 
 
-def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
+def _unravel_index(indices: Tensor, shape: int | Sequence[int]) -> Tensor:
     torch._check_type(
         not indices.is_complex()
         and not indices.is_floating_point()

@@ -393,7 +393,7 @@ def _suggest_or_raise_constraint_violation(
     graph_capture_output: CaptureOutput,
     args: Any,
     kwargs: Any,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
+    dynamic_shapes: Optional[dict[str, Any] | tuple[Any] | list[Any]],
 ):
     constraint_violation_error = None
     try:
@@ -681,7 +681,7 @@ def _dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
     *,
     constraints: Optional[list[Constraint]] = None,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[dict[str, Any] | tuple[Any] | list[Any]] = None,
 ) -> Callable[..., torch.fx.GraphModule]:
     """
     Improved dynamo graph capture using transformer approach with proper fake tensor handling.
@@ -716,7 +716,7 @@ def _dynamo_graph_capture_for_export(
             orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
 
             constraints: Optional[list[Constraint]] = _constraints
-            dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = (
+            dynamic_shapes: Optional[dict[str, Any] | tuple[Any] | list[Any]] = (
                 _dynamic_shapes
             )
 

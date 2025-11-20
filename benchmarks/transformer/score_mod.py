@@ -266,7 +266,7 @@ def generate_jagged_inputs(
     B, Hq, M, Hkv, N, D = shape
 
     def offsets_to_lengths(
-        offsets: torch.Tensor, device: Union[str, torch.device]
+        offsets: torch.Tensor, device: str | torch.device
     ) -> torch.tensor:
         """Converts a list of offsets to a list of lengths. Reverse op of attn_gym.masks.document_mask.length_to_offsets
 
@@ -955,7 +955,7 @@ def generate_FA_callable(
         FA_kwargs["cu_seqlens_k"] = kwargs["offsets"].to(torch.int32)
 
         def offsets_to_lengths(
-            offsets: torch.Tensor, device: Union[str, torch.device]
+            offsets: torch.Tensor, device: str | torch.device
         ) -> torch.tensor:
             lengths = offsets[1:] - offsets[:-1]
             return lengths

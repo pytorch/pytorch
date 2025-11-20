@@ -32,7 +32,7 @@ class OpKey(NamedTuple):
 
 
 def get_schedule_ops(
-    schedule: Union[str, type[_PipelineSchedule]],
+    schedule: str | type[_PipelineSchedule],
     pp_degree: int,
     num_microbatches: int,
     num_stages_per_rank: Optional[int] = None,

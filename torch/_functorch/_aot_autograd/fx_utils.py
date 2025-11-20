@@ -26,7 +26,7 @@ from .descriptors import (
 
 
 def _raise_autograd_subclass_not_implemented(
-    n: fx.Node, desc: Union[AOTInput, AOTOutput]
+    n: fx.Node, desc: AOTInput | AOTOutput
 ) -> NoReturn:
     raise RuntimeError(
         "Subclasses are currently not supported by this function, but a desugared subclass input "
@@ -205,7 +205,7 @@ def get_plain_output_and_tangent_nodes(
 
 
 def _raise_fqn_subclass_not_implemented(
-    n: fx.Node, desc: Union[AOTInput, AOTOutput]
+    n: fx.Node, desc: AOTInput | AOTOutput
 ) -> NoReturn:
     raise RuntimeError(
         "Subclasses are currently not supported by this function, but a desugared subclass input "

@@ -144,7 +144,7 @@ class MetricTable:
     num_rows_added: int = 0
 
     def add_row(
-        self, row_fn: Callable[[], dict[str, Optional[Union[str, float]]]]
+        self, row_fn: Callable[[], dict[str, Optional[str | float]]]
     ) -> None:
         if self.table_name not in enabled_metric_tables():
             return

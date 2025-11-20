@@ -228,13 +228,13 @@ def unzip_artifact_and_replace_files() -> None:
         old_version = f"+git{path.stem.split('+')[1].split('-')[0][3:]}"
         new_version = f"+git{head_sha[:7]}"
 
-        def rename_to_new_version(file: Union[str, Path]) -> None:
+        def rename_to_new_version(file: str | Path) -> None:
             # Rename file with old_version to new_version
             subprocess.check_output(
                 ["mv", file, str(file).replace(old_version, new_version)]
             )
 
-        def change_content_to_new_version(file: Union[str, Path]) -> None:
+        def change_content_to_new_version(file: str | Path) -> None:
             # Check if is a file
             if os.path.isdir(file):
                 return

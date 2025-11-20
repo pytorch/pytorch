@@ -29,7 +29,7 @@ class TypeGen:
     }
 
     @staticmethod
-    def from_example(obj: Any) -> Union[BaseType, ListType, CustomClassType]:
+    def from_example(obj: Any) -> BaseType | ListType | CustomClassType:
         import torch
 
         if isinstance(obj, torch.fx.GraphModule):

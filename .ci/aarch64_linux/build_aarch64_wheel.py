@@ -108,13 +108,13 @@ class RemoteHost:
         ]
 
     @staticmethod
-    def _split_cmd(args: Union[str, list[str]]) -> list[str]:
+    def _split_cmd(args: str | list[str]) -> list[str]:
         return args.split() if isinstance(args, str) else args
 
-    def run_ssh_cmd(self, args: Union[str, list[str]]) -> None:
+    def run_ssh_cmd(self, args: str | list[str]) -> None:
         subprocess.check_call(self._gen_ssh_prefix() + self._split_cmd(args))
 
-    def check_ssh_output(self, args: Union[str, list[str]]) -> str:
+    def check_ssh_output(self, args: str | list[str]) -> str:
         return subprocess.check_output(
             self._gen_ssh_prefix() + self._split_cmd(args)
         ).decode("utf-8")
@@ -157,7 +157,7 @@ class RemoteHost:
     def using_docker(self) -> bool:
         return self.container_id is not None
 
-    def run_cmd(self, args: Union[str, list[str]]) -> None:
+    def run_cmd(self, args: str | list[str]) -> None:
         if not self.using_docker():
             return self.run_ssh_cmd(args)
         assert self.container_id is not None
@@ -178,7 +178,7 @@ class RemoteHost:
         if rc != 0:
             raise subprocess.CalledProcessError(rc, docker_cmd)
 
-    def check_output(self, args: Union[str, list[str]]) -> str:
+    def check_output(self, args: str | list[str]) -> str:
         if not self.using_docker():
             return self.check_ssh_output(args)
         assert self.container_id is not None

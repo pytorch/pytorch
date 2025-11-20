@@ -203,7 +203,7 @@ class PackageExporter:
     def __init__(
         self,
         f: FileLike,
-        importer: Union[Importer, Sequence[Importer]] = sys_importer,
+        importer: Importer | Sequence[Importer] = sys_importer,
         debug: bool = False,
     ) -> None:
         """

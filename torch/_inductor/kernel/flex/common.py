@@ -113,7 +113,7 @@ def get_fwd_subgraph_outputs(
 
 
 def build_subgraph_module_buffer(
-    args: list[Union[TensorBox, ShapeAsConstantBuffer]],
+    args: list[TensorBox | ShapeAsConstantBuffer],
     graph_module: torch.fx.GraphModule,
 ) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
@@ -168,7 +168,7 @@ def build_subgraph_module_buffer(
 
 
 def build_subgraph_buffer(
-    args: list[Union[TensorBox, ShapeAsConstantBuffer]], subgraph: Subgraph
+    args: list[TensorBox | ShapeAsConstantBuffer], subgraph: Subgraph
 ) -> SubgraphResults:
     return build_subgraph_module_buffer(args, subgraph.graph_module)
 
@@ -206,7 +206,7 @@ def create_placeholder(
     dtype: torch.dtype,
     device: torch.device,
     size: Optional[list[int]] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox | ShapeAsConstantBuffer:
     """Creates a placeholder input buffers for producing subgraph_output."""
     input_buffer = InputBuffer(
         name=name,

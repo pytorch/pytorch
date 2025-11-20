@@ -48,9 +48,7 @@ from .utils import (
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
-_GenericOperator: TypeAlias = Union[
-    torch._ops.OperatorBase, torch._ops.OpOverloadPacket
-]
+_GenericOperator: TypeAlias = torch._ops.OperatorBase | torch._ops.OpOverloadPacket
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -109,7 +107,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
-decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]] = [
+decomps_to_exclude: list[torch._ops.OpOverload | torch._ops.OpOverloadPacket] = [
     aten._unsafe_index,
     aten._unsafe_masked_index,
     aten._unsafe_masked_index_put_accumulate,
@@ -133,7 +131,7 @@ remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(
-    ops: Union[_GenericOperator, list[_GenericOperator]],
+    ops: _GenericOperator | list[_GenericOperator],
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     for op in ops if isinstance(ops, list) else [ops]:
         if op in decompositions:
@@ -185,7 +183,7 @@ def clamp(
 
 @register_decomposition([aten.full])
 def full(
-    size: list[Union[int, torch.SymInt]],
+    size: list[int | torch.SymInt],
     fill_value: torch.types.Number,
     **kwargs: Any,
 ) -> torch.Tensor:
@@ -220,7 +218,7 @@ def index_add(
 # cool with strides and everything goes to empty_strided)
 @register_decomposition([aten.empty_permuted.default])
 def empty_permuted(
-    size: list[Union[int, torch.SymInt]],
+    size: list[int | torch.SymInt],
     physical_layout: list[int],
     **kwargs: Any,
 ) -> torch.Tensor:
@@ -236,9 +234,9 @@ def convolution_backward(
     input: torch.Tensor,
     weight: torch.Tensor,
     bias_sizes: list[int],
-    stride: Union[int, list[int]],
-    padding: Union[int, list[int]],
-    dilation: Union[int, list[int]],
+    stride: int | list[int],
+    padding: int | list[int],
+    dilation: int | list[int],
     transposed: bool,
     output_padding: list[int],
     groups: int,
@@ -573,7 +571,7 @@ def narrow_copy(
 @register_decomposition([aten.view_copy.default])
 def view_copy_default(
     self: torch.Tensor,
-    size: list[Union[int, torch.SymInt]],
+    size: list[int | torch.SymInt],
 ) -> torch.Tensor:
     return aten.view(self, size).clone()
 
@@ -602,7 +600,7 @@ def _get_shape_permutation_like(
 @register_decomposition(aten.full_like)
 def full_like(
     self: torch.Tensor,
-    fill_value: Union[int, float],
+    fill_value: int | float,
     *,
     dtype: Optional[torch.dtype] = None,
     layout: Optional[torch.layout] = None,
@@ -701,7 +699,7 @@ def randint_like_low(
 @register_decomposition(aten.randint.default)
 def randint(
     high: int,
-    size: list[Union[int, torch.SymInt]],
+    size: list[int | torch.SymInt],
     **kwargs: Any,
 ) -> torch.Tensor:
     return aten.randint.low(0, high, size, **kwargs)
@@ -1031,9 +1029,9 @@ def index_reduce(
 def _max_pool_with_indices(
     x: torch.Tensor,
     kernel_size: list[int],
-    stride: Optional[Union[int, list[int]]],
-    padding: Union[int, list[int]],
-    dilation: Union[int, list[int]],
+    stride: Optional[int | list[int]],
+    padding: int | list[int],
+    dilation: int | list[int],
     ceil_mode: bool,
     dim: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -1088,9 +1086,9 @@ def _max_pool_with_indices(
 def max_pool2d_with_indices(
     x: torch.Tensor,
     kernel_size: list[int],
-    stride: Optional[Union[int, list[int]]] = None,
-    padding: Union[int, list[int]] = 0,
-    dilation: Union[int, list[int]] = 1,
+    stride: Optional[int | list[int]] = None,
+    padding: int | list[int] = 0,
+    dilation: int | list[int] = 1,
     ceil_mode: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return _max_pool_with_indices(
@@ -1102,9 +1100,9 @@ def max_pool2d_with_indices(
 def max_pool3d_with_indices(
     x: torch.Tensor,
     kernel_size: list[int],
-    stride: Optional[Union[int, list[int]]] = None,
-    padding: Union[int, list[int]] = 0,
-    dilation: Union[int, list[int]] = 1,
+    stride: Optional[int | list[int]] = None,
+    padding: int | list[int] = 0,
+    dilation: int | list[int] = 1,
     ceil_mode: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     return _max_pool_with_indices(

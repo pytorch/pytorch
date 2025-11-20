@@ -362,7 +362,7 @@ def get_constant(x):
 
 def get_script_args(args):
     formals: list[str] = []
-    tensors: list[Union[torch.Tensor, list[torch.Tensor]]] = []
+    tensors: list[torch.Tensor | list[torch.Tensor]] = []
     actuals: list[str] = []
     for arg in args:
         if isinstance(arg, torch.Tensor):

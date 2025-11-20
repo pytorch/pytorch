@@ -189,8 +189,8 @@ class GradScaler:
 
     def scale(
         self,
-        outputs: Union[torch.Tensor, Iterable[torch.Tensor]],
-    ) -> Union[torch.Tensor, Iterable[torch.Tensor]]:
+        outputs: torch.Tensor | Iterable[torch.Tensor],
+    ) -> torch.Tensor | Iterable[torch.Tensor]:
         """
         Multiplies ('scales') a tensor or list of tensors by the scale factor.
 
@@ -215,7 +215,7 @@ class GradScaler:
             _MultiDeviceReplicator
         ] = []  # holds a reference that can be overwritten by apply_scale
 
-        def apply_scale(val: Union[torch.Tensor, Iterable[torch.Tensor]]):
+        def apply_scale(val: torch.Tensor | Iterable[torch.Tensor]):
             if isinstance(val, torch.Tensor):
                 if len(stash) == 0:
                     if self._scale is None:
@@ -466,7 +466,7 @@ class GradScaler:
 
         return retval
 
-    def update(self, new_scale: Optional[Union[float, torch.Tensor]] = None) -> None:
+    def update(self, new_scale: Optional[float | torch.Tensor] = None) -> None:
         """Update the scale factor.
 
         If any optimizer steps were skipped the scale is multiplied by ``backoff_factor``

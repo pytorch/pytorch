@@ -31,7 +31,7 @@ from torch.distributed.tensor.placement_types import (
 
 # convenient wrapper to register sharding propagation rules
 def register_prop_rule(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
     schema_info: Optional[RuntimeSchemaInfo] = None,
 ) -> Callable[
     [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
@@ -60,7 +60,7 @@ _ShardingStrategyFunc: TypeAlias = Callable[[_OpSchemaT], _StrategyTypeT]
 
 
 def register_op_strategy(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
     schema_info: Optional[RuntimeSchemaInfo] = None,
 ) -> Callable[[_ShardingStrategyFunc], _ShardingStrategyFunc]:
     # For every ATen op that accepts any args in this list,
@@ -131,9 +131,9 @@ def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
 
 
 def as_list(
-    x: Union[list[object], object],
+    x: list[object] | object,
     # pyre-fixme[11]: Annotation `immutable_list` is not defined as a type.
-) -> Union[list[object], torch.fx.immutable_collections.immutable_list]:  # type: ignore[valid-type]
+) -> list[object] | torch.fx.immutable_collections.immutable_list:  # type: ignore[valid-type]
     # During tracing, `aten.sum.dim_IntList` uses `immutable_list` for its args,
     # which is an object but treated as a list by the tracer. Therefore, keep
     # `immutable_list` intact here as well.

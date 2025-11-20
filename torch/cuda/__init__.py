@@ -92,7 +92,7 @@ try:
                     self.paths: list[str] = paths
 
                 def hooked_CDLL(
-                    self, name: Union[str, Path, None], *args: Any, **kwargs: Any
+                    self, name: str | Path | None, *args: Any, **kwargs: Any
                 ) -> ctypes.CDLL:
                     if name and Path(name).name == "libamd_smi.so":
                         for path in self.paths:
@@ -752,7 +752,7 @@ def set_stream(stream: Stream):
     )
 
 
-def _parse_visible_devices() -> Union[list[int], list[str]]:
+def _parse_visible_devices() -> list[int] | list[str]:
     r"""Parse CUDA_VISIBLE_DEVICES environment variable."""
     var = os.getenv("CUDA_VISIBLE_DEVICES")
 
@@ -1189,7 +1189,7 @@ def current_blas_handle():
     return torch._C._cuda_getCurrentBlasHandle()
 
 
-def set_sync_debug_mode(debug_mode: Union[int, str]) -> None:
+def set_sync_debug_mode(debug_mode: int | str) -> None:
     r"""Set the debug mode for cuda synchronizing operations.
 
     Args:
@@ -1449,7 +1449,7 @@ def clock_rate(device: "Device" = None) -> int:
         return _get_amdsmi_clock_rate(device)
 
 
-def _get_device(device: Union[int, str, torch.device]) -> torch.device:
+def _get_device(device: int | str | torch.device) -> torch.device:
     r"""Return the torch.device type object from the passed in device.
 
     Args:
@@ -1475,7 +1475,7 @@ def _get_generator(device: torch.device) -> torch._C.Generator:
 
 
 def _set_rng_state_offset(
-    offset: int, device: Union[int, str, torch.device] = "cuda"
+    offset: int, device: int | str | torch.device = "cuda"
 ) -> None:
     r"""Set the random number generator state offset of the specified GPU.
 
@@ -1493,7 +1493,7 @@ def _set_rng_state_offset(
     _lazy_call(cb)
 
 
-def _get_rng_state_offset(device: Union[int, str, torch.device] = "cuda") -> int:
+def _get_rng_state_offset(device: int | str | torch.device = "cuda") -> int:
     r"""Return the random number generator state offset of the specified GPU.
 
     Args:

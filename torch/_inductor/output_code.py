@@ -792,7 +792,7 @@ class CompiledAOTI(OutputCode):
     Class holding an AOTInductor compiled so.
     """
 
-    filename: Union[str, list[Union[str, Weights]], torch.fx.GraphModule]
+    filename: str | list[str | Weights] | torch.fx.GraphModule
     device_type: str
     current_callable: Optional[Callable[..., Any]] = None
     _cached_files: dict[str, bytes] = dataclasses.field(default_factory=dict)

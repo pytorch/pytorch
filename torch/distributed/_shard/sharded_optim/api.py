@@ -10,7 +10,7 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 class ShardedOptimizer(optim.Optimizer):
     def __init__(
         self,
-        named_params: Mapping[str, Union[Tensor, ShardedTensor]],
+        named_params: Mapping[str, Tensor | ShardedTensor],
         optimizer_class,
         *optimizer_args,
         **optimizer_kwargs,

@@ -22,7 +22,7 @@ T = TypeVar("T")
 _P = ParamSpec("_P")
 
 OpOverload = torch._ops.OpOverload
-LoweringDict = dict[Union[OpOverload, str], Callable[..., Any]]
+LoweringDict = dict[OpOverload | str, Callable[..., Any]]
 TargetType = Union[Callable[..., Any], str]
 
 
@@ -161,7 +161,7 @@ def lower_pointwise_subgraph(
     # Lower subgraph to ir.Pointwise nodes
     def fake_inner_fn(
         loop_idx: int, input_idx: int
-    ) -> Union[ir.Expr, ir.TensorBox, None]:
+    ) -> ir.Expr | ir.TensorBox | None:
         return ops.placeholder(input_idx)
 
     graph_inputs = [

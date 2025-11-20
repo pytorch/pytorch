@@ -75,7 +75,7 @@ class _BenchmarkProcess:
     _start_time: float
     _end_time: Optional[float] = None
     _retcode: Optional[int]
-    _result: Optional[Union[WorkerOutput, WorkerFailure]] = None
+    _result: Optional[WorkerOutput | WorkerFailure] = None
 
     def __init__(self, work_order: WorkOrder, cpu_list: Optional[str]) -> None:
         self._work_order = work_order
@@ -129,7 +129,7 @@ class _BenchmarkProcess:
         return (self._end_time or time.time()) - self._start_time
 
     @property
-    def result(self) -> Union[WorkerOutput, WorkerFailure]:
+    def result(self) -> WorkerOutput | WorkerFailure:
         self._maybe_collect()
         assert self._result is not None
         return self._result
@@ -230,7 +230,7 @@ class InProgress:
         raise subprocess.TimeoutExpired(cmd=self._proc.cmd, timeout=timeout)
 
     @property
-    def result(self) -> Union[WorkerOutput, WorkerFailure]:
+    def result(self) -> WorkerOutput | WorkerFailure:
         return self._proc.result
 
     def __hash__(self) -> int:

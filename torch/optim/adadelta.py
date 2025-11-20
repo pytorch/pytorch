@@ -29,7 +29,7 @@ class Adadelta(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1.0,
+        lr: float | Tensor = 1.0,
         rho: float = 0.9,
         eps: float = 1e-6,
         weight_decay: float = 0,

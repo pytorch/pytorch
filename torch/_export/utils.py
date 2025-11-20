@@ -337,7 +337,7 @@ def get_keystr(key_path: KeyPath) -> str:
 
 
 def _check_symint(
-    symint: Union[int, torch.SymInt],
+    symint: int | torch.SymInt,
     arg: int,
     range_constraints,
     unification_map,
@@ -619,7 +619,7 @@ def get_lifted_tensor_constant(
 
 def sequential_split(
     gm: torch.fx.GraphModule,
-    node_call_back: Callable[[torch.fx.Node], Union[torch.fx.Node, bool]],
+    node_call_back: Callable[[torch.fx.Node], torch.fx.Node | bool],
 ) -> torch.fx.GraphModule:
     """
     sequential_split creates a new graph module that splits the input graph module into multiple submodules
@@ -1409,7 +1409,7 @@ def _compiling_state_context():
 def _fakify_params_buffers(
     fake_mode: FakeTensorMode,
     mod: torch.nn.Module,
-) -> dict[str, Union[torch.Tensor, torch.nn.Parameter]]:
+) -> dict[str, torch.Tensor | torch.nn.Parameter]:
     params_buffers = {
         **dict(mod.named_parameters(remove_duplicate=False)),
         **dict(mod.named_buffers(remove_duplicate=False)),

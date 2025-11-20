@@ -83,7 +83,7 @@ class CUDAKernel(Kernel):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
         self.layout_args: dict[str, list[LayoutArg]] = defaultdict(list)
-        self.size_args: list[Union[Expr, int]] = []
+        self.size_args: list[Expr | int] = []
         # Mapping from arg name to IRNode.
         self.named_nodes: dict[str, IRNode] = {}
 
@@ -152,7 +152,7 @@ class CUDAKernel(Kernel):
             self.add_layout_arg("ldc", Bias, "stride", ldc_dim)
         self.add_layout_arg("ldd", Y, "stride", ldd_dim)
 
-    def get_layout_args(self) -> tuple[Union[Expr, int], ...]:
+    def get_layout_args(self) -> tuple[Expr | int, ...]:
         X = self.named_nodes["X"]
         W = self.named_nodes["W"]
         Y = self.named_nodes["Y"]
@@ -161,7 +161,7 @@ class CUDAKernel(Kernel):
         ndim = _normalize_idx(-1, len(W.get_size()))
         kdim = _normalize_idx(-1, len(X.get_size()))
 
-        def get_ld(node) -> Union[Expr, int]:
+        def get_ld(node) -> Expr | int:
             dim = self.find_ld_idx(node)
             return node.get_stride()[dim]
 
@@ -175,7 +175,7 @@ class CUDAKernel(Kernel):
         LDD = get_ld(Y)
         return (M, N, K, B, LDA, LDB, LDC, LDD)
 
-    def get_dynamic_shape_args(self) -> list[Union[Expr, int]]:
+    def get_dynamic_shape_args(self) -> list[Expr | int]:
         return [*self.get_layout_args(), *self.size_args]
 
     def get_offset_args(self) -> list[Expr]:
@@ -589,7 +589,7 @@ class CUDATemplateCaller(ChoiceCaller):
         supports_epilogue_fusion: bool,
         template: "CUDATemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[
-            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
+            dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]
         ],  # type: ignore[type-arg]
         description: str,
     ) -> None:
@@ -646,7 +646,7 @@ class CUDATemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """
         Information returned here is logged to the autotune log file when that is enabled.
 
@@ -673,7 +673,7 @@ class CUDATemplateCaller(ChoiceCaller):
         else:
             return {"backend": "CUDA", "op_type": "unknown"}
 
-    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def output_node(self) -> TensorBox | ShapeAsConstantBuffer:
         self.bmreq.update_workspace_size()
         return TensorBox.create(
             CUDATemplateBuffer(

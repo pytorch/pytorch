@@ -35,8 +35,8 @@ class Adam(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
-        betas: tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
+        lr: float | Tensor = 1e-3,
+        betas: tuple[float | Tensor, float | Tensor] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
         amsgrad: bool = False,
@@ -356,9 +356,9 @@ def _single_tensor_adam(
     *,
     amsgrad: bool,
     has_complex: bool,
-    beta1: Union[float, Tensor],
-    beta2: Union[float, Tensor],
-    lr: Union[float, Tensor],
+    beta1: float | Tensor,
+    beta2: float | Tensor,
+    lr: float | Tensor,
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -448,7 +448,7 @@ def _single_tensor_adam(
                     device=device, dtype=dtype, non_blocking=True
                 )
 
-            device_beta1: Union[float, Tensor] = beta1_dict[key]
+            device_beta1: float | Tensor = beta1_dict[key]
         else:
             device_beta1 = beta1
 
@@ -563,9 +563,9 @@ def _multi_tensor_adam(
     *,
     amsgrad: bool,
     has_complex: bool,
-    beta1: Union[float, Tensor],
-    beta2: Union[float, Tensor],
-    lr: Union[float, Tensor],
+    beta1: float | Tensor,
+    beta2: float | Tensor,
+    lr: float | Tensor,
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -727,9 +727,9 @@ def _multi_tensor_adam(
         del device_grads
         del scaled_device_grads
 
-        bias_correction1: Union[tuple[Tensor, ...], list[Tensor]]
-        bias_correction2: Union[tuple[Tensor, ...], list[Tensor]]
-        bias_correction2_sqrt: Union[tuple[Tensor, ...], list[Tensor]]
+        bias_correction1: tuple[Tensor, ...] | list[Tensor]
+        bias_correction2: tuple[Tensor, ...] | list[Tensor]
+        bias_correction2_sqrt: tuple[Tensor, ...] | list[Tensor]
 
         if capturable:
             bias_correction1 = torch._foreach_pow(beta1, device_state_steps)  # type: ignore[arg-type]
@@ -812,9 +812,9 @@ def _fused_adam(
     *,
     amsgrad: bool,
     has_complex: bool,  # Needed for consistency.
-    beta1: Union[float, Tensor],
-    beta2: Union[float, Tensor],
-    lr: Union[float, Tensor],
+    beta1: float | Tensor,
+    beta2: float | Tensor,
+    lr: float | Tensor,
     weight_decay: float,
     eps: float,
     maximize: bool,
@@ -919,9 +919,9 @@ def adam(
     decoupled_weight_decay: bool = False,
     *,
     amsgrad: bool,
-    beta1: Union[float, Tensor],
-    beta2: Union[float, Tensor],
-    lr: Union[float, Tensor],
+    beta1: float | Tensor,
+    beta2: float | Tensor,
+    lr: float | Tensor,
     weight_decay: float,
     eps: float,
     maximize: bool,

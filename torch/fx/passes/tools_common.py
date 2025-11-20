@@ -138,7 +138,7 @@ class FxNetAccFusionsFinder:
     def recursive_add_node(
         self,
         fusion_group: "FxNetAccFusionsFinder.FusionGroup",
-        inputs: Union[NodeSet, NodeList],
+        inputs: NodeSet | NodeList,
         visited: Optional[NodeSet] = None,
     ):
         """

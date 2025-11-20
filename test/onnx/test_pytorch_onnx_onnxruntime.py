@@ -95,8 +95,8 @@ def _init_test_rpn():
 
 def _construct_tensor_for_quantization_test(
     shape: tuple[int, ...],
-    offset: Optional[Union[int, float]] = None,
-    max_val: Optional[Union[int, float]] = None,
+    offset: Optional[int | float] = None,
+    max_val: Optional[int | float] = None,
 ) -> Tensor:
     """Helper function to generate weights and test inputs in a deterministic way.
 

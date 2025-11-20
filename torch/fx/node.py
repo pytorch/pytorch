@@ -46,7 +46,7 @@ BaseArgumentTypes = Union[
 ]
 base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
 
-Target: TypeAlias = Union[Callable[..., Any], str]
+Target: TypeAlias = Callable[..., Any] | str
 
 Argument = Optional[
     Union[

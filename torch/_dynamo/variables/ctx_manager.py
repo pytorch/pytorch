@@ -1443,7 +1443,7 @@ class ErrorOnGraphBreakVariable(ContextWrappingVariable):
 class WithEnterFunctionVariable(VariableTracker):
     def __init__(
         self,
-        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        ctx: ContextWrappingVariable | GenericContextWrappingVariable,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -1489,7 +1489,7 @@ class WithExitFunctionVariable(VariableTracker):
 
     def __init__(
         self,
-        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        ctx: ContextWrappingVariable | GenericContextWrappingVariable,
         target: Any,
         **kwargs: Any,
     ) -> None:

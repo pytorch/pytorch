@@ -76,7 +76,7 @@ class AsyncStager(Protocol):
 
     def stage(
         self, state_dict: STATE_DICT_TYPE
-    ) -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+    ) -> Future[STATE_DICT_TYPE] | STATE_DICT_TYPE:
         """
         Returns a "staged" copy of `state_dict`. The expectation of the staged copy is that it is
         inoculated from any updates incurred after the stage call is complete.
@@ -204,7 +204,7 @@ class DefaultStager(AsyncStager):
         self,
         state_dict: STATE_DICT_TYPE,
         **kwargs: Any,
-    ) -> Union[STATE_DICT_TYPE, Future[STATE_DICT_TYPE]]:
+    ) -> STATE_DICT_TYPE | Future[STATE_DICT_TYPE]:
         """
         This function is responsible for staging staging the state_dict.
         See class docstring for more details on staging.
@@ -368,7 +368,7 @@ class _ReplicationStager(AsyncStager):
 
     def stage(
         self, state_dict: STATE_DICT_TYPE
-    ) -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+    ) -> Future[STATE_DICT_TYPE] | STATE_DICT_TYPE:
         """
         Stage the state_dict by replicating it across ranks. Returns a state_dict representing
         the received replica.

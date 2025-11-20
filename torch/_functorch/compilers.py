@@ -235,7 +235,7 @@ def print_compile(fx_g, _):
 
 
 def memory_efficient_fusion(
-    fn: Union[Callable, nn.Module],
+    fn: Callable | nn.Module,
     **kwargs,
 ):
     """

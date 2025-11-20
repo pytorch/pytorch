@@ -67,7 +67,7 @@ class LKJCholesky(Distribution):
     def __init__(
         self,
         dim: int,
-        concentration: Union[Tensor, float] = 1.0,
+        concentration: Tensor | float = 1.0,
         validate_args: Optional[bool] = None,
     ) -> None:
         if dim < 2:

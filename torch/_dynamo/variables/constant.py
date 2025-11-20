@@ -280,7 +280,7 @@ class EnumVariable(VariableTracker):
     both standard Enum and IntEnum with proper value tracking and comparison.
     """
 
-    def __init__(self, value: Union[enum.Enum, enum.IntEnum], **kwargs: Any) -> None:
+    def __init__(self, value: enum.Enum | enum.IntEnum, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
@@ -301,7 +301,7 @@ class EnumVariable(VariableTracker):
             hints=[*graph_break_hints.USER_ERROR, *graph_break_hints.SUPPORTABLE],
         )
 
-    def as_proxy(self) -> Union[enum.Enum, int]:
+    def as_proxy(self) -> enum.Enum | int:
         if isinstance(self.value, int):
             return int(self.value)  # convert IntEnum to a normal int
         return self.value
@@ -309,7 +309,7 @@ class EnumVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"EnumVariable({type(self.value)})"
 
-    def as_python_constant(self) -> Union[enum.Enum, enum.IntEnum]:
+    def as_python_constant(self) -> enum.Enum | enum.IntEnum:
         return self.value
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:

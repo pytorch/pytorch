@@ -83,7 +83,7 @@ def _allocate_jacobians_with_outputs(
 
 
 def _iter_tensors(
-    x: Union[torch.Tensor, Iterable[torch.Tensor]], only_requiring_grad: bool = False
+    x: torch.Tensor | Iterable[torch.Tensor], only_requiring_grad: bool = False
 ) -> Iterable[torch.Tensor]:
     if is_tensor_like(x):
         # mypy doesn't narrow type of `x` to torch.Tensor
@@ -1979,7 +1979,7 @@ def _fast_gradcheck(
 # the '...' first argument of Callable can be replaced with VarArg(Tensor).
 # For now, we permit any input.
 def gradcheck(
-    func: Callable[..., Union[_TensorOrTensors]],  # See Note [VarArg of Tensors]
+    func: Callable[..., _TensorOrTensors],  # See Note [VarArg of Tensors]
     inputs: _TensorOrTensors,
     *,
     eps: float = 1e-6,

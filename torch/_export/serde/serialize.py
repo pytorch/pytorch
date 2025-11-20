@@ -284,13 +284,13 @@ def deserialize_storage_offset(offset: SymInt) -> int:
     return offset.as_int
 
 
-def _print_sympy(s: Union[torch.SymInt, torch.SymBool, torch.SymFloat, sympy.Expr]):
+def _print_sympy(s: torch.SymInt | torch.SymBool | torch.SymFloat | sympy.Expr):
     if isinstance(s, (torch.SymInt, torch.SymBool, torch.SymFloat)):
         s = s.node.expr
     return sympy.printing.repr.srepr(s)
 
 
-def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
+def serialize_sym_int(s: int | torch.SymInt) -> SymInt:
     if isinstance(s, (torch.SymInt, sympy.Symbol, int)):
         if symbolic_shapes.is_concrete_int(s):
             return SymInt.create(as_int=int(s))
@@ -311,7 +311,7 @@ def serialize_sym_int(s: Union[int, torch.SymInt]) -> SymInt:
         )
 
 
-def serialize_sym_float(s: Union[float, torch.SymFloat]) -> SymFloat:
+def serialize_sym_float(s: float | torch.SymFloat) -> SymFloat:
     if isinstance(s, (torch.SymFloat, sympy.Symbol, float)):
         if symbolic_shapes.is_concrete_float(s):
             return SymFloat.create(as_float=float(s))
@@ -332,7 +332,7 @@ def serialize_sym_float(s: Union[float, torch.SymFloat]) -> SymFloat:
         )
 
 
-def serialize_sym_bool(s: Union[bool, torch.SymBool]) -> SymBool:
+def serialize_sym_bool(s: bool | torch.SymBool) -> SymBool:
     if isinstance(s, (torch.SymBool, bool)):
         if symbolic_shapes.is_concrete_bool(s):
             return SymBool.create(as_bool=bool(s))
@@ -413,7 +413,7 @@ def serialize_torch_artifact(
 
 
 def deserialize_torch_artifact(
-    serialized: Union[dict[str, Any], tuple[Any, ...], bytes],
+    serialized: dict[str, Any] | tuple[Any, ...] | bytes,
 ):
     if isinstance(serialized, (dict, tuple)):
         return serialized
@@ -1953,7 +1953,7 @@ class GraphModuleDeserializer(metaclass=Final):
         signature: ep.ExportGraphSignature
         module_call_graph: list[ep.ModuleCallEntry]
         names_to_symbols: dict[str, sympy.Symbol]
-        state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]]
+        state_dict: dict[str, torch.Tensor | torch.nn.Parameter]
         constants: dict[str, _ConstantAttributeType]
         example_inputs: Optional[tuple[tuple[torch.Tensor, ...], dict[str, Any]]]
 
@@ -2020,7 +2020,7 @@ class GraphModuleDeserializer(metaclass=Final):
         return target
 
     def _parse_sym_expr(
-        self, expr_str: str, hint: Optional[Union[int, bool, float]] = None
+        self, expr_str: str, hint: Optional[int | bool | float] = None
     ) -> sympy.Expr:
         """
         Parses and does bottom-up processing of sympy.Expr nodes,
@@ -2028,7 +2028,7 @@ class GraphModuleDeserializer(metaclass=Final):
         """
 
         def _process_sym_expr(
-            sym: sympy.Expr, hint: Optional[Union[int, bool, float]] = None
+            sym: sympy.Expr, hint: Optional[int | bool | float] = None
         ) -> sympy.Expr:
             if sym.is_Integer or sym.is_Float or sym.is_Boolean:  # base case
                 return sym
@@ -2068,7 +2068,7 @@ class GraphModuleDeserializer(metaclass=Final):
         )
         return _process_sym_expr(expr, hint)
 
-    def deserialize_sym_int(self, s: SymInt) -> Union[int, torch.SymInt]:
+    def deserialize_sym_int(self, s: SymInt) -> int | torch.SymInt:
         val = s.value
         if s.type == "as_expr":
             if val.hint is None:
@@ -2087,7 +2087,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 f"SymInt has invalid field type {s.type} with value {s.value}"
             )
 
-    def deserialize_sym_float(self, s: SymFloat) -> Union[float, torch.SymFloat]:
+    def deserialize_sym_float(self, s: SymFloat) -> float | torch.SymFloat:
         val = s.value
         if s.type == "as_expr":
             hint = val.hint.as_float if val.hint else None
@@ -2101,7 +2101,7 @@ class GraphModuleDeserializer(metaclass=Final):
                 f"SymFloat has invalid field type {s.type} with value {s.value}"
             )
 
-    def deserialize_sym_bool(self, s: SymBool) -> Union[bool, torch.SymBool]:
+    def deserialize_sym_bool(self, s: SymBool) -> bool | torch.SymBool:
         val = s.value
         if s.type == "as_expr":
             expr = self._parse_sym_expr(val.expr_str)
@@ -2138,7 +2138,7 @@ class GraphModuleDeserializer(metaclass=Final):
             class_fqn=script_obj_meta.class_fqn,
         )
 
-    def deserialize_graph_output(self, output) -> Optional[Union[torch.fx.Node, int]]:
+    def deserialize_graph_output(self, output) -> Optional[torch.fx.Node | int]:
         if output.type == "as_tensor":
             return self.serialized_name_to_node[output.as_tensor.name]
         elif output.type == "as_sym_int":
@@ -2511,10 +2511,10 @@ class GraphModuleDeserializer(metaclass=Final):
     def deserialize(
         self,
         serialized_graph_module: GraphModule,
-        serialized_state_dict: Union[dict[str, torch.Tensor], bytes],
-        constants: Union[dict[str, Any], bytes],
+        serialized_state_dict: dict[str, torch.Tensor] | bytes,
+        constants: dict[str, Any] | bytes,
         example_inputs: Optional[
-            Union[tuple[tuple[torch.Tensor, ...], dict[str, Any]], bytes]
+            tuple[tuple[torch.Tensor, ...], dict[str, Any]] | bytes
         ] = None,
         symbol_name_to_range: Optional[dict[str, symbolic_shapes.ValueRanges]] = None,
     ) -> Result:
@@ -2865,7 +2865,7 @@ class GraphModuleDeserializer(metaclass=Final):
         self,
         meta_val,
         fx_node: torch.fx.Node,
-        arg: Union[TensorArgument, SymIntArgument, SymFloatArgument],
+        arg: TensorArgument | SymIntArgument | SymFloatArgument,
         idx: int,
         deserialized_metadata: dict[str, Any],
     ):
@@ -3120,10 +3120,10 @@ class ExportedProgramDeserializer(metaclass=Final):
     def deserialize(
         self,
         exported_program: ExportedProgram,
-        state_dict: Union[dict[str, torch.Tensor], bytes],
-        constants: Union[dict[str, torch.Tensor], bytes],
+        state_dict: dict[str, torch.Tensor] | bytes,
+        constants: dict[str, torch.Tensor] | bytes,
         example_inputs: Optional[
-            Union[tuple[tuple[torch.Tensor, ...], dict[str, Any]], bytes]
+            tuple[tuple[torch.Tensor, ...], dict[str, Any]] | bytes
         ] = None,
         *,
         _unsafe_skip_version_check=False,

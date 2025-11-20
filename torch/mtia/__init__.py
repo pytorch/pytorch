@@ -363,7 +363,7 @@ def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
     return StreamContext(stream)
 
 
-def get_rng_state(device: Union[int, str, torch.device] = "mtia") -> Tensor:
+def get_rng_state(device: int | str | torch.device = "mtia") -> Tensor:
     r"""Returns the random number generator state as a ByteTensor.
 
     Args:
@@ -379,7 +379,7 @@ def get_rng_state(device: Union[int, str, torch.device] = "mtia") -> Tensor:
 
 
 def set_rng_state(
-    new_state: Tensor, device: Union[int, str, torch.device] = "mtia"
+    new_state: Tensor, device: int | str | torch.device = "mtia"
 ) -> None:
     r"""Sets the random number generator state.
 

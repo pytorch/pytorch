@@ -47,7 +47,7 @@ class Reduction(Enum):
 
 @dataclass(frozen=True)
 class NormReduction:
-    norm_type: Union[int, float, str]
+    norm_type: int | float | str
 
 
 ReductionOpType = Union[NormReduction, str]
@@ -71,9 +71,9 @@ class _NormPartial(Partial):
     similarly for inf and -inf norm. For 0-norm, the reduction op is sum.
     """
 
-    norm_type: Union[int, float, str] = 2
+    norm_type: int | float | str = 2
 
-    def __init__(self, norm_type: Union[int, float, str] = 2):
+    def __init__(self, norm_type: int | float | str = 2):
         reduce_op = None
         if norm_type in (float("inf"), "inf"):
             reduce_op = "max"

@@ -262,7 +262,7 @@ class CheckpointProcess:
 
     def write(
         self,
-        state_dict: Union[STATE_DICT, Future[STATE_DICT]],
+        state_dict: STATE_DICT | Future[STATE_DICT],
         path: str,
         **kwargs: Any,
     ) -> Optional[Future[None]]:
@@ -280,7 +280,7 @@ class CheckpointProcess:
 
     def _write(
         self,
-        state_dict: Union[STATE_DICT, Future[STATE_DICT]],
+        state_dict: STATE_DICT | Future[STATE_DICT],
         path: str,
         **kwargs: Any,
     ) -> None:

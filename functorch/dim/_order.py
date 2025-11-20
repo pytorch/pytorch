@@ -40,7 +40,7 @@ def _wrap_dim(arg: Any, orig_ndim: int, allow_none: bool = True) -> DimEntry:
 
 
 def order(
-    tensor_or_dim: Union[torch.Tensor, Any], *dims: Union[Any, Sequence[Any]]
+    tensor_or_dim: torch.Tensor | Any, *dims: Any | Sequence[Any]
 ) -> torch.Tensor:
     """
     Reorder the dimensions of a tensor or create a tensor from a dimension.

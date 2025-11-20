@@ -33,7 +33,7 @@ default_rtol = {
 
 
 def rand_math_tensor(
-    shape: tuple[Union[int, list[int]]],
+    shape: tuple[int | list[int]],
     device: str,
     dtype: torch.dtype,
     requires_grad: bool = False,

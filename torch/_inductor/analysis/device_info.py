@@ -19,7 +19,7 @@ class DeviceInfo:
     For example,
     """
 
-    tops: dict[Union[torch.dtype, str], float]
+    tops: dict[torch.dtype | str, float]
     dram_bw_gbs: float
     dram_gb: float
 

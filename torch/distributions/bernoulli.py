@@ -47,8 +47,8 @@ class Bernoulli(ExponentialFamily):
 
     def __init__(
         self,
-        probs: Optional[Union[Tensor, Number]] = None,
-        logits: Optional[Union[Tensor, Number]] = None,
+        probs: Optional[Tensor | Number] = None,
+        logits: Optional[Tensor | Number] = None,
         validate_args: Optional[bool] = None,
     ) -> None:
         if (probs is None) == (logits is None):

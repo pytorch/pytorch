@@ -166,7 +166,7 @@ else:
 class DynamoStance:
     stance: str = "default"
     skip_guard_eval_unsafe: bool = False
-    backend: Union[str, Callable[..., Any], None] = None
+    backend: str | Callable[..., Any] | None = None
 
 
 _stance = DynamoStance()
@@ -346,7 +346,7 @@ DONT_WRAP_FILES = {
 
 
 def _debug_get_cache_entry_list(
-    code: Union[types.CodeType, Callable[..., Any]],
+    code: types.CodeType | Callable[..., Any],
 ) -> list[CacheEntry]:
     """
     Given a code object or a callable object, retrieve the cache entries
@@ -689,7 +689,7 @@ class _TorchDynamoContext:
         assert callable(callback) or callback is False or callback is None
         self.callback: DynamoCallback = callback
         self._backend_ctx_ctor = backend_ctx_ctor
-        self.prior: Union[Unset, DynamoCallback] = unset
+        self.prior: Unset | DynamoCallback = unset
         self.first_ctx = first_ctx
         self.fullgraph = fullgraph
         self.error_on_graph_break = error_on_graph_break
@@ -1023,7 +1023,7 @@ class OptimizeContext(_TorchDynamoContext):
         dynamic: Optional[bool] = None,
         compiler_config: Optional[Any] = None,
         rebuild_ctx: Optional[
-            Callable[[], Union[OptimizeContext, _NullDecorator]]
+            Callable[[], OptimizeContext | _NullDecorator]
         ] = None,
         package: Optional[CompilePackage] = None,
         hooks: Optional[Hooks] = None,
@@ -1185,7 +1185,7 @@ def _optimize_catch_errors(
     export: bool = False,
     dynamic: Optional[bool] = None,
     compiler_config: Optional[Any] = None,
-    rebuild_ctx: Optional[Callable[[], Union[OptimizeContext, _NullDecorator]]] = None,
+    rebuild_ctx: Optional[Callable[[], OptimizeContext | _NullDecorator]] = None,
     package: Optional[CompilePackage] = None,
 ) -> OptimizeContext:
     return OptimizeContext(
@@ -1204,7 +1204,7 @@ def _optimize_catch_errors(
 
 
 def get_compiler_fn(
-    compiler_fn: Union[str, Callable[..., Any], None],
+    compiler_fn: str | Callable[..., Any] | None,
 ) -> WrapBackendDebug:
     from .repro.after_dynamo import wrap_backend_debug
 
@@ -1233,7 +1233,7 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 # Make dynamo graph to have same input/output spec as user code
 def argument_names(
     f_sig: inspect.Signature,
-    args: Union[list[Any], tuple[Any, ...]],
+    args: list[Any] | tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> list[str]:
     def signature_to_fullargspec(sig: inspect.Signature) -> inspect.FullArgSpec:
@@ -1356,8 +1356,8 @@ def check_for_incompatible_configs() -> None:
     )
 
 
-def optimize(*args: Any, **kwargs: Any) -> Union[OptimizeContext, _NullDecorator]:
-    def rebuild_ctx() -> Union[OptimizeContext, _NullDecorator]:
+def optimize(*args: Any, **kwargs: Any) -> OptimizeContext | _NullDecorator:
+    def rebuild_ctx() -> OptimizeContext | _NullDecorator:
         ca_kwargs_override = config.compiled_autograd_kwargs_override
         if ca_kwargs_override:
             # NOTE: The process of translating other `torch.compile` kwargs to `torch._dynamo.optimize` kwargs
@@ -1372,8 +1372,8 @@ def optimize(*args: Any, **kwargs: Any) -> Union[OptimizeContext, _NullDecorator
 
 
 def _optimize(
-    rebuild_ctx: Callable[[], Union[OptimizeContext, _NullDecorator]],
-    backend: Union[str, Callable[..., Any]] = "inductor",
+    rebuild_ctx: Callable[[], OptimizeContext | _NullDecorator],
+    backend: str | Callable[..., Any] = "inductor",
     *,
     nopython: bool = False,
     error_on_graph_break: Optional[bool] = None,
@@ -1383,7 +1383,7 @@ def _optimize(
     disable: bool = False,
     dynamic: Optional[bool] = None,
     package: Optional[CompilePackage] = None,
-) -> Union[OptimizeContext, _NullDecorator]:
+) -> OptimizeContext | _NullDecorator:
     """
     The main entrypoint of TorchDynamo.  Do graph capture and call
     backend() to optimize extracted graphs.
@@ -1865,7 +1865,7 @@ def export(
         dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[dict[str, Any] | tuple[Any] | list[Any]] = None,
     specialize_float: bool = True,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
@@ -2043,7 +2043,7 @@ def export(
                     )
 
                     def fakify_with_ambient(
-                        path: KeyPath, t: Union[torch.Tensor, _IntWrapper, Any]
+                        path: KeyPath, t: torch.Tensor | _IntWrapper | Any
                     ) -> Any:
                         if isinstance(t, torch.Tensor):
                             # pyrefly: ignore [missing-attribute]
@@ -2309,7 +2309,7 @@ def optimize_assert(*args: Any, **kwargs: Any) -> OptimizeContext:
 
 def _optimize_assert(
     rebuild_ctx: Callable[[], OptimizeContext],
-    backend: Union[str, Callable[..., Any], None],
+    backend: str | Callable[..., Any] | None,
     *,
     hooks: Hooks = Hooks(None, None, None),
     export: bool = False,

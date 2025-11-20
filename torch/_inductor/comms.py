@@ -169,7 +169,7 @@ class ReorderInfo:
         return self.initial_exposed - self.final_exposed
 
 
-def is_gemm_like(node: Optional[Union[IRNode, Operation]]) -> bool:
+def is_gemm_like(node: Optional[IRNode | Operation]) -> bool:
     if node is None:
         return False
 
@@ -642,7 +642,7 @@ def _find_buffers_with_changed_last_use(
     candidate: BaseSchedulerNode,
     gns: list[BaseSchedulerNode],
     buf_to_snode_last_use: dict,
-) -> dict[BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]]:
+) -> dict[BaseSchedulerNode, list[FreeableInputBuffer | Any]]:
     """
     Find buffers whose last use will change after swapping candidate with group.
 
@@ -659,7 +659,7 @@ def _find_buffers_with_changed_last_use(
         Dict mapping group nodes to buffers that will change their last-use node
     """
     group_n_to_bufs_after_swap_dealloc_by_candidate: dict[
-        BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]
+        BaseSchedulerNode, list[FreeableInputBuffer | Any]
     ] = defaultdict(list)
     for (
         buf,
@@ -1646,7 +1646,7 @@ def _find_buffers_with_changed_last_use_sink_waits(
     candidate: BaseSchedulerNode,
     gns: list[BaseSchedulerNode],
     buf_to_snode_last_use: dict,
-) -> dict[BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]]:
+) -> dict[BaseSchedulerNode, list[FreeableInputBuffer | Any]]:
     """
     Find buffers whose last use will change after swapping in sink_waits pass.
 
@@ -1663,7 +1663,7 @@ def _find_buffers_with_changed_last_use_sink_waits(
         Dict mapping group nodes to buffers that will change their last-use node
     """
     group_n_to_bufs_after_swap_dealloc_instead_of_candidate: dict[
-        BaseSchedulerNode, list[Union[FreeableInputBuffer, Any]]
+        BaseSchedulerNode, list[FreeableInputBuffer | Any]
     ] = defaultdict(list)
     for (
         buf,

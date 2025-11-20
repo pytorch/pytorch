@@ -62,7 +62,7 @@ class ShardingPlan:
         >>> )
     """
 
-    plan: dict[str, Union[ShardingSpec, Sharder]]
+    plan: dict[str, ShardingSpec | Sharder]
     output_plan: Optional[dict[str, ShardingSpec]] = None
     return_local_tensor: Optional[list[str]] = None
 

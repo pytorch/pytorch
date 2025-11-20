@@ -9,7 +9,7 @@ from typing import Union
 logger = logging.getLogger(__name__)
 
 
-def get_path(path: Union[str, Path], resolve: bool = False) -> Path:
+def get_path(path: str | Path, resolve: bool = False) -> Path:
     """Convert to Path object, optionally resolving to absolute path."""
     if not path:
         raise ValueError("Path cannot be None or empty")
@@ -17,14 +17,14 @@ def get_path(path: Union[str, Path], resolve: bool = False) -> Path:
     return result.resolve() if resolve else result
 
 
-def ensure_dir_exists(path: Union[str, Path]) -> Path:
+def ensure_dir_exists(path: str | Path) -> Path:
     """Create directory if it doesn't exist."""
     path_obj = get_path(path)
     path_obj.mkdir(parents=True, exist_ok=True)
     return path_obj
 
 
-def remove_dir(path: Union[str, Path, None]) -> None:
+def remove_dir(path: str | Path | None) -> None:
     """Remove directory if it exists."""
     if not path:
         return
@@ -33,13 +33,13 @@ def remove_dir(path: Union[str, Path, None]) -> None:
         shutil.rmtree(path_obj)
 
 
-def force_create_dir(path: Union[str, Path]) -> Path:
+def force_create_dir(path: str | Path) -> Path:
     """Remove directory if exists, then create fresh empty directory."""
     remove_dir(path)
     return ensure_dir_exists(path)
 
 
-def copy(src: Union[str, Path], dst: Union[str, Path]) -> None:
+def copy(src: str | Path, dst: str | Path) -> None:
     """Copy file or directory from src to dst."""
     src_path = get_path(src, resolve=True)
     dst_path = get_path(dst, resolve=True)
@@ -57,6 +57,6 @@ def copy(src: Union[str, Path], dst: Union[str, Path]) -> None:
         raise ValueError(f"Unsupported path type: {src_path}")
 
 
-def is_path_exist(path: Union[str, Path, None]) -> bool:
+def is_path_exist(path: str | Path | None) -> bool:
     """Check if path exists."""
     return bool(path and get_path(path).exists())

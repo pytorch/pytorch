@@ -74,7 +74,7 @@ def gh_get_labels(org: str, repo: str) -> list[str]:
 
 
 def gh_add_labels(
-    org: str, repo: str, pr_num: int, labels: Union[str, list[str]], dry_run: bool
+    org: str, repo: str, pr_num: int, labels: str | list[str], dry_run: bool
 ) -> None:
     if dry_run:
         print(f"Dryrun: Adding labels {labels} to PR {pr_num}")

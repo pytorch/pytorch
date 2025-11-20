@@ -1146,7 +1146,7 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
             # pyrefly: ignore [bad-argument-type]
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
-            out: list[Union[torch.Tensor, int, torch.SymInt]] = []
+            out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
             fake_tensors: list[FakeTensor] = [
                 x for x in out if isinstance(x, FakeTensor)

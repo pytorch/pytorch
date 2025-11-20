@@ -182,8 +182,8 @@ def _fake_quantize_learnable_per_channel_affine_grad_reference(
 
 def _get_tensor_min_max(
         X: torch.Tensor,
-        running_min: Union[float, torch.Tensor] = float("inf"),
-        running_max: Union[float, torch.Tensor] = float("-inf"),
+        running_min: float | torch.Tensor = float("inf"),
+        running_max: float | torch.Tensor = float("-inf"),
         averaging_const: float = 0.01,
         dtype: torch.dtype = torch.float32) -> tuple[float, float]:
     min_val_tensor = X.min().to(dtype=dtype)

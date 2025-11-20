@@ -212,7 +212,7 @@ def _get_mem_divisor(units: str) -> int:
         )
 
 
-def _rounding_fn(value: int, divisor: int, precision: int) -> Union[float, int]:
+def _rounding_fn(value: int, divisor: int, precision: int) -> float | int:
     return value if divisor == 1 else round(value / divisor, precision)
 
 
@@ -784,7 +784,7 @@ class MemTracker(TorchDispatchMode):
             self._optimizer_hook_handles = None
 
     def track_external(
-        self, *external: Union[nn.Module, optim.Optimizer, torch.Tensor]
+        self, *external: nn.Module | optim.Optimizer | torch.Tensor
     ) -> None:
         """
         Track tensors and stateful objects like modules, optimizers etc. that are created outside the MemTracker.
@@ -850,7 +850,7 @@ class MemTracker(TorchDispatchMode):
             tabulate (bool, optional): Whether to display the snapshot in a tabular format. Defaults to False.
         """
 
-        def natural_sort_key(s: str) -> list[Union[int, str]]:
+        def natural_sort_key(s: str) -> list[int | str]:
             return [
                 int(text) if text.isdigit() else text.lower()
                 for text in re.split("([0-9]+)", s)

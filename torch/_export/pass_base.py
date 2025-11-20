@@ -104,17 +104,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             # propagate the fake tensor or sym nodes
             def make_val(
                 x: Argument,
-            ) -> Union[
-                FakeTensor,
-                torch.SymInt,
-                torch.SymFloat,
-                torch.SymBool,
-                int,
-                float,
-                bool,
-                str,
-                None,
-            ]:
+            ) -> FakeTensor | torch.SymInt | torch.SymFloat | torch.SymBool | int | float | bool | str | None:
                 if isinstance(x, FakeTensor):
                     return x
                 elif isinstance(x, torch.Tensor):

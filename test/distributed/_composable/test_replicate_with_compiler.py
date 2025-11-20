@@ -94,7 +94,7 @@ class ReplicateTest(MultiProcessInductorTestCase):
         no_inductor: bool = False,
         no_compile_forward: bool = False,
         checkpoint: bool = False,
-        device: Union[str, torch.device],
+        device: str | torch.device,
     ):
         self.create_pg(device)
         torch._dynamo.config.optimize_ddp = "python_reducer"

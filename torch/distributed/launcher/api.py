@@ -161,7 +161,7 @@ class elastic_launch:
     def __init__(
         self,
         config: LaunchConfig,
-        entrypoint: Union[Callable, str, None],
+        entrypoint: Callable | str | None,
     ):
         self._config = config
         self._entrypoint = entrypoint
@@ -171,7 +171,7 @@ class elastic_launch:
 
 
 def _get_entrypoint_name(
-    entrypoint: Union[Callable, str, None], args: list[Any]
+    entrypoint: Callable | str | None, args: list[Any]
 ) -> str:
     """Retrieve entrypoint name with the rule:
     1. If entrypoint is a function, use ``entrypoint.__qualname__``.
@@ -213,7 +213,7 @@ def _get_addr_and_port(
 
 def launch_agent(
     config: LaunchConfig,
-    entrypoint: Union[Callable, str, None],
+    entrypoint: Callable | str | None,
     args: list[Any],
 ) -> dict[int, Any]:
     if not config.run_id:

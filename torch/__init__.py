@@ -1277,7 +1277,7 @@ def set_default_device(device: "Device") -> None:
     _GLOBAL_DEVICE_CONTEXT.device_context = device_context
 
 
-def set_default_tensor_type(t: _Union[type["torch.Tensor"], str], /) -> None:
+def set_default_tensor_type(t: type["torch.Tensor"] | str, /) -> None:
     r"""
     .. warning::
 
@@ -1525,7 +1525,7 @@ def is_deterministic_algorithms_warn_only_enabled() -> builtins.bool:
     return _C._get_deterministic_algorithms_warn_only()
 
 
-def set_deterministic_debug_mode(debug_mode: _Union[builtins.int, str]) -> None:
+def set_deterministic_debug_mode(debug_mode: builtins.int | str) -> None:
     r"""Sets the debug mode for deterministic operations.
 
     .. note:: This is an alternative interface for
@@ -1687,7 +1687,7 @@ def is_warn_always_enabled() -> builtins.bool:
 
 def _check_with(
     error_type,
-    cond: _Union[builtins.bool, SymBool],
+    cond: builtins.bool | SymBool,
     message: _Callable[[], str],
 ):  # noqa: F811
     if not isinstance(cond, (builtins.bool, SymBool)):
@@ -2093,7 +2093,7 @@ class QUInt2x4Storage(_LegacyStorage):
         return torch.quint2x4
 
 
-_storage_classes: set[type[_Union[TypedStorage, UntypedStorage]]] = {
+_storage_classes: set[type[TypedStorage | UntypedStorage]] = {
     UntypedStorage,
     DoubleStorage,
     FloatStorage,
@@ -2526,10 +2526,10 @@ def compile(
     *,
     fullgraph: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
+    backend: str | _Callable = "inductor",
+    mode: str | None = None,
     options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+        dict[str, str | builtins.int | builtins.bool | _Callable]
     ] = None,
     disable: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
@@ -2541,10 +2541,10 @@ def compile(
     *,
     fullgraph: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
+    backend: str | _Callable = "inductor",
+    mode: str | None = None,
     options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+        dict[str, str | builtins.int | builtins.bool | _Callable]
     ] = None,
     disable: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
@@ -2555,16 +2555,13 @@ def compile(
     *,
     fullgraph: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
-    backend: _Union[str, _Callable] = "inductor",
-    mode: _Union[str, None] = None,
+    backend: str | _Callable = "inductor",
+    mode: str | None = None,
     options: _Optional[
-        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+        dict[str, str | builtins.int | builtins.bool | _Callable]
     ] = None,
     disable: builtins.bool = False,
-) -> _Union[
-    _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
-    _Callable[_InputT, _RetT],
-]:
+) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]] | _Callable[_InputT, _RetT]:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
     If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
@@ -2872,7 +2869,7 @@ else:
 
 
 @functools.cache
-def get_device_module(device: _Optional[_Union[torch.device, str]] = None):
+def get_device_module(device: _Optional[torch.device | str] = None):
     """
     Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).
     If no device is given, return the module for the current accelerator or CPU if none is present.

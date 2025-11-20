@@ -30,7 +30,7 @@ def gh_fetch_url_and_headers(
     url: str,
     *,
     headers: Optional[dict[str, str]] = None,
-    data: Union[Optional[dict[str, Any]], str] = None,
+    data: Optional[dict[str, Any]] | str = None,
     method: Optional[str] = None,
     reader: Callable[[Any], Any] = lambda x: x.read(),
 ) -> tuple[Any, Any]:
@@ -73,7 +73,7 @@ def gh_fetch_url(
     url: str,
     *,
     headers: Optional[dict[str, str]] = None,
-    data: Union[Optional[dict[str, Any]], str] = None,
+    data: Optional[dict[str, Any]] | str = None,
     method: Optional[str] = None,
     reader: Callable[[Any], Any] = json.load,
 ) -> Any:

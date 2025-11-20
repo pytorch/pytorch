@@ -544,7 +544,7 @@ else:
             )
 
         def __getitem__(
-            self, mesh_dim_names: Union[str, tuple[str, ...]]
+            self, mesh_dim_names: str | tuple[str, ...]
         ) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_names given to create a submesh.
@@ -613,7 +613,7 @@ else:
                     submesh = self._create_sub_mesh(sliced_mesh_layout, mesh_dim_names)
                 return submesh
 
-        def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
+        def get_group(self, mesh_dim: Optional[int | str] = None) -> ProcessGroup:
             """
             Returns the single ProcessGroup specified by mesh_dim, or, if mesh_dim is not specified and the
             DeviceMesh is 1-dimensional, returns the only ProcessGroup in the mesh.
@@ -893,7 +893,7 @@ else:
 
         @staticmethod
         def from_group(
-            group: Union[ProcessGroup, list[ProcessGroup]],
+            group: ProcessGroup | list[ProcessGroup],
             device_type: str,
             mesh: Optional[Union[torch.Tensor, "ArrayLike"]] = None,
             *,
@@ -1005,7 +1005,7 @@ else:
             """
             return get_rank()
 
-        def get_local_rank(self, mesh_dim: Optional[Union[int, str]] = None) -> int:
+        def get_local_rank(self, mesh_dim: Optional[int | str] = None) -> int:
             """
             Returns the local rank of the given mesh_dim of the DeviceMesh.
 
@@ -1059,9 +1059,7 @@ else:
         def _flatten(
             self,
             mesh_dim_name: Optional[str] = None,
-            backend_override: Union[
-                None, str, C10dBackend.Options, tuple[str, C10dBackend.Options]
-            ] = None,
+            backend_override: None | str | C10dBackend.Options | tuple[str, C10dBackend.Options] = None,
         ) -> "DeviceMesh":
             """
             Returns a 1D DeviceMesh by flattening the current DeviceMesh.
@@ -1140,13 +1138,13 @@ else:
 
         def _unflatten(
             self,
-            dim: Union[int, str],
+            dim: int | str,
             mesh_sizes: tuple[int, ...],
             mesh_dim_names: tuple[str, ...],
             backend_override: Optional[
                 dict[
                     str,
-                    Union[str, C10dBackend.Options, tuple[str, C10dBackend.Options]],
+                    str | C10dBackend.Options | tuple[str, C10dBackend.Options],
                 ]
             ] = None,
         ) -> "DeviceMesh":
@@ -1239,8 +1237,8 @@ else:
 
     def _normalize_backend_override(
         backend_override: dict[
-            Union[int, str],
-            Union[str, C10dBackend.Options, tuple[str, C10dBackend.Options]],
+            int | str,
+            str | C10dBackend.Options | tuple[str, C10dBackend.Options],
         ],
         ndim: int,
         mesh_dim_names: Optional[tuple[str, ...]] = None,
@@ -1281,8 +1279,8 @@ else:
         mesh_dim_names: Optional[tuple[str, ...]] = None,
         backend_override: Optional[
             dict[
-                Union[int, str],
-                Union[str, C10dBackend.Options, tuple[str, C10dBackend.Options]],
+                int | str,
+                str | C10dBackend.Options | tuple[str, C10dBackend.Options],
             ]
         ] = None,
     ) -> DeviceMesh:

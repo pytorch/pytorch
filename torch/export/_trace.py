@@ -115,7 +115,7 @@ from .graph_signature import _convert_to_export_graph_signature, ExportGraphSign
 log = logging.getLogger(__name__)
 
 # Type alias for dynamic shapes specification
-_DynamicShapesSpec: TypeAlias = Union[dict[str, Any], tuple[Any, ...], list[Any]]
+_DynamicShapesSpec: TypeAlias = dict[str, Any] | tuple[Any, ...] | list[Any]
 
 
 @dataclasses.dataclass
@@ -768,7 +768,7 @@ def _export_to_torch_ir(
     f: Callable,
     args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[dict[str, Any] | tuple[Any] | list[Any]] = None,
     *,
     preserve_module_call_signature: tuple[str, ...] = (),
     disable_constraint_solver: bool = False,
@@ -1315,11 +1315,7 @@ def _process_export_inputs(
     args: tuple[object, ...],
     kwargs: Optional[dict[str, object]],
     dynamic_shapes: Optional[
-        Union[
-            _DynamicShapesSpec,
-            torch.export.AdditionalInputs,
-            torch.export.ShapesCollection,
-        ]
+        _DynamicShapesSpec | torch.export.AdditionalInputs | torch.export.ShapesCollection
     ],
 ) -> tuple[
     tuple[object, ...],
@@ -1513,7 +1509,7 @@ def _strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
+    dynamic_shapes: Optional[dict[str, Any] | tuple[Any] | list[Any]],
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     prefer_deferred_runtime_asserts_over_guards: bool,
@@ -1974,7 +1970,7 @@ def _non_strict_export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
+    dynamic_shapes: Optional[dict[str, Any] | tuple[Any] | list[Any]],
     preserve_module_call_signature: tuple[str, ...],
     orig_in_spec: TreeSpec,
     prefer_deferred_runtime_asserts_over_guards: bool,
@@ -2153,7 +2149,7 @@ def _export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[dict[str, Any] | tuple[Any] | list[Any]] = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),
@@ -2304,7 +2300,7 @@ def _export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[dict[str, Any] | tuple[Any] | list[Any]] = None,
     *,
     strict: bool = True,
     preserve_module_call_signature: tuple[str, ...] = (),

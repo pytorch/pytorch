@@ -15,7 +15,7 @@ class NewBatchSampler(Sampler[list[int]]):
 
     def __init__(
         self,
-        sampler: Union[Sampler[int], Iterable[int]],
+        sampler: Sampler[int] | Iterable[int],
         batch_size: int,
         drop_last: bool,
     ) -> None:

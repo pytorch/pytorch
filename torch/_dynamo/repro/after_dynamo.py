@@ -516,7 +516,7 @@ def run_repro(
     load_args: Any,
     *,
     command: str = "run",
-    accuracy: Union[bool, str] = "",
+    accuracy: bool | str = "",
     save_dir: Optional[str] = None,
     autocast: bool = False,
     backend: str = "inductor",

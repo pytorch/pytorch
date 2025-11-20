@@ -505,7 +505,7 @@ class TestAutoWrap(TestCase):
         callable_policy = functools.partial(_or_policy, policies=[auto_wrap_policy])
         self._test_transformer_wrapping(callable_policy)
 
-    def _test_transformer_wrapping(self, auto_wrap_policy: Union[Callable, _Policy]):
+    def _test_transformer_wrapping(self, auto_wrap_policy: Callable | _Policy):
         fsdp_kwargs = {"auto_wrap_policy": auto_wrap_policy}
         fsdp_model = TransformerWithSharedParams.init(
             self.process_group,

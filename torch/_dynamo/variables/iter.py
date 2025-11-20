@@ -338,8 +338,8 @@ class RepeatIteratorVariable(IteratorVariable):
 class CountIteratorVariable(IteratorVariable):
     def __init__(
         self,
-        item: Union[int, VariableTracker] = 0,
-        step: Union[int, VariableTracker] = 1,
+        item: int | VariableTracker = 0,
+        step: int | VariableTracker = 1,
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -428,7 +428,7 @@ class ZipVariable(IteratorVariable):
         args = []
 
         def get_item(
-            it: Union[list[VariableTracker], VariableTracker],
+            it: list[VariableTracker] | VariableTracker,
         ) -> VariableTracker:
             if isinstance(it, list):
                 if old_index >= len(it):

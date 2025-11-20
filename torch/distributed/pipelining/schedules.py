@@ -289,7 +289,7 @@ class _PipelineSchedule(ABC):
         loss_fn: Optional[Callable[..., torch.Tensor]] = None,
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
+        output_merge_spec: Optional[dict[str, Any] | tuple[Any]] = None,
         scale_grads: bool = True,
     ):
         # From arguments
@@ -560,7 +560,7 @@ class PipelineScheduleSingle(_PipelineSchedule):
         loss_fn: Optional[Callable] = None,
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
+        output_merge_spec: Optional[dict[str, Any] | tuple[Any]] = None,
         scale_grads: bool = True,
     ):
         # Init parent
@@ -1482,7 +1482,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         loss_fn: Optional[Callable] = None,
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
+        output_merge_spec: Optional[dict[str, Any] | tuple[Any]] = None,
         use_full_backward: Optional[bool] = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
@@ -2306,8 +2306,8 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         self,
         stages: list[_PipelineStageBase],
         n_microbatches: int,
-        loss_fn: Optional[Union[Callable, _Loss]] = None,
-        output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
+        loss_fn: Optional[Callable | _Loss] = None,
+        output_merge_spec: Optional[dict[str, Any] | tuple[Any]] = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
     ):
@@ -2523,7 +2523,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         loss_fn: Optional[Callable] = None,
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
+        output_merge_spec: Optional[dict[str, Any] | tuple[Any]] = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
     ):
@@ -2637,7 +2637,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         loss_fn: Optional[Callable] = None,
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
+        output_merge_spec: Optional[dict[str, Any] | tuple[Any]] = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
     ):
@@ -2836,7 +2836,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         loss_fn: Optional[Callable] = None,
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
+        output_merge_spec: Optional[dict[str, Any] | tuple[Any]] = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
     ):
@@ -3014,7 +3014,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         loss_fn: Optional[Callable] = None,
         args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
-        output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
+        output_merge_spec: Optional[dict[str, Any] | tuple[Any]] = None,
         scale_grads: bool = True,
         backward_requires_autograd: bool = True,
     ):

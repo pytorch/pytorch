@@ -122,7 +122,7 @@ def make_boxed_compiler(compiler):
 
 
 def call_func_at_runtime_with_args(
-    f, args: Union[tuple[Any], list[Any]], steal_args=False, disable_amp=False
+    f, args: tuple[Any] | list[Any], steal_args=False, disable_amp=False
 ):
     if not steal_args:
         args = list(args)

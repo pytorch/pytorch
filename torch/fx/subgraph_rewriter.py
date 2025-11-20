@@ -95,8 +95,8 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
 @compatibility(is_backward_compatible=True)
 def replace_pattern(
     gm: GraphModule,
-    pattern: Union[Callable, GraphModule],
-    replacement: Union[Callable, GraphModule],
+    pattern: Callable | GraphModule,
+    replacement: Callable | GraphModule,
 ) -> list[Match]:
     """
     Matches all possible non-overlapping sets of operators and their
@@ -225,8 +225,8 @@ def replace_pattern(
 @compatibility(is_backward_compatible=False)
 def replace_pattern_with_filters(
     gm: GraphModule,
-    pattern: Union[Callable, Graph, GraphModule],
-    replacement: Union[Callable, Graph, GraphModule, None] = None,
+    pattern: Callable | Graph | GraphModule,
+    replacement: Callable | Graph | GraphModule | None = None,
     match_filters: Optional[
         list[Callable[["InternalMatch", Graph, Graph], bool]]
     ] = None,
@@ -264,8 +264,8 @@ def replace_pattern_with_filters(
 
 def _replace_pattern(
     gm: GraphModule,
-    pattern: Union[Callable, Graph, GraphModule],
-    replacement: Union[Callable, Graph, GraphModule, None] = None,
+    pattern: Callable | Graph | GraphModule,
+    replacement: Callable | Graph | GraphModule | None = None,
     match_filters: Optional[
         list[Callable[["InternalMatch", Graph, Graph], bool]]
     ] = None,

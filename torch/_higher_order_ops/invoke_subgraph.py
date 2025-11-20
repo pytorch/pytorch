@@ -69,7 +69,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
     # identifying two invoke_subgraph calls have same subgraph.
     def __call__(
         self,
-        subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
+        subgraph: GraphModule | FunctionalizeCtxWrapper,
         identifier: Optional[str],
         *operands,
     ):
@@ -138,7 +138,7 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
         ):
             with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                 if metadata_mode:
-                    backend: Union[str, Callable[..., Any]] = (
+                    backend: str | Callable[..., Any] = (
                         make_eager_backend_with_torch_function_mode(metadata_mode)
                     )
                 else:

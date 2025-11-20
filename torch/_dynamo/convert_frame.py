@@ -453,7 +453,7 @@ def exception_handler(
 
 
 FRAME_COUNTER = 0
-FRAME_COMPILE_COUNTER: typing.Counter[Union[int, FrameStateSizeEntry]] = (
+FRAME_COMPILE_COUNTER: typing.Counter[int | FrameStateSizeEntry] = (
     collections.Counter()
 )
 
@@ -541,7 +541,7 @@ class ConvertFrameBox:
 
 
 def get_compile_id(
-    frame_state: dict[str, Union[int, FrameStateSizeEntry]],
+    frame_state: dict[str, int | FrameStateSizeEntry],
 ) -> CompileId:
     global FRAME_COUNTER
     if "_id" not in frame_state:
@@ -595,7 +595,7 @@ class ConvertFrameAssert:
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, int | FrameStateSizeEntry],
         *,
         skip: int = 0,
     ) -> ConvertFrameReturn:
@@ -781,7 +781,7 @@ def trace_frame(
     *,
     export: bool = False,
     export_constraints: Optional[typing.Never] = None,
-    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    frame_state: Optional[dict[str, int | FrameStateSizeEntry]] = None,
     distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
 ) -> DynamoTracerOutput:
@@ -1248,7 +1248,7 @@ def compile_frame(  # type: ignore[return]
     *,
     export: bool = False,
     export_constraints: Optional[typing.Never] = None,
-    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    frame_state: Optional[dict[str, int | FrameStateSizeEntry]] = None,
     distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
     # pyrefly: ignore [bad-return]
@@ -1351,7 +1351,7 @@ def _compile(
     cache_entry: Optional[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,
     frame: Optional[DynamoFrameType] = None,
-    frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
+    frame_state: Optional[dict[str, int | FrameStateSizeEntry]] = None,
     *,
     compile_id: CompileId,
     skip: int = 0,
@@ -1884,7 +1884,7 @@ class ConvertFrame:
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, int | FrameStateSizeEntry],
         skip: int = 0,
     ) -> ConvertFrameReturn:
         input_codes.add(frame.f_code)
@@ -2055,7 +2055,7 @@ class ConvertFrameProtocol(typing.Protocol):
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
         hooks: Hooks,
-        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, int | FrameStateSizeEntry],
         *,
         skip: int = 0,
     ) -> ConvertFrameReturn: ...
@@ -2075,7 +2075,7 @@ class CatchErrorsWrapper:
         self,
         frame: DynamoFrameType,
         cache_entry: Optional[CacheEntry],
-        frame_state: dict[str, Union[int, FrameStateSizeEntry]],
+        frame_state: dict[str, int | FrameStateSizeEntry],
     ) -> ConvertFrameReturn:
         assert frame_state is not None
         input_codes.add(frame.f_code)

@@ -513,7 +513,7 @@ class FlatParamHandle:
     ##################
     def __init__(
         self,
-        params: Sequence[Union[nn.Parameter, Tensor]],
+        params: Sequence[nn.Parameter | Tensor],
         fully_sharded_module: nn.Module,
         device: torch.device,
         sharding_strategy: HandleShardingStrategy,
@@ -644,7 +644,7 @@ class FlatParamHandle:
 
     def _init_flat_param_and_metadata(
         self,
-        params: list[Union[Tensor, nn.Parameter]],
+        params: list[Tensor | nn.Parameter],
         module: nn.Module,
         aligned_numel: int,
         use_orig_params: bool,
@@ -681,10 +681,10 @@ class FlatParamHandle:
         fqns: list[str] = []
         shared_param_infos: list[SharedParamInfo] = []
         shared_param_memo: dict[
-            Union[Tensor, nn.Parameter], tuple[nn.Module, str, str]
+            Tensor | nn.Parameter, tuple[nn.Module, str, str]
         ] = {}
-        params_to_flatten: list[Union[Tensor, nn.Parameter]] = []
-        shared_params: list[Union[Tensor, nn.Parameter]] = []
+        params_to_flatten: list[Tensor | nn.Parameter] = []
+        shared_params: list[Tensor | nn.Parameter] = []
         param_extensions: list[Any] = []
         is_padding_mask: list[bool] = []
         total_numel = total_numel_without_padding = 0
@@ -799,7 +799,7 @@ class FlatParamHandle:
         )
 
     def _validate_tensors_to_flatten(
-        self, tensors: list[Union[Tensor, nn.Parameter]]
+        self, tensors: list[Tensor | nn.Parameter]
     ) -> tuple:
         """Validate the tensors to flatten and returns any necessary metadata."""
         dtype: Optional[torch.dtype] = None
@@ -2023,7 +2023,7 @@ class FlatParamHandle:
             prim_module,
             _,
         ) in enumerate(self.flat_param._shared_param_infos):
-            prim_param: Union[Tensor, nn.Parameter] = getattr(
+            prim_param: Tensor | nn.Parameter = getattr(
                 prim_module, prim_param_name
             )
             _p_assert(
@@ -2745,7 +2745,7 @@ def _unsafe_setattr_tensor(module: nn.Module, param_name: str, tensor: Tensor) -
 
 
 def _safe_setattr_tensor_or_param(
-    module: nn.Module, param_name: str, tensor_or_param: Union[Tensor, nn.Parameter]
+    module: nn.Module, param_name: str, tensor_or_param: Tensor | nn.Parameter
 ):
     # Call `delattr()` and `setattr()` to go through `nn.Module` checks
     if hasattr(module, param_name):
@@ -2754,7 +2754,7 @@ def _safe_setattr_tensor_or_param(
 
 
 def _convert_to_params(
-    tensors: list[Union[torch.Tensor, nn.Parameter]],
+    tensors: list[torch.Tensor | nn.Parameter],
 ) -> list[nn.Parameter]:
     return [t if isinstance(t, nn.Parameter) else nn.Parameter(t) for t in tensors]
 
@@ -2767,7 +2767,7 @@ def _is_truly_contiguous(x: Tensor) -> bool:
     return x.stride(-1) == 1 and x.is_contiguous()
 
 
-def _detach_if_needed(param_or_tensor: Union[nn.Parameter, Tensor]) -> Tensor:
+def _detach_if_needed(param_or_tensor: nn.Parameter | Tensor) -> Tensor:
     return (
         param_or_tensor.detach()
         if isinstance(param_or_tensor, nn.Parameter)

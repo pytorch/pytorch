@@ -228,19 +228,17 @@ auto_dynamic = AutoDynamic.token
 
 @dataclasses.dataclass
 class FrameStateSizeEntry:
-    scalar: Union[int, AutoDynamic, AutoUnset] = dataclasses.field(default=auto_unset)
+    scalar: int | AutoDynamic | AutoUnset = dataclasses.field(default=auto_unset)
     # NB: We don't have cases where we have a known dimensionality but
     # we know NOTHING about the individual sizes
-    size: Union[AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic], ...]] = (
+    size: AutoDynamic | AutoUnset | tuple[int | AutoDynamic, ...] = (
         dataclasses.field(default=auto_unset)
     )
-    stride: Union[
-        AutoDynamic, AutoUnset, tuple[Union[int, AutoDynamic, InferStride], ...]
-    ] = dataclasses.field(default=auto_unset)
+    stride: AutoDynamic | AutoUnset | tuple[int | AutoDynamic | InferStride, ...] = dataclasses.field(default=auto_unset)
 
     def render(self) -> str:
         # Special cases
-        def render_single(s: Union[int, AutoDynamic, AutoUnset, InferStride]) -> str:
+        def render_single(s: int | AutoDynamic | AutoUnset | InferStride) -> str:
             if s is auto_dynamic:
                 return "?"
             elif s is auto_unset:
@@ -251,7 +249,7 @@ class FrameStateSizeEntry:
             else:
                 return str(s)
 
-        def render_tuple(ss: tuple[Union[int, AutoDynamic, InferStride], ...]) -> str:
+        def render_tuple(ss: tuple[int | AutoDynamic | InferStride, ...]) -> str:
             return "[" + ", ".join(render_single(s) for s in ss) + "]"
 
         # Common cases
@@ -310,7 +308,7 @@ class FrameStateSizeEntry:
         return self.stride[dim] is auto_dynamic
 
     @staticmethod
-    def _munge_symint(xs: tuple[int, ...]) -> tuple[Union[AutoDynamic, int], ...]:
+    def _munge_symint(xs: tuple[int, ...]) -> tuple[AutoDynamic | int, ...]:
         return tuple(auto_dynamic if isinstance(x, torch.SymInt) else x for x in xs)
 
     @classmethod
@@ -336,7 +334,7 @@ class FrameStateSizeEntry:
         )
 
     @staticmethod
-    def _merge_atom(x: _T, y: _T) -> Union[AutoDynamic, _T]:
+    def _merge_atom(x: _T, y: _T) -> AutoDynamic | _T:
         if x is auto_unset:
             return y
         if y is auto_unset:
@@ -348,9 +346,9 @@ class FrameStateSizeEntry:
     @classmethod
     def _merge_atom_tup(
         cls,
-        xs: Union[AutoDynamic, AutoUnset, tuple[_T, ...]],
-        ys: Union[AutoDynamic, AutoUnset, tuple[_T, ...]],
-    ) -> Union[AutoDynamic, AutoUnset, tuple[Union[AutoDynamic, _T], ...]]:
+        xs: AutoDynamic | AutoUnset | tuple[_T, ...],
+        ys: AutoDynamic | AutoUnset | tuple[_T, ...],
+    ) -> AutoDynamic | AutoUnset | tuple[AutoDynamic | _T, ...]:
         if xs is auto_unset:
             return ys
         if ys is auto_unset:

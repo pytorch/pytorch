@@ -397,7 +397,7 @@ def handle_file(file_path: Path) -> str:
     return ""
 
 
-def read_file(file_path: Union[str, Path]) -> str:
+def read_file(file_path: str | Path) -> str:
     try:
         if isinstance(file_path, Path):
             if file_path.is_file():

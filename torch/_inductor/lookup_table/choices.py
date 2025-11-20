@@ -313,7 +313,7 @@ class LookupTableChoices(InductorChoices):
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
     ) -> list[KernelTemplateChoice]:
@@ -364,7 +364,7 @@ class LookupTableChoices(InductorChoices):
         self,
         template_choices: dict[str, Generator[KernelTemplateChoice, None, None]],
         kernel_inputs: KernelInputs,
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         op_name: str,
         kwarg_overrides: Optional[dict[str, dict[str, Any]]] = None,
     ) -> list[KernelTemplateChoice]:
@@ -383,7 +383,7 @@ class LookupTableChoices(InductorChoices):
     def _create_lookup_choices(
         self,
         lookup_results: dict[str, list[dict[str, Any]]],
-        templates: list[Union[KernelTemplate, ExternKernelChoice]],
+        templates: list[KernelTemplate | ExternKernelChoice],
         kernel_inputs: KernelInputs,
         op_name: str,
     ) -> list[KernelTemplateChoice]:

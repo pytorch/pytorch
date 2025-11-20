@@ -430,7 +430,7 @@ def error_if_complex(func_name, args, is_input):
 @exposed_in("torch.func")
 def jacrev(
     func: Callable,
-    argnums: Union[int, tuple[int]] = 0,
+    argnums: int | tuple[int] = 0,
     *,
     has_aux=False,
     chunk_size: Optional[int] = None,

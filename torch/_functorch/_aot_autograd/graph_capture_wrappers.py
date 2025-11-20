@@ -457,11 +457,11 @@ def create_functionalized_rng_ops_wrapper(
     if fake_mode_det is not None:
         fake_mode = fake_mode_det
 
-    def override_get_rng_state(device: Union[int, str, torch.device] = "cuda"):
+    def override_get_rng_state(device: int | str | torch.device = "cuda"):
         out = PhiloxStateTracker.get_state_as_tensor()
         return out
 
-    def override_set_rng_state(x, device: Union[int, str, torch.device] = "cuda"):
+    def override_set_rng_state(x, device: int | str | torch.device = "cuda"):
         PhiloxStateTracker.set_state_from_tensor(x)
 
     def append_rng_offsets(outs, outs_descs):
@@ -1170,9 +1170,9 @@ def handle_effect_tokens_fn(
 #   Why do we need this? We need to collect updated ViewAndMutationMeta on our new dense -> dense functions.
 #   In particular, we need this to tell the partitioner how many dense forward outputs there are.
 def aot_dispatch_subclass(
-    flat_fn_maybe_joint: Union[JointTraceFn, TraceFn],
-    args: Union[list[FxValue], tuple[list[FxValue], list[FxValue]]],
-    args_descs: Union[list[AOTInput], tuple[list[AOTInput], list[AOTInput]]],
+    flat_fn_maybe_joint: JointTraceFn | TraceFn,
+    args: list[FxValue] | tuple[list[FxValue], list[FxValue]],
+    args_descs: list[AOTInput] | tuple[list[AOTInput], list[AOTInput]],
     *,
     is_joint_structure: bool,
     meta: ViewAndMutationMeta,

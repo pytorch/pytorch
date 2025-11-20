@@ -460,8 +460,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         choices: list[ChoiceCaller],
         layout: ir.Layout,
         input_nodes: list[Buffer],
-        alpha: Union[float, int] = 1,
-        beta: Union[float, int] = 0,
+        alpha: float | int = 1,
+        beta: float | int = 0,
         input_reorder: Optional[list[int]] = None,
         use_fast_accum: Optional[bool] = None,
         **extra_kwargs,
@@ -542,8 +542,8 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         choices: list[ChoiceCaller],
         layout: ir.Layout,
         input_nodes: list[Buffer],
-        alpha: Union[float, int] = 1,
-        beta: Union[float, int] = 0,
+        alpha: float | int = 1,
+        beta: float | int = 0,
         input_reorder: Optional[list[int]] = None,
         **extra_kwargs,
     ) -> None:
@@ -567,10 +567,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
         # pre-computation
         layout_repr: str = str(layout)
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]] = (
+        input_tensor_meta: TensorMeta | list[TensorMeta] = (
             TensorMeta.from_irnodes(self.input_nodes)
         )
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]] = (
+        output_tensor_meta: TensorMeta | list[TensorMeta] = (
             TensorMeta.from_irnodes(self.output_node)
         )
 
@@ -767,7 +767,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         X: Buffer,
         W: Buffer,
         Bias: Optional[Buffer],
-        Y: Union[Buffer, ReinterpretView],
+        Y: Buffer | ReinterpretView,
     ) -> "cutlass_library.gemm_op.GemmOperation":  # type: ignore[name-defined]  # noqa: F821
         # This is a workaround to deal with cases where the input layouts have changed
         # between autotuning and rendering. This happens if the inputs layout
@@ -1348,8 +1348,8 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         choices: list[ChoiceCaller],
         layout: ir.Layout,
         input_nodes: list[Buffer],
-        alpha: Union[float, int] = 1,
-        beta: Union[float, int] = 0,
+        alpha: float | int = 1,
+        beta: float | int = 0,
         input_reorder: Optional[list[int]] = None,
         use_fast_accum: Optional[bool] = None,
         **extra_kwargs,
@@ -1725,8 +1725,8 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         choices: list[ChoiceCaller],
         layout: ir.Layout,
         input_nodes: list[Buffer],
-        alpha: Union[float, int] = 1,
-        beta: Union[float, int] = 0,
+        alpha: float | int = 1,
+        beta: float | int = 0,
         input_reorder: Optional[list[int]] = None,
         use_fast_accum: Optional[bool] = False,
         **extra_kwargs,

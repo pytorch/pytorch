@@ -215,11 +215,7 @@ compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
 
 PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
-ExceptionVals: TypeAlias = Union[
-    variables.ExceptionVariable,
-    UserDefinedExceptionClassVariable,
-    UserDefinedExceptionObjectVariable,
-]
+ExceptionVals: TypeAlias = variables.ExceptionVariable | UserDefinedExceptionClassVariable | UserDefinedExceptionObjectVariable
 
 
 @functools.cache
@@ -417,7 +413,7 @@ class BlockStackEntry:
     target: Instruction
     stack_index: int
     with_context: Optional[
-        Union[ContextWrappingVariable, GenericContextWrappingVariable]
+        ContextWrappingVariable | GenericContextWrappingVariable
     ] = None
 
     def can_restore(self) -> bool:
@@ -3839,7 +3835,7 @@ class InstructionTranslatorBase(
 
     def enter_ctx(
         self,
-        ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
+        ctx: ContextWrappingVariable | GenericContextWrappingVariable,
         inst: Instruction,
     ) -> VariableTracker:
         if (
@@ -4364,7 +4360,7 @@ class InstructionTranslatorBase(
         self.inline_depth = inline_depth
         self.inconsistent_side_effects = False
         self._constants_cache: list[
-            Optional[Union[ConstantVariable, SliceVariable]]
+            Optional[ConstantVariable | SliceVariable]
         ] = [None] * len(f_code.co_consts)
 
         self.is_trace_bytecode_log_enabled: Optional[bool] = (

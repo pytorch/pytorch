@@ -89,9 +89,7 @@ def _sticky_export(
     dynamic_shapes_callback: typing.Optional[
         typing.Callable[
             _InputT,
-            typing.Union[
-                list[typing.Any], dict[str, typing.Any], tuple[typing.Any, ...]
-            ],
+            list[typing.Any] | dict[str, typing.Any] | tuple[typing.Any, ...],
         ]
     ] = None,
 ) -> typing.Callable[_InputT, _RetT]:

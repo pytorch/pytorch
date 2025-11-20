@@ -234,8 +234,8 @@ class ReinplaceCounters:
 
 
 def tabulate(
-    rows: Union[list[tuple[str, Any]], list[list[Any]]],
-    headers: Union[tuple[str, ...], list[str]],
+    rows: list[tuple[str, Any]] | list[list[Any]],
+    headers: tuple[str, ...] | list[str],
 ) -> str:
     try:
         import tabulate
@@ -811,7 +811,7 @@ def compile_times(
 
 def compile_times(  # type: ignore[misc]
     repr: str = "str", aggregate: bool = False
-) -> Union[str, None, tuple[list[str], list[str]]]:
+) -> str | None | tuple[list[str], list[str]]:
     """
     Get metrics about torchdynamo frontend/backend compilation times.
 
@@ -875,7 +875,7 @@ class DuplicateWarningChecker:
     def reset(self) -> None:
         self.set: OrderedDict[Any, Any] = OrderedDict()
 
-    def add(self, key: Union[str, tuple[object, object]]) -> bool:
+    def add(self, key: str | tuple[object, object]) -> bool:
         if key in self.set:
             self.set.move_to_end(key, last=True)
             if not config.verbose:
@@ -1136,17 +1136,12 @@ def is_lru_cache_wrapped_function(
     )
 
 
-_FuncTypes: TypeAlias = Union[
-    types.FunctionType,
-    types.BuiltinFunctionType,
-    types.MethodDescriptorType,
-    types.WrapperDescriptorType,
-]
+_FuncTypes: TypeAlias = types.FunctionType | types.BuiltinFunctionType | types.MethodDescriptorType | types.WrapperDescriptorType
 
 
 def is_function_or_wrapper(
     value: Any,
-) -> TypeIs[Union[_FuncTypes, torch._ops.OpOverloadPacket, torch._ops.OpOverload]]:
+) -> TypeIs[_FuncTypes | torch._ops.OpOverloadPacket | torch._ops.OpOverload]:
     return is_function(value) or isinstance(
         value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
     )
@@ -1189,13 +1184,7 @@ cmp_name_to_op_str_mapping = {
 def is_wrapper_or_member_descriptor(
     value: Any,
 ) -> TypeIs[
-    Union[
-        types.GetSetDescriptorType,
-        types.MethodDescriptorType,
-        types.WrapperDescriptorType,
-        types.MemberDescriptorType,
-        types.MethodWrapperType,
-    ]
+    types.GetSetDescriptorType | types.MethodDescriptorType | types.WrapperDescriptorType | types.MemberDescriptorType | types.MethodWrapperType
 ]:
     return isinstance(
         value,
@@ -2239,7 +2228,7 @@ def clone_input(
 
 @overload
 def clone_inputs(
-    example_inputs: dict[str, Union[T, tuple[T, ...]]],
+    example_inputs: dict[str, T | tuple[T, ...]],
 ) -> dict[str, list[T]]: ...
 
 
@@ -2248,7 +2237,7 @@ def clone_inputs(example_inputs: Sequence[T]) -> list[T]: ...
 
 
 def clone_inputs(example_inputs: Any) -> Any:
-    res: Union[dict[str, Any], list[Any]]
+    res: dict[str, Any] | list[Any]
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
@@ -2303,13 +2292,7 @@ def preserve_rng_state() -> Generator[None, None, None]:
 def is_jit_model(
     model0: Any,
 ) -> TypeIs[
-    Union[
-        torch.jit._trace.TopLevelTracedModule,
-        torch.jit._script.RecursiveScriptModule,
-        # pyrefly: ignore [invalid-param-spec]
-        torch.jit.ScriptFunction[Any, Any],
-        torch.jit.ScriptModule,
-    ]
+    torch.jit._trace.TopLevelTracedModule | torch.jit._script.RecursiveScriptModule | torch.jit.ScriptFunction[Any, Any] | torch.jit.ScriptModule
 ]:
     return isinstance(
         model0,
@@ -2527,7 +2510,7 @@ def common_constants() -> set[int]:
     }
 
 
-def is_torch_sym(value: Any) -> TypeGuard[Union[torch.SymBool, torch.SymInt]]:
+def is_torch_sym(value: Any) -> TypeGuard[torch.SymBool | torch.SymInt]:
     return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
         value.node, torch.nested._internal.nested_int.NestedIntNode
     )
@@ -2675,7 +2658,7 @@ def builtin_dict_keys(d: dict[K, V]) -> KeysView[K]:
     return dict.keys(d)
 
 
-def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, Union[V, Any]]]:
+def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, V | Any]]:
     # Get items without calling the user defined __getitem__ or keys method.
     assert isinstance(obj, dict)
     if istype(obj, (dict, OrderedDict)):
@@ -2862,7 +2845,7 @@ def iter_contains(
 
 def key_is_id(
     k: Any,
-) -> TypeIs[Union[torch.Tensor, torch.nn.Module, MethodWrapperType]]:
+) -> TypeIs[torch.Tensor | torch.nn.Module | MethodWrapperType]:
     """Returns whether it indexes dictionaries using its id"""
     return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
 
@@ -3828,7 +3811,7 @@ def tensor_static_reason_to_message(reason: TensorStaticReason) -> str:
 
 
 def tensor_always_has_static_shape(
-    tensor: Union[torch.Tensor, Any],
+    tensor: torch.Tensor | Any,
     is_tensor: bool,
     tensor_source: Source,
 ) -> tuple[bool, Optional[TensorStaticReason]]:

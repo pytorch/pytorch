@@ -44,7 +44,7 @@ def parse_list(lst: str) -> list[int]:
 
 
 def register_adapter(
-    aten: Union[str, list[str]],
+    aten: str | list[str],
 ) -> Callable[
     [AdapterType],
     AdapterType,
@@ -403,7 +403,7 @@ class JsonProfile:
         self,
         path: str,
         benchmark_name: Optional[str] = None,
-        dtype: Optional[Union[torch.dtype, str]] = None,
+        dtype: Optional[torch.dtype | str] = None,
     ):
         """
         Convenience class for running common operations on chrome/perfetto json traces.

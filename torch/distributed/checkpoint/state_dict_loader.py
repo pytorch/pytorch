@@ -60,7 +60,7 @@ def load_state_dict(
 def load(
     state_dict: dict[str, Any],
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
+    checkpoint_id: str | os.PathLike | None = None,
     storage_reader: Optional[StorageReader] = None,
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -306,9 +306,9 @@ def _load_state_dict(
 
 
 def _load_state_dict_from_keys(
-    keys: Optional[Union[set[str], str]] = None,
+    keys: Optional[set[str] | str] = None,
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
+    checkpoint_id: str | os.PathLike | None = None,
     storage_reader: Optional[StorageReader] = None,
     process_group: Optional[dist.ProcessGroup] = None,
 ) -> dict[str, Any]:

@@ -123,12 +123,12 @@ class BytesStorageMetadata:
 
 
 STORAGE_TYPES = Union[TensorStorageMetadata, BytesStorageMetadata]
-STATE_DICT_TYPE = dict[str, Union[StatefulT, Any]]
+STATE_DICT_TYPE = dict[str, StatefulT | Any]
 
 
 @dataclass
 class StorageMeta:
-    checkpoint_id: Union[str, os.PathLike, None] = None
+    checkpoint_id: str | os.PathLike | None = None
     save_id: Optional[str] = None
     load_id: Optional[str] = None
     modules: list[str] = field(default_factory=list)

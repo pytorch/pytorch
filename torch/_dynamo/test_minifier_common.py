@@ -180,7 +180,7 @@ torch._inductor.config.{"cpp" if device == "cpu" else "triton"}.inject_relu_bug_
     # minifier launcher script, if `code` outputted it.
     def _run_test_code(
         self, code: str, *, isolate: bool
-    ) -> tuple[subprocess.CompletedProcess[bytes], Union[str, Any]]:
+    ) -> tuple[subprocess.CompletedProcess[bytes], str | Any]:
         proc = self._maybe_subprocess_run(
             ["python3", "-c", code], isolate=isolate, cwd=self.DEBUG_DIR
         )

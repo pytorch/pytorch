@@ -65,7 +65,7 @@ def get_swa_multi_avg_fn():
     def swa_update(
         averaged_param_list: PARAM_LIST,
         current_param_list: PARAM_LIST,
-        num_averaged: Union[Tensor, int],
+        num_averaged: Tensor | int,
     ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(
@@ -112,7 +112,7 @@ def get_swa_avg_fn():
 
     @torch.no_grad()
     def swa_update(
-        averaged_param: Tensor, current_param: Tensor, num_averaged: Union[Tensor, int]
+        averaged_param: Tensor, current_param: Tensor, num_averaged: Tensor | int
     ):
         return averaged_param + (current_param - averaged_param) / (num_averaged + 1)
 
@@ -223,10 +223,10 @@ class AveragedModel(Module):
     def __init__(
         self,
         model: Module,
-        device: Optional[Union[int, torch.device]] = None,
-        avg_fn: Optional[Callable[[Tensor, Tensor, Union[Tensor, int]], Tensor]] = None,
+        device: Optional[int | torch.device] = None,
+        avg_fn: Optional[Callable[[Tensor, Tensor, Tensor | int], Tensor]] = None,
         multi_avg_fn: Optional[
-            Callable[[PARAM_LIST, PARAM_LIST, Union[Tensor, int]], None]
+            Callable[[PARAM_LIST, PARAM_LIST, Tensor | int], None]
         ] = None,
         use_buffers=False,
     ) -> None:  # noqa: D107
@@ -330,7 +330,7 @@ class AveragedModel(Module):
 def update_bn(
     loader: Iterable[Any],
     model: Module,
-    device: Optional[Union[int, torch.device]] = None,
+    device: Optional[int | torch.device] = None,
 ) -> None:
     r"""Update BatchNorm running_mean, running_var buffers in the model.
 

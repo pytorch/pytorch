@@ -62,7 +62,7 @@ def init_rank(num_ranks, uid, rank):
     return torch._C._nccl_init_rank(num_ranks, uid, rank)
 
 
-def _check_sequence_type(inputs: Union[torch.Tensor, Sequence[torch.Tensor]]) -> None:
+def _check_sequence_type(inputs: torch.Tensor | Sequence[torch.Tensor]) -> None:
     if not isinstance(inputs, collections.abc.Container) or isinstance(
         inputs, torch.Tensor
     ):
@@ -81,7 +81,7 @@ def all_reduce(inputs, outputs=None, op=SUM, streams=None, comms=None):
 # arguments for BC reasons.
 def reduce(
     inputs: Sequence[torch.Tensor],
-    output: Optional[Union[torch.Tensor, Sequence[torch.Tensor]]] = None,
+    output: Optional[torch.Tensor | Sequence[torch.Tensor]] = None,
     root: int = 0,
     op: int = SUM,
     streams: Optional[Sequence[torch.cuda.Stream]] = None,

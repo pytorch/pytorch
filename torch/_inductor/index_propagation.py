@@ -91,11 +91,11 @@ class SymPyOps:
         return value
 
     @staticmethod
-    def constant(value: Union[int, float, bool], dtype: torch.dtype) -> TypedExpr:
+    def constant(value: int | float | bool, dtype: torch.dtype) -> TypedExpr:
         return TypedExpr(value, dtype)
 
     @staticmethod
-    def index_expr(value: Union[sympy.Expr, int], dtype: torch.dtype) -> TypedExpr:
+    def index_expr(value: sympy.Expr | int, dtype: torch.dtype) -> TypedExpr:
         return TypedExpr(value, dtype)
 
     @staticmethod
@@ -195,7 +195,7 @@ class IndexPropVar:
         )
 
 
-IndexPropResult: TypeAlias = Union[IndexPropVar, tuple["IndexPropResult", ...]]
+IndexPropResult: TypeAlias = IndexPropVar | tuple["IndexPropResult", ...]
 
 
 class IndexPropagation(DefaultHandler):
@@ -238,7 +238,7 @@ class IndexPropagation(DefaultHandler):
             return self._inner.constant(val, dtype)
         return self._inner.index_expr(expr, dtype)
 
-    def unwrap(self, a: Union[Any, IndexPropVar]) -> Any:
+    def unwrap(self, a: Any | IndexPropVar) -> Any:
         if isinstance(a, (list, tuple)):
             return tuple(self.unwrap(v) for v in a)
 
@@ -281,7 +281,7 @@ class IndexPropagation(DefaultHandler):
         self, name: str, args: Sequence[Any], kwargs: dict[str, Any]
     ) -> IndexPropResult:
         # Build a new SymPy expression from this ops call
-        def unwrap(a: Union[Any, IndexPropVar]) -> Any:
+        def unwrap(a: Any | IndexPropVar) -> Any:
             if not isinstance(a, IndexPropVar):
                 return a
             return a.value
@@ -337,7 +337,7 @@ class IndexPropagation(DefaultHandler):
 
     def indirect_indexing(
         self,
-        index: Union[Any, IndexPropVar],
+        index: Any | IndexPropVar,
         size: Any,
         check: bool = True,
         wrap_neg=True,

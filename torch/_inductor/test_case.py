@@ -11,7 +11,7 @@ from torch._inductor import config
 from torch._inductor.utils import fresh_cache
 
 
-def run_tests(needs: Union[str, tuple[str, ...]] = ()) -> None:
+def run_tests(needs: str | tuple[str, ...] = ()) -> None:
     dynamo_run_tests(needs)
 
 

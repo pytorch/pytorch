@@ -241,7 +241,7 @@ class ROCmTemplateCaller(ChoiceCaller):
         bmreq: ROCmBenchmarkRequest,
         template: "ROCmTemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[
-            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
+            dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]
         ],  # type: ignore[type-arg]
     ) -> None:
         super().__init__(name, input_nodes, layout, description="")
@@ -276,7 +276,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             ]
         )
 
-    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "ROCm",
@@ -284,7 +284,7 @@ class ROCmTemplateCaller(ChoiceCaller):
             **dict(self.info_kwargs["op"].dict_items()),  # type: ignore[union-attr, index]
         }
 
-    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def output_node(self) -> TensorBox | ShapeAsConstantBuffer:
         self.bmreq.update_workspace_size()
         return TensorBox.create(
             ROCmTemplateBuffer(

@@ -22,7 +22,7 @@ class ExportOptions:
     operator_export_type: _C_onnx.OperatorExportTypes = _C_onnx.OperatorExportTypes.ONNX
     opset_version: Optional[int] = None
     do_constant_folding: bool = True
-    dynamic_axes: Optional[Mapping[str, Union[Mapping[int, str], Sequence[int]]]] = None
+    dynamic_axes: Optional[Mapping[str, Mapping[int, str] | Sequence[int]]] = None
     keep_initializers_as_inputs: Optional[bool] = None
     custom_opsets: Optional[Mapping[str, int]] = None
-    export_modules_as_functions: Union[bool, set[type[torch.nn.Module]]] = False
+    export_modules_as_functions: bool | set[type[torch.nn.Module]] = False

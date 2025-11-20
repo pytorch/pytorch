@@ -361,18 +361,18 @@ def replay_shape_env_events(events):
 # ShapeEnv.produce_guards.
 @dataclass
 class FakeTensorMeta:
-    tensor_size: tuple[Union[int, torch.SymInt], ...]
-    tensor_stride: tuple[Union[int, torch.SymInt], ...]
-    tensor_storage_offset: Union[int, torch.SymInt]
+    tensor_size: tuple[int | torch.SymInt, ...]
+    tensor_stride: tuple[int | torch.SymInt, ...]
+    tensor_storage_offset: int | torch.SymInt
     is_nested: bool
 
-    def size(self) -> tuple[Union[int, torch.SymInt], ...]:
+    def size(self) -> tuple[int | torch.SymInt, ...]:
         return self.tensor_size
 
-    def stride(self) -> tuple[Union[int, torch.SymInt], ...]:
+    def stride(self) -> tuple[int | torch.SymInt, ...]:
         return self.tensor_stride
 
-    def storage_offset(self) -> Union[int, torch.SymInt]:
+    def storage_offset(self) -> int | torch.SymInt:
         return self.tensor_storage_offset
 
     def dim(self) -> int:

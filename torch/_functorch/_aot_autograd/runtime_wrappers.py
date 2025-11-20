@@ -1346,7 +1346,7 @@ def merge_view_inputs(
     # The autograd case currently has more restrictions than the inference case.
     is_inference: bool,
 ) -> tuple[
-    list[Any], list[AOTInput], Optional[list[Union[int, tuple[int, torch.Tensor]]]]
+    list[Any], list[AOTInput], Optional[list[int | tuple[int, torch.Tensor]]]
 ]:
     if fwd_inputs_descs is None:
         fwd_inputs_descs = [DummyAOTInput(i) for i in range(len(fwd_inputs))]
@@ -1392,7 +1392,7 @@ def merge_view_inputs(
     # - another int (corresponding to the index in the argument list of the element from the outer calling convention)
     # - idx, view_tensor, where we can generate the new output with view_tensor._view_func(old_args[idx])
     #   idx corresponds to which synthetic base from the outer calling context to view
-    inner_calling_convention_meta: dict[int, Union[int, tuple[int, torch.Tensor]]] = {}
+    inner_calling_convention_meta: dict[int, int | tuple[int, torch.Tensor]] = {}
     for aliased_input_indices in storage_ref_to_idx.values():
         if len(aliased_input_indices) <= 1 or not any(
             # We only care about mutations that affect all aliases,
@@ -1550,7 +1550,7 @@ def merge_view_inputs(
 
         # post process into a list
         post_processed_calling_convention_meta: list[
-            Union[int, tuple[int, torch.Tensor]]
+            int | tuple[int, torch.Tensor]
         ] = [-1 for _ in range(len(inner_calling_convention_meta))]
         for k, v in inner_calling_convention_meta.items():
             post_processed_calling_convention_meta[k] = v
@@ -1966,7 +1966,7 @@ class SerializableCompiledFunction:
 # No need to make it into an actual CompilerWrapper because it doesn't fit the abstract as cleanly
 class AOTDispatchAutograd:
     @staticmethod
-    def process_runtime_tangent(x, meta: Union[PlainTensorMeta, SubclassCreationMeta]):
+    def process_runtime_tangent(x, meta: PlainTensorMeta | SubclassCreationMeta):
         if not isinstance(x, torch.Tensor):
             return x, [x]
 
@@ -2062,10 +2062,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         disable_amp: bool,
         indices_of_inps_to_detach: list[int],
         lazy_backward_info: Optional[
-            Union[
-                AutogradLazyBackwardCompileInfo,
-                CachedAutogradLazyBackwardCompileInfo,
-            ]
+            AutogradLazyBackwardCompileInfo | CachedAutogradLazyBackwardCompileInfo
         ],
         aot_config: AOTConfig,
         *,

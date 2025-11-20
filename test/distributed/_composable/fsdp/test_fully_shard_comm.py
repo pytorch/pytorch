@@ -120,7 +120,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         return orig_params
 
     def _init_fsdp_param_group(
-        self, params: list[nn.Parameter], reshard_after_forward: Union[bool, int]
+        self, params: list[nn.Parameter], reshard_after_forward: bool | int
     ):
         module = nn.ParameterList([param.detach().clone() for param in params])
         mesh_info = FSDPMeshInfo(_init_default_fully_shard_mesh(), shard_mesh_dim=0)
@@ -171,7 +171,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
     def _test_all_gather(
         self,
         param_sizes: list[torch.Size],
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         async_op: bool,
         all_gather_copy_in_stream,
         all_gather_stream,
@@ -346,7 +346,7 @@ class TestFullyShardCommunication(FSDPTest):
 
     def _test_communication_count(
         self,
-        reshard_after_forward: Union[bool, int, None],
+        reshard_after_forward: bool | int | None,
     ):
         torch.manual_seed(42)
         model_args = ModelArgs()
@@ -555,7 +555,7 @@ class TestFullyShardCommunication(FSDPTest):
 
     def _test_set_reshard_after_forward_by_communication_count(
         self,
-        set_reshard_after_forward: Union[bool, None],
+        set_reshard_after_forward: bool | None,
         recurse: bool,
     ):
         torch.manual_seed(42)
@@ -641,7 +641,7 @@ class TestFullyShardPrefetch(FSDPTest):
 
     def _test_backward_prefetch_forward_backward(
         self,
-        reshard_after_forward: Union[bool, int, None],
+        reshard_after_forward: bool | int | None,
         checkpoint_impl: Optional[str],
     ):
         n_layers = 3
@@ -699,7 +699,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
 
     def _test_backward_prefetch_multi_forward(
-        self, reshard_after_forward: Union[bool, int], checkpoint_impl: Optional[str]
+        self, reshard_after_forward: bool | int, checkpoint_impl: Optional[str]
     ):
         n_layers = 3
         model, _, inp = self._init_transformer(
@@ -778,7 +778,7 @@ class TestFullyShardPrefetch(FSDPTest):
             events.clear()
 
     def _test_backward_prefetch_unused_in_backward(
-        self, reshard_after_forward: Union[bool, int, None]
+        self, reshard_after_forward: bool | int | None
     ):
         """
         Test a model with a linear module then a split into two linear modules,
@@ -1434,7 +1434,7 @@ class TestFullyShardPrefetch(FSDPTest):
     def _init_transformer(
         self,
         n_layers: int,
-        reshard_after_forward: Union[bool, int, None],
+        reshard_after_forward: bool | int | None,
         checkpoint_impl: Optional[str],
     ):
         model_args = ModelArgs(

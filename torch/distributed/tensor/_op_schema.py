@@ -64,7 +64,7 @@ PlacementList = list[Optional[Placement]]
 
 # ATen op schemas could have Tensor, Tuple[Tensor] and List[Tensor], so output type should
 # be the same set of possibilities.
-OutputSpecType = Optional[Union[DTensorSpec, Sequence[Optional[DTensorSpec]]]]
+OutputSpecType = Optional[DTensorSpec | Sequence[Optional[DTensorSpec]]]
 
 
 def _rebuild_tensor_from_dtensor_meta(arg) -> object:
@@ -109,7 +109,7 @@ class OpSpec:
 
     # output_specs and input_specs are related: for this op, given these input_specs,
     # this is the way the output would look
-    output_specs: Union[DTensorSpec, tuple[Optional[DTensorSpec], ...]]
+    output_specs: DTensorSpec | tuple[Optional[DTensorSpec], ...]
     input_specs: Optional[Sequence[DTensorSpec]] = None
 
     """

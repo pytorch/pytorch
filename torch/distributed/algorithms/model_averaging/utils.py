@@ -51,10 +51,7 @@ def average_parameters(
 
 
 def get_params_to_average(
-    params: Union[
-        Iterable[torch.nn.Parameter],
-        Iterable[dict[str, torch.nn.Parameter]],
-    ],
+    params: Iterable[torch.nn.Parameter] | Iterable[dict[str, torch.nn.Parameter]],
 ):
     """
     Return a list of parameters that need to average.
@@ -83,9 +80,7 @@ def get_params_to_average(
 
 
 def average_parameters_or_parameter_groups(
-    params: Union[
-        Iterable[torch.nn.Parameter], Iterable[dict[str, torch.nn.Parameter]]
-    ],
+    params: Iterable[torch.nn.Parameter] | Iterable[dict[str, torch.nn.Parameter]],
     process_group: ProcessGroup,
 ):
     """Averages parameters of a model or parameter groups of an optimizer."""

@@ -79,7 +79,7 @@ def infer_schema(
             )
 
     def unstringify_types(
-        tys: tuple[Union[type[object], str], ...],
+        tys: tuple[type[object] | str, ...],
     ) -> tuple[tuple[typing.Any, ...], bool]:
         res = []
         changed = False
@@ -92,7 +92,7 @@ def infer_schema(
         else:
             return tys, False  # type: ignore[return-value]
 
-    def unstringify_type(ty: Union[type[object], str]) -> tuple[typing.Any, bool]:
+    def unstringify_type(ty: type[object] | str) -> tuple[typing.Any, bool]:
         # Dig through a generic type and if it contains a stringified type
         # convert that to a real type. The second return value indicates if the
         # type contained a string or not.
@@ -213,19 +213,19 @@ def infer_schema(
 
 
 def derived_types(
-    base_type: Union[type, typing._SpecialForm],
+    base_type: type | typing._SpecialForm,
     cpp_type: str,
     list_base: bool,
     optional_base_list: bool,
     optional_list_base: bool,
 ):
-    result: list[tuple[Union[type, typing._SpecialForm, GenericAlias], str]] = [
+    result: list[tuple[type | typing._SpecialForm | GenericAlias, str]] = [
         (base_type, cpp_type),
         # pyrefly: ignore [not-a-type]
         (typing.Optional[base_type], f"{cpp_type}?"),
     ]
 
-    def derived_seq_types(typ: Union[type, typing._SpecialForm]):
+    def derived_seq_types(typ: type | typing._SpecialForm):
         return (
             typing.Sequence[typ],  # type: ignore[valid-type]  # noqa: UP006
             typing.List[typ],  # type: ignore[valid-type]  # noqa: UP006
@@ -253,7 +253,7 @@ def derived_types(
 
 def get_supported_param_types():
     # pyrefly: ignore [bad-assignment]
-    data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
+    data: list[tuple[type | typing._SpecialForm, str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
         (int, "SymInt", True, False, True),
@@ -345,4 +345,4 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     elif len(type_args) == 2 and type_args[1] is Ellipsis:
         return list[type_args[0]]  # type: ignore[valid-type]
     else:
-        return list[typing.Union[tuple(type_args)]]  # type: ignore[misc, return-value]
+        return list[tuple(type_args)]  # type: ignore[misc, return-value]

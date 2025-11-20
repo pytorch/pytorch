@@ -42,13 +42,13 @@ if TYPE_CHECKING:
     from ..graph import GraphLowering
 
     # At most, the list nesting can go one layer deep.
-    _OUTPUT_ARGS_TYPE = list[Union[Optional[str], list[Optional[str]]]]
+    _OUTPUT_ARGS_TYPE = list[Optional[str] | list[Optional[str]]]
 
     from ..scheduler import BaseSchedulerNode
 
 
 class HasWriteLine(Protocol):
-    def writeline(self, line: Union[LineContext, DeferredLineBase, str]) -> None: ...
+    def writeline(self, line: LineContext | DeferredLineBase | str) -> None: ...
 
 
 class CppWrapperCpu(PythonWrapperCodegen):
@@ -317,7 +317,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return f"{name}_stride"
 
         def codegen_symbol(
-            sym_or_exp: Union[sympy.Symbol, sympy.Expr],
+            sym_or_exp: sympy.Symbol | sympy.Expr,
             base_name: str,
             name_fn: Callable[[str], str],
             dim: int,
@@ -1903,7 +1903,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         # ```
         return final_tensor_str
 
-    def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
+    def codegen_device_copy(self, src, dst, non_blocking: bool | str):
         """This function is overridden by cpp_wrapper_cpu_array_ref, so we don't need to
         handle cases where dst is not an AtenTensorHandle."""
         self.writeline(
@@ -2072,7 +2072,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
     def generate_extern_kernel_args_decl_if_needed(
         self,
-        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        op_overload: torch._ops.OpOverload | torch._ops.HigherOrderOperator,
         raw_args: Sequence[Any],
         output_args: _OUTPUT_ARGS_TYPE,
         raw_outputs: Sequence[ir.Buffer],
@@ -2274,7 +2274,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         buf_name: str,
         python_kernel_name: str,
         get_args: Callable[[], Sequence[str]],
-        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        op_overload: torch._ops.OpOverload | torch._ops.HigherOrderOperator,
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
     ) -> None:
@@ -2282,8 +2282,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
         different code paths for AOT Inductor vs cpp_wrapper Inductor mode."""
 
         def extract_output_name(
-            out: Optional[Union[ir.Buffer, Sequence[ir.Buffer]]],
-        ) -> Union[Optional[str], _OUTPUT_ARGS_TYPE]:
+            out: Optional[ir.Buffer | Sequence[ir.Buffer]],
+        ) -> Optional[str] | _OUTPUT_ARGS_TYPE:
             if out is None:
                 return None
             if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
@@ -2703,7 +2703,7 @@ if (!custom_op_wrapper) {
 
     def generate_fallback_kernel_with_runtime_lookup_aot(
         self,
-        op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
+        op_overload: torch._ops.OpOverload | torch._ops.HigherOrderOperator,
         raw_args: Sequence[Any],
         output_args: _OUTPUT_ARGS_TYPE,
         raw_outputs: Sequence[ir.Buffer],
@@ -2897,7 +2897,7 @@ if (!custom_op_wrapper) {
         return self.val_to_arg_str_for_prim_type(val, type_)
 
     def create_tmp_raii_handle_var_if_needed(
-        self, handle: str, writer: Optional[Union[HasWriteLine, list[str]]] = None
+        self, handle: str, writer: Optional[HasWriteLine | list[str]] = None
     ) -> str:
         """If the input handle is an rvalue RAII tensor, creates an lvalue variable for
         it in writer.  Returns a variable name that can be used to access handle."""
@@ -2942,10 +2942,10 @@ if (!custom_op_wrapper) {
     def write_kernel_context_guard(
         self,
         kernel_name: str,
-        node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+        node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
     ):
         def aggregate_stack_traces(
-            node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+            node_schedule: Sequence[BaseSchedulerNode] | ExternKernel,
         ) -> OrderedSet[str]:
             if isinstance(node_schedule, list):
                 return functools.reduce(

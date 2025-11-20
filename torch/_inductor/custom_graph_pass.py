@@ -86,7 +86,7 @@ class CustomGraphModulePass(ABC):
 
 
 CustomGraphPassType: TypeAlias = Optional[
-    Union[CustomGraphPass, Callable[[torch.fx.graph.Graph], None]]
+    CustomGraphPass | Callable[[torch.fx.graph.Graph], None]
 ]
 
 

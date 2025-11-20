@@ -39,7 +39,7 @@ def strict_mode(callable, operands):
                 modes = [metadata_mode, predispatch_mode]
                 modes = [mode for mode in modes if mode is not None]
                 if modes:
-                    backend: Union[str, Callable[..., Any]] = (
+                    backend: str | Callable[..., Any] = (
                         make_eager_backend_with_torch_function_modes(modes)
                     )
                 else:

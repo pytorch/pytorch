@@ -227,7 +227,7 @@ class graph:
         if self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.cuda.Stream()
 
-        self.pool: Union[tuple[()], tuple[_POOL_HANDLE]] = (
+        self.pool: tuple[()] | tuple[_POOL_HANDLE] = (
             () if pool is None else (pool,)
         )
         self.capture_stream = (
@@ -293,12 +293,12 @@ def make_graphed_callables(
 
 
 def make_graphed_callables(
-    callables: Union[_ModuleOrCallable, tuple[_ModuleOrCallable, ...]],
-    sample_args: Union[tuple[Tensor, ...], tuple[tuple[Tensor, ...], ...]],
+    callables: _ModuleOrCallable | tuple[_ModuleOrCallable, ...],
+    sample_args: tuple[Tensor, ...] | tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
     pool: Optional[_POOL_HANDLE] = None,
-) -> Union[_ModuleOrCallable, tuple[_ModuleOrCallable, ...]]:
+) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
     Each graphed callable's forward pass runs its source callable's

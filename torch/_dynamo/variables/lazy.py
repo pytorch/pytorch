@@ -75,7 +75,7 @@ class LazyVariableTracker(VariableTracker):
             assert self._cache.vt is not None
         return self._cache.vt
 
-    def unwrap(self) -> Union[VariableTracker, Self]:
+    def unwrap(self) -> VariableTracker | Self:
         """Return the real VariableTracker if it already exists"""
         if self.is_realized():
             assert self._cache.vt is not None

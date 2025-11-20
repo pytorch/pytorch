@@ -67,9 +67,9 @@ PROTOCOL_VERSION = 1001
 STORAGE_KEY_SEPARATOR = ","
 
 MAP_LOCATION: TypeAlias = Optional[
-    Union[Callable[[Storage, str], Storage], torch.device, str, dict[str, str]]
+    Callable[[Storage, str], Storage] | torch.device | str | dict[str, str]
 ]
-STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
+STORAGE: TypeAlias = Storage | torch.storage.TypedStorage | torch.UntypedStorage
 
 IS_WINDOWS = sys.platform == "win32"
 
@@ -272,14 +272,14 @@ def clear_safe_globals() -> None:
     _weights_only_unpickler._clear_safe_globals()
 
 
-def get_safe_globals() -> list[Union[Callable, tuple[Callable, str]]]:
+def get_safe_globals() -> list[Callable | tuple[Callable, str]]:
     """
     Returns the list of user-added globals that are safe for ``weights_only`` load.
     """
     return _weights_only_unpickler._get_safe_globals()
 
 
-def add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]) -> None:
+def add_safe_globals(safe_globals: list[Callable | tuple[Callable, str]]) -> None:
     """
     Marks the given globals as safe for ``weights_only`` load. For example, functions
     added to this list can be called during unpickling, classes could be instantiated
@@ -672,7 +672,7 @@ register_package(
 
 
 def location_tag(
-    storage: Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage],
+    storage: Storage | torch.storage.TypedStorage | torch.UntypedStorage,
 ):
     for _, tagger, _ in _package_registry:
         location = tagger(storage)
@@ -726,7 +726,7 @@ def storage_to_tensor_type(storage):
     return getattr(module, storage_type.__name__.replace("Storage", "Tensor"))
 
 
-def _is_path(name_or_buffer: object) -> TypeIs[Union[str, os.PathLike]]:
+def _is_path(name_or_buffer: object) -> TypeIs[str | os.PathLike]:
     return isinstance(name_or_buffer, (str, os.PathLike))
 
 
@@ -745,7 +745,7 @@ class _opener(Generic[T]):
 
 
 class _open_file(_opener[IO[bytes]]):
-    def __init__(self, name: Union[str, os.PathLike[str]], mode: str) -> None:
+    def __init__(self, name: str | os.PathLike[str], mode: str) -> None:
         super().__init__(open(name, mode))
 
     def __exit__(self, *args):
@@ -776,7 +776,7 @@ def _open_file_like(name_or_buffer: FileLike, mode: str) -> _opener[IO[bytes]]:
 
 
 class _open_zipfile_reader(_opener[torch._C.PyTorchFileReader]):
-    def __init__(self, name_or_buffer: Union[str, IO[bytes]]) -> None:
+    def __init__(self, name_or_buffer: str | IO[bytes]) -> None:
         super().__init__(torch._C.PyTorchFileReader(name_or_buffer))
 
 
@@ -829,7 +829,7 @@ class _open_zipfile_writer_buffer(_opener[torch._C.PyTorchFileWriter]):
         self.buffer.flush()
 
 
-def _open_zipfile_writer(name_or_buffer: Union[str, IO[bytes]]) -> _opener:
+def _open_zipfile_writer(name_or_buffer: str | IO[bytes]) -> _opener:
     container: type[_opener]
     if _is_path(name_or_buffer):
         container = _open_zipfile_writer_file
@@ -1852,7 +1852,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     return result
 
 
-def _maybe_decode_ascii(bytes_str: Union[bytes, str]) -> str:
+def _maybe_decode_ascii(bytes_str: bytes | str) -> str:
     # When using encoding='bytes' in Py3, some **internal** keys stored as
     # strings in Py2 are loaded as bytes. This function decodes them with
     # ascii encoding, one that Py3 uses by default.

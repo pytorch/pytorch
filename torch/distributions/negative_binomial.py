@@ -43,7 +43,7 @@ class NegativeBinomial(Distribution):
 
     def __init__(
         self,
-        total_count: Union[Tensor, float],
+        total_count: Tensor | float,
         probs: Optional[Tensor] = None,
         logits: Optional[Tensor] = None,
         validate_args: Optional[bool] = None,

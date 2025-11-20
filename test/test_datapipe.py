@@ -118,7 +118,7 @@ def create_temp_dir_and_files():
 
 
 def reset_after_n_next_calls(
-    datapipe: Union[IterDataPipe[T_co], MapDataPipe[T_co]], n: int
+    datapipe: IterDataPipe[T_co] | MapDataPipe[T_co], n: int
 ) -> tuple[list[T_co], list[T_co]]:
     """
     Given a DataPipe and integer n, iterate the DataPipe for n elements and store the elements into a list
@@ -2433,7 +2433,7 @@ class TestTyping(TestCase):
                 self.assertFalse(issubtype(t1, t2))
 
         T = TypeVar("T", int, str)
-        S = TypeVar("S", bool, Union[str, int], tuple[int, T])  # type: ignore[valid-type]
+        S = TypeVar("S", bool, str | int, tuple[int, T])  # type: ignore[valid-type]
         types = (
             (int, Optional[int]),
             (list, Union[int, list]),
@@ -2469,7 +2469,7 @@ class TestTyping(TestCase):
 
         basic_data = (1, "1", True, 1.0, complex(1.0, 0.0))
         basic_type = (int, str, bool, float, complex)
-        S = TypeVar("S", bool, Union[str, int])
+        S = TypeVar("S", bool, str | int)
         for d in basic_data:
             self.assertTrue(issubinstance(d, Any))
             self.assertTrue(issubinstance(d, T_co))

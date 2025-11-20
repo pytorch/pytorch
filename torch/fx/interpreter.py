@@ -643,7 +643,7 @@ class Transformer(Interpreter):
             result = super().run(enable_io_processing=False)
         if result is not None:
 
-            def strip_proxy(a: Union[Argument, Proxy]) -> Any:
+            def strip_proxy(a: Argument | Proxy) -> Any:
                 return a.node if isinstance(a, Proxy) else a
 
             new_output_node = self.new_graph.output(map_aggregate(result, strip_proxy))

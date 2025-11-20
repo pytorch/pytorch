@@ -407,7 +407,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
 
     def _test_train_parity_multi_group(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         offload_policy: OffloadPolicy,
         test_device_type: str,
         delay_after_forward: bool,
@@ -565,7 +565,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             self._test_multi_forward_module,
         )
 
-    def _test_multi_forward_module(self, reshard_after_forward: Union[bool, int]):
+    def _test_multi_forward_module(self, reshard_after_forward: bool | int):
         class MultiForwardModule(nn.Module):
             def __init__(self, device: torch.device):
                 super().__init__()
@@ -709,7 +709,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
 
     def _test_train_parity_with_activation_checkpointing(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         checkpoint_impl: str,
         module_grouping: str,
     ):
@@ -985,7 +985,7 @@ class TestFullyShardGradientAccumulation(FSDPTest):
     def _test_gradient_accumulation(
         self,
         mesh: DeviceMesh,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         mode: str,
         reshard_after_backward: bool,
         offload_policy: OffloadPolicy,

@@ -492,7 +492,7 @@ class GraphModule(torch.nn.Module):
     @compatibility(is_backward_compatible=True)
     def __init__(
         self,
-        root: Union[torch.nn.Module, dict[str, Any]],
+        root: torch.nn.Module | dict[str, Any],
         graph: Graph,
         class_name: str = "GraphModule",
     ):
@@ -621,7 +621,7 @@ class GraphModule(torch.nn.Module):
         self.recompile()
 
     @compatibility(is_backward_compatible=False)
-    def to_folder(self, folder: Union[str, os.PathLike], module_name: str = "FxModule"):
+    def to_folder(self, folder: str | os.PathLike, module_name: str = "FxModule"):
         """Dumps out module to ``folder`` with ``module_name`` so that it can be
         imported with ``from <folder> import <module_name>``
 

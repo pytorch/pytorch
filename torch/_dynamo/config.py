@@ -327,15 +327,7 @@ allow_unspec_int_on_nn_module = False
 # Note that to avoid breaking the existing usage, mode 1 and mode 4 can be
 # specified with a boolean value. True is using ddp_optimizer and False is
 # no optimization.
-optimize_ddp: Union[
-    bool,
-    Literal[
-        "ddp_optimizer",
-        "python_reducer",
-        "python_reducer_without_compiled_forward",
-        "no_optimization",
-    ],
-] = True
+optimize_ddp: bool | Literal["ddp_optimizer", "python_reducer", "python_reducer_without_compiled_forward", "no_optimization"] = True
 
 # By default, Dynamo emits runtime asserts (e.g. torch._check) in the graph.
 # In some cases those asserts could be performance costly

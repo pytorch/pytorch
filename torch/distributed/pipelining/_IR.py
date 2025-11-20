@@ -186,7 +186,7 @@ def _insert_stage_symbolic_backward(
             fx.node.map_arg(node.args, add_to_live_nodes)
             fx.node.map_arg(node.kwargs, add_to_live_nodes)
             if node.op == "call_module":
-                output_grads: Union[tuple[Optional[fx.Node], ...], Optional[fx.Node]]
+                output_grads: tuple[Optional[fx.Node], ...] | Optional[fx.Node]
                 if node in tuples:
                     stage_output = tuples[node]
                     output_grads = tuple(val_to_grad.get(n) for n in tuples[node])

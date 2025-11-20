@@ -157,7 +157,7 @@ class Runner:
                 active_jobs.append(job)
                 continue
 
-            result: Union[WorkerOutput, WorkerFailure] = job.result
+            result: WorkerOutput | WorkerFailure = job.result
             if isinstance(result, WorkerOutput):
                 self._results[job.work_order] = result
                 assert job.cpu_list is not None

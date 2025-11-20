@@ -70,7 +70,7 @@ class ShardingPropagator:
         # op map to save indices of shape (and stride) args which may need to be
         # modified in sharding prop
         self.op_to_shape_and_stride_idx: dict[
-            OpOverload, Union[int, tuple[int, int]]
+            OpOverload, int | tuple[int, int]
         ] = {
             # new factory ops
             aten.new_empty.default: 1,
@@ -157,7 +157,7 @@ class ShardingPropagator:
 
     def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+    ) -> None | TensorMeta | Sequence[Optional[TensorMeta]]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
@@ -215,7 +215,7 @@ class ShardingPropagator:
     @lru_cache  # noqa: B019
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+    ) -> None | TensorMeta | Sequence[Optional[TensorMeta]]:
         """
         Cached version of _propagate_tensor_meta_non_cached
         This is a private API. Use propagate_tensor_meta instead.
@@ -224,7 +224,7 @@ class ShardingPropagator:
 
     def propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+    ) -> None | TensorMeta | Sequence[Optional[TensorMeta]]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas. This is a public API that should be
@@ -239,7 +239,7 @@ class ShardingPropagator:
         self,
         op: OpOverload,
         output_specs: OutputSpecType,
-        output_tensor_meta: Union[None, TensorMeta, Sequence[Optional[TensorMeta]]],
+        output_tensor_meta: None | TensorMeta | Sequence[Optional[TensorMeta]],
     ) -> OutputSpecType:
         """
         Wrap the output_specs with the tensor metadata from the output.

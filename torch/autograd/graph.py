@@ -235,7 +235,7 @@ def get_gradient_edge(tensor: torch.Tensor) -> GradientEdge:
     return GradientEdge(grad_fn, tensor.output_nr, ownership_token=token)
 
 
-def increment_version(tensor: Union[torch.Tensor, Iterable[torch.Tensor]]) -> None:
+def increment_version(tensor: torch.Tensor | Iterable[torch.Tensor]) -> None:
     """Update autograd metadata tracking whether the given Tensor was modified in place.
 
     This is to enable more accurate error checking within the autograd engine.
@@ -465,10 +465,7 @@ class _MultiHandle(RemovableHandle):
 
 def register_multi_grad_hook(
     tensors: Sequence[torch.Tensor],
-    fn: Union[
-        Callable[[Sequence[Optional[torch.Tensor]]], None],
-        Callable[[torch.Tensor], None],
-    ],
+    fn: Callable[[Sequence[Optional[torch.Tensor]]], None] | Callable[[torch.Tensor], None],
     *,
     mode: Literal["all", "any"] = "all",
 ) -> RemovableHandle:
@@ -806,7 +803,7 @@ def allow_mutation_on_saved_tensors() -> Generator[
 
 
 def _register_logging_hooks_on_whole_graph(
-    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
+    t_outputs: Sequence[torch.Tensor | GradientEdge],
 ) -> Callable[[], None]:
     grad_fns = list(map(_get_grad_fn_or_grad_acc, t_outputs))
 
@@ -854,7 +851,7 @@ def _register_logging_hooks_on_whole_graph(
 
 
 def _engine_run_backward(
-    t_outputs: Sequence[Union[torch.Tensor, GradientEdge]],
+    t_outputs: Sequence[torch.Tensor | GradientEdge],
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor, ...]:

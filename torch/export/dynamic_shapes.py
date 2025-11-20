@@ -475,7 +475,7 @@ class _DerivedConstraint(_ConstraintTarget):
 
     name: str
     constraint_range: "StrictMinMaxConstraint"
-    root: Union[_ConstraintTarget, _PhantomRoot]
+    root: _ConstraintTarget | _PhantomRoot
     fn: Callable
 
     @property
@@ -519,7 +519,7 @@ class _IntWrapper:
 
     val: int
     # Disallow specifying dynamism
-    dynamism: Optional[Union[_DimHint, int]] = dataclasses.field(
+    dynamism: Optional[_DimHint | int] = dataclasses.field(
         init=False, default=None
     )
 
@@ -925,7 +925,7 @@ def _warn_on_None_dynamic_shape_dimension():
 
 def _check_dynamic_shapes(
     combined_args: dict[str, Any],
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
 ):
     """
     Checks the dynamic_shapes specification for correctness,
@@ -1055,7 +1055,7 @@ def _check_dynamic_shapes(
 
 def _process_dynamic_shapes(
     combined_args: dict[str, Any],
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
 ) -> list[Constraint]:
     """
     Reads the dynamic_shapes specification and produces a list of constraints.
@@ -1232,7 +1232,7 @@ def _process_dynamic_shapes(
 
 
 def _get_dim_name_mapping(
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
 ):
     name_to_dim = {}
     for dim in tree_iter(dynamic_shapes, is_leaf=lambda x: isinstance(x, Dim)):
@@ -1252,8 +1252,8 @@ def _get_dim_name_mapping(
 
 def refine_dynamic_shapes_from_suggested_fixes(
     msg: str,
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any]],
-) -> Union[dict[str, Any], tuple[Any], list[Any]]:
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any],
+) -> dict[str, Any] | tuple[Any] | list[Any]:
     """
     When exporting with :func:`dynamic_shapes`, export may fail with a ConstraintViolation error if the specification
     doesn't match the constraints inferred from tracing the model. The error message may provide suggested fixes -

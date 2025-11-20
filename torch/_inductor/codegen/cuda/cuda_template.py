@@ -171,8 +171,8 @@ class CUDATemplate(KernelTemplate):
         description: str,
         input_key: str,
         layout_repr: str,
-        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
-        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        input_tensor_meta: TensorMeta | list[TensorMeta],
+        output_tensor_meta: TensorMeta | list[TensorMeta],
         **kwargs,
     ) -> CUDATemplateCaller:
         """

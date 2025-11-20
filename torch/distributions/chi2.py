@@ -29,7 +29,7 @@ class Chi2(Gamma):
 
     def __init__(
         self,
-        df: Union[Tensor, float],
+        df: Tensor | float,
         validate_args: Optional[bool] = None,
     ) -> None:
         super().__init__(0.5 * df, 0.5, validate_args=validate_args)

@@ -87,7 +87,7 @@ def save_state_dict(
 def save(
     state_dict: STATE_DICT_TYPE,
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
+    checkpoint_id: str | os.PathLike | None = None,
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -219,7 +219,7 @@ class AsyncSaveResponse:
 def async_save(
     state_dict: STATE_DICT_TYPE,
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
+    checkpoint_id: str | os.PathLike | None = None,
     storage_writer: Optional[StorageWriter] = None,
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
@@ -227,7 +227,7 @@ def async_save(
     async_stager: Optional[AsyncStager] = None,
     no_dist: bool = False,
     use_collectives: bool = True,
-) -> Union[Future, AsyncSaveResponse]:
+) -> Future | AsyncSaveResponse:
     """Asynchronous version of ``save``. This code first de-stages the state_dict on to the
     staging storage (defaults to CPU memory), and then calls the `save` in a separate thread.
 
@@ -315,7 +315,7 @@ def async_save(
     state_dict = _stateful_to_state_dict(state_dict)
 
     @_dcp_method_logger(log_exceptions=True)
-    def stage_state_dict() -> Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE]:
+    def stage_state_dict() -> Future[STATE_DICT_TYPE] | STATE_DICT_TYPE:
         return async_stager.stage(state_dict)
 
     staging_future_or_state_dict = stage_state_dict()

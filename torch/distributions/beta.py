@@ -41,8 +41,8 @@ class Beta(ExponentialFamily):
 
     def __init__(
         self,
-        concentration1: Union[Tensor, float],
-        concentration0: Union[Tensor, float],
+        concentration1: Tensor | float,
+        concentration0: Tensor | float,
         validate_args: Optional[bool] = None,
     ) -> None:
         if isinstance(concentration1, _Number) and isinstance(concentration0, _Number):

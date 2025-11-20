@@ -123,7 +123,7 @@ class TritonSplitScanKernel(TritonKernel):
         )
         max_blocks = pointwise_numel * CeilDiv(reduction_numel, min_rblock)
         nbytes = scratch_nbytes_per_block * max_blocks
-        scratch_base: Union[str, TritonCSEVariable]
+        scratch_base: str | TritonCSEVariable
         scratch_base, _, offset = self.args.workspace(nelem=nbytes, zero_fill=True)
         if offset != 0:
             scratch_base = cse_load(

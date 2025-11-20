@@ -16,7 +16,7 @@ from . import autograd, utils
 from .effects import EffectType
 
 
-device_types_t = Optional[Union[str, Sequence[str]]]
+device_types_t = Optional[str | Sequence[str]]
 log = logging.getLogger(__name__)
 
 
@@ -26,7 +26,7 @@ def custom_op(
     fn: None = None,
     /,
     *,
-    mutates_args: Union[str, Iterable[str]],
+    mutates_args: str | Iterable[str],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
     tags: Optional[Sequence[_C.Tag]] = None,
@@ -39,7 +39,7 @@ def custom_op(
     fn: Callable[..., object],
     /,
     *,
-    mutates_args: Union[str, Iterable[str]],
+    mutates_args: str | Iterable[str],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
     tags: Optional[Sequence[_C.Tag]] = None,
@@ -52,7 +52,7 @@ def custom_op(
     fn: Optional[Callable] = None,
     /,
     *,
-    mutates_args: Union[str, Iterable[str]],
+    mutates_args: str | Iterable[str],
     device_types: device_types_t = None,
     schema: Optional[str] = None,
     tags: Optional[Sequence[_C.Tag]] = None,
@@ -201,7 +201,7 @@ class CustomOpDef:
 
         self._init_fn = fn
 
-        self._backend_fns: dict[Union[str, None], Callable] = {}
+        self._backend_fns: dict[str | None, Callable] = {}
         self._abstract_fn: Optional[Callable] = None
         self._setup_context_fn: Optional[Callable] = None
         self._backward_fn: Optional[Callable] = None
@@ -336,7 +336,7 @@ class CustomOpDef:
 
         def inner(fn):
             if device_types is None or isinstance(device_types, str):
-                dtypes: list[Union[str, None]] = [device_types]
+                dtypes: list[str | None] = [device_types]
             else:
                 dtypes = list(device_types)
             for device_type in dtypes:
@@ -929,7 +929,7 @@ def get_library_allowing_overwrite(
 
 
 def _maybe_get_opdef(
-    op: Union[CustomOpDef, _ops.OpOverload, str],
+    op: CustomOpDef | _ops.OpOverload | str,
 ) -> Optional[CustomOpDef]:
     if isinstance(op, CustomOpDef):
         return op

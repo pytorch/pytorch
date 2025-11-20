@@ -44,7 +44,7 @@ def pip_install_first_match(pattern: str, extras: Optional[str] = None, pref_uv=
     pip_install_packages([target], prefer_uv=pref_uv)
 
 
-def run_python(args: Union[str, list[str]], env=None):
+def run_python(args: str | list[str], env=None):
     """
     Run the python in the current environment.
     """

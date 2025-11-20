@@ -197,7 +197,7 @@ class _ExecOrderData:
             num_valid_indices = sum(
                 (index is not None) for index in optional_local_indices
             )
-            tensor_kwargs: dict[str, Union[torch.dtype, torch.device]] = {
+            tensor_kwargs: dict[str, torch.dtype | torch.device] = {
                 "dtype": torch.int32,
                 "device": device,
             }

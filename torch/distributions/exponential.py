@@ -51,7 +51,7 @@ class Exponential(ExponentialFamily):
 
     def __init__(
         self,
-        rate: Union[Tensor, float],
+        rate: Tensor | float,
         validate_args: Optional[bool] = None,
     ) -> None:
         (self.rate,) = broadcast_all(rate)

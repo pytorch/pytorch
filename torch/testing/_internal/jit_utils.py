@@ -795,7 +795,7 @@ class TensorExprTestOptions:
         torch._C._jit_set_te_must_use_llvm_cpu(self.old_te_must_use_llvm_cpu)
 
 def clone_inputs(args):
-    inputs: list[Union[torch.Tensor, list[torch.Tensor]]] = []
+    inputs: list[torch.Tensor | list[torch.Tensor]] = []
 
     for arg in args:
         if isinstance(arg, torch.Tensor):

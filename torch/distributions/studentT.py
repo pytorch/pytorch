@@ -64,9 +64,9 @@ class StudentT(Distribution):
 
     def __init__(
         self,
-        df: Union[Tensor, float],
-        loc: Union[Tensor, float] = 0.0,
-        scale: Union[Tensor, float] = 1.0,
+        df: Tensor | float,
+        loc: Tensor | float = 0.0,
+        scale: Tensor | float = 1.0,
         validate_args: Optional[bool] = None,
     ) -> None:
         self.df, self.loc, self.scale = broadcast_all(df, loc, scale)

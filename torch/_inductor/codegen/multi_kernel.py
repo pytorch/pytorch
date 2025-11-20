@@ -37,7 +37,7 @@ class MultiKernelState:
         self,
         kernels: list[Any],
         kernel_shape_keys: Optional[
-            list[Union[None, tuple[tuple[int, ...], ...]]]
+            list[None | tuple[tuple[int, ...], ...]]
         ] = None,
     ) -> str:
         """

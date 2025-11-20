@@ -24,7 +24,7 @@ static_inputs_log = torch._logging.getArtifactLogger(
 )
 
 
-OutputType = list[Optional[Union[int, torch.Tensor]]]
+OutputType = list[Optional[int | torch.Tensor]]
 ModelType = Callable[[list[InputType]], OutputType]
 
 
@@ -112,7 +112,7 @@ def format_default_skip_message(reason: str) -> str:
 
 def get_mutation_stack_trace(
     placeholders: Sequence[PlaceholderInfo],
-    mutation_indices: Union[AbstractSet[int], Sequence[int]],
+    mutation_indices: AbstractSet[int] | Sequence[int],
 ) -> str:
     stack_trace: Optional[str] = ""
 

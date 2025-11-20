@@ -24,7 +24,7 @@ __all__ = [
 
 # FIXME: Use (*values: *Ts) -> tuple[Tensor for T in Ts] if Mapping-Type is ever added.
 #   See https://github.com/python/typing/issues/1216#issuecomment-2126153831
-def broadcast_all(*values: Union[Tensor, Number]) -> tuple[Tensor, ...]:
+def broadcast_all(*values: Tensor | Number) -> tuple[Tensor, ...]:
     r"""
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
@@ -59,7 +59,7 @@ def broadcast_all(*values: Union[Tensor, Number]) -> tuple[Tensor, ...]:
 
 
 def _standard_normal(
-    shape: Sequence[Union[int, SymInt]],
+    shape: Sequence[int | SymInt],
     dtype: Optional[_dtype],
     device: Optional[Device],
 ) -> Tensor:
@@ -162,7 +162,7 @@ class lazy_property(Generic[T, R]):
     def __get__(self, instance: T, obj_type: Any = None) -> R: ...
 
     def __get__(
-        self, instance: Union[T, None], obj_type: Any = None
+        self, instance: T | None, obj_type: Any = None
     ) -> "R | _lazy_property_and_property[T, R]":
         if instance is None:
             return _lazy_property_and_property(self.wrapped)

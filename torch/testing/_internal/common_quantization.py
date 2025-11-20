@@ -1072,7 +1072,7 @@ class QuantizationTestCase(TestCase):
 
             def _get_underlying_op_type(
                 node: Node, gm: GraphModule
-            ) -> Union[Callable, str]:
+            ) -> Callable | str:
                 if node.op == "call_module":
                     mod = getattr(gm, node.target)
                     return type(mod)

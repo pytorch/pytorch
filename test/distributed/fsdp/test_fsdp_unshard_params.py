@@ -67,8 +67,8 @@ class TestUnshardParamsBase(FSDPTest):
         offloading_params = model.cpu_offload.offload_params
 
         # Assumes depth-first `.parameters()`
-        outer_param: Union[FlatParameter, nn.Parameter] = next(model.parameters())
-        inner_param: Union[FlatParameter, nn.Parameter] = next(model[0].parameters())
+        outer_param: FlatParameter | nn.Parameter = next(model.parameters())
+        inner_param: FlatParameter | nn.Parameter = next(model[0].parameters())
         param_to_check = outer_param if check_outer else inner_param
 
         # Write a known value to all elements of the *sharded* parameter or

@@ -551,7 +551,7 @@ def rebuild_storage_fd(cls, df, size):
 
 
 def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
-    storage: Union[torch.TypedStorage, torch.UntypedStorage] = storage_from_cache(
+    storage: torch.TypedStorage | torch.UntypedStorage = storage_from_cache(
         cls, handle
     )
     if storage is not None:

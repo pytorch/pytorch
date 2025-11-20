@@ -553,7 +553,7 @@ try:
                 log.debug("add target guard: %s", z3str(z3expr))
             self._target_exprs.add(z3expr)
 
-        def add_assertion(self, e: Union[z3.BoolRef, sympy.Basic]) -> None:
+        def add_assertion(self, e: z3.BoolRef | sympy.Basic) -> None:
             if isinstance(e, sympy.Basic):
                 self._check_freesymbols(e)
                 ref = self.to_z3_boolean_expr(e)

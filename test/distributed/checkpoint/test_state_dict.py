@@ -256,7 +256,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def _test_fsdp2(
         self,
         *,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         optimizer_class: type[Optimizer],
         compile_model: bool,
         foreach: bool = True,

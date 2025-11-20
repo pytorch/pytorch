@@ -558,7 +558,7 @@ class TestShardingSpec(TestCase):
 @dataclass
 class GridShardingSpec(ShardingSpec):
     grid_size: int
-    placements: list[Union[torch.distributed._remote_device, str]]
+    placements: list[torch.distributed._remote_device | str]
 
     def __post_init__(self):
         for i, remote_device in enumerate(self.placements):

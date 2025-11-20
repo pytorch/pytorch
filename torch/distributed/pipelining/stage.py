@@ -99,7 +99,7 @@ InputInfo = Union[_RecvInfo, _RootArgPlaceholder]
 
 
 def _make_tensor_from_meta(
-    example: Union[torch.Tensor, FakeTensor],
+    example: torch.Tensor | FakeTensor,
     device: torch.device,
 ) -> torch.Tensor:
     """
@@ -1347,8 +1347,8 @@ class PipelineStage(_PipelineStageBase):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        input_args: Optional[Union[torch.Tensor, tuple[torch.Tensor, ...]]] = None,
-        output_args: Optional[Union[torch.Tensor, tuple[torch.Tensor, ...]]] = None,
+        input_args: Optional[torch.Tensor | tuple[torch.Tensor, ...]] = None,
+        output_args: Optional[torch.Tensor | tuple[torch.Tensor, ...]] = None,
         group: Optional[dist.ProcessGroup] = None,
         dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
     ):

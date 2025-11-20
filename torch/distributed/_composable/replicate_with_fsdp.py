@@ -163,7 +163,7 @@ def replicate_impl(
     module,
     mesh: DeviceMesh,
     *,
-    device_id: Optional[Union[int, torch.device]] = None,
+    device_id: Optional[int | torch.device] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: Optional[set[nn.Parameter]] = None,

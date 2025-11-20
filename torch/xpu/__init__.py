@@ -281,7 +281,7 @@ def current_device() -> int:
     return torch._C._xpu_getDevice()
 
 
-def _get_device(device: Union[int, str, torch.device]) -> torch.device:
+def _get_device(device: int | str | torch.device) -> torch.device:
     r"""Return the torch.device type object from the passed in device.
 
     Args:
@@ -484,7 +484,7 @@ def _get_generator(device: torch.device) -> torch._C.Generator:
 
 
 def _set_rng_state_offset(
-    offset: int, device: Union[int, str, torch.device] = "xpu"
+    offset: int, device: int | str | torch.device = "xpu"
 ) -> None:
     r"""Set the random number generator state offset of the specified GPU.
 
@@ -502,7 +502,7 @@ def _set_rng_state_offset(
     _lazy_call(cb)
 
 
-def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
+def _get_rng_state_offset(device: int | str | torch.device = "xpu") -> int:
     r"""Return the random number generator state offset of the specified GPU.
 
     Args:

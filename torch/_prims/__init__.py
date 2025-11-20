@@ -221,12 +221,12 @@ __all__ = [
 
 
 def TensorMeta(
-    tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
+    tensorlike: Optional[NumberType | torch.Tensor] = None,
     *,
     shape: Optional[ShapeType] = None,
     strides: Optional[StrideType] = None,
     dtype: Optional[torch.dtype] = None,
-    device: Optional[Union[torch.device, str]] = None,
+    device: Optional[torch.device | str] = None,
 ):
     if isinstance(tensorlike, Number):
         assert not shape and (shape is None or isinstance(shape, Sequence))
@@ -266,7 +266,7 @@ def TensorMeta(
 def _make_prim(
     *,
     schema: str,
-    return_type: Union[RETURN_TYPE, tuple[RETURN_TYPE, ...]],
+    return_type: RETURN_TYPE | tuple[RETURN_TYPE, ...],
     meta: Callable,
     impl_aten: Callable,
     doc: str,
@@ -1115,7 +1115,7 @@ lt = _make_elementwise_binary_prim(
 
 # Note: the following impls are because torch.maximum and torch.minimum do not support scalar inputs
 def _maximum_aten(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+    a: TensorLikeType | NumberType, b: TensorLikeType | NumberType
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
@@ -1134,7 +1134,7 @@ maximum = _make_elementwise_binary_prim(
 
 
 def _minimum_aten(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+    a: TensorLikeType | NumberType, b: TensorLikeType | NumberType
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
@@ -1842,7 +1842,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     )
 
 
-def _cat_aten(tensors: Union[tuple[Tensor, ...], list[Tensor]], dim: int) -> Tensor:
+def _cat_aten(tensors: tuple[Tensor, ...] | list[Tensor], dim: int) -> Tensor:
     return torch.cat(tensors, dim)
 
 
@@ -1991,7 +1991,7 @@ convert_element_type = _make_prim(
 
 
 def _device_put_meta(
-    a: TensorLikeType, device: Union[str, torch.device], non_blocking=False
+    a: TensorLikeType, device: str | torch.device, non_blocking=False
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     assert isinstance(device, (str, torch.device))
@@ -2001,7 +2001,7 @@ def _device_put_meta(
 
 
 def _device_put_aten(
-    a: Tensor, device: Union[str, torch.device], non_blocking=False
+    a: Tensor, device: str | torch.device, non_blocking=False
 ) -> Tensor:
     return a.to(device, non_blocking=non_blocking)
 
@@ -2726,7 +2726,7 @@ svd = _make_prim(
 def _normal_meta(
     shape: ShapeType,
     *,
-    mean: Union[float, complex],
+    mean: float | complex,
     std: float,
     dtype: torch.dtype,
     device: torch.device,
@@ -2750,7 +2750,7 @@ def _normal_meta(
 def _normal_aten(
     shape: ShapeType,
     *,
-    mean: Union[float, complex],
+    mean: float | complex,
     std: float,
     dtype: torch.dtype,
     device: torch.device,

@@ -639,11 +639,11 @@ def should_print_better_repro() -> None:
 
 
 def opcheck(
-    op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
+    op: torch._ops.OpOverload | torch._ops.OpOverloadPacket | CustomOpDef,
     args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
-    test_utils: Union[str, Sequence[str]] = DEFAULT_TEST_UTILS,
+    test_utils: str | Sequence[str] = DEFAULT_TEST_UTILS,
     raise_exception: bool = True,
     rtol: Optional[float] = None,
     atol: Optional[float] = None,

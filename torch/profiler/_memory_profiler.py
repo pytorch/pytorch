@@ -275,7 +275,7 @@ class SchemaMatcher:
                 isinstance(i, TensorKey) for i in observed
             )
 
-        type_map: tuple[tuple[Any, Union[type, tuple[type, ...]]], ...] = (
+        type_map: tuple[tuple[Any, type | tuple[type, ...]], ...] = (
             (torch._C.TensorType, TensorKey),
             (torch._C.NoneType, type(None)),
             (torch._C.BoolType, bool),

@@ -417,7 +417,7 @@ def get_dir() -> str:
     return os.path.join(_get_torch_home(), "hub")
 
 
-def set_dir(d: Union[str, os.PathLike]) -> None:
+def set_dir(d: str | os.PathLike) -> None:
     r"""
     Optionally set the Torch Hub directory used to save downloaded models & weights.
 

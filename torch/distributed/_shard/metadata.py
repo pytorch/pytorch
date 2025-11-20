@@ -33,7 +33,7 @@ class ShardMetadata:
         self,
         shard_offsets: list[int],
         shard_sizes: list[int],
-        placement: Optional[Union[str, _remote_device]] = None,
+        placement: Optional[str | _remote_device] = None,
     ):
         self.shard_offsets = shard_offsets
         self.shard_sizes = shard_sizes

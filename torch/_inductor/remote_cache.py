@@ -110,7 +110,7 @@ class RemoteCacheSerde(Generic[_T, _U]):
 
 
 JsonDataTy = Optional[
-    Union[int, float, str, bool, dict[str, "JsonDataTy"], list["JsonDataTy"]]
+    int | float | str | bool | dict[str, "JsonDataTy"] | list["JsonDataTy"]
 ]
 
 

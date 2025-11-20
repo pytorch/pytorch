@@ -14,10 +14,10 @@ s_pattern = r"s\d+"
 
 
 def infer_symbol_values(
-    symints: list[Union[torch.SymInt, int]],
-    init_symints: list[Union[torch.SymInt, int]],
+    symints: list[torch.SymInt | int],
+    init_symints: list[torch.SymInt | int],
     symbol_idx_dict: dict[str, int],
-    padding_constraints: defaultdict[torch.SymInt, list[Union[sp.Expr, int]]],
+    padding_constraints: defaultdict[torch.SymInt, list[sp.Expr | int]],
     constraint: str,
 ) -> None:
     if constraint.find("non-singleton") != -1:
@@ -82,9 +82,9 @@ def infer_symbol_values(
 
 
 def calculate_value(
-    left_expression: Union[str, Any, None],
-    right_expression: Union[str, Any, None],
-    symints: list[Union[torch.SymInt, int]],
+    left_expression: str | Any | None,
+    right_expression: str | Any | None,
+    symints: list[torch.SymInt | int],
     symbol_idx_dict: dict[str, int],
 ) -> None:
     var, val = solve_equation(left_expression, right_expression)
@@ -94,8 +94,8 @@ def calculate_value(
 
 
 def solve_equation(
-    left_expression: Union[str, Any, None],
-    right_expression: Union[str, Any, None],
+    left_expression: str | Any | None,
+    right_expression: str | Any | None,
 ) -> tuple[str, int]:
     expression = f"{left_expression} - {right_expression}"
     var = re.findall(s_pattern, expression)[0]
@@ -117,9 +117,9 @@ def solve_equation(
 
 
 def update_equation(
-    symints: list[Union[torch.SymInt, int]],
-    init_symints: list[Union[torch.SymInt, int]],
-    padding_constraints: defaultdict[torch.SymInt, list[Union[sp.Expr, int]]],
+    symints: list[torch.SymInt | int],
+    init_symints: list[torch.SymInt | int],
+    padding_constraints: defaultdict[torch.SymInt, list[sp.Expr | int]],
     init_eq: sp.Expr,
     new_mod_num: int,
     var: torch.SymInt,

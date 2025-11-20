@@ -29,10 +29,10 @@ class SGD(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
+        lr: float | Tensor = 1e-3,
         momentum: float = 0,
         dampening: float = 0,
-        weight_decay: Union[float, Tensor] = 0,
+        weight_decay: float | Tensor = 0,
         nesterov: bool = False,
         *,
         maximize: bool = False,

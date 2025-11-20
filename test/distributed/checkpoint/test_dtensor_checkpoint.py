@@ -58,14 +58,14 @@ class MyTestModule(torch.nn.Module):
     def extra_state_tensor(self, new_extra_state_tensor: torch.Tensor) -> None:
         self._extra_state_tensor = new_extra_state_tensor
 
-    def get_extra_state(self) -> dict[str, Union[int, torch._tensor.Tensor]]:
+    def get_extra_state(self) -> dict[str, int | torch._tensor.Tensor]:
         return {
             "extra_state": self._extra_state,
             "extra_state_tensor": self._extra_state_tensor,
         }
 
     def set_extra_state(
-        self, state: dict[str, Union[int, torch._tensor.Tensor]]
+        self, state: dict[str, int | torch._tensor.Tensor]
     ) -> None:
         self._extra_state = state["extra_state"]  # pyre-ignore[8]
         self._extra_state_tensor = state["extra_state_tensor"]  # pyre-ignore[8]

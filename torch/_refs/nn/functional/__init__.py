@@ -876,7 +876,7 @@ def nll_loss(
 def huber_loss(
     input: TensorLikeType,
     target: TensorLikeType,
-    reduction: Union[str, int] = "mean",
+    reduction: str | int = "mean",
     delta: float = 1.0,
 ) -> TensorLikeType:
     """
@@ -921,7 +921,7 @@ def tanhshrink(a: TensorLikeType) -> TensorLikeType:
 def threshold(
     a: TensorLikeType,
     threshold: NumberType,
-    value: Union[bool, int, float],
+    value: bool | int | float,
     inplace: bool = False,
 ) -> TensorLikeType:
     """

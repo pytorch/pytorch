@@ -408,12 +408,12 @@ class ExportMetaData:
     # 3) constants
     output_return_type: dict[int, tuple[str, Any]] = dc_field(default_factory=dict)
     # output spec of the traced function
-    out_spec: Union[torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec] = (
+    out_spec: torch.utils._pytree.TreeSpec | torch.utils._pytree.LeafSpec = (
         torch.utils._pytree._LEAF_SPEC
     )
     module_call_spec: dict[
         str,
-        dict[str, Union[torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec]],
+        dict[str, torch.utils._pytree.TreeSpec | torch.utils._pytree.LeafSpec],
     ] = dc_field(default_factory=dict)
 
 
@@ -1034,9 +1034,9 @@ class OutputGraph(OutputGraphCommon):
     def has_outputs(self) -> bool:
         return len([x for x in self.graph.nodes if x.op == "output"]) > 0
 
-    def get_submodule(self, keys: str) -> Union[torch.nn.Module, Any]:
+    def get_submodule(self, keys: str) -> torch.nn.Module | Any:
         assert keys
-        obj: Union[torch.nn.Module, dict[str, torch.nn.Module]] = self.nn_modules
+        obj: torch.nn.Module | dict[str, torch.nn.Module] = self.nn_modules
         for k in keys.split("."):
             if isinstance(obj, dict):
                 obj = obj[k]
@@ -1103,7 +1103,7 @@ class OutputGraph(OutputGraphCommon):
 
     def register_attr_or_module(
         self,
-        target: Union[torch.nn.Module, torch.Tensor, Any],
+        target: torch.nn.Module | torch.Tensor | Any,
         *names: Any,
         **options: Any,
     ) -> VariableTracker:
@@ -1982,8 +1982,8 @@ class OutputGraph(OutputGraphCommon):
         self.package.bypass_current_entry()
         self.package = None
 
-    def get_graph_sizes_structured(self) -> dict[str, list[Union[int, str]]]:
-        ret: dict[str, list[Union[int, str]]] = {}
+    def get_graph_sizes_structured(self) -> dict[str, list[int | str]]:
+        ret: dict[str, list[int | str]] = {}
         for node in self.graph.nodes:
             example_value = node.meta.get("example_value", None)
             if isinstance(example_value, torch._subclasses.FakeTensor):
@@ -2567,7 +2567,7 @@ class OutputGraph(OutputGraphCommon):
         used_symbols: set[sympy.Symbol] = set()
 
         def update_used_symbols(
-            used_symbols: set[sympy.Symbol], fake: Union[torch.SymInt, torch.Tensor]
+            used_symbols: set[sympy.Symbol], fake: torch.SymInt | torch.Tensor
         ) -> None:
             used_symbols |= free_symbols(fake)
 
@@ -2957,7 +2957,7 @@ class SubgraphTracer(fx.Tracer):
         # 2. when we track_produced_symints for intermediate results
         # bound_symbols always map the symbol to the proxy whose
         # tracer is the current tracer that's readily accessible in current tracer's graph.
-        self.bound_symbols: dict[sympy.Symbol, Union[torch.fx.Proxy, LazyProxy]] = {}
+        self.bound_symbols: dict[sympy.Symbol, torch.fx.Proxy | LazyProxy] = {}
 
         # Maps _DynamicScalar object ids to allocated SymInt nodes, for symbol reuse
         self.dynamic_scalar_nodes: dict[int, torch.SymInt] = {}
@@ -3416,7 +3416,7 @@ class SubgraphTracer(fx.Tracer):
     # See NOTE: [Nested SubgraphTracer and free_variable handling] for more details
     def lift_tracked_freevar_to_input(
         self, proxy: fx.Proxy
-    ) -> Union[LazyProxy, fx.Proxy]:
+    ) -> LazyProxy | fx.Proxy:
         # You're doing something wrong if we are the root SubgraphTracer because
         # Dynamo adds tensors to graph inputs before creating a proxy for them.
         assert self.parent is not None, (
@@ -3489,7 +3489,7 @@ class SubgraphTracer(fx.Tracer):
     # for symbols that're not going to be used, the LazyProxy will be turned into a proxy
     # when it's lifted as input to subgraph.
     def track_produced_symints(
-        self, example_value: Any, e_proxy: Union[LazyProxy, torch.fx.Proxy]
+        self, example_value: Any, e_proxy: LazyProxy | torch.fx.Proxy
     ) -> None:
         # When binding the symbols in an example_value, we bind the symbols
         # to the proxy's associated Tracer instead of current tracer.
@@ -3613,14 +3613,14 @@ class SubgraphTracer(fx.Tracer):
 
     # See Note [Auto lift basic free symbols when create_graph_input]
     def _lift_basic_symbols(
-        self, example_value: Union[torch.SymInt, torch.Tensor], src: Optional[Source]
+        self, example_value: torch.SymInt | torch.Tensor, src: Optional[Source]
     ) -> None:
         # The before arg is for inserting symints in the sizes/strides of a tensor
         # before the tensor. This ordering ensures that when we look at the tensor's
         # symbols, they're already lifted/tracked. E.g. this assumption is used
         # in insert_deferred_runtime_asserts.
         def _lift_symbols_in_symint(
-            s: Union[int, torch.SymInt],
+            s: int | torch.SymInt,
             source: Optional[Source],
             before: bool = False,
         ) -> None:

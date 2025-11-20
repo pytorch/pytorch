@@ -45,7 +45,7 @@ map_impl = MapImpl()
 
 def map(
     f: Callable[[pytree.PyTree, tuple[pytree.PyTree, ...]], pytree.PyTree],
-    xs: Union[pytree.PyTree, torch.Tensor],
+    xs: pytree.PyTree | torch.Tensor,
     *args: TypeVarTuple,
 ):
     r"""

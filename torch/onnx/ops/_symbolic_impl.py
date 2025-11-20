@@ -58,16 +58,7 @@ class EncodedAttrs:
         cls,
         attrs: dict[
             str,
-            Union[
-                int,
-                float,
-                str,
-                bool,
-                Sequence[int],
-                Sequence[float],
-                Sequence[str],
-                Sequence[bool],
-            ],
+            int | float | str | bool | Sequence[int] | Sequence[float] | Sequence[str] | Sequence[bool],
         ],
     ) -> "EncodedAttrs":
         encoded = cls(
@@ -129,26 +120,12 @@ class EncodedAttrs:
         self,
     ) -> dict[
         str,
-        Union[
-            int,
-            float,
-            str,
-            list[int],
-            list[float],
-            list[str],
-        ],
+        int | float | str | list[int] | list[float] | list[str],
     ]:
         """Convert the encoded attributes back to a dictionary for creating an ONNX node."""
         attrs: dict[
             str,
-            Union[
-                int,
-                float,
-                str,
-                list[int],
-                list[float],
-                list[str],
-            ],
+            int | float | str | list[int] | list[float] | list[str],
         ] = {}
         for i, key in enumerate(self.attr_keys):
             attr_type = self.attr_types[i]
@@ -185,7 +162,7 @@ def _symbolic(
     op_type: str,
     onnx_dtype: int,
     *,
-    shape: Sequence[Union[int, torch.SymInt]],
+    shape: Sequence[int | torch.SymInt],
     attr_keys: Sequence[str],
     attr_types: Sequence[str],
     attr_pos: Sequence[tuple[int, int]],
@@ -212,7 +189,7 @@ def _(
     op_type: str,
     onnx_dtype: int,
     *,
-    shape: Sequence[Union[int, torch.SymInt]],
+    shape: Sequence[int | torch.SymInt],
     attr_keys: Sequence[str],
     attr_types: Sequence[str],
     attr_pos: Sequence[tuple[int, int]],
@@ -251,7 +228,7 @@ def _symbolic_multi_out(
     op_type: str,
     onnx_dtypes: Sequence[int],
     *,
-    shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
+    shapes: Sequence[Sequence[int | torch.SymInt]],
     attr_keys: Sequence[str],
     attr_types: Sequence[str],
     attr_pos: Sequence[tuple[int, int]],
@@ -287,7 +264,7 @@ def _(
     op_type: str,
     onnx_dtypes: Sequence[int],
     *,
-    shapes: Sequence[Sequence[Union[int, torch.SymInt]]],
+    shapes: Sequence[Sequence[int | torch.SymInt]],
     attr_keys: Sequence[str],
     attr_types: Sequence[str],
     attr_pos: Sequence[tuple[int, int]],

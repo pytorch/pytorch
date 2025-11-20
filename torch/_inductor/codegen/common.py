@@ -161,7 +161,7 @@ class CodegenSymbol(ABC):
         pass
 
     @abstractmethod
-    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+    def get_example(self) -> torch.Tensor | sympy.Symbol:
         pass
 
 
@@ -229,7 +229,7 @@ class WorkspaceArg(CodegenSymbol):
     def get_dtype(self) -> torch.dtype:
         return self.dtype
 
-    def get_example(self) -> Union[torch.Tensor, sympy.Symbol]:
+    def get_example(self) -> torch.Tensor | sympy.Symbol:
         return self.get_layout().get_example()
 
     def get_layout(self) -> FixedLayout:
@@ -445,7 +445,7 @@ class BackendFeature(Enum):
 
 
 def get_backend_features(
-    device: Union[torch.device, str, None],
+    device: torch.device | str | None,
 ) -> OrderedSet[BackendFeature]:
     if device is None:
         return OrderedSet()
@@ -463,7 +463,7 @@ def get_backend_features(
 
 
 def has_backend_feature(
-    device: Union[torch.device, str, None], feature: BackendFeature
+    device: torch.device | str | None, feature: BackendFeature
 ) -> bool:
     """See also V.graph.has_feature"""
     assert isinstance(feature, BackendFeature)
@@ -741,7 +741,7 @@ def check_nan(buffer: IndentedBuffer, var: CSEVariableType) -> None:
 class DataTypePropagation:
     def __init__(self, body: LoopBody) -> None:
         self.body = body
-        self.graphs: dict[Union[Callable[..., Any], str], Any] = {
+        self.graphs: dict[Callable[..., Any] | str, Any] = {
             "root": body.root_block.graph
         }
         for k, v in body.subblocks.items():
@@ -974,7 +974,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         return f"({string})"
 
     @staticmethod
-    def constant(value: Union[bool, float, int], dtype: torch.dtype) -> OpVarT:
+    def constant(value: bool | float | int, dtype: torch.dtype) -> OpVarT:
         return repr(value)
 
     @staticmethod
@@ -1019,7 +1019,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     def indirect_indexing(
         self,
         var: OpVarT,
-        size: Union[sympy.Expr, int],
+        size: sympy.Expr | int,
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
@@ -1059,8 +1059,8 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[OpVarT, tuple[OpVarT, ...]],
-    ) -> Union[OpVarT, tuple[OpVarT, ...]]:
+        value: OpVarT | tuple[OpVarT, ...],
+    ) -> OpVarT | tuple[OpVarT, ...]:
         raise NotImplementedError(
             f"{type(self).__name__}: reduction should be handled by CSEProxy"
         )
@@ -1491,10 +1491,10 @@ class KernelArgs:
     @staticmethod
     def _lookup(
         prefix: str,
-        odict: Union[dict[_T, Union[str, RemovedArg]], dict[_T, str]],
+        odict: dict[_T, str | RemovedArg] | dict[_T, str],
         name: _T,
     ) -> str:
-        result: Union[str, RemovedArg] = odict.get(name, REMOVED)
+        result: str | RemovedArg = odict.get(name, REMOVED)
         if isinstance(result, RemovedArg):
             odict[name] = new_result = f"{prefix}{len(odict)}"
             return new_result
@@ -1502,8 +1502,8 @@ class KernelArgs:
 
     def __init__(self) -> None:
         self.input_buffers: dict[str, str] = {}
-        self.output_buffers: dict[str, Union[str, RemovedArg]] = {}
-        self.inplace_buffers: dict[str, Union[InplacedBuffer, RemovedArg]] = {}
+        self.output_buffers: dict[str, str | RemovedArg] = {}
+        self.inplace_buffers: dict[str, InplacedBuffer | RemovedArg] = {}
         self.sizevars: dict[sympy.Expr, str] = {}
         self.workspace_args: list[WorkspaceArg] = []
 
@@ -1879,7 +1879,7 @@ if TYPE_CHECKING:
     ReductionCacheKey = tuple[
         torch.dtype,
         ReductionType,
-        Union[CSEVariable, tuple[CSEVariable, ...]],
+        CSEVariable | tuple[CSEVariable, ...],
     ]
 
 
@@ -1958,7 +1958,7 @@ class CSE(Generic[CSEVariableType, AugmentedKeyT]):
     def generate(
         self,
         buffer: IndentedBuffer,
-        expr: Union[str, CSEVariable, OpsValue, IndentedBuffer, DeferredLineBase],
+        expr: str | CSEVariable | OpsValue | IndentedBuffer | DeferredLineBase,
         *,
         bounds: ValueRanges[Any] = ValueRanges.unknown(),
         write: bool = True,
@@ -2097,7 +2097,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.must_keep_buffers: OrderedSet[str] = OrderedSet()
         self.store_buffer_names: OrderedSet[str] = OrderedSet()
         self._load_mask: Optional[str] = None
-        self._load_other: Union[None, int, float] = None
+        self._load_other: None | int | float = None
         # OrderedSet in set_current_node
         self.current_node: Optional[SchedulerNode] = None
         self.node_to_bounds: Optional[dict[torch.fx.Node, ValueRanges[Any]]] = None
@@ -2184,8 +2184,8 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:
         raise NotImplementedError
 
     def partial_accumulate(
@@ -2240,10 +2240,10 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
 
     def indirect_assert(
         self,
-        var: Union[CSEVariable, str],
+        var: CSEVariable | str,
         lower: Optional[str],
         upper: Optional[str],
-        mask: Optional[Union[CSEVariable, str]] = None,
+        mask: Optional[CSEVariable | str] = None,
     ) -> str:
         if isinstance(var, CSEVariable):
             var = str(var)
@@ -2343,7 +2343,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
         self.removed_buffers.add(name)
 
     def rename_indexing(
-        self, index: Union[list[sympy.Expr], tuple[sympy.Expr, ...], sympy.Expr]
+        self, index: list[sympy.Expr] | tuple[sympy.Expr, ...] | sympy.Expr
     ) -> sympy.Expr:
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
@@ -2465,7 +2465,7 @@ class KernelTemplate:
 
     @staticmethod
     def _fake_get_dtype(
-        fake_outs: Union[list[Buffer], Buffer],
+        fake_outs: list[Buffer] | Buffer,
     ) -> Callable[[str], torch.dtype]:
         _get_dtype_real = V.graph.get_dtype
         if isinstance(fake_outs, (list, tuple)):
@@ -2497,7 +2497,7 @@ class KernelTemplate:
         return self.name
 
     @property
-    def src_hash(self) -> Union[str, None]:
+    def src_hash(self) -> str | None:
         """
         source hash for a Template.
 
@@ -2598,7 +2598,7 @@ class CSEProxy(DefaultHandler):
 
         output_idx = 0
 
-        def do_cse(v: Union[str, CSEVariable]) -> CSEVariable:
+        def do_cse(v: str | CSEVariable) -> CSEVariable:
             # we tree_map over the output, so we need to fetch corresponding dtype
             nonlocal output_idx
             var_dtype: Optional[torch.dtype] = (
@@ -2701,7 +2701,7 @@ class CSEProxy(DefaultHandler):
     def indirect_indexing(
         self,
         var: CSEVariable,
-        size: Union[sympy.Expr, int],
+        size: sympy.Expr | int,
         check: bool = True,
         wrap_neg: bool = True,
     ) -> sympy.Symbol:
@@ -2812,8 +2812,8 @@ class CSEProxy(DefaultHandler):
         dtype: torch.dtype,
         src_dtype: torch.dtype,
         reduction_type: ReductionType,
-        value: Union[CSEVariable, tuple[CSEVariable, ...]],
-    ) -> Union[CSEVariable, tuple[CSEVariable, ...]]:
+        value: CSEVariable | tuple[CSEVariable, ...],
+    ) -> CSEVariable | tuple[CSEVariable, ...]:
         self.kernel.num_reduction += 1
         return self.kernel.reduction(dtype, src_dtype, reduction_type, value)
 

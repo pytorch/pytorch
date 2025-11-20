@@ -254,7 +254,7 @@ def create_rot_n(n: int) -> list[Instruction]:
 
 
 def add_push_null(
-    inst_or_insts: Union[Instruction, list[Instruction]],
+    inst_or_insts: Instruction | list[Instruction],
 ) -> list[Instruction]:
     """
     Appends or prepends a PUSH_NULL instruction to `inst_or_insts`,
@@ -313,7 +313,7 @@ def add_push_null(
 
 
 def add_push_null_call_function_ex(
-    inst_or_insts: Union[Instruction, list[Instruction]],
+    inst_or_insts: Instruction | list[Instruction],
 ) -> list[Instruction]:
     """Like add_push_null, but the low bit of LOAD_ATTR/LOAD_SUPER_ATTR
     is not set, due to an expected CALL_FUNCTION_EX instruction.

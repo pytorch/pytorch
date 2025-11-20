@@ -18,7 +18,7 @@ def get_env(name: str, default: str = "") -> str:
 
 def env_path_optional(
     name: str,
-    default: Optional[Union[str, Path]] = None,
+    default: Optional[str | Path] = None,
     resolve: bool = True,
 ) -> Optional[Path]:
     """Get environment variable as optional Path."""
@@ -32,7 +32,7 @@ def env_path_optional(
 
 def env_path(
     name: str,
-    default: Optional[Union[str, Path]] = None,
+    default: Optional[str | Path] = None,
     resolve: bool = True,
 ) -> Path:
     """Get environment variable as Path, raise if missing."""
@@ -61,7 +61,7 @@ def env_bool_field(
 
 def env_path_field(
     name: str,
-    default: Union[str, Path] = "",
+    default: str | Path = "",
     *,
     resolve: bool = True,
 ) -> Path:

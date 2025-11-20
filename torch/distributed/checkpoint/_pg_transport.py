@@ -95,7 +95,7 @@ class _StateDictMeta:
     treespec: TreeSpec
     paths: list[KeyPath]
     non_tensor_leaves: list[
-        Union[object, _TensorMeta, _DTensorMeta, _ShardedTensorMeta]
+        object | _TensorMeta | _DTensorMeta | _ShardedTensorMeta
     ]
 
 
@@ -129,7 +129,7 @@ def _prepare_state_dict(
 
     paths: list[KeyPath] = []
     non_tensor_leaves: list[
-        Union[object, _TensorMeta, _DTensorMeta, _ShardedTensorMeta]
+        object | _TensorMeta | _DTensorMeta | _ShardedTensorMeta
     ] = []
     tensors: list[torch.Tensor] = []
     for key_path, v in leaves:

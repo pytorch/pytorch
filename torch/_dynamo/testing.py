@@ -151,11 +151,11 @@ def reduce_to_scalar_loss(out: torch.Tensor) -> torch.Tensor: ...
 
 @overload
 def reduce_to_scalar_loss(
-    out: Union[list[Any], tuple[Any, ...], dict[Any, Any]],
+    out: list[Any] | tuple[Any, ...] | dict[Any, Any],
 ) -> float: ...
 
 
-def reduce_to_scalar_loss(out: Any) -> Union[torch.Tensor, float]:
+def reduce_to_scalar_loss(out: Any) -> torch.Tensor | float:
     """Reduce the output of a model to get scalar loss"""
     if isinstance(out, torch.Tensor):
         # Mean does not work on integer tensors
@@ -233,7 +233,7 @@ def debug_insert_nops(
 
 class CompileCounter:
     def __init__(self) -> None:
-        self.frame_count: Union[int, CompileCounterInt] = 0
+        self.frame_count: int | CompileCounterInt = 0
         self.clear()
 
     def __call__(
@@ -255,7 +255,7 @@ class CompileCounter:
 
 class CompileCounterWithBackend:
     def __init__(self, backend: str) -> None:
-        self.frame_count: Union[int, CompileCounterInt] = 0
+        self.frame_count: int | CompileCounterInt = 0
         self.backend = backend
         self.graphs: list[torch.fx.GraphModule] = []
         self.clear()
@@ -423,7 +423,7 @@ def rand_strided(
     size: Sequence[int],
     stride: Sequence[int],
     dtype: torch.dtype = torch.float32,
-    device: Union[str, torch.device] = "cpu",
+    device: str | torch.device = "cpu",
     extra_size: int = 0,
 ) -> torch.Tensor:
     needed_size = extra_size

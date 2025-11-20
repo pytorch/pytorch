@@ -85,7 +85,7 @@ class GitCommit:
         return item in self.body or item in self.title
 
 
-def parse_fuller_format(lines: Union[str, list[str]]) -> GitCommit:
+def parse_fuller_format(lines: str | list[str]) -> GitCommit:
     """
     Expect commit message generated using `--format=fuller --date=unix` format, i.e.:
         commit <sha1>
@@ -179,7 +179,7 @@ class GitRepo:
     def get_merge_base(self, from_ref: str, to_ref: str) -> str:
         return self._run_git("merge-base", from_ref, to_ref).strip()
 
-    def patch_id(self, ref: Union[str, list[str]]) -> list[tuple[str, str]]:
+    def patch_id(self, ref: str | list[str]) -> list[tuple[str, str]]:
         is_list = isinstance(ref, list)
         if is_list:
             if len(ref) == 0:

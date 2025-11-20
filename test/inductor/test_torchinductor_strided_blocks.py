@@ -91,7 +91,7 @@ class BlockDescriptorTestBase(InductorTestCase):
     block_descriptor_constructor_str = "tl.make_block_ptr"
 
     def _discontiguous_tensor(
-        self, view_size: tuple[int, ...], device: Union[torch.device, str]
+        self, view_size: tuple[int, ...], device: torch.device | str
     ) -> torch.Tensor:
         """
         Create a padded tensor of the given size.

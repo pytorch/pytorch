@@ -123,7 +123,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
         logsumexp: torch.Tensor,
         grad_out: torch.Tensor,
         grad_logsumexp: torch.Tensor,
-        fw_graph: Union[Callable, GraphModule],
+        fw_graph: Callable | GraphModule,
         joint_graph: GraphModule,
         block_mask: tuple,
         scale: float,
@@ -555,8 +555,8 @@ def create_fw_bw_graph(
         with disable_proxy_modes_tracing():
 
             def _from_fun(
-                t: Union[Tensor, torch.SymInt, int],
-            ) -> Union[Tensor, torch.SymInt, int]:
+                t: Tensor | torch.SymInt | int,
+            ) -> Tensor | torch.SymInt | int:
                 if isinstance(t, torch.Tensor):
                     return torch.empty_strided(
                         t.size(),
@@ -857,8 +857,8 @@ def sdpa_dense_backward(
     actual_grad_value = _permute_strides(actual_grad_value, value.stride())
 
     def _maybe_new_buffer(
-        buffer: Union[torch.Tensor, torch.SymInt, int],
-    ) -> Optional[Union[torch.Tensor, torch.SymInt, int]]:
+        buffer: torch.Tensor | torch.SymInt | int,
+    ) -> Optional[torch.Tensor | torch.SymInt | int]:
         if isinstance(buffer, torch.Tensor):
             return (
                 torch.empty_like(buffer, memory_format=torch.contiguous_format)
@@ -1002,7 +1002,7 @@ def trace_flex_attention_backward(
     logsumexp: torch.Tensor,
     grad_out: torch.Tensor,
     grad_logsumexp: torch.Tensor,
-    fw_graph: Union[Callable, GraphModule],
+    fw_graph: Callable | GraphModule,
     joint_graph: GraphModule,
     block_mask: tuple,
     scale: float,
@@ -1104,7 +1104,7 @@ def flex_attention_backward_proxy_torch_dispatch_mode(
     logsumexp: torch.Tensor,
     grad_out: torch.Tensor,
     grad_logsumexp: torch.Tensor,
-    fw_graph: Union[Callable, GraphModule],
+    fw_graph: Callable | GraphModule,
     joint_graph: GraphModule,
     block_mask: tuple,
     scale: float,
@@ -1147,7 +1147,7 @@ def flex_attention_backward_functionalize(
     logsumexp: torch.Tensor,
     grad_out: torch.Tensor,
     grad_logsumexp: torch.Tensor,
-    fw_graph: Union[Callable, GraphModule],
+    fw_graph: Callable | GraphModule,
     joint_graph: GraphModule,
     block_mask: tuple,
     scale: float,
@@ -1243,7 +1243,7 @@ def flex_attention_backward_fake_tensor_mode(
     logsumexp: torch.Tensor,
     grad_out: torch.Tensor,
     grad_logsumexp: torch.Tensor,
-    fw_graph: Union[Callable, GraphModule],
+    fw_graph: Callable | GraphModule,
     joint_graph: GraphModule,
     block_mask: tuple,
     scale: float,

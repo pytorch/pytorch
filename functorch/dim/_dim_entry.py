@@ -15,9 +15,9 @@ import torch  # noqa: TC002
 # follow this convention even though it shouldn't be necessary now
 class DimEntry:
     # The dimension this is from the rhs, or a FCD
-    data: Union[Dim, int]
+    data: Dim | int
 
-    def __init__(self, data: Union[Dim, int, None] = None) -> None:
+    def __init__(self, data: Dim | int | None = None) -> None:
         from . import Dim
 
         if type(data) is int:

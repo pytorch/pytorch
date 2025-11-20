@@ -15,7 +15,7 @@ from ._debug import map_debug_info
 logger = logging.getLogger(__name__)
 
 
-def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Union[Node, None]:
+def _get_grad_fn_or_grad_acc(t: torch.Tensor) -> Node | None:
     """
     Get the grad function or grad accumulator for a tensor.
 

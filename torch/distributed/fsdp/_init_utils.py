@@ -61,7 +61,7 @@ FSDP_SYNCED = "_fsdp_synced"
 # Specification of process groups for hybrid sharding strategies.
 HybridShardProcessGroupType = tuple[dist.ProcessGroup, dist.ProcessGroup]
 # Overall specification of process group.
-ProcessGroupType = Optional[Union[dist.ProcessGroup, HybridShardProcessGroupType]]
+ProcessGroupType = Optional[dist.ProcessGroup | HybridShardProcessGroupType]
 
 
 # TODO (awgu): Refactor this later
@@ -274,9 +274,7 @@ def _init_ignored_module_states(
     state: _FSDPState,
     module: nn.Module,
     ignored_modules: Optional[Iterable[torch.nn.Module]],
-    ignored_states: Union[
-        Optional[Iterable[torch.nn.Parameter]], Optional[Iterable[torch.nn.Module]]
-    ] = None,
+    ignored_states: Optional[Iterable[torch.nn.Parameter]] | Optional[Iterable[torch.nn.Module]] = None,
 ) -> _FSDPState:
     if ignored_modules is not None and ignored_states is not None:
         raise ValueError(
@@ -350,7 +348,7 @@ def _init_device_handle(
     state: _FSDPState,
     module: nn.Module,
     ignored_params: set[nn.Parameter],
-    device_id: Optional[Union[int, torch.device]],
+    device_id: Optional[int | torch.device],
 ) -> _FSDPState:
     """
     Determine device handle used for initializing FSDP.
@@ -562,7 +560,7 @@ def _verify_managed_params(module: nn.Module, params: list[nn.Parameter]) -> Non
 def _init_param_handle_from_module(
     state: _FSDPState,
     fully_sharded_module: nn.Module,
-    device_id: Optional[Union[int, torch.device]],
+    device_id: Optional[int | torch.device],
     param_init_fn: Optional[Callable[[nn.Module], None]],
     sync_module_states: bool,
 ) -> _FSDPState:
@@ -799,7 +797,7 @@ def _get_buffer_names(root_module: nn.Module) -> set[str]:
 def _check_single_device_module(
     module: nn.Module,
     ignored_params: set[nn.Parameter],
-    device_id: Optional[Union[int, torch.device]],
+    device_id: Optional[int | torch.device],
 ) -> None:
     """
     Raise an error if ``module`` has original parameters on multiple devices, ignoring the parameters in ``ignored_params``.
@@ -827,7 +825,7 @@ def _check_single_device_module(
 
 
 def _get_device_from_device_id(
-    device_id: Optional[Union[int, torch.device]],
+    device_id: Optional[int | torch.device],
     rank: int,
     device_handle: _FSDPDeviceHandle,
 ) -> Optional[torch.device]:

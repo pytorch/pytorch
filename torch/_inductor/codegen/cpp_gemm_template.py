@@ -507,7 +507,7 @@ def gen_2d_view_of_epilogue_buf(
     reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
     default_reindexers: list[Optional[Callable[[list[Any]], list[Any]]]],
 ) -> tuple[
-    Union[ir.Buffer, ir.ReinterpretView],
+    ir.Buffer | ir.ReinterpretView,
     list[Optional[Callable[[list[Any]], list[Any]]]],
 ]:
     """
@@ -518,7 +518,7 @@ def gen_2d_view_of_epilogue_buf(
     In this function, we return a 2D buffer (`Y_2d`) according to GEMM output (reinterpreted from `Y` if needed) and
     build a reindexer that converts the indexing of `Y` into `Y_2d`.
     """
-    Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
+    Y_2d: ir.Buffer | ir.ReinterpretView = Y
     if (
         Y.get_size() == template_buffer.get_size()
         and Y.get_stride() == template_buffer.get_stride()
@@ -1508,7 +1508,7 @@ class CppGemmTemplate(CppTemplate):
                     )
 
         assert isinstance(Y, (ir.Buffer, ir.ReinterpretView))
-        Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
+        Y_2d: ir.Buffer | ir.ReinterpretView = Y
 
         if epilogue_nodes:
             if not template_buffer_has_other_users:

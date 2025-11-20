@@ -165,7 +165,7 @@ def _aoti_compile_and_package_inner(
     *,
     load_and_run: bool = False,
     check_accuracy: Optional[str] = None,
-    package_path: Optional[Union[str, io.BytesIO]] = None,
+    package_path: Optional[str | io.BytesIO] = None,
     inductor_configs: Optional[dict[str, Any]] = None,
 ):
     """
@@ -276,7 +276,7 @@ def aot_compile(
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,
-) -> Union[str, list[Union[str, Weights]], torch.fx.GraphModule]:
+) -> str | list[str | Weights] | torch.fx.GraphModule:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 

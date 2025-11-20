@@ -52,7 +52,7 @@ from torch.futures import Future
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
-BuiltinUnionType: Union[type, tuple[type, ...]] = types.UnionType
+BuiltinUnionType: type | tuple[type, ...] = types.UnionType
 
 LockType: type
 try:

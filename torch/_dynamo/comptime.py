@@ -67,7 +67,7 @@ class ComptimeVar:
     def __init__(self, v: VariableTracker) -> None:
         self.__variable = v
 
-    def as_proxy(self) -> Union[VariableTracker, Sequence[VariableTracker]]:
+    def as_proxy(self) -> VariableTracker | Sequence[VariableTracker]:
         """
         Returns an fx.Proxy (or tuple/list of fx.Proxy) representing
         this variable in the FX graph we are assembling to pass
@@ -87,7 +87,7 @@ class ComptimeVar:
         """
         return self.__variable.is_proxy()
 
-    def as_fake(self) -> Union[FakeTensor, torch.SymInt]:
+    def as_fake(self) -> FakeTensor | torch.SymInt:
         """
         Returns a "fake" value (either a FakeTensor or a SymInt)
         representing the variable in question.  This only works
@@ -99,7 +99,7 @@ class ComptimeVar:
         """
         return self.__variable.as_proxy().node.meta["example_value"]
 
-    def size(self, dim: Optional[int] = None) -> Union[int, torch.SymInt]:
+    def size(self, dim: Optional[int] = None) -> int | torch.SymInt:
         """
         Returns the size of the tensor (if dim is None) or the size
         at the dimension dim.  The returned size may be a SymInt.
@@ -328,7 +328,7 @@ class ComptimeContext:
         """
         return self.__tx
 
-    def sleep(self, sec: Union[int, float]) -> None:
+    def sleep(self, sec: int | float) -> None:
         time.sleep(sec)
 
 
@@ -437,7 +437,7 @@ class _Comptime:
         comptime(inner)
 
     @staticmethod
-    def sleep(sec: Union[int, float]) -> None:
+    def sleep(sec: int | float) -> None:
         comptime(lambda ctx: ctx.sleep(ctx.get_local("sec").as_python_constant()))
 
 

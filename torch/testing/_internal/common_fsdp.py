@@ -333,7 +333,7 @@ class TransformerWithSharedParams(FSDPTestModel):
         fsdp_kwargs: Optional[dict[str, Any]] = None,
         deterministic: bool = False,
         add_bn: bool = True,
-    ) -> Union[nn.Module, FSDP]:
+    ) -> nn.Module | FSDP:
         """
         Initializes a :class:`TransformerWithSharedParams` instance.
 
@@ -973,7 +973,7 @@ class DoubleLinear(nn.Module):
 
     def forward(
         self, x: torch.Tensor
-    ) -> Union[tuple[torch.Tensor, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor] | torch.Tensor:
         if self.use_second_linear:
             return self.relu(self.lin1(x)), self.relu(self.lin2(x))
         return self.relu(self.lin1(x))

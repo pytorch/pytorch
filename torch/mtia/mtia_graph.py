@@ -66,7 +66,7 @@ class graph:
         if self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.mtia.current_stream()
 
-        self.pool: Union[tuple[()], tuple[_POOL_HANDLE]] = (
+        self.pool: tuple[()] | tuple[_POOL_HANDLE] = (
             () if pool is None else (pool,)
         )
         self.capture_stream = (

@@ -309,7 +309,7 @@ class AutogradCompilerInstance:
         self,
         inputs: list[torch.Tensor],
         sizes: list[int],
-        scalars: list[Union[int, float]],
+        scalars: list[int | float],
         origins: list[list[tuple[int, str]]],
         accumulate_grad: bool,
         check_nans: bool,

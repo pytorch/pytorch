@@ -25,7 +25,7 @@ from torch.distributed.fsdp.wrap import (
 
 def _auto_wrap(
     root_module: nn.Module,
-    policy: Union[Callable, _Policy],
+    policy: Callable | _Policy,
     ignored_modules: set[nn.Module],
     ignored_params: set[nn.Parameter],
     root_kwargs: dict[str, Any],

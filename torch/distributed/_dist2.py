@@ -127,7 +127,7 @@ register_backend("nccl", _nccl_factory)
 def new_group(
     backend: str,
     timeout: timedelta,
-    device: Union[str, torch.device],
+    device: str | torch.device,
     **kwargs: object,
 ) -> ProcessGroup:
     """

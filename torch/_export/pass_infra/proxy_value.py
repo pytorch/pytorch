@@ -10,7 +10,7 @@ _T = TypeVar("_T")
 
 class ProxyValue(Generic[_T]):
     # pyre-ignore
-    def __init__(self, data: Iterable[_T], proxy: Union[torch.fx.Proxy, torch.fx.Node]):
+    def __init__(self, data: Iterable[_T], proxy: torch.fx.Proxy | torch.fx.Node):
         # pyre-ignore
         self.data = data
         self.proxy_or_node = proxy

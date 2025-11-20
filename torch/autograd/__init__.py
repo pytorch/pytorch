@@ -58,7 +58,7 @@ _ShapeorNestedShape = Union[_size, Sequence[_size], torch.Tensor]
 
 
 def _calculate_shape(
-    output: Union[torch.Tensor, graph.GradientEdge],
+    output: torch.Tensor | graph.GradientEdge,
     grad: torch.Tensor,
     is_grads_batched: bool,
 ) -> tuple[_ShapeorNestedShape, _ShapeorNestedShape]:
@@ -87,14 +87,14 @@ def _calculate_shape(
 
 
 def _make_grads(
-    outputs: Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]],
+    outputs: Sequence[torch.Tensor] | Sequence[graph.GradientEdge],
     grads: Sequence[_OptionalTensor],
     is_grads_batched: bool,
 ) -> tuple[_OptionalTensor, ...]:
     new_grads: list[_OptionalTensor] = []
 
     for out, grad in zip(outputs, grads):
-        out = cast(Union[torch.Tensor, graph.GradientEdge], out)
+        out = cast(torch.Tensor | graph.GradientEdge, out)
         out_size = None
         out_device = None
 
@@ -142,7 +142,7 @@ def _make_grads(
                 shape_matches = expect_true(sym_eq(out_size, first_grad.size()))
 
             if not shape_matches:
-                out = cast(Union[torch.Tensor, graph.GradientEdge], out)  # type: ignore[redundant-cast]
+                out = cast(torch.Tensor | graph.GradientEdge, out)  # type: ignore[redundant-cast]
                 out_shape, grad_shape = _calculate_shape(
                     out, first_grad, is_grads_batched
                 )
@@ -335,7 +335,7 @@ def backward(
                 "use `grad_tensors`."
             )
 
-    inputs_tuple: tuple[Union[torch.Tensor, graph.GradientEdge], ...]
+    inputs_tuple: tuple[torch.Tensor | graph.GradientEdge, ...]
     if inputs is None:
         inputs_tuple = ()
     elif isinstance(inputs, (torch.Tensor, graph.GradientEdge)):
@@ -347,7 +347,7 @@ def backward(
 
     if is_tensor_like(tensors) or isinstance(tensors, graph.GradientEdge):
         tensors = cast(
-            Union[tuple[torch.Tensor], tuple[graph.GradientEdge]], (tensors,)
+            tuple[torch.Tensor] | tuple[graph.GradientEdge], (tensors,)
         )
     else:
         # pyrefly: ignore [bad-argument-type]
@@ -447,7 +447,7 @@ def grad(
         allow_unused = materialize_grads
     if is_tensor_like(outputs) or isinstance(outputs, graph.GradientEdge):
         outputs = cast(
-            Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]], (outputs,)
+            Sequence[torch.Tensor] | Sequence[graph.GradientEdge], (outputs,)
         )
     else:
         # pyrefly: ignore [bad-argument-type]

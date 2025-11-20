@@ -410,7 +410,7 @@ def _broadcast_shapes(*_shapes):
             )
 
     # Computes common shape
-    common_shape: list[Union[int, torch.SymInt]] = [
+    common_shape: list[int | torch.SymInt] = [
         1,
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
@@ -1143,8 +1143,8 @@ def _make_elementwise_binary_reference(
             type_promotion_kind=type_promotion_kind,
         )
         def _ref(
-            a: Union[Tensor, NumberType],
-            b: Union[Tensor, NumberType],
+            a: Tensor | NumberType,
+            b: Tensor | NumberType,
         ) -> Tensor:
             torch._check_value(
                 supports_lhs_python_scalar or not isinstance(a, Number),
@@ -1187,8 +1187,8 @@ def _make_elementwise_binary_reference(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def add(
-    a: Union[TensorLikeType, NumberType],
-    b: Union[TensorLikeType, NumberType],
+    a: TensorLikeType | NumberType,
+    b: TensorLikeType | NumberType,
     *,
     alpha: Optional[NumberType] = None,
 ):
@@ -1264,7 +1264,7 @@ def bitwise_xor(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     supports_lhs_python_scalar=False,
 )
 def copysign(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+    a: TensorLikeType | NumberType, b: TensorLikeType | NumberType
 ):
     if isinstance(b, Number) and isinstance(a, Tensor):
         # pyrefly: ignore [bad-argument-type]
@@ -1282,8 +1282,8 @@ def copysign(
 @register_decomposition(aten.div)
 @out_wrapper()
 def div(
-    a: Union[TensorLikeType, NumberType],
-    b: Union[TensorLikeType, NumberType],
+    a: TensorLikeType | NumberType,
+    b: TensorLikeType | NumberType,
     *,
     rounding_mode: Optional[str] = None,
 ):
@@ -1313,8 +1313,8 @@ def eq(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.BOOL_TO_LONG,
 )
 def pow(
-    a: Union[TensorLikeType, NumberType],
-    b: Union[TensorLikeType, NumberType],
+    a: TensorLikeType | NumberType,
+    b: TensorLikeType | NumberType,
 ) -> TensorLikeType:
     assert isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)
 
@@ -1340,8 +1340,8 @@ def pow(
 # CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 def float_power(
-    a: Union[TensorLikeType, NumberType],
-    b: Union[TensorLikeType, NumberType],
+    a: TensorLikeType | NumberType,
+    b: TensorLikeType | NumberType,
 ) -> Tensor:
     if isinstance(a, Number) and isinstance(b, Number):
         raise ValueError(
@@ -1402,7 +1402,7 @@ def float_power(
     should_register_decomposition=False,
 )
 def floor_divide(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+    a: TensorLikeType | NumberType, b: TensorLikeType | NumberType
 ):
     # Wrap scalars because some references only accept tensor arguments.
     if isinstance(a, Number) and isinstance(b, Number):
@@ -1809,8 +1809,8 @@ def remainder(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.rsub)
 @out_wrapper()
 def rsub(
-    a: Union[TensorLikeType, NumberType],
-    b: Union[TensorLikeType, NumberType],
+    a: TensorLikeType | NumberType,
+    b: TensorLikeType | NumberType,
     alpha: NumberType = 1,
 ):
     if isinstance(a, Number):
@@ -1829,8 +1829,8 @@ def rsub(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def sub(
-    a: Union[TensorLikeType, NumberType],
-    b: Union[TensorLikeType, NumberType],
+    a: TensorLikeType | NumberType,
+    b: TensorLikeType | NumberType,
     *,
     alpha: NumberType = 1,
 ):
@@ -1883,7 +1883,7 @@ def true_divide(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
-def xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]):
+def xlogy(a: TensorLikeType | NumberType, b: TensorLikeType | NumberType):
     torch._check(
         isinstance(a, TensorLike) or isinstance(b, TensorLike),
         lambda: 'Expected either argument a or b to be a Tensor"',
@@ -1910,7 +1910,7 @@ def xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberT
     supports_two_python_scalars=True,
 )
 def trunc_divide(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+    a: TensorLikeType | NumberType, b: TensorLikeType | NumberType
 ):
     dtype = utils.get_dtype(a)
     if utils.is_integer_dtype(dtype):
@@ -2401,7 +2401,7 @@ def any(
 @register_decomposition([aten.sum.dim_IntList, aten.sum.IntList_out])
 def sum(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[list[int]]] = None,
+    dim: Optional[int] | Optional[list[int]] = None,
     keepdim: bool = False,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -2453,7 +2453,7 @@ def sum_to_size(
 @register_decomposition(aten.prod)
 def prod(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[list[int]]] = None,
+    dim: Optional[int] | Optional[list[int]] = None,
     keepdim: bool = False,
     *,
     dtype=None,
@@ -2571,7 +2571,7 @@ def var(
 @out_wrapper()
 def std(
     a: TensorLikeType,
-    dim: Union[Optional[int], Optional[list[int]]] = None,
+    dim: Optional[int] | Optional[list[int]] = None,
     unbiased: Optional[bool] = None,
     keepdim: bool = False,
     *,
@@ -2744,8 +2744,8 @@ def addr(
 
 # CompositeImplicitAutograd - don't register decomp
 def atleast_1d(
-    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
-) -> Union[TensorLikeType, tuple[TensorLikeType, ...]]:
+    arg: TensorLikeType | Sequence[TensorLikeType], *args: TensorLikeType
+) -> TensorLikeType | tuple[TensorLikeType, ...]:
     """Reference implementation of :func:`torch.atleast_1d`."""
     if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
@@ -2768,8 +2768,8 @@ def _unsqueeze_atleast(
 
 # CompositeImplicitAutograd - don't register decomp
 def atleast_2d(
-    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
-) -> Union[TensorLikeType, tuple[TensorLikeType, ...]]:
+    arg: TensorLikeType | Sequence[TensorLikeType], *args: TensorLikeType
+) -> TensorLikeType | tuple[TensorLikeType, ...]:
     """Reference implementation of :func:`torch.atleast_2d`."""
     if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
@@ -2783,8 +2783,8 @@ def atleast_2d(
 
 # CompositeImplicitAutograd - don't register decomp
 def atleast_3d(
-    arg: Union[TensorLikeType, Sequence[TensorLikeType]], *args: TensorLikeType
-) -> Union[TensorLikeType, tuple[TensorLikeType, ...]]:
+    arg: TensorLikeType | Sequence[TensorLikeType], *args: TensorLikeType
+) -> TensorLikeType | tuple[TensorLikeType, ...]:
     """Reference implementation of :func:`torch.atleast_3d`."""
     if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
@@ -3231,7 +3231,7 @@ def flipud(a: TensorLikeType) -> TensorLikeType:
 
 # CompositeImplicitAutograd - don't register decomp
 def narrow(
-    a: TensorLikeType, dim: int, start: Union[int, TensorLikeType], length: int
+    a: TensorLikeType, dim: int, start: int | TensorLikeType, length: int
 ) -> TensorLikeType:
     # Supports Tensor overload that was added for XLA:
     # https://github.com/pytorch/pytorch/issues/31558
@@ -4216,14 +4216,14 @@ def index_copy_(x: TensorLike, dim: int, index: TensorLike, tensor: TensorLike):
 @register_decomposition(aten.index_fill)
 @out_wrapper()
 def index_fill(
-    x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
+    x: TensorLike, dim: int, index: TensorLike, value: NumberType | TensorLike
 ):
     return _index_fill(x, dim, index, value, inplace=False)
 
 
 @register_decomposition(aten.index_fill_)
 def index_fill_(
-    x: TensorLike, dim: int, index: TensorLike, value: Union[NumberType, TensorLike]
+    x: TensorLike, dim: int, index: TensorLike, value: NumberType | TensorLike
 ):
     return _index_fill(x, dim, index, value, inplace=True)
 
@@ -4232,7 +4232,7 @@ def _index_fill(
     x: TensorLike,
     dim: int,
     index: TensorLike,
-    value: Union[NumberType, TensorLike],
+    value: NumberType | TensorLike,
     *,
     inplace: bool,
 ):
@@ -4379,7 +4379,7 @@ def split_with_sizes(
 # CompositeImplicitAutograd - don't register decomp
 def tensor_split(
     a: TensorLikeType,
-    indices_or_sections: Union[Tensor, DimsType],
+    indices_or_sections: Tensor | DimsType,
     dim: int = 0,
 ) -> tuple[TensorLikeType, ...]:
     _dim = utils.canonicalize_dim(a.ndim, dim)
@@ -5320,7 +5320,7 @@ def arange(
     type_promoting_args=("start", "end", "weight"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
-def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
+def lerp(start: Tensor, end: Tensor, weight: Tensor | NumberType):
     inputs = [start, end]
     if isinstance(weight, Number):
         weight = start.new_full((), weight)  # type: ignore[arg-type]
@@ -5348,8 +5348,8 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
 @register_decomposition(aten.linspace)
 @out_wrapper()
 def linspace(
-    start: Union[NumberType, TensorLikeType],
-    end: Union[NumberType, TensorLikeType],
+    start: NumberType | TensorLikeType,
+    end: NumberType | TensorLikeType,
     steps: NumberType,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -5438,8 +5438,8 @@ def linspace(
 @register_decomposition(aten.logspace)
 @out_wrapper()
 def logspace(
-    start: Union[NumberType, TensorLikeType],
-    end: Union[NumberType, TensorLikeType],
+    start: NumberType | TensorLikeType,
+    end: NumberType | TensorLikeType,
     steps: NumberType,
     base: NumberType = 10,
     *,
@@ -5509,7 +5509,7 @@ def meshgrid(*tensors: TensorLikeType, indexing: str):
 
 @register_decomposition(aten.meshgrid)  # type: ignore[misc]
 def meshgrid(
-    *tensors: Union[TensorLikeType, list[TensorLikeType], tuple[TensorLikeType]],
+    *tensors: TensorLikeType | list[TensorLikeType] | tuple[TensorLikeType],
     indexing: str,
 ) -> list[TensorLikeType]:
     # This ref simultaneously handles two overloads (see stubs above)
@@ -5576,8 +5576,8 @@ def meshgrid(
 # CompositeImplicitAutograd - don't register decomp
 def movedim(
     input: TensorLikeType,
-    source: Union[int, DimsSequenceType],
-    destination: Union[int, DimsSequenceType],
+    source: int | DimsSequenceType,
+    destination: int | DimsSequenceType,
 ) -> TensorLikeType:
     """
     Reference implementation of torch.movedim
@@ -5640,7 +5640,7 @@ def movedim(
 @register_decomposition(aten.empty_strided)
 @out_wrapper()
 def empty_strided(
-    shape: Union[ShapeType, tuple[ShapeType]],
+    shape: ShapeType | tuple[ShapeType],
     strides: StrideType,
     *,
     dtype: Optional[torch.dtype] = None,
@@ -5867,8 +5867,8 @@ def scalar_tensor(
 
 def _uniform_helper(
     shape: ShapeType,
-    low: Union[bool, int, float] = 0.0,
-    high: Union[bool, int, float] = 1.0,
+    low: bool | int | float = 0.0,
+    high: bool | int | float = 1.0,
     *,
     dtype: torch.dtype,
     device: DeviceLikeType,
@@ -5983,7 +5983,7 @@ def equal(a: TensorLikeType, b: TensorLikeType) -> bool:
 @out_wrapper(exact_dtype=True)
 def norm(
     input: TensorLikeType,
-    p: Optional[Union[float, str]] = "fro",
+    p: Optional[float | str] = "fro",
     dim: Optional[DimsType] = None,
     keepdim: bool = False,
     *,
@@ -6018,8 +6018,8 @@ def trace(self: TensorLikeType) -> TensorLikeType:
 
 def _make_r_binary_op(base_op):
     def rop(
-        a: Union[TensorLikeType, NumberType],
-        b: Union[TensorLikeType, NumberType],
+        a: TensorLikeType | NumberType,
+        b: TensorLikeType | NumberType,
     ) -> TensorLikeType:
         return base_op(b, a)
 
@@ -6743,7 +6743,7 @@ def _infer_scalar_type(obj):
 # Analogous to recursive_store
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
 def _recursive_build(
-    scalarType: torch.dtype, obj: Union[TensorOrNumberLikeType, TensorSequenceType]
+    scalarType: torch.dtype, obj: TensorOrNumberLikeType | TensorSequenceType
 ):
     if isinstance(obj, Tensor) and obj.numel() == 1:
         return obj.detach().to(dtype=scalarType, device="cpu", copy=True).view(())

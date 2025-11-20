@@ -451,7 +451,7 @@ class TestFX(JitTestCase):
             def create_node(
                 self,
                 kind: str,
-                target: Union[str, Callable],
+                target: str | Callable,
                 args: tuple[Argument, ...],
                 kwargs: dict[str, Any],
                 name: Optional[str] = None,
@@ -1050,7 +1050,7 @@ class TestFX(JitTestCase):
             def create_node(
                 self,
                 kind: str,
-                target: Union[str, Callable],
+                target: str | Callable,
                 args: tuple[Argument, ...],
                 kwargs: dict[str, Any],
                 name: Optional[str] = None,
@@ -4025,7 +4025,7 @@ class TestFX(JitTestCase):
             def create_node(
                 self,
                 kind: str,
-                target: Union[str, Callable],
+                target: str | Callable,
                 args: tuple[Argument, ...],
                 kwargs: dict[str, Any],
                 name: Optional[str] = None,

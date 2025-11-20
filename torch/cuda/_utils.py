@@ -450,8 +450,8 @@ class _CudaKernel:
 
 
 def _cuda_load_module(
-    ptx: Union[str, bytes], kernel_names: Optional[list[str]] = None
-) -> Union[_CudaModule, dict[str, "_CudaKernel"]]:
+    ptx: str | bytes, kernel_names: Optional[list[str]] = None
+) -> _CudaModule | dict[str, "_CudaKernel"]:
     """
     Loads a CUDA module from PTX code and returns a module object that can access kernels.
 

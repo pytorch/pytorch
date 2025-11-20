@@ -22,14 +22,14 @@ class _remote_device:
                     and "cuda:1", just represent local devices.
     """
 
-    def __init__(self, remote_device: Union[str, torch.device]):
+    def __init__(self, remote_device: str | torch.device):
         PARSE_ERROR = (
             f"Could not parse remote_device: {remote_device}. The valid format is "
             "'<workername>/<device>' or 'rank:<rank>/<device>' or '<device>'"
         )
         self._worker_name = None
         self._rank = None
-        self._device: Optional[Union[str, int, torch.device]] = None
+        self._device: Optional[str | int | torch.device] = None
 
         if isinstance(remote_device, torch.device):
             self._device = remote_device

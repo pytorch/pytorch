@@ -25,7 +25,7 @@ class ScalarSpec(NamedTuple):
     """Specification for a scalar argument."""
 
     dtype: torch.dtype
-    constant: Optional[Union[int, float, bool, complex]] = (
+    constant: Optional[int | float | bool | complex] = (
         None  # If set, use this constant value instead of fuzzing
     )
 
@@ -492,7 +492,7 @@ def fuzz_non_contiguous_dense_tensor(
     return tensor
 
 
-def fuzz_scalar(spec, seed: Optional[int] = None) -> Union[float, int, bool, complex]:
+def fuzz_scalar(spec, seed: Optional[int] = None) -> float | int | bool | complex:
     """
     Create a Python scalar value from a ScalarSpec.
 

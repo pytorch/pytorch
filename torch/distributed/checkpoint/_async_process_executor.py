@@ -31,10 +31,10 @@ class _CheckpointSaveProcessControlOpts(Enum):
 
 @dataclass(init=False, unsafe_hash=True)
 class _CheckpointRequestIdentifier:
-    checkpoint_id: Union[str, os.PathLike, None]
+    checkpoint_id: str | os.PathLike | None
     uuid: str
 
-    def __init__(self, checkpoint_id: Union[str, os.PathLike, None]):
+    def __init__(self, checkpoint_id: str | os.PathLike | None):
         self.checkpoint_id = checkpoint_id
         self.uuid = str(uuid4())
 
@@ -173,7 +173,7 @@ class _AsyncCheckpointProcess:
         self,
         staged_state_dict: STATE_DICT_TYPE,
         *,
-        checkpoint_id: Union[str, os.PathLike, None] = None,
+        checkpoint_id: str | os.PathLike | None = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         no_dist: bool = False,
@@ -326,8 +326,8 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
     def _execute_save_impl(
         *,
         pg_init_info: Optional[_ProcessGroupInitInfo],
-        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
-        checkpoint_id: Union[str, os.PathLike, None] = None,
+        staging_future_or_state_dict: Future[STATE_DICT_TYPE] | STATE_DICT_TYPE,
+        checkpoint_id: str | os.PathLike | None = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,
@@ -373,9 +373,9 @@ class _ProcessBasedAsyncCheckpointExecutor(_AsyncCheckpointExecutor):
 
     def execute_save(
         self,
-        staging_future_or_state_dict: Union[Future[STATE_DICT_TYPE], STATE_DICT_TYPE],
+        staging_future_or_state_dict: Future[STATE_DICT_TYPE] | STATE_DICT_TYPE,
         *,
-        checkpoint_id: Union[str, os.PathLike, None] = None,
+        checkpoint_id: str | os.PathLike | None = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,

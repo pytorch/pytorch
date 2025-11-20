@@ -102,7 +102,7 @@ __all__ = [
 
 def start_processes(
     name: str,
-    entrypoint: Union[Callable, str],
+    entrypoint: Callable | str,
     args: dict[int, tuple],
     envs: dict[int, dict[str, str]],
     logs_specs: LogsSpecs,

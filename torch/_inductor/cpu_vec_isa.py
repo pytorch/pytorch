@@ -416,7 +416,7 @@ supported_vec_isa_list = [
 
 
 def get_isa_from_cpu_capability(
-    capability: Union[str, None],
+    capability: str | None,
     vec_isa_list: list[VecISA],
     invalid_vec_isa: InvalidVecISA,
 ):

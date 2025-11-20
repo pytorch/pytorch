@@ -33,7 +33,7 @@ class NAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 2e-3,
+        lr: float | Tensor = 2e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
@@ -485,9 +485,9 @@ def _multi_tensor_nadam(
 
         exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
 
-        bias_correction_sqrt: Union[tuple[Tensor, ...], list[Tensor]]
-        mus: Union[tuple[Tensor, ...], list[Tensor]]
-        mu_nexts: Union[tuple[Tensor, ...], list[Tensor]]
+        bias_correction_sqrt: tuple[Tensor, ...] | list[Tensor]
+        mus: tuple[Tensor, ...] | list[Tensor]
+        mu_nexts: tuple[Tensor, ...] | list[Tensor]
         if capturable:
             # mus will be beta1 * (1 - 0.5 * 0.96 ** (step * momentum_decay))
             exponent = torch._foreach_mul(grouped_state_steps, momentum_decay)

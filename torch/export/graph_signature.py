@@ -63,7 +63,7 @@ class CustomObjArgument:
 @dataclasses.dataclass
 class ConstantArgument:
     name: str
-    value: Union[int, float, bool, str, None]
+    value: int | float | bool | str | None
 
 
 ArgumentSpec = Union[
@@ -323,8 +323,8 @@ class ExportGraphSignature:
 
     # Graph node names of pytree-flattened inputs of original program
     @property
-    def user_inputs(self) -> Collection[Union[int, float, bool, None, str]]:
-        user_inputs: list[Union[int, float, bool, None, str]] = []
+    def user_inputs(self) -> Collection[int | float | bool | None | str]:
+        user_inputs: list[int | float | bool | None | str] = []
         for s in self.input_specs:
             if s.kind != InputKind.USER_INPUT:
                 continue
@@ -349,8 +349,8 @@ class ExportGraphSignature:
     # Graph node names of pytree-flattened outputs of original program
     # For joint-graph purposes, will include the loss output.
     @property
-    def user_outputs(self) -> Collection[Union[int, float, bool, None, str]]:
-        user_outputs: list[Union[int, float, bool, None, str]] = []
+    def user_outputs(self) -> Collection[int | float | bool | None | str]:
+        user_outputs: list[int | float | bool | None | str] = []
         for s in self.output_specs:
             if s.kind not in [
                 OutputKind.USER_OUTPUT,

@@ -55,7 +55,7 @@ class TestFullyShardFrozen(FSDPTest):
 
     def _test_train_mixed_requires_grad_per_group(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         use_activation_checkpointing: bool,
         freeze_after_init: bool,
     ):
@@ -151,7 +151,7 @@ class TestFullyShardFrozen(FSDPTest):
 
     def _test_train_mixed_requires_grad_across_groups(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
         unfreeze_params: bool,
     ):
         torch.manual_seed(42)
@@ -225,7 +225,7 @@ class TestFullyShardFrozen(FSDPTest):
 
     def _test_multi_forward_mixed_requires_grad(
         self,
-        reshard_after_forward: Union[bool, int],
+        reshard_after_forward: bool | int,
     ):
         class MultiForwardModule(nn.Module):
             def __init__(self, device: torch.device):

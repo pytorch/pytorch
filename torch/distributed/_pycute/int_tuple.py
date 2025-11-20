@@ -43,7 +43,7 @@ from .typing import Integer
 
 
 # Type aliases for better readability
-IntTuple: TypeAlias = Union[int, tuple["IntTuple", ...]]
+IntTuple: TypeAlias = int | tuple["IntTuple", ...]
 
 
 def is_int(x: object) -> TypeIs[int]:
@@ -241,7 +241,7 @@ def crd2crd(
 
 
 # Filter trg according to crd: keep only elements of trg that are paired with None
-def slice_(crd: Union[None, tuple, int], trg: Union[tuple, int]) -> Union[tuple, int]:
+def slice_(crd: None | tuple | int, trg: tuple | int) -> tuple | int:
     if is_tuple(crd):
         if is_tuple(trg):  # tuple tuple
             assert len(crd) == len(trg)
@@ -264,7 +264,7 @@ def slice_(crd: Union[None, tuple, int], trg: Union[tuple, int]) -> Union[tuple,
 
 
 # Determine if None appears at any of an int_tuples' terminals
-def has_none(a: Union[None, tuple, int]) -> bool:
+def has_none(a: None | tuple | int) -> bool:
     if is_tuple(a):
         return any(has_none(v) for v in a)
     else:

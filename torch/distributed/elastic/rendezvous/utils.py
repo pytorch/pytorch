@@ -166,7 +166,7 @@ def _matches_machine_hostname(host: str) -> bool:
     return False
 
 
-def _delay(seconds: Union[float, tuple[float, float]]) -> None:
+def _delay(seconds: float | tuple[float, float]) -> None:
     """Suspend the current thread for ``seconds``.
 
     Args:

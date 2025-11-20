@@ -35,7 +35,7 @@ except ModuleNotFoundError:
 _share_memory_lock = threading.Lock()
 _share_memory_map: dict[int, threading.RLock] = {}
 
-T = TypeVar("T", bound="Union[_StorageBase, TypedStorage]")
+T = TypeVar("T", bound="_StorageBase | TypedStorage")
 
 
 class _StorageBase:
@@ -65,7 +65,7 @@ class _StorageBase:
     def copy_(self, source: T, non_blocking: _Optional[_bool] = None) -> T:
         raise NotImplementedError
 
-    def new(self) -> Union[_StorageBase, TypedStorage]:
+    def new(self) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     def nbytes(self) -> _int:
@@ -76,12 +76,12 @@ class _StorageBase:
 
     def type(
         self, dtype: _Optional[str] = None, non_blocking: _bool = False
-    ) -> Union[_StorageBase, TypedStorage]:
+    ) -> _StorageBase | TypedStorage:
         return _type(self, dtype, non_blocking)
 
     def cuda(
         self, device=None, non_blocking=False
-    ) -> Union[_StorageBase, TypedStorage]:
+    ) -> _StorageBase | TypedStorage:
         """Returns a copy of this object in CUDA memory.
 
         If this object is already in CUDA memory and on the correct device, then
@@ -96,7 +96,7 @@ class _StorageBase:
         device2 = torch.device("cuda", device) if device else torch.device("cuda")
         return self.to(device=device2, non_blocking=non_blocking)
 
-    def hpu(self, device=None, non_blocking=False) -> Union[_StorageBase, TypedStorage]:
+    def hpu(self, device=None, non_blocking=False) -> _StorageBase | TypedStorage:
         """Returns a copy of this object in HPU memory.
 
         If this object is already in HPU memory and on the correct device, then
@@ -166,7 +166,7 @@ class _StorageBase:
     def _new_with_weak_ptr(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
-    def _shared_decref(self) -> Union[_StorageBase, TypedStorage]:
+    def _shared_decref(self) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     def _write_file(self, *args, **kwargs):
@@ -175,7 +175,7 @@ class _StorageBase:
     def resize_(self, size: _int):
         raise NotImplementedError
 
-    def _weak_ref(self, *args, **kwargs) -> Union[_StorageBase, TypedStorage]:
+    def _weak_ref(self, *args, **kwargs) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     def _set_from_file(self, *args, **kwargs):
@@ -210,11 +210,11 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
-    def from_file(cls, filename, shared, nbytes) -> Union[_StorageBase, TypedStorage]:
+    def from_file(cls, filename, shared, nbytes) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     @classmethod
-    def _expired(cls, *args, **kwargs) -> Union[_StorageBase, TypedStorage]:
+    def _expired(cls, *args, **kwargs) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     def _byteswap(self, *args, **kwargs):
@@ -354,7 +354,7 @@ class _StorageBase:
         """Casts this storage to float8_e4m3fnuz type"""
         return self._to(torch.float8_e4m3fnuz)
 
-    def is_pinned(self, device: Union[str, torch.device] = "cuda"):
+    def is_pinned(self, device: str | torch.device = "cuda"):
         r"""Determine whether the CPU storage is already pinned on device.
 
         Args:
@@ -370,7 +370,7 @@ class _StorageBase:
             .is_pinned(device)
         )
 
-    def pin_memory(self, device: Union[str, torch.device] = "cuda"):
+    def pin_memory(self, device: str | torch.device = "cuda"):
         r"""Copy the CPU storage to pinned memory, if it's not already pinned.
 
         Args:
@@ -1038,7 +1038,7 @@ class TypedStorage:
         self,
         dtype: _Optional[str] = None,
         non_blocking: bool = False,
-    ) -> Union[_StorageBase, TypedStorage, str]:
+    ) -> _StorageBase | TypedStorage | str:
         _warn_typed_storage_removal()
         if dtype is None:
             legacy_class = self._get_legacy_storage_class()
@@ -1157,7 +1157,7 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def is_pinned(self, device: Union[str, torch.device] = "cuda"):
+    def is_pinned(self, device: str | torch.device = "cuda"):
         r"""Determine whether the CPU TypedStorage is already pinned on device.
 
         Args:
@@ -1170,7 +1170,7 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._untyped_storage.is_pinned(device)
 
-    def pin_memory(self, device: Union[str, torch.device] = "cuda"):
+    def pin_memory(self, device: str | torch.device = "cuda"):
         r"""Copy the CPU TypedStorage to pinned memory, if it's not already pinned.
 
         Args:

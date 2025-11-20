@@ -590,7 +590,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
 
     @staticmethod
     def try_load(
-        mod: Union[torch.fx.GraphModule, torch._dynamo.utils.GmWrapper],
+        mod: torch.fx.GraphModule | torch._dynamo.utils.GmWrapper,
         args,
         aot_config: AOTConfig,
         cudagraphs: BoxedBool,
@@ -773,7 +773,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         return os.path.join(cls._get_tmp_dir(), key)
 
     @staticmethod
-    def evaluate_guards(guard_expr: str, hints: Union[list[int], list[torch.SymInt]]):
+    def evaluate_guards(guard_expr: str, hints: list[int] | list[torch.SymInt]):
         if torch._inductor.config.unsafe_skip_cache_dynamic_shape_guards:
             return True
         shape_env = AOTAutogradCache._get_shape_env()

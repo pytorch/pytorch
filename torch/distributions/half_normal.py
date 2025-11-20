@@ -40,7 +40,7 @@ class HalfNormal(TransformedDistribution):
 
     def __init__(
         self,
-        scale: Union[Tensor, float],
+        scale: Tensor | float,
         validate_args: Optional[bool] = None,
     ) -> None:
         base_dist = Normal(0, scale, validate_args=False)

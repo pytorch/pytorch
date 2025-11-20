@@ -251,7 +251,7 @@ ddp_suggest_debug_mode_str = (
 class DDPUnevenTestInput(NamedTuple):
     name: str
     model: nn.Module
-    inp: Union[torch.tensor, tuple]
+    inp: torch.tensor | tuple
     sync_interval: int
     throw_on_early_termination: bool = False
     hook: Callable = None

@@ -258,7 +258,7 @@ class PartialRender:
 class SubgraphInfo:
     body: IndentedBuffer
     template_mask: Optional[str] = None
-    template_out_shape: Optional[Union[str, tuple[str]]] = None
+    template_out_shape: Optional[str | tuple[str]] = None
     compute: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     indexing_code: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
     loads: IndentedBuffer = dataclasses.field(default_factory=IndentedBuffer)
@@ -473,7 +473,7 @@ class TritonTemplateKernel(TritonKernel):
         self.loads: IndentedBuffer = FakeIndentedBuffer()
         self.stores: IndentedBuffer = FakeIndentedBuffer()
         self.template_mask: Optional[str] = None
-        self.template_out_shape: Optional[Union[str, tuple[str]]] = None
+        self.template_out_shape: Optional[str | tuple[str]] = None
         self.ops_handler: Optional[V.WrapperHandler] = None  # type: ignore[name-defined]
 
         # When caching is enabled, the generated code is not dependent on the input nodes names, or
@@ -871,9 +871,9 @@ class TritonTemplateKernel(TritonKernel):
         self,
         input_name: str,
         output_name: str,
-        indices: Union[list[Any], tuple[Any]],
+        indices: list[Any] | tuple[Any],
         mask: Optional[str] = None,
-        other: Optional[Union[float, int]] = 0.0,
+        other: Optional[float | int] = 0.0,
         indent_width: int = 4,
         index_shape: Optional[tuple[str]] = None,
     ):
@@ -1122,7 +1122,7 @@ class TritonTemplateKernel(TritonKernel):
 
     def store_output(
         self,
-        indices: Union[list[Any], tuple[Any]],
+        indices: list[Any] | tuple[Any],
         val: str,
         mask: Optional[str] = None,
         indent_width: int = 4,
@@ -2221,7 +2221,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         description,
         bmreq,
         log_info: Optional[
-            dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]
+            dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]
         ] = None,
         mutated_inputs=None,
         workspace_arg: Optional[WorkspaceArg] = None,
@@ -2284,7 +2284,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             )
         )
 
-    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return self.log_info
 
@@ -2383,7 +2383,7 @@ class ExternKernelCaller(ChoiceCaller):
 
         return ir.TensorBox.create(inner)
 
-    def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
+    def info_dict(self) -> dict[str, PrimitiveInfoType | list[PrimitiveInfoType]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
         return {
             "backend": "extern",
@@ -4136,7 +4136,7 @@ def _log_autotune_choices_stats(
     if not timings:
         return None
 
-    metadata: dict[str, Union[int, float, str]] = {
+    metadata: dict[str, int | float | str] = {
         "num_choices": len(timings),
         "num_triton_choices": len(
             [c for c in timings if isinstance(c, TritonTemplateCaller)]

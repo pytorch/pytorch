@@ -35,7 +35,7 @@ class FileSystem(FileSystemBase):
 
     @contextmanager
     def create_stream(
-        self, path: Union[str, os.PathLike], mode: str
+        self, path: str | os.PathLike, mode: str
     ) -> Generator[io.IOBase, None, None]:
         if self.fs is None:
             raise AssertionError("fs should not be None")
@@ -56,26 +56,26 @@ class FileSystem(FileSystemBase):
                 raise
 
     def concat_path(
-        self, path: Union[str, os.PathLike], suffix: str
-    ) -> Union[str, os.PathLike]:
+        self, path: str | os.PathLike, suffix: str
+    ) -> str | os.PathLike:
         return os.path.join(path, suffix)
 
     def init_path(
-        self, path: Union[str, os.PathLike], **kwargs
-    ) -> Union[str, os.PathLike]:
+        self, path: str | os.PathLike, **kwargs
+    ) -> str | os.PathLike:
         self.fs, _ = url_to_fs(path, **kwargs)
         return path
 
     def rename(
-        self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
+        self, path: str | os.PathLike, new_path: str | os.PathLike
     ) -> None:
         self.fs.rename(path, new_path)
 
-    def mkdir(self, path: Union[str, os.PathLike]) -> None:
+    def mkdir(self, path: str | os.PathLike) -> None:
         self.fs.makedirs(path, exist_ok=True)
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         if isinstance(checkpoint_id, Path):
             return False
 
@@ -86,13 +86,13 @@ class FileSystem(FileSystemBase):
 
         return True
 
-    def exists(self, path: Union[str, os.PathLike]) -> bool:
+    def exists(self, path: str | os.PathLike) -> bool:
         return self.fs.exists(path)
 
-    def rm_file(self, path: Union[str, os.PathLike]) -> None:
+    def rm_file(self, path: str | os.PathLike) -> None:
         self.fs.rm(path)
 
-    def ls(self, path: Union[str, os.PathLike]) -> list[str]:
+    def ls(self, path: str | os.PathLike) -> list[str]:
         # setting detail to False explicitly to keep the list[str] return type,
         # instead of the list[Dict] return type when detail=True
         return self.fs.ls(path, detail=False)
@@ -115,7 +115,7 @@ class FsspecWriter(FileSystemWriter):
 
     def __init__(
         self,
-        path: Union[str, os.PathLike],
+        path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,
@@ -153,16 +153,16 @@ class FsspecWriter(FileSystemWriter):
         self.path = self.fs.init_path(path, **kwargs)
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
 class FsspecReader(FileSystemReader):
-    def __init__(self, path: Union[str, os.PathLike], **kwargs) -> None:
+    def __init__(self, path: str | os.PathLike, **kwargs) -> None:
         super().__init__(path)
         self.fs = FileSystem()
         self.path = self.fs.init_path(path, **kwargs)
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)

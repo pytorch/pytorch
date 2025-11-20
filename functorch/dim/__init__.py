@@ -42,7 +42,7 @@ def _create_dim(name: str, size: Optional[int] = None) -> Dim:
 
 def dims(
     n: Optional[int] = None, sizes: Optional[list[Optional[int]]] = None
-) -> Union[Dim, tuple[Dim, ...]]:
+) -> Dim | tuple[Dim, ...]:
     """
     Create and return one or more Dim objects.
 
@@ -154,7 +154,7 @@ class DimList:
 
     def __init__(
         self,
-        len_or_dims: Optional[Union[int, Sequence]] = None,
+        len_or_dims: Optional[int | Sequence] = None,
         name: Optional[str] = None,
     ):
         """
@@ -249,7 +249,7 @@ class DimList:
         """Return the length of the DimList."""
         return self.size()
 
-    def __getitem__(self, key: Union[int, slice]) -> Union[Dim, tuple[Dim, ...]]:
+    def __getitem__(self, key: int | slice) -> Dim | tuple[Dim, ...]:
         if not self._bound:
             raise DimensionBindError("DimList not bound")
 
@@ -294,7 +294,7 @@ class DimList:
 
 
 def _create_dimlist(
-    name: str, size: Optional[Union[int, list[Optional[int]]]] = None
+    name: str, size: Optional[int | list[Optional[int]]] = None
 ) -> DimList:
     """Create a DimList object with the given name and optional size."""
     dimlist = DimList(name=name)
@@ -312,7 +312,7 @@ def _create_dimlist(
 
 def dimlists(
     n: Optional[int] = None, sizes: Optional[list[Optional[int]]] = None
-) -> Union[DimList, tuple[DimList, ...]]:
+) -> DimList | tuple[DimList, ...]:
     """
     Create and return one or more DimList objects.
 
@@ -710,14 +710,8 @@ class _Tensor:
 
     def index(
         self,
-        dims: Union[int, Dim, tuple[Union[int, Dim], ...], list[Union[int, Dim]]],
-        indices: Union[
-            int,
-            slice,
-            torch.Tensor,
-            tuple[Union[int, slice, torch.Tensor], ...],
-            list[Union[int, slice, torch.Tensor]],
-        ],
+        dims: int | Dim | tuple[int | Dim, ...] | list[int | Dim],
+        indices: int | slice | torch.Tensor | tuple[int | slice | torch.Tensor, ...] | list[int | slice | torch.Tensor],
     ) -> _Tensor:
         """
         Index tensor using first-class dimensions.
@@ -747,8 +741,8 @@ class _Tensor:
             else:
                 raise TypeError(f"dimension {repr(d.dim())} not in tensor")
 
-        dims_list: list[Union[int, Dim]] = []
-        indices_list: list[Union[int, slice, torch.Tensor]] = []
+        dims_list: list[int | Dim] = []
+        indices_list: list[int | slice | torch.Tensor] = []
 
         lhs_list = isinstance(dims, (tuple, list))
         rhs_list = isinstance(indices, (tuple, list))
@@ -982,7 +976,7 @@ class Tensor(_Tensor):
     @classmethod
     def from_positional(
         cls, tensor: torch.Tensor, levels: list[DimEntry], has_device: bool
-    ) -> Union[_Tensor, torch.Tensor]:
+    ) -> _Tensor | torch.Tensor:
         """
         Create a functorch Tensor from a regular PyTorch tensor with specified dimension levels.
 
@@ -1396,7 +1390,7 @@ def dot_finish(parts: list[DotPart], result_tensor: torch.Tensor) -> Tensor:
     return tensor_result  # type: ignore[return-value]
 
 
-def dot(lhs: Any, rhs: Any, sum_dims: Any) -> Union[_Tensor, torch.Tensor]:
+def dot(lhs: Any, rhs: Any, sum_dims: Any) -> _Tensor | torch.Tensor:
     """
     Perform dot product between two tensors along specified dimensions.
 

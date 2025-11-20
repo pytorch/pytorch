@@ -4713,10 +4713,10 @@ class TestTypeConversion(TestCase):
 
     def test_mixed_types(self):
         result_type = tuple_to_list(Tuple[int, float])
-        self.assertEqual(result_type, list[typing.Union[int, float]])
+        self.assertEqual(result_type, list[int | float])
 
         result_type = tuple_to_list(Tuple[int, float, str])
-        self.assertEqual(result_type, list[typing.Union[int, float, str]])
+        self.assertEqual(result_type, list[int | float | str])
 
 
 class TestOpProfiles(TestCase):

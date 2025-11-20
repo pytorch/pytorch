@@ -55,7 +55,7 @@ class CommDebugModeExample:
         self.device_type = get_device_type()
 
     def _MLP_model_setup(
-        self, model_type: type, parallelize_plan: Union[None, dict] = None
+        self, model_type: type, parallelize_plan: None | dict = None
     ) -> tuple[nn.Module, torch.Tensor]:
         """
         Creates MLP or MLPStacked model for examples

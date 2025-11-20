@@ -2313,12 +2313,12 @@ def device_hint(tensor) -> "str":
 def calc_conv_nd_return_shape(
     input_tensor: torch.Tensor,
     weight: torch.Tensor,
-    stride: Union[list[int], int],
-    padding: Union[list[int], int],
-    dilation: Union[list[int], int],
+    stride: list[int] | int,
+    padding: list[int] | int,
+    dilation: list[int] | int,
     is_transposed: bool,
     groups: int,
-    output_padding: Optional[Union[list[int], int]] = None,
+    output_padding: Optional[list[int] | int] = None,
 ):
     def _formula(ln: int, p: int, d: int, k: int, s: int) -> int:
         """
@@ -6988,8 +6988,8 @@ def upsample_nearest2d(input, output_size, scales_h=None, scales_w=None):
 )
 def upsample_nearest2d_backward(
     grad_output: Tensor,
-    output_size: Sequence[Union[int, torch.SymInt]],
-    input_size: Sequence[Union[int, torch.SymInt]],
+    output_size: Sequence[int | torch.SymInt],
+    input_size: Sequence[int | torch.SymInt],
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ):

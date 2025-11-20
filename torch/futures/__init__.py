@@ -27,7 +27,7 @@ class Future(torch._C.Future, Generic[T]):
     """
 
     def __init__(
-        self, *, devices: Optional[list[Union[int, str, torch.device]]] = None
+        self, *, devices: Optional[list[int | str | torch.device]] = None
     ):
         r"""
         Create an empty unset ``Future``. If the future is intended to hold

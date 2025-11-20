@@ -27,7 +27,7 @@ def _disable_dynamo(
 
 def _disable_dynamo(
     fn: Optional[Callable[_P, _T]] = None, recursive: bool = True
-) -> Union[Callable[_P, _T], Callable[[Callable[_P, _T]], Callable[_P, _T]]]:
+) -> Callable[_P, _T] | Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     This API should be only used inside torch, external users should still use
     torch._dynamo.disable. The main goal of this API is to avoid circular

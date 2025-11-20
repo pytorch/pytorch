@@ -15,9 +15,9 @@ class _AsyncCheckpointExecutor(abc.ABC):
     @abc.abstractmethod
     def execute_save(
         self,
-        staging_future_or_state_dict: Union[STATE_DICT_TYPE, Future[STATE_DICT_TYPE]],
+        staging_future_or_state_dict: STATE_DICT_TYPE | Future[STATE_DICT_TYPE],
         *,
-        checkpoint_id: Union[str, os.PathLike, None] = None,
+        checkpoint_id: str | os.PathLike | None = None,
         storage_writer: Optional[StorageWriter] = None,
         planner: Optional[SavePlanner] = None,
         process_group: Optional[dist.ProcessGroup] = None,

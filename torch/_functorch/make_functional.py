@@ -31,8 +31,8 @@ def raise_parameter_tying_error() -> NoReturn:
 
 
 def create_names_map(
-    named_params: Union[dict[str, Tensor], Iterable[tuple[str, Tensor]]],
-    tied_named_params: Union[dict[str, Tensor], Iterable[tuple[str, Tensor]]],
+    named_params: dict[str, Tensor] | Iterable[tuple[str, Tensor]],
+    tied_named_params: dict[str, Tensor] | Iterable[tuple[str, Tensor]],
 ) -> dict[str, list[str]]:
     """
     named_params is a dictionary of tensors: {'A': A, 'B': B}
@@ -550,7 +550,7 @@ def combine_state_for_ensemble(
 
 def functional_init(
     model_class: type[nn.Module],
-    ensemble_shape: Union[tuple[()], tuple[int]] = (),
+    ensemble_shape: tuple[()] | tuple[int] = (),
     device: torch.types.Device = "cpu",
 ):
     def wrapped(*args, **kwargs):
@@ -577,7 +577,7 @@ def functional_init(
 
 def functional_init_with_buffers(
     model_class: type[nn.Module],
-    ensemble_shape: Union[tuple[()], tuple[int]] = (),
+    ensemble_shape: tuple[()] | tuple[int] = (),
     device: torch.types.Device = "cpu",
 ):
     def wrapped(*args, **kwargs):

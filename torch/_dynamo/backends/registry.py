@@ -116,7 +116,7 @@ register_experimental_backend = functools.partial(
 )
 
 
-def lookup_backend(compiler_fn: Union[str, CompilerFn]) -> CompilerFn:
+def lookup_backend(compiler_fn: str | CompilerFn) -> CompilerFn:
     """Expand backend strings to functions"""
     if isinstance(compiler_fn, str):
         if compiler_fn not in _BACKENDS:

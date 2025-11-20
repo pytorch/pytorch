@@ -757,8 +757,8 @@ class AffineTransform(Transform):
 
     def __init__(
         self,
-        loc: Union[Tensor, float],
-        scale: Union[Tensor, float],
+        loc: Tensor | float,
+        scale: Tensor | float,
         event_dim: int = 0,
         cache_size: int = 0,
     ) -> None:
@@ -813,7 +813,7 @@ class AffineTransform(Transform):
         return True
 
     @property
-    def sign(self) -> Union[Tensor, int]:  # type: ignore[override]
+    def sign(self) -> Tensor | int:  # type: ignore[override]
         if isinstance(self.scale, _Number):
             return 1 if float(self.scale) > 0 else -1 if float(self.scale) < 0 else 0
         return self.scale.sign()

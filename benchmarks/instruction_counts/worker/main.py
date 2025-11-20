@@ -120,7 +120,7 @@ class WorkerUnpickler(pickle.Unpickler):
         assert isinstance(result, WorkerTimerArgs)
         return result
 
-    def load_output(self) -> Union[WorkerTimerArgs, WorkerOutput, WorkerFailure]:
+    def load_output(self) -> WorkerTimerArgs | WorkerOutput | WorkerFailure:
         """Convenience method for type safe loading."""
         result = self.load()
         assert isinstance(result, (WorkerTimerArgs, WorkerOutput, WorkerFailure))
@@ -159,7 +159,7 @@ def _run(timer_args: WorkerTimerArgs) -> WorkerOutput:
 
 
 def main(communication_file: str) -> None:
-    result: Union[WorkerOutput, WorkerFailure]
+    result: WorkerOutput | WorkerFailure
     try:
         with open(communication_file, "rb") as f:
             timer_args: WorkerTimerArgs = WorkerUnpickler(f).load_input()

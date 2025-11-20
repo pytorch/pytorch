@@ -299,7 +299,7 @@ class LRScheduler:
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
                     values = cast(
-                        list[Union[float, Tensor]], self._get_closed_form_lr()
+                        list[float | Tensor], self._get_closed_form_lr()
                     )
                 else:
                     values = self.get_lr()
@@ -389,7 +389,7 @@ class LambdaLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        lr_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
+        lr_lambda: Callable[[int], float] | list[Callable[[int], float]],
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
         self.optimizer = optimizer
@@ -505,7 +505,7 @@ class MultiplicativeLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        lr_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
+        lr_lambda: Callable[[int], float] | list[Callable[[int], float]],
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
         self.optimizer = optimizer
@@ -1659,7 +1659,7 @@ class ReduceLROnPlateau(LRScheduler):
         threshold: float = 1e-4,
         threshold_mode: Literal["rel", "abs"] = "rel",
         cooldown: int = 0,
-        min_lr: Union[list[float], float] = 0,
+        min_lr: list[float] | float = 0,
         eps: float = 1e-8,
     ) -> None:  # noqa: D107
         if factor >= 1.0:
@@ -1894,8 +1894,8 @@ class CyclicLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        base_lr: Union[float, list[float]],
-        max_lr: Union[float, list[float]],
+        base_lr: float | list[float],
+        max_lr: float | list[float],
         step_size_up: int = 2000,
         step_size_down: Optional[int] = None,
         mode: Literal["triangular", "triangular2", "exp_range"] = "triangular",
@@ -2396,15 +2396,15 @@ class OneCycleLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        max_lr: Union[float, list[float]],
+        max_lr: float | list[float],
         total_steps: Optional[int] = None,
         epochs: Optional[int] = None,
         steps_per_epoch: Optional[int] = None,
         pct_start: float = 0.3,
         anneal_strategy: Literal["cos", "linear"] = "cos",
         cycle_momentum: bool = True,
-        base_momentum: Union[float, list[float]] = 0.85,
-        max_momentum: Union[float, list[float]] = 0.95,
+        base_momentum: float | list[float] = 0.85,
+        max_momentum: float | list[float] = 0.95,
         div_factor: float = 25.0,
         final_div_factor: float = 1e4,
         three_phase: bool = False,

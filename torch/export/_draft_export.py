@@ -369,7 +369,7 @@ def draft_export(
     args: tuple[Any, ...],
     kwargs: Optional[Mapping[str, Any]] = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: Optional[dict[str, Any] | tuple[Any] | list[Any]] = None,
     preserve_module_call_signature: tuple[str, ...] = (),
     strict: bool = False,
     pre_dispatch: bool = True,

@@ -43,9 +43,9 @@ def _uniform_random_(t: torch.Tensor, low: float, high: float) -> torch.Tensor:
 
 
 def make_tensor(
-    *shape: Union[int, torch.Size, list[int], tuple[int, ...]],
+    *shape: int | torch.Size | list[int] | tuple[int, ...],
     dtype: torch.dtype,
-    device: Union[str, torch.device],
+    device: str | torch.device,
     low: Optional[float] = None,
     high: Optional[float] = None,
     requires_grad: bool = False,

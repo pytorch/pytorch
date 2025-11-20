@@ -159,7 +159,7 @@ def _arg_to_str(arg, attributes, tensor_memo=None) -> str:
 
 def norm_hash_fn(
     t: torch.Tensor, use_scalar: bool = False
-) -> Union[torch.Tensor, float]:
+) -> torch.Tensor | float:
     """
     from Observer. Computes a hash for a tensor by converting it to float (if needed), making it contiguous,
     replacing NaN/inf values with fixed numbers, and then computing the L1 norm in float64 or complex128.
@@ -190,7 +190,7 @@ def _compute_rel_diff(hash1, hash2):
 
 def hash_tensor_fn(
     t: torch.Tensor, use_scalar: bool = False
-) -> Union[torch.Tensor, int]:
+) -> torch.Tensor | int:
     """
     wrapper over torch.hash_tensor
     """
@@ -924,7 +924,7 @@ class DebugMode(TorchDispatchMode):
     @staticmethod
     @contextlib.contextmanager
     def log_tensor_hashes(
-        hash_fn: Union[Callable, str, list[str]] = "norm",
+        hash_fn: Callable | str | list[str] = "norm",
         hash_inputs: bool = False,
         wait_on_collectives: bool = True,
     ):

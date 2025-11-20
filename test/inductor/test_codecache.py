@@ -2317,7 +2317,7 @@ if not torch.allclose(eager_result, compiled_result, atol=0.1, rtol=0.01):
             def __call__(self, graph: torch.fx.graph.Graph) -> None:
                 return None
 
-            def uuid(self) -> Optional[Union[bytes, str]]:
+            def uuid(self) -> Optional[bytes | str]:
                 return "uuid"
 
         def fn(a, b):
@@ -2370,7 +2370,7 @@ class TestCustomPartitionerFn(CustomPartitionerFn):
     ) -> tuple[torch.fx.GraphModule, torch.fx.GraphModule]:
         return gm, gm  # Dummy implementation
 
-    def uuid(self) -> Optional[Union[bytes, str]]:
+    def uuid(self) -> Optional[bytes | str]:
         return self._uuid
 
 
@@ -2675,7 +2675,7 @@ class TestFxGraphCacheHashing(TestCase):
             def __call__(self, graph: torch.fx.graph.Graph) -> None:
                 return None
 
-            def uuid(self) -> Optional[Union[bytes, str]]:
+            def uuid(self) -> Optional[bytes | str]:
                 return self._uuid
 
         custom_pass = TestCustomGraphPass()
@@ -2711,7 +2711,7 @@ class TestFxGraphCacheHashing(TestCase):
             def __call__(self, gm: torch.fx.GraphModule) -> None:
                 return None
 
-            def uuid(self) -> Optional[Union[bytes, str]]:
+            def uuid(self) -> Optional[bytes | str]:
                 return self._uuid
 
         custom_pass = TestCustomGraphModulePass()

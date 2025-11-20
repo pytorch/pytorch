@@ -144,7 +144,7 @@ def _is_tensor_constructor(func: OpOverload):
     )
 
 
-def register_op_impl(run_impl_check: Union[Callable[[OpOverload], bool], OpOverload]):
+def register_op_impl(run_impl_check: Callable[[OpOverload], bool] | OpOverload):
     def impl_decorator(op_impl):
         if isinstance(run_impl_check, OpOverload):
             assert run_impl_check not in op_implementations_dict, (

@@ -27,7 +27,7 @@ from torch.types import Number
 _NumericType = Union[Number, torch.Tensor, np.ndarray]
 _ModelType = Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
 _InputArgsType = Optional[
-    Union[torch.Tensor, int, float, bool, Sequence[Any], Mapping[str, Any]]
+    torch.Tensor | int | float | bool | Sequence[Any] | Mapping[str, Any]
 ]
 _OutputsType = Sequence[_NumericType]
 
@@ -157,7 +157,7 @@ class _TestONNXRuntime(pytorch_test_common.ExportTestCase):
 
 
 def run_ort(
-    onnx_model: Union[str, torch.onnx.ONNXProgram],
+    onnx_model: str | torch.onnx.ONNXProgram,
     pytorch_inputs: Sequence[_InputArgsType],
 ) -> _OutputsType:
     """Run ORT on the given ONNX model and inputs
@@ -268,7 +268,7 @@ class DecorateMeta:
     op_name: str
     variant_name: str
     decorator: Callable
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]]
+    opsets: Optional[Collection[int | Callable[[int], bool]]]
     dtypes: Optional[Collection[torch.dtype]]
     reason: str
     test_behavior: str
@@ -290,7 +290,7 @@ def xfail(
     variant_name: str = "",
     *,
     reason: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    opsets: Optional[Collection[int | Callable[[int], bool]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], bool]] = None,
     enabled_if: bool = True,
@@ -328,7 +328,7 @@ def skip(
     variant_name: str = "",
     *,
     reason: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    opsets: Optional[Collection[int | Callable[[int], bool]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], Any]] = None,
     enabled_if: bool = True,
@@ -368,7 +368,7 @@ def skip_slow(
     variant_name: str = "",
     *,
     reason: str,
-    opsets: Optional[Collection[Union[int, Callable[[int], bool]]]] = None,
+    opsets: Optional[Collection[int | Callable[[int], bool]]] = None,
     dtypes: Optional[Collection[torch.dtype]] = None,
     matcher: Optional[Callable[[Any], Any]] = None,
     model_type: Optional[pytorch_test_common.TorchModelType] = None,

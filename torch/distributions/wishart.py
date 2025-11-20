@@ -79,7 +79,7 @@ class Wishart(ExponentialFamily):
 
     def __init__(
         self,
-        df: Union[Tensor, Number],
+        df: Tensor | Number,
         covariance_matrix: Optional[Tensor] = None,
         precision_matrix: Optional[Tensor] = None,
         scale_tril: Optional[Tensor] = None,

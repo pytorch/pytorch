@@ -71,7 +71,7 @@ _TensorT = TypeVar("_TensorT", bound=torch.Tensor)
 _TensorT_cov = TypeVar("_TensorT_cov", bound=torch.Tensor, covariant=True)
 
 
-def safe_is_leaf(t: Union[MetaTensorDesc, torch.Tensor]) -> bool:
+def safe_is_leaf(t: MetaTensorDesc | torch.Tensor) -> bool:
     try:
         return t.is_leaf
     except RuntimeError:
@@ -114,7 +114,7 @@ def disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
 
 def assert_metadata_eq(
     assert_eq: Callable[[object, object], None],
-    m1: Union[MetaTensorDesc, torch.Tensor],
+    m1: MetaTensorDesc | torch.Tensor,
     m2: torch.Tensor,
     *,
     skip_symbolic: bool = False,
@@ -579,12 +579,12 @@ class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
 #   def mk(arg: Callable[[], torch.Tensor], device: Optional[Union[torch.device, str]] = None)
 class _MetaTensorCallback(Protocol, Generic[_TensorT_cov]):
     def __call__(
-        self, arg: Callable[[], torch.Tensor], /, *, device: Union[torch.device, str]
+        self, arg: Callable[[], torch.Tensor], /, *, device: torch.device | str
     ) -> _TensorT_cov: ...
 
 
 class _MetaTensorCallbackKwargs(TypedDict, total=False):
-    device: Union[torch.device, str]
+    device: torch.device | str
 
 
 # A callback where the device may not be provided (is optional).
@@ -855,7 +855,7 @@ class MetaConverter(Generic[_TensorT]):
     def _identity_callable(
         cls,
         t: Callable[[], torch.Tensor],
-        device: Optional[Union[torch.device, str]] = None,
+        device: Optional[torch.device | str] = None,
     ) -> _TensorT:
         return cls._checked_cast_tensor_t(t())
 

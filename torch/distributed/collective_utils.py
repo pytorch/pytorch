@@ -44,7 +44,7 @@ class SyncPayload(Generic[T]):
 
 
 def broadcast(
-    data_or_fn: Union[T, Callable[[], T]],
+    data_or_fn: T | Callable[[], T],
     *,
     success: bool = True,
     stage_name: Optional[str] = None,
@@ -124,7 +124,7 @@ def broadcast(
 
 
 def all_gather(
-    data_or_fn: Union[T, Callable[[], T]],
+    data_or_fn: T | Callable[[], T],
     stage_name: Optional[str] = None,
     pg: Optional[dist.ProcessGroup] = None,
 ) -> list[T]:
@@ -247,7 +247,7 @@ def _summarize_ranks(ranks: Iterable[int]) -> str:
         raise AssertionError("ranks should all be positive")
     if len(set(ranks)) != len(ranks):
         raise AssertionError("ranks should not contain duplicates")
-    curr: Optional[Union[int, range]] = None
+    curr: Optional[int | range] = None
     ranges = []
     while ranks:
         x = ranks.pop(0)

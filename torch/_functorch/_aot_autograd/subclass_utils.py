@@ -148,13 +148,13 @@ def create_subclass_metadata(
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[list[Any], tuple[Any, ...]],
+    curr_args: list[Any] | tuple[Any, ...],
     *,
     count_symints: bool = True,
     with_memory_format: bool = False,
-) -> list[Union[PlainTensorMeta, SubclassCreationMeta]]:
+) -> list[PlainTensorMeta | SubclassCreationMeta]:
     idx = 0
-    infos: list[Union[PlainTensorMeta, SubclassCreationMeta]] = []
+    infos: list[PlainTensorMeta | SubclassCreationMeta] = []
     for a in curr_args:
         if is_traceable_wrapper_subclass(a):
             assert isinstance(a, Tensor)
@@ -187,7 +187,7 @@ def enumerate_filter_symints(lst: Iterable[IntLikeType]) -> list[tuple[int, SymI
     return [(i, s) for i, s in enumerate(lst) if symint_check(s)]
 
 
-def compute_symint_placeholders(lst: Iterable[Union[None, int, SymInt]]) -> list[bool]:
+def compute_symint_placeholders(lst: Iterable[None | int | SymInt]) -> list[bool]:
     # Non-nested symints are replaced with None in `make_runtime_safe()`
     return [s is None for s in lst]
 
@@ -267,10 +267,10 @@ def unwrap_tensor_subclasses(
 # subclass_metas is needed at runtime to compute which indices are symints in
 # the outer_size/outer_stride
 def runtime_unwrap_tensor_subclasses(
-    wrapped_args: list[Union[Tensor, int]],
+    wrapped_args: list[Tensor | int],
     *,
     append_symints: bool,
-    subclass_metas: Optional[list[Union[PlainTensorMeta, SubclassCreationMeta]]] = None,
+    subclass_metas: Optional[list[PlainTensorMeta | SubclassCreationMeta]] = None,
 ):
     def flatten_subclass(x: Tensor, meta: Optional[SubclassCreationMeta], *, out):
         if not is_traceable_wrapper_subclass(x):
@@ -306,7 +306,7 @@ def runtime_unwrap_tensor_subclasses(
             )
         return out
 
-    xs_inner: list[Union[int, Tensor, SymInt]] = []
+    xs_inner: list[int | Tensor | SymInt] = []
 
     if append_symints:
         assert subclass_metas is not None
@@ -365,9 +365,9 @@ def remap_unwrapped_subclass_arg_indices(wrapped_args, static_input_indices):
 # Turns a flattened list of tensor arguments into (maybe) subclass tensors.
 # This function is used both at trace time and runtime, so we have an is_runtime flag telling us which context we're in.
 def wrap_tensor_subclasses(
-    unwrapped_args: Union[tuple[Any, ...], list[Any]],
+    unwrapped_args: tuple[Any, ...] | list[Any],
     *,
-    subclass_metas: list[Union[PlainTensorMeta, SubclassCreationMeta]],
+    subclass_metas: list[PlainTensorMeta | SubclassCreationMeta],
     num_fw_outs_saved_for_bw: Optional[int] = None,
     included_subclass_symints: bool = False,
     is_runtime: bool = False,
@@ -439,7 +439,7 @@ def wrap_tensor_subclasses(
 # - when is_joint_structure is False, args is [*primals]
 def wrap_tensor_subclasses_maybe_joint(
     unwrapped_args, *, is_joint_structure: bool, meta: ViewAndMutationMeta
-) -> Union[tuple[Any, ...], list[Any]]:
+) -> tuple[Any, ...] | list[Any]:
     # Since this function is reused for both inference and joint graphs,
     if is_joint_structure:
         assert isinstance(unwrapped_args, tuple) and len(unwrapped_args) == 2

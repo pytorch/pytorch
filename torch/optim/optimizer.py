@@ -230,7 +230,7 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     return capturable_supported_devices
 
 
-def _to_scalar(x: Union[float, torch.Tensor]):
+def _to_scalar(x: float | torch.Tensor):
     r"""This function converts a hyperparameter to a 0-dimension (scalar) tensor
     if it is a nonzero-dimensions 1-element tensor. If it is not a tensor, it is
     kept as is.
@@ -331,9 +331,7 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
     return handle
 
 
-ParamsT: TypeAlias = Union[
-    Iterable[torch.Tensor], Iterable[dict[str, Any]], Iterable[tuple[str, torch.Tensor]]
-]
+ParamsT: TypeAlias = Iterable[torch.Tensor] | Iterable[dict[str, Any]] | Iterable[tuple[str, torch.Tensor]]
 
 R = TypeVar("R")
 T = TypeVar("T")
@@ -541,10 +539,7 @@ class Optimizer:
     def _group_tensors_by_device_and_dtype(
         tensorlistlist: TensorListList,
         with_indices: bool = False,
-    ) -> Union[
-        dict[tuple[None, None], tuple[TensorListList, Indices]],
-        dict[tuple[torch.device, torch.dtype], tuple[TensorListList, Indices]],
-    ]:
+    ) -> dict[tuple[None, None], tuple[TensorListList, Indices]] | dict[tuple[torch.device, torch.dtype], tuple[TensorListList, Indices]]:
         """Group a list of lists of tensors by device and dtype.
 
         Skips this step if we are compiling since this will occur during inductor lowering.

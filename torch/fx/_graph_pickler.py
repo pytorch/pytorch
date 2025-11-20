@@ -275,7 +275,7 @@ class _TensorPickleData:
             metadata = dataclasses.replace(metadata, base=new_base)
 
         def with_fake(
-            make_meta_t: Callable[[], torch.Tensor], device: Union[torch.device, str]
+            make_meta_t: Callable[[], torch.Tensor], device: torch.device | str
         ) -> FakeTensor:
             with no_dispatch():
                 return FakeTensor(
@@ -445,9 +445,7 @@ class _OpPickleData:
     @staticmethod
     def _pickle_op(
         name: str,
-        datacls: Union[
-            type["_OpOverloadPickleData"], type["_OpOverloadPacketPickleData"]
-        ],
+        datacls: type["_OpOverloadPickleData"] | type["_OpOverloadPacketPickleData"],
         options: Options,
     ) -> "_OpPickleData":
         if (ops_filter := options.ops_filter) and not ops_filter(name):

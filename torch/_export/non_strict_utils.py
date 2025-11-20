@@ -474,7 +474,7 @@ def make_fake_inputs(
 
         names: dict[str, tuple[int, int]] = {}
         source_pairs: list[tuple[Source, Source]] = []
-        derived_equalities: list[tuple[Source, Union[Source, Symbol], Callable]] = []
+        derived_equalities: list[tuple[Source, Source | Symbol, Callable]] = []
         phantom_symbols: dict[str, Symbol] = {}
         relaxed_sources: set[Source] = set()
         for constraint in constraints:
@@ -508,7 +508,7 @@ def make_fake_inputs(
 
 def _flatten_dynamic_shapes(
     combined_args: dict[str, Any],
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any]],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any],
 ) -> list[Any]:
     flat_shapes = []
 
@@ -535,7 +535,7 @@ def _clean_dynamic_markers(tensor: torch.Tensor) -> None:
 def produce_guards_and_solve_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
 ):
@@ -675,7 +675,7 @@ def make_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
     combined_args: dict[str, Any],
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
+    dynamic_shapes: dict[str, Any] | tuple[Any] | list[Any] | None,
     num_lifted_inputs: int,
 ):
     """

@@ -61,15 +61,13 @@ if TYPE_CHECKING:
 
 
 DEFAULT_PICKLE_PROTOCOL = 2
-AOTI_FILES: TypeAlias = Union[
-    list[Union[str, Weights]], dict[str, list[Union[str, Weights]]]
-]
+AOTI_FILES: TypeAlias = list[str | Weights] | dict[str, list[str | Weights]]
 
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def is_pt2_package(serialized_model: Union[bytes, str]) -> bool:
+def is_pt2_package(serialized_model: bytes | str) -> bool:
     """
     Check if the serialized model is a PT2 Archive package.
     """
@@ -569,7 +567,7 @@ def _package_payload_config(
 
 def _package_exported_programs(
     archive_writer: PT2ArchiveWriter,
-    exported_programs: Optional[Union[ExportedProgram, dict[str, ExportedProgram]]],
+    exported_programs: Optional[ExportedProgram | dict[str, ExportedProgram]],
     opset_version: Optional[dict[str, int]] = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> None:
@@ -633,7 +631,7 @@ def package_pt2(
     f: FileLike,
     *,
     exported_programs: Optional[
-        Union[ExportedProgram, dict[str, ExportedProgram]]
+        ExportedProgram | dict[str, ExportedProgram]
     ] = None,
     aoti_files: Optional[AOTI_FILES] = None,
     extra_files: Optional[dict[str, Any]] = None,
@@ -843,7 +841,7 @@ def _load_payload_config(
 def _load_state_dict(
     archive_reader: PT2ArchiveReader,
     model_name: str,
-) -> Union[dict[str, torch.Tensor], bytes]:
+) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy weight files
     legacy_weights_file = f"{WEIGHTS_DIR}{model_name}.pt"
     if legacy_weights_file in archive_reader.get_file_names():
@@ -897,7 +895,7 @@ def _load_state_dict(
 def _load_constants(
     archive_reader: PT2ArchiveReader,
     model_name: str,
-) -> Union[dict[str, torch.Tensor], bytes]:
+) -> dict[str, torch.Tensor] | bytes:
     # Make it BC compatible with legacy constant files
     legacy_constants_file = f"{CONSTANTS_DIR}{model_name}.pt"
     if legacy_constants_file in archive_reader.get_file_names():

@@ -262,7 +262,7 @@ def set_stance(
     stance: str = "default",
     *,
     skip_guard_eval_unsafe: bool = False,
-    force_backend: Union[str, Callable[..., Any], None] = None,
+    force_backend: str | Callable[..., Any] | None = None,
 ):
     """
     Set the current stance of the compiler.

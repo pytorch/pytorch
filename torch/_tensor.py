@@ -180,10 +180,7 @@ class Tensor(torch._C.TensorBase):
                 new_storage = self._typed_storage()._deepcopy(memo)
                 if self.is_quantized:
                     # quantizer_params can be different type based on torch attribute
-                    quantizer_params: Union[
-                        tuple[torch.qscheme, float, int],
-                        tuple[torch.qscheme, Tensor, Tensor, int],
-                    ]
+                    quantizer_params: tuple[torch.qscheme, float, int] | tuple[torch.qscheme, Tensor, Tensor, int]
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = (
                             self.qscheme(),
@@ -366,9 +363,7 @@ class Tensor(torch._C.TensorBase):
                     "Cannot serialize qtensor under skip_data context manager, file an issue if you need this feature"
                 )
             # quantizer_params can be different type based on torch attribute
-            quantizer_params: Union[
-                tuple[torch.qscheme, float, int], tuple[Any, Tensor, Tensor, int]
-            ]
+            quantizer_params: tuple[torch.qscheme, float, int] | tuple[Any, Tensor, Tensor, int]
             if self.qscheme() == torch.per_tensor_affine:
                 quantizer_params = (
                     torch.per_tensor_affine,
@@ -893,7 +888,7 @@ class Tensor(torch._C.TensorBase):
 
     def norm(
         self,
-        p: Optional[Union[float, str]] = "fro",
+        p: Optional[float | str] = "fro",
         dim=None,
         keepdim=False,
         dtype=None,
@@ -1529,7 +1524,7 @@ class Tensor(torch._C.TensorBase):
         return self.to_sparse()
 
     def dim_order(
-        self, *, ambiguity_check: Union[bool, list[torch.memory_format]] = False
+        self, *, ambiguity_check: bool | list[torch.memory_format] = False
     ):
         """
         dim_order(ambiguity_check=False) -> tuple

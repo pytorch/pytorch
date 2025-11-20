@@ -618,7 +618,7 @@ class AttrProxySource(ChainedSource):
 
 @dataclasses.dataclass(frozen=True)
 class DefaultsSource(ChainedSource):
-    idx_key: Union[int, str]
+    idx_key: int | str
     is_kw: bool = False
     field: str = dataclasses.field(init=False, repr=False, compare=False)
     _name: str = dataclasses.field(init=False, repr=False, compare=False)

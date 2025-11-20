@@ -40,9 +40,7 @@ _proxyable_classes: dict[type, None] = {}
 
 _is_fx_tracing_flag = False
 
-_ConstantAttributeType: TypeAlias = Union[
-    torch.Tensor, torch.ScriptObject, FakeScriptObject, pytree.TreeSpec
-]
+_ConstantAttributeType: TypeAlias = torch.Tensor | torch.ScriptObject | FakeScriptObject | pytree.TreeSpec
 
 _constant_attribute_types = get_args(_ConstantAttributeType)
 
@@ -740,7 +738,7 @@ class Tracer(TracerBase):
     @compatibility(is_backward_compatible=True)
     def trace(
         self,
-        root: Union[torch.nn.Module, Callable[..., Any]],
+        root: torch.nn.Module | Callable[..., Any],
         concrete_args: Optional[dict[str, Any]] = None,
     ) -> Graph:
         """
@@ -1234,7 +1232,7 @@ def _autowrap_check(
 
 
 @compatibility(is_backward_compatible=True)
-def wrap(fn_or_name: Union[str, Callable]):
+def wrap(fn_or_name: str | Callable):
     """
     This function can be called at module-level scope to register fn_or_name as a "leaf function".
     A "leaf function" will be preserved as a CallFunction node in the FX trace instead of being
@@ -1299,7 +1297,7 @@ def wrap(fn_or_name: Union[str, Callable]):
 
 @compatibility(is_backward_compatible=True)
 def symbolic_trace(
-    root: Union[torch.nn.Module, Callable[..., Any]],
+    root: torch.nn.Module | Callable[..., Any],
     concrete_args: Optional[dict[str, Any]] = None,
 ) -> GraphModule:
     """

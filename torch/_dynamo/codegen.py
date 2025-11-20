@@ -78,19 +78,19 @@ class PyCodegen:
         tx: "InstructionTranslatorBase",
         root: Optional[torch.nn.Module] = None,
         graph_output_var: Optional[str] = None,
-        tempvars: Optional[dict[Union[VariableTracker, Source], Any]] = None,
+        tempvars: Optional[dict[VariableTracker | Source, Any]] = None,
         overridden_sources: Optional[dict[Source, Source]] = None,
     ) -> None:
         self.root = root
-        self.top_of_stack: Optional[Union[VariableTracker, Source]] = None
-        self.uses: Counter[Union[VariableTracker, Source]] = collections.Counter()
+        self.top_of_stack: Optional[VariableTracker | Source] = None
+        self.uses: Counter[VariableTracker | Source] = collections.Counter()
         self.graph_outputs: dict[int, GraphOutputEntry] = {}
         self._output: list[Instruction] = []
         # This determines which VariableTracker/Source should be stored as
         # locals, and maps the VariableTracker/Source to the local variable
         # name. Note that it could map to None initially, in which case we'll
         # overwrite it to map to real temporary names via `add_cache`.
-        self.tempvars: dict[Union[VariableTracker, Source], Any] = tempvars or {}
+        self.tempvars: dict[VariableTracker | Source, Any] = tempvars or {}
         self.tx = tx
         self.graph_output_var = graph_output_var
         self.code_options = self.tx.output.code_options
@@ -153,7 +153,7 @@ class PyCodegen:
             self.clear_tos()
 
     def __call__(
-        self, value: Union[VariableTracker, Source, None], allow_cache: bool = True
+        self, value: VariableTracker | Source | None, allow_cache: bool = True
     ) -> None:
         """
         Generate code such that top-of-stack (TOS) is set to value.
@@ -392,12 +392,12 @@ class PyCodegen:
         output.append(self.create_load_const(index))
         output.append(self.create_binary_subscr())
 
-    def add_cache(self, value: Union[VariableTracker, Source]) -> None:
+    def add_cache(self, value: VariableTracker | Source) -> None:
         var = self.new_var()
         self.tempvars[value] = var
         self._output.append(self.create_store(var))
 
-    def foreach(self, items: Iterable[Union[VariableTracker, Source]]) -> None:
+    def foreach(self, items: Iterable[VariableTracker | Source]) -> None:
         for i in items:
             self(i)
 

@@ -57,7 +57,7 @@ LayoutOrIntTuple: TypeAlias = Union["Layout", IntTuple]
 LayoutProfile: TypeAlias = Optional[Union[tuple[object, ...], "Layout"]]
 LayoutInput: TypeAlias = Optional[Union["Layout", IntTuple, tuple[object, ...]]]
 CoordinateType: TypeAlias = Optional[
-    Union[int, IntTuple, tuple[object, ...]]
+    int | IntTuple | tuple[object, ...]
 ]  # Input for slice_ and crd2idx functions
 
 
@@ -136,7 +136,7 @@ class Layout(LayoutBase):
 
 
 # Make Layout from a list of layouts (each layout it's own mode in the result)
-def make_layout(*layouts: Union[Layout, tuple[Layout, ...]]) -> Layout:
+def make_layout(*layouts: Layout | tuple[Layout, ...]) -> Layout:
     if len(layouts) == 1 and not is_layout(layouts[0]):
         layouts = layouts[0]
 

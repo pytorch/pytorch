@@ -615,7 +615,7 @@ class CppWrapperGpu(CppWrapperCpu):
 
     def generate_args_decl(
         self,
-        code: Union[IndentedBuffer, Self],
+        code: IndentedBuffer | Self,
         call_args,
         arg_types,
         arg_signatures,

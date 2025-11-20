@@ -21,7 +21,7 @@ if TYPE_CHECKING:
 
 # Module-wide registry for template heuristics
 _TEMPLATE_HEURISTIC_REGISTRY: dict[
-    tuple[Union[str, None], ...], type[TemplateConfigHeuristics]
+    tuple[str | None, ...], type[TemplateConfigHeuristics]
 ] = {}
 
 # Manual cache for successful lookups only (fallback instances are not cached)
@@ -32,7 +32,7 @@ log = logging.getLogger(__name__)
 
 def register_template_heuristic(
     template_name: str,
-    device_type: Union[str, None],
+    device_type: str | None,
     register: bool = True,
     op_name: Optional[str] = None,
 ) -> Any:
@@ -60,7 +60,7 @@ def register_template_heuristic(
         cls: type[TemplateConfigHeuristics],
     ) -> type[TemplateConfigHeuristics]:
         if register:
-            key: tuple[Union[str, None], ...] = (template_name, device_type, op_name)
+            key: tuple[str | None, ...] = (template_name, device_type, op_name)
             _TEMPLATE_HEURISTIC_REGISTRY[key] = cls
             log.info(
                 f"Registered template heuristic: {cls.__name__} for '{template_name=}', '{device_type=}', '{op_name=}'"  # noqa: G004

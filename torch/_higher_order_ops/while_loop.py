@@ -37,8 +37,8 @@ class WhileLoopOp(HigherOrderOperator):
         self,
         cond_fn: Callable,
         body_fn: Callable,
-        carried_inputs: tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
+        carried_inputs: tuple[torch.Tensor | int | float | bool],
+        additional_inputs: tuple[torch.Tensor | torch.SymInt | int, ...],
         /,
     ):
         if not isinstance(carried_inputs, (tuple, list)):
@@ -247,7 +247,7 @@ def while_loop(cond_fn, body_fn, carried_inputs):
         with _temp_remove_metadata_torch_function_mode() as metadata_mode:
             with _temp_remove_metadata_torch_function_mode() as metadata_mode:
                 if metadata_mode:
-                    backend: Union[str, Callable[..., Any]] = (
+                    backend: str | Callable[..., Any] = (
                         make_eager_backend_with_torch_function_mode(metadata_mode)
                     )
                 else:
@@ -622,8 +622,8 @@ class WhileLoopStackOutputOp(HigherOrderOperator):
         self,
         cond_fn: Callable,
         body_fn: Callable,
-        carried_inputs: tuple[Union[torch.Tensor, int, float, bool]],
-        additional_inputs: tuple[Union[torch.Tensor, torch.SymInt, int], ...],
+        carried_inputs: tuple[torch.Tensor | int | float | bool],
+        additional_inputs: tuple[torch.Tensor | torch.SymInt | int, ...],
         /,
     ):
         if not isinstance(carried_inputs, (tuple, list)):

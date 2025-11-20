@@ -26,8 +26,8 @@ F = TypeVar(
     NativeFunction,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
-    Union[NativeFunction, NativeFunctionsGroup],
-    Union[NativeFunction, NativeFunctionsViewGroup],
+    NativeFunction | NativeFunctionsGroup,
+    NativeFunction | NativeFunctionsViewGroup,
 )
 
 F2 = TypeVar(

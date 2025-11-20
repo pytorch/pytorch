@@ -18,7 +18,7 @@ logger = logging.getLogger("torch.distributed.fsdp.fully_shard")
 
 
 def _get_post_forward_mesh_info(
-    reshard_after_forward: Union[bool, int], mesh_info: FSDPMeshInfo
+    reshard_after_forward: bool | int, mesh_info: FSDPMeshInfo
 ) -> Optional[FSDPMeshInfo]:
     shard_mesh_size = mesh_info.shard_mesh_size
     if not isinstance(reshard_after_forward, (bool, int)):

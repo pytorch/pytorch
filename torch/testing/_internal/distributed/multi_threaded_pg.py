@@ -132,7 +132,7 @@ class AllToAllBase:
     def _size_cumsum(
         self,
         buf_size: int,
-        sizes: Union[torch.Tensor, list[int], None],
+        sizes: torch.Tensor | list[int] | None,
         world_size: int,
     ) -> torch.Tensor:
         if sizes is None or len(sizes) == 0:
@@ -535,7 +535,7 @@ class WorldData:
     group_count: int
     tags_to_pg: dict[str, list[dist.ProcessGroup]]
     pg_to_tag: dict[dist.ProcessGroup, str]
-    pg_coalesce_state: dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]
+    pg_coalesce_state: dict[dist.ProcessGroup, list[_CollOp | P2POp]]
 
 
 class ThreadLocalWorld:
@@ -589,7 +589,7 @@ class ThreadLocalWorld:
         return self._get_world().pg_to_tag
 
     @property
-    def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[Union[_CollOp, P2POp]]]:
+    def pg_coalesce_state(self) -> dict[dist.ProcessGroup, list[_CollOp | P2POp]]:
         return self._get_world().pg_coalesce_state
 
 

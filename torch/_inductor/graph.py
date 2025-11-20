@@ -176,7 +176,7 @@ def is_magic_method(op: Any) -> bool:
 
 def getattr_recursive(
     obj: GraphModule, target: str
-) -> Union[Tensor, torch._C.ScriptObject, GraphModule]:
+) -> Tensor | torch._C.ScriptObject | GraphModule:
     target_atoms = target.split(".")
     attr_itr = obj
     for i, atom in enumerate(target_atoms):
@@ -376,7 +376,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         self.sizevars = SizeVarAllocator(shape_env)
         self.graph_input_names: list[str] = []
-        self.graph_inputs: dict[str, Union[TensorBox, TorchBindObject, sympy.Expr]] = {}
+        self.graph_inputs: dict[str, TensorBox | TorchBindObject | sympy.Expr] = {}
         self.graph_inputs_original: dict[str, InputBuffer] = {}
         self.partition_maps: Optional[list[GraphPartitionMap]] = None
         self.zero_dim_cpu_tensor_list: OrderedSet[str] = OrderedSet()
@@ -415,7 +415,7 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.named_parameters if const_module else {}
         )
         self.torchbind_constants: dict[
-            str, Union[torch._C.ScriptObject, FakeScriptObject]
+            str, torch._C.ScriptObject | FakeScriptObject
         ] = {}
         self.seen_subgraphs: dict[str, ir.Subgraph] = {}
         self.constant_reprs: dict[str, str] = {}
@@ -529,7 +529,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def symbolic_sizes_strides(
         self, ex: torch.Tensor
-    ) -> tuple[Sequence[Union[int, Expr]], Sequence[Union[int, Expr]]]:
+    ) -> tuple[Sequence[int | Expr], Sequence[int | Expr]]:
         """
         Support dynamic shapes and dynamic strides by assigning variables
         to each dimension.  We duck-shape tensors, so if two tensors
@@ -576,9 +576,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def get_allocation_size(
         self,
-        node: Union[
-            ir.TensorBox, ir.StorageBox, ir.Buffer, WorkspaceArg, ir.TorchBindObject
-        ],
+        node: ir.TensorBox | ir.StorageBox | ir.Buffer | WorkspaceArg | ir.TorchBindObject,
     ) -> Sequence[Expr]:
         if isinstance(node, ir.TensorBox):
             node = node.data  # type: ignore[assignment]
@@ -594,7 +592,7 @@ class GraphLowering(torch.fx.Interpreter):
             return node.get_size()
 
     def get_allocation_storage_size(
-        self, node: Union[ir.Buffer, WorkspaceArg, ir.TorchBindObject]
+        self, node: ir.Buffer | WorkspaceArg | ir.TorchBindObject
     ) -> Expr:
         layout = node.get_layout()
         size = self.get_allocation_size(node)  # consider inplace padding
@@ -604,7 +602,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def has_feature(
         self,
-        device: Union[torch._inductor.ir.IRNode, device, None],
+        device: torch._inductor.ir.IRNode | device | None,
         feature: BackendFeature,
     ) -> bool:
         assert isinstance(feature, BackendFeature), feature
@@ -917,7 +915,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def try_get_buffer(
         self, buffer_name: str
-    ) -> Optional[Union[ir.TensorBox, ir.Buffer, ir.TorchBindObject]]:
+    ) -> Optional[ir.TensorBox | ir.Buffer | ir.TorchBindObject]:
         if buffer_name in self.name_to_buffer:
             return self.name_to_buffer[buffer_name]
         if buffer_name in self.graph_inputs:
@@ -938,7 +936,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def get_buffer(
         self, buffer_name: str
-    ) -> Union[ir.TensorBox, ir.Buffer, ir.TorchBindObject]:
+    ) -> ir.TensorBox | ir.Buffer | ir.TorchBindObject:
         buf = self.try_get_buffer(buffer_name)
         if buf is not None:
             return buf
@@ -966,7 +964,7 @@ class GraphLowering(torch.fx.Interpreter):
             return self.get_dtype(m.group(1))
         raise KeyError(f"could not find {buffer_name}")
 
-    def get_numel(self, buffer_name: str) -> Union[int, Expr]:
+    def get_numel(self, buffer_name: str) -> int | Expr:
         if buffer_name in self.constants:
             return self.constants[buffer_name].numel()
         if buffer_name in self.name_to_buffer:
@@ -1017,9 +1015,9 @@ class GraphLowering(torch.fx.Interpreter):
         return name
 
     def register_users_of(
-        self, node_output: Union[Iterable[ir.IRNode], ir.IRNode]
+        self, node_output: Iterable[ir.IRNode] | ir.IRNode
     ) -> None:
-        def register(value: Union[Iterable[ir.IRNode], ir.IRNode]) -> None:
+        def register(value: Iterable[ir.IRNode] | ir.IRNode) -> None:
             if isinstance(value, (list, tuple)):
                 for x in value:
                     register(x)
@@ -1060,7 +1058,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
 
     def allocate_non_dup_const_name(
-        self, name: Optional[str], data: Union[Tensor]
+        self, name: Optional[str], data: Tensor
     ) -> str:
         if not config.aot_inductor.use_runtime_constant_folding:
             for constant_name, value in self.constants.items():
@@ -1092,7 +1090,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def add_tensor_constant(
         self, data: Tensor, name: Optional[str] = None
-    ) -> Union[TensorBox, ir.ShapeAsConstantBuffer]:
+    ) -> TensorBox | ir.ShapeAsConstantBuffer:
         new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
@@ -1149,7 +1147,7 @@ class GraphLowering(torch.fx.Interpreter):
         target: str,  # type: ignore[override]
         args: tuple[object],  # type: ignore[override]
         kwargs: dict[str, object],
-    ) -> Union[Expr, TensorBox, None]:
+    ) -> Expr | TensorBox | None:
         self.placeholder_idx += 1
         example = super().placeholder(target, args, kwargs)  # type: ignore[arg-type]
         target = self.qualify_name(target)
@@ -1379,9 +1377,7 @@ class GraphLowering(torch.fx.Interpreter):
         target: str,  # type: ignore[override]
         args: tuple[()],  # type: ignore[override]
         kwargs: dict[str, object],
-    ) -> Union[
-        Constant, TensorBox, ShapeAsConstantBuffer, ir.Subgraph, TorchBindObject
-    ]:
+    ) -> Constant | TensorBox | ShapeAsConstantBuffer | ir.Subgraph | TorchBindObject:
         # this is a constant
         value = getattr_recursive(self.module, target)  # type: ignore[arg-type]
 
@@ -2116,7 +2112,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.wrapper_code._names_iter = self.const_module.wrapper_code._names_iter
 
     def extract_autotune_inputs(
-        self, example_inputs: list[Union[int, float, torch.Tensor]]
+        self, example_inputs: list[int | float | torch.Tensor]
     ) -> None:
         import copy
 
@@ -2218,10 +2214,10 @@ class GraphLowering(torch.fx.Interpreter):
         """
         if any(device in self.device_types for device in ["cuda", "xpu"]):
 
-            def extract_real_inputs() -> list[Union[int, float, torch.Tensor]]:
+            def extract_real_inputs() -> list[int | float | torch.Tensor]:
                 def materialize(
-                    x: Union[torch.SymInt, torch.SymFloat, torch.Tensor],
-                ) -> Union[int, float, torch.Tensor]:
+                    x: torch.SymInt | torch.SymFloat | torch.Tensor,
+                ) -> int | float | torch.Tensor:
                     if x is None:
                         # pyrefly: ignore [bad-return]
                         return None

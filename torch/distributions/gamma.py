@@ -57,8 +57,8 @@ class Gamma(ExponentialFamily):
 
     def __init__(
         self,
-        concentration: Union[Tensor, float],
-        rate: Union[Tensor, float],
+        concentration: Tensor | float,
+        rate: Tensor | float,
         validate_args: Optional[bool] = None,
     ) -> None:
         self.concentration, self.rate = broadcast_all(concentration, rate)

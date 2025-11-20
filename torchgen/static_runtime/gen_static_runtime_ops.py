@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 NativeGroupT = TypeVar(
     "NativeGroupT",
-    bound=Union[NativeFunctionsGroup, NativeFunctionsViewGroup],
+    bound=NativeFunctionsGroup | NativeFunctionsViewGroup,
 )
 
 

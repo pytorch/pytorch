@@ -53,7 +53,7 @@ use_buck = inductor_config.is_fbcode()
 
 
 class AOTIMinifierError(Exception):
-    def __init__(self, original_exception: Union[str, Exception]) -> None:
+    def __init__(self, original_exception: str | Exception) -> None:
         additional_message = "This error is caused by a bug in the AOTI minifier, please report a bug to PyTorch"
         full_message = f"{additional_message}: {str(original_exception)}"
         super().__init__(full_message)
@@ -141,7 +141,7 @@ def save_graph_repro_ep(
     stable_output: bool = False,
     save_dir: Optional[str] = None,
     command: str = "run",
-    accuracy: Optional[Union[str, bool]] = None,
+    accuracy: Optional[str | bool] = None,
     check_str: Optional[str] = None,
     module_in_comment: bool = False,
     strict: bool = False,
@@ -194,7 +194,7 @@ def dump_compiler_graph_state(
     compiler_name: str,
     *,
     config_patches: Optional[dict[str, str]] = None,
-    accuracy: Optional[Union[str, bool]] = None,
+    accuracy: Optional[str | bool] = None,
     strict: bool = False,
 ) -> None:
     subdir = os.path.join(minifier_dir(), "checkpoints")
@@ -475,7 +475,7 @@ def run_repro(
     *,
     config_patches: Optional[dict[str, str]] = None,
     command: str = "run",
-    accuracy: Union[bool, str] = "",
+    accuracy: bool | str = "",
     save_dir: Optional[str] = None,
     tracing_mode: Optional[str] = None,
     check_str: Optional[str] = None,

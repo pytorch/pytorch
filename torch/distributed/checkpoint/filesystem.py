@@ -319,7 +319,7 @@ def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[Writ
 def _write_item(
     transforms: _StorageWriterTransforms,
     stream: io.IOBase,
-    data: Union[io.BytesIO, torch.Tensor],
+    data: io.BytesIO | torch.Tensor,
     write_item: WriteItem,
     storage_key: str,
     serialization_format: SerializationFormat,
@@ -481,40 +481,40 @@ class FileSystemBase(ABC):
     @contextmanager
     @abstractmethod
     def create_stream(
-        self, path: Union[str, os.PathLike], mode: str
+        self, path: str | os.PathLike, mode: str
     ) -> Generator[io.IOBase, None, None]: ...
 
     @abstractmethod
     def concat_path(
-        self, path: Union[str, os.PathLike], suffix: str
-    ) -> Union[str, os.PathLike]: ...
+        self, path: str | os.PathLike, suffix: str
+    ) -> str | os.PathLike: ...
 
     @abstractmethod
     def rename(
-        self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
+        self, path: str | os.PathLike, new_path: str | os.PathLike
     ) -> None: ...
 
     @abstractmethod
-    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]: ...
+    def init_path(self, path: str | os.PathLike) -> str | os.PathLike: ...
 
     @abstractmethod
-    def mkdir(self, path: Union[str, os.PathLike]) -> None: ...
+    def mkdir(self, path: str | os.PathLike) -> None: ...
 
     @classmethod
     @abstractmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool: ...
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool: ...
 
     @abstractmethod
-    def exists(self, path: Union[str, os.PathLike]) -> bool: ...
+    def exists(self, path: str | os.PathLike) -> bool: ...
 
     @abstractmethod
-    def rm_file(self, path: Union[str, os.PathLike]) -> None: ...
+    def rm_file(self, path: str | os.PathLike) -> None: ...
 
 
 class FileSystem(FileSystemBase):
     @contextmanager
     def create_stream(
-        self, path: Union[str, os.PathLike], mode: str
+        self, path: str | os.PathLike, mode: str
     ) -> Generator[io.IOBase, None, None]:
         if not isinstance(path, Path):
             path = Path(path)
@@ -522,32 +522,32 @@ class FileSystem(FileSystemBase):
             yield cast(io.IOBase, stream)
 
     def concat_path(
-        self, path: Union[str, os.PathLike], suffix: str
-    ) -> Union[str, os.PathLike]:
+        self, path: str | os.PathLike, suffix: str
+    ) -> str | os.PathLike:
         if not isinstance(path, Path):
             path = Path(path)
         return path / suffix
 
-    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
+    def init_path(self, path: str | os.PathLike) -> str | os.PathLike:
         if not isinstance(path, Path):
             path = Path(path)
         return path
 
     def rename(
-        self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
+        self, path: str | os.PathLike, new_path: str | os.PathLike
     ) -> None:
         if not isinstance(path, Path):
             path = Path(path)
 
         path.rename(cast(Path, new_path))
 
-    def mkdir(self, path: Union[str, os.PathLike]) -> None:
+    def mkdir(self, path: str | os.PathLike) -> None:
         if not isinstance(path, Path):
             path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         if isinstance(checkpoint_id, Path):
             return True
 
@@ -560,17 +560,17 @@ class FileSystem(FileSystemBase):
 
         return False
 
-    def exists(self, path: Union[str, os.PathLike]) -> bool:
+    def exists(self, path: str | os.PathLike) -> bool:
         if not isinstance(path, Path):
             path = Path(path)
         return path.exists()
 
-    def rm_file(self, path: Union[str, os.PathLike]) -> None:
+    def rm_file(self, path: str | os.PathLike) -> None:
         if not isinstance(path, Path):
             path = Path(path)
         path.unlink()
 
-    def ls(self, path: Union[str, os.PathLike]) -> list[str]:
+    def ls(self, path: str | os.PathLike) -> list[str]:
         if not isinstance(path, Path):
             path = Path(path)
         return [str(p) for p in path.iterdir()]
@@ -592,7 +592,7 @@ class _FileSystemWriter(StorageWriter):
 
     def __init__(
         self,
-        path: Union[str, os.PathLike],
+        path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,
@@ -631,7 +631,7 @@ class _FileSystemWriter(StorageWriter):
         self.rank: Optional[int] = None
         self.use_collectives: bool = True
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
         self.save_id = _generate_uuid()
@@ -802,14 +802,14 @@ class _FileSystemWriter(StorageWriter):
         return cast(Path, self.fs.concat_path(self.path, filename))
 
     @property
-    def checkpoint_id(self) -> Union[str, os.PathLike]:
+    def checkpoint_id(self) -> str | os.PathLike:
         """
         return the checkpoint_id that will be used to save the checkpoint.
         """
         return self.path
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
@@ -842,7 +842,7 @@ class _StorageReaderTransforms:
 class FileSystemReader(StorageReader):
     def __init__(
         self,
-        path: Union[str, os.PathLike],
+        path: str | os.PathLike,
         _extension_registry: Optional[ExtensionRegistry] = None,  # EXPERIMENTAL
     ) -> None:
         super().__init__()
@@ -857,7 +857,7 @@ class FileSystemReader(StorageReader):
     def _slice_file(self, file, sinfo: _StorageInfo) -> IO[bytes]:
         return cast(IO[bytes], _create_file_view(file, sinfo.offset, sinfo.length))
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         self.storage_data = {}
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
@@ -956,14 +956,14 @@ class FileSystemReader(StorageReader):
         return plans
 
     @property
-    def checkpoint_id(self) -> Union[str, os.PathLike]:
+    def checkpoint_id(self) -> str | os.PathLike:
         """
         return the checkpoint_id that will be used to load the checkpoint.
         """
         return self.path
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
@@ -984,7 +984,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
 
     def __init__(
         self,
-        path: Union[str, os.PathLike],
+        path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,

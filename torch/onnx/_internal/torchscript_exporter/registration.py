@@ -263,7 +263,7 @@ class SymbolicRegistry:
 
 def onnx_symbolic(
     name: str,
-    opset: Union[OpsetVersion, Sequence[OpsetVersion]],
+    opset: OpsetVersion | Sequence[OpsetVersion],
     decorate: Optional[Sequence[Callable]] = None,
     custom: bool = False,
 ) -> Callable:
@@ -314,7 +314,7 @@ def onnx_symbolic(
 
 def custom_onnx_symbolic(
     name: str,
-    opset: Union[OpsetVersion, Sequence[OpsetVersion]],
+    opset: OpsetVersion | Sequence[OpsetVersion],
     decorate: Optional[Sequence[Callable]] = None,
 ) -> Callable:
     """Registers a custom symbolic function.
