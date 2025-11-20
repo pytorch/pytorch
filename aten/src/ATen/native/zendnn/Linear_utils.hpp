@@ -121,16 +121,5 @@ inline void check_tensor_dtypes_for_linear(
   }
 }
 
-inline void set_linear_context_attributes(
-    matmul_context_t& matmul_context,
-    tensor_t& weights,
-    std::optional<std::reference_wrapper<tensor_t>> bias_opt_ref =
-        std::nullopt) {
-  matmul_context.set_param("weights", weights);
-  if (bias_opt_ref.has_value()) {
-    tensor_t& bias = bias_opt_ref->get();
-    matmul_context.set_param("bias", bias);
-  }
-}
 } // namespace at::native
 #endif // AT_ZENDNN_ENABLED()
