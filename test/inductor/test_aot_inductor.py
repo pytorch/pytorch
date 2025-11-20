@@ -7433,6 +7433,50 @@ class AOTInductorTestsTemplate:
             "RAIIAtenTensorHandle buf0(buf0_handle_restrided);"
         ).run(code)
 
+    def test_codegen_int_array_var_fix_memory_leak(self):
+        """
+        Fix https://github.com/pytorch/pytorch/issues/167630
+        """
+        if self.device != "cuda":
+            raise unittest.SkipTest("test is only for cuda")
+
+        def make_mlp(in_dim=128, hidden=256, out_dim=64, depth=3):
+            layers = []
+            d = in_dim
+            for _ in range(depth):
+                layers += [nn.Linear(d, hidden), nn.ReLU()]
+                d = hidden
+            layers += [nn.Linear(d, out_dim)]
+            return nn.Sequential(*layers)
+
+        batch = 32
+        in_dim = 2048
+        hidden = 512
+        out_dim = 10
+        depth = 6
+
+        import gc
+
+        allocated_memory = []
+        for _ in range(3):
+            torch.cuda.reset_peak_memory_stats()
+
+            model = make_mlp(in_dim, hidden, out_dim, depth).to(self.device)
+            example_inputs = (torch.randn(batch, in_dim, device=self.device),)
+            ep = torch.export.export(
+                model,
+                example_inputs,
+            )
+            torch._inductor.aoti_compile_and_package(ep)
+
+            del model, example_inputs, ep
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            gc.collect()
+            allocated_memory.append(torch.cuda.memory_allocated())
+
+        self.assertTrue(allocated_memory[1] == allocated_memory[2])
+
     @unittest.skipIf(IS_MACOS, "might have no readelf on Mac")
     def test_libtorch_free_so(self):
         class Model(torch.nn.Module):
