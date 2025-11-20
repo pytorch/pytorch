@@ -58,6 +58,7 @@ from torch._dynamo.utils import (
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
@@ -358,6 +359,13 @@ class GraphArg:
     # Then we cannot only keep a weak reference to it.  This lets you
     # stash a strong reference too.
     example_strong_ref: Optional[torch.Tensor] = None
+
+    def __setattr__(self, name, value):
+        # Use object.__setattr__ to bypass Dynamo's STORE_ATTR interception.
+        # This is needed because when PYTORCH_TEST_WITH_DYNAMO=1, even internal
+        # GraphArg creation can be traced, and with replay_side_effects=False,
+        # normal STORE_ATTR bytecode only records mutations without applying them.
+        object.__setattr__(self, name, value)
 
     @property
     def example(self):
@@ -1445,27 +1453,32 @@ class VariableBuilder:
                     source=self.source,
                 )
 
-            # This exists to allow a smoother transition.
-            # The implications are:
-            # The script objects won't be tracked as proxies.
-            # Methods on these objects won't show up in the graph.
-            # The original script object might be mutated.
-            if not hasattr(value, "__obj_flatten__"):
-                return self.wrap_user_defined(value)
+            if is_opaque_type(type(value)):
+                self.install_guards(GuardBuilder.TYPE_MATCH)
 
-            # Install the guards on the fully qualified name of the script object
-            LazyVariableTracker.realize_all(
-                VariableBuilder(self.tx, ScriptObjectQualifiedNameSource(self.source))(
-                    value._type().qualified_name()  # type: ignore[attr-defined]
+            elif not hasattr(value, "__obj_flatten__"):
+                # This exists to allow a smoother transition.
+                # The implications are:
+                # The script objects won't be tracked as proxies.
+                # Methods on these objects won't show up in the graph.
+                # The original script object might be mutated.
+                return self.wrap_user_defined(value)
+            else:
+                # Install the guards on the fully qualified name of the script object
+                LazyVariableTracker.realize_all(
+                    VariableBuilder(
+                        self.tx, ScriptObjectQualifiedNameSource(self.source)
+                    )(
+                        value._type().qualified_name()  # type: ignore[attr-defined]
+                    )
                 )
-            )
-            # Install the guards on the content of the script object by setting the source
-            # to be FlattenScriptObjectSource, which calls __obj_flatten__() to get the contents.
-            LazyVariableTracker.realize_all(
-                VariableBuilder(self.tx, FlattenScriptObjectSource(self.source))(
-                    value.__obj_flatten__()
+                # Install the guards on the content of the script object by setting the source
+                # to be FlattenScriptObjectSource, which calls __obj_flatten__() to get the contents.
+                LazyVariableTracker.realize_all(
+                    VariableBuilder(self.tx, FlattenScriptObjectSource(self.source))(
+                        value.__obj_flatten__()
+                    )
                 )
-            )
 
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
