@@ -203,6 +203,25 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
   return outputs;
 }
 
+std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
+    std::vector<at::Tensor> inputs,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::string reduce_op,
+    int64_t group_size,
+    // NOLINTNEXTLINE(performance-unnecessary-value-param)
+    std::string group_name,
+    std::vector<at::Tensor>& outputs) {
+  c10d::ReduceScatterOptions opts;
+  opts.reduceOp = to_reduce_op(reduce_op);
+
+  auto group = c10d::resolve_process_group(group_name);
+  auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
+  for (const auto& tensor : outputs) {
+    c10d::register_work(tensor, work);
+  }
+  return outputs;
+}
+
 at::Tensor reduce_scatter_tensor(
     const at::Tensor& input,
     std::string reduce_op,
@@ -218,6 +237,36 @@ at::Tensor reduce_scatter_tensor(
   std::vector<at::Tensor> inputs{input};
   return reduce_scatter_tensor_coalesced(
       inputs, std::move(reduce_op), group_size, std::move(group_name))[0];
+}
+
+at::Tensor reduce_scatter_tensor_out(
+    const at::Tensor& input,
+    std::string reduce_op,
+    int64_t group_size,
+    std::string group_name,
+    at::Tensor& output) {
+  TORCH_CHECK(input.is_contiguous());
+  if (input.is_complex()) {
+    TORCH_CHECK(output.is_complex())
+    auto real_input = at::view_as_real(input);
+    std::vector<at::Tensor> inputs{real_input};
+    auto real_output = at::view_as_real(output);
+    std::vector<at::Tensor> outputs{real_output};
+    return at::view_as_complex(reduce_scatter_tensor_coalesced_out(
+        inputs,
+        std::move(reduce_op),
+        group_size,
+        std::move(group_name),
+        outputs)[0]);
+  }
+  std::vector<at::Tensor> inputs{input};
+  std::vector<at::Tensor> outputs{output};
+  return reduce_scatter_tensor_coalesced_out(
+      inputs,
+      std::move(reduce_op),
+      group_size,
+      std::move(group_name),
+      outputs)[0];
 }
 
 at::Tensor all_to_all_single(
@@ -330,6 +379,13 @@ TORCH_LIBRARY(_c10d_functional, m) {
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
           c10d::reduce_scatter_tensor),
+      {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
+
+  m.def(
+      "reduce_scatter_tensor_out(Tensor input, str reduce_op, int group_size, str group_name, *, Tensor(a!) out) -> Tensor(a!)",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          c10d::reduce_scatter_tensor_out),
       {at::Tag::pt2_compliant_tag, at::Tag::needs_contiguous_strides});
 
   m.def(
