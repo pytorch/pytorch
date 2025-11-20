@@ -2069,6 +2069,10 @@ def main():
     check_pip_packages()
 
     options = parse_args()
+    tests_to_include_env = os.environ.get("TESTS_TO_INCLUDE", "").strip()
+    if tests_to_include_env:
+        options.include = tests_to_include_env.split()
+        options.enable_td = False
 
     # Include sharding info in all metrics
     which_shard, num_shards = get_sharding_opts(options)

@@ -28,6 +28,11 @@ on:
         default: 240
         description: |
           Set the maximum (in minutes) how long the workflow should take to finish
+      tests-to-include:
+        required: false
+        type: string
+        default: ""
+        description: Space-separated tests to include (empty string implies default list)
       use-gha:
         required: false
         type: string
@@ -327,6 +332,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
           PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
+          TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -405,6 +411,7 @@ jobs:
             -e XLA_CLANG_CACHE_S3_BUCKET_NAME \
             -e PYTORCH_TEST_CUDA_MEM_LEAK_CHECK \
             -e PYTORCH_TEST_RERUN_DISABLED_TESTS \
+            -e TESTS_TO_INCLUDE \
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e HUGGING_FACE_HUB_TOKEN \
             -e VLLM_TEST_HUGGING_FACE_TOKEN \
