@@ -16101,7 +16101,7 @@
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
 
-- func: quantize_mx(Tensor self, int block_size, ScalarType dtype, int scale_calculation_mode) -> (Tensor output, Tensor scale)
+- func: quantize_mx(Tensor self, int dim, int block_size, ScalarType dtype, int scale_calculation_mode) -> (Tensor output, Tensor scale)
   variants: function, method
   dispatch:
     CPU: quantize_mx_cpu

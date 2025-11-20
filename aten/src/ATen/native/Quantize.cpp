@@ -147,13 +147,15 @@ void quantize_mxfp8_impl(
 
 std::tuple<Tensor, Tensor> quantize_mx_cpu(
     const Tensor& self,
+    int64_t dim,
     int64_t block_size,
     at::ScalarType dtype,
     int64_t scale_calculation_mode) {
   
   bool is_1d = (self.dim() == 1);
   const Tensor input = is_1d ? self.unsqueeze(0) : self;
-
+  
+  TORCH_CHECK(dim == -1, "Quantization currently only supported for dim -1");
   TORCH_CHECK(input.dim() == 2, "Input tensor must be 2D");
   TORCH_CHECK(block_size > 0, "Block size must be positive");
   TORCH_CHECK(scale_calculation_mode >= 0 && scale_calculation_mode <= 1, "scale_calculation_mode must be 0, 1");
@@ -199,6 +201,7 @@ std::tuple<Tensor, Tensor> quantize_mx_cpu(
 // Meta kernel: Only computes shapes, no actual computation
 std::tuple<Tensor, Tensor> quantize_mx_meta(
     const Tensor& self,
+    int64_t dim,
     int64_t block_size,
     at::ScalarType dtype_opt,
     int64_t scale_calculation_mode) {
@@ -210,6 +213,7 @@ std::tuple<Tensor, Tensor> quantize_mx_meta(
   const Tensor input = is_1d ? self.unsqueeze(0) : self;
 
   // Validation (same as other kernels)
+  TORCH_CHECK(dim == -1, "Quantization currently only supported for dim -1");
   TORCH_CHECK(input.dim() >= 1, "Input tensor must have at least 1 dimension");
   TORCH_CHECK(block_size > 0, "Block size must be positive");
   

@@ -7,6 +7,7 @@ namespace native {
 
 std::tuple<Tensor, Tensor> quantize_mx_cpu(
     const Tensor& self,
+    int64_t dim,
     int64_t block_size,
     at::ScalarType dtype,
     int64_t rounding_mode);
@@ -15,6 +16,7 @@ std::tuple<Tensor, Tensor> quantize_mx_cpu(
 // Meta kernel for torch.compile (shape inference only)
 std::tuple<Tensor, Tensor> quantize_mx_meta(
     const Tensor& self,
+    int64_t dim,
     int64_t block_size,
     at::ScalarType dtype,
     int64_t rounding_mode);

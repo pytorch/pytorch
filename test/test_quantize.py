@@ -9,6 +9,7 @@ class TestQuantizeOp(unittest.TestCase):
         input_tensor = torch.randn(128, dtype=torch.float32)
         output, scale = torch.quantize_mx(
             input_tensor,
+            dim=-1,
             block_size=32,
             dtype=torch.float8_e4m3fn,
             scale_calculation_mode=0
@@ -19,6 +20,7 @@ class TestQuantizeOp(unittest.TestCase):
         self.assertEqual(scale.shape[0], 128//32)
 
         golden_output, golden_scale = quantize_python(input_tensor,
+            dim =-1,
             block_size=32,
             dtype=torch.float8_e4m3fn,
             scale_calculation_mode=0
@@ -31,6 +33,7 @@ class TestQuantizeOp(unittest.TestCase):
         input_tensor = torch.randn(1024, 1024 , dtype=torch.float32)
         output, scale = torch.quantize_mx(
             input_tensor,
+            -1,
             block_size=32,
             dtype=torch.float8_e4m3fn,
             scale_calculation_mode=0
@@ -41,6 +44,7 @@ class TestQuantizeOp(unittest.TestCase):
 
         golden_output, golden_scale = quantize_python(
             input_tensor,
+            -1,
             block_size=32,
             dtype=torch.float8_e4m3fn,
             scale_calculation_mode=0
@@ -53,6 +57,7 @@ class TestQuantizeOp(unittest.TestCase):
         input_tensor = torch.randn(64, 64, dtype=torch.float32)
         output, scale = torch.quantize_mx(
             input_tensor,
+            -1,
             block_size=64*64,
             dtype=torch.float8_e4m3fn,
             scale_calculation_mode=0
@@ -61,6 +66,7 @@ class TestQuantizeOp(unittest.TestCase):
         self.assertEqual(scale.shape[0], 64)
 
         golden_output, golden_scale = quantize_python(input_tensor,
+            -1,
             block_size=64*64,
             dtype=torch.float8_e4m3fn,
             scale_calculation_mode=0
@@ -76,6 +82,7 @@ class TestQuantizeOp(unittest.TestCase):
         def quantize_model(x):
             output, scale = torch.quantize_mx(
                 x, 
+                -1,
                 block_size=block_size,
                 dtype=torch.float8_e4m3fn,
                 scale_calculation_mode=0
@@ -90,6 +97,7 @@ class TestQuantizeOp(unittest.TestCase):
 
         golden_output, golden_scale = quantize_python(
             x,
+            -1,
             block_size=block_size,
             dtype=torch.float8_e4m3fn,
             scale_calculation_mode=0
@@ -218,6 +226,7 @@ def quantize_mxfp8_python(
 
 def quantize_python(
     input: torch.Tensor,
+    dim: int =-1,
     block_size: int = 32,
     dtype: torch.dtype = torch.float8_e4m3fn,
     scale_calculation_mode: int = 0
@@ -230,6 +239,7 @@ def quantize_python(
     input_2d = input.unsqueeze(0) if is_1d else input
     
     # Validate
+    assert dim == -1, "Quantization currently only supported for dim -1"
     assert input_2d.dim() == 2, "Input must be 2D"
     assert block_size > 0, "Block size must be positive"
     assert scale_calculation_mode in (0, 1), "scale_calculation_mode must be 0 or 1"
