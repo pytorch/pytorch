@@ -12,13 +12,12 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops.registration import register_op_strategy, register_single_dim_strategy
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
     map_placements_after_broadcast,
     normalize_dim,
-    register_op_strategy,
-    register_single_dim_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -489,23 +488,28 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy(op_schema, linearity=linearity_type)
 
 
-def single_mesh_dim_pointwise_strategy(op_schema: OpSchema, linearity: int = -1) -> list[list[Placement]]:
+def single_mesh_dim_pointwise_strategy(
+    op_schema: OpSchema, linearity: int = -1
+) -> list[list[Placement]]:
     return single_mesh_dim_common_pointwise_strategy(op_schema.args_schema, linearity)
+
 
 def single_mesh_dim_common_pointwise_strategy(
     args_schema: Sequence[object],
     linearity: int = -1,
-    scalar_tensor_idx: Optional[int] = None
+    scalar_tensor_idx: Optional[int] = None,
 ) -> list[list[Placement]]:
-    tensor_arg_strategies: list[OpStrategy] = [arg for arg in args_schema if isinstance(arg, OpStrategy)]
+    tensor_arg_strategies: list[OpStrategy] = [
+        arg for arg in args_schema if isinstance(arg, OpStrategy)
+    ]
     common_shape = torch.broadcast_shapes(
         *[arg.shape for arg in args_schema if isinstance(arg, OpStrategy)]
     )
 
-    placements_list = []
+    placements_list: list[list[Placement]] = []
     for i in range(len(common_shape)):
         # Shard output dim i, and then shard the corresponding arguments if they have a corresponding (non broadcast) dim
-        shard_placements = [Shard(i)]
+        shard_placements: list[Placement] = [Shard(i)]
         for arg in tensor_arg_strategies:
             common_dim_to_arg_dim = infer_broadcast_dims_map(common_shape, arg.shape)
             if common_dim_to_arg_dim[i] >= 0:
@@ -518,7 +522,9 @@ def single_mesh_dim_common_pointwise_strategy(
     if linearity == 0:
         # unary op (e.g. to_copy), and also binary ops like mul.scalar
         # input, output can be partial
-        assert len(tensor_arg_strategies) == 1, "expected single tensor input for linearity==0 op"
+        assert len(tensor_arg_strategies) == 1, (
+            "expected single tensor input for linearity==0 op"
+        )
         placements_list.append([Partial("sum"), Partial("sum")])
         # TODO: do i need to check scalar_tensor_index and assign a replicate to that one, or do i omit a placement for it
         # TODO: can mul.scalar work with avg or only sum? i think only sum works. common_pointwise_strategy seems
@@ -529,17 +535,22 @@ def single_mesh_dim_common_pointwise_strategy(
     elif linearity == 1:
         # binary add ops
         # (A1 + B1) + (A2 + B2) == (A1 + A2) + (B1 + B2)
-        assert len(tensor_arg_strategies) == 2, "expected two tensor inputs for linearity==1 op"
+        assert len(tensor_arg_strategies) == 2, (
+            "expected two tensor inputs for linearity==1 op"
+        )
         placements_list.append([Partial("sum"), Partial("sum"), Partial("sum")])
     elif linearity == 2:
         # binary mul ops (2 tensor inputs)
         # (A * B1) + (A * B2) == A * (B1 + B2)
-        assert len(tensor_arg_strategies) == 2, "expected two tensor inputs for linearity==2 op"
+        assert len(tensor_arg_strategies) == 2, (
+            "expected two tensor inputs for linearity==2 op"
+        )
         placements_list.append([Partial("sum"), Partial("sum"), Replicate()])
         placements_list.append([Partial("sum"), Replicate(), Partial("sum")])
 
     # TODO: handle scalar_tensor_idx
     return placements_list
+
 
 def common_pointwise_strategy(
     args_schema: Sequence[object],
@@ -680,9 +691,9 @@ for op in pointwise_ops:
     # register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
     #     pointwise_strategy
     # )
-    register_single_dim_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        single_mesh_dim_pointwise_strategy
-    )
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(single_mesh_dim_pointwise_strategy)
 
 # TODO: add all for_each ops
 for_each_ops = [
