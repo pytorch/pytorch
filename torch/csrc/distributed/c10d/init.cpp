@@ -1659,12 +1659,6 @@ Arguments:
     key (str): The key of the queue to get the length.
 )")
           .def(
-              "list_keys",
-              &::c10d::Store::listKeys,
-              R"(
-Returns a list of all keys in the store.
-)")
-          .def(
               "has_extended_api",
               &::c10d::Store::hasExtendedApi,
               R"(Returns true if the store supports extended operations.)");
