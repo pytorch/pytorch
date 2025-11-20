@@ -14,8 +14,8 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.nn import functional as F
-from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.common_cuda import with_tf32_off
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorTestBase,
