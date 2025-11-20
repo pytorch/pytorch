@@ -370,7 +370,7 @@ class OverlapPreservingBucketer:
         # Sort collectives by node index for efficient distance checking
         sorted_collectives = sorted(collective_group, key=lambda n: self.node_idx[n])
 
-        for start_node in sorted_collectives:
+        for i, start_node in enumerate(sorted_collectives):
             if start_node in processed:
                 continue
 
@@ -380,35 +380,20 @@ class OverlapPreservingBucketer:
                 total_bytes=self.collective_info[start_node].size_bytes,
             )
             processed.add(start_node)
-            start_node_idx = self.node_idx[start_node]
 
             # Greedy optimization: stop after consecutive failures
             consecutive_failures = 0
-            max_consecutive_failures = 5
+            max_consecutive_failures = 20
 
-            # IMPORTANT: Only check candidates with index > start_node_idx
-            # This avoids trying the same pair twice (e.g., (A, B) and later (B, A))
-            for candidate in sorted_collectives:
-                if candidate in processed:
-                    continue
-
-                candidate_idx = self.node_idx[candidate]
-
-                # Skip candidates before start_node to avoid duplicate pair checking
-                if candidate_idx <= start_node_idx:
-                    continue
-
-                # Check if candidate is within max distance from the bucket start
-                distance = candidate_idx - start_node_idx
-                if distance > self.max_coll_distance:
-                    # Since sorted and only looking forward, all remaining will be too far
+            # Check candidates in sorted order, break when beyond max distance
+            for candidate in sorted_collectives[i + 1 : i + 1 + self.max_coll_distance]:
+                candidate_bytes = self.collective_info[candidate].size_bytes
+                # proxy on memory use, if we see a too large bucket,
+                # dont look for another, later bucket
+                if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
                     break
 
-                candidate_bytes = self.collective_info[candidate].size_bytes
-                if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
-                    consecutive_failures += 1
-                    if consecutive_failures >= max_consecutive_failures:
-                        break
+                if candidate in processed:
                     continue
 
                 if self._can_add_to_bucket(bucket_info, candidate):
@@ -727,12 +712,18 @@ class OverlapPreservingBucketer:
 
         for coll in bucket_info.collectives:
             # Check if collectives are ancestors of each other using augmented ancestors
-            if coll in self.augmented_ancestors[candidate] or candidate in self.augmented_ancestors[coll]:
+            if (
+                coll in self.augmented_ancestors[candidate]
+                or candidate in self.augmented_ancestors[coll]
+            ):
                 return True
 
             # Check if waits are ancestors of each other
             coll_wait = self.collective_info[coll].wait_node
-            if coll_wait in self.augmented_ancestors[candidate_wait] or candidate_wait in self.augmented_ancestors[coll_wait]:
+            if (
+                coll_wait in self.augmented_ancestors[candidate_wait]
+                or candidate_wait in self.augmented_ancestors[coll_wait]
+            ):
                 return True
 
             # Check if existing hiding node conflicts with candidate wait
