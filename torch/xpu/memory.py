@@ -1,4 +1,5 @@
 import collections
+import contextlib
 import ctypes
 import pickle
 import sys
@@ -8,6 +9,7 @@ import torch
 from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type
 from torch.types import Device
 from torch._utils import _dummy_type
+from torch.types import Device
 
 from . import _get_device_index, _is_compiled, _lazy_init, is_initialized
 
@@ -573,11 +575,20 @@ if not hasattr(torch._C, "_xpu_XPUAllocator"):
 if not hasattr(torch._C, "_XPUMemPool"):
     # Define dummy base classes
     torch._C.__dict__["_XPUMemPool"] = _dummy_type("_XPUMemPool")
+    torch._C.__dict__["_xpu_beginAllocateCurrentThreadToPool"] = _dummy_type(
+        "_xpu_beginAllocateCurrentThreadToPool"
+    )
+    torch._C.__dict__["_xpu_endAllocateToPool"] = _dummy_type("_xpu_endAllocateToPool")
+    torch._C.__dict__["_xpu_releasePool"] = _dummy_type("_xpu_releasePool")
 
 from torch._C import (  # noqa: F401
+    _xpu_beginAllocateCurrentThreadToPool,
+    _xpu_endAllocateToPool,
+    _xpu_releasePool,
     _xpu_XPUAllocator,
     _XPUMemPool,
 )
+
 
 class MemPool(_XPUMemPool):
     r"""MemPool represents a pool of memory in a caching allocator. Currently,
@@ -619,3 +630,31 @@ class MemPool(_XPUMemPool):
     def snapshot(self):
         # not supported yet
         raise NotImplementedError("XPU: MemPool.snapshot is not supported yet.")
+
+
+@contextlib.contextmanager
+def use_mem_pool(pool: MemPool, device: "Device" = None):
+    r"""A context manager that routes allocations to a given pool.
+
+    Args:
+        pool(torch.xpu.MemPool): a MemPool object to be made active so that
+            allocations route to this pool.
+        device (torch.device or int, optional): selected device. Uses MemPool on
+            the current device, given by :func:`~torch.xpu.current_device`,
+            if :attr:`device` is ``None`` (default).
+
+    .. note::
+        This context manager makes only current thread's allocations route to
+        the given pool. If a new thread is spawned inside the context manager
+        (e.g. by calling backward) the allocations in that thread will not
+        route to the given pool.
+    """
+    device_index = (
+        torch.xpu.current_device() if device is None else _get_device_index(device)
+    )
+    _xpu_beginAllocateCurrentThreadToPool(device_index, pool.id)
+    try:
+        yield
+    finally:
+        _xpu_endAllocateToPool(device_index, pool.id)
+        _xpu_releasePool(device_index, pool.id)

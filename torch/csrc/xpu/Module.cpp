@@ -451,6 +451,30 @@ static void initXpuMethodBindings(PyObject* module) {
   m.def("_xpu_memorySnapshot", [](std::optional<c10::MempoolId_t> mempool_id) {
     using c10::xpu::XPUCachingAllocator::BlockInfo;
     using c10::xpu::XPUCachingAllocator::SegmentInfo;
+  m.def(
+      "_xpu_beginAllocateCurrentThreadToPool",
+      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
+        auto tid = std::this_thread::get_id();
+
+        c10::xpu::XPUCachingAllocator::beginAllocateToPool(
+            device, mempool_id, [=](sycl::queue*) {
+              auto current_tid = std::this_thread::get_id();
+              return current_tid == tid;
+            });
+      });
+
+  m.def(
+      "_xpu_endAllocateToPool",
+      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
+        c10::xpu::XPUCachingAllocator::endAllocateToPool(device, mempool_id);
+      });
+
+  m.def(
+      "_xpu_releasePool",
+      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
+        c10::xpu::XPUCachingAllocator::releasePool(device, mempool_id);
+      });
+}
 
     py::str device_s = "device";
     py::str address_s = "address";

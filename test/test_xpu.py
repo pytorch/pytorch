@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -1382,6 +1383,36 @@ class TestXPUAPISanity(TestCase):
             value = re.search(r"USE_XCCL=([^,]+)", config)
             self.assertIsNotNone(value)
             self.assertTrue(value.group(1) in ["OFF", "0"])
+
+
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+class TestMemPool(TestCase):
+    def test_mempool_id(self):
+        pool = torch.xpu.MemPool().id
+
+        # first value of id in a user created pool is always zero
+        self.assertEqual(pool[0] == 0, pool[1] == 1)
+
+    def test_mempool_multithread(self):
+        pool_ids = []
+
+        def create_mempool_and_make_active():
+            pool = torch.xpu.MemPool()
+            pool_ids.extend([pool.id])
+
+        num_threads = 4
+        threads = [
+            threading.Thread(target=create_mempool_and_make_active)
+            for t in range(num_threads)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        # each thread should create a unique mempool, since
+        # mempool id creation is atomic
+        self.assertEqual(len(set(pool_ids)), 4)
 
 
 if __name__ == "__main__":
