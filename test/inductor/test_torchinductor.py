@@ -153,6 +153,8 @@ _P = ParamSpec("_P")
 
 HAS_AVX2 = "fbgemm" in torch.backends.quantized.supported_engines
 
+USE_ZENDNN = torch._C.has_zendnn and torch._C._cpu._is_avx512_supported()
+
 if TEST_WITH_ROCM:
     torch._inductor.config.force_layout_optimization = 1
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
@@ -420,6 +422,15 @@ def compute_grads(args, kwrags, results, grads):
     )
 
 
+def is_tensor_float16(input_list):
+    for inp in input_list:
+        if isinstance(inp, torch.Tensor) and inp.dtype == torch.half:
+            return True
+        if isinstance(inp, list | tuple):
+            return is_tensor_float16(inp)
+    return False
+
+
 def check_model(
     self: TestCase,
     model,
@@ -442,6 +453,12 @@ def check_model(
     # TODO: enable this for all tests
     exact_stride=False,
 ):
+    if (
+        is_tensor_float16(example_inputs)
+        and torch._inductor.config.enable_zendnn
+        and USE_ZENDNN
+    ):
+        TestCase.skipTest(TestCase, "zendnn does not support fp16 precision")
     kwargs = kwargs or {}
     torch._dynamo.reset()
 

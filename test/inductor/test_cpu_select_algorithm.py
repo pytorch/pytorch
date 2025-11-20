@@ -45,6 +45,16 @@ except unittest.SkipTest:
     raise
 
 check_model = test_torchinductor.check_model
+USE_ZENDNN = test_torchinductor.USE_ZENDNN
+zendnn_string = {
+    "relu": "relu",
+    "gelu": "gelu_erf",
+    "silu": "silu",
+    "sigmoid": "sigmoid",
+    "tanh": "tanh",
+    "add": "add",
+    "mul": "mul",
+}
 set_num_threads = test_cpu_repro.set_num_threads
 run_and_get_cpp_code = test_torchinductor.run_and_get_cpp_code
 
@@ -146,6 +156,15 @@ class BaseTestSelectAlgorithm(TestCase):
 
 class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     common = check_model
+
+    def setUp(self):
+        self.current_enable_zendnn = torch._inductor.config.enable_zendnn
+        torch._inductor.config.enable_zendnn = False
+        return super().setUp()
+
+    def tearDown(self):
+        torch._inductor.config.enable_zendnn = self.current_enable_zendnn
+        return super().tearDown()
 
     @inductor_config.patch({"freezing": True})
     @patches
@@ -265,11 +284,12 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             "div",
         ),
     )
+    @parametrize("use_zendnn", (False, True))
     @dtypes(torch.float, torch.bfloat16, torch.half)
     @torch.fx.experimental._config.patch(use_duck_shape=False)
     @torch._dynamo.config.patch(specialize_float=True)
     def test_linear_with_pointwise(
-        self, batch_size, in_features, out_features, bias, epilogue, dtype
+        self, batch_size, in_features, out_features, bias, epilogue, use_zendnn, dtype
     ):
         class M(torch.nn.Module):
             def __init__(self, bias, epilogue, other):
@@ -283,9 +303,17 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(batch_size, out_features).to(dtype=dtype)
+        if use_zendnn:
+            torch._inductor.config.enable_zendnn = True
         mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
+        if USE_ZENDNN and use_zendnn:
+            if epilogue in zendnn_string.keys():
+                self.assertEqual(
+                    counters["zendnn"]["zendnn_linear_" + zendnn_string[epilogue]], 1
+                )
+            return  # skip the counter checks for unsupported fusions on zendnn
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         if (
             (
@@ -340,9 +368,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             "mul",
         ),
     )
+    @parametrize("use_zendnn", (False, True))
     @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_linear_with_transpose(
-        self, batch_size, in_features, out_features, bias, epilogue, dtype
+        self, batch_size, in_features, out_features, bias, epilogue, use_zendnn, dtype
     ):
         class M(torch.nn.Module):
             def __init__(self, bias, epilogue, other):
@@ -357,9 +386,17 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         v = torch.randn(batch_size, in_features).to(dtype=dtype)
         u = torch.randn(out_features, batch_size).to(dtype=dtype)
         other = torch.randn(batch_size, out_features).to(dtype=dtype)
+        if use_zendnn:
+            torch._inductor.config.enable_zendnn = True
         mod = M(bias=bias, epilogue=epilogue, other=other).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v, u), atol=atol, rtol=rtol)
+        if USE_ZENDNN and use_zendnn:
+            if epilogue in zendnn_string.keys():
+                self.assertEqual(
+                    counters["zendnn"]["zendnn_linear_" + zendnn_string[epilogue]], 1
+                )
+            return  # skip the counter checks for unsupported fusions on zendnn
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
         self.assertEqual(counters["inductor"]["cpp_epilogue_fusion_counter"], 1)
 
@@ -715,6 +752,89 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @inductor_config.patch({"freezing": True})
     @patches
     @torch.no_grad
+    @unittest.skipIf(
+        not USE_ZENDNN,
+        "Test requires MKL and zendnn",
+    )
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384, 385))
+    @parametrize("bias", (True, False))
+    @parametrize(
+        "binary1",
+        ("add", "mul"),
+    )
+    @parametrize(
+        "binary2",
+        ("add",),
+    )
+    @dtypes(torch.float, torch.bfloat16)
+    def test_linear_with_binary_binary(
+        self, batch_size, in_features, out_features, bias, binary1, binary2, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias, binary1, binary2, other1, other2):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.binary1 = _get_epilogue(binary1, other1)
+                self.binary2 = _get_epilogue(binary2, other2)
+
+            def forward(self, x):
+                return self.binary2(self.binary1(self.linear(x)))
+
+        counters.clear()
+        torch._inductor.config.enable_zendnn = True
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        other1 = torch.randn(batch_size, out_features).to(dtype=dtype)
+        other2 = torch.randn(batch_size, out_features).to(dtype=dtype)
+        mod = (
+            M(bias=bias, binary1=binary1, binary2=binary2, other1=other1, other2=other2)
+            .to(dtype=dtype)
+            .eval()
+        )
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(
+            counters["zendnn"][
+                "zendnn_linear_" + zendnn_string[binary1] + "_" + zendnn_string[binary2]
+            ],
+            1,
+        )
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(
+        not USE_ZENDNN,
+        "Test requires MKL and zendnn",
+    )
+    @parametrize("batch_size", (384,))
+    @parametrize("in_features", (196,))
+    @parametrize("out_features", (384, 385))
+    @parametrize("bias", (True, False))
+    @dtypes(torch.float, torch.bfloat16)
+    def test_linear_weight_prepack(
+        self, batch_size, in_features, out_features, bias, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        counters.clear()
+        torch._inductor.config.enable_zendnn = True
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        mod = M(bias=bias).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["zendnn"]["zendnn_weight_prepack_for_linear"], 1)
+
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (384,))
     @parametrize("in_features", (196,))
@@ -724,9 +844,10 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         "binary",
         ("add",),
     )
+    @parametrize("use_zendnn", (False, True))
     @dtypes(torch.float, torch.bfloat16, torch.half)
     def test_linear_with_binary_input_3d(
-        self, batch_size, in_features, out_features, bias, binary, dtype
+        self, batch_size, in_features, out_features, bias, binary, use_zendnn, dtype
     ):
         class M(torch.nn.Module):
             def __init__(self, bias, binary, other):
@@ -741,9 +862,17 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         B = (2, batch_size)
         v = torch.randn(*B, in_features).to(dtype=dtype)
         u = torch.randn(*B, out_features).to(dtype=dtype)
+        if use_zendnn:
+            torch._inductor.config.enable_zendnn = True
         mod = M(bias=bias, binary=binary, other=u).to(dtype=dtype).eval()
         with verify(dtype) as (atol, rtol):
             self.common(mod, (v,), atol=atol, rtol=rtol)
+        if USE_ZENDNN and use_zendnn:
+            if binary in zendnn_string.keys():
+                self.assertEqual(
+                    counters["zendnn"]["zendnn_linear_" + zendnn_string[binary]], 1
+                )
+            return  # skip the counter checks for unsupported fusions on zendnn
         self.assertEqual(counters["inductor"]["cpp_templated_kernel_counter"], 1)
 
     @inductor_config.patch({"freezing": True})
