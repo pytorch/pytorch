@@ -822,9 +822,9 @@ def _export_to_torch_ir(
 
     def use_legacy_dynamo_graph_capture() -> bool:
         return bool(
-            constraints  # dynamic shape
-            or dynamic_shapes  # dynamic shape
-            or torch._functorch.config.fake_tensor_propagate_real_tensors  # draft
+            # constraints  # dynamic shape
+            # or dynamic_shapes  # dynamic shape
+            torch._functorch.config.fake_tensor_propagate_real_tensors  # draft
             or torch._export.config.use_legacy_dynamo_graph_capture
         )
 
@@ -862,7 +862,9 @@ def _export_to_torch_ir(
                             f, constraints=constraints, dynamic_shapes=dynamic_shapes
                         )
                     else:
-                        dynamo_graph_capture = dynamo_graph_capture_for_export(f)
+                        dynamo_graph_capture = dynamo_graph_capture_for_export(
+                            f, constraints=constraints
+                        )
                     # We can't serialize entire fake mode yet, so this is to make sure
                     # things like copy.deepcopy(ep.graph_module) not crash.
                     # see test_export.py::test_custom_tag_metadata_re_export
@@ -1914,13 +1916,16 @@ def _export_to_aten_ir_make_fx(
         )
         stack.enter_context(_ignore_backend_decomps())
         stack.enter_context(_compiling_state_context())
-        gm, graph_signature = transform(_make_fx_helper)(
-            stack,
-            mod,
-            fake_args,
-            trace_joint=False,
-            kwargs=fake_kwargs,
-        )
+        try:
+            gm, graph_signature = transform(_make_fx_helper)(
+                stack,
+                mod,
+                fake_args,
+                trace_joint=False,
+                kwargs=fake_kwargs,
+            )
+        except Exception as e:
+            raise e
 
         # [NOTE] In training IR, we don't run
         # any DCE as a result we preserve constant
