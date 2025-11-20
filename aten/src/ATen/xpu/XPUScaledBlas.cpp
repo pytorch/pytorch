@@ -119,4 +119,62 @@ bool check_rowwise_recipe(
   return true;
 }
 
+/**
+ * A must be fp16/bf16, B must be fp8,
+ * A needs no scale (implicitly 1.0), B needs a single scale {Tensorwise (float)}
+ */
+bool check_a16w8_tensorwise_recipe(
+    c10::ScalarType type_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
+  // A must be fp16 or bf16, B must be fp8
+  if ((type_a != ScalarType::Half && type_a != ScalarType::BFloat16) ||
+      !isFloat8Type(type_b)) {
+    return false;
+  }
+
+  // B should have 1 scale {Tensorwise, float}
+  if (scales_b.size() != 1 || recipe_b.size() != 1) {
+    return false;
+  }
+  
+  // B uses Tensorwise with float scale
+  if (recipe_b[0] != ScalingType::TensorWise)
+    return false;
+  if (scales_b[0].scalar_type() != ScalarType::Float)
+    return false;
+
+  return true;
+}
+
+/**
+ * A must be fp16/bf16, B must be fp8,
+ * A needs no scale (implicitly 1.0), B needs a rowwise scale {RowWise (float)}
+ */
+bool check_a16w8_rowwise_recipe(
+    c10::ScalarType type_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
+  // A must be fp16 or bf16, B must be fp8
+  if ((type_a != ScalarType::Half && type_a != ScalarType::BFloat16) ||
+      !isFloat8Type(type_b)) {
+    return false;
+  }
+
+  // B should have 1 scale {Rowwise, float}
+  if (scales_b.size() != 1 || recipe_b.size() != 1) {
+    return false;
+  }
+  
+  // B uses Rowwise with float scale
+  if (recipe_b[0] != ScalingType::RowWise)
+    return false;
+  if (scales_b[0].scalar_type() != ScalarType::Float)
+    return false;
+
+  return true;
+}
+
 } // namespace at::native::onednn::scaled
