@@ -326,7 +326,7 @@ class OverlapPreservingBucketer:
         # Sort collectives by node index for efficient distance checking
         sorted_collectives = sorted(collective_group, key=lambda n: self.node_idx[n])
 
-        for start_node in sorted_collectives:
+        for i, start_node in enumerate(sorted_collectives):
             if start_node in processed:
                 continue
 
@@ -336,25 +336,17 @@ class OverlapPreservingBucketer:
                 total_bytes=self.collective_info[start_node].size_bytes,
             )
             processed.add(start_node)
-            start_node_idx = self.node_idx[start_node]
 
             # Check candidates in sorted order, break when beyond max distance
-            for candidate in sorted_collectives:
+            for candidate in sorted_collectives[i + 1 : i + 1 + self.max_coll_distance]:
                 if candidate in processed:
                     continue
 
-                candidate_idx = self.node_idx[candidate]
-                # Check if candidate is within max distance from the bucket start
-                distance = abs(candidate_idx - start_node_idx)
-                if distance > self.max_coll_distance:
-                    # Since sorted, all remaining candidates will be too far
-                    if candidate_idx > start_node_idx:
-                        break
-                    continue
-
                 candidate_bytes = self.collective_info[candidate].size_bytes
+                # proxy on memory use, if we see a too large bucket,
+                # dont look for another, later bucket
                 if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
-                    continue
+                    break
 
                 if self._can_add_to_bucket(bucket_info, candidate):
                     bucket_info.collectives.append(candidate)

@@ -299,18 +299,20 @@ class OverlapScheduler:
         self.original_peak_memory = 0
         self._compute_baseline_memory()
 
-        # Maximum allowed peak memory = baseline + min(absolute, ratio * baseline)
-        # Compute the effective memory budget from both absolute and ratio limits
-        memory_increase_bytes = sys.maxsize
+        # Maximum allowed peak memory = baseline + max(absolute, ratio * baseline)
+        # When both limits are specified, use the more permissive one
+        memory_increase_bytes = None
         if max_memory_increase_gb is not None:
-            memory_increase_bytes = min(
-                memory_increase_bytes, gb_to_bytes(max_memory_increase_gb)
-            )
+            memory_increase_bytes = gb_to_bytes(max_memory_increase_gb)
         if max_memory_increase_ratio is not None:
-            memory_increase_bytes = min(
-                memory_increase_bytes,
-                int(self.original_peak_memory * max_memory_increase_ratio),
+            ratio_increase = int(self.original_peak_memory * max_memory_increase_ratio)
+            memory_increase_bytes = (
+                max(memory_increase_bytes, ratio_increase)
+                if memory_increase_bytes is not None
+                else ratio_increase
             )
+        if memory_increase_bytes is None:
+            memory_increase_bytes = 0
 
         self.allowed_peak_memory_bytes = (
             self.original_peak_memory + memory_increase_bytes
@@ -824,9 +826,7 @@ class OverlapScheduler:
         if not self.in_flight:
             return False
 
-        return (
-            self.in_flight_bytes >= self.max_in_flight_bytes
-        )
+        return self.in_flight_bytes >= self.max_in_flight_bytes
 
     def _force_oldest_wait(self) -> None:
         """Schedule the oldest in flight wait"""
@@ -884,10 +884,9 @@ class OverlapScheduler:
 
         # Compile-time filtering: limit candidates by distance to bound O(compute * collectives) cost
         candidates = []
-        for collective in self.unscheduled_collectives:
-            distance = abs(self.node_idx[compute_node] - self.node_idx[collective])
-            if distance > self.max_node_distance:
-                continue  # Skip collectives too far away
+        for i, collective in enumerate(self.unscheduled_collectives):
+            if i > self.max_node_distance:
+                break
 
             if (
                 not self.off_compute_path(collective)
@@ -899,7 +898,6 @@ class OverlapScheduler:
 
             candidates.append(collective)
 
-        # Sort by domination index (priority)
         candidates = sorted(
             candidates,
             key=lambda n: (self.compute_index_domination[n], self.node_idx[n]),
@@ -1147,8 +1145,8 @@ class OverlapScheduler:
             collective_info=self.collective_info,
             node_ancestors=self.node_ancestors,
             scheduled=self.scheduled,
-            max_bucket_memory_gb=5.0,  # Could make this configurable
-            max_coll_distance=100,
+            max_bucket_memory_gb=2.0,  # Could make this configurable
+            max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
         )
         bucketer.bucket_collectives()
