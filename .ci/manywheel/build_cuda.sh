@@ -33,7 +33,7 @@ fi
 ARCH=$(uname -m)
 echo "Building for architecture: $ARCH"
 
-# Detect and configure NVPL for BLAS/LAPACK for CUDA aarch64
+# Detect and configure NVPL for BLAS/LAPACK and ARM Compute Library for CUDA aarch64
 if [[ "$ARCH" == "aarch64" ]]; then
     # Use NVPL (NVIDIA Performance Libraries) for ARM
     # NVPL provides optimized BLAS and LAPACK for better cpu performance on NVIDIA platforms
@@ -44,6 +44,18 @@ if [[ "$ARCH" == "aarch64" ]]; then
     fi
     echo "Using NVPL BLAS/LAPACK for CUDA aarch64"
     export BLAS=NVPL
+
+    # ACL is required for aarch64 builds
+    if [[ ! -d "/acl" ]]; then
+        echo "ERROR: ARM Compute Library not found at /acl"
+        echo "ACL is required for aarch64 builds. Check Docker image setup."
+        exit 1
+    fi
+
+    export USE_MKLDNN=1
+    export USE_MKLDNN_ACL=1
+    export ACL_ROOT_DIR=/acl
+    echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
 fi
 
 # Determine CUDA version and architectures to build for

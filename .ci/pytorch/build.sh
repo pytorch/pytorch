@@ -50,6 +50,20 @@ if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
+  export USE_MKLDNN=1
+
+  # ACL is required for aarch64 builds
+  if [[ ! -d "/acl" ]]; then
+    echo "ERROR: ARM Compute Library not found at /acl"
+    echo "ACL is required for aarch64 builds. Check Docker image setup."
+    exit 1
+  fi
+
+  export USE_MKLDNN_ACL=1
+  export ACL_ROOT_DIR=/acl
+  echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
+fi
 
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with

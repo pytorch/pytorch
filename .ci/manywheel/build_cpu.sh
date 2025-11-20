@@ -19,7 +19,7 @@ fi
 ARCH=$(uname -m)
 echo "Building CPU wheel for architecture: $ARCH"
 
-# Detect and configure OpenBLAS for CPU aarch64
+# Detect and configure OpenBLAS and ARM Compute Libraryfor CPU aarch64
 if [[ "$ARCH" == "aarch64" ]]; then
     # Use OpenBLAS for BLAS/LAPACK on CPU aarch64 builds
     if [[ ! -f "/opt/OpenBLAS/lib/libopenblas.so.0" ]]; then
@@ -30,6 +30,18 @@ if [[ "$ARCH" == "aarch64" ]]; then
     echo "Using OpenBLAS for CPU aarch64"
     export BLAS=OpenBLAS
     export OpenBLAS_HOME=/opt/OpenBLAS
+
+    # ACL is required for aarch64 builds
+    if [[ ! -d "/acl" ]]; then
+        echo "ERROR: ARM Compute Library not found at /acl"
+        echo "ACL is required for aarch64 builds. Check Docker image setup."
+        exit 1
+    fi
+
+    export USE_MKLDNN=1
+    export USE_MKLDNN_ACL=1
+    export ACL_ROOT_DIR=/acl
+    echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
 fi
 
 WHEELHOUSE_DIR="wheelhousecpu"
