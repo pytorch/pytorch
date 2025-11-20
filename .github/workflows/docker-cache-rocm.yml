@@ -8,11 +8,11 @@ on:
       - completed
   workflow_dispatch:
     inputs:
-      name: branch
+      branch:
         type: string
         description: Branch corresponding to the docker images being cached
         required: true
-      name: run_id
+      run_id:
         type: string
         description: Workflow run id to pull artifacts from
         required: true
