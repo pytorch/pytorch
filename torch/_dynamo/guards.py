@@ -1002,6 +1002,9 @@ class GuardBuilder(GuardBuilderBase):
         self.source_ref = source_ref
         self.lookup_weakrefs = lookup_weakrefs
         self.scope: dict[str, dict[str, object]] = {"L": local_scope, "G": global_scope}
+        self.src_get_value_cache: weakref.WeakKeyDictionary[Source, object] = (
+            weakref.WeakKeyDictionary()
+        )
         self.runtime_global_scope = runtime_global_scope or global_scope
         self.source_get_cache = source_get_cache or {}
         self.scope["__builtins__"] = builtins.__dict__.copy()
@@ -1042,7 +1045,7 @@ class GuardBuilder(GuardBuilderBase):
         self.key_order_guarded_dict_ids = set()
         assert self.check_fn_manager.output_graph is not None
         for source in self.check_fn_manager.output_graph.guard_on_key_order:
-            dict_obj = self.get(source.name)
+            dict_obj = self.get(source)
             if self.save_guards:
                 self.source_get_cache[source.name] = dict_obj
             self.key_order_guarded_dict_ids.add(id(dict_obj))
@@ -1306,7 +1309,7 @@ class GuardBuilder(GuardBuilderBase):
         source_name = source.name
         if source_name == "":
             return False
-        obj_id = id(self.get(source_name))
+        obj_id = id(self.get(source))
         return obj_id in self.key_order_guarded_dict_ids
 
     def get_guard_manager_type(
@@ -1352,7 +1355,7 @@ class GuardBuilder(GuardBuilderBase):
             return self._cached_guard_managers[source_name]
 
         if source_name != "":
-            example_value = self.get(source_name)
+            example_value = self.get(source)
             self.guard_tree_values[id(example_value)] = example_value
 
         guard_manager_enum = self.get_guard_manager_type(source, example_value)
@@ -1364,7 +1367,7 @@ class GuardBuilder(GuardBuilderBase):
         base_guard_manager_enum = GuardManagerType.GUARD_MANAGER
         if isinstance(source, ChainedSource):
             base_source_name = source.base.name
-            base_example_value = self.get(base_source_name)
+            base_example_value = self.get(source.base)
             base_guard_manager = self.get_guard_manager_from_source(source.base)
             base_guard_manager_enum = self.get_guard_manager_type(
                 source.base, base_example_value
@@ -1791,13 +1794,22 @@ class GuardBuilder(GuardBuilderBase):
     # to this frame!)  Instead, you should be reading out some property
     # (like its type) which is what you permanently install into the
     # guard code.
-    def get(self, name: str, closure_vars: Optional[dict[str, Any]] = None) -> Any:
+    def get(
+        self,
+        guard_or_source: Guard | Source,
+        closure_vars: Optional[dict[str, Any]] = None,
+    ) -> Any:
+        name = guard_or_source.name
+        if isinstance(guard_or_source, Source):
+            src = guard_or_source
+        else:
+            src = guard_or_source.originating_source
         if self.source_get_cache:
             if name in self.source_get_cache:
                 return self.source_get_cache[name]
         if closure_vars is None:
             closure_vars = _get_closure_vars()
-        ret = eval(name, self.scope, closure_vars)
+        ret = src.get_value(self.scope, closure_vars, self.src_get_value_cache)
         if self.save_guards and ".__closure__" in name:
             self.source_get_cache[name] = ret
         return ret
@@ -1871,7 +1883,7 @@ class GuardBuilder(GuardBuilderBase):
         if val:
             # Just install a getattr manager. GetAttrGuardAccessor itself
             # acts as hasattr guard.
-            example_value = self.get(source.name)
+            example_value = self.get(source)
             base_example_value = self.get(base)
             guard_manager_enum = self.get_guard_manager_type(source, example_value)
 
@@ -1903,7 +1915,7 @@ class GuardBuilder(GuardBuilderBase):
     ) -> None:
         assert attr is not None
         ref = self.arg_ref(guard)
-        val = self.get(guard.name)
+        val = self.get(guard)
 
         base_manager = self.get_guard_manager(guard)
 
@@ -1925,7 +1937,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
-        value = self.get(guard.name)
+        value = self.get(guard)
         if isinstance(value, torch._subclasses.FakeTensor) and value.pytype:
             t = value.pytype
         else:
@@ -1947,8 +1959,8 @@ class GuardBuilder(GuardBuilderBase):
     def DICT_VERSION(self, guard: Guard) -> None:
         # ___check_dict_version is same as `dict_version(x) == y`
         ref = self.arg_ref(guard)
-        val = self.get(guard.name)
-        version = dict_version(self.get(guard.name))
+        val = self.get(guard)
+        version = dict_version(self.get(guard))
         code = f"___dict_version({ref}) == {version}"
         self._set_guard_export_info(guard, [code])
 
@@ -1991,7 +2003,7 @@ class GuardBuilder(GuardBuilderBase):
     def BOOL_MATCH(self, guard: Guard) -> None:
         # checks val == True or val == False
         ref = self.arg_ref(guard)
-        val = self.get(guard.name)
+        val = self.get(guard)
         assert istype(val, bool)
         code = [f"{ref} == {val!r}"]
         self._set_guard_export_info(guard, code)
@@ -2008,7 +2020,7 @@ class GuardBuilder(GuardBuilderBase):
     def NONE_MATCH(self, guard: Guard) -> None:
         # checks `val is None`
         ref = self.arg_ref(guard)
-        val = self.get(guard.name)
+        val = self.get(guard)
         assert val is None
         code = [f"{ref} is None"]
         self._set_guard_export_info(guard, code)
@@ -2019,7 +2031,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def ID_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         # TODO - Run a CI with the following uncommented to find the remaining places
-        # val = self.get(guard.name)
+        # val = self.get(guard)
         # if inspect.isclass(val):
         #     raise AssertionError(f"{guard.name} is a class, use CLASS_MATCH guard")
         # if inspect.ismodule(val):
@@ -2037,7 +2049,7 @@ class GuardBuilder(GuardBuilderBase):
             )
 
         ref = self.arg_ref(guard)
-        val = self.get(guard.name)
+        val = self.get(guard)
         id_val = self.id_ref(val, guard.name)
         code = f"___check_obj_id({ref}, {id_val})"
         self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
@@ -2059,7 +2071,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def NOT_NONE_MATCH(self, guard: Guard, value: Optional[Any] = None) -> None:
         ref = self.arg_ref(guard)
-        val = self.get(guard.name)
+        val = self.get(guard)
         assert isinstance(val, torch.Tensor)
         code = f"{ref} is not None"
         self._set_guard_export_info(guard, [code])
@@ -2070,7 +2082,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def DISPATCH_KEY_SET_MATCH(self, guard: Guard) -> None:
         ref = self.arg_ref(guard)
-        val = self.get(guard.name)
+        val = self.get(guard)
         assert isinstance(val, torch._C.DispatchKeySet)
         code_parts = f"{ref}.raw_repr() == {val!r}.raw_repr()"
 
@@ -2137,8 +2149,8 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
-        value = self.get(guard.name)
-        original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
+        value = self.get(guard)
+        original_metadata = deepcopy(self.get(guard).__tensor_flatten__()[1])
         if hasattr(value, "__metadata_guard__"):
             verify_guard_fn_signature(value)
             cls = type(value)
@@ -2161,7 +2173,7 @@ class GuardBuilder(GuardBuilderBase):
     def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
         # Copied from DTensor __metadata_guard__
         # TODO - Consider moving this to C++ if stable
-        value = deepcopy(self.get(guard.name))
+        value = deepcopy(self.get(guard))
 
         def guard_fn(x: Any) -> bool:
             return x._check_equals(value, skip_shapes=True)
@@ -2173,7 +2185,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         ref = self.arg_ref(guard)
-        val = self.get(guard.name)
+        val = self.get(guard)
         if np:
             np_types: tuple[type[Any], ...] = (
                 np.int8,
@@ -2277,7 +2289,7 @@ class GuardBuilder(GuardBuilderBase):
         return
 
     def CONSTANT_MATCH(self, guard: Guard) -> None:
-        val = self.get(guard.name)
+        val = self.get(guard)
         if istype(val, bool):
             self.BOOL_MATCH(guard)
         elif val is None:
@@ -2290,7 +2302,7 @@ class GuardBuilder(GuardBuilderBase):
     def NN_MODULE(self, guard: Guard) -> None:
         # don't support this in serialization because it uses unsupported ID_MATCH
         self.ID_MATCH(guard, "[inline-inbuilt-nn-modules-candidate]")
-        val = self.get(guard.name)
+        val = self.get(guard)
         if hasattr(val, "training"):
             assert istype(val.training, bool)
             if not self.guard_nn_modules:
@@ -2314,7 +2326,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def CLASS_MATCH(self, guard: Guard) -> None:
         """Equals ID_MATCH on classes - better readability than directly calling ID_MATCH"""
-        val = self.get(guard.name)
+        val = self.get(guard)
         if not inspect.isclass(val):
             raise AssertionError(
                 f"{guard.name} is not a class, but CLASS_MATCH is used"
@@ -2323,7 +2335,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def MODULE_MATCH(self, guard: Guard) -> None:
         """Equals ID_MATCH on modules - better readability than directly calling ID_MATCH"""
-        val = self.get(guard.name)
+        val = self.get(guard)
         if not inspect.ismodule(val):
             raise AssertionError(
                 f"{guard.name} is not a module, but MODULE_MATCH is used"
@@ -2333,7 +2345,7 @@ class GuardBuilder(GuardBuilderBase):
     def CLOSURE_MATCH(self, guard: Guard) -> None:
         """matches a closure by __code__ id."""
         # don't support this in serialization because it uses unsupported FUNCTION_MATCH
-        val = self.get(guard.name)
+        val = self.get(guard)
         # Strictly only want user-defined functions
         if type(val) is types.FunctionType and hasattr(val, "__code__"):
             self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)  # type: ignore[arg-type]
@@ -2354,7 +2366,7 @@ class GuardBuilder(GuardBuilderBase):
         # This guard is used to check length of PySequence objects like list,
         # tuple, collections.deque etc
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
+        value = self.get(guard)
 
         if not isinstance(value, dict):
             # C++ DICT_LENGTH checks for type
@@ -2378,7 +2390,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def TUPLE_ITERATOR_LEN(self, guard: Guard) -> None:
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
+        value = self.get(guard)
         t = type(value)
 
         code = []
@@ -2394,7 +2406,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def RANGE_ITERATOR_MATCH(self, guard: Guard) -> None:
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
+        value = self.get(guard)
         t = type(value)
 
         code = []
@@ -2462,7 +2474,7 @@ class GuardBuilder(GuardBuilderBase):
     def MAPPING_KEYS_CHECK(self, guard: Guard) -> None:
         """Guard on the key order of types.MappingProxyType object"""
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
+        value = self.get(guard)
 
         code = []
         code.append(f"list({ref}.keys()) == {list(value.keys())}")
@@ -2472,7 +2484,7 @@ class GuardBuilder(GuardBuilderBase):
     def DICT_KEYS_MATCH(self, guard: Guard) -> None:
         """Insert guard to check that the keys of a dict are same"""
         ref = self.arg_ref(guard)
-        value = self.get(guard.name)
+        value = self.get(guard)
 
         if value is torch.utils._pytree.SUPPORTED_NODES:
             # For SUPPORTED_NODES, we can guard on the dictionary version (PEP509).
@@ -2694,7 +2706,7 @@ class GuardBuilder(GuardBuilderBase):
                     python_fallback = True
                 else:
                     example_value = self.get(
-                        source.name,
+                        source,
                         closure_vars={**SYMPY_INTERP, **_get_closure_vars()},
                     )
                     if isinstance(example_value, int):
@@ -2804,7 +2816,7 @@ class GuardBuilder(GuardBuilderBase):
             if isinstance(value, TensorWeakRef):
                 value = value()
 
-            value = value if value is not None else self.get(guard.name)
+            value = value if value is not None else self.get(guard)
 
             pytype = type(value)
             dispatch_keys = torch._C._dispatch_keys(value)
@@ -2857,7 +2869,7 @@ class GuardBuilder(GuardBuilderBase):
                 ]
 
                 for term in terms:
-                    real_value = self.get(tensor_name + "." + term)
+                    real_value = self.get(AttrSource(guard, term))
                     if istype(real_value, (torch.device, torch.dtype)):
                         # copy pasted from EQUALS_MATCH
                         code.append(f"str({tensor_name}.{term}) == {str(real_value)!r}")
@@ -3003,7 +3015,7 @@ class GuardBuilder(GuardBuilderBase):
         # Not all guards have names, some can be installed globally (see asserts on HAS_GRAD)
         if provided_guarded_object is None:
             name = guard.name
-            guarded_object = None if not name else self.get(name)
+            guarded_object = None if not name else self.get(guard)
         else:
             guarded_object = provided_guarded_object
 
@@ -3612,7 +3624,7 @@ class CheckFunctionManager:
                         # things like "not hasattr(x, 'foo')". In cases like this,
                         # we don't have a well defined value because such thing
                         # doesn't exist.
-                        value = builder.get(guard.name)
+                        value = builder.get(guard)
                         has_value = True
                     except:  # noqa: B001,E722
                         value = MISSING
@@ -3768,7 +3780,7 @@ class CheckFunctionManager:
             if guard_type in ("TYPE_MATCH", "BUILTIN_MATCH"):
                 if guard._unserializable:
                     # Only call builder.get again if we know we're going to throw
-                    obj = builder.get(guard.name)
+                    obj = builder.get(guard)
                     raise_local_type_error(obj)
             elif (
                 guard_type in CheckFunctionManager.UNSUPPORTED_SERIALIZATION_GUARD_TYPES

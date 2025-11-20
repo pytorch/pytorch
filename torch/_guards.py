@@ -9,6 +9,7 @@ import re
 import threading
 import traceback
 import unittest.mock
+import uuid
 import weakref
 from abc import abstractmethod
 from collections import defaultdict
@@ -1092,9 +1093,27 @@ class Source:
     def guard_source(self) -> GuardSource:
         raise NotImplementedError
 
+    # can be called by both `name` and `_get_value` in order
+    # to define guard name generation once.
+    @functools.cached_property
+    def _name_template(self) -> str:
+        raise NotImplementedError
+
     @functools.cached_property
     def name(self) -> str:
-        raise NotImplementedError
+        return self._name_template
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: weakref.WeakKeyDictionary[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        value = eval(self._name_template, globals, locals)
+        cache[self] = value
+        return value
 
     def make_guard(self, fn: Callable[..., Any]) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
@@ -1126,6 +1145,27 @@ class ChainedSource(Source):
         while isinstance(current, ChainedSource):
             current = current.base
         return current
+
+    @functools.cached_property
+    def name(self) -> str:
+        return self._name_template.format(self.base.name)
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: weakref.WeakKeyDictionary[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        tmpvar = "tmp"
+        while tmpvar in locals:
+            tmpvar = f"tmp{uuid.uuid4()}"
+        locals[tmpvar] = self.base.get_value(globals, locals, cache)
+        value = eval(self._name_template.format(tmpvar), globals, locals)
+        del locals[tmpvar]
+        cache[self] = value
+        return value
 
 
 def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
