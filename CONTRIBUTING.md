@@ -317,6 +317,7 @@ With Spin, we offer a unified interface to these tasks.
 |`regenerate-version`|regenerate `torch/version.py`|
 |`regenerate-type-stubs`|regenerates type stubs for use by static type checkers|
 |`regenerate-clangtidy-files`|regenerates clang related files needed for linting|
+|`regenerate-github-workflows`|regenerates github workflows from jinja templates|
 
 ## Unit testing
 
