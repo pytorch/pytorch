@@ -404,8 +404,6 @@ class TestFP8Lowering(TestCase):
         persistent_matmul: bool,
         device,
     ):
-        if "xpu" in device:
-            unittest.skip("XPU does not support use_fast_accum=True for now")
         if dtype is torch.float32 and has_bias:
             self.skipTest("bias is not supported when output dtype is float32")
         dtype_float8 = torch.float8_e4m3fn
@@ -420,6 +418,9 @@ class TestFP8Lowering(TestCase):
         bias = None
         if has_bias:
             bias = torch.randn(N, device=device, dtype=torch.bfloat16)
+
+        # if "xpu" in device and use_fast_accum:
+        self.skipTest("XPU does not support use_fast_accum=True for now")
 
         # quantize weight (prior to inference)
         w_fp8, w_inverse_scale = _quantize_tensorwise(w, dtype_float8)
@@ -574,8 +575,8 @@ class TestFP8Lowering(TestCase):
         use_fast_accum: bool,
         device,
     ):
-        if "xpu" in device:
-            unittest.skip("XPU does not support use_fast_accum=True for now")
+        if "xpu" in device and use_fast_accum:
+            self.skipTest("XPU does not support use_fast_accum=True for now")
         dtype_float8 = torch.float8_e4m3fn
         dtype_float8 = _fix_fp8_dtype_for_rocm(dtype_float8, device)
 
@@ -663,8 +664,8 @@ class TestFP8Lowering(TestCase):
         persistent_matmul: bool,
         device,
     ):
-        if "xpu" in device:
-            unittest.skip("XPU does not support use_fast_accum=True for now")
+        if "xpu" in device and use_fast_accum:
+            self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for row-wise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
         dtype_float8 = torch.float8_e4m3fn
@@ -822,8 +823,8 @@ class TestFP8Lowering(TestCase):
         scaling_block_sizes: tuple[int, int, int, int],
         device,
     ):
-        if "xpu" in device:
-            unittest.skip("XPU does not support use_fast_accum=True for now")
+        if "xpu" in device and use_fast_accum:
+            self.skipTest("XPU does not support use_fast_accum=True for now")
         # Only bf16 output type is supported for non-tensorwise scaling, not fp32
         dtype: torch.dtype = torch.bfloat16
         dtype_float8 = torch.float8_e4m3fn
