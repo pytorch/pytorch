@@ -1180,17 +1180,19 @@ static at::Tensor linear_int8_with_onednn_weight(
   static const bool enable_primitive_cache = cache_flag_str != "" && cache_flag_str == "1";
   static std::unordered_map<int64_t, QlinearForwardParams> qlinear_forward_params_map;
   int64_t weight_addr = at::native::data_ptr_from_mkldnn(onednn_weight);
-  if (enable_primitive_cache && qlinear_forward_params_map.find(weight_addr) != qlinear_forward_params_map.end()) {
-    RECORD_FUNCTION("qlinear_fast_path", c10::ArrayRef<c10::IValue>({}));
-    auto& params = qlinear_forward_params_map[weight_addr];
-    auto& args = params.args;
-    args[DNNL_ARG_SRC] = std::move(src);
-    args[DNNL_ARG_DST] = std::move(dst);
-    if (binary_post_op == "add") {
-      args[DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1] = std::move(src1);
+  if (enable_primitive_cache) {
+    auto it = qlinear_forward_params_map.find(weight_addr);
+    if (it != qlinear_forward_params_map.end()) {
+      auto& params = it->second;
+      auto& args = params.args;
+      args[DNNL_ARG_SRC] = std::move(src);
+      args[DNNL_ARG_DST] = std::move(dst);
+      if (binary_post_op == "add") {
+        args[DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1] = std::move(src1);
+      }
+      params.primitive.execute(ideep::stream::default_stream(), args);
+      return dim == 2 ? output : output.resize_(output_size);
     }
-    params.primitive.execute(ideep::stream::default_stream(), args);
-    return dim == 2 ? output : output.reshape(output_size);
   }
 
   // Regular path
@@ -1308,7 +1310,7 @@ static at::Tensor linear_int8_with_onednn_weight(
     params.init_args();
     qlinear_forward_params_map[weight_addr] = params;
   }
-  return dim == 2 ? output : output.reshape(output_size);
+  return dim == 2 ? output : output.resize_(output_size);
 }
 
 #if AT_MKLDNN_ACL_ENABLED()
