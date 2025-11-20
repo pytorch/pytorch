@@ -3616,7 +3616,8 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
   TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
   TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
   TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
-  TORCH_CHECK(self.dtype() == at::kChar, func_name, ": Expected self dtype to be of type int8 but got ", self.dtype());
+  TORCH_CHECK(self.dtype() == at::kChar || self.dtype() == at::kByte,
+    func_name, ": Expected self dtype to be int8 or uint8 but got ", self.dtype());
   TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
   TORCH_CHECK(result.dtype() == at::kInt, func_name, ": Expected result dtype to be of type kInt but got ", result.dtype());
   TORCH_CHECK(result.size(0) == self.size(0), func_name, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
@@ -3638,7 +3639,6 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     }
   }
   if (!dispatched) {
-    auto a = reinterpret_cast<int8_t*>(self.data_ptr());
     auto b = reinterpret_cast<int8_t*>(mat2.data_ptr());
     auto c = reinterpret_cast<int32_t*>(result.data_ptr());
     const int64_t m = result.size(0);
@@ -3649,18 +3649,35 @@ Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) 
     const int64_t ldb_0 = mat2.strides()[0];
     const int64_t ldb_1 = mat2.strides()[1];
     const int64_t ldc = result.strides()[0];
-    parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) {
-      for (const auto i : c10::irange(start, end)) {
-        auto row = i / n;
-        auto col = i % n;
-        c[row * ldc + col] = 0;
-        for (const auto k : c10::irange(k)) {
-          c[row * ldc + col] = c[row * ldc + col] +
-              static_cast<int32_t>(a[row * lda_0 + k * lda_1]) *
-                  static_cast<int32_t>(b[k * ldb_0 + col * ldb_1]);
+    if (self.scalar_type() == at::kByte) {
+      auto a = reinterpret_cast<uint8_t*>(self.data_ptr());
+      parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) {
+        for (const auto i : c10::irange(start, end)) {
+          auto row = i / n;
+          auto col = i % n;
+          c[row * ldc + col] = 0;
+          for (const auto k : c10::irange(k)) {
+            c[row * ldc + col] = c[row * ldc + col] +
+                static_cast<int32_t>(a[row * lda_0 + k * lda_1]) *
+                    static_cast<int32_t>(b[k * ldb_0 + col * ldb_1]);
+          }
         }
-      }
-    });
+      });
+    } else {
+      auto a = reinterpret_cast<int8_t*>(self.data_ptr());
+      parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) {
+        for (const auto i : c10::irange(start, end)) {
+          auto row = i / n;
+          auto col = i % n;
+          c[row * ldc + col] = 0;
+          for (const auto k : c10::irange(k)) {
+            c[row * ldc + col] = c[row * ldc + col] +
+                static_cast<int32_t>(a[row * lda_0 + k * lda_1]) *
+                    static_cast<int32_t>(b[k * ldb_0 + col * ldb_1]);
+          }
+        }
+      });
+    }
   }
   return result;
 }
