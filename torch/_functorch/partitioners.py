@@ -161,21 +161,6 @@ def has_recomputable_rng_ops(fx_g: fx.GraphModule) -> bool:
     return False
 
 
-def is_not_collective(node: fx.Node) -> bool:
-    """
-    Helper for DCE to treat certain collectives as pure.
-    Used by both default_partition and AC reordering pass.
-    """
-    distributed_enabled = torch.distributed.is_available()
-    if not distributed_enabled:
-        return True
-    if node.target is torch.ops._c10d_functional.wait_tensor.default:
-        return False
-    if node.target is torch.ops._c10d_functional.all_gather_into_tensor.default:
-        return False
-    return True
-
-
 def sym_node_size(node: fx.Node) -> int:
     if isinstance(node.meta["val"], (torch.SymInt, torch.SymBool)):
         return 1
@@ -186,6 +171,18 @@ def sym_node_size(node: fx.Node) -> int:
 class InvalidNodeBase:
     def __repr__(self):
         return "Invalid Node"
+
+
+# Run DCE while overriding the definition of is_impure_node
+def is_not_collective(node):
+    distributed_enabled = torch.distributed.is_available()
+    if not distributed_enabled:
+        return True
+    if node.target is torch.ops._c10d_functional.wait_tensor.default:
+        return False
+    if node.target is torch.ops._c10d_functional.all_gather_into_tensor.default:
+        return False
+    return True
 
 
 InvalidNode = InvalidNodeBase()
@@ -1073,6 +1070,7 @@ def default_partition(
                 num_fwd_outputs=num_fwd_outputs,
                 static_lifetime_input_indices=static_lifetime_input_indices,
             )
+
         joint_module = cleanup_recompute_tags(joint_module, is_default_partition=True)
 
     if not config.unsafe_allow_optimization_of_collectives:
@@ -1176,7 +1174,6 @@ def default_partition(
         static_lifetime_input_nodes=static_lifetime_input_nodes,
     )
 
-    # Run DCE while overriding the definition of is_impure_node
     fw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
     bw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
 
@@ -1270,68 +1267,6 @@ def sort_depths(args, depth_map: dict[fx.Node, int]) -> list[tuple[fx.Node, int]
     return sorted(arg_depths.items(), key=operator.itemgetter(1), reverse=True)
 
 
-def collect_deps_with_filter(
-    node: fx.Node,
-    skip_condition: Callable[[fx.Node], bool],
-) -> OrderedSet[fx.Node]:
-    """
-    Collect all dependencies of a node that should be inserted,
-    respecting the skip_condition.
-
-    This is a common utility for graph reordering passes that need to
-    recursively pull in dependencies while maintaining original order.
-
-    Args:
-        node: The node whose dependencies to collect
-        skip_condition: Function that returns True if a node should be skipped
-
-    Returns:
-        OrderedSet of nodes to be inserted (in dependency order, not sorted)
-    """
-    cur_nodes = [node]
-    insertable_nodes: OrderedSet[fx.Node] = OrderedSet()
-
-    while len(cur_nodes) > 0:
-        n = cur_nodes.pop()
-
-        if n in insertable_nodes:
-            continue
-
-        if skip_condition(n):
-            continue
-
-        insertable_nodes.add(n)
-        cur_nodes += n.all_input_nodes
-
-    return insertable_nodes
-
-
-def insert_nodes_in_original_order(
-    nodes: OrderedSet[fx.Node],
-    order: dict[fx.Node, int],
-    new_graph: fx.Graph,
-    env: dict[fx.Node, fx.Node],
-    node_copy_fn: Optional[Callable[[fx.Node], fx.Node]] = None,
-) -> None:
-    """
-    Insert nodes into a new graph in their original order.
-
-    Args:
-        nodes: Set of nodes to insert
-        order: Mapping from node to its original position in the graph
-        new_graph: The graph to insert nodes into
-        env: Environment mapping old nodes to new nodes
-        node_copy_fn: Optional custom function to copy nodes. If None, uses
-                      new_graph.node_copy(n, lambda x: env[x])
-    """
-    for n in sorted(nodes, key=lambda x: order[x]):
-        if n not in env:
-            if node_copy_fn is not None:
-                env[n] = node_copy_fn(n)
-            else:
-                env[n] = new_graph.node_copy(n, lambda x: env[x])
-
-
 def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     """
     This pass finds the first bwd node in the graph (by looking at users of
@@ -1365,12 +1300,22 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     order = {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
     def insert_node_in_graph(node):
-        # Collect dependencies that need to be inserted
-        # Skip condition: already in env
-        insertable_nodes = collect_deps_with_filter(node, lambda n: n in env)
+        cur_nodes = [node]
+        insertable_nodes: OrderedSet[fx.Node] = OrderedSet()
+        while len(cur_nodes) > 0:
+            node = cur_nodes.pop()
+            if node in insertable_nodes or node in env:
+                continue
+            insertable_nodes.add(node)
 
-        # Insert in original order
-        insert_nodes_in_original_order(insertable_nodes, order, new_graph, env)
+            # Bias traversal towards the nodes that have higher depth - prioritizes
+            # critical path first.
+            cur_nodes += node.all_input_nodes
+
+        # pyrefly: ignore [bad-assignment]
+        insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
+        for node in insertable_nodes:
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     # Find first bwd node in the graph
     tangent_inputs = list(filter(_is_tangent, gm.graph.nodes))
