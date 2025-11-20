@@ -74,6 +74,11 @@ def prologue_fusion_enabled() -> bool:
 # Enable Zendnn optimizations
 enable_zendnn: Optional[bool] = get_tristate_env("TORCHINDUCTOR_ENABLE_ZENDNN")
 
+# Enable zendnn weight prepacking to get a better performance; may lead to large memory footprint
+zendnn_weight_prepack: bool = (
+    os.environ.get("TORCHINDUCTOR_ZENDNN_WEIGHT_PREPACK", "1") == "1"
+)
+
 # Enable auto_functionalized_v2 (enabled by default)
 enable_auto_functionalized_v2 = (
     os.environ.get("TORCHDYNAMO_AUTO_FUNCTIONALIZED_V2", "1") == "1"
