@@ -2063,7 +2063,6 @@ class FusedMixOrderReductions(FusedSchedulerNode):
             node1.scheduler, list(node1.get_nodes()) + list(node2.get_nodes())
         )
         self.numel = MixOrderReduction.get_numel(self.node1)
-        # breakpoint()
 
     def sub_node_can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
@@ -2737,9 +2736,6 @@ class Scheduler:
             self.compute_ancestors()
 
         self.nodes = self.fuse_nodes(self.nodes)
-        if V.graph.post_grad_graph_id == 1:
-            # breakpoint() # TODO
-            pass
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
 
