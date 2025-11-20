@@ -301,12 +301,18 @@ class TestNumPyInterop(TestCase):
         # This used to leak memory as the `from_numpy` call raised an exception and didn't decref the temporary
         # object. See https://github.com/pytorch/pytorch/issues/121138
         x = np.array(b"value")
+        initial_refcount = sys.getrefcount(x)
         for _ in range(1000):
             try:
                 torch.from_numpy(x)
             except TypeError:
                 pass
-        self.assertTrue(sys.getrefcount(x) == 2)
+        final_refcount = sys.getrefcount(x)
+        self.assertEqual(
+            final_refcount,
+            initial_refcount,
+            f"Memory leak detected: refcount increased from {initial_refcount} to {final_refcount}",
+        )
 
     @skipIfTorchDynamo("No need to test invalid dtypes that should fail by design.")
     @onlyCPU
