@@ -10895,6 +10895,34 @@ get_out().sum().backward()
 
             self.assertTrue(gradcheck(func, x, fast_mode=True))
 
+    def test_grad_thread_safety(self):
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+
+        NUM_ITERS = 10
+        NUM_THREADS = 4
+
+        # Concurrent calls to tensor.untyped_storage()
+        def access_grad(tensor, barrier):
+            barrier.wait()
+            return weakref.ref(tensor.grad)
+
+        for i in range(NUM_ITERS):
+            tensor = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+            (tensor**2).sum().backward()
+
+            barrier = threading.Barrier(NUM_THREADS)
+            with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
+                futures = [
+                    executor.submit(access_grad, tensor, barrier)
+                    for _ in range(NUM_THREADS)
+                ]
+
+                # Check that all the grad tensors returned were the same
+                for future in futures:
+                    self.assertEqual(future.result()(), tensor.grad)
+                self.assertIsNotNone(tensor.grad)
+
 
 def index_perm_variable(shape, max_indices):
     if not isinstance(shape, tuple):
