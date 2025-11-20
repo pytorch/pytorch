@@ -7,6 +7,7 @@ a valid sharding for SDPA without CP enabled. This module provides utilities to
 dynamically install Shard(2) sharding rules when CP is activated.
 """
 
+import warnings
 from contextlib import contextmanager
 
 import torch
@@ -26,6 +27,9 @@ from torch.distributed.tensor.placement_types import Replicate, Shard
 aten = torch.ops.aten
 
 SEQ_DIM = 2
+
+# Flag to track if cache warning has been shown
+_cache_warning_shown = False
 
 
 @contextmanager
@@ -70,8 +74,16 @@ def _op_strategy_context(op_overload, strategy_func, schema_info=None):
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
 
-        # Clear cache
-        propagator.propagate_op_sharding.cache.cache_clear()
+        # Warn about cache not being cleared (only once)
+        global _cache_warning_shown
+        if not _cache_warning_shown:
+            warnings.warn(
+                "Context Parallel sharding rules cache will not be cleared. "
+                "Shard(2) support will persist in the cache.",
+                UserWarning,
+                stacklevel=2,
+            )
+            _cache_warning_shown = True
 
 
 # ==================== Flash Attention Strategies ====================
