@@ -21,6 +21,11 @@ License: BSD-2-Clause
 Files: third_party/NNPACK
   For details, see: third_party/NNPACK/LICENSE
 
+Name: QNNPACK
+License: BSD-3-Clause
+Files: third_party/QNNPACK
+  For details, see: third_party/QNNPACK/LICENSE
+
 Name: VulkanMemoryAllocator
 License: MIT
 Files: third_party/VulkanMemoryAllocator
@@ -31,18 +36,17 @@ License: BSD-3-Clause
 Files: third_party/XNNPACK
   For details, see: third_party/XNNPACK/LICENSE
 
-Name: aiter
-License: MIT
-Files: third_party/aiter
-  For details, see: third_party/aiter/LICENSE
-
 Name: benchmark
 License: Apache-2.0
-Files: third_party/protobuf/third_party/benchmark,
-     third_party/benchmark,
+Files: third_party/benchmark,
+     third_party/onnx/third_party/benchmark,
+     third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark,
+     third_party/protobuf/third_party/benchmark,
      third_party/opentelemetry-cpp/third_party/benchmark
-  For details, see: third_party/protobuf/third_party/benchmark/LICENSE,
-     third_party/benchmark/LICENSE,
+  For details, see: third_party/benchmark/LICENSE,
+     third_party/onnx/third_party/benchmark/LICENSE,
+     third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark/LICENSE,
+     third_party/protobuf/third_party/benchmark/LICENSE,
      third_party/opentelemetry-cpp/third_party/benchmark/LICENSE
 
 Name: boost-vcpkg-helpers
@@ -52,10 +56,8 @@ Files: third_party/opentelemetry-cpp/tools/vcpkg/ports/boost-vcpkg-helpers
 
 Name: cJSON
 License: MIT
-Files: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/examples/rest/cJSON,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/examples/rest/cJSON
-  For details, see: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/examples/rest/cJSON/LICENSE,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/examples/rest/cJSON/LICENSE
+Files: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/examples/rest/cJSON
+  For details, see: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/examples/rest/cJSON/LICENSE
 
 Name: catch2
 License: BSL-1.0
@@ -64,10 +66,12 @@ Files: third_party/opentelemetry-cpp/third_party/opentracing-cpp/3rd_party/inclu
 
 Name: clog
 License: BSD-2-Clause
-Files: third_party/fbgemm/external/cpuinfo/deps/clog,
-     third_party/cpuinfo/deps/clog
-  For details, see: third_party/fbgemm/external/cpuinfo/deps/clog/LICENSE,
-     third_party/cpuinfo/deps/clog/LICENSE
+Files: third_party/QNNPACK/deps/clog,
+     third_party/cpuinfo/deps/clog,
+     third_party/fbgemm/third_party/cpuinfo/deps/clog
+  For details, see: third_party/QNNPACK/deps/clog/LICENSE,
+     third_party/cpuinfo/deps/clog/LICENSE,
+     third_party/fbgemm/third_party/cpuinfo/deps/clog/LICENSE
 
 Name: colorama
 License: BSD-3-Clause
@@ -81,8 +85,10 @@ Files: third_party/cpp-httplib
 
 Name: cpplint
 License: BSD-3-Clause
-Files: third_party/kineto/libkineto/third_party/dynolog/third_party/json/third_party/cpplint
-  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/json/third_party/cpplint/LICENSE
+Files: third_party/kineto/libkineto/third_party/dynolog/third_party/json/third_party/cpplint,
+     third_party/nlohmann/tools/cpplint
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/json/third_party/cpplint/LICENSE,
+     third_party/nlohmann/tools/cpplint/LICENSE
 
 Name: cpr
 License: MIT
@@ -91,10 +97,22 @@ Files: third_party/kineto/libkineto/third_party/dynolog/third_party/cpr
 
 Name: cpuinfo
 License: BSD-2-Clause
-Files: third_party/fbgemm/external/cpuinfo,
-     third_party/cpuinfo
-  For details, see: third_party/fbgemm/external/cpuinfo/LICENSE,
-     third_party/cpuinfo/LICENSE
+Files: third_party/cpuinfo,
+     third_party/fbgemm/third_party/cpuinfo
+  For details, see: third_party/cpuinfo/LICENSE,
+     third_party/fbgemm/third_party/cpuinfo/LICENSE
+
+Name: cudnn_frontend
+License: MIT
+Files: third_party/cudnn_frontend
+  For details, see: third_party/cudnn_frontend/LICENSE.txt
+
+Name: cutlass
+License: BSD-3-Clause
+Files: third_party/cutlass,
+     third_party/fbgemm/third_party/cutlass
+  For details, see: third_party/cutlass/LICENSE.txt,
+     third_party/fbgemm/third_party/cutlass/LICENSE.txt
 
 Name: dart
 License: Apache-2.0
@@ -103,27 +121,30 @@ Files: third_party/flatbuffers/dart
 
 Name: doctest
 License: MIT
-Files: third_party/kineto/libkineto/third_party/dynolog/third_party/json/test/thirdparty/doctest
-  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/json/test/thirdparty/doctest/LICENSE.txt
+Files: third_party/kineto/libkineto/third_party/dynolog/third_party/json/test/thirdparty/doctest,
+     third_party/nlohmann/tests/thirdparty/doctest
+  For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/json/test/thirdparty/doctest/LICENSE.txt,
+     third_party/nlohmann/tests/thirdparty/doctest/LICENSE.txt
 
 Name: duktape-1.5.2
 License: MIT
-Files: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.5.2,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.5.2
-  For details, see: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.5.2/LICENSE.txt,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.5.2/LICENSE.txt
+Files: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.5.2
+  For details, see: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.5.2/LICENSE.txt
 
 Name: duktape-1.8.0
 License: MIT
-Files: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.8.0,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.8.0
-  For details, see: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.8.0/LICENSE.txt,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.8.0/LICENSE.txt
+Files: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.8.0
+  For details, see: third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/civetweb/src/third_party/duktape-1.8.0/LICENSE.txt
 
 Name: dynolog
 License: MIT
 Files: third_party/kineto/libkineto/third_party/dynolog
   For details, see: third_party/kineto/libkineto/third_party/dynolog/LICENSE
+
+Name: eigen
+License: BSD-3-Clause
+Files: third_party/eigen
+  For details, see: third_party/eigen/COPYING.BSD
 
 Name: etw
 License: MIT
@@ -156,8 +177,13 @@ Files: third_party/kineto/libkineto/third_party/dynolog/third_party/fmt,
      third_party/kineto/libkineto/third_party/fmt,
      third_party/fmt
   For details, see: third_party/kineto/libkineto/third_party/dynolog/third_party/fmt/LICENSE.rst,
-     third_party/kineto/libkineto/third_party/fmt/LICENSE,
+     third_party/kineto/libkineto/third_party/fmt/LICENSE.rst,
      third_party/fmt/LICENSE
+
+Name: foxi
+License: MIT
+Files: third_party/foxi
+  For details, see: third_party/foxi/LICENSE
 
 Name: gemmlowp
 License: Apache-2.0
@@ -166,14 +192,18 @@ Files: third_party/gemmlowp/gemmlowp
 
 Name: generator
 License: Apache-2.0
-Files: third_party/protobuf/third_party/googletest/googlemock/scripts/generator,
-     third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/googletest/googlemock/scripts/generator,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/googletest/googlemock/scripts/generator,
-     third_party/tensorpipe/third_party/googletest/googlemock/scripts/generator
-  For details, see: third_party/protobuf/third_party/googletest/googlemock/scripts/generator/LICENSE,
-     third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/googletest/googlemock/scripts/generator/LICENSE,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/googletest/googlemock/scripts/generator/LICENSE,
-     third_party/tensorpipe/third_party/googletest/googlemock/scripts/generator/LICENSE
+Files: third_party/fbgemm/third_party/googletest/googlemock/scripts/generator,
+     third_party/googletest/googlemock/scripts/generator,
+     third_party/kineto/libkineto/third_party/googletest/googlemock/scripts/generator,
+     third_party/protobuf/third_party/googletest/googlemock/scripts/generator,
+     third_party/tensorpipe/third_party/googletest/googlemock/scripts/generator,
+     third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/googletest/googlemock/scripts/generator
+  For details, see: third_party/fbgemm/third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/kineto/libkineto/third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/protobuf/third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/tensorpipe/third_party/googletest/googlemock/scripts/generator/LICENSE,
+     third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/googletest/googlemock/scripts/generator/LICENSE
 
 Name: gettimeofday
 License: Apache-2.0
@@ -187,45 +217,51 @@ Files: third_party/gloo
 
 Name: googlemock
 License: BSD-3-Clause
-Files: third_party/protobuf/third_party/googletest/googlemock,
+Files: third_party/fbgemm/third_party/googletest/googlemock,
+     third_party/kineto/libkineto/third_party/googletest/googlemock,
+     third_party/protobuf/third_party/googletest/googlemock,
      third_party/tensorpipe/third_party/googletest/googlemock
-  For details, see: third_party/protobuf/third_party/googletest/googlemock/LICENSE,
+  For details, see: third_party/fbgemm/third_party/googletest/googlemock/LICENSE,
+     third_party/kineto/libkineto/third_party/googletest/googlemock/LICENSE,
+     third_party/protobuf/third_party/googletest/googlemock/LICENSE,
      third_party/tensorpipe/third_party/googletest/googlemock/LICENSE
 
 Name: googletest
 License: BSD-3-Clause
-Files: third_party/protobuf/third_party/googletest,
-     third_party/protobuf/third_party/googletest/googletest,
-     third_party/opentelemetry-cpp/third_party/googletest,
-     third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/googletest,
+Files: third_party/fbgemm/third_party/googletest,
+     third_party/fbgemm/third_party/googletest/googletest,
      third_party/googletest,
-     third_party/fbgemm/external/googletest,
-     third_party/kineto/libkineto/third_party/googletest,
      third_party/kineto/libkineto/third_party/dynolog/third_party/googletest,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/googletest,
+     third_party/kineto/libkineto/third_party/googletest,
+     third_party/kineto/libkineto/third_party/googletest/googletest,
+     third_party/protobuf/third_party/googletest,
+     third_party/protobuf/third_party/googletest/googletest,
      third_party/tensorpipe/third_party/googletest,
-     third_party/tensorpipe/third_party/googletest/googletest
-  For details, see: third_party/protobuf/third_party/googletest/LICENSE,
-     third_party/protobuf/third_party/googletest/googletest/LICENSE,
-     third_party/opentelemetry-cpp/third_party/googletest/LICENSE,
-     third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/googletest/LICENSE,
+     third_party/tensorpipe/third_party/googletest/googletest,
+     third_party/opentelemetry-cpp/third_party/googletest,
+     third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/googletest
+  For details, see: third_party/fbgemm/third_party/googletest/LICENSE,
+     third_party/fbgemm/third_party/googletest/googletest/LICENSE,
      third_party/googletest/LICENSE,
-     third_party/fbgemm/external/googletest/LICENSE,
-     third_party/kineto/libkineto/third_party/googletest/LICENSE,
      third_party/kineto/libkineto/third_party/dynolog/third_party/googletest/LICENSE,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/3rdparty/googletest/LICENSE,
+     third_party/kineto/libkineto/third_party/googletest/LICENSE,
+     third_party/kineto/libkineto/third_party/googletest/googletest/LICENSE,
+     third_party/protobuf/third_party/googletest/LICENSE,
+     third_party/protobuf/third_party/googletest/googletest/LICENSE,
      third_party/tensorpipe/third_party/googletest/LICENSE,
-     third_party/tensorpipe/third_party/googletest/googletest/LICENSE
+     third_party/tensorpipe/third_party/googletest/googletest/LICENSE,
+     third_party/opentelemetry-cpp/third_party/googletest/LICENSE,
+     third_party/opentelemetry-cpp/third_party/prometheus-cpp/3rdparty/googletest/LICENSE
 
 Name: gtest
 License: BSD-3-Clause
-Files: third_party/ideep/mkl-dnn/third_party/gtest
-  For details, see: third_party/ideep/mkl-dnn/third_party/gtest/LICENSE
+Files: third_party/ideep/mkl-dnn/tests/gtests/gtest
+  For details, see: third_party/ideep/mkl-dnn/tests/gtests/gtest/LICENSE
 
 Name: hipify_torch
 License: MIT
-Files: third_party/fbgemm/external/hipify_torch
-  For details, see: third_party/fbgemm/external/hipify_torch/LICENSE.txt
+Files: third_party/fbgemm/third_party/hipify_torch
+  For details, see: third_party/fbgemm/third_party/hipify_torch/LICENSE.txt
 
 Name: hungarian
 License: Permissive (free to use)
@@ -236,6 +272,11 @@ Name: ideep
 License: MIT
 Files: third_party/ideep
   For details, see: third_party/ideep/LICENSE
+
+Name: ios-cmake
+License: BSD-3-Clause
+Files: third_party/ios-cmake
+  For details, see: third_party/ios-cmake/LICENSE
 
 Name: irrlicht
 License: MIT
@@ -267,10 +308,10 @@ License: MIT
 Files: third_party/mimalloc
   For details, see: third_party/mimalloc/LICENSE
 
-Name: miniz-3.0.2
+Name: miniz-2.1.0
 License: MIT
-Files: third_party/miniz-3.0.2
-  For details, see: third_party/miniz-3.0.2/LICENSE
+Files: third_party/miniz-2.1.0
+  For details, see: third_party/miniz-2.1.0/LICENSE
 
 Name: mkl-dnn
 License: Apache-2.0
@@ -282,17 +323,30 @@ License: MIT
 Files: third_party/opentelemetry-cpp/third_party/ms-gsl
   For details, see: third_party/opentelemetry-cpp/third_party/ms-gsl/LICENSE
 
-Name: mx
-License: MIT
-Files: third_party/fbgemm/fbgemm_gpu/test/quantize/mx,
-     third_party/fbgemm/fbgemm_gpu/src/quantize_ops/mx
-  For details, see: third_party/fbgemm/fbgemm_gpu/test/quantize/mx/LICENSE,
-     third_party/fbgemm/fbgemm_gpu/src/quantize_ops/mx/LICENSE
+Name: nccl
+License: BSD-3-Clause
+Files: third_party/nccl/nccl
+  For details, see: third_party/nccl/nccl/LICENSE.txt
+
+Name: neon2sse
+License: BSD-Source-Code
+Files: third_party/neon2sse
+  For details, see: third_party/neon2sse/LICENSE
 
 Name: onnx
 License: Apache-2.0
 Files: third_party/onnx
   For details, see: third_party/onnx/LICENSE
+
+Name: onnx
+License: MIT
+Files: third_party/onnx-tensorrt/third_party/onnx
+  For details, see: third_party/onnx-tensorrt/third_party/onnx/LICENSE
+
+Name: onnx-tensorrt
+License: MIT
+Files: third_party/onnx-tensorrt
+  For details, see: third_party/onnx-tensorrt/LICENSE
 
 Name: opentelemetry-cpp
 License: Apache-2.0
@@ -331,10 +385,8 @@ Files: third_party/opentelemetry-cpp/tools/vcpkg/ports/pqp
 
 Name: prometheus-cpp
 License: MIT
-Files: third_party/opentelemetry-cpp/third_party/prometheus-cpp,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp
-  For details, see: third_party/opentelemetry-cpp/third_party/prometheus-cpp/LICENSE,
-     third_party/kineto/libkineto/third_party/dynolog/third_party/prometheus-cpp/LICENSE
+Files: third_party/opentelemetry-cpp/third_party/prometheus-cpp
+  For details, see: third_party/opentelemetry-cpp/third_party/prometheus-cpp/LICENSE
 
 Name: protobuf
 License: BSD-3-Clause
@@ -354,11 +406,18 @@ Files: third_party/pthreadpool
 Name: pybind11
 License: BSD-3-Clause
 Files: third_party/onnx/third_party/pybind11,
-     third_party/tensorpipe/third_party/pybind11,
-     third_party/pybind11
+     third_party/onnx-tensorrt/third_party/onnx/third_party/pybind11,
+     third_party/pybind11,
+     third_party/tensorpipe/third_party/pybind11
   For details, see: third_party/onnx/third_party/pybind11/LICENSE,
-     third_party/tensorpipe/third_party/pybind11/LICENSE,
-     third_party/pybind11/LICENSE
+     third_party/onnx-tensorrt/third_party/onnx/third_party/pybind11/LICENSE,
+     third_party/pybind11/LICENSE,
+     third_party/tensorpipe/third_party/pybind11/LICENSE
+
+Name: python
+License: BSD-3-Clause
+Files: third_party/cutlass/python
+  For details, see: third_party/cutlass/python/LICENSE.txt
 
 Name: python-peachpy
 License: BSD-2-Clause
@@ -384,6 +443,11 @@ Name: tb_plugin
 License: BSD-3-Clause
 Files: third_party/kineto/tb_plugin
   For details, see: third_party/kineto/tb_plugin/LICENSE
+
+Name: tbb
+License: Apache-2.0
+Files: third_party/tbb
+  For details, see: third_party/tbb/LICENSE
 
 Name: tensorflow-common
 License: MIT
@@ -414,3 +478,8 @@ Name: vulkan
 License: Apache-2.0 with exception
 Files: third_party/opentelemetry-cpp/tools/vcpkg/ports/vulkan
   For details, see: third_party/opentelemetry-cpp/tools/vcpkg/ports/vulkan/LICENSE.txt
+
+Name: zstd
+License: BSD-3-Clause
+Files: third_party/zstd
+  For details, see: third_party/zstd/LICENSE

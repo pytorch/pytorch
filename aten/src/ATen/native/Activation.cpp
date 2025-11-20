@@ -392,7 +392,7 @@ TORCH_IMPL_FUNC(gelu_out_cpu) (
 ) {
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
-  if (use_mkldnn(self) && (approximate_type == GeluType::None) && self.scalar_type() != c10::ScalarType::BFloat16)  {
+  if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
     const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
