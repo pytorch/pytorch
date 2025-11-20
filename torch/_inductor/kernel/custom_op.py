@@ -275,106 +275,113 @@ def _merge_identical_implementations(
     return merged
 
 
-@torch._dynamo.allow_in_graph
-def _build_torch_cond_dispatch_recursive(
-    range_idx: int,
-    range_endpoints: list[int],
-    impl_wrappers: list[Callable],
-    tensors: tuple[torch.Tensor, ...],
-    dispatch_dim: torch.SymInt,
-) -> torch.Tensor:
-    """Build nested torch.cond recursively without using functools.partial.
+def _cleanup_torch_cond_operands(
+    gm: torch.fx.GraphModule, num_expected_tensors: int
+) -> None:
+    """Clean up torch.cond operands to remove Python constants.
 
-    This function is designed to work around Dynamo's limitations with functools.partial.
-    Instead of using partial, we use simple recursion with index-based selection.
+    make_fx automatically collects all closure variables. For nested torch.cond,
+    this can include Python int/float constants that are not FX Nodes.
 
+    The issue: ir.py:8807 expects all operands to be FX Nodes:
+        assert all(isinstance(n, Node) for n in fx_operands)
+
+    We keep:
+    - All FX Nodes (including tensor placeholders and SymInt nodes)
+
+    We remove:
+    - Python int/float constants (like 512) that are not FX Nodes
+
+    Also cleans up subgraph function signatures to match the cleaned operands.
+
+    Args:
+        gm: GraphModule traced by make_fx
+        num_expected_tensors: Number of expected tensor inputs (unused, for future)
     """
-    if range_idx >= len(impl_wrappers):
-        raise IndexError(
-            f"range_idx {range_idx} out of bounds (len={len(impl_wrappers)})"
-        )
+    import torch.fx
 
-    if range_idx == len(impl_wrappers) - 1:
-        # Last range: just call the wrapper directly
-        return impl_wrappers[range_idx](*tensors)
+    for node in gm.graph.nodes:
+        if node.op == "call_function" and node.target == torch.ops.higher_order.cond:
+            # node.args is (pred, true_graph, false_graph, operands_tuple)
+            if len(node.args) >= 4:
+                operands_tuple = node.args[3]
 
-    # Not last range: create conditional
-    endpoint = range_endpoints[range_idx]
+                if isinstance(operands_tuple, (tuple, list)):
+                    original_count = len(operands_tuple)
 
-    # Define true/false branches as simple nested functions
-    # These are NOT closures over tensors - they will receive tensors as args
-    def true_fn():
-        return impl_wrappers[range_idx](*tensors)
+                    # Filter: keep only FX Nodes, remove Python constants
+                    filtered_operands = []
+                    removed_indices = []  # Track which operand positions were removed
 
-    def false_fn():
-        return _build_torch_cond_dispatch_recursive(
-            range_idx + 1,
-            range_endpoints,
-            impl_wrappers,
-            tensors,
-            dispatch_dim,
-        )
+                    for i, operand in enumerate(operands_tuple):
+                        # Check if operand is an FX Node
+                        if isinstance(operand, torch.fx.Node):
+                            filtered_operands.append(operand)
+                        else:
+                            # This is a Python constant (int, float, etc.)
+                            log.info(f"  Removing non-Node constant at index {i}: {operand} (type: {type(operand).__name__})")
+                            removed_indices.append(i)
 
-    # 🔍 DEBUG: Print what torch.cond actually receives
-    print("\n" + "=" * 80)
-    print(f"🔍 DEBUG: torch.cond branches at range_idx={range_idx}")
-    print("=" * 80)
-    print(f"Predicate: dispatch_dim <= {endpoint}")
-    print(f"dispatch_dim type: {type(dispatch_dim)}, value: {dispatch_dim}")
-    print(f"\ntrue_fn:")
-    print(f"  type: {type(true_fn)}")
-    print(f"  __name__: {true_fn.__name__}")
-    print(f"  __qualname__: {true_fn.__qualname__}")
-    print(f"  __module__: {true_fn.__module__}")
+                    if len(filtered_operands) != original_count:
+                        log.info(
+                            f"Cleaning torch.cond operands: {original_count} -> {len(filtered_operands)}"
+                        )
 
-    if true_fn.__closure__:
-        print(f"  Closure ({len(true_fn.__closure__)} items):")
-        for i, cell in enumerate(true_fn.__closure__):
-            try:
-                content = cell.cell_contents
-                print(
-                    f"    [{i}] {type(content).__name__}: {content if not callable(content) else f'<function {content.__name__}>'}"
-                )
-            except:
-                print(f"    [{i}] <error accessing>")
-    else:
-        print(f"  Closure: None")
+                        # Replace operands in the node
+                        new_args = list(node.args)
+                        new_args[3] = tuple(filtered_operands)
+                        node.args = tuple(new_args)
 
-    print(f"\nfalse_fn:")
-    print(f"  type: {type(false_fn)}")
-    print(f"  __name__: {false_fn.__name__}")
-    print(f"  __qualname__: {false_fn.__qualname__}")
-    print(f"  __module__: {false_fn.__module__}")
+                        # CRITICAL: Clean up subgraph function signatures
+                        # Remove placeholders at the removed indices
+                        true_graph = node.args[1]
+                        false_graph = node.args[2]
 
-    if false_fn.__closure__:
-        print(f"  Closure ({len(false_fn.__closure__)} items):")
-        for i, cell in enumerate(false_fn.__closure__):
-            try:
-                content = cell.cell_contents
-                print(
-                    f"    [{i}] {type(content).__name__}: {content if not callable(content) else f'<function {content.__name__}>'}"
-                )
-            except:
-                print(f"    [{i}] <error accessing>")
-    else:
-        print(f"  Closure: None")
+                        if hasattr(gm, str(true_graph)):
+                            true_gm = getattr(gm, str(true_graph))
+                            _cleanup_subgraph_placeholders(true_gm, removed_indices)
 
-    # Print bytecode
-    import dis
+                        if hasattr(gm, str(false_graph)):
+                            false_gm = getattr(gm, str(false_graph))
+                            _cleanup_subgraph_placeholders(false_gm, removed_indices)
+                            # Recursively clean nested conds in false_graph
+                            _cleanup_torch_cond_operands(false_gm, num_expected_tensors)
 
-    print(f"\ntrue_fn bytecode:")
-    dis.dis(true_fn)
+    # Recompile the graph
+    gm.recompile()
 
-    print(f"\nfalse_fn bytecode:")
-    dis.dis(false_fn)
 
-    print("=" * 80 + "\n")
+def _cleanup_subgraph_placeholders(
+    subgraph_gm: torch.fx.GraphModule,
+    removed_indices: list[int],
+) -> None:
+    """Remove placeholder nodes at specified indices from subgraph.
 
-    return torch.cond(
-        dispatch_dim <= endpoint,
-        true_fn,
-        false_fn,
-    )
+    Args:
+        subgraph_gm: Subgraph GraphModule (true_graph or false_graph)
+        removed_indices: List of operand indices that were removed
+    """
+    import torch.fx
+
+    if not removed_indices:
+        return
+
+    # Get all placeholder nodes in order
+    placeholders = [n for n in subgraph_gm.graph.nodes if n.op == "placeholder"]
+
+    log.info(f"  Cleaning subgraph: removing {len(removed_indices)} placeholder(s) at indices {removed_indices}")
+
+    # Remove placeholders at the specified indices
+    for idx in sorted(removed_indices, reverse=True):  # Remove from end to avoid index shifting
+        if idx < len(placeholders):
+            placeholder = placeholders[idx]
+            log.info(f"    Removing placeholder: {placeholder.name}")
+            # Replace all uses with None (they shouldn't be used)
+            placeholder.replace_all_uses_with(None)
+            subgraph_gm.graph.erase_node(placeholder)
+
+    # Recompile the subgraph
+    subgraph_gm.recompile()
 
 
 def _split_points_to_ranges(
@@ -1099,6 +1106,10 @@ def _range_based_lowering_fn(
     kwargs: Any,
 ) -> Any:
     """Range-based autotuning lowering function."""
+    from torch.fx.experimental.proxy_tensor import make_fx
+    from ..decomposition import select_decomp_table
+    from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
+
     log.info("=== Range-based Autotuning for %s ===", name)
     log.info("Dispatch on: %s[%d], Ranges: %s", tensor_name, dim_index, ranges)
 
@@ -1164,95 +1175,135 @@ def _range_based_lowering_fn(
             )
 
             # Extract winning implementation
-            choice_name = getattr(winning_choice, "name", "")
-            winning_idx = _extract_winning_decomposition_index(
-                choice_name, decompositions
+            winning_impl_idx = _extract_winning_decomposition_index(
+                winning_choice.name, decompositions
             )
-            impl = decompositions[winning_idx]
-            impl_kwargs = non_tensor_args[winning_idx]
+            winning_impl = decompositions[winning_impl_idx]
+            winning_kwargs = non_tensor_args[winning_impl_idx]
 
             range_to_best_impl[(range_start, range_end)] = (
-                impl,
-                impl_kwargs,
-                impl.__name__,
+                winning_impl,
+                winning_kwargs,
+                winning_impl.__name__,
             )
 
             log.info(
-                "Range [%s, %s]: Selected %s",
+                "   Range [%s, %s] -> %s",
                 range_start,
                 range_end if range_end != float("inf") else "inf",
-                impl.__name__,
+                winning_impl.__name__,
             )
 
-    log.info("Completed autotuning for %d ranges", len(range_to_best_impl))
+    # Merge consecutive ranges with same implementation
+    sorted_ranges = list(_merge_identical_implementations(range_to_best_impl).items())
 
-    # Step 2: Merge consecutive ranges with identical implementations
-    merged_range_to_best_impl = _merge_identical_implementations(range_to_best_impl)
-
-    log.info(
-        "After merging: %d unique implementations across %d ranges",
-        len({impl_name for _, _, impl_name in merged_range_to_best_impl.values()}),
-        len(merged_range_to_best_impl),
-    )
-
-    # Step 3: Check if all ranges merged into one
-    if len(merged_range_to_best_impl) == 1:
+    log.info("After merging identical implementations: %d ranges", len(sorted_ranges))
+    for (range_start, range_end), (impl, impl_kwargs, impl_name) in sorted_ranges:
         log.info(
-            "All ranges selected the same implementation - skipping dispatch, using direct inline"
+            "   [%s, %s] -> %s",
+            range_start,
+            range_end if range_end != float("inf") else "inf",
+            impl_name,
         )
-        single_impl, single_kwargs, _ = next(iter(merged_range_to_best_impl.values()))
+
+    # If only one range remains after merging, just inline that implementation
+    if len(sorted_ranges) == 1:
+        (range_start, range_end), (impl, impl_kwargs, _) = sorted_ranges[0]
+        log.info("Only one range after merging, directly inlining implementation")
         return _lower_single_impl(
-            single_impl, single_kwargs, runtime_kwargs, tensor_inputs, name
+            impl, impl_kwargs, runtime_kwargs, tensor_inputs, name
         )
 
-    # Step 4: Create dispatch using torch.cond traced with make_fx
-    log.info(
-        "Creating torch.cond dispatch for %d ranges", len(merged_range_to_best_impl)
-    )
-
-    from torch.fx.experimental.proxy_tensor import make_fx
-    from ..decomposition import select_decomp_table
-    from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes
-
-    sorted_ranges = sorted(merged_range_to_best_impl.items())
-
-    # Build dispatch function for 2 ranges
+    # Build dispatch function for N ranges
     def dispatch_fn(*fake_tensors):
         """Main dispatch function that will be traced by make_fx.
 
-        Currently supports only 2 ranges.
-        For 2 ranges: torch.cond(pred1, impl1, impl2)
+        Supports 2-3 ranges using nested torch.cond.
         """
-        if len(sorted_ranges) != 2:
+        num_ranges = len(sorted_ranges)
+
+        if num_ranges < 2:
+            raise RuntimeError(
+                f"dispatch_fn requires at least 2 ranges, got {num_ranges}"
+            )
+
+        if num_ranges > 3:
             raise NotImplementedError(
-                f"Range-based dispatch currently supports only 2 ranges, got {len(sorted_ranges)}. "
-                f"Support for 3+ ranges requires a different approach to avoid data-dependent branching issues."
+                f"Range-based dispatch currently supports up to 3 ranges, got {num_ranges}. "
+                f"Support for 4+ ranges requires additional implementation."
             )
 
         dispatch_tensor = fake_tensors[0]
         dim_value = dispatch_tensor.size(dim_index)
 
-        # Simple case: just one torch.cond for 2 ranges
-        (r1_start, r1_end), (impl1, impl1_kwargs, _) = sorted_ranges[0]
-        (r2_start, r2_end), (impl2, impl2_kwargs, _) = sorted_ranges[1]
+        if num_ranges == 2:
+            # Simple case: just one torch.cond for 2 ranges
+            (r1_start, r1_end), (impl1, impl1_kwargs, _) = sorted_ranges[0]
+            (r2_start, r2_end), (impl2, impl2_kwargs, _) = sorted_ranges[1]
 
-        merged_kwargs1 = {**runtime_kwargs, **impl1_kwargs}
-        merged_kwargs2 = {**runtime_kwargs, **impl2_kwargs}
+            merged_kwargs1 = {**runtime_kwargs, **impl1_kwargs}
+            merged_kwargs2 = {**runtime_kwargs, **impl2_kwargs}
 
-        @torch._dynamo.dont_skip_tracing
-        def true_fn(*ops):
-            return impl1(*ops, **merged_kwargs1)
+            @torch._dynamo.dont_skip_tracing
+            def true_fn(*ops):
+                return impl1(*ops, **merged_kwargs1)
 
-        @torch._dynamo.dont_skip_tracing
-        def false_fn(*ops):
-            return impl2(*ops, **merged_kwargs2)
+            @torch._dynamo.dont_skip_tracing
+            def false_fn(*ops):
+                return impl2(*ops, **merged_kwargs2)
 
-        return torch.cond(
-            pred=dim_value <= r1_end,
-            true_fn=true_fn,
-            false_fn=false_fn,
-            operands=list(fake_tensors),
-        )
+            return torch.cond(
+                pred=dim_value <= r1_end,
+                true_fn=true_fn,
+                false_fn=false_fn,
+                operands=list(fake_tensors),
+            )
+
+        elif num_ranges == 3:
+            # Nested torch.cond for 3 ranges
+            (r1_start, r1_end), (impl1, impl1_kwargs, _) = sorted_ranges[0]
+            (r2_start, r2_end), (impl2, impl2_kwargs, _) = sorted_ranges[1]
+            (r3_start, r3_end), (impl3, impl3_kwargs, _) = sorted_ranges[2]
+
+            merged_kwargs1 = {**runtime_kwargs, **impl1_kwargs}
+            merged_kwargs2 = {**runtime_kwargs, **impl2_kwargs}
+            merged_kwargs3 = {**runtime_kwargs, **impl3_kwargs}
+
+            # CRITICAL: Use int() to convert endpoints to Python ints
+            # This prevents them from being captured as variables in the closure
+            r1_end_int = int(r1_end)
+            r2_end_int = int(r2_end)
+
+            @torch._dynamo.dont_skip_tracing
+            def range1_fn(*ops):
+                return impl1(*ops, **merged_kwargs1)
+
+            @torch._dynamo.dont_skip_tracing
+            def range2_fn(*ops):
+                return impl2(*ops, **merged_kwargs2)
+
+            @torch._dynamo.dont_skip_tracing
+            def range3_fn(*ops):
+                return impl3(*ops, **merged_kwargs3)
+
+            # Inner cond: check if dim_value <= r2_end
+            @torch._dynamo.dont_skip_tracing
+            def inner_false_fn(*ops):
+                # Use hardcoded constant instead of variable
+                return torch.cond(
+                    pred=dim_value <= r2_end_int,
+                    true_fn=range2_fn,
+                    false_fn=range3_fn,
+                    operands=list(ops),
+                )
+
+            # Outer cond: check if dim_value <= r1_end
+            return torch.cond(
+                pred=dim_value <= r1_end_int,
+                true_fn=range1_fn,
+                false_fn=inner_false_fn,
+                operands=list(fake_tensors),
+            )
 
     # Trace with make_fx using fake mode
     with V.fake_mode:
@@ -1273,12 +1324,33 @@ def _range_based_lowering_fn(
                 f"GraphModule created with {len(list(dispatch_gm.graph.nodes))} nodes"
             )
 
+            log.info("=== Traced GraphModule ===")
+            log.info(dispatch_gm.graph)
+
+            # CRITICAL: Clean up operands to remove Python constants
+            # make_fx automatically collects constants like 512 from predicates
+            # We need to filter operands to only keep FX Nodes
+            log.info(f"Cleaning operands to remove non-Node constants")
+            _cleanup_torch_cond_operands(dispatch_gm, len(fake_inputs))
+
+            log.info("=== Graph code ===")
+            log.info(dispatch_gm.code)
+
         except Exception as e:
             log.error("make_fx tracing FAILED: %s", e)
             raise
 
     # Inline the dispatch graph
     log.info("Inlining torch.cond dispatch graph...")
+
+    # Debug: Print what's in the dispatch graph before inlining
+    log.info("=== Dispatch GraphModule nodes ===")
+    for node in dispatch_gm.graph.nodes:
+        log.info(f"  {node.op}: {node.target} | args: {node.args}")
+        if node.op == "call_function" and node.target == torch.ops.higher_order.cond:
+            log.info(f"    -> cond operands (args[3]): {node.args[3]}")
+            log.info(f"    -> cond operands types: {[type(x).__name__ for x in node.args[3]]}")
+
     result = inline_subgraph_to_ir_nodes(dispatch_gm, tensor_inputs, f"{name}_dispatch")
 
     log.info(
