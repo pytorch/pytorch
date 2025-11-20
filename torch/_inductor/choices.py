@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import typing
 from typing import Any, Optional, TYPE_CHECKING, Union
 
@@ -50,6 +51,34 @@ class Sortable(typing.Protocol):
     """Anything that can be used as a list.sort() key (int/tuple/etc)"""
 
     def __lt__(self, other: typing.Self) -> bool: ...
+
+
+@dataclasses.dataclass
+class FusionScore:
+    template_score: int
+    node_type_score: bool
+    memory_score: int
+    proximity_score: int
+
+    def __lt__(self, other):
+        """
+        node_type_score has higher priority than memory_score unless
+        the memory_score differs too much
+        """
+        threshold = 16
+        if self.template_score != other.template_score:
+            return self.template_score < other.template_score
+
+        if self.memory_score > other.memory_score * threshold:
+            return False
+        if other.memory_score > self.memory_score * threshold:
+            return True
+
+        return (self.node_type_score, self.memory_score, self.proximity_score) < (
+            other.node_type_score,
+            other.memory_score,
+            other.proximity_score,
+        )
 
 
 class InductorChoices:
@@ -591,6 +620,7 @@ class InductorChoices:
         - Estimate of the saved memory operations
         - Fusions closer together in original graph order
         """
+
         memory_score = scheduler.score_fusion_memory(node1, node2)
         proximity_score = -max(
             abs(node1.min_order - node2.max_order),
@@ -607,7 +637,7 @@ class InductorChoices:
             )
 
         # pyrefly: ignore [bad-return]
-        return (
+        return FusionScore(
             template_score,
             node1.is_reduction() == node2.is_reduction() and memory_score > 0,
             memory_score,
