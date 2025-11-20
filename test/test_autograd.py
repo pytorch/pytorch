@@ -404,8 +404,6 @@ class TestAutograd(TestCase):
         out.backward()
 
     def test_unused_grad_requires_grad_with_materialize(self):
-        """Test that unused gradients have requires_grad=False when create_graph=False"""
-
         x = torch.ones(10, requires_grad=True)
         y = torch.ones(10, requires_grad=True)
         z = (x**2).sum()
