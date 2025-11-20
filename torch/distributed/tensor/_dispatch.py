@@ -128,7 +128,9 @@ class OpDispatcher:
         self._random_ops = {
             aten.native_dropout.default,
             aten.normal_.default,
+            aten.rand.default,
             aten.rand_like.default,
+            aten.randn.default,
             aten.randn_like.default,
             aten.randint_like.default,
             aten.randint_like.low_dtype,
