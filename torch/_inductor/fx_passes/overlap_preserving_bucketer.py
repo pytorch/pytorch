@@ -8,12 +8,12 @@ import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
+    _schedulable_wait_node,
     bucket_key,
     BucketMode,
     has_mergeable_all_gather_convert_dtype,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
-    is_wait_tensor,
 )
 from torch._inductor.fx_passes.overlap_scheduling import (
     CollBucket,
@@ -52,12 +52,12 @@ class WhyNoBucket:
 
 def is_collective_or_wait(n: fx.Node) -> bool:
     """Check if node is a collective start or wait."""
-    if is_wait_tensor(n):
+    if _schedulable_wait_node(n):
         return True
     # Collective starts have exactly one use: the wait_tensor
     if len(n.users) == 1:
         user = next(iter(n.users.keys()))
-        if is_wait_tensor(user):
+        if _schedulable_wait_node(user):
             return True
     return False
 
@@ -187,7 +187,7 @@ class OverlapPreservingBucketer:
             if node in self.collective_info and get_group_name(node) == pg:
                 node_type = "starts"
                 hiding_nodes |= self.collective_info[node].hiding_nodes
-            elif is_wait_tensor(node):
+            elif _schedulable_wait_node(node):
                 wait_input = node.args[0]
                 if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
                     node_type = "waits"
@@ -811,7 +811,7 @@ class OverlapPreservingBucketer:
             )
 
         # Get new nodes
-        new_waits = [n for n in new_nodes if is_wait_tensor(n)]
+        new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
         assert len(new_waits) == 1
 
         new_wait = new_waits[0]
