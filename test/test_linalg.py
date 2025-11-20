@@ -9367,10 +9367,30 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if self.device_type == 'cpu':
             with self.assertRaisesRegex(torch.linalg.LinAlgError, r"cholesky_inverse: The diagonal element 2 is zero"):
                 torch.cholesky_inverse(a)
-        # cholesky_inverse on GPU does not raise an error for this case
-        elif self.device_type == 'cuda':
-            out = torch.cholesky_inverse(a)
-            self.assertTrue(out.isinf().any() or out.isnan().any())
+        # cholesky_inverse on GPU raises an Accelerator CUDA error, which is easier to check with subprocess.
+        # This can be slow so moving test to  def test_cholesky_inverse_errors_and_warnings_subprocess
+
+    @skipCUDAIfNoMagma
+    @onlyCUDA
+    @slowTest
+    def test_cholesky_inverse_errors_and_warnings_subprocess(self):
+        # check cholesky_inverse errors on CUDA device.
+        # This error is thrown by at::_assert_async, thus it needs to run on its own subprocess to avoid corrupting the test process
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [sys.executable, "-c", """\
+import torch
+a = torch.eye(3, device='cuda', dtype=torch.float32)
+a[1, 1] = 0
+torch.cholesky_inverse(a)
+torch.cuda.synchronize()
+"""],
+            capture_output=True
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cholesky_inverse: Diagonal contains zero element, matrix is singular.", str(result.stderr))
+
 
     def _select_broadcastable_dims(self, dims_full=None):
         # select full dimensionality

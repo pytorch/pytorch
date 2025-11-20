@@ -950,6 +950,14 @@ void _cholesky_inverse_cusolver_potrs_based(Tensor& result, Tensor& infos, bool 
 }
 
 Tensor& cholesky_inverse_kernel_impl_cusolver(Tensor &result, Tensor& infos, bool upper) {
+  // Check for zero diagonal elements before attempting inversion
+  auto diag_elements = result.diagonal(/*offset=*/0, /*dim1=*/-2, /*dim2=*/-1);
+  auto has_zero = diag_elements.eq(0).any();
+  at::_assert_async(
+      has_zero.logical_not(),
+      "cholesky_inverse: Diagonal contains zero element, matrix is singular."
+  );
+
   _cholesky_inverse_cusolver_potrs_based(result, infos, upper);
   return result;
 }
