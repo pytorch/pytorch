@@ -52,7 +52,7 @@ if [[ "$PACKAGE_TYPE" != libtorch ]]; then
 
     # numpy tests:
     # We test 1 version no numpy. 1 version with numpy 1.x and rest with numpy 2.x
-    if [[ "\$python_nodot" = *312* ]]; then
+    if [[ "\$python_nodot" = *311* ]]; then
       retry pip install -q protobuf typing-extensions
     elif [[ "\$python_nodot" = *312* ]]; then
       retry pip install -q numpy==1.21.2 protobuf typing-extensions
