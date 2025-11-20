@@ -417,6 +417,7 @@ class TracerBase:
             kwargs = {
                 field.name: self.create_arg(getattr(a, field.name))
                 for field in fields(a)
+                if field.init  # Only include fields that can be passed to __init__
             }
             return self.create_node("call_function", a.__class__, (), kwargs)
 

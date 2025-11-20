@@ -509,7 +509,7 @@ class _RelaxedConstraint(_ConstraintTarget):
 Constraint = Union[_Constraint, _DerivedConstraint, _RelaxedConstraint]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(repr=False)
 class _IntWrapper:
     """
     Dummy wrapper class to wrap around integer inputs so that when we parse the
@@ -518,10 +518,15 @@ class _IntWrapper:
     """
 
     val: int
-    # Disallow specifying dynamism
-    dynamism: Optional[Union[_DimHint, int]] = dataclasses.field(
-        init=False, default=None
-    )
+    dynamism: Optional[Union[_DimHint, int]] = None
+
+    def _custom_fx_repr_fn(self) -> str:
+        """Custom FX representation that only includes the val parameter."""
+        return f"torch.export.dynamic_shapes._IntWrapper(val = {self.val})"
+
+    def __repr__(self) -> str:
+        """Override repr to only include val parameter for code generation."""
+        return f"_IntWrapper(val={self.val})"
 
 
 def _process_equalities(

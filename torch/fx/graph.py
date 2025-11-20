@@ -562,6 +562,8 @@ class CodeGen:
                 return "[" + ", ".join(_get_repr(a) for a in arg) + "]"
             elif isinstance(arg, slice):
                 return f"slice({_get_repr(arg.start)}, {_get_repr(arg.stop)}, {_get_repr(arg.step)})"
+            elif hasattr(arg, "_custom_fx_repr_fn"):
+                return arg._custom_fx_repr_fn()
             else:
                 return blue(repr(arg))
 

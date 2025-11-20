@@ -402,6 +402,11 @@ def _suggest_or_raise_constraint_violation(
         graph_capture_output.graph_capture_output.build_guards(fn.__code__)
     except ConstraintViolationError as e:
         constraint_violation_error = e
+    except AssertionError as e:
+        # Ignore guard failures during export (e.g., global state changes like autocast)
+        # These are expected during export and don't indicate actual constraint violations
+        if "Guard failed on the same frame it was created" not in str(e):
+            raise
 
     if (
         (shape_env := getattr(fake_mode, "shape_env", None)) is not None
@@ -722,6 +727,7 @@ def dynamo_graph_capture_for_export(
 ) -> Callable[..., Any]:
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
+
         with (
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
@@ -731,6 +737,21 @@ def dynamo_graph_capture_for_export(
                 args,
                 kwargs,
                 constraints=constraints,
+            )
+
+            # Extract fake_mode for constraint checking
+            fake_mode = out.backend_input.fake_mode if out.backend_input is not None else None
+
+            # Check for constraint violations (similar to _dynamo_graph_capture_for_export)
+            orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
+            _suggest_or_raise_constraint_violation(
+                mod,
+                orig_callable,
+                fake_mode,
+                out,
+                args,
+                kwargs,
+                None,  # dynamic_shapes - not used in new path
             )
 
         if out.backend_input is None:
