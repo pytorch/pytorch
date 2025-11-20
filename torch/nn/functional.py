@@ -6662,13 +6662,16 @@ def grouped_mm(
         mat_a: Left operand. When 2D, its leading dimension is sliced into groups
             according to ``offs``. When 3D, its first dimension enumerates the groups
             directly and ``offs`` must be ``None``.
-        mat_b: Right operand. Similar dimensionality requirements as ``mat_a``.
-            For the common MoE forward path (``out = input @ weight.T``) this tensor
-            is typically 3D with shape ``(num_groups, N, K)``.
+        mat_b: Right operand. When both operands are 2D (e.g., MoE weight-gradient
+            updates), the trailing dimension of ``mat_a`` and the leading dimension of
+            ``mat_b`` are partitioned according to the same ``offs`` tensor. For the
+            common forward pass (``out = input @ weight.T``) ``mat_b`` is 3D with
+            shape ``(num_groups, N, K)``.
         offs: Optional 1D tensor of monotonically increasing ``int32`` offsets that
             delimit the jagged dimension of any 2D operand. ``offs[i]`` marks the end
-            of group ``i`` and ``offs[-1]`` must match the total length of that
-            operand's sliced dimension.
+            of group ``i`` and ``offs[-1]`` must be strictly less than the total
+            length of that operand's sliced dimension; elements beyond ``offs[-1]``
+            are ignored.
         bias: Optional tensor that is added to the grouped outputs. Bias is not
             jagged and must be broadcastable to the result shape of each group.
         out_dtype: Optional dtype that controls the accumulation/output dtype.
