@@ -593,6 +593,9 @@ search_autotune_cache = False
 
 save_args = os.environ.get("TORCHINDUCTOR_SAVE_ARGS") == "1"
 
+# experimental locking mechanism that prevents concurrent accelerator access
+accelerator_locking = os.environ.get("TORCHINDUCTOR_ACCELERATOR_LOCKING") == "1"
+
 # We will disable creating subprocess for autotuning if this is False
 autotune_in_subproc = os.environ.get("TORCHINDUCTOR_AUTOTUNE_IN_SUBPROC") == "1"
 
