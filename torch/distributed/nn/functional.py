@@ -365,21 +365,18 @@ class _AllGatherBase(Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
-        if dist.get_backend(group=ctx.group) is dist.Backend.NCCL:
-            world_size = dist.get_world_size(group=ctx.group)
-            out_size = list(grad_output.size())
-            if out_size[0] % world_size != 0:
-                raise RuntimeError(
-                    f"Tensor with dimensions: {out_size} does "
-                    f"not have first dimension divisible by world_size: {world_size}"
-                )
-            out_size[0] = out_size[0] // dist.get_world_size(group=ctx.group)
-            gx = torch.empty(
-                out_size, device=grad_output.device, dtype=grad_output.dtype
+        world_size = dist.get_world_size(group=ctx.group)
+        out_size = list(grad_output.size())
+        if out_size[0] % world_size != 0:
+            raise RuntimeError(
+                f"Tensor with dimensions: {out_size} does "
+                f"not have first dimension divisible by world_size: {world_size}"
             )
-            dist._reduce_scatter_base(gx, grad_output, ReduceOp.SUM, ctx.group)
-        else:
-            raise RuntimeError("Backend not supported!")
+        out_size[0] = out_size[0] // dist.get_world_size(group=ctx.group)
+        gx = torch.empty(
+            out_size, device=grad_output.device, dtype=grad_output.dtype
+        )
+        dist._reduce_scatter_base(gx, grad_output, ReduceOp.SUM, ctx.group)
         return (None, gx, None)
 
 
