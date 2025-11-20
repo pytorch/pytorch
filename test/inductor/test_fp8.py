@@ -159,7 +159,7 @@ class TestFP8Types(TestCase):
         torch.testing.assert_close(y1_fp8, x, rtol=5e-1, atol=5e-1)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
-    def test_bad_cast(self):
+    def test_bad_cast(self, device):
         def fp8_cast(x, dtype):
             return x.to(dtype=dtype)
 
@@ -171,14 +171,14 @@ class TestFP8Types(TestCase):
             torch._dynamo.exc.BackendCompilerFailed,
             "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
         ):
-            x = torch.rand(*x_shape, device="cuda").to(dtype=torch.float8_e4m3fn)
+            x = torch.rand(*x_shape, device=device).to(dtype=torch.float8_e4m3fn)
             compiled_fp8_cast(x, torch.float8_e5m2)
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
             "Conversions between float8_e5m2 and float8_e4m3fn is not supported!",
         ):
-            x = torch.rand(*x_shape, device="cuda").to(dtype=torch.float8_e5m2)
+            x = torch.rand(*x_shape, device=device).to(dtype=torch.float8_e5m2)
             compiled_fp8_cast(x, torch.float8_e4m3fn)
 
     @parametrize("src_dtype", (torch.float16, torch.bfloat16, torch.float))
@@ -320,6 +320,7 @@ class TestFP8Types(TestCase):
             amax_buffer_compiled, amax_buffer, rtol=1e-2, atol=1e-2
         )
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("4,2048,4096",))
@@ -560,11 +561,11 @@ class TestFP8Lowering(TestCase):
             # The clones should be visible in the generated code
             self.assertIn("clone", wrapper.lower())
 
+    @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
         not has_triton_tma_device(), "Need device-side TMA support in Triton"
     )
-    @onlyOn(["cuda", "xpu"])
     @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
     @parametrize("use_fast_accum", (False, True))
@@ -975,9 +976,10 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=5e-2, atol=0.07)
 
+    @onlyOn(["cuda", "xpu"])
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @torch._inductor.config.patch("emulate_precision_casts", True)
-    def test_mx_fusion(self):
+    def test_mx_fusion(self, device):
         # Register fake_scaled_mm custom op scoped to this test
         with torch.library._scoped_library("test_fp8", "FRAGMENT") as lib:
             # Define the op schema
@@ -988,8 +990,8 @@ class TestFP8Lowering(TestCase):
             )
             input_values = []
 
-            # Register CUDA implementation
-            @torch.library.impl(lib, "fake_scaled_mm", "CUDA")
+            # Register CUDA/XPU implementation
+            @torch.library.impl(lib, "fake_scaled_mm", device)
             def fake_scaled_mm_impl(
                 mat_a,
                 mat_b,
@@ -1174,7 +1176,6 @@ class TestFP8Lowering(TestCase):
 
             # Run with largest shape
             M, K, N = 8192, 8192, 8192
-            device = "cuda"
 
             A = torch.randn(M, K, dtype=torch.float32, device=device)
             B = torch.randn(K, N, dtype=torch.float32, device=device)
@@ -1271,8 +1272,8 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM, "Not supported on non B200")
     def test_mx_fp8_max_autotune(self, device):
         M, K, N = 128, 32, 128
         BLOCK_SIZE = 32
@@ -1309,8 +1310,8 @@ class TestFP8Lowering(TestCase):
         self.assertEqual(y_compiled.dtype, dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.07)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @onlyOn(["cuda", "xpu"])
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     def test_unacceptable_input_dims(self, device):
         # for compiled ops, type checking is in torch/_meta_registrations.py
         dtype: torch.dtype = torch.bfloat16
@@ -1342,16 +1343,18 @@ class TestFP8Lowering(TestCase):
             return y
 
         linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
-        with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
-            linear_compiled(
+
+        self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError if "cuda" in device else RuntimeError,
+            f"Expected self.size(1) to be divisible by 16, but got self.size(1)={K}"
+            if "cuda" in device
+            else f"Expected trailing dimension of mat1 to be divisible by 16 but got mat1 shape: \\({M}x{K}\\)\\.",
+            lambda: linear_compiled(
                 x,
                 w_t_fp8,
                 w_inverse_scale,
                 bias,
-            )
-        self.assertTrue(
-            f"Expected self.size(1) to be divisible by 16, but got self.size(1)={K}"
-            in str(cm.exception)
+            ),
         )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -1386,14 +1389,17 @@ class TestFP8Lowering(TestCase):
             return y
 
         linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
-        with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
-            linear_compiled(
+
+        self.assertRaisesRegex(
+            torch._dynamo.exc.TorchRuntimeError if "cuda" in device else RuntimeError,
+            "Invalid scaling configuration.",
+            lambda: linear_compiled(
                 x,
                 w_t_fp8,
                 w_inverse_scale,
                 bias,
-            )
-        self.assertTrue("Invalid scaling configuration." in str(cm.exception))
+            ),
+        )
 
 
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
