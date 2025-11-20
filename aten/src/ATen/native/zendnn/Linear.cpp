@@ -52,7 +52,6 @@ inline void zendnn_linear_impl(
   // Get appropriately processed tensors (2D input, transposed weight, 2D
   // result)
   check_args_for_linear(input, weight);
-  data_type_t datatype = get_zendnn_dtype(input);
   auto input_2d = get_2d_view(input);
   auto weight_transposed = weight.t();
   auto result_2d = result.view(get_2d_size_for_tensor(result));
@@ -60,65 +59,81 @@ inline void zendnn_linear_impl(
       input_2d, weight_transposed, bias, result_2d, post_op_buffers);
   check_tensor_sizes_for_linear(
       input_2d, weight_transposed, bias, result_2d, post_op_buffers);
-  // declare linear tensors
-  matmul_context_t matmul_context;
-  tensor_t input_tensor, weight_tensor, output_tensor, bias_tensor;
-  create_zendnn_tensor(input_2d, input_tensor, "matmul_input", datatype);
-  create_zendnn_tensor(
-      weight_transposed,
-      weight_tensor,
-      "weights",
-      datatype,
-      is_weight_prepacked);
-  create_zendnn_tensor(result_2d, output_tensor, "matmul_output", datatype);
-  if (bias.defined()) {
-    // adds dimension at dim=0 -> [1, n]
-    auto bias_unsqueezed = bias.unsqueeze(0);
-    create_zendnn_tensor(bias_unsqueezed, bias_tensor, "bias", datatype);
-    set_linear_context_attributes(
-        matmul_context, weight_tensor, post_op_ids, bias_tensor);
-  } else {
-    set_linear_context_attributes(matmul_context, weight_tensor, post_op_ids);
-  }
-  matmul_context.create();
-  // define matmul operator
-  matmul_operator_t matmul_operator;
-  matmul_operator.set_name("matmul_operator")
-      .set_context(matmul_context)
-      .create();
-  TORCH_CHECK(
-      matmul_operator.check(),
-      "operator ",
-      matmul_operator.get_name(),
-      " creation failed.");
-  matmul_operator.set_input("matmul_input", input_tensor)
-      .set_output("matmul_output", output_tensor);
-  int empty_post_op_id = 0;
-  for (size_t idx = 0; idx < post_op_buffers.size(); idx++) {
-    if (post_op_ids[idx] == "none") {
-      empty_post_op_id++;
-      continue;
-    }
-    tensor_t binary_tensor;
-    if (post_op_ids[idx] == "mul") {
-      set_zendnn_tensor_attributes(
-          post_op_buffers[idx], binary_tensor, "binary_input", datatype);
-      binary_tensor.create();
-      matmul_operator.set_input(
-          matmul_context.get_post_op(idx - empty_post_op_id)
-              .binary_mul_params.tensor_name,
-          binary_tensor);
-    } else if (post_op_ids[idx] == "add") {
-      set_zendnn_tensor_attributes(
-          post_op_buffers[idx], binary_tensor, "binary_input", datatype);
-      binary_tensor.create();
-      matmul_operator.set_input(
-          matmul_context.get_post_op(idx - empty_post_op_id)
-              .binary_add_params.tensor_name,
-          binary_tensor);
+
+  // Use direct matmul
+  const int64_t M = input_2d.size(0);
+  const int64_t N = weight_transposed.size(1);
+  const int64_t K = input_2d.size(1);
+
+  // check if tensor is transposed
+  bool transa = is_transposed(input_2d);
+  bool transb = is_transposed(weight_transposed);
+  // make a copy of tensor when tensor is neither contiguous nor transposed
+  input_2d =
+      (transa || input_2d.is_contiguous()) ? input_2d : input_2d.contiguous();
+  weight_transposed = (transb || weight_transposed.is_contiguous())
+      ? weight_transposed
+      : weight_transposed.contiguous();
+  auto strideA = input_2d.strides();
+  auto strideB = weight_transposed.strides();
+  auto strideC = result_2d.strides();
+
+  const int64_t lda = transa ? strideA[1] : strideA[0];
+  const int64_t ldb = transb ? strideB[1] : strideB[0];
+  const int64_t ldc = strideC[0];
+  zendnnl::lowoha::data_types matmul_dtype;
+  matmul_dtype.src = get_zendnn_dtype(input_2d);
+  matmul_dtype.wei = get_zendnn_dtype(weight_transposed);
+  matmul_dtype.dst = get_zendnn_dtype(result_2d);
+  matmul_dtype.bias =
+      (bias.defined()) ? get_zendnn_dtype(bias) : data_type_t::none;
+  std::vector<zendnnl::lowoha::postop> post_op;
+  if (post_op_ids.size() > 0) {
+    // Set post-op parameters
+    for (size_t i = 0; i < post_op_ids.size(); i++) {
+      zendnnl::lowoha::postop op1;
+      auto it = post_op_map.find(post_op_ids[i]);
+      if (it == post_op_map.end()) {
+        continue;
+      } else {
+        op1.po_type = it->second;
+      }
+      if ((post_op_ids[i] == "mul" || post_op_ids[i] == "add")) {
+        auto sizes = post_op_buffers[i].sizes();
+        op1.dims.assign(sizes.begin(), sizes.end());
+        op1.dtype = get_zendnn_dtype(post_op_buffers[i]);
+        op1.buff = post_op_buffers[i].data_ptr();
+      }
+      post_op.push_back(op1);
     }
   }
-  matmul_operator.execute();
+  zendnnl::lowoha::lowoha_params params;
+  params.dtypes = matmul_dtype;
+  params.postop_ = std::move(post_op);
+  params.mem_format_a = 'n';
+  params.mem_format_b = is_weight_prepacked ? 'r' : 'n';
+
+  // Execute Linear directly for LoA path
+  matmul_direct(
+      'r',
+      transa,
+      transb,
+      M,
+      N,
+      K,
+      1.0f, /*alpha*/
+      input_2d.data_ptr(),
+      lda,
+      weight_transposed.data_ptr(),
+      ldb,
+      (bias.defined()) ? bias.data_ptr() : nullptr,
+      0.0f, /*beta*/
+      result_2d.data_ptr(),
+      ldc,
+      params,
+      1, /*for matmul*/
+      1 /*for matmul*/
+  );
 }
 
 at::Tensor zendnn_linear_unary(
