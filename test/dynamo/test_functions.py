@@ -2053,7 +2053,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return mytuple(tmp.x, tmp[1], tmp.xy + b)
 
     @make_test
-    def test_namedtuple_replace(a, b):
+    def test_namedtuple_replace_1(a, b):
         mytuple = collections.namedtuple("mytuple", ["x", "y"])
         t = mytuple(a, b)
         t._replace(x=b)
@@ -2109,7 +2109,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return mytuple.add(), mytuple.static_method(), mytuple.class_method()
 
     @make_test
-    def test_namedtuple_replace(a, b):
+    def test_namedtuple_replace_2(a, b):
         mytuple = FunctionTests.MyNamedTuple(a, b)
         replaced = mytuple._replace(first=b)
         return mytuple.first + mytuple.second + replaced.first + replaced.second

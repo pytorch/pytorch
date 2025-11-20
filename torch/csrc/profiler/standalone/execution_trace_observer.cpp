@@ -279,7 +279,7 @@ static std::ofstream openOutputFile(const std::string& name) {
   std::ofstream stream;
   stream.open(name, std::ofstream::out | std::ofstream::trunc);
   if (!stream) {
-    LOG(ERROR) << "Failed to open '" << name << "'";
+    LOG(ERROR) << "Failed to open '" << name << '\'';
   } else {
     VLOG(1) << "PyTorch Execution Trace: writing to " << name;
   }
@@ -754,7 +754,7 @@ static void recordOperatorStart(
                 RecordScope::USER_SCOPE),
             tid,
             0); // fw_tid
-        ob.out << ",";
+        ob.out << ',';
       }
     }
 
@@ -928,7 +928,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
             fc.kernelFile,
             fc.get_string_for_tensor_range(),
             additiona_attrs);
-        ob->out << ",";
+        ob->out << ',';
       }
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
@@ -977,7 +977,7 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
       // 5 is the length of ".json"
       ob.resourceDir.replace(ext_pos, 5, "_resources/");
       VLOG(1) << "Execution trace resource directory: " << ob.resourceDir
-              << "\n";
+              << '\n';
     } else {
       LOG(WARNING)
           << "Execution trace output file does not end with \".json\".";
