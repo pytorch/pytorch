@@ -709,7 +709,7 @@ class OverlapScheduler:
     def get_non_collective_runtime_estimate(self, node: fx.Node) -> float | None:
         """Get runtime estimation for a node in ms. Returns None if no estimation is available."""
 
-        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion grou
+        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion group
         if is_compute_node(node):
             return benchmark_node(node, self.custom_runtime_estimation)
 
@@ -1076,9 +1076,7 @@ class OverlapScheduler:
             if c.exposed_time_ms == c.estimated_time_ms
         ]
 
-        potentially_hidden_collectives = self.compute_potential_hidden_collectives(
-            limit_coll_per_compute=False
-        )
+        potentially_hidden_collectives = self.compute_potential_hidden_collectives()
         bad_exposed = [
             c for c in exposed if c.start_node in potentially_hidden_collectives
         ]
@@ -1136,24 +1134,18 @@ class OverlapScheduler:
         bucketer.bucket_collectives()
 
     def compute_potential_hidden_nodes(
-        self, nodes_to_check: Iterable[fx.Node], limit_coll_per_compute: bool = False
+        self, nodes_to_check: Iterable[fx.Node]
     ) -> dict[fx.Node, fx.Node]:
         """
         Returns a dict containing a mapping of nodes which could potentially be hidden to their hiding node
         """
 
-        used_compute_nodes: OrderedSet[fx.Node] = OrderedSet()
-
         def could_be_hidden(start: fx.Node) -> fx.Node | None:
             for compute_node in self.compute_nodes:
-                if limit_coll_per_compute and compute_node in used_compute_nodes:
-                    continue
                 if (
                     start not in self.node_ancestors[compute_node]
                     and compute_node not in self.node_ancestors[start]
                 ):
-                    if limit_coll_per_compute:
-                        used_compute_nodes.add(compute_node)
                     return compute_node
 
             return None
@@ -1169,20 +1161,14 @@ class OverlapScheduler:
 
         return potentially_hidden
 
-    def compute_potential_hidden_collectives(
-        self, limit_coll_per_compute: bool = False
-    ) -> dict[fx.Node, fx.Node]:
+    def compute_potential_hidden_collectives(self) -> dict[fx.Node, fx.Node]:
         """Compute which collective operations could be hidden by compute."""
-        return self.compute_potential_hidden_nodes(
-            self.collective_info.keys(), limit_coll_per_compute
-        )
+        return self.compute_potential_hidden_nodes(self.collective_info.keys())
 
-    def compute_potential_hidden_waits(
-        self, limit_coll_per_compute: bool = False
-    ) -> dict[fx.Node, fx.Node]:
+    def compute_potential_hidden_waits(self) -> dict[fx.Node, fx.Node]:
         """Compute which wait operations could be hidden by compte."""
         wait_nodes = [info.wait_node for info in self.collective_info.values()]
-        return self.compute_potential_hidden_nodes(wait_nodes, limit_coll_per_compute)
+        return self.compute_potential_hidden_nodes(wait_nodes)
 
 
 def schedule_overlap_bucketing(
