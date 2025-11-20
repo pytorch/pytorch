@@ -994,7 +994,7 @@ def _record_memory_history(
         skip_actions (list[str], optional): List of action types to skip when recording
             memory history. This can be used to reduce memory overhead by excluding
             certain types of events from being recorded. Valid action types are:
-            
+
             - `"alloc"`: Memory allocation events
             - `"free_requested"`: Free requests (memory marked for freeing)
             - `"free_completed"`: Completed free operations (memory actually freed)
@@ -1002,10 +1002,10 @@ def _record_memory_history(
             - `"segment_free"`: Segment freed back to CUDA via cudaFree
             - `"oom"`: Out-of-memory exceptions
             - `"snapshot"`: Memory snapshot generation events
-            
+
             For example, to skip recording free_requested events:
             `skip_actions=["free_requested"]`
-            
+
             Defaults to None (record all actions).
 
     """
