@@ -888,11 +888,16 @@ class PallasKernel(SIMDKernel):
         kernel_name = name or "<KERNEL_NAME>"
         interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
         is_tpu = torch._inductor.config.pallas_target_tpu
-        if is_tpu and not has_tpu_pallas():
-            raise RuntimeError(
-                "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                "Please make sure that you have a TPU available and that JAX is configured correctly."
-            )
+        if is_tpu:
+            if not torch._inductor.config.pallas_take_first_jax_device_only:
+                raise RuntimeError(
+                    "Pallas backend currently only supports using the first JAX device."
+                )
+            if not has_tpu_pallas():
+                raise RuntimeError(
+                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                    "Please make sure that you have a TPU available and that JAX is configured correctly."
+                )
         interpret_literal = "True" if interpret_is_cpu else "False"
 
         # For GPU (Triton backend), import pltriton for masked loads/stores
