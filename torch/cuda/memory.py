@@ -991,7 +991,23 @@ def _record_memory_history(
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
-        
+        skip_actions (list[str], optional): List of action types to skip when recording
+            memory history. This can be used to reduce memory overhead by excluding
+            certain types of events from being recorded. Valid action types are:
+            
+            - `"alloc"`: Memory allocation events
+            - `"free_requested"`: Free requests (memory marked for freeing)
+            - `"free_completed"`: Completed free operations (memory actually freed)
+            - `"segment_alloc"`: Segment allocation from cudaMalloc
+            - `"segment_free"`: Segment freed back to CUDA via cudaFree
+            - `"oom"`: Out-of-memory exceptions
+            - `"snapshot"`: Memory snapshot generation events
+            
+            For example, to skip recording free_requested events:
+            `skip_actions=["free_requested"]`
+            
+            Defaults to None (record all actions).
+
     """
     if isinstance(enabled, bool):
         return _record_memory_history_legacy(enabled, *args, **kwargs)
