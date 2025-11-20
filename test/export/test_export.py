@@ -1359,7 +1359,6 @@ def forward(self, primals, tangents):
         # instead of the scripted function, so we get x.sin()
         self.assertEqual(res, x.sin())
 
-    @testing.expectedFailureStrictV2
     def test_no_tensor_computation_2(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -2689,7 +2688,6 @@ class GraphModule(torch.nn.Module):
             gm = export(m, (torch.rand(64, 64),))
             torch.export.unflatten(gm)
 
-    @testing.expectedFailureStrictV2
     def test_unflatten_closure(self):
         class Dummy(torch.nn.Module):
             def forward(self, fn, x):
@@ -4839,7 +4837,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, b_
             table.materialize()
             self.assertFalse(torch.ops.mylib.foo123.default in table)
 
-    @testing.expectedFailureStrictV2
     def test_if_post_autograd_op_preserved(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -10017,7 +10014,6 @@ def forward(self, p_lin_weight, p_lin_bias, x):
         )
 
     @unittest.skipIf(IS_FBCODE, "We can't customize decomp in fbcode")
-    @testing.expectedFailureStrictV2
     def test_export_decomp_torture_case_2(self):
         class MyLinear(torch.nn.Module):
             def __init__(self) -> None:
@@ -10050,10 +10046,26 @@ def forward(self, p_lin_weight, p_lin_bias, x):
         ep_decompose_linear = ep_has_linear_convd.run_decompositions(
             decomp_table={torch.ops.aten.linear.default: _decompose_linear_custom}
         )
-
-        self.assertExpectedInline(
-            str(ep_decompose_linear.graph_module.code).strip(),
-            """\
+        if is_strict_v2_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(ep_decompose_linear.graph_module.code).strip(),
+                """\
+def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
+    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
+    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
+    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
+    matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
+    mul_30 = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
+    add_36 = torch.ops.aten.add.Tensor(matmul, mul_30);  matmul = mul_30 = None
+    cos = torch.ops.aten.cos.default(add_36);  add_36 = None
+    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
+    add_47 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add_47,)""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(ep_decompose_linear.graph_module.code).strip(),
+                """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
@@ -10065,7 +10077,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
     add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add_1,)""",
-        )
+            )
 
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
@@ -10238,7 +10250,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             # expected >= 3, but got 2
             ep.module()(*test_inp)
 
-    @testing.expectedFailureStrictV2
     def test_nested_module(self):
         class M1(torch.nn.Module):
             def forward(self, x):
@@ -10276,7 +10287,6 @@ graph():
         unflattened = unflatten(ep)
         self.assertTrue(torch.allclose(unflattened(*inps), M2()(*inps)))
 
-    @testing.expectedFailureStrictV2
     def test_nested_module_with_init_buffer(self):
         class M1(torch.nn.Module):
             def __init__(self) -> None:
@@ -13005,7 +13015,6 @@ def forward(self, c_submod_params, x):
         ufm = torch.export.unflatten(ep)
         self.assertTrue(torch.allclose(ufm(*inp), epm(*inp)))
 
-    @testing.expectedFailureStrictV2
     def test_unflatten_multiple_graphs_shared_submodule(self):
         class N(torch.nn.Module):
             def forward(self, x, b):
@@ -14057,7 +14066,6 @@ def forward(self, x):
     return (foo_functional,)""",
         )
 
-    @testing.expectedFailureStrictV2
     def test_placeholder_naming_order(self):
         # See https://github.com/pytorch/pytorch/issues/143732
 
@@ -14109,7 +14117,6 @@ def forward(self, x):
         ).run_decompositions()
         ep.module()(torch.ones(4, 4), **kwargs)
 
-    @testing.expectedFailureStrictV2
     def test_placeholder_naming_order_variadic(self):
         class Mod(torch.nn.Module):
             def forward(self, a, b, c, **kwargs):
@@ -14134,7 +14141,6 @@ def forward(self, x):
         ):
             export(Foo(), (torch.randn(4, 4),), strict=False)
 
-    @testing.expectedFailureStrictV2
     def test_placeholder_naming_collisions(self):
         # test collisions between nested user inputs
         class Foo(torch.nn.Module):
@@ -14207,7 +14213,6 @@ def forward(self, x):
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
 
     @skipIfCrossRef  # Dynamo changes the order of ops under Torch function modes
-    @testing.expectedFailureStrictV2
     def test_placeholder_naming_collisions_hoo_subgraphs(self):
         # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
         class Foo(torch.nn.Module):
@@ -14285,7 +14290,6 @@ def forward(self, x):
         ]
         self.assertEqual(expected_getattr_names, real_getattr_names)
 
-    @testing.expectedFailureStrictV2
     def test_constant_input_naming(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y, div="floor"):
@@ -15312,7 +15316,6 @@ graph():
                 Block(torch.randn(4, 4), torch.randn(4, 4))
             )
 
-    @testing.expectedFailureStrictV2
     def test_enum_str(self):
         class TensorDim(str, enum.Enum):
             DDP = "ddp"
@@ -15336,9 +15339,24 @@ graph():
 
         inp = torch.randn(4, 4)
         gm = export(Foo(), (inp,)).run_decompositions().module()
-        self.assertExpectedInline(
-            str(gm.graph).strip(),
-            """\
+        if is_strict_v2_test(self._testMethodName):
+            self.assertExpectedInline(
+                str(gm.graph).strip(),
+                """\
+graph():
+    %x : [num_users=4] = placeholder[target=x]
+    %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
+    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%x,), kwargs = {})
+    %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %add_12 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
+    %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
+    %add_25 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_12, %cos_1), kwargs = {})
+    return (add_25,)""",
+            )
+        else:
+            self.assertExpectedInline(
+                str(gm.graph).strip(),
+                """\
 graph():
     %x : [num_users=4] = placeholder[target=x]
     %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
@@ -15348,7 +15366,7 @@ graph():
     %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %cos_1), kwargs = {})
     return (add_1,)""",
-        )
+            )
 
         self.assertEqual(gm(inp), Foo()(inp))
 
@@ -15474,7 +15492,6 @@ def forward(self, x):
     return (getitem_3, cos_1)""",
             )
 
-    @testing.expectedFailureStrictV2
     def test_run_decompositions_keep_metadata(self):
         """Make sure the metadata is kept after exported program run_decompositions."""
 
@@ -15504,7 +15521,6 @@ def forward(self, x):
         for node in decomposed_program.graph.nodes:
             self.assertEqual(node.meta["custom"]["my_field"], "dummy")
 
-    @testing.expectedFailureStrictV2
     def test_run_decompositions_keep_tensor_constant_metadata(self):
         """Make sure the metadata of tensor constants are kept after run_decompositions."""
 
@@ -16711,7 +16727,6 @@ def forward(self, args_0):
     return (abs_1,)""",
         )
 
-    @testing.expectedFailureStrictV2
     def test_sdpa_gqa(self):
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
