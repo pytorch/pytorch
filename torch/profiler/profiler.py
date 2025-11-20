@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import partial
 from typing import Any, Optional
-from typing_extensions import Self
+from typing_extensions import deprecated, Self
 from warnings import warn
 
 import torch
@@ -271,13 +271,10 @@ class _KinetoProfile:
                 "Profiler must be initialized before exporting chrome trace"
             )
         if path.endswith(".gz"):
-            fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
-            fp.close()
-            retvalue = self.profiler.export_chrome_trace(fp.name)
-            with open(fp.name, "rb") as fin:
-                with gzip.open(path, "wb") as fout:
+            with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
+                retvalue = self.profiler.export_chrome_trace(fp.name)
+                with open(fp.name, "rb") as fin, gzip.open(path, "wb") as fout:
                     fout.writelines(fin)
-            os.remove(fp.name)
             return retvalue
         else:
             return self.profiler.export_chrome_trace(path)
@@ -411,6 +408,11 @@ class _KinetoProfile:
             )
         return MemoryProfile(self.profiler.kineto_results)
 
+    @deprecated(
+        "`export_memory_timeline` is deprecated and will be removed in a future version. "
+        "Please use `torch.cuda.memory._record_memory_history` and `torch.cuda.memory._export_memory_snapshot` instead.",
+        category=FutureWarning,
+    )
     def export_memory_timeline(self, path: str, device: Optional[str] = None) -> None:
         """Export memory event information from the profiler collected
         tree for a given device, and export a timeline plot. There are 3
@@ -432,6 +434,11 @@ class _KinetoProfile:
           ``torch.profiler._memory_profiler.Category``.
 
         Output: Memory timeline written as gzipped JSON, JSON, or HTML.
+
+        .. deprecated::
+            ``export_memory_timeline`` is deprecated and will be removed in a future version.
+            Please use ``torch.cuda.memory._record_memory_history`` and
+            ``torch.cuda.memory._export_memory_snapshot`` instead.
         """
         # Default to device 0, if unset. Fallback on cpu.
         if device is None:
@@ -448,16 +455,13 @@ class _KinetoProfile:
         if path.endswith(".html"):
             self.mem_tl.export_memory_timeline_html(path, device)
         elif path.endswith(".gz"):
-            fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=False)
-            fp.close()
-            if path.endswith("raw.json.gz"):
-                self.mem_tl.export_memory_timeline_raw(fp.name, device)
-            else:
-                self.mem_tl.export_memory_timeline(fp.name, device)
-            with open(fp.name) as fin:
-                with gzip.open(path, "wt") as fout:
+            with tempfile.NamedTemporaryFile("w+t", suffix=".json") as fp:
+                if path.endswith("raw.json.gz"):
+                    self.mem_tl.export_memory_timeline_raw(fp.name, device)
+                else:
+                    self.mem_tl.export_memory_timeline(fp.name, device)
+                with open(fp.name) as fin, gzip.open(path, "wt") as fout:
                     fout.writelines(fin)
-            os.remove(fp.name)
         else:
             self.mem_tl.export_memory_timeline(path, device)
 
@@ -947,7 +951,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE", "0") == "1":
             try:
-                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)  # noqa:SIM115
             except Exception as e:
                 warn(
                     f"Execution trace will not be recorded. Exception on creating default temporary file: {e}",

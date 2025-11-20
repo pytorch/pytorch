@@ -8146,7 +8146,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             unsafe_grad(y)  # should not warn
             self.assertEqual(len(w), 1)
 
-    @torch._dynamo.config.patch(install_free_tensors=True)
     def test_partial_export(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -8166,14 +8165,14 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             def forward(self, a, b):
                 return a + b
 
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
         foo = Foo()
         foo.parallelize()
         x = torch.randn(4, 4, dtype=torch.float32)
         y = torch.randn(4, 4, dtype=torch.float32)
         ref = foo(x, y)
-        gm = _dynamo_graph_capture_for_export(foo)(x, y)
+        gm = dynamo_graph_capture_for_export(foo)(x, y)
         res = gm(x, y)
         self.assertEqual(res, ref)
 
