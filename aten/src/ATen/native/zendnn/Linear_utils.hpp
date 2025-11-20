@@ -24,7 +24,9 @@ static const std::unordered_map<std::string_view, post_op_type_t> post_op_map =
      {"gelu_erf", post_op_type_t::gelu_erf},
      {"silu", post_op_type_t::swish},
      {"sigmoid", post_op_type_t::sigmoid},
-     {"tanh", post_op_type_t::tanh}};
+     {"tanh", post_op_type_t::tanh},
+     {"mul", post_op_type_t::binary_mul},
+     {"add", post_op_type_t::binary_add}};
 
 inline std::vector<int64_t> get_2d_size_for_tensor(
     const at::Tensor& inp_tensor) {
@@ -88,7 +90,8 @@ inline void check_tensor_sizes_for_linear(
     const at::Tensor& input,
     const at::Tensor& weights,
     const at::Tensor& bias,
-    const at::Tensor& result) {
+    const at::Tensor& result,
+    const std::vector<at::Tensor>& post_op_buffers) {
   const int input_dim = input.dim();
   const int weights_dim = weights.dim();
   TORCH_CHECK(
@@ -104,13 +107,24 @@ inline void check_tensor_sizes_for_linear(
         bias.dim() == 1 && bias.size(0) == weights_sizes[1],
         "bias shape incompatible with linear");
   }
+  for (const at::Tensor& buffer : post_op_buffers) {
+    if (buffer.defined()) {
+      TORCH_CHECK(
+          buffer.dim() == input_dim,
+          "unsupported dims for mat1, mat2 and post op buffers");
+      TORCH_CHECK(
+          buffer.sizes() == result.sizes(),
+          "unsupported shapes for mat1, mat2 and post op buffers");
+    }
+  }
 }
 
 inline void check_tensor_dtypes_for_linear(
     const at::Tensor& input,
     const at::Tensor& weights,
     const at::Tensor& bias,
-    const at::Tensor& result) {
+    const at::Tensor& result,
+    const std::vector<at::Tensor>& post_op_buffers) {
   auto is_fp32 = [](const at::Tensor& t) {
     return t.scalar_type() == c10::ScalarType::Float;
   };
@@ -128,6 +142,13 @@ inline void check_tensor_dtypes_for_linear(
     TORCH_CHECK(
         zendnn_bf16_device_check(),
         "zendnn linear bf16 path needs cpu support avx512bf16");
+  }
+  for (const at::Tensor& buffer : post_op_buffers) {
+    if (buffer.defined()) {
+      TORCH_CHECK(
+          (all_fp32 && is_fp32(buffer)) ^ (all_bf16 && is_bf16(buffer)),
+          "Post ops must match with other tensor dtype");
+    }
   }
 }
 

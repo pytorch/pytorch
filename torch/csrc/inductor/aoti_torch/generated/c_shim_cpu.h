@@ -155,6 +155,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_view_dtype(AtenTensorHandle self
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_view_as_complex(AtenTensorHandle self, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_view_as_real(AtenTensorHandle self, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_zendnn_linear_unary(AtenTensorHandle input, AtenTensorHandle weight, AtenTensorHandle* bias, int32_t is_weight_prepacked, const char* post_op, AtenTensorHandle* ret0);
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_zendnn_linear_unary_binary(AtenTensorHandle input, AtenTensorHandle weight, AtenTensorHandle binary_input, AtenTensorHandle* bias, int32_t is_weight_prepacked, const char* post_op_1, const char* post_op_2, AtenTensorHandle* ret0);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cpu_zendnn_weight_prepack_for_linear(AtenTensorHandle weight, AtenTensorHandle* ret0);
 
 #ifdef __cplusplus
