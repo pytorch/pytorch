@@ -716,22 +716,22 @@ class InterfacesTest(TestMixin, TestCase):
         return getattr(intfs, intf_typename)()
 
     def assert_call_is_cached(self, fn, params, intf, *args, **kwargs) -> None:
-        self.assertTrue(intf.get(fn, params, *args, **kwargs) is not None)
+        self.assertTrue(intf.get(fn, *params, *args, **kwargs) is not None)
 
     def assert_call_is_not_cached(self, fn, params, intf, *args, **kwargs) -> None:
-        self.assertTrue(intf.get(fn, params, *args, **kwargs) is None)
+        self.assertTrue(intf.get(fn, *params, *args, **kwargs) is None)
 
     def assert_call_was_cached(self, fn, params, result, intf, *args, **kwargs) -> None:
-        self.assertTrue(intf.insert(fn, params, result, *args, **kwargs))
+        self.assertTrue(intf.insert(result, fn, *params, *args, **kwargs))
 
     def assert_call_was_not_cached(
         self, fn, params, result, intf, *args, **kwargs
     ) -> None:
-        self.assertFalse(intf.insert(fn, params, result, *args, **kwargs))
+        self.assertFalse(intf.insert(result, fn, *params, *args, **kwargs))
 
     def assert_cached_call_is(self, fn, params, result, intf, *args, **kwargs) -> None:
         self.assertTrue(
-            ((get := intf.get(fn, params, *args, **kwargs)) is not None)
+            ((get := intf.get(fn, *params, *args, **kwargs)) is not None)
             and (get.value == result)
         )
 
@@ -805,8 +805,8 @@ class InterfacesTest(TestMixin, TestCase):
         sleep_t: int = 5
 
         @intf.record(
-            custom_result_encoder=lambda value: "bar",
-            custom_result_decoder=lambda encoded_value: "bar",
+            custom_result_encoder=lambda *args, **kwargs: lambda value: "bar",
+            custom_result_decoder=lambda *args, **kwargs: lambda value: "bar",
         )
         def foo() -> None:
             sleep(sleep_t)
@@ -961,11 +961,10 @@ class InterfacesTest(TestMixin, TestCase):
             ),
             {"bar": "bar"},
         )
-        params, result = (args, kwargs), None
 
-        self.assertEqual(foo(*args, **kwargs), result)
+        self.assertEqual(foo(*args, **kwargs), None)
         self.assertTrue(
-            ((get := intf.get(foo, params)) is not None) and (get.value == result)
+            ((get := intf.get(foo, args, kwargs)) is not None) and (get.value is None)
         )
         self.assertTrue((fpath := intf._dump_imc_to_disk()) is not None)
 
@@ -986,7 +985,7 @@ class InterfacesTest(TestMixin, TestCase):
             def foo(*args: Any, **kwargs: dict[str, Any]) -> None:
                 return None
 
-            self.assertEqual(foo(*args, **kwargs), result)
+            self.assertEqual(foo(*args, **kwargs), None)
 
             with self.assertRaises(
                 exceptions.StrictDeterministicCachingKeyNotFoundError
@@ -996,10 +995,10 @@ class InterfacesTest(TestMixin, TestCase):
             with self.assertRaises(
                 exceptions.StrictDeterministicCachingKeyNotFoundError
             ):
-                intf.get(foo, ((), {}))
+                intf.get(foo, (), {})
 
             with self.assertRaises(exceptions.StrictDeterministicCachingInsertionError):
-                intf.insert(foo, ((), {}), None)
+                intf.insert(None, foo, (), {})
 
     @set_caching_module_enabled(True)
     @set_deterministic_caching_enabled(True)
@@ -1025,15 +1024,14 @@ class InterfacesTest(TestMixin, TestCase):
             ),
             {"bar": "bar"},
         )
-        params, result = (args, kwargs), None
 
-        self.assertEqual(foo(*args, **kwargs), result)
+        self.assertEqual(foo(*args, **kwargs), None)
         self.assertTrue(
-            ((get := intf.get(foo, params)) is not None) and (get.value == result)
+            ((get := intf.get(foo, args, kwargs)) is not None) and (get.value is None)
         )
 
         with set_strictly_cached_determinism(True):
-            self.assertEqual(foo(*args, **kwargs), result)
+            self.assertEqual(foo(*args, **kwargs), None)
 
             with self.assertRaises(
                 exceptions.StrictDeterministicCachingKeyNotFoundError
@@ -1043,10 +1041,10 @@ class InterfacesTest(TestMixin, TestCase):
             with self.assertRaises(
                 exceptions.StrictDeterministicCachingKeyNotFoundError
             ):
-                intf.get(foo, ((), {}))
+                intf.get(foo, (), {})
 
             with self.assertRaises(exceptions.StrictDeterministicCachingInsertionError):
-                intf.insert(foo, ((), {}), None)
+                intf.insert(None, foo, (), {})
 
     @set_caching_module_enabled(False)
     @set_deterministic_caching_enabled(True)
@@ -1071,10 +1069,9 @@ class InterfacesTest(TestMixin, TestCase):
             ),
             {"bar": "bar"},
         )
-        params = (args, kwargs)
 
-        self.assertIsNone(intf.get(foo, params))
-        self.assertFalse(intf.insert(foo, params, params))
+        self.assertIsNone(intf.get(foo, args, kwargs))
+        self.assertFalse(intf.insert((args, kwargs), foo, args, kwargs))
 
         foo(*args, **kwargs)
         start_t: float = time()
@@ -1103,13 +1100,12 @@ class InterfacesTest(TestMixin, TestCase):
             ),
             {"bar": "bar"},
         )
-        params = (args, kwargs)
 
         with self.assertRaises(exceptions.DeterministicCachingDisabledError):
-            intf.get(foo, params)
+            intf.get(foo, args, kwargs)
 
         with self.assertRaises(exceptions.DeterministicCachingDisabledError):
-            intf.insert(foo, params, params)
+            intf.insert((args, kwargs), foo, args, kwargs)
 
         with self.assertRaises(exceptions.DeterministicCachingDisabledError):
             foo(*args, **kwargs)
