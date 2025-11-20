@@ -20,12 +20,12 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     skipIf,
-    skipIfXpu,
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
+    skipIfXpu,
     TEST_WITH_SLOW,
     TestCase,
 )
