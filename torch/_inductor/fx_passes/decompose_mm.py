@@ -425,7 +425,9 @@ class _PostMMOp:
     n: torch.fx.Node
 
     def apply(self, t, num_chunks):
-        return self.n.target(t, *self.n.args[1:], **self.n.kwargs)
+        return self.n.target(
+            t, *self.n.args[1:], **self.n.kwargs
+        )  # pyrefly: ignore[not-callable]
 
 
 @dataclasses.dataclass
@@ -433,10 +435,12 @@ class _ViewOp(_PostMMOp):
     chunk_dim: int
 
     def apply(self, t, num_chunks):
-        shape = list(s for s in self.n.args[1])  # noqa: C400
+        shape = list(
+            s for s in self.n.args[1]
+        )  # pyrefly: ignore[not-callable,not-iterable]
         if shape[self.chunk_dim] != -1:
             shape[self.chunk_dim] //= num_chunks
-        return self.n.target(t, shape)
+        return self.n.target(t, shape)  # pyrefly: ignore[not-callable]
 
 
 def _process_matmul_reduce_scatter(
@@ -518,7 +522,9 @@ def _process_matmul_reduce_scatter(
     # TODO: just use group_size?
     orig_split_num_chunks = -1
     if orig_scatter_dim != 0:
-        orig_split_num_chunks = len(_reduce_scatter_node.args[0].args[0])
+        orig_split_num_chunks = len(
+            _reduce_scatter_node.args[0].args[0]
+        )  # pyrefly: ignore[missing-attribute]
 
     trace_args = (
         arg_a_t,
