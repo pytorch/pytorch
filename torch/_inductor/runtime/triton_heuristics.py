@@ -2270,13 +2270,17 @@ def _check_max_grid_x(size_hints, x, num_warps):
         64 if torch.version.hip else 32
     )  # TODO: query warp size once #129663 is merged
     num_blocks = (size_hints["x"] + x - 1) // x
+    x_limit = min(size_hints["x"], TRITON_MAX_BLOCK["X"])
 
-    while (num_blocks * num_warps * warp_size) > max_grid_x and x < size_hints["x"]:
+    while (num_blocks * num_warps * warp_size) > max_grid_x and x < x_limit:
         x *= 2  # Scale up XBLOCK if grid exceeds limits
-        num_blocks = num_blocks // 2
-    if (num_blocks * num_warps * warp_size) > max_grid_x:
+        num_blocks = max(1, num_blocks // 2)
+    # TODO idk why we were using num_threads as instead of num_ctas?
+    if num_blocks > max_grid_x:
         raise AssertionError(
-            "Reduction config exceeds cudaDeviceProp maxGridSize. Please raise a pytorch issue"
+            "XBLOCK capped by TRITON_MAX_BLOCK['X'], but grid still exceeds cudaDeviceProp "
+            "maxGridSize; split the workload or reduce size hints. With num_blocks = "
+            f"{num_blocks} and x={x}."
         )
     return x, num_blocks
 
