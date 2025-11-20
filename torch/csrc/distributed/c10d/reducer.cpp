@@ -1307,9 +1307,15 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
       }
     } else {
       if (v.is_non_overlapping_and_dense()) {
+        // If the param's memory is dense, match its layout, anticipating
+        // the autograd engine (AccumulateGrad) will also create gradients
+        // matching its layout.
         bucket.bucket_views_in.push_back(
             gradients.as_strided(v.sizes(), v.strides(), offset));
       } else {
+        // Fall back to a C-style contiguous view, again anticipating
+        // AccumulateGrad will do the same when stashing grads for non-dense
+        // params.
         bucket.bucket_views_in.push_back(gradients
                                              .narrow(
                                                  0,
@@ -1389,9 +1395,15 @@ void Reducer::populate_bucket_views_out(
       }
     } else {
       if (v.is_non_overlapping_and_dense()) {
+        // If the param's memory is dense, match its layout, anticipating
+        // the autograd engine (AccumulateGrad) will also create gradients
+        // matching its layout.
         bucket.bucket_views_out.push_back(
             tensor.as_strided(v.sizes(), v.strides(), offset));
       } else {
+        // Fall back to a C-style contiguous view, again anticipating
+        // AccumulateGrad will do the same when stashing grads for non-dense
+        // params.
         bucket.bucket_views_out.push_back(tensor
                                               .narrow(
                                                   0,
