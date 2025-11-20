@@ -823,10 +823,20 @@ def _export_to_torch_ir(
         return bool(
             constraints  # dynamic shape
             or dynamic_shapes  # dynamic shape
-            or isinstance(f, torch.fx.GraphModule)  # retracing
-            or preserve_module_call_signature  # unflatten
             or torch._functorch.config.fake_tensor_propagate_real_tensors  # draft
             or torch._export.config.use_legacy_dynamo_graph_capture
+        )
+
+    # For the new non-legacy export path, we need to assume static shapes by default
+    # to match the behavior of the legacy path and ensure shapes are only treated
+    # as dynamic when explicitly marked via constraints or dynamic_shapes.
+    if (
+        torch._export.config.use_new_tracer_experimental
+        and not use_legacy_dynamo_graph_capture()
+    ):
+        dynamo_cfg = dataclasses.replace(
+            dynamo_cfg,
+            assume_static_by_default=True,
         )
 
     with torch._dynamo.config.patch(dataclasses.asdict(dynamo_cfg)):

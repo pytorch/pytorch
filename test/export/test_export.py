@@ -9846,7 +9846,6 @@ def forward(self, b_a_buffer, x):
         ep = export(m, ())
         self.assertEqual(ep.graph_signature.lifted_tensor_constants, ["x"])
 
-    @testing.expectedFailureStrictV2
     def test_preserve_shape_dynamism_for_unused_inputs(self):
         torch.export.register_dataclass(
             Inp3,
@@ -10048,26 +10047,9 @@ def forward(self, p_lin_weight, p_lin_bias, x):
         ep_decompose_linear = ep_has_linear_convd.run_decompositions(
             decomp_table={torch.ops.aten.linear.default: _decompose_linear_custom}
         )
-        if is_strict_v2_test(self._testMethodName):
-            self.assertExpectedInline(
-                str(ep_decompose_linear.graph_module.code).strip(),
-                """\
-def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
-    conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
-    conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
-    permute = torch.ops.aten.permute.default(c_linear_weight, [1, 0]);  c_linear_weight = None
-    matmul = torch.ops.aten.matmul.default(conv2d, permute);  conv2d = permute = None
-    mul_30 = torch.ops.aten.mul.Tensor(c_linear_bias, 2);  c_linear_bias = None
-    add_36 = torch.ops.aten.add.Tensor(matmul, mul_30);  matmul = mul_30 = None
-    cos = torch.ops.aten.cos.default(add_36);  add_36 = None
-    sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
-    add_47 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
-    return (add_47,)""",
-            )
-        else:
-            self.assertExpectedInline(
-                str(ep_decompose_linear.graph_module.code).strip(),
-                """\
+        self.assertExpectedInline(
+            str(ep_decompose_linear.graph_module.code).strip(),
+            """\
 def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_linear_weight, c_linear_bias, x, y):
     conv2d = torch.ops.aten.conv2d.default(x, p_conv_weight, p_conv_bias);  x = p_conv_weight = p_conv_bias = None
     conv1d = torch.ops.aten.conv1d.default(y, p_conv1d_weight, p_conv1d_bias);  y = p_conv1d_weight = p_conv1d_bias = None
@@ -10079,7 +10061,7 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
     sum_1 = torch.ops.aten.sum.default(conv1d);  conv1d = None
     add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
     return (add_1,)""",
-            )
+        )
 
     def test_export_decomps_dynamic(self):
         class M(torch.nn.Module):
@@ -12297,7 +12279,6 @@ graph():
         ep.module()(x)
 
     @testing.expectedFailureCppRuntime
-    @testing.expectedFailureStrictV2
     def test_symint_input_basic(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -15341,24 +15322,9 @@ graph():
 
         inp = torch.randn(4, 4)
         gm = export(Foo(), (inp,)).run_decompositions().module()
-        if is_strict_v2_test(self._testMethodName):
-            self.assertExpectedInline(
-                str(gm.graph).strip(),
-                """\
-graph():
-    %x : [num_users=4] = placeholder[target=x]
-    %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
-    %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%x,), kwargs = {})
-    %cos : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
-    %add_12 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%sin, %cos), kwargs = {})
-    %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
-    %add_25 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add_12, %cos_1), kwargs = {})
-    return (add_25,)""",
-            )
-        else:
-            self.assertExpectedInline(
-                str(gm.graph).strip(),
-                """\
+        self.assertExpectedInline(
+            str(gm.graph).strip(),
+            """\
 graph():
     %x : [num_users=4] = placeholder[target=x]
     %_guards_fn : [num_users=0] = call_module[target=_guards_fn](args = (%x,), kwargs = {})
@@ -15368,7 +15334,7 @@ graph():
     %cos_1 : [num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%x,), kwargs = {})
     %add_1 : [num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%add, %cos_1), kwargs = {})
     return (add_1,)""",
-            )
+        )
 
         self.assertEqual(gm(inp), Foo()(inp))
 
@@ -16154,7 +16120,6 @@ def forward(self, x):
 
     @testing.expectedFailureSerDer  # T195866111
     @testing.expectedFailureSerDerNonStrict
-    @testing.expectedFailureStrictV2
     def test_hints_wrapper(self):
         strict = True
 
