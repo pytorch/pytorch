@@ -534,6 +534,137 @@ class TestTorchDlPack(TestCase):
         ):
             from_dlpack(inp)
 
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(
+        *all_types_and_complex_and(
+            torch.half,
+            torch.bfloat16,
+            torch.bool,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat, torch.chalf))
+    def test_dlpack_byte_offset_handling(self, device, dtype):
+        """Test that from_dlpack correctly converts byte_offset to storage_offset.
+        
+        This test manually modifies a DLPack capsule to set byte_offset,
+        then verifies that from_dlpack correctly converts it to storage_offset.
+        This avoids modifying toDLPack for backward compatibility.
+        """
+        import ctypes
+        
+        # Create a base tensor (no need for view since toDLPack sets byte_offset=0 anyway)
+        base = make_tensor((10,), dtype=dtype, device=device)
+        element_size = base.element_size()
+        base_data_ptr = base.storage().data_ptr()
+        original_shape = base.shape[0]
+        
+        # Test with different byte offsets
+        for offset_elements in [1, 2, 3, 5]:
+            expected_byte_offset = offset_elements * element_size
+            expected_storage_offset = offset_elements
+            
+            # Create the expected view for comparison
+            view = base[offset_elements:]
+            expected_shape = view.shape
+            expected_shape_size = expected_shape[0]
+            
+            # Get a fresh DLPack capsule from base for each iteration
+            capsule = to_dlpack(base)
+            
+            # Manually modify byte_offset in the capsule
+            class DLDevice(ctypes.Structure):
+                _fields_ = [
+                    ("device_type", ctypes.c_int32),
+                    ("device_id", ctypes.c_int32),
+                ]
+            
+            class DLDataType(ctypes.Structure):
+                _fields_ = [
+                    ("code", ctypes.c_uint8),
+                    ("bits", ctypes.c_uint8),
+                    ("lanes", ctypes.c_uint16),
+                ]
+            
+            class DLTensor(ctypes.Structure):
+                _fields_ = [
+                    ("data", ctypes.c_void_p),
+                    ("device", DLDevice),
+                    ("ndim", ctypes.c_int32),
+                    ("dtype", DLDataType),
+                    ("shape", ctypes.POINTER(ctypes.c_int64)),
+                    ("strides", ctypes.POINTER(ctypes.c_int64)),
+                    ("byte_offset", ctypes.c_uint64),
+                ]
+            
+            class DLManagedTensor(ctypes.Structure):
+                _fields_ = [
+                    ("dl_tensor", DLTensor),
+                    ("manager_ctx", ctypes.c_void_p),
+                    ("deleter", ctypes.c_void_p),
+                ]
+            
+            # Get pointer from capsule
+            capsule_name = "dltensor"
+            try:
+                pythonapi = ctypes.pythonapi
+                pythonapi.PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
+                pythonapi.PyCapsule_GetPointer.restype = ctypes.c_void_p
+                
+                capsule_ptr = pythonapi.PyCapsule_GetPointer(
+                    ctypes.py_object(capsule),
+                    capsule_name.encode('utf-8')
+                )
+                
+                if not capsule_ptr:
+                    self.skipTest("Could not get pointer from DLPack capsule")
+                
+                # Cast to DLManagedTensor pointer
+                dl_tensor_ptr = ctypes.cast(
+                    capsule_ptr,
+                    ctypes.POINTER(DLManagedTensor)
+                )
+                
+                # Verify current shape before modification
+                current_shape = dl_tensor_ptr.contents.dl_tensor.shape[0]
+                self.assertEqual(current_shape, original_shape, 
+                               f"Initial shape should be {original_shape}")
+                
+                # Modify the DLPack tensor to set byte_offset
+                # Keep the data pointer pointing to base, set byte_offset
+                dl_tensor_ptr.contents.dl_tensor.data = base_data_ptr
+                dl_tensor_ptr.contents.dl_tensor.byte_offset = expected_byte_offset
+                
+                # Adjust shape to match the offset view
+                # Modify the shape array directly
+                shape_ptr = dl_tensor_ptr.contents.dl_tensor.shape
+                if shape_ptr:
+                    shape_ptr[0] = expected_shape_size
+                    # Verify the shape was set correctly
+                    actual_shape_after = shape_ptr[0]
+                    self.assertEqual(actual_shape_after, expected_shape_size,
+                                   f"Shape should be {expected_shape_size}, got {actual_shape_after}")
+                
+                # Now test from_dlpack with the modified capsule
+                result = from_dlpack(capsule)
+                
+                # Verify correctness
+                self.assertEqual(result.shape, expected_shape, 
+                               f"Shape mismatch: expected {expected_shape}, got {result.shape}")
+                self.assertEqual(result, view, "Data values should match")
+                self.assertEqual(
+                    result.storage_offset(), 
+                    expected_storage_offset,
+                    f"storage_offset should be {expected_storage_offset}, "
+                    f"got {result.storage_offset()}"
+                )
+                
+            except (AttributeError, OSError, ctypes.ArgumentError) as e:
+                # If ctypes access fails, skip the test
+                self.skipTest(f"Could not modify DLPack capsule via ctypes: {e}")
 
 instantiate_device_type_tests(TestTorchDlPack, globals(), allow_mps=True)
 
