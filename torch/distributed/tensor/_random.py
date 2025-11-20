@@ -569,11 +569,6 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
 
         if self.distribute_region_enabled:
             old_offset = state.offset
-            print(
-                "before pre: ",
-                torch.distributed.get_rank(),
-                state.state.view(dtype=torch.int64),
-            )
             self._set_pre_op_sharding_spec(state, spec)
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
