@@ -737,12 +737,12 @@ class OverlapPreservingBucketer:
 
             # Check if existing hiding node conflicts with candidate wait
             for old_hiding_node in self.collective_info[coll].hiding_nodes:
-                if old_hiding_node in self.augmented_ancestors[candidate_wait] or candidate_wait in self.augmented_ancestors[old_hiding_node]:
+                if candidate_wait in self.augmented_ancestors[old_hiding_node]:
                     return True
 
             # Check if candidate hiding node conflicts with existing wait
             for new_hiding_node in candidate_info.hiding_nodes:
-                if new_hiding_node in self.augmented_ancestors[coll_wait] or coll_wait in self.augmented_ancestors[new_hiding_node]:
+                if coll_wait in self.augmented_ancestors[new_hiding_node]:
                     return True
 
         return False
