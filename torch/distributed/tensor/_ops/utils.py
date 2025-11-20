@@ -4,21 +4,17 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
-from typing import cast, Optional, TypeVar, Union
-from typing_extensions import ParamSpec
+from typing import cast, Optional, Union
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
-from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
     OpStrategy,
-    OutputSharding,
     PlacementList,
-    RuntimeSchemaInfo,
     StrategyType,
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
@@ -28,42 +24,21 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
-# from torch.testing._internal.distributed._tensor.common_dtensor import redistribute
 
 
-_T = TypeVar("_T")
-_P = ParamSpec("_P")
-
-
-# convenient wrapper to register sharding propagation rules
-def register_prop_rule(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[
-    [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
-]:
-    def wrapper(
-        impl: Callable[[OpSchema], OutputSharding],
-    ) -> Callable[[OpSchema], OutputSharding]:
-        overloads = op if isinstance(op, list) else [op]
-        for overload in overloads:
-            DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
-                overload, impl, schema_info
-            )
-        return impl
-
-    return wrapper
-
-
-def _expand_single_dim_strategy_to_mesh(single_dim_strategy: Callable[[OpSchema], list[list[Placement]]]) -> Callable[[OpSchema], StrategyType]:
+def _expand_single_dim_strategy_to_mesh(
+    single_dim_strategy: Callable[[OpSchema], list[list[Placement]]],
+) -> Callable[[OpSchema], StrategyType]:
     """
     Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
     sharding types used by inputs.
     """
-    def expanded_strategy(op_schema: OpSchema) -> StrategyType:
 
+    def expanded_strategy(op_schema: OpSchema) -> StrategyType:
         strategies_over_one_mesh_dim = single_dim_strategy(op_schema)
-        args_strategy = [s for s in op_schema.args_strategy if isinstance(s, OpStrategy)]
+        args_strategy = [
+            s for s in op_schema.args_strategy if isinstance(s, OpStrategy)
+        ]
         assert len(args_strategy) > 0, "expected at least one Tensor arg"
         mesh = args_strategy[0].mesh
 
@@ -80,85 +55,35 @@ def _expand_single_dim_strategy_to_mesh(single_dim_strategy: Callable[[OpSchema]
                 DTensorSpec(mesh, tuple(specs)) for specs in zip(*strategy_comb)
             ]
             arg_specs = spec_list[1:]
-            src_strategies = [s for s in op_schema.args_schema if isinstance(s, OpStrategy)]
-            if any(not is_tensor_shardable(src_strat.shape, arg_spec) for src_strat, arg_spec in zip(src_strategies, arg_specs)):
+            src_strategies = [
+                s for s in op_schema.args_schema if isinstance(s, OpStrategy)
+            ]
+            if any(
+                not is_tensor_shardable(src_strat.shape, arg_spec)
+                for src_strat, arg_spec in zip(src_strategies, arg_specs)
+            ):
                 # Note: since we don't look at mesh dims inside single_dim_strategies, we can't tell if tensors are 'shardable'
                 # instead, we filter out unshardable strategies after mesh expansion
                 # TODO: make this more robust after adding ShardingPlaceholder, allowing us to say inside a single_dim_strategy
                 # whether we care about even-sharding or other specific properties
                 continue
 
-            assert len(arg_specs) == len(src_strategies), "expected one src strategy per arg spec"
+            assert len(arg_specs) == len(src_strategies), (
+                "expected one src strategy per arg spec"
+            )
             all_strategies.append(
-                OpSpec(output_specs=spec_list[0], input_specs=spec_list[1:], redistribute_cost=[
-                    generate_redistribute_costs(src_strategy, arg_spec) for (src_strategy, arg_spec) in zip(src_strategies, arg_specs)
-                ])
+                OpSpec(
+                    output_specs=spec_list[0],
+                    input_specs=spec_list[1:],
+                    redistribute_cost=[
+                        generate_redistribute_costs(src_strategy, arg_spec)
+                        for (src_strategy, arg_spec) in zip(src_strategies, arg_specs)
+                    ],
+                )
             )
         return OpStrategy(all_strategies)
 
     return expanded_strategy
-
-def register_single_dim_strategy(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[
-    [Callable[[OpSchema], list[list[Placement]]]], Callable[[OpSchema], list[list[Placement]]]
-]:
-    """
-    Registers a simplified op strategy that only considers a single mesh dim, taking care to expand it
-    to cover all the mesh dims present in the runtime inputs.
-    """
-    def expanded_registration_wrapper(
-        single_dim_strategy: Callable[[OpSchema], list[list[Placement]]],
-    ) -> Callable[[OpSchema], list[list[Placement]]]:
-        _expanded_strategy = _expand_single_dim_strategy_to_mesh(single_dim_strategy)
-        register_op_strategy(op, schema_info)(_expanded_strategy)
-
-        return single_dim_strategy
-
-    return expanded_registration_wrapper
-
-
-def register_op_strategy(
-    op, schema_info=None
-) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    # pyre-fixme[2]: Parameter must be annotated.
-
-    # For every ATen op that accepts any args in this list,
-    # the arg itself can impact the strides (and potentially the sharding strategy)
-    # of the output tensor.
-    # thus, we will detect ATen schemas with any of these args and ensure
-    # that they get specialized here.
-    arg_names_that_require_specializing_cache_strategy = [
-        "memory_format",
-    ]
-
-    def wrapper(impl):
-        if isinstance(op, list):
-            overloads = op
-        else:
-            overloads = [op]
-
-        for overload in overloads:
-            curr_schema_info = None
-            if schema_info is None:
-                specialized_args = [
-                    a.name
-                    for a in overload._schema.arguments
-                    if a.name in arg_names_that_require_specializing_cache_strategy
-                ]
-                if any(specialized_args):
-                    curr_schema_info = RuntimeSchemaInfo(
-                        static_kwargkey=specialized_args
-                    )
-            else:
-                curr_schema_info = schema_info
-            DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
-                overload, impl, curr_schema_info
-            )
-        return impl
-
-    return wrapper
 
 
 def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
@@ -224,7 +149,10 @@ def prod(xs: Iterable[int]) -> int:
 
 
 def is_tensor_shardable(shape: Sequence[int], spec: DTensorSpec) -> bool:
-    """Check if the shape is shardable according to the spec."""
+    """Check if the spec matches these criteria:
+    * any Shard placements in spec refer to valid tensor dims
+    * no empty local tensors (uneven sharding OK, as long as last rank has >0 size)
+    """
     # number of shards in each tensor dimension
     shards_map = [1] * len(shape)
     for i, placement in enumerate(spec.placements):
@@ -290,6 +218,9 @@ def infer_broadcast_dims_map(
 ) -> list[int]:
     # infer the broadcast dims map, where it maps from the common shape dim to the input shape dim
     # this is aligned with the broadcast semantics
+    # e.g. if common_shape = [1, 2, 3, 4] and input_shape = [2, 3, 4],
+    # broadcast_dims_map will be [-1, 0, 1, 2]
+    # meaning that dim 0 in the output has no mapping to the input, and dim 1 in the output maps to dim 0 in the input
     common_ndim = len(common_shape)
     input_ndim = len(input_shape)
     broadcast_dims_map = [-1] * common_ndim

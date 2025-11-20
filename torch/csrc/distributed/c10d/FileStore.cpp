@@ -492,17 +492,4 @@ void FileStore::wait(
   }
 }
 
-std::vector<std::string> FileStore::listKeys() {
-  std::unique_lock<std::mutex> l(activeFileOpLock_);
-  File file(path_, O_RDONLY, timeout_);
-  auto lock = file.lockShared();
-  pos_ = refresh(file, pos_, cache_, deletePrefix_);
-  std::vector<std::string> keys;
-  keys.reserve(cache_.size());
-  for (const auto& kv : cache_) {
-    keys.push_back(kv.first.substr(regularPrefix_.size()));
-  }
-  return keys;
-}
-
 } // namespace c10d
