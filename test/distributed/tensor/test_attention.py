@@ -813,6 +813,50 @@ class TestSharding(DTensorTestBase):
             ),
         )
 
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Does not support flash nor efficient attention",
+    )
+    def test_attention_shard_without_cp(self) -> None:
+        """Test that sharding on sequence dimension without CP enabled is not supported."""
+        from torch.distributed.tensor import distribute_tensor, Replicate, Shard
+
+        B = 2
+        nheads = 4
+        seq_len = 256
+        dim = 32
+
+        device_mesh = init_device_mesh(
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+        )
+
+        # Create q, k, v tensors with shape (B, nheads, seq_len, dim)
+        q = torch.randn(
+            B, nheads, seq_len, dim, device=self.device_type, dtype=torch.bfloat16
+        )
+        k = torch.randn(
+            B, nheads, seq_len, dim, device=self.device_type, dtype=torch.bfloat16
+        )
+        v = torch.randn(
+            B, nheads, seq_len, dim, device=self.device_type, dtype=torch.bfloat16
+        )
+        q_dt = distribute_tensor(q, device_mesh, [Shard(2)])
+        k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
+        v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
+
+        # Run SDPA with sequence-sharded tensors WITHOUT enabling CP
+        # Without CP enabled, DTensor should select a different strategy
+        # (not sequence-sharded) because Shard(2) strategy is only available with CP
+        out = F.scaled_dot_product_attention(q_dt, k_dt, v_dt)
+
+        # Verify the output is NOT sharded on sequence dimension (dim 2)
+        # This proves that CP sharding rules were not used
+        self.assertNotEqual(out.placements[0], Shard(2))
+        # The output should be replicated or sharded on batch head dimensions.
+        self.assertIn(out.placements[0], [Replicate(), Shard(0), Shard(1)])
+
 
 RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
     RingAttentionTest,
