@@ -61,6 +61,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     ClosureSource,
+    CollectionsSource,
     ConstantSource,
     DefaultsSource,
     GetItemSource,
@@ -2762,7 +2763,8 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             type_source = TypeSource(args[0].source)
         python_type = args[0].python_type()
         if is_namedtuple_class(python_type):
-            return VariableTracker.build(tx, namedtuple)
+            type_source = AttrSource(CollectionsSource(), "namedtuple")
+            return VariableTracker.build(tx, namedtuple, type_source)
         return VariableTracker.build(tx, python_type, source=type_source)
 
 
