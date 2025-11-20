@@ -1357,6 +1357,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--include-inductor-core-tests",
+        "--include-inductor-core-tests",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run inductor tests. "
+            "If this flag is not present, we will run all tests "
+            "(including inductor tests)."
+        ),
+    )
+    parser.add_argument(
         "--functorch",
         "--functorch",
         action="store_true",
@@ -1626,6 +1636,12 @@ def get_selected_tests(options) -> list[str]:
     if options.include_dynamo_core_tests:
         selected_tests = list(
             filter(lambda test_name: test_name in DYNAMO_CORE_TESTS, selected_tests)
+        )
+
+    # Filter to only run dynamo tests when --include-inductor-core-tests option is specified
+    if options.include_inductor_core_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in INDUCTOR_TESTS, selected_tests)
         )
 
     # Filter to only run functorch tests when --functorch option is specified
