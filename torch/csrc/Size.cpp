@@ -5,7 +5,6 @@
 
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_arg_parser.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/python_tuples.h>
@@ -220,7 +219,7 @@ static PySequenceMethods THPSize_as_sequence = {
     nullptr /* sq_contains */
 };
 
-#ifdef IS_PYTHON_3_14_PLUS
+#if PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 14
 static Py_hash_t THPSize_hash(PyObject* self) {
   /*
   Python 3.14 introduce a caching mechanism for tuple hashing which is stored
@@ -302,7 +301,7 @@ PyTypeObject THPSizeType = {
     &THPSize_as_number, /* tp_as_number */
     &THPSize_as_sequence, /* tp_as_sequence */
     &THPSize_as_mapping, /* tp_as_mapping */
-#ifdef IS_PYTHON_3_14_PLUS
+#if PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 14
     &THPSize_hash, /* tp_hash  */
 #else
     nullptr, /* tp_hash */
@@ -316,7 +315,7 @@ PyTypeObject THPSizeType = {
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
-#ifdef IS_PYTHON_3_14_PLUS
+#if PY_MAJOR_VERSION >= 3 && PY_MINOR_VERSION >= 14
     // if tp_hash is defined, one must also defines tp_richcompare
     PyTuple_Type.tp_richcompare, /* tp_richcompare */
 #else
