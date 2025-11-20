@@ -1440,24 +1440,35 @@ py::object dispatchDTensorOp(
         py_op.ptr(),
         args.ptr(),
         kwargs.ptr());
-    py::object sharding = checked_vectorcall(
-        op_dispatcher
-            .attr("_propagate_op_sharding_non_cached_dispatch_slow_path")
-            .ptr(),
-        py_op.ptr(),
-        args.ptr(),
-        kwargs.ptr(),
-        py_op_info.ptr());
-    if (!py::isinstance(sharding, get_output_sharding_class())) {
-      stack->clear();
-      return sharding;
-    }
-    cached_sharding = sharding;
-    if (opt_native_op_schema.has_value()) {
+
+    // Use Python-side LRU cache when native cache is not available
+    if (!opt_native_op_schema.has_value()) {
+      py::object sharding_propagator =
+          op_dispatcher.attr("sharding_propagator");
+      checked_vectorcall(
+          sharding_propagator.attr("propagate").ptr(), py_op_info.ptr());
+      cached_sharding =
+          py_op_info.attr(dtensor_interned_strings.output_sharding);
+    } else {
+      // Use non-cached path for native cache (will be cached after this call)
+      py::object sharding = checked_vectorcall(
+          op_dispatcher
+              .attr("_propagate_op_sharding_non_cached_dispatch_slow_path")
+              .ptr(),
+          py_op.ptr(),
+          args.ptr(),
+          kwargs.ptr(),
+          py_op_info.ptr());
+      if (!py::isinstance(sharding, get_output_sharding_class())) {
+        stack->clear();
+        return sharding;
+      }
+      cached_sharding = sharding;
       native_sharding_propagator_cache->insert(
           std::move(opt_native_op_schema->first), std::move(sharding));
+      py_op_info.attr(dtensor_interned_strings.output_sharding) =
+          cached_sharding;
     }
-    py_op_info.attr(dtensor_interned_strings.output_sharding) = cached_sharding;
   }
 
   const auto get_py_op_info_if_needed = [&, &args = args, &kwargs = kwargs]() {
