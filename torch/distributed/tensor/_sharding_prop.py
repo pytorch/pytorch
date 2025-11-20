@@ -10,6 +10,7 @@ import torch
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
+from torch._utils_internal import justknobs_check
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
@@ -368,6 +369,17 @@ class ShardingPropagator:
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
+            arg = op_schema.args_schema[0]
+
+            if isinstance(arg, DTensorSpec) and any(
+                p.is_partial() for p in arg.placements
+            ):
+                if justknobs_check(
+                    "ai_infra/pytorch_distributed:torch_enable_partial_item_error"
+                ):
+                    raise RuntimeError(
+                        "local_scalar_dense doesn't support partial dtensor"
+                    )
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
