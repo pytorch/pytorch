@@ -954,7 +954,26 @@ if(USE_CUDNN)
   if(CUDNN_VERSION VERSION_LESS 8.5)
     message(FATAL_ERROR "PyTorch needs CuDNN-8.5 or above, but found ${CUDNN_VERSION}. Builds are still possible with `USE_CUDNN=0`")
   endif()
-  set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
+  if(NOT USE_SYSTEM_CUDNN_FRONTEND)
+    set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
+  else()
+    find_path(CUDNN_FRONTEND_INCLUDE_DIR cudnn_frontend.h PATH_SUFFIXES cudnn_frontend)
+    if(NOT CUDNN_FRONTEND_INCLUDE_DIR)
+      message(FATAL_ERROR "Cannot find system cuDNN frontend headers. Please install cudnn-frontend-dev or set USE_SYSTEM_CUDNN_FRONTEND=OFF")
+    endif()
+
+    if(EXISTS "${CUDNN_FRONTEND_INCLUDE_DIR}/cudnn_frontend_version.h")
+      file(STRINGS "${CUDNN_FRONTEND_INCLUDE_DIR}/cudnn_frontend_version.h" CUDNN_FE_VERSION_LINE REGEX "CUDNN_FRONTEND_VERSION")
+      if(CUDNN_FE_VERSION_LINE)
+        string(REGEX MATCH "[0-9]+" CUDNN_FE_VERSION "${CUDNN_FE_VERSION_LINE}")
+        if(CUDNN_FE_VERSION VERSION_LESS 1000000)
+          message(WARNING "System cuDNN frontend version ${CUDNN_FE_VERSION} may be too old. PyTorch is tested with bundled version. Known issues with older versions include SDPA dispatch bugs and numerical accuracy issues. Use at your own risk.")
+        endif()
+      endif()
+    else()
+      message(WARNING "Cannot detect system cuDNN frontend version. This library has known backward compatibility issues including SDPA dispatch bugs. PyTorch is tested with specific bundled version. Use at your own risk.")
+    endif()
+  endif()
   target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
 
@@ -1509,7 +1528,7 @@ if(NOT INTERN_BUILD_MOBILE)
     message("disabling MKLDNN because USE_MKLDNN is not set")
   endif()
 
-  if(USE_KLEIDIAI)
+  if(USE_KLEIDIAI AND NOT USE_SYSTEM_KLEIDIAI)
     set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
     set(AT_KLEIDIAI_ENABLED 1)
@@ -1519,6 +1538,22 @@ if(NOT INTERN_BUILD_MOBILE)
     list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
     # Recover build options.
     set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+  elseif(USE_KLEIDIAI AND USE_SYSTEM_KLEIDIAI)
+    add_library(kleidiai UNKNOWN IMPORTED)
+    find_library(KLEIDIAI_LIBRARY kleidiai)
+    if(NOT KLEIDIAI_LIBRARY)
+      message(FATAL_ERROR "Cannot find system KleidiAI library. Please install it or set USE_SYSTEM_KLEIDIAI=OFF")
+    endif()
+    find_path(KLEIDIAI_INCLUDE_DIR kai/kai_common.h)
+    if(NOT KLEIDIAI_INCLUDE_DIR)
+      message(FATAL_ERROR "Cannot find system KleidiAI headers. Please install kleidiai-dev or set USE_SYSTEM_KLEIDIAI=OFF")
+    endif()
+    set_target_properties(kleidiai PROPERTIES
+      IMPORTED_LOCATION "${KLEIDIAI_LIBRARY}"
+      INTERFACE_INCLUDE_DIRECTORIES "${KLEIDIAI_INCLUDE_DIR}"
+    )
+    set(AT_KLEIDIAI_ENABLED 1)
+    list(APPEND Caffe2_DEPENDENCY_LIBS kleidiai)
   endif()
 
   if(UNIX AND NOT APPLE)
@@ -1568,26 +1603,35 @@ endif()
 # End ATen checks
 #
 
-# Install `fmtlib` header.
-# This was the default behavior before version 12.0.0.
-# Since PyTorch C API depends on it, make it available for projects that
-# depend on PyTorch.
-set(FMT_INSTALL ON)
-set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
-set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
-add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
+if(NOT USE_SYSTEM_FMT)
+  set(FMT_INSTALL ON)
+  set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
 
-# Disable compiler feature checks for `fmt`.
-#
-# CMake compiles a little program to check compiler features. Some of our build
-# configurations (notably the mobile build analyzer) will populate
-# CMAKE_CXX_FLAGS in ways that break feature checks. Since we already know
-# `fmt` is compatible with a superset of the compilers that PyTorch is, it
-# shouldn't be too bad to just disable the checks.
-set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
+  set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
 
-list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
-set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+  list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt-header-only)
+  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+else()
+  find_package(fmt REQUIRED)
+  if(NOT fmt_FOUND)
+    message(FATAL_ERROR "Cannot find system fmt library. Please install libfmt-dev or set USE_SYSTEM_FMT=OFF")
+  endif()
+
+  set(FMT_INSTALL ON)
+  set(TEMP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+  set(BUILD_SHARED_LIBS OFF CACHE BOOL "Build shared libs" FORCE)
+
+  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/fmt)
+  set_target_properties(fmt-header-only PROPERTIES INTERFACE_COMPILE_FEATURES "")
+
+  set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS} CACHE BOOL "Build shared libs" FORCE)
+
+  list(APPEND Caffe2_DEPENDENCY_LIBS fmt::fmt)
+
+  message(STATUS "Using system fmt library for PyTorch, but installing bundled headers for extensions")
+endif()
 
 # ---[ Kineto
 # edge profiler depends on KinetoProfiler but it only does cpu
