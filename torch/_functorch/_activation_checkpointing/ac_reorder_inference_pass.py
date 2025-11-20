@@ -82,7 +82,8 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
 
         # Recursively duplicate checkpointed dependencies first, in original forward order
         checkpointed_inputs = [
-            inp for inp in node.all_input_nodes
+            inp
+            for inp in node.all_input_nodes
             if inp.op != "placeholder" and must_recompute(inp)
         ]
         # Sort by original order to preserve forward ordering
