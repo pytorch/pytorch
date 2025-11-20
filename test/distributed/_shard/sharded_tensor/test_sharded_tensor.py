@@ -43,6 +43,7 @@ from torch.distributed._shard.sharding_spec import (
 from torch.distributed.remote_device import _remote_device
 from torch.testing._internal.common_distributed import (
     requires_accelerator_dist_backend,
+    requires_nccl,
     skip_if_lt_x_gpu,
     spawn_threads_and_init_comms,
     tp_transports,
@@ -1809,9 +1810,9 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         for meta in metas:
             self.assertEqual(str(meta.placement.device()), "cpu")
 
-    @with_comms(backend=BACKEND)
+    @with_comms
     @skip_if_lt_x_gpu(4)
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_nccl()
     def test_sharded_tensor_to_cuda(self):
         cpu_spec = ChunkShardingSpec(
             dim=0,
@@ -1825,20 +1826,19 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                f"rank:0/{DEVICE_TYPE}:0",
-                f"rank:1/{DEVICE_TYPE}:1",
-                f"rank:2/{DEVICE_TYPE}:2",
-                f"rank:3/{DEVICE_TYPE}:3",
+                "rank:0/cuda:0",
+                "rank:1/cuda:1",
+                "rank:2/cuda:2",
+                "rank:3/cuda:3",
             ],
         )
         h, w = 10, 20
-        st_acc = sharded_tensor.zeros(spec, h, w)
-        if DEVICE_TYPE == "cuda":
-            # CUDA sharded tensor should return a new ShardedTensor, but same
-            # local shards(no movements)
-            new_st_acc = st_acc.to(DEVICE_TYPE)
-            self.assertTrue(st_acc is not new_st_acc)
-            self.assertTrue(st_acc.local_tensor() is new_st_acc.local_tensor())
+        # CUDA sharded tensor should return a new ShardedTensor, but same
+        # local shards(no movements)
+        st_cuda = sharded_tensor.zeros(spec, h, w)
+        new_st_cuda = st_cuda.cuda()
+        self.assertTrue(st_cuda is not new_st_cuda)
+        self.assertTrue(st_cuda.local_tensor() is new_st_cuda.local_tensor())
 
         gloo_pg = dist.new_group(backend="gloo")
 
@@ -1846,7 +1846,7 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         st_cpu = sharded_tensor.zeros(cpu_spec, h, w, process_group=gloo_pg)
         # test ability to move st to GPU
         spec_before_move = st_cpu.sharding_spec()
-        new_st_gpu = st_cpu.to(DEVICE_TYPE)
+        new_st_gpu = st_cpu.cuda()
         # check the spec is still ChunkShardingSpec
         spec_after_move = new_st_gpu.sharding_spec()
         self.assertIsInstance(spec_after_move, ChunkShardingSpec)
@@ -1859,12 +1859,12 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
             remote_device_before = spec_before_move.placements[i]
             self.assertEqual(remote_device_before.rank(), remote_device_after.rank())
             self.assertEqual(str(remote_device_before.device().type), "cpu")
-            self.assertEqual(str(remote_device_after.device().type), DEVICE_TYPE)
+            self.assertEqual(str(remote_device_after.device().type), "cuda")
 
         # ensure metadata also get changed to GPU
         metas = new_st_gpu.metadata().shards_metadata
         for meta in metas:
-            self.assertEqual(str(meta.placement.device().type), DEVICE_TYPE)
+            self.assertEqual(str(meta.placement.device().type), "cuda")
 
     @with_comms(backend=BACKEND)
     @skip_if_lt_x_gpu(4)
