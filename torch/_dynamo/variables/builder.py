@@ -240,12 +240,11 @@ from .misc import (
     LoggingLoggerVariable,
     MethodWrapperVariable,
     NumpyDTypeVariable,
-    NumpyTypeInfoVariable,
     NumpyVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
-    RegexPatternVariable,
+    ConstantLikeVariable,
     SavedTensorBox,
     TorchVersionVariable,
     TypingVariable,
@@ -564,7 +563,7 @@ class VariableBuilder:
     def wrap_regex_pattern(self, value: re.Pattern):
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
-        return RegexPatternVariable(value)
+        return ConstantLikeVariable(value)
 
     def wrap_weakref(self, value: weakref.ReferenceType):
         self.install_guards(GuardBuilder.TYPE_MATCH)
@@ -951,7 +950,7 @@ class VariableBuilder:
                 install_guard(dt_source.make_guard(GuardBuilder.ID_MATCH))
             else:
                 self.install_guards(GuardBuilder.ID_MATCH)
-            return NumpyTypeInfoVariable(value, source=self.source)
+            return ConstantLikeVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             self.install_guards(GuardBuilder.CLOSURE_MATCH)
@@ -3820,7 +3819,7 @@ class SourcelessBuilder:
         elif value is functools.wraps:
             return FunctoolsWrapsVariable(value)
         elif isinstance(value, re.Pattern):
-            return RegexPatternVariable(value)
+            return ConstantLikeVariable(value)
         elif isinstance(value, torch._dynamo.variables.lazy.LazySymNodeFormatString):
             return ConstantVariable.create(str(value))
         elif isinstance(value, type(torch._higher_order_ops.flex_attention_backward)):
