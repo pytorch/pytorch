@@ -204,12 +204,16 @@ if(CAFFE2_USE_CUDNN)
     set(CUDNN_STATIC OFF CACHE BOOL "")
   endif()
 
-  find_package(CUDNN)
+  # From https://github.com/NVIDIA/cudnn-frontend/blob/main/cmake/cuDNN.cmake
+  include(cuDNN)
 
   if(NOT CUDNN_FOUND)
     message(WARNING
       "Cannot find cuDNN library. Turning the option off")
     set(CAFFE2_USE_CUDNN OFF)
+    if(CUDNN_STATIC)
+      message(FATAL_ERROR "cuDNN not find on with static link enabled of it")
+    endif()
   else()
     if(CUDNN_VERSION VERSION_LESS "8.1.0")
       message(FATAL_ERROR "PyTorch requires cuDNN 8.1 and above.")
@@ -217,13 +221,7 @@ if(CAFFE2_USE_CUDNN)
   endif()
 
   add_library(torch::cudnn INTERFACE IMPORTED)
-  target_include_directories(torch::cudnn INTERFACE ${CUDNN_INCLUDE_PATH})
-  if(CUDNN_STATIC AND NOT WIN32)
-    target_link_options(torch::cudnn INTERFACE
-        "-Wl,--exclude-libs,libcudnn_static.a")
-  else()
-    target_link_libraries(torch::cudnn INTERFACE ${CUDNN_LIBRARY_PATH})
-  endif()
+  target_link_libraries(torch::cudnn INTERFACE CUDNN::cudnn)
 else()
   message(STATUS "USE_CUDNN is set to 0. Compiling without cuDNN support")
 endif()
