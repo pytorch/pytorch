@@ -7,7 +7,7 @@ from collections.abc import Callable, Generator, Mapping, Sequence
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import partial
-from typing import Any, cast, Optional, Protocol, TypeAlias
+from typing import Any, cast, Protocol, TypeAlias
 
 import torch
 import torch.distributed as dist
@@ -140,8 +140,8 @@ class _SDPAMerger:
 
     def __init__(self, convert_to_f32: bool, seq_dim: int):
         self._seq_dim = seq_dim
-        self._out: Optional[torch.Tensor] = None
-        self._lse: Optional[torch.Tensor] = None
+        self._out: torch.Tensor | None = None
+        self._lse: torch.Tensor | None = None
         self._should_lse_squeeze = False
         self._convert_to_f32 = convert_to_f32
         self._out_dtype = torch.float32
@@ -250,7 +250,7 @@ class _AllToAllRotater(_RingRotater):
     def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
         self._pg = pg
         self._seq_dim = seq_dim
-        self._buffer: Optional[torch.Tensor] = None
+        self._buffer: torch.Tensor | None = None
 
     def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
         curr_buffer = curr_buffer.contiguous()
@@ -272,7 +272,7 @@ class _AllGatherRotater(_RingRotater):
     def __init__(self, pg: dist.ProcessGroup, seq_dim: int) -> None:
         self._pg = pg
         self._seq_dim = seq_dim
-        self._aggregated_buffer: Optional[torch.Tensor] = None
+        self._aggregated_buffer: torch.Tensor | None = None
         self._idx = 0
 
     def exchange_buffers(self, curr_buffer: torch.Tensor) -> None:
@@ -293,7 +293,7 @@ class _AllGatherRotater(_RingRotater):
 
 
 def _create_rotater(
-    pg: dist.ProcessGroup, seq_dim: int, method: Optional[_RotateMethod] = None
+    pg: dist.ProcessGroup, seq_dim: int, method: _RotateMethod | None = None
 ) -> _RingRotater:
     if method is None:
         method = _cp_options.rotate_method
@@ -655,7 +655,7 @@ def _scaled_dot_product_ring_flash_attention(
     is_causal: bool = False,
     return_debug_mask: bool = False,
     *,
-    scale: Optional[float] = None,
+    scale: float | None = None,
 ) -> tuple[torch.Tensor, ...]:
     if return_debug_mask:
         raise NotImplementedError("return_debug_mask is not supported yet")
@@ -681,12 +681,12 @@ def _scaled_dot_product_ring_efficient_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_bias: Optional[torch.Tensor] = None,
+    attn_bias: torch.Tensor | None = None,
     compute_log_sumexp: bool = True,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     *,
-    scale: Optional[float] = None,
+    scale: float | None = None,
 ) -> tuple[torch.Tensor, ...]:
     if attn_bias is not None:
         raise NotImplementedError("attn_bias is not supported yet")
@@ -718,13 +718,13 @@ def _scaled_dot_product_ring_cudnn_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_bias: Optional[torch.Tensor] = None,
+    attn_bias: torch.Tensor | None = None,
     compute_log_sumexp: bool = True,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
     *,
-    scale: Optional[float] = None,
+    scale: float | None = None,
 ) -> tuple[torch.Tensor, ...]:
     if attn_bias is not None:
         raise NotImplementedError("attn_bias is not supported yet")
@@ -769,7 +769,7 @@ def _scaled_dot_product_ring_flash_attention_backward(
     philox_seed: torch.Tensor,
     philox_offset: torch.Tensor,
     *,
-    scale: Optional[float] = None,
+    scale: float | None = None,
 ) -> tuple[torch.Tensor, ...]:
     # TODO: remove this hardcoding
     seq_dim = 2
@@ -812,7 +812,7 @@ def _scaled_dot_product_ring_efficient_attention_backward(
     grad_input_mask: tuple[bool, ...],
     is_causal: bool = False,
     *,
-    scale: Optional[float] = None,
+    scale: float | None = None,
 ) -> tuple[torch.Tensor, ...]:
     # TODO: remove this hardcoding
     seq_dim = 2
@@ -856,7 +856,7 @@ def _scaled_dot_product_ring_cudnn_attention_backward(
     dropout_p: float,
     is_causal: bool,
     *,
-    scale: Optional[float] = None,
+    scale: float | None = None,
 ) -> tuple[torch.Tensor, ...]:
     # TODO: remove this hardcoding
     seq_dim = 2
@@ -938,8 +938,8 @@ exitsing_custom_ops = DTensor._op_dispatcher._custom_op_handlers
 
 ArgsType = tuple[Any, ...]
 KwargsType = dict[str, Any]
-InputFnType = Callable[[Optional[nn.Module], ArgsType, KwargsType, DeviceMesh], Any]
-OutputFnType = Callable[[Optional[nn.Module], Any, Any, DeviceMesh], Any]
+InputFnType = Callable[[nn.Module | None, ArgsType, KwargsType, DeviceMesh], Any]
+OutputFnType = Callable[[nn.Module | None, Any, Any, DeviceMesh], Any]
 
 _replaced_functions: dict[Callable, tuple[str, Callable]] = {}
 
@@ -1039,7 +1039,7 @@ def _context_parallel_buffers(
     mesh: DeviceMesh,
     buffers: list[torch.Tensor | BlockMask],
     buffer_seq_dims: list[int],
-    load_balancer: Optional[_LoadBalancer] = None,
+    load_balancer: _LoadBalancer | None = None,
 ) -> list[torch.Tensor | BlockMask]:
     """
     Shard the buffers along the sequence dimensions according to CP rules.
@@ -1136,7 +1136,7 @@ def _create_cp_block_mask(
     Q_LEN: int,
     KV_LEN: int,
     device_mesh: DeviceMesh,
-    load_balancer: Optional[_LoadBalancer] = None,
+    load_balancer: _LoadBalancer | None = None,
 ) -> BlockMask:
     """
     Creates a specialized BlockMask for Context Parallel FlexAttention.
@@ -1197,7 +1197,7 @@ def _create_cp_block_mask(
         rank: int,
         block_size: int,
         local_q_size: int,
-        qkv_rearrange_indices: Optional[torch.Tensor] = None,
+        qkv_rearrange_indices: torch.Tensor | None = None,
     ) -> _mask_mod_signature:
         assert qkv_rearrange_indices is None or qkv_rearrange_indices.ndim == 2, (
             "load balance index expects shape (1, seq_len) or (B, seq_len) "
@@ -1301,7 +1301,7 @@ class _ContextParallel(ParallelStyle):
             raise ValueError(f"Unknown attention type: {self.attention_type}")
 
     def flex_input_fn(
-        self, module: Optional[nn.Module], args: Any, kwargs: Any, mesh: DeviceMesh
+        self, module: nn.Module | None, args: Any, kwargs: Any, mesh: DeviceMesh
     ) -> Any:
         args_list = list(args)
         for idx, name in enumerate(
@@ -1329,7 +1329,7 @@ class _ContextParallel(ParallelStyle):
 
     def sdpa_input_fn(
         self,
-        module: Optional[nn.Module],
+        module: nn.Module | None,
         args: tuple[Any, ...],
         kwargs: dict[str, Any],
         mesh: DeviceMesh,
@@ -1351,7 +1351,7 @@ class _ContextParallel(ParallelStyle):
         return new_args, new_kwargs
 
     def sdpa_output_fn(
-        self, module: Optional[nn.Module], inputs: Any, outputs: Any, mesh: DeviceMesh
+        self, module: nn.Module | None, inputs: Any, outputs: Any, mesh: DeviceMesh
     ) -> Any:
         new_outputs = []
         for output in [outputs] if isinstance(outputs, torch.Tensor) else outputs:
@@ -1373,7 +1373,7 @@ def _context_parallel_shard(
     mesh: DeviceMesh,
     buffers: CPBufferContainer,
     seq_dims: CPBufferSeqDims,
-    load_balancer: Optional[_LoadBalancer] = None,
+    load_balancer: _LoadBalancer | None = None,
 ) -> list[torch.Tensor | BlockMask]:
     """
     Shard the buffers along the specified sequence dimensions (`seq_dims`), so that each
@@ -1464,9 +1464,9 @@ def _disable_context_parallel_dispatcher() -> None:
 def context_parallel(
     mesh: DeviceMesh,
     *,
-    buffers: Optional[list[torch.Tensor]] = None,
-    buffer_seq_dims: Optional[list[int]] = None,
-    no_restore_buffers: Optional[set[torch.Tensor]] = None,
+    buffers: list[torch.Tensor] | None = None,
+    buffer_seq_dims: list[int] | None = None,
+    no_restore_buffers: set[torch.Tensor] | None = None,
 ) -> Generator[None, None, None]:
     """
 
@@ -1554,7 +1554,7 @@ def context_parallel_unshard(
     mesh: DeviceMesh,
     buffers: list[torch.Tensor],
     seq_dims: list[int],
-    load_balancer: Optional[_LoadBalancer] = None,
+    load_balancer: _LoadBalancer | None = None,
 ) -> list[torch.Tensor]:
     """
     Unshard the tensors (e.g., output) that are sharded due to context parallelism.

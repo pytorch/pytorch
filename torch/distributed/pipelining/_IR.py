@@ -8,7 +8,7 @@ from collections.abc import Callable
 from enum import Enum
 from inspect import Parameter, Signature, signature
 from types import MethodType
-from typing import Any, Optional, Union
+from typing import Any, Union
 
 import torch
 import torch.fx as fx
@@ -165,7 +165,7 @@ def _insert_stage_symbolic_backward(
     # We will only emit backward operations for nodes that can contribute
     # to the specified loss value.
     live_nodes = {loss_node: None}
-    val_to_grad: dict[fx.Node, Optional[fx.Node]] = {loss_node: None}
+    val_to_grad: dict[fx.Node, fx.Node | None] = {loss_node: None}
 
     def assign_or_accumulate_grad(forward_node, grad_value):
         if forward_node in val_to_grad and forward_node.op != "placeholder":
@@ -186,7 +186,7 @@ def _insert_stage_symbolic_backward(
             fx.node.map_arg(node.args, add_to_live_nodes)
             fx.node.map_arg(node.kwargs, add_to_live_nodes)
             if node.op == "call_module":
-                output_grads: Union[tuple[Optional[fx.Node], ...], Optional[fx.Node]]
+                output_grads: tuple[fx.Node | None, ...] | fx.Node | None
                 if node in tuples:
                     stage_output = tuples[node]
                     output_grads = tuple(val_to_grad.get(n) for n in tuples[node])
@@ -680,11 +680,10 @@ class Pipe(torch.nn.Module):
     def _from_traced(
         mod: torch.nn.Module,
         exported_program: ExportedProgram,
-        multi_use_param_spec: Optional[MultiUseParamSpec] = None,
+        multi_use_param_spec: MultiUseParamSpec | None = None,
         output_loss_value_spec=None,
-        split_policy: Optional[
-            Callable[[torch.fx.GraphModule], torch.fx.GraphModule]
-        ] = None,
+        split_policy: Callable[[torch.fx.GraphModule], torch.fx.GraphModule]
+        | None = None,
     ):
         """
         Additionally, the ``output_loss_value_spec`` value can be specified to disambiguate
@@ -1012,7 +1011,7 @@ class Pipe(torch.nn.Module):
     def _trace_with_export(
         mod: torch.nn.Module,
         example_args: tuple[Any, ...],
-        example_kwargs: Optional[dict[str, Any]] = None,
+        example_kwargs: dict[str, Any] | None = None,
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
         try:
@@ -1032,8 +1031,8 @@ class Pipe(torch.nn.Module):
     def from_tracing(
         mod: torch.nn.Module,
         example_args: tuple[Any, ...],
-        example_kwargs: Optional[dict[str, Any]] = None,
-        split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
+        example_kwargs: dict[str, Any] | None = None,
+        split_policy: Callable[[fx.GraphModule], fx.GraphModule] | None = None,
     ):
         # If a param will be used in multiple pipeline stages, we default the strategy to REPLICATE'ing the param across
         # stages instead of TRANSMIT'ting it
@@ -1120,7 +1119,7 @@ class Pipe(torch.nn.Module):
         self,
         stage_index: int,
         device: torch.device,
-        group: Optional[ProcessGroup] = None,
+        group: ProcessGroup | None = None,
     ) -> _PipelineStage:
         """
         Create a `PipelineStage` given a stage index and distributed group.
@@ -1209,9 +1208,9 @@ def annotate_split_points(mod: torch.nn.Module, spec: dict[str, SplitPoint]):
 def pipeline(
     module: torch.nn.Module,
     mb_args: tuple[Any, ...],
-    mb_kwargs: Optional[dict[str, Any]] = None,
-    split_spec: Optional[dict[str, SplitPoint]] = None,
-    split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
+    mb_kwargs: dict[str, Any] | None = None,
+    split_spec: dict[str, SplitPoint] | None = None,
+    split_policy: Callable[[fx.GraphModule], fx.GraphModule] | None = None,
 ) -> Pipe:
     """
     Split a module based on a specification.

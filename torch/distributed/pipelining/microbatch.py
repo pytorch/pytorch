@@ -3,7 +3,7 @@
 import logging
 import operator
 from collections.abc import Sequence
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.fx.node import map_aggregate
@@ -307,10 +307,10 @@ def _shard_dict_of_args(
 
 def split_args_kwargs_into_chunks(
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]],
+    kwargs: dict[str, Any] | None,
     chunks: int,
-    args_chunk_spec: Optional[tuple[TensorChunkSpec, ...]] = None,
-    kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
+    args_chunk_spec: tuple[TensorChunkSpec, ...] | None = None,
+    kwargs_chunk_spec: dict[str, TensorChunkSpec] | None = None,
 ) -> tuple[list[tuple], list[dict]]:
     """
     Given a sequence of args and kwargs, split them into a number of chunks

@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import string
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -44,7 +44,7 @@ def einop_rule(
     op_schema: OpSchema,
     *,
     linearity: bool = False,
-    enforce_sharding: Optional[dict[str, int]] = None,
+    enforce_sharding: dict[str, int] | None = None,
 ) -> OutputSharding:
     """
     Propagate the sharding of inputs to output for ops whose data moves according to einsum notation.

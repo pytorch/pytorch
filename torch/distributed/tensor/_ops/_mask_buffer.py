@@ -1,14 +1,13 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 
 
 @dataclass
 class MaskBuffer:
-    data: Optional[torch.Tensor] = None
+    data: torch.Tensor | None = None
     # refcount allows shared usage of the MaskBuffer, as long as all users have the same data
     refcount: int = 0
 
