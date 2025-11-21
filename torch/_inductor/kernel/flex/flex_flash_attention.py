@@ -16,7 +16,6 @@ from torch.utils._sympy.functions import Identity
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
-from ...virtualized import V
 from .common import infer_dense_strides, load_flex_template, SubgraphResults
 
 
@@ -131,6 +130,18 @@ def input_buffers_require_grads(graph_module, num_score_mod_placeholders: int):
         return tensor_meta.requires_grad if tensor_meta is not None else False
 
     return any(requires_grad(n) for n in inputs[num_score_mod_placeholders:])
+
+
+def is_trivial_score_graph(graph_module: GraphModule) -> bool:
+    """Bacwards currently doesnt support score_mods, match against identity"""
+    graph = graph_module.graph
+    nodes = list(graph.nodes)
+    placeholders = [n for n in nodes if n.op == "placeholder"]
+    output = [n for n in nodes if n.op == "output"]
+    assert len(output) == 1, "Got graph w/ multiple outputs"
+    output_val = output[0].args[0]
+    # The identity graph just sends the score striaght through
+    return output_val == placeholders[0]
 
 
 def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
@@ -335,72 +346,54 @@ def create_flex_flash_attention_kernel(
     return (template_output, lse)
 
 
-def _use_flex_flash_attention_backward(
-    backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
-    mask_graph: Subgraph | GraphModule,
-    score_mod_other_buffers: tuple[Any, ...],
-    fw_graph: Any,
-    query: TensorBox,
-    key: TensorBox,
+def _can_use_flex_flash_attention_backward(
+    fw_subgraph: Subgraph,
+    mask_graph: Subgraph,
 ) -> tuple[bool, str]:
-    if backend != "FLASH":
-        return False, ""
-
     if not ensure_flash_available():
         return False, "CUTE flash attention is not available"
 
-    if score_mod_other_buffers:
-        return (
-            False,
-            "BACKEND='FLASH' for flex attention backward requires no score_mod captures.",
-        )
+    if not is_trivial_score_graph(fw_subgraph.graph_module):
+        return False, "NYI: Flex Flash Attention doesnt support score_mods in bwds yet."
 
-    if isinstance(mask_graph, GraphModule):
-        mask_graph_module = mask_graph
-    elif hasattr(mask_graph, "graph_module"):
-        mask_graph_module = mask_graph.graph_module
-    else:
-        mask_graph_module = None
-    if mask_graph_module is None or not is_trivial_mask_graph(mask_graph_module):
-        return (
-            False,
-            "BACKEND='FLASH' for flex attention backward requires the default mask_mod.",
-        )
-
-    if not _is_identity_score_mod_graph(fw_graph):
-        return (
-            False,
-            "BACKEND='FLASH' for flex attention backward requires the default score_mod.",
-        )
-
-    device = query.get_device()
-    if device is None or device.type != "cuda":
-        return False, "BACKEND='FLASH' for flex attention backward only supports CUDA."
-
-    dtype = query.get_dtype()
-    if dtype not in (torch.float16, torch.bfloat16):
-        return (
-            False,
-            "BACKEND='FLASH' for flex attention backward supports float16/bfloat16 only.",
-        )
-
-    Bq = query.get_size()[0]
-    Bkv = key.get_size()[0]
-    if not V.graph.sizevars.statically_known_true(sympy.Eq(Bq, Bkv)):
-        return (
-            False,
-            "BACKEND='FLASH' for flex attention backward requires Bq == Bkv.",
-        )
-
-    Hq = query.get_size()[1]
-    Hkv = key.get_size()[1]
-    if not V.graph.sizevars.statically_known_true(sympy.Eq(Hq, Hkv)):
-        return (
-            False,
-            "BACKEND='FLASH' for flex attention backward requires matching head counts.",
-        )
+    if not is_trivial_mask_graph(mask_graph.graph_module):
+        return False, "NYI: Flex Flash Attention doesnt supprot block_sparsity yet."
 
     return True, ""
+
+
+def _use_flex_flash_attention_backward(
+    fw_subgraph: Subgraph,
+    mask_graph: Subgraph,
+    backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
+) -> bool:
+    """Determine if we should use flex flash attention for the given inputs.
+
+    Args:
+        subgraph: The score modification subgraph
+        mask_graph: The mask modification subgraph
+        kernel_options: Kernel configuration options
+        num_score_mod_placeholders: Number of placeholders in score_mod
+        backend: Implementation selector (AUTO, TRITON, FLASH, TRITON_DECODE)
+
+    Returns:
+        True if flash attention should be used, False otherwise
+    """
+    # Flash is experimental and must be explicitly requested
+    if backend != "FLASH":
+        return False
+
+    can_use, reason = _can_use_flex_flash_attention_backward(
+        fw_subgraph,
+        mask_graph,
+    )
+
+    if not can_use:
+        raise RuntimeError(
+            f"BACKEND='FLASH' but flash attention cannot be used: {reason}"
+        )
+
+    return True
 
 
 def create_flex_flash_attention_backward_kernel(
@@ -411,7 +404,19 @@ def create_flex_flash_attention_backward_kernel(
     logsumexp: TensorBox,
     grad_out: TensorBox,
     scale: float,
-) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox]:
+    kernel_options: dict[str, Any],
+    # TODO: will be needed
+    # grad_logsumexp,
+    # fw_graph: SubgraphResults,
+    # joint_graph: SubgraphResults,
+    # mask_graph: SubgraphResults,
+    # score_mod_other_buffers: list[TensorBox],
+    # mask_mod_other_buffers: list[TensorBox],
+    # kv_num_blocks: TensorBox | None,
+    # kv_indices: TensorBox | None,
+    # full_kv_num_blocks: TensorBox | None,
+    # full_kv_indices: TensorBox | None,
+) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
@@ -488,4 +493,4 @@ def create_flex_flash_attention_backward_kernel(
 
     template_output = choices[0].output_node()
 
-    return (template_output, grad_key, grad_value)
+    return (template_output, grad_key, grad_value, tuple())

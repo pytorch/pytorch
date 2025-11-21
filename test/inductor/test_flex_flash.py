@@ -393,13 +393,36 @@ class TestFlexFlash(InductorTestCase):
         compiled_fn = torch.compile(flex_attention)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"BACKEND='FLASH' for flex attention backward requires no score_mod captures",
+            r"BACKEND='FLASH' for flex attention backward requires the default score_mod",
         ):
             compiled_fn(
                 q,
                 k,
                 v,
                 score_mod=score_mod_with_capture,
+                kernel_options={"BACKEND": "FLASH"},
+            ).sum().backward()
+
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_flash_attention_backward_rejects_score_mod(self, device, dtype):
+        q, k, v = create_test_tensors(dtype=dtype, device=device)
+
+        def score_mod_twice(score, b, h, q_idx, kv_idx):
+            return score * 2
+
+        q.requires_grad_(True)
+        k.requires_grad_(True)
+        v.requires_grad_(True)
+        compiled_fn = torch.compile(flex_attention)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"BACKEND='FLASH' for flex attention backward requires the default score_mod",
+        ):
+            compiled_fn(
+                q,
+                k,
+                v,
+                score_mod=score_mod_twice,
                 kernel_options={"BACKEND": "FLASH"},
             ).sum().backward()
 

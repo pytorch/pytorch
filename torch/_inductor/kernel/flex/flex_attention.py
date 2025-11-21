@@ -663,16 +663,6 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
-    use_flash_bwd, flash_bwd_reason = _use_flex_flash_attention_backward(
-        backend, mask_graph, score_mod_other_buffers, fw_graph, query, key
-    )
-    if use_flash_bwd:
-        grad_query, grad_key, grad_value = create_flex_flash_attention_backward_kernel(
-            query, key, value, out, logsumexp, grad_out, scale
-        )
-        return (grad_query, grad_key, grad_value, tuple())
-    if backend == "FLASH" and flash_bwd_reason:
-        raise RuntimeError(flash_bwd_reason)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -734,6 +724,15 @@ def flex_attention_backward(*args, **kwargs):
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
     freeze_irnodes(mask_graph_buffer)
+
+    if _use_flex_flash_attention_backward(
+        fw_graph,
+        mask_graph,
+        backend=backend,
+    ):
+        return create_flex_flash_attention_backward_kernel(
+            query, key, value, out, logsumexp, grad_out, scale, kernel_options
+        )
 
     # Construct layout with stride order matching K
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]
