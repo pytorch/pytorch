@@ -134,11 +134,6 @@ def _get_first_offset(offsets: torch.Tensor) -> int:
     return int(offsets[0])
 
 
-# @maybe_run_for_local_tensor
-# def _get_offsets_by_index(offsets: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
-#     return offsets[index]
-
-
 # accept 'plain data types' to enable simpler unit testing without creating device mesh
 def _compute_local_shape_and_global_offset(
     global_shape: ShapeType,
