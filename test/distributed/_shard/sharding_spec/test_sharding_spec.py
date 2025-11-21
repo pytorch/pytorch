@@ -490,6 +490,69 @@ class TestShardingSpec(TestCase):
         with self.assertRaisesRegex(ValueError, "overlap"):
             validate_non_overlapping_shards_metadata(shards)
 
+        shards = [
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_sizes=[5, 5],
+                placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[0, 5],
+                shard_sizes=[5, 5],
+                placement="cuda:1",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0],
+                shard_sizes=[5, 5],
+                placement="cuda:2",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 5],
+                shard_sizes=[5, 5],
+                placement="cuda:3",
+            ),
+        ]
+        validate_non_overlapping_shards_metadata(shards)
+
+        shards = [
+            ShardMetadata(
+                shard_offsets=[0, 0],
+                shard_sizes=[5, 5],
+                placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 5],
+                shard_sizes=[5, 5],
+                placement="cuda:1",
+            ),
+        ]
+        validate_non_overlapping_shards_metadata(shards)
+
+        shards = [
+            ShardMetadata(
+                shard_offsets=[0, 0, 0],
+                shard_sizes=[5, 5, 5],
+                placement="cuda:0",
+            ),
+            ShardMetadata(
+                shard_offsets=[5, 0, 0],
+                shard_sizes=[5, 5, 5],
+                placement="cuda:1",
+            ),
+            ShardMetadata(
+                shard_offsets=[10, 0, 0],
+                shard_sizes=[5, 5, 5],
+                placement="cuda:2",
+            ),
+            ShardMetadata(
+                shard_offsets=[10, 3, 0],
+                shard_sizes=[5, 5, 5],
+                placement="cuda:3",
+            ),
+        ]
+        with self.assertRaisesRegex(ValueError, "overlap"):
+            validate_non_overlapping_shards_metadata(shards)
+
 
 # Custom ShardingSpec, an simple example to do grid sharding
 @dataclass

@@ -20,7 +20,7 @@ from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
-from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
+from .utils import DTYPE_TO_CUTLASS_TYPE
 
 
 if TYPE_CHECKING:
@@ -110,7 +110,7 @@ class CUDATemplate(KernelTemplate):
         args are different.
         """
         key: Optional[str] = None
-        if config.cuda.enable_caching_codegen:
+        if config.cutlass.enable_caching_codegen:
             key = self.make_key(name=name, input_key=input_key, layout_repr=layout_repr)
 
         if key is not None and key in self.code_cache:

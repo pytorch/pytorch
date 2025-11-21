@@ -1,0 +1,5 @@
+[MESSAGES CONTROL]
+
+# Disable the message, report, category or checker with the given id(s).
+disable=all
+enable=W0143
