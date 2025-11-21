@@ -85,7 +85,7 @@ jobs:
 
               # Standard ROCm build flags for PyTorch; adjust ARCH / FLAGS as needed.
               export USE_ROCM=1
-              : "${PYTORCH_ROCM_ARCH:=gfx1100}"
+              : "${PYTORCH_ROCM_ARCH:=gfx942}"
               export PYTORCH_ROCM_ARCH
               : "${MAX_JOBS:=8}"
               export MAX_JOBS
