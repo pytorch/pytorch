@@ -98,7 +98,7 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
   // cvt 16x32 from fp32 to fp8 e4m3
   const __m512i sign_mask = _mm512_set1_epi32(0x80000000);
   const __m512i fp32_inf = _mm512_set1_epi32(UINT32_C(255) << 23);
-  const __m512i fp8_inf = _mm512_set1_epi32(UINT32_C(1087) << 20);
+  const __m512i fp8_max = _mm512_set1_epi32(UINT32_C(543) << 21);
   const __m512i denorm_thresh = _mm512_set1_epi32(UINT32_C(121) << 23);
   const __m512i denorm_mask = _mm512_set1_epi32(UINT32_C(141) << 23);
   const __m512i bias_part1 = _mm512_set1_epi32((uint32_t)(7 - 127) << 23);
@@ -119,8 +119,8 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
   }
 
   // Step 2: Handle clamping
-  // (f_bits >= fp8_inf): set result = 0x7E
-  __mmask16 overflow_mask = _mm512_cmpge_epu32_mask(f_bits, fp8_inf);
+  // (f_bits >= fp8_max): set result = 0x7E
+  __mmask16 overflow_mask = _mm512_cmpge_epu32_mask(f_bits, fp8_max);
   if (overflow_mask) {
     result = _mm512_mask_set1_epi32(result, overflow_mask, 0x7E);
   }
