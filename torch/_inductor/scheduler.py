@@ -2309,12 +2309,22 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         grouped_nodes = []
         max_num_nodes = 8
         for nodes in sorted_nodes:
-            grouped_nodes.extend(
-                [
-                    nodes[i : i + max_num_nodes]
-                    for i in range(0, len(nodes), max_num_nodes)
-                ]
+            # Group nodes by device first to avoid mixed-device fusion
+            device_groups: dict[Optional[torch.device], list[BaseSchedulerNode]] = (
+                defaultdict(list)
             )
+            for node in nodes:
+                device = node.get_device()
+                device_groups[device].append(node)
+
+            # Chunk each device group separately
+            for device_nodes in device_groups.values():
+                grouped_nodes.extend(
+                    [
+                        device_nodes[i : i + max_num_nodes]
+                        for i in range(0, len(device_nodes), max_num_nodes)
+                    ]
+                )
 
         return grouped_nodes
 
@@ -6111,8 +6121,9 @@ class Scheduler:
         subkernel_nodes = nodes
         device = subkernel_nodes[0].get_device()
 
-        if not all(node.get_device() == device for node in subkernel_nodes):
-            return False
+        assert all(node.get_device() == device for node in subkernel_nodes), (
+            "All nodes in a combo kernel group must be on the same device"
+        )
 
         # don't support benchmark fusion for CPU C++ backend right now.
         if device is None or (device.type == "cpu" and config.cpu_backend != "triton"):
