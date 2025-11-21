@@ -283,10 +283,10 @@ def _group_ranges_by_impl(
         for ranges_list, impl, kwargs, name in result:
             if len(ranges_list) > 1:
                 ranges_str = ", ".join(
-                    f"[{s}, {e if e != float('inf') else 'inf'}]"
+                    "[{}, {}]".format(s, e if e != float('inf') else 'inf')
                     for s, e in ranges_list
                 )
-                log.info(f"   Grouped {len(ranges_list)} ranges for {name}: {ranges_str}")
+                log.info("   Grouped %d ranges for %s: %s", len(ranges_list), name, ranges_str)
 
     return result
 
@@ -335,12 +335,19 @@ def _cleanup_torch_cond_operands(
                             filtered_operands.append(operand)
                         else:
                             # This is a Python constant (int, float, etc.)
-                            log.info(f"  Removing non-Node constant at index {i}: {operand} (type: {type(operand).__name__})")
+                            log.info(
+                                "  Removing non-Node constant at index %d: %s (type: %s)",
+                                i,
+                                operand,
+                                type(operand).__name__,
+                            )
                             removed_indices.append(i)
 
                     if len(filtered_operands) != original_count:
                         log.info(
-                            f"Cleaning torch.cond operands: {original_count} -> {len(filtered_operands)}"
+                            "Cleaning torch.cond operands: %d -> %d",
+                            original_count,
+                            len(filtered_operands),
                         )
 
                         # Replace operands in the node
@@ -377,21 +384,23 @@ def _cleanup_subgraph_placeholders(
         subgraph_gm: Subgraph GraphModule (true_graph or false_graph)
         removed_indices: List of operand indices that were removed
     """
-    import torch.fx
-
     if not removed_indices:
         return
 
     # Get all placeholder nodes in order
     placeholders = [n for n in subgraph_gm.graph.nodes if n.op == "placeholder"]
 
-    log.info(f"  Cleaning subgraph: removing {len(removed_indices)} placeholder(s) at indices {removed_indices}")
+    log.info(
+        "  Cleaning subgraph: removing %d placeholder(s) at indices %s",
+        len(removed_indices),
+        removed_indices,
+    )
 
     # Remove placeholders at the specified indices
     for idx in sorted(removed_indices, reverse=True):  # Remove from end to avoid index shifting
         if idx < len(placeholders):
             placeholder = placeholders[idx]
-            log.info(f"    Removing placeholder: {placeholder.name}")
+            log.info("    Removing placeholder: %s", placeholder.name)
             # Replace all uses with None (they shouldn't be used)
             placeholder.replace_all_uses_with(None)
             subgraph_gm.graph.erase_node(placeholder)
@@ -1334,7 +1343,7 @@ def _range_based_lowering_fn(
 
             log.info("Successfully traced torch.cond dispatch")
             log.debug(
-                f"GraphModule created with {len(list(dispatch_gm.graph.nodes))} nodes"
+                "GraphModule created with %d nodes", len(list(dispatch_gm.graph.nodes))
             )
 
             log.info("=== Traced GraphModule ===")
@@ -1343,7 +1352,7 @@ def _range_based_lowering_fn(
             # CRITICAL: Clean up operands to remove Python constants
             # make_fx automatically collects constants like 512 from predicates
             # We need to filter operands to only keep FX Nodes
-            log.info(f"Cleaning operands to remove non-Node constants")
+            log.info("Cleaning operands to remove non-Node constants")
             _cleanup_torch_cond_operands(dispatch_gm, len(fake_inputs))
 
             log.info("=== Graph code ===")
@@ -1359,10 +1368,13 @@ def _range_based_lowering_fn(
     # Debug: Print what's in the dispatch graph before inlining
     log.info("=== Dispatch GraphModule nodes ===")
     for node in dispatch_gm.graph.nodes:
-        log.info(f"  {node.op}: {node.target} | args: {node.args}")
+        log.info("  %s: %s | args: %s", node.op, node.target, node.args)
         if node.op == "call_function" and node.target == torch.ops.higher_order.cond:
-            log.info(f"    -> cond operands (args[3]): {node.args[3]}")
-            log.info(f"    -> cond operands types: {[type(x).__name__ for x in node.args[3]]}")
+            log.info("    -> cond operands (args[3]): %s", node.args[3])
+            log.info(
+                "    -> cond operands types: %s",
+                [type(x).__name__ for x in node.args[3]],
+            )
 
     result = inline_subgraph_to_ir_nodes(dispatch_gm, tensor_inputs, f"{name}_dispatch")
 
