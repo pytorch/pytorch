@@ -438,7 +438,7 @@ class _RemoteModule(nn.Module):
         memo: Optional[set[Module]] = None,
         prefix: str = "",
         remove_duplicate: bool = True,
-    ):
+    ) -> Iterator[tuple[str, Module]]:
         _raise_not_supported(self.named_modules.__name__)
 
     def train(self, mode: bool = True) -> Self:
