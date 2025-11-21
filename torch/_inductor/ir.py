@@ -6905,16 +6905,12 @@ class SubgraphBuffer(ExternKernel):
         gm: torch.fx.GraphModule,
         example_inputs: list[Any],
         subgraph_name: str,
-        dispatch_dim_index: int | None = None,
     ):
         super().__init__(None, layout, input_nodes)
+        self.gm = gm
         self.example_inputs = example_inputs
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
-
-        self.is_multi_range = False
-        self.gm = gm
-        self.dispatch_dim_index = None
 
         self.subgraph = V.graph.make_subgraph(self.gm, example_inputs, subgraph_name)
 
@@ -6938,11 +6934,6 @@ class SubgraphBuffer(ExternKernel):
                 self.subgraph.run(*self.example_inputs)
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        self._codegen_single_subgraph(wrapper)
-
-    def _codegen_single_subgraph(self, wrapper: PythonWrapperCodegen) -> None:
-        """Generate code for single subgraph."""
-
         class CodegenGraph:
             def __init__(self, graph: GraphLowering):
                 self.graph = graph
