@@ -501,6 +501,7 @@ def pytreeify(
     torch._dynamo.eval_frame.check_user_input_output(
         flat_real_args[1 if root else 0 :], UserErrorType.INVALID_INPUT
     )
+    f_globals = out.graph_capture_output.f_globals
 
     class Yield(Exception):
         pass
@@ -522,7 +523,9 @@ def pytreeify(
                 raise Yield
 
             try:
-                out.forward_callable(compiled_fn=backend_dummy)(*args, **kwargs)
+                out.forward_callable(
+                    compiled_fn=backend_dummy, extra_globals=f_globals
+                )(*args, **kwargs)
             except Yield:
                 assert self.gm_inputs is not None
                 return self.gm_inputs
@@ -557,7 +560,9 @@ def pytreeify(
                     for i in range(self.num_outputs)
                 ]
 
-            results = out.forward_callable(compiled_fn=backend_dummy)(*args, **kwargs)
+            results = out.forward_callable(
+                compiled_fn=backend_dummy, extra_globals=f_globals
+            )(*args, **kwargs)
             ret, self.out_spec = pytree.tree_flatten(results)
             return ret
 
@@ -606,7 +611,6 @@ def dynamo_graph_capture_for_export(
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
         with (
-            torch._dynamo.config.patch(replay_side_effects=False),
             torch._dynamo.config.patch(side_effect_replay_policy="warn"),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),

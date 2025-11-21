@@ -150,6 +150,10 @@ if(USE_CUDA)
 
     if(TARGET torch::nvtx3)
       list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtx3)
+    else()
+      if(TARGET torch::nvtoolsext)
+        list(APPEND TORCH_PYTHON_LINK_LIBRARIES torch::nvtoolsext)
+      endif()
     endif()
 endif()
 
@@ -486,7 +490,8 @@ add_custom_target(
   "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
     --is-debug=${TORCH_VERSION_DEBUG}
     --cuda-version=${CUDA_VERSION}
-    --hip-version=${ROCM_VERSION_DEV}
+    --hip-version=${HIP_VERSION_CLEAN}
+    --rocm-version=${ROCM_VERSION_DEV}
     --xpu-version=${SYCL_COMPILER_VERSION}
   BYPRODUCTS ${TORCH_SRC_DIR}/version.py
   COMMENT "Regenerating version file..."

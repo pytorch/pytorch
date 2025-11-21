@@ -101,3 +101,14 @@ TEST(TestScalarType, toUnderlying) {
   AT_FORALL_FLOAT8_TYPES(DEFINE_CHECK);
 #undef DEFINE_CHECK
 }
+
+TEST(TestScalarType, isQIntType) {
+  using torch::headeronly::isQIntType;
+  using torch::headeronly::ScalarType;
+#define DEFINE_CHECK(_, name) EXPECT_TRUE(isQIntType(ScalarType::name));
+  AT_FORALL_QINT_TYPES(DEFINE_CHECK);
+#undef DEFINE_CHECK
+#define DEFINE_CHECK(_, name) EXPECT_FALSE(isQIntType(ScalarType::name));
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CHECK);
+#undef DEFINE_CHECK
+}
