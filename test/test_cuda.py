@@ -5710,20 +5710,17 @@ class TestMemPool(TestCase):
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
 
+    @serialTest()
     def test_nested_mempool(self):
         torch.cuda.empty_cache()
         pool1 = torch.cuda.MemPool()
         pool2 = torch.cuda.MemPool()
         pool3 = torch.cuda.MemPool()
 
-        nelem = 1024 * 1024 * 20
-
         data = []
-        data_ptrs = []
         def allocate_data():
-            x = torch.empty(nelem, device="cuda")
+            x = torch.empty(1024, device="cuda")
             data.append(x)
-            data_ptrs.append(x.data_ptr())
 
         with torch.cuda.use_mem_pool(pool1):
             allocate_data()
