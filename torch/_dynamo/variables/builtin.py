@@ -2559,15 +2559,6 @@ class BuiltinVariable(VariableTracker):
         if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
             return tx.output.side_effects.load_attr(obj, name)
 
-        if default is not None:
-            hasattr_var = self.call_hasattr(tx, obj, name_var)
-            if hasattr_var is not None:
-                assert hasattr_var.as_python_constant() in (True, False)
-                if not hasattr_var.as_python_constant():
-                    return default
-            else:
-                return default
-
         source = obj.source and AttrSource(obj.source, name)
         if name in {"__bases__", "__base__", "__flags__"}:
             try:
@@ -2641,6 +2632,10 @@ class BuiltinVariable(VariableTracker):
             except AsPythonConstantNotImplementedError:
                 # dont fallback on as_python_constant error because this leads
                 # to a failure later on, and leads to a wrong stacktrace
+                raise
+            except ObservedAttributeError:
+                if default is not None:
+                    return default
                 raise
             except NotImplementedError:
                 return variables.GetAttrVariable(obj, name, source=source)
