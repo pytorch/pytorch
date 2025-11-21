@@ -119,13 +119,13 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cutlass.cuda_template import CUDATemplate
+    from .codegen.cutlass.template import CUTLASSTemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
 
 else:
-    CUDATemplate: TypeAlias = object
+    CUTLASSTemplate: TypeAlias = object
 
 
 try:
@@ -5364,7 +5364,7 @@ class CUDATemplateBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T],
         workspace_size: int,
-        template: CUDATemplate,
+        template: CUTLASSTemplate,
         supports_epilogue_fusion: bool,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
@@ -5387,7 +5387,7 @@ class CppTemplateBuffer(TemplateBuffer):
         layout: Layout,
         inputs: Sequence[IRNode],
         make_kernel_render: Callable[_P, _T],
-        template: CUDATemplate,
+        template: CUTLASSTemplate,
         choice: Any,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
