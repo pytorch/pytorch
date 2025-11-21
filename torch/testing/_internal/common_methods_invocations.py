@@ -6304,7 +6304,7 @@ def reference_inputs_permute(op, device, dtype, requires_grad, **kwargs):
 
 def error_inputs_softshrink(op, device, **kwargs):
     yield ErrorInput(SampleInput(make_tensor((1,), dtype=torch.float, device=device), kwargs={"lambd": -0.5}),
-                     error_regex="lambda must be greater or equal to 0, but found to be -0.5")
+                     error_regex=r"lambda must be in range \[0,.*input dtype.*found -0\.5")
 
 def sample_inputs_softshrink(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
