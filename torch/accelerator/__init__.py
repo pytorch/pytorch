@@ -2,7 +2,8 @@ r"""
 This package introduces support for the current :ref:`accelerator<accelerators>` in python.
 """
 
-from typing import Any, Optional
+from functools import cache
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -153,6 +154,7 @@ current_device_idx.__doc__ = r"""
     """
 
 
+@cache
 def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
     r"""Return the capability of the currently selected device.
 
@@ -163,7 +165,7 @@ def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
 
     Returns:
         dict[str, Any]: A dictionary containing device capability information. The dictionary includes:
-            - ``supported_dtypes`` (list[torch.dtype]): List of PyTorch data types supported by the device
+            - ``supported_dtypes`` (set(torch.dtype)): Set of PyTorch data types supported by the device
 
     Examples:
         >>> # Query capabilities for current device

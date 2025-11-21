@@ -40,15 +40,15 @@ void initModule(PyObject* module) {
 
     py::dict dict;
 
-    py::list dtype_list;
+    py::set dtype_set;
     caps.forEachSupportedScalarType([&](c10::ScalarType dtype) {
       THPDtype* thp_dtype = torch::getTHPDtype(dtype);
       py::object dtype_obj =
           py::reinterpret_borrow<py::object>((PyObject*)thp_dtype);
-      dtype_list.append(dtype_obj);
+      dtype_set.add(dtype_obj);
     });
 
-    dict["supported_dtypes"] = dtype_list;
+    dict["supported_dtypes"] = dtype_set;
     return dict;
   });
 
