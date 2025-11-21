@@ -18,7 +18,7 @@ void UpsampleImpl::pretty_print(std::ostream& stream) const {
     // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
     stream << "size=" << at::ArrayRef<int64_t>(options.size().value());
   }
-  stream << ", mode=" << enumtype::get_enum_name(options.mode()) << ")";
+  stream << ", mode=" << enumtype::get_enum_name(options.mode()) << ')';
 }
 
 Tensor UpsampleImpl::forward(const Tensor& input) {
