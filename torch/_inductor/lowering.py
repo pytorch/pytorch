@@ -2653,7 +2653,6 @@ make_fallback(aten.addbmm)
 make_fallback(aten._addmm_activation, warn=False)
 
 # Need templated kernel. Probably impossible to write efficiently
-make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
 

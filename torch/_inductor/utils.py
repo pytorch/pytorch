@@ -1312,6 +1312,20 @@ def _use_conv_autotune_backend(backend: str) -> bool:
     ]
 
 
+def _use_conv_bwd_weight_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip()
+        for x in config.max_autotune_conv_bwd_weight_backends.upper().split(",")
+    ]
+
+
+def _use_conv_bwd_input_autotune_backend(backend: str) -> bool:
+    return backend.upper() in [
+        x.strip()
+        for x in config.max_autotune_conv_bwd_input_backends.upper().split(",")
+    ]
+
+
 def use_triton_template(
     layout: Layout, *, enable_int32: bool = False, enable_float8: bool = False
 ) -> bool:
