@@ -9213,7 +9213,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 self.assertFalse(torch.allclose(a0, a1))
                 self.assertFalse(torch.allclose(a1, a2))
 
-    def test_rand_like_deterministic(self, combo_kernels):
+    def test_rand_like_deterministic(self):
         @torch.compile(backend="inductor")
         def fn(a):
             return torch.rand_like(a), torch.rand_like(a)
