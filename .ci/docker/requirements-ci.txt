@@ -255,8 +255,9 @@ scikit-image==0.22.0
 #test that import:
 
 scipy==1.10.1 ; python_version <= "3.11"
-scipy==1.14.1 ; python_version > "3.11" and python_version < "3.14"
-scipy==1.16.2 ; python_version >= "3.14"
+scipy==1.14.1 ; python_version > "3.11" and python_version < "3.13"
+# TODO breaks some dynamo_wrapped tests in test/nn/test_convolution.py on 3.13
+scipy==1.16.2 ; python_version >= "3.13"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.10.1
@@ -328,8 +329,8 @@ pywavelets==1.7.0 ; python_version >= "3.12"
 #Pinned versions: 1.4.1
 #test that import:
 
-lxml==5.3.0 ; python_version < "3.14"
-lxml==6.0.2 ; python_version >= "3.14"
+lxml==5.3.0 ; python_version < "3.13"
+lxml==6.0.2 ; python_version >= "3.13"
 #Description: This is a requirement of unittest-xml-reporting
 
 PyGithub==2.3.0

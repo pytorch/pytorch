@@ -58,6 +58,7 @@ jobs:
           pytorch-linux-jammy-py3.11-clang12,
           pytorch-linux-jammy-py3.12-clang12,
           pytorch-linux-jammy-py3.13-clang12,
+          pytorch-linux-jammy-py3.13t-clang12,
           pytorch-linux-jammy-py3.14-clang12,
           pytorch-linux-jammy-py3.14t-clang12,
           pytorch-linux-jammy-rocm-n-py3,
