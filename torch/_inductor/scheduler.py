@@ -285,7 +285,9 @@ class MixOrderReduction:
             return False
 
         contiguous_node, other_node = (
-            (node1, node2) if g1[1] == ncol else (node2, node1)
+            (node1, node2)
+            if V.graph.sizevars.evaluate_expr(sympy.Eq(g1[1], ncol))
+            else (node2, node1)
         )
 
         # We previously only check the contiguous_node has contiguous
@@ -2775,12 +2777,22 @@ class Scheduler:
             if (
                 used_non_deterministic_runtime_estimations()
                 and config_comms.runtime_estimations_align_across_all_distributed_ranks
-            ):
-                from .comms import (
-                    align_runtime_estimations_across_all_distributed_ranks,
+                and (
+                    config.runtime_estimations_mms_benchmark
+                    or config_comms.runtime_estimations_use_nccl_lib_estimations
                 )
+            ):
+                has_collectives = False
+                for node in self.nodes:
+                    if is_collective(node.node):
+                        has_collectives = True
+                        break
+                if has_collectives:
+                    from .comms import (
+                        align_runtime_estimations_across_all_distributed_ranks,
+                    )
 
-                align_runtime_estimations_across_all_distributed_ranks(self.nodes)
+                    align_runtime_estimations_across_all_distributed_ranks(self.nodes)
 
             from torch._logging import trace_structured
 
@@ -2803,8 +2815,11 @@ class Scheduler:
         self.process_grouped_nodes()
 
         if (
+            # pyrefly: ignore[unbound-name]
             config.graph_partition
+            # pyrefly: ignore[unbound-name]
             and config.triton.cudagraphs
+            # pyrefly: ignore[unbound-name]
             and config.triton.reorder_for_reducing_graph_partitions
         ):
             self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
@@ -2816,6 +2831,7 @@ class Scheduler:
             self.insert_memory_check_nodes()
 
         log_ir_post_fusion(self.nodes)
+        # pyrefly: ignore[unbound-name]
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
