@@ -6,6 +6,12 @@ PythonCall::PythonCall(SerializedPyObj&& serializedPyObj, bool isAsyncExecution)
     : serializedPyObj_(std::move(serializedPyObj)),
       isAsyncExecution_(isAsyncExecution) {}
 
+#if defined(__GNUC__) && __GNUC__ == 14
+/* this warning is falsely triggered with gcc-14 in following function. */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfree-nonheap-object"
+#endif
+
 c10::intrusive_ptr<Message> PythonCall::toMessageImpl() && {
   std::vector<char> payload;
   payload.reserve(serializedPyObj_.payload_.length() + 1);
@@ -20,6 +26,10 @@ c10::intrusive_ptr<Message> PythonCall::toMessageImpl() && {
       std::move(serializedPyObj_.tensors_),
       MessageType::PYTHON_CALL);
 }
+
+#if defined(__GNUC__) && __GNUC__ == 14
+#pragma GCC diagnostic pop
+#endif
 
 std::unique_ptr<PythonCall> PythonCall::fromMessage(const Message& message) {
   TORCH_INTERNAL_ASSERT(
