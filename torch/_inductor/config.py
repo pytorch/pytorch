@@ -950,6 +950,11 @@ class aten_distributed_optimizations:
     # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
     collective_estimator: Literal["analytical", "benchmark"] = "analytical"
 
+    # Maximum memory increase above baseline for prefetch operations
+    # Uses minimum of absolute cap and ratio of baseline
+    max_memory_increase_gb: Optional[float] = None  # Absolute cap in GB
+    max_memory_increase_ratio: Optional[float] = None  # Ratio of baseline peak memory
+
 
 def parallel_compile_enabled_internally() -> bool:
     """

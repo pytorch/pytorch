@@ -61,7 +61,6 @@ from .codegen.common import (
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
-    gen_common_triton_imports,
     texpr,
     TMACompatibilityChecker,
     TritonKernel,
@@ -742,7 +741,7 @@ class TritonTemplateKernel(TritonKernel):
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
             code = IndentedBuffer()
-            code.splice(gen_common_triton_imports())
+            code.splice(self.gen_common_triton_imports())
             code.splice(self.jit_lines())
             code.writeline(
                 f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
@@ -777,7 +776,7 @@ class TritonTemplateKernel(TritonKernel):
             val = self.output_node.get_stride()
         else:
             assert isinstance(name, str)
-            val = self.named_input_nodes[name].get_stride()
+            val = self.get_stride_and_maybe_freeze_layout(self.named_input_nodes[name])
 
         if isinstance(index, int):
             return texpr(self.rename_indexing(val[index]))
@@ -955,7 +954,6 @@ class TritonTemplateKernel(TritonKernel):
             self.template_mask = mask if mask is not None else "None"
             self.template_out_shape = index_shape if index_shape else "xindex"
             self.template_indices = indices
-            self.named_input_nodes[input_name].data.freeze_layout()
             self.cse.invalidate(OrderedSet())
 
             template_mask = self.template_mask
@@ -1412,7 +1410,7 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(indices, (list, tuple))
         assert isinstance(name, str)
         assert isinstance(mask, str)
-        stride = self.named_input_nodes[name].get_stride()
+        stride = self.get_stride_and_maybe_freeze_layout(self.named_input_nodes[name])
         indices = list(map(OpOverrides.paren, indices))
         assert len(indices) == len(stride)
         index = " + ".join(
@@ -1501,6 +1499,10 @@ class TritonTemplateKernel(TritonKernel):
                 *V.graph.sizevars.size_hints(self.call_sizes), self.meta
             )
         ]
+
+    def get_stride_and_maybe_freeze_layout(self, node) -> list[int]:
+        node.data.freeze_layout()
+        return node.get_stride()
 
 
 @functools.cache
