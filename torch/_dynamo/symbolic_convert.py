@@ -94,6 +94,8 @@ from .exc import (
     BackendCompilerFailed,
     collapse_resume_frames,
     format_graph_break_message,
+    format_loop_skip_frame_message,
+    format_skip_frame_message,
     get_stack_above_dynamo,
     ResumePrologueTracingError,
     StepUnsupported,
@@ -605,9 +607,9 @@ def generic_jump(
         )
         # compile a partial subgraph prefix then jump into user code
         if self.maybe_has_backedge():
-            msg = (
-                "Skipping frame because there is a graph break in a for/while loop\n"
-                f"{self.frame_summary()}"
+            msg = format_loop_skip_frame_message(
+                self.f_code,
+                "".join(traceback.format_list([self.frame_summary()])),
             )
             log.info(msg)
             raise exc.SkipFrame(msg)
@@ -883,9 +885,9 @@ def break_graph_if_unsupported(
                 )
 
                 if self.maybe_has_backedge():
-                    msg = (
-                        "Skipping frame because there is a graph break in a for/while loop\n"
-                        f"{self.frame_summary()}"
+                    msg = format_loop_skip_frame_message(
+                        self.f_code,
+                        "".join(traceback.format_list([self.frame_summary()])),
                     )
                     log.info(msg)
                     raise exc.SkipFrame(msg) from excp
@@ -2048,22 +2050,23 @@ class InstructionTranslatorBase(
 
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
+        self.push(it)
         try:
             val = it.next_variable(self)
-            self.push(it)
             self.push(val)
         except (StopIteration, exc.ObservedUserStopIteration) as e:
             if isinstance(e, exc.ObservedUserStopIteration):
                 exc.handle_observed_exception(self)
 
-            # leave iterator upon exhaustion in 3.12
             if sys.version_info >= (3, 12):
                 # CPython 3.12 actually jumps to the instruction after the END_FOR
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(it)
                 self.push(ConstantVariable.create(None))
+            else:
+                # pop the iterator in Python < 3.12
+                self.pop()
             self.jump(inst)
 
     def _create_exception_type(self, val: VariableTracker) -> VariableTracker:
@@ -4626,8 +4629,9 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
         ):
-            raise exc.SkipFrame("because no content in function call")
-
+            raise exc.SkipFrame(
+                format_skip_frame_message(self.f_code, "no content in function call")
+            )
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
@@ -4862,6 +4866,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     "orig_graphmodule"
                 ] = weakref.ref(module)
 
+        assert not isinstance(func, SkipFunctionVariable)
         tracer: InliningInstructionTranslator
         if is_generator(code):
             tracer = InliningGeneratorInstructionTranslator(
@@ -4874,8 +4879,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 func,
             )
         else:
-            # need the line below to make MyPy happy
-            assert not isinstance(func, LocalGeneratorObjectVariable)
             tracer = InliningInstructionTranslator(
                 parent,
                 code,
@@ -4883,7 +4886,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
                 parent.symbolic_stream_state,
-                # pyrefly: ignore [bad-argument-type]
                 func,
             )
         return tracer
@@ -4967,9 +4969,9 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         symbolic_stream_state: SymbolicStreamState,
-        funcvar: BaseUserFunctionVariable,
+        funcvar: BaseUserFunctionVariable | LocalGeneratorObjectVariable,
     ) -> None:
-        f_globals = funcvar.get_globals()  # type: ignore[attr-defined]
+        f_globals = funcvar.get_globals()
         f_builtins = f_globals["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
@@ -5027,6 +5029,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
     def should_compile_partial_graph(self) -> bool:
         if config.nested_graph_breaks:
+            if not self.funcvar.should_allow_nested_graph_breaks():
+                return False
             if not self.parent.should_compile_partial_graph():
                 return False
             return super().should_compile_partial_graph()
