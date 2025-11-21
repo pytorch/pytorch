@@ -651,7 +651,6 @@ def dynamo_graph_capture_for_export(
             if sys.version_info >= (3, 14):
                 import annotationlib  # added in 3.14
 
-                # pyrefly: ignore[missing-attribute]
                 annotations = annotationlib.get_annotations(torch.nn.Module)
             else:
                 annotations = getattr(torch.nn.Module, "__annotations__", None)
