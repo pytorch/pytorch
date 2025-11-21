@@ -1004,6 +1004,33 @@ class TorchSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class CollectionsSource(Source):
+    """Points to the actual `collections` module - used instead of GlobalSource
+    in case the user has overridden `collections` in their local namespace"""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        from .guards import GuardBuilder, install_guard
+
+        install_guard(self.make_guard(GuardBuilder.ID_MATCH))
+
+    def name(self) -> str:
+        return "__import__('collections')"
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.extend_output(
+            [
+                codegen.create_load_const(0),  # level
+                create_build_tuple(0),  # fromlist
+                codegen.create_import_name("collections"),
+            ]
+        )
+
+    def guard_source(self) -> GuardSource:
+        return GuardSource.GLOBAL
+
+
+@dataclasses.dataclass(frozen=True)
 class TorchFunctionModeStackSource(Source):
     ind: int
 
