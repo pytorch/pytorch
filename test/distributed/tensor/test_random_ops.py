@@ -714,6 +714,63 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
 
         compute_rankwise_if_local_tensor(weight_local, self.rank)
 
+class DistTensorRandomOpsTestND(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    @skip_if_lt_x_gpu(8)
+    def test_dtensor_randn_seed_consistency_with_torch(self):
+        """
+        Test that DTensor randn produces identical results to torch.randn when using the same seed.
+
+        This verifies that:
+        1. DTensor random operations respect torch.manual_seed()
+        2. DTensor randn produces the same global tensor as torch.randn with identical seeds
+        3. Multiple consecutive random operations maintain consistency
+        """
+        mesh = torch.arange(self.world_size).view(2, 2, 2)
+        device_mesh = DeviceMesh(self.device_type, mesh)
+
+        # Generate reference tensors using regular torch.randn
+        torch.manual_seed(42)
+        reference_tensor_1 = torch.randn(8, 8, device=self.device_type)
+        reference_tensor_2 = torch.randn(8, 8, device=self.device_type)
+
+        placements_list = [  # this list of placements should be enough to cover
+            [Shard(0), Shard(0), Shard(1)],
+            [Shard(0), Shard(1), Replicate()],
+            [Replicate(), Shard(0), Replicate()],
+            [Replicate(), Shard(1), Replicate()],
+            [Replicate(), Replicate(), Replicate()],
+        ]
+        for placements in placements_list:
+            # Generate DTensor tensors with the same seed
+            torch.manual_seed(42)
+            dtensor_1 = torch.distributed.tensor.randn(
+                (8, 8), device_mesh=device_mesh, placements=placements
+            )
+            # Gather distributed tensor to replicate for comparison
+            gathered_tensor_1 = dtensor_1.full_tensor()
+
+            dtensor_2 = torch.distributed.tensor.randn(
+                (8, 8), device_mesh=device_mesh, placements=placements
+            )
+            gathered_tensor_2 = dtensor_2.full_tensor()
+
+            # Verify DTensor produces identical results to regular torch tensors
+            self.assertTrue(
+                torch.allclose(reference_tensor_1, gathered_tensor_1),
+                f"First DTensor at randn call does not match torch.randn with same seed. "
+                f"Expected: {reference_tensor_1.tolist()}, Got: {gathered_tensor_1.tolist()}",
+            )
+            self.assertTrue(
+                torch.allclose(reference_tensor_2, gathered_tensor_2),
+                f"Second DTensor randn call does not match torch.randn with same seed. "
+                f"Expected: {reference_tensor_2.tolist()}, Got: {gathered_tensor_2.tolist()}",
+            )
+
 
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomInitTest,
