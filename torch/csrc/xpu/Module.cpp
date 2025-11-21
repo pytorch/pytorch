@@ -462,13 +462,11 @@ static void initXpuMethodBindings(PyObject* module) {
               return current_tid == tid;
             });
       });
-
   m.def(
       "_xpu_endAllocateToPool",
       [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
         c10::xpu::XPUCachingAllocator::endAllocateToPool(device, mempool_id);
       });
-
   m.def(
       "_xpu_releasePool",
       [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
