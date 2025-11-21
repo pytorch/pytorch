@@ -33,6 +33,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -41,7 +42,6 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
-from torch.distributed.tensor.placement_utils import ShardOrderEntry
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
     MultiProcessTestCase,
@@ -850,7 +850,9 @@ def redistribute(
     new_spec = copy.deepcopy(old_spec)
     new_spec.placements = placements
     if shard_order is not None:
-        assert new_spec._maybe_update_placements_given_shard_order(shard_order)
+        new_spec.shard_order = shard_order
+    else:
+        new_spec.shard_order = ()
     if old_spec == new_spec:
         return dtensor_input
     dtensor_input = DTensor.from_local(

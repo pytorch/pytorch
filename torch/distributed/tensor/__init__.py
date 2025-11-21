@@ -46,8 +46,11 @@ __all__ = [
 ]
 
 # For weights_only torch.load
-from ._dtensor_spec import DTensorSpec as _DTensorSpec, TensorMeta as _TensorMeta
-from .placement_utils import ShardOrderEntry as _ShardOrderEntry
+from ._dtensor_spec import (
+    DTensorSpec as _DTensorSpec,
+    ShardOrderEntry as _ShardOrderEntry,
+    TensorMeta as _TensorMeta,
+)
 
 
 torch.serialization.add_safe_globals(
