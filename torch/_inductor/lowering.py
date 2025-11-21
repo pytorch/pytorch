@@ -7504,6 +7504,10 @@ def with_effects(token, op, *args, **kwargs):
 
     # Get all the operations created during the lowering above, and add StarDeps
     # to the previous node with the same effect
+    assert len(V.graph.operations[operation_len:]) > 0, (
+        f"No operation nodes were generated when lowering effectful operator {op}."
+    )
+
     if effect_type:
         prev_effect_buffer = V.graph.effectful_ops.get(effect_type)
         for new_op in V.graph.operations[operation_len:]:
