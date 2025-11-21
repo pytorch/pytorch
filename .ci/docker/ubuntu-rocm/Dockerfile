@@ -52,6 +52,10 @@ ENV INSTALLED_VISION ${VISION}
 
 # Install rocm
 ARG ROCM_VERSION
+ARG USE_THEROCK_NIGHTLY
+ARG THEROCK_NIGHTLY_INDEX_URL
+ENV USE_THEROCK_NIGHTLY=${USE_THEROCK_NIGHTLY}
+ENV THEROCK_NIGHTLY_INDEX_URL=${THEROCK_NIGHTLY_INDEX_URL}
 RUN mkdir ci_commit_pins
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
