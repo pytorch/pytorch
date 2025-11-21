@@ -273,7 +273,9 @@ class MixOrderReduction:
             return False
 
         contiguous_node, other_node = (
-            (node1, node2) if g1[1] == ncol else (node2, node1)
+            (node1, node2)
+            if V.graph.sizevars.evaluate_expr(sympy.Eq(g1[1], ncol))
+            else (node2, node1)
         )
 
         # We previously only check the contiguous_node has contiguous
