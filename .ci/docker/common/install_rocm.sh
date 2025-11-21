@@ -27,6 +27,43 @@ install_ubuntu() {
     apt-get install -y libc++abi1
 
     # Make sure rocm packages from repo.radeon.com have highest priority
+        # When USE_THEROCK_NIGHTLY=1, install ROCm from TheRock nightly wheels
+    if [[ "${USE_THEROCK_NIGHTLY:-0}" == "1" ]]; then
+      echo "install_rocm.sh: installing ROCm from TheRock nightly wheels"
+
+      # Clean any previous ROCm installation in the base CI image.
+      if [[ -d /opt/rocm ]]; then
+        echo "Removing existing /opt/rocm from base image"
+        rm -rf /opt/rocm
+      fi
+
+      : "${THEROCK_NIGHTLY_INDEX_URL:=https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/}"
+      python3 -m pip install \
+        --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
+        "rocm[libraries,devel]"
+
+      # Use the rocm-sdk CLI helper to populate environment defaults
+      ROCM_HOME="$(rocm-sdk path --root)"
+      ROCM_BIN="$(rocm-sdk path --bin)"
+      ROCM_CMAKE_PREFIX="$(rocm-sdk path --cmake)"
+
+      echo "ROCM_HOME=${ROCM_HOME}"
+      echo "ROCM_BIN=${ROCM_BIN}"
+      echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
+
+      cat >/etc/profile.d/rocm-sdk.sh <<EOF
+export ROCM_HOME="${ROCM_HOME}"
+export PATH="${ROCM_BIN}:\$PATH"
+export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+EOF
+
+      export ROCM_HOME
+      export PATH="${ROCM_BIN}:${PATH}"
+      export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:${CMAKE_PREFIX_PATH:-}"
+
+      echo "install_rocm.sh: TheRock nightly ROCm install complete"
+      exit 0
+    fi
     cat << EOF > /etc/apt/preferences.d/rocm-pin-600
 Package: *
 Pin: release o=repo.radeon.com
