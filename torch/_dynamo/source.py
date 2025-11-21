@@ -104,7 +104,7 @@ def is_constant_source(source: Source) -> bool:
     if isinstance(source, ConstantSource):
         return True
     try:
-        if source.guard_source() == GuardSource.CONSTANT:
+        if source.guard_source == GuardSource.CONSTANT:
             return True
     except NotImplementedError:
         pass
@@ -144,6 +144,7 @@ class LocalSource(Source):
         else:
             codegen.append_output(codegen.create_load(self.local_name))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.LOCAL
 
@@ -160,6 +161,7 @@ class TempLocalSource(Source):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load(self.local_name))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.TEMP_LOCAL
 
@@ -177,6 +179,7 @@ class SyntheticLocalSource(Source):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load(self.local_name))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.SYNTHETIC_LOCAL
 
@@ -189,6 +192,7 @@ class SyntheticLocalSource(Source):
 class RandomValueSource(Source):
     random_call_index: int
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.RANDOM_VALUE
 
@@ -209,6 +213,7 @@ class GlobalSource(Source):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load_global(self.global_name, add=True))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
@@ -229,6 +234,7 @@ class GlobalWeakRefSource(Source):
         )
         codegen.extend_output(create_call_function(0, False))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
@@ -243,8 +249,9 @@ class WeakRefCallSource(ChainedSource):
         codegen.add_push_null(lambda: codegen(self.base))
         codegen.extend_output(create_call_function(0, False))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -273,8 +280,9 @@ class AttrSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -300,8 +308,9 @@ class GenericAttrSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -315,8 +324,9 @@ class TypeDictSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__dict__"))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -334,8 +344,9 @@ class TypeMROSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__mro__"))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -368,8 +379,9 @@ class CodeSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__code__"))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -383,8 +395,9 @@ class ClosureSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("__closure__"))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -403,8 +416,9 @@ class GradSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs(self.member))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -413,8 +427,9 @@ class GradSource(ChainedSource):
 
 @dataclasses.dataclass(frozen=True)
 class ParamBufferSource(AttrSource):
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source]
 
 
 # Special AttrSource to differentiate module._buffers or module._parameters
@@ -436,6 +451,7 @@ class UnspecializedParamBufferSource(AttrSource):
 class EphemeralSource(Source):
     desc: Optional[str] = None
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.EPHEMERAL
 
@@ -455,8 +471,9 @@ class SkipGuardSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         self.base.reconstruct(codegen)
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -505,8 +522,9 @@ class TensorPropertySource(ChainedSource):
             create_call_function(2 if self.idx is not None else 1, False)
         )
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -531,8 +549,9 @@ class IndexedSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -547,8 +566,9 @@ class NegateSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         raise NotImplementedError
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -564,8 +584,9 @@ class ConvertIntSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -588,8 +609,9 @@ class DynamicScalarSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(create_call_function(1, False))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -604,8 +626,9 @@ class FlattenScriptObjectSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -620,8 +643,9 @@ class ScriptObjectQualifiedNameSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -632,8 +656,9 @@ class AttrProxySource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -666,8 +691,9 @@ class DefaultsSource(ChainedSource):
         codegen.append_output(codegen.create_load_const(self.idx_key))
         codegen.append_output(create_binary_subscr())
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -694,8 +720,9 @@ class GetItemSource(ChainedSource):
             codegen.append_output(codegen.create_load_const(self.index))
         codegen.append_output(create_binary_subscr())
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     def unpack_slice(self) -> slice:
         assert self.index_is_slice
@@ -718,8 +745,9 @@ class GetItemSource(ChainedSource):
 class ConstDictKeySource(ChainedSource):
     index: Any
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -747,8 +775,9 @@ class NonSerializableSetGetItemSource(ChainedSource):
 
         assert ConstantVariable.is_literal(self.index)
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -782,8 +811,9 @@ class DictGetItemSource(ChainedSource):
             self.index, ConstDictKeySource
         ) or ConstantVariable.is_literal(self.index)
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # Load dict
@@ -820,8 +850,9 @@ class DictSubclassGetItemSource(ChainedSource):
             self.index, ConstDictKeySource
         ) or ConstantVariable.is_literal(self.index)
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         # reconstruct dict.__getitem__(dct, key)
@@ -913,8 +944,9 @@ class NamedTupleFieldsSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(codegen.create_load_attrs("_fields"))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -930,8 +962,9 @@ class DataclassFieldsSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(create_call_function(1, False))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -948,8 +981,9 @@ class TypeSource(ChainedSource):
         codegen(self.base)
         codegen.extend_output(create_call_function(1, False))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -961,8 +995,9 @@ class OptimizerSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -974,8 +1009,9 @@ class NNModuleSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_SPECIALIZED_NN_MODULE[self.base.guard_source]
 
     @functools.cached_property
     def _name_template(self) -> str:
@@ -984,20 +1020,23 @@ class NNModuleSource(ChainedSource):
 
 @dataclasses.dataclass(frozen=True)
 class UnspecializedNNModuleSource(NNModuleSource):
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE[self.base.guard_source]
 
 
 @dataclasses.dataclass(frozen=True)
 class UnspecializedBuiltinNNModuleSource(UnspecializedNNModuleSource):
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return _GUARD_SOURCE_UNSPECIALIZED_BUILTIN_NN_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_UNSPECIALIZED_BUILTIN_NN_MODULE[self.base.guard_source]
 
 
 @dataclasses.dataclass(frozen=True)
 class FSDPNNModuleSource(NNModuleSource):
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return _GUARD_SOURCE_FSDP_MODULE[self.base.guard_source()]
+        return _GUARD_SOURCE_FSDP_MODULE[self.base.guard_source]
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1006,6 +1045,7 @@ class GlobalStateSource(Source):
     def _name_template(self) -> str:
         return ""
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
@@ -1034,6 +1074,7 @@ class TorchSource(Source):
             ]
         )
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
@@ -1061,6 +1102,7 @@ class CollectionsSource(Source):
             ]
         )
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
@@ -1087,6 +1129,7 @@ class TorchFunctionModeStackSource(Source):
         codegen.extend_output([codegen.create_load_const(self._get_index())])
         codegen.extend_output(create_call_function(1, False))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
@@ -1098,6 +1141,7 @@ class ConstantSource(Source):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.append_output(codegen.create_load_global(self.source_name, add=False))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.CONSTANT
 
@@ -1115,8 +1159,9 @@ class NumpyTensorSource(ChainedSource):
     def _name_template(self) -> str:
         return "___from_numpy({0})"
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen.load_import_from("torch", "as_tensor"))
@@ -1130,8 +1175,9 @@ class SubclassAttrListSource(ChainedSource):
     def _name_template(self) -> str:
         return "{0}.__tensor_flatten__()[0]"
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
 
 # NB: We don't expect you to actually ever generate guards against this
@@ -1142,8 +1188,9 @@ class FloatTensorSource(ChainedSource):
     def _name_template(self) -> str:
         return "___as_tensor({0})"
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1152,8 +1199,9 @@ class CallMethodItemSource(ChainedSource):
     def _name_template(self) -> str:
         return "{0}.item()"
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
-        return self.base.guard_source()
+        return self.base.guard_source
 
 
 # This is a synthetic source that is associated with the singleton
@@ -1165,6 +1213,7 @@ class ShapeEnvSource(Source):
     def _name_template(self) -> str:
         return ""
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.SHAPE_ENV
 
@@ -1190,6 +1239,7 @@ class CurrentStreamSource(Source):
         codegen.extend_output(create_call_function(num_args, False))
         codegen.extend_output(create_call_function(1, False))
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.GLOBAL
 
@@ -1200,6 +1250,7 @@ class BackwardStateSource(Source):
     def _name_template(self) -> str:
         return ""
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         return GuardSource.BACKWARD_STATE
 

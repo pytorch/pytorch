@@ -3912,7 +3912,7 @@ class CheckFunctionManager:
         w_builder = None
 
         def source_ref(source: Source) -> str:
-            guard_source = source.guard_source()
+            guard_source = source.guard_source
             if guard_source is GuardSource.CONSTANT:
                 # No need to track constants
                 return source.name
