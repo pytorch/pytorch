@@ -2657,7 +2657,7 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
-        from .cuda.cuda_kernel import CUDATemplateKernel
+        from .cutlass.cuda_kernel import CUDATemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
             return ValueRanges.unknown()
