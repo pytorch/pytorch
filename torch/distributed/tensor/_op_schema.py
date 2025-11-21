@@ -361,6 +361,16 @@ class OpSchema:
         )
         return tuple(item for item in args if isinstance(item, OpStrategy))
 
+    @property
+    def kwargs_strategy(self) -> tuple[OpStrategy, ...]:
+        # returns OpStrategy items from kwargs_schema.
+        kwargs_vals = (
+            tree_leaves(self.kwargs_schema)
+            if self.schema_info is not None and self.schema_info.needs_pytree
+            else self.kwargs_schema.values()
+        )
+        return tuple(item for item in kwargs_vals if isinstance(item, OpStrategy))
+
     def __repr__(self) -> str:
         args_schema = ", ".join([str(arg_schema) for arg_schema in self.args_schema])
         return (
