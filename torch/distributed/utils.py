@@ -184,7 +184,7 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
                 tensor._typed_storage()._resize_(size.numel())
 
 
-def _free_storage(tensor: torch.Tensor):
+def _free_storage(tensor: torch.Tensor) -> None:
     """
     Frees the underlying storage of ``tensor``.
 

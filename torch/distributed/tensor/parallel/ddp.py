@@ -23,7 +23,7 @@ def _get_submodule_n_params(module: nn.Module, path: str):
     return module, path
 
 
-def _update_module_param(param_list: list[tuple[nn.Module, str, nn.Parameter]]):
+def _update_module_param(param_list: list[tuple[nn.Module, str, nn.Parameter]]) -> None:
     """
     Update parameters within the module
     """
@@ -34,7 +34,7 @@ def _update_module_param(param_list: list[tuple[nn.Module, str, nn.Parameter]]):
         setattr(parent_module, module_path, t)
 
 
-def _reconstruct_dtensor(module: nn.Module, _input: Any):
+def _reconstruct_dtensor(module: nn.Module, _input: Any) -> None:
     """
     Reconstruct DTensor parameters from local tensors
     """
@@ -49,7 +49,7 @@ def _reconstruct_dtensor(module: nn.Module, _input: Any):
 
 def _localize_dtensor(
     module: nn.Module, *_: Any, ignored_params: Optional[set[nn.Parameter]] = None
-):
+) -> None:
     """
     Convert DTensor parameters to local tensors
     """
@@ -67,7 +67,7 @@ def _localize_dtensor(
     _update_module_param(param_list)  # type: ignore[arg-type]
 
 
-def _pre_dp_module_transform(module: nn.Module):
+def _pre_dp_module_transform(module: nn.Module) -> None:
     """
     Enable the composability between Tensor Parallelism (TP) and Data
     Parallelism(DP) in PyTorch when using DDP. We need to convert Parameters which

@@ -32,7 +32,7 @@ class _FunctionalRprop:
         foreach: bool = False,
         maximize: bool = False,
         _allow_empty_param_list: bool = False,
-    ):
+    ) -> None:
         _scripted_functional_optimizer_deprecation_warning(stacklevel=2)
         self.defaults = {
             "lr": lr,
@@ -51,7 +51,7 @@ class _FunctionalRprop:
 
         self.state = torch.jit.annotate(dict[torch.Tensor, dict[str, torch.Tensor]], {})
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]) -> None:
         params = self.param_group["params"]
         params_with_grad = []
         grads = []

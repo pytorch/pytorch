@@ -177,7 +177,7 @@ class MetadataIndex:
         fqn: str,
         offset: Optional[Sequence[int]] = None,
         index: Optional[int] = None,
-    ):
+    ) -> None:
         # We must use object.__setattr__ due to frozen=True
         object.__setattr__(self, "fqn", fqn)
         object.__setattr__(self, "index", index)

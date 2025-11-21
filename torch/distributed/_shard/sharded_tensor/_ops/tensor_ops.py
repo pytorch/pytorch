@@ -61,7 +61,7 @@ def st_is_meta(types, args=(), kwargs=None, pg=None):
     return args[0].local_tensor().is_meta
 
 
-def sharded_type_as_check(*args, **kwargs):
+def sharded_type_as_check(*args, **kwargs) -> None:
     """
     Perform extra checks for the sharded_type_as op such as the input needs to
     be either a Tensor or ShardedTensor.

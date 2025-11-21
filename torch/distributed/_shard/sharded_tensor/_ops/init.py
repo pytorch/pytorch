@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+
 import torch
 import torch.distributed._shard.sharded_tensor as sharded_tensor
 from torch.distributed._shard.sharded_tensor import _sharded_op_impl
@@ -135,7 +136,7 @@ tensor_like_creation_op_map = {
 
 
 # tensor ops that behave the same as the default tensor
-def register_tensor_creation_op(op):
+def register_tensor_creation_op(op) -> None:
     @_sharded_op_impl(op)
     def tensor_creation_op(types, args=(), kwargs=None, pg=None):
         """

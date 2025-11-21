@@ -95,7 +95,7 @@ def register_kl(type_p, type_q):
 class _Match:
     __slots__ = ["types"]
 
-    def __init__(self, *types):
+    def __init__(self, *types) -> None:
         self.types = types
 
     def __eq__(self, other):
@@ -957,7 +957,7 @@ def _kl_cauchy_cauchy(p, q):
     return t1 - t2
 
 
-def _add_kl_info():
+def _add_kl_info() -> None:
     """Appends a list of implemented KL functions to the doc for kl_divergence."""
     rows = [
         "KL divergence is currently implemented for the following distribution pairs:"

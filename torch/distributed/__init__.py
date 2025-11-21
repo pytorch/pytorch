@@ -73,7 +73,7 @@ if is_available():
         _DistributedPdb().set_trace()
         """
 
-        def interaction(self, *args, **kwargs):
+        def interaction(self, *args, **kwargs) -> None:
             _stdin = sys.stdin
             try:
                 sys.stdin = open("/dev/stdin")
@@ -83,7 +83,7 @@ if is_available():
 
     _breakpoint_cache: dict[int, typing.Any] = {}
 
-    def breakpoint(rank: int = 0, skip: int = 0, timeout_s=3600):
+    def breakpoint(rank: int = 0, skip: int = 0, timeout_s=3600) -> None:
         """
         Set a breakpoint, but only on a single rank.  All other ranks will wait for you to be
         done with the breakpoint before continuing.

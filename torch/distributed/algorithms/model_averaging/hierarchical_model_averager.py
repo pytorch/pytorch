@@ -99,7 +99,9 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         `HierarchicalModelAverager` is experimental and subject to change.
     """
 
-    def __init__(self, period_group_size_dict=None, warmup_steps=0, process_group=None):
+    def __init__(
+        self, period_group_size_dict=None, warmup_steps=0, process_group=None
+    ) -> None:
         super().__init__(process_group)
         if not period_group_size_dict:
             raise ValueError("Arg ``period_group_size_dict`` must not be empty.")
@@ -163,7 +165,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
         params: Union[
             Iterable[torch.nn.Parameter], Iterable[dict[str, torch.nn.Parameter]]
         ],
-    ):
+    ) -> None:
         """
         Averages parameters or parameter groups of an optimizer.
 

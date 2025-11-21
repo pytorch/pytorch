@@ -279,7 +279,7 @@ class _PeriodicTimer:
             ctx.function(*ctx.args, **ctx.kwargs)
 
     @staticmethod
-    def _stop_thread(thread, stop_event):
+    def _stop_thread(thread, stop_event) -> None:
         stop_event.set()
 
         thread.join()

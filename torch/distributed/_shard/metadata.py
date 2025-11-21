@@ -34,7 +34,7 @@ class ShardMetadata:
         shard_offsets: list[int],
         shard_sizes: list[int],
         placement: Optional[Union[str, _remote_device]] = None,
-    ):
+    ) -> None:
         self.shard_offsets = shard_offsets
         self.shard_sizes = shard_sizes
         if isinstance(placement, str):

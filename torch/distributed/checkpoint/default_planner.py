@@ -401,7 +401,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
     """
 
-    def __init__(self, keys=None, *args, **kwargs):
+    def __init__(self, keys=None, *args, **kwargs) -> None:
         self.keys = keys
         super().__init__(*args, **kwargs)
 

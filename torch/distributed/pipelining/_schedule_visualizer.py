@@ -115,7 +115,7 @@ class _ComputationTypeVisual:
         color: str,
         text: str = "",
         width: int = 1,
-    ):
+    ) -> None:
         self.color = color
         self.width = width
         self.text = text

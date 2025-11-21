@@ -35,7 +35,7 @@ FLAT_PARAM = "_flat_param"
 def _writeback_to_local_shard(
     handle: FlatParamHandle,
     writeback_grad: bool,
-):
+) -> None:
     """
     For the handle, writes back the this rank's shard of the unsharded
     flattened parameter to the sharded flattened parameter. If

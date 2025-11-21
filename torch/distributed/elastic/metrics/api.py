@@ -37,7 +37,7 @@ MetricData = namedtuple("MetricData", ["timestamp", "group_name", "name", "value
 class MetricsConfig:
     __slots__ = ["params"]
 
-    def __init__(self, params: Optional[dict[str, str]] = None):
+    def __init__(self, params: Optional[dict[str, str]] = None) -> None:
         self.params = params
         if self.params is None:
             self.params = {}
@@ -50,23 +50,23 @@ class MetricHandler(abc.ABC):
 
 
 class ConsoleMetricHandler(MetricHandler):
-    def emit(self, metric_data: MetricData):
+    def emit(self, metric_data: MetricData) -> None:
         print(
             f"[{metric_data.timestamp}][{metric_data.group_name}]: {metric_data.name}={metric_data.value}"
         )
 
 
 class NullMetricHandler(MetricHandler):
-    def emit(self, metric_data: MetricData):
+    def emit(self, metric_data: MetricData) -> None:
         pass
 
 
 class MetricStream:
-    def __init__(self, group_name: str, handler: MetricHandler):
+    def __init__(self, group_name: str, handler: MetricHandler) -> None:
         self.group_name = group_name
         self.handler = handler
 
-    def add_value(self, metric_name: str, metric_value: int):
+    def add_value(self, metric_name: str, metric_value: int) -> None:
         self.handler.emit(
             MetricData(time.time(), self.group_name, metric_name, metric_value)
         )
@@ -77,7 +77,7 @@ _default_metrics_handler: MetricHandler = NullMetricHandler()
 
 
 # pyre-fixme[9]: group has type `str`; used as `None`.
-def configure(handler: MetricHandler, group: Optional[str] = None):
+def configure(handler: MetricHandler, group: Optional[str] = None) -> None:
     if group is None:
         global _default_metrics_handler
         # pyre-fixme[9]: _default_metrics_handler has type `NullMetricHandler`; used
@@ -188,7 +188,9 @@ def profile(group=None):
     return wrap
 
 
-def put_metric(metric_name: str, metric_value: int, metric_group: str = "torchelastic"):
+def put_metric(
+    metric_name: str, metric_value: int, metric_group: str = "torchelastic"
+) -> None:
     """
     Publish a metric data point.
 
@@ -206,7 +208,7 @@ def put_metric(metric_name: str, metric_value: int, metric_group: str = "torchel
     "Deprecated, use `put_metric(metric_group)(metric_name, metric_value)` instead",
     category=FutureWarning,
 )
-def publish_metric(metric_group: str, metric_name: str, metric_value: int):
+def publish_metric(metric_group: str, metric_name: str, metric_value: int) -> None:
     metric_stream = getStream(metric_group)
     metric_stream.add_value(metric_name, metric_value)
 

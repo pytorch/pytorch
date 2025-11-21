@@ -92,13 +92,13 @@ class DTensorRedistributePlanner:
             default=None, init=False, repr=False, compare=False
         )
 
-        def __str__(self):
+        def __str__(self) -> str:
             return DTensorSpec.format_shard_order_str(
                 self.placements,
                 self.tensor_dim_to_mesh_dim,
             )
 
-        def __repr__(self):
+        def __repr__(self) -> str:
             return self.__str__()
 
         def __post_init__(self):

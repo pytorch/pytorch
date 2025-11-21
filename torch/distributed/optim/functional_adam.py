@@ -35,7 +35,7 @@ class _FunctionalAdam:
         foreach: bool = False,
         fused: bool = False,
         _allow_empty_param_list: bool = False,
-    ):
+    ) -> None:
         _scripted_functional_optimizer_deprecation_warning(stacklevel=2)
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -68,7 +68,7 @@ class _FunctionalAdam:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-    def step_param(self, param: Tensor, grad: Optional[Tensor]):
+    def step_param(self, param: Tensor, grad: Optional[Tensor]) -> None:
         """
         Similar to step, but operates on a single parameter and optionally a
         gradient tensor.
@@ -128,7 +128,7 @@ class _FunctionalAdam:
                 found_inf=None,
             )
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]) -> None:
         params = self.param_group["params"]
         params_with_grad = []
         grads = []

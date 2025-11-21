@@ -93,7 +93,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
         devices: Optional[list[DeviceType]] = None,
         _transports: Optional[list] = None,
         _channels: Optional[list] = None,
-    ):
+    ) -> None:
         full_device_maps = (
             {}
             if device_maps is None
@@ -110,7 +110,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
             full_device_list,
         )
 
-    def set_device_map(self, to: str, device_map: dict[DeviceType, DeviceType]):
+    def set_device_map(self, to: str, device_map: dict[DeviceType, DeviceType]) -> None:
         r"""
         Set device mapping between each RPC caller and callee pair. This
         function can be called multiple times to incrementally add
@@ -168,7 +168,7 @@ class TensorPipeRpcBackendOptions(_TensorPipeRpcBackendOptionsBase):
 
         super()._set_device_map(to, full_device_map)
 
-    def set_devices(self, devices: list[DeviceType]):
+    def set_devices(self, devices: list[DeviceType]) -> None:
         r"""
         Set local devices used by the TensorPipe RPC agent. When processing
         CUDA RPC requests, the TensorPipe RPC agent will properly synchronize

@@ -12,7 +12,7 @@ class MaskBuffer:
     # refcount allows shared usage of the MaskBuffer, as long as all users have the same data
     refcount: int = 0
 
-    def materialize_mask(self, mask):
+    def materialize_mask(self, mask) -> None:
         if self.refcount == 0:
             self.data = mask
         else:
@@ -23,14 +23,14 @@ class MaskBuffer:
                 )
         self.refcount += 1
 
-    def release_mask(self):
+    def release_mask(self) -> None:
         if self.refcount == 0 or self.data is None:
             raise RuntimeError("MaskBuffer has not been materialized")
         self.refcount -= 1
         if self.refcount == 0:
             self.data = None
 
-    def apply_mask(self, tensor):
+    def apply_mask(self, tensor) -> None:
         if self.refcount == 0 or self.data is None:
             raise RuntimeError("MaskBuffer has not been materialized")
 

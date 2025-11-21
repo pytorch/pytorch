@@ -153,7 +153,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
     +--------------------------------------------+--------------------------+
     """
 
-    def __init__(self, rdzv_impl: "EtcdRendezvous", local_addr: Optional[str]):
+    def __init__(self, rdzv_impl: "EtcdRendezvous", local_addr: Optional[str]) -> None:
         """
         Args:
             rdzv_impl: the implementation of the rendezvous
@@ -163,7 +163,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
         self._rdzv_impl = rdzv_impl
         self._local_addr = local_addr
 
-    def __del__(self):
+    def __del__(self) -> None:
         # TODO: look into using weakref here instead.
         del self._rdzv_impl
 
@@ -189,7 +189,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
             # No rendezvous state, so it cannot be closed.
             return False
 
-    def set_closed(self):
+    def set_closed(self) -> None:
         self._rdzv_impl.set_closed()
 
     def num_nodes_waiting(self):
@@ -231,7 +231,7 @@ class EtcdRendezvous:
         num_max_workers,
         timeout,
         last_call_timeout,
-    ):
+    ) -> None:
         self.client = client
         logger.info("Etcd machines: %s", self.client.machines)
 
@@ -270,7 +270,7 @@ class EtcdRendezvous:
         except etcd.EtcdAlreadyExist:
             pass
 
-    def __del__(self):
+    def __del__(self) -> None:
         # TODO: look into using weakref here instead.
         if self._lease_run_id_stop is not None:
             self._lease_run_id_stop.set()
@@ -442,7 +442,7 @@ class EtcdRendezvous:
         # Rendezvous version number; our rank in it; world size
         return state["version"], this_rank, len(state["participants"])
 
-    def handle_existing_rendezvous(self, expected_version):
+    def handle_existing_rendezvous(self, expected_version) -> None:
         """
         Handle the case when there's an existing (state 'final) rendezvous already
         in place, and we have to announce ourselves waiting, and wait until
@@ -678,7 +678,7 @@ class EtcdRendezvous:
             except etcd.EtcdCompareFailed:
                 logger.info("Announce self as waiting CAS unsuccessful, retrying")
 
-    def wait_for_rendezvous_to_free(self, expected_version):
+    def wait_for_rendezvous_to_free(self, expected_version) -> None:
         """
         When there's an existing valid rendezvous in state 'final', we have to wait until the next opportunity to join.
 
@@ -746,7 +746,7 @@ class EtcdRendezvous:
                 raise RendezvousTimeoutError
             active_version, state = self.get_rdzv_state()
 
-    def handle_join_last_call(self, expected_version, deadline):
+    def handle_join_last_call(self, expected_version, deadline) -> None:
         """
         After we reach min number of workers, one particular worker takes on the
         responsibility of waiting an additional timeout before closing the join window.
@@ -820,7 +820,7 @@ class EtcdRendezvous:
                 cas_delay()
                 active_version, state = self.get_rdzv_state()
 
-    def set_closed(self):
+    def set_closed(self) -> None:
         """
         Mark rendezvous 'closed' for current run_id, which is used to signal other
         participants to not attempt to perform (re-)rendezvous. This is useful
@@ -868,13 +868,13 @@ class EtcdRendezvous:
         # Unfortunately, we have to do another fetch in order to get last etcd_index.
         return self.get_rdzv_state()
 
-    def get_path(self, path):
+    def get_path(self, path) -> str:
         if not path.startswith("/"):
             path = "/" + path
 
         return f"{self._prefix}run_{self._run_id}{path}"
 
-    def create_path_if_not_exists(self, full_path, ttl=None):
+    def create_path_if_not_exists(self, full_path, ttl=None) -> None:
         try:
             self.client.write(
                 key=full_path, value=None, dir=True, prevExist=False, ttl=ttl
@@ -888,7 +888,7 @@ class EtcdRendezvous:
         # release the Python's GIL! An example of this is calling a pybind11
         # extension function that is blocking / long-running, but is not
         # doing a scoped release of the GIL.
-        def lease_worker(client, path, ttl, stop_event):
+        def lease_worker(client, path, ttl, stop_event) -> None:
             while True:
                 try:
                     client.refresh(path, ttl=ttl)
@@ -912,7 +912,7 @@ class EtcdRendezvous:
 
         return lease_stop_event
 
-    def store_extra_data(self, rdzv_version, key, value):
+    def store_extra_data(self, rdzv_version, key, value) -> None:
         node = self.get_path(f"/rdzv/v_{rdzv_version}/extra_data")
         try:
             # If first time we are storing anything:

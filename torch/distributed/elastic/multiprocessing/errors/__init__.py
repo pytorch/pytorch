@@ -157,7 +157,7 @@ class ProcessFailure:
             timestamp = int(message["extraInfo"]["timestamp"])
         return (message, timestamp)
 
-    def _set_no_reply_file(self):
+    def _set_no_reply_file(self) -> None:
         self.error_file = _NOT_AVAILABLE
         self.error_file_data = _EMPTY_ERROR_DATA
         self.message = ""
@@ -237,7 +237,7 @@ class ChildFailedError(Exception):
     of trainer 1's error file to the scheduler's init process.
     """
 
-    def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]):
+    def __init__(self, name: str, failures: dict[GlobalRank, ProcessFailure]) -> None:
         self.name = name
         self.failures = failures
         assert (

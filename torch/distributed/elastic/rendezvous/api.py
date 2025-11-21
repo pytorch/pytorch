@@ -115,7 +115,7 @@ class RendezvousInfo:
         rank: int,
         world_size: int,
         bootstrap_store_info: RendezvousStoreInfo,
-    ):
+    ) -> None:
         self._store = store
         self._rank = rank
         self._world_size = world_size
@@ -267,7 +267,7 @@ class RendezvousParameters:
         max_nodes: int,
         local_addr: Optional[str] = None,
         **kwargs,
-    ):
+    ) -> None:
         if not backend:
             raise ValueError("The rendezvous backend name must be a non-empty string.")
 

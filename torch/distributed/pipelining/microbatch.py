@@ -40,7 +40,7 @@ class _CustomReducer:
     >>> )
     """
 
-    def __init__(self, init_value, reduce_fn):
+    def __init__(self, init_value, reduce_fn) -> None:
         self.init_value = init_value
         self.reduce_fn = reduce_fn
 
@@ -61,17 +61,17 @@ class TensorChunkSpec:
     Class used to specify chunking of inputs
     """
 
-    def __init__(self, split_dim):
+    def __init__(self, split_dim) -> None:
         self.split_dim = split_dim
 
     split_dim: int
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return (
             f"{self.__class__.__module__}.{self.__class__.__name__}({self.split_dim})"
         )
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"TensorChunkSpec({self.split_dim})"
 
     @staticmethod

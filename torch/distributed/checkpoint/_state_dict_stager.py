@@ -32,7 +32,7 @@ class StateDictStager:
         pin_memory: bool = False,
         share_memory: bool = False,
         pin_memory_min_bytes: int = 5,
-    ):
+    ) -> None:
         if pin_memory and not torch.cuda.is_available():
             warnings.warn(
                 "Ignoring pin_memory flag for checkpoint staging as pinning memory"
@@ -258,7 +258,7 @@ class StateDictStager:
 
         return y
 
-    def close(self):
+    def close(self) -> None:
         """
         Clean up all cached storages and release associated resources.
 
@@ -386,7 +386,7 @@ class StateDictStager:
             self._keep_alive(x, memo)  # Make sure x lives at least as long as d
         return y
 
-    def _keep_alive(self, x, memo):
+    def _keep_alive(self, x, memo) -> None:
         """Keeps a reference to the object x in the memo.
 
         Because we remember objects by their id, we have

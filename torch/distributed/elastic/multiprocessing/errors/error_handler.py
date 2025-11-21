@@ -92,7 +92,7 @@ class ErrorHandler:
         rootcause_error_file: str,
         rootcause_error: dict[str, Any],
         error_code: int = 0,
-    ):
+    ) -> None:
         """Modify the rootcause_error read from the file, to correctly set the exit code."""
         if "message" not in rootcause_error:
             logger.warning(
@@ -110,7 +110,7 @@ class ErrorHandler:
         else:
             rootcause_error["message"]["errorCode"] = error_code
 
-    def dump_error_file(self, rootcause_error_file: str, error_code: int = 0):
+    def dump_error_file(self, rootcause_error_file: str, error_code: int = 0) -> None:
         """Dump parent error file from child process's root cause error and error code."""
         with open(rootcause_error_file) as fp:
             rootcause_error = json.load(fp)
@@ -147,7 +147,7 @@ class ErrorHandler:
                 rootcause_error_file,
             )
 
-    def _rm(self, my_error_file):
+    def _rm(self, my_error_file) -> None:
         if os.path.isfile(my_error_file):
             # Log the contents of the original file.
             with open(my_error_file) as fp:
