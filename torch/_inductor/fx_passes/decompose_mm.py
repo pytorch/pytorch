@@ -475,6 +475,7 @@ def _add_out_collectives_deps(gm):
         wait_ns.append(n)
     if len(wait_ns) == 0:
         return
+    assert out_n is not None
 
     with g.inserting_before(out_n):
         control_dep_n = g.call_function(
