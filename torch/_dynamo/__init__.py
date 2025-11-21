@@ -105,6 +105,7 @@ __all__ = [
     "reset",
     "run",
     "error_on_graph_break",
+    "set_recursion_limit",
     "set_stance",
     "skip_frame",
     "step_unsupported",
@@ -181,3 +182,26 @@ def reset_code_caches() -> None:
             if code:
                 reset_code(code)
         code_context.clear()
+
+
+def get_recursion_limit() -> int:
+    """
+    Returns the internal dynamo recursion limit set by `torch._dynamo.set_recursion_limit`.
+
+    Returns -1 if no c recursion limit has been set.
+    """
+    return torch._C._dynamo.eval_frame.get_c_recursion_limit()
+
+
+def set_recursion_limit(limit: int) -> None:
+    """
+    Sets an internal dynamo recursion limit. The limit must be >= 1.
+
+    This is possibly needed in Python 3.12-3.13 since there is a separate C recursion limit
+    that is not visible at the Python level. If you are getting RecursionErrors during
+    Dynamo compilation and `sys.setrecursionlimit()` doesn't help, this function may alleviate
+    the issue.
+
+    NOTE: this function will also call `sys.setrecursionlimit()`.
+    """
+    torch._C._dynamo.eval_frame.set_c_recursion_limit(limit)
