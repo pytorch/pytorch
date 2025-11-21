@@ -214,7 +214,7 @@ class _FromTorchTensor(torch.autograd.Function):
                 tensor_meta=grad_output._spec.tensor_meta,
             )
             local_tensor = grad_output._local_tensor
-            output = redistribute_local_tensor(
+            output, _ = redistribute_local_tensor(
                 local_tensor, current_spec, target_spec, is_backward=True
             )
             # TODO: return the redistributed local tensor directly without

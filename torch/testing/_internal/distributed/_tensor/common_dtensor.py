@@ -864,7 +864,7 @@ def redistribute(
             old_spec,
             new_spec,
             use_graph_based_transform=use_graph_based_transform,
-        ),
+        )[0],
         device_mesh,
     )
     dtensor_input._spec = copy.deepcopy(new_spec)

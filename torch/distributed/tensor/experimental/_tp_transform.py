@@ -452,11 +452,12 @@ def _insert_reshard_gm(
 
     # insert reshard operation
     def reshard_fn(local_tensor: torch.Tensor) -> torch.Tensor:
-        return redistribute_local_tensor(
+        new_tensor, _ = redistribute_local_tensor(
             local_tensor,
             input_arg_spec,
             desired_spec,
         )
+        return new_tensor
 
     reshard_gm = make_fx(reshard_fn)(input_arg_tensor)
     reshard_gm_nodes = list(reshard_gm.graph.nodes)
