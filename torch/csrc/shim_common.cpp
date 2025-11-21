@@ -590,8 +590,8 @@ torch_get_mutable_data_ptr(AtenTensorHandle tensor, void** ret_data_ptr) {
 AOTI_TORCH_EXPORT AOTITorchError
 torch_new_string_handle(const char* data, size_t length, StringHandle* handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
-    auto str_ptr = std::make_unique<std::string>(data, length);
-    *handle = reinterpret_cast<StringHandle>(str_ptr.release());
+    auto str_ptr = new std::string(data, length);
+    *handle = reinterpret_cast<StringHandle>(str_ptr);
   });
 }
 

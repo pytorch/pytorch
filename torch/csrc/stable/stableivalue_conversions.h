@@ -728,7 +728,7 @@ struct ToImpl<torch::stable::Device> {
 };
 
 // Specialization for std::string
-// Returns a new std::string that steals ownership from the string in val.
+// Returns a new std::string; the string in val is deleted.
 template <>
 struct ToImpl<std::string> {
   static std::string call(
@@ -740,11 +740,11 @@ struct ToImpl<std::string> {
     TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
     const char* data;
     TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle, &data));
-    auto strptr = std::make_unique<std::string>(data, length);
+    auto strptr = new std::string(data, length);
 
     // delete the old string before returning new string
     TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
-    return std::move(*strptr);
+    return *strptr;
   }
 };
 
