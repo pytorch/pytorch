@@ -987,7 +987,7 @@ class CppMicroGemmAVX512VNNI(CppMicroGemm):
     TEMPLATE_ENTRY = r"""
 {{declare_kernel}} {
     {{kernel.assert_function}}(N % {{block_n}} == 0, "N dimension must be multiple of {{block_n}}");
-    {{kernel.assert_function}}(K % 4 == 0, "K dimension must be multiple of 4");
+    {{kernel.assert_function}}(K % {{vnni_size}} == 0, "K dimension must be multiple of {{vnni_size}}");
     constexpr int64_t M_BLOCK = {{block_m}};
     const int64_t M_TAIL = M % M_BLOCK;
     const int64_t M_MAIN = M - M_TAIL;
@@ -1039,8 +1039,7 @@ inline void {{kernel_name}}_kernel(
     int64_t ldb,
     int64_t ldc
 ) {
-    constexpr int vnni_size = 4;
-    constexpr const int COLS = N / 16;
+    constexpr const int COLS = N / {{vec_len}};
     __m512i va;
     __m512i vb[COLS];
     __m512i vc[M * COLS];
@@ -1056,8 +1055,8 @@ inline void {{kernel_name}}_kernel(
         }
 
         if constexpr (row == 0) {
-            // B block in VNNI layout: [K / vnni_size, N, vnni_size]
-            int64_t offset = k * ldb + col * 16 * vnni_size;
+            // B block in VNNI layout: [K / {{vnni_size}}, N, {{vnni_size}}]
+            int64_t offset = k * ldb + col * {{vec_len}} * {{vnni_size}};
             vb[col] = _mm512_loadu_si512((__m512i const*)(B + offset));
         }
         vc[i] = _mm512_dpbusd_epi32(vc[i], va, vb[col]);
@@ -1066,15 +1065,16 @@ inline void {{kernel_name}}_kernel(
     // Accumulate along k
     constexpr const int k_unroll = 2;
     int k = 0;
-    for (; k < K / vnni_size / k_unroll; k++) {
+    int k_limit = K / {{vnni_size}} / k_unroll;
+    for (; k < k_limit; k++) {
         c10::ForcedUnroll<k_unroll>{}(
             [&](auto i) {
-                c10::ForcedUnroll<M * COLS>{}(compute, vnni_size * (k * k_unroll + i));
+                c10::ForcedUnroll<M * COLS>{}(compute, {{vnni_size}} * (k * k_unroll + i));
             }
         );
     }
-    k *= vnni_size * k_unroll;
-    for (; k < K; k += vnni_size) {
+    k *= {{vnni_size}} * k_unroll;
+    for (; k < K; k += {{vnni_size}}) {
         c10::ForcedUnroll<M * COLS>{}(compute, k);
     }
 
@@ -1083,10 +1083,10 @@ inline void {{kernel_name}}_kernel(
         constexpr const int row = i / COLS;
         constexpr const int col = i % COLS;
         if constexpr (accum) {
-            __m512i vc_old = _mm512_loadu_si512((__m512i const*)(C + row * ldc + col * 16));
+            __m512i vc_old = _mm512_loadu_si512((__m512i const*)(C + row * ldc + col * {{vec_len}}));
             vc[i] = _mm512_add_epi32(vc[i], vc_old);
         }
-        _mm512_storeu_si512((__m512i*)(C + row * ldc + col * 16), vc[i]);
+        _mm512_storeu_si512((__m512i*)(C + row * ldc + col * {{vec_len}}), vc[i]);
     };
     c10::ForcedUnroll<M * COLS>{}(store_c);
 }
@@ -1123,6 +1123,7 @@ inline void {{kernel_name}}_kernel(
             "block_n": self.register_blocking.block_n,
             "block_k": self.register_blocking.block_k,
             "restrict_keyword": get_restrict_keyword(),
+            "vec_len": 16,  # = 512 / 32 for C
             **self.get_common_options(),
         }
         return KernelTemplate._template_from_string(self.TEMPLATE_KERNEL).render(
