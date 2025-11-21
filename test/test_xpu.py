@@ -1388,10 +1388,15 @@ class TestXPUAPISanity(TestCase):
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestMemPool(TestCase):
     def test_mempool_id(self):
-        pool = torch.xpu.MemPool().id
+        pool1 = torch.xpu.MemPool().id
+        pool2 = torch.xpu.MemPool().id
 
         # first value of id in a user created pool is always zero
-        self.assertEqual(pool[0] == 0, pool[1] == 1)
+        self.assertEqual(pool1[0] == 0, pool2[0] == 0)
+
+        # each call to torch.xpu.MemPool()
+        # increments the id
+        self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
 
     def test_mempool_multithread(self):
         pool_ids = []
@@ -1413,6 +1418,23 @@ class TestMemPool(TestCase):
         # each thread should create a unique mempool, since
         # mempool id creation is atomic
         self.assertEqual(len(set(pool_ids)), 4)
+
+    def test_mempool_empty_cache(self):
+        torch.xpu.empty_cache()
+        pool = torch.xpu.MemPool()
+        x = torch.empty(1024, 1024, device="xpu")
+
+        with torch.xpu.use_mem_pool(pool):
+            y = torch.empty(1024, 1024, device="xpu")
+
+        del x
+        del y
+        peak_reserved = torch.xpu.memory_reserved()
+        del pool
+        after_pool_release = torch.xpu.memory_reserved()
+
+        self.assertTrue(after_pool_release < peak_reserved)
+        self.assertTrue(after_pool_release > 0)
 
 
 if __name__ == "__main__":
