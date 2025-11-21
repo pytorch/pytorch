@@ -41,9 +41,6 @@ def get_embedding_operators_config() -> OperatorConfig:
 
 
 class EmbeddingQuantizer(Quantizer):
-    def __init__(self) -> None:
-        super().__init__()
-
     @classmethod
     def get_supported_quantization_configs(cls) -> list[QuantizationConfig]:
         op_configs: set[QuantizationConfig] = {

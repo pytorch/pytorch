@@ -172,6 +172,8 @@ class ManualOverlapScheduler(OverlapScheduler):
             max_coll_distance=0,
             custom_runtime_estimation=None,
             collective_estimator="analytical",
+            max_memory_increase_gb=None,
+            max_memory_increase_ratio=None,
         )
         self.module_bucket_plans = module_bucket_plans
         self.nodes_in_subgraph: list[list[fx.Node]] = []
@@ -180,7 +182,6 @@ class ManualOverlapScheduler(OverlapScheduler):
         self.bucketer = ManualOverlapPreservingBucketer(
             graph=self.graph,
             collective_info=self.collective_info,
-            node_ancestors=self.node_ancestors,
             node_users=self.node_users,
             scheduled=OrderedSet(self.graph.nodes),
         )
