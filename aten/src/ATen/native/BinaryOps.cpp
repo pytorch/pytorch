@@ -1575,32 +1575,31 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  // if (isComplexType(self.scalar_type())) {
-  //   auto real_part = at::ldexp(at::real(self), other);
-  //   auto imag_part = at::ldexp(at::imag(self), other);
-  //   return at::complex_out(result, real_part, imag_part);
-  // } else if (self.scalar_type() == ScalarType::Bool) {
-  //   return at::mul_out(result, self, _pow2(self, other));;
-  // }
-
-  auto log2_self_plus_other = at::log2(at::abs(self)).add(other);
-  auto pow2_result = _pow2(self, log2_self_plus_other);
-  auto sign_self = at::sign(self);
-  return at::mul_out(result, sign_self, pow2_result);
+  auto self_type = self.scalar_type();
+  auto other_type = other.scalar_type();
+  if ((isFloatingType(self_type) || isIntegralType(self_type, /*includeBool=*/false)) &&
+      (isFloatingType(other_type) || isIntegralType(other_type, /*includeBool=*/false))) {
+    auto log2_self_plus_other = at::log2(at::abs(self)).add(other);
+    auto pow2_result = _pow2(self, log2_self_plus_other);
+    auto sign_self = at::sign(self);
+    return at::mul_out(result, sign_self, pow2_result);
+  }
+  return at::mul_out(result, self, _pow2(self, other));
 }
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  // if (isComplexType(self.scalar_type())) {
-  //   auto real_part = at::ldexp(at::real(self), other);
-  //   auto imag_part = at::ldexp(at::imag(self), other);
-  //   return at::complex(real_part, imag_part);
-  // } else if (self.scalar_type() == ScalarType::Bool) {
-  //   return at::mul(self, _pow2(self, other));
-  // }
-
-  auto log2_self_plus_other = at::log2(at::abs(self)).add(other);
-  auto pow2_result = _pow2(self, log2_self_plus_other);
-  return at::sign(self).mul(pow2_result);
+  auto self_type = self.scalar_type();
+  auto other_type = other.scalar_type();
+  if ((isFloatingType(self_type) || isIntegralType(self_type, /*includeBool=*/false)) &&
+      (isFloatingType(other_type) || isIntegralType(other_type, /*includeBool=*/false))) {
+    // helps handle case when 2^other goes out of numerical limits (too large or too small),
+    // even if self*2^other is within the limits.
+    auto log2_self_plus_other = at::log2(at::abs(self)).add(other);
+    auto pow2_result = _pow2(self, log2_self_plus_other);
+    auto sign_self = at::sign(self);
+    return at::mul(sign_self, pow2_result);
+  }
+  return at::mul(self, _pow2(self, other));
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
