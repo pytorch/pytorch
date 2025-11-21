@@ -395,6 +395,24 @@ struct FromImpl<torch::stable::Device> {
   }
 };
 
+// Specialization for std::string, which should return a new owning reference of
+// the string
+template <>
+struct FromImpl<std::string> {
+  static StableIValue call(
+      const std::string& val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    // auto str_ptr = std::make_unique<std::string>(val);  // is this..okay? or
+    // are we locking ourselves to this... StringHandle handle =
+    // reinterpret_cast<StringHandle>(str_ptr.release());
+    StringHandle handle;
+    TORCH_ERROR_CODE_CHECK(
+        torch_new_string_handle(val.c_str(), val.length(), &handle))
+    return from(handle);
+  }
+};
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // =============================================================================
@@ -703,6 +721,32 @@ struct ToImpl<torch::stable::Device> {
     StableIValue device_type_shim = (val >> 32) & 0xFFFFFFFF;
     DeviceType device_type = to<DeviceType>(device_type_shim);
     return torch::stable::Device(device_type, device_index);
+  }
+};
+
+// Specialization for std::string
+// Returns a new std::string that steals ownership from the string in val.
+template <>
+struct ToImpl<std::string> {
+  static std::string call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    StringHandle handle = to<StringHandle>(val);
+    size_t length;
+    TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
+    const char* data;
+    TORCH_ERROR_CODE_CHECK(torch_string_data(handle, &data));
+    auto strptr = std::make_unique<std::string>(data, length);
+
+    // delete the old string before returning new string
+    TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
+    return std::move(*strptr);
+
+    // StringHandle handle = to<StringHandle>(val);
+    // std::unique_ptr<std::string>
+    // strptr(reinterpret_cast<std::string*>(handle)); return
+    // std::move(*strptr);
   }
 };
 
