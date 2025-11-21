@@ -5,7 +5,6 @@
 #include <c10/util/ApproximateClock.h>
 #include <c10/xpu/XPUStream.h>
 
-
 namespace c10::xpu::XPUCachingAllocator {
 
 class XPUAllocator : public DeviceAllocator {
