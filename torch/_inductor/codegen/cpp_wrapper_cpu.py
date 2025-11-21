@@ -96,7 +96,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.include_extra_header = functools.lru_cache(None)(  # type: ignore[method-assign]
             self._include_extra_header
         )
-        self.codegen_int_array_var_cache = {}
 
     @staticmethod
     def create(
@@ -1637,33 +1636,14 @@ class CppWrapperCpu(PythonWrapperCodegen):
         self.used_cached_memory_formats.add(memory_format_str)
         return f"cached_torch_memory_format_{memory_format_str}"
 
+    @functools.cache  # noqa: B019
     def codegen_int_array_var(
         self,
         int_array: str,
         writeline: Callable[..., None],
         known_statically=False,
         graph=None,  # for per-graph caching
-    ) -> str:
-        # Use id(graph) for caching to avoid circular references
-        cache_key = (
-            int_array,
-            id(writeline),
-            known_statically,
-            id(graph) if graph else None,
-        )
-        if cache_key not in self.codegen_int_array_var_cache:
-            self.codegen_int_array_var_cache[cache_key] = (
-                self._codegen_int_array_var_impl(int_array, writeline, known_statically)
-            )
-
-        return self.codegen_int_array_var_cache[cache_key]
-
-    def _codegen_int_array_var_impl(
-        self,
-        int_array: str,
-        writeline: Callable[..., None],
-        known_statically: bool,
-    ) -> str:
+    ):
         # Used for size/stride declaration
         #
         # Because the memory planning is done in two passes (see the implementation
@@ -2581,13 +2561,13 @@ if (!custom_op_wrapper) {
                     codegen_arg = codegen_arg.removeprefix("&")
 
                     if codegen_arg == "nullptr":
-                        return "from(std::nullopt)"
+                        return "torch::stable::detail::from(std::nullopt)"
 
                     var_name = f"tmp_var_{next(tmp_var_number)}"
                     dispatch_lines.writeline(
                         f"std::optional {var_name}{{{parse_arg(arg_type.getElementType(), codegen_arg)}}};"
                     )
-                    return f"from({var_name})"
+                    return f"torch::stable::detail::from({var_name})"
 
                 raii_var = self.create_tmp_raii_handle_var_if_needed(
                     codegen_arg, dispatch_lines
@@ -2604,11 +2584,11 @@ if (!custom_op_wrapper) {
                         dispatch_lines.writeline(
                             f"aoti_torch_new_tensor_handle({raii_var}, &{var_name});"
                         )
-                        return f"from({var_name})"
+                        return f"torch::stable::detail::from({var_name})"
                     # If the RAII tensor _is_ a temporary scoped to this fallback call,
                     # simply release and steal the handle.
-                    return f"from({raii_var}.release())"
-                return f"from({codegen_arg})"
+                    return f"torch::stable::detail::from({raii_var}.release())"
+                return f"torch::stable::detail::from({codegen_arg})"
 
             codegen_args = get_args()
             ivalue_args = (
@@ -2629,7 +2609,7 @@ if (!custom_op_wrapper) {
             if len(output_args) == 1 and (output := output_args[0]) is not None:
                 # result is a single tensor
                 dispatch_lines.writeline(
-                    f"{output} = to<AtenTensorHandle>(dispatch_vars[0]);"
+                    f"{output} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[0]);"
                 )
             else:
                 # result is a tuple of tensors
@@ -2637,7 +2617,7 @@ if (!custom_op_wrapper) {
                     if output_arg is None:
                         continue
                     dispatch_lines.writeline(
-                        f"{output_arg} = to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                        f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
                     )
 
         dispatch_lines.writeline("}")
