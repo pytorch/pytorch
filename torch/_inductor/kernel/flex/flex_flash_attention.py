@@ -163,25 +163,6 @@ def _supports_nontrivial_mask_graphs() -> bool:
     return torch.cuda.get_device_capability()[0] in [9, 10]
 
 
-def _is_identity_score_mod_graph(fw_graph: Any) -> bool:
-    graph = getattr(fw_graph, "graph", None)
-    if graph is None:
-        graph_module = getattr(fw_graph, "graph_module", None)
-        graph = getattr(graph_module, "graph", None)
-    if graph is None:
-        return False
-
-    nodes = list(graph.nodes)
-    placeholders = [n for n in nodes if n.op == "placeholder"]
-    outputs = [n for n in nodes if n.op == "output"]
-    if len(outputs) != 1 or not placeholders:
-        return False
-    non_trivial = [n for n in nodes if n.op not in ("placeholder", "output")]
-    if non_trivial:
-        return False
-    return outputs[0].args[0] is placeholders[0]
-
-
 def _can_use_flex_flash_attention(
     subgraph: Subgraph, mask_graph: Subgraph, num_score_mod_placeholders: int
 ) -> tuple[bool, str]:
