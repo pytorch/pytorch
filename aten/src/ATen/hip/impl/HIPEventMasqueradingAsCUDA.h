@@ -20,12 +20,9 @@ struct HIPEventMasqueradingAsCUDA {
   ~HIPEventMasqueradingAsCUDA() = default;
 
   HIPEventMasqueradingAsCUDA(const HIPEventMasqueradingAsCUDA&) = delete;
-  HIPEventMasqueradingAsCUDA& operator=(const HIPEventMasqueradingAsCUDA&) =
-      delete;
-  HIPEventMasqueradingAsCUDA(HIPEventMasqueradingAsCUDA&& other) noexcept =
-      default;
-  HIPEventMasqueradingAsCUDA& operator=(
-      HIPEventMasqueradingAsCUDA&& other) noexcept = default;
+  HIPEventMasqueradingAsCUDA& operator=(const HIPEventMasqueradingAsCUDA&) = delete;
+  HIPEventMasqueradingAsCUDA(HIPEventMasqueradingAsCUDA&& other) noexcept = default;
+  HIPEventMasqueradingAsCUDA& operator=(HIPEventMasqueradingAsCUDA&& other) noexcept = default;
 
   operator hipEvent_t() const {
     return event_.event();
