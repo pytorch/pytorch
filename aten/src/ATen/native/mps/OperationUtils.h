@@ -40,8 +40,6 @@ using namespace at::mps;
 
 namespace at::native::mps {
 
-void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
-
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const {
     return __builtin_bit_cast(id<MTLBuffer>, buffer.get());
@@ -98,6 +96,9 @@ MPSNDArray* getMPSNDArray(const TensorBase& t, MPSShape* sizes = nil, MPSShape* 
 Tensor getTensorView(const Tensor& t, MPSShape* shape);
 MPSShape* getMPSShape(const TensorBase& t, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
 MPSShape* getMPSShape(IntArrayRef sizes, c10::MemoryFormat memory_format = MemoryFormat::Contiguous);
+
+// Determines whether a tensor is too large to use MPSGraph
+bool isTooLargeForMPSGraph(const Tensor& tensor, bool useMPSStridedAPI = true);
 
 static inline id<MTLBuffer> getMTLBufferStorage(const TensorBase& tensor) {
   return __builtin_bit_cast(id<MTLBuffer>, tensor.storage().data());

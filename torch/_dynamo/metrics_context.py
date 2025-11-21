@@ -13,12 +13,18 @@ The metrics system enables comprehensive monitoring and analysis of both compila
 execution performance.
 """
 
+from __future__ import annotations
+
 import heapq
 import logging
 import time
-from collections.abc import Iterator
-from typing import Any, Callable, Optional
-from typing_extensions import TypeAlias
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias
+from typing_extensions import Self
+
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from torch.utils._traceback import CapturedTraceback
 
@@ -67,7 +73,7 @@ class MetricsContext:
         self._level: int = 0
         self._edits: list[tuple[CapturedTraceback, set[str]]] = []
 
-    def __enter__(self) -> "MetricsContext":
+    def __enter__(self) -> Self:
         """
         Initialize metrics recording.
         """

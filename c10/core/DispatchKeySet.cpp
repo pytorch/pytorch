@@ -52,14 +52,15 @@ constexpr DispatchKeySet math_dispatch_keyset = backend_dispatch_keyset |
     // where we would like to support composite implicit kernels but not
     // explicit kernels therefore we manually add the key to the
     // math_dispatch_keyset
-    DispatchKeySet{DispatchKey::NestedTensor} |
-    // Functionalize should always reuse CompositeImplicit decomps.
-    DispatchKeySet{DispatchKey::Functionalize};
+    DispatchKeySet{DispatchKey::NestedTensor};
 
 constexpr DispatchKeySet nested_dispatch_keyset =
     DispatchKeySet(
         {DispatchKey::AutogradNestedTensor, DispatchKey::NestedTensor}) |
     DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
+
+constexpr DispatchKeySet functorch_batched_dispatch_keyset =
+    DispatchKeySet(DispatchKey::FuncTorchBatched);
 
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
@@ -79,6 +80,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return backend_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
       return non_functional_backend_dispatch_keyset;
+    case DispatchKey::FuncTorchBatchedDecomposition:
+      return functorch_batched_dispatch_keyset;
     default:
       return DispatchKeySet(t);
   }

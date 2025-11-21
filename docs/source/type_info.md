@@ -20,15 +20,15 @@ This is similar to [numpy.finfo](https://numpy.org/doc/stable/reference/generate
 
 A {class}`torch.finfo` provides the following attributes:
 
-| Name            | Type  | Description                                                                |
-| :-------------- | :---- | :------------------------------------------------------------------------- |
-| bits            | int   | The number of bits occupied by the type.                                   |
-| eps             | float | The smallest representable number such that ``1.0 + eps != 1.0``.          |
-| max             | float | The largest representable number.                                          |
-| min             | float | The smallest representable number (typically ``-max``).                    |
-| tiny            | float | The smallest positive normal number. Equivalent to ``smallest_normal``.    |
-| smallest_normal | float | The smallest positive normal number. See notes.                            |
-| resolution      | float | The approximate decimal resolution of this type, i.e., ``10**-precision``. |
+| Name            | Type  | Description                                                                                 |
+| :-------------- | :---- | :------------------------------------------------------------------------------------------ |
+| bits            | int   | The number of bits occupied by the type.                                                    |
+| eps             | float | The difference between 1.0 and the next smallest representable float larger than 1.0.       |
+| max             | float | The largest representable number.                                                           |
+| min             | float | The smallest representable number (typically ``-max``).                                     |
+| tiny            | float | The smallest positive normal number. Equivalent to ``smallest_normal``.                     |
+| smallest_normal | float | The smallest positive normal number. See notes.                                             |
+| resolution      | float | The approximate decimal resolution of this type, i.e., ``10**-precision``.                  |
 
 ```{note}
   The constructor of {class}`torch.finfo` can be called without argument,

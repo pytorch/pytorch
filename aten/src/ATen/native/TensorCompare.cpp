@@ -23,6 +23,7 @@
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
+#include <ATen/ops/_async_error_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
 #include <ATen/ops/_functional_assert_scalar_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
@@ -73,7 +74,6 @@
 #include <ATen/ops/where_native.h>
 #include <ATen/ops/zeros_like.h>
 
-#include <iostream>
 #include <utility>
 #endif
 
@@ -480,6 +480,14 @@ Tensor isfinite(const Tensor& self) {
   });
 }
 
+void _async_error(std::string_view msg) {
+  TORCH_CHECK(0, msg);
+}
+
+void _async_error_meta(std::string_view msg) {
+  // Do NOT error, it's an async error!
+}
+
 void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(
       native::is_nonzero(self),
@@ -847,7 +855,7 @@ TORCH_IMPL_FUNC(clamp_Tensor_out)
 (const Tensor& self,
  const OptionalTensorRef min,
  const OptionalTensorRef max,
- const Tensor&) {
+ const Tensor& /*unused*/) {
   if (min && max) {
     clamp_stub(device_type(), *this);
   } else if (min) {

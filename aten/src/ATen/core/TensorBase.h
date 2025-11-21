@@ -1,5 +1,18 @@
 #pragma once
 
+// See https://github.com/pytorch/pytorch/issues/161660
+// This compile flag is intended to be passed in to CppExtensions that rely on
+// the stable ABI via the `extra_compile_args` argument. This is a stopgap
+// solution to ensure that non-stable libtorch APIs are not used in the extension.
+// The long term solution is to have a torch_stable target that excludes headers
+// that are not in torch/stable or torch/headeronly.
+// See test/cpp_extensions/torch_stable_test_extension/setup.py for an example
+// of how this is used.
+#ifdef TORCH_STABLE_ONLY
+#error \
+    "TensorBase.h should not be included when TORCH_STABLE_ONLY compile flag is passed"
+#endif
+
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -87,7 +100,7 @@ class TORCH_API TensorBase {
   // Create a Tensor with a +0 reference count. Special care must be
   // taken to avoid decrementing this reference count at destruction
   // time. Intended to support MaybeOwnedTraits<Tensor>.
-  explicit TensorBase(unsafe_borrow_t, const TensorBase& rhs)
+  explicit TensorBase(unsafe_borrow_t /*unused*/, const TensorBase& rhs)
       : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>(rhs.impl_.get(), c10::raw::DontIncreaseRefcount{})) {}
   friend MaybeOwnedTraits<TensorBase>;
 
@@ -98,9 +111,7 @@ class TORCH_API TensorBase {
   explicit TensorBase(
       c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : impl_(std::move(tensor_impl)) {
-    if (impl_.get() == nullptr) {
-      throw std::runtime_error("TensorImpl with nullptr is not supported");
-    }
+    TORCH_CHECK(impl_.get(), "TensorImpl with nullptr is not supported");
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
@@ -917,6 +928,10 @@ public:
 
   const TensorBase& requires_grad_(bool _requires_grad=true) const;
 
+  std::optional<ScalarType> grad_dtype() const;
+
+  void set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const;
+
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -937,7 +952,7 @@ protected:
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 
 private:
-  TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
+  TensorBase __dispatch_contiguous(c10::MemoryFormat /*memory_format*/) const;
 };
 
 inline DeviceIndex get_device(const TensorBase& self) {

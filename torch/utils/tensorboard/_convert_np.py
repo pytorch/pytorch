@@ -20,6 +20,8 @@ def make_np(x: torch.Tensor) -> np.ndarray:
     if np.isscalar(x):
         return np.array([x])
     if isinstance(x, torch.Tensor):
+        if x.device.type == "meta":
+            return np.random.randn(1)
         return _prepare_pytorch(x)
     raise NotImplementedError(
         f"Got {type(x)}, but numpy array or torch tensor are expected."
@@ -29,5 +31,7 @@ def make_np(x: torch.Tensor) -> np.ndarray:
 def _prepare_pytorch(x: torch.Tensor) -> np.ndarray:
     if x.dtype == torch.bfloat16:
         x = x.to(torch.float16)
+    # pyrefly: ignore [bad-assignment]
     x = x.detach().cpu().numpy()
+    # pyrefly: ignore [bad-return]
     return x

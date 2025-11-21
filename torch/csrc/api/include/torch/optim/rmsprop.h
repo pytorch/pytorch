@@ -43,8 +43,8 @@ struct TORCH_API RMSpropParamState
     : public OptimizerCloneableParamState<RMSpropParamState> {
   TORCH_ARG(int64_t, step) = 0;
   TORCH_ARG(torch::Tensor, square_avg);
-  TORCH_ARG(torch::Tensor, momentum_buffer) = {};
-  TORCH_ARG(torch::Tensor, grad_avg) = {};
+  TORCH_ARG(torch::Tensor, momentum_buffer);
+  TORCH_ARG(torch::Tensor, grad_avg);
 
  public:
   void serialize(torch::serialize::InputArchive& archive) override;

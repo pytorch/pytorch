@@ -3259,7 +3259,7 @@ struct to_ir {
       case TK_IN:
         return aten::__contains__;
       default:
-        throw std::runtime_error("unknown kind " + std::to_string(kind));
+        TORCH_CHECK(false, "unknown kind ", kind);
     }
   }
 
@@ -3306,7 +3306,7 @@ struct to_ir {
       case TK_RSHIFT:
         return "__rshift__";
       default:
-        throw std::runtime_error("unknown kind " + std::to_string(kind));
+        TORCH_CHECK(false, "unknown kind ", kind);
     }
   }
 
@@ -4120,8 +4120,7 @@ struct to_ir {
     } else if (kind == aten::ge) {
       return aten::le;
     }
-    throw std::runtime_error(
-        "reverseComparision: unsupported NodeKind. File a bug");
+    TORCH_CHECK(false, "reverseComparision: unsupported NodeKind. File a bug");
   }
 
   // any expression that can produce a SugaredValue is handled here

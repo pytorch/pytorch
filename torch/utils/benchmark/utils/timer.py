@@ -2,7 +2,8 @@
 import enum
 import timeit
 import textwrap
-from typing import overload, Any, Callable, NoReturn, Optional, Union
+from typing import overload, Any, NoReturn
+from collections.abc import Callable
 
 import torch
 from torch.utils.benchmark.utils import common, cpp_jit
@@ -51,7 +52,7 @@ class CPPTimer:
         self._stmt: str = textwrap.dedent(stmt)
         self._setup: str = textwrap.dedent(setup)
         self._global_setup: str = textwrap.dedent(global_setup)
-        self._timeit_module: Optional[TimeitModuleType] = None
+        self._timeit_module: TimeitModuleType | None = None
 
     def timeit(self, number: int) -> float:
         if self._timeit_module is None:
@@ -180,14 +181,14 @@ class Timer:
         setup: str = "pass",
         global_setup: str = "",
         timer: Callable[[], float] = timer,
-        globals: Optional[dict[str, Any]] = None,
-        label: Optional[str] = None,
-        sub_label: Optional[str] = None,
-        description: Optional[str] = None,
-        env: Optional[str] = None,
+        globals: dict[str, Any] | None = None,
+        label: str | None = None,
+        sub_label: str | None = None,
+        description: str | None = None,
+        env: str | None = None,
         num_threads: int = 1,
-        language: Union[Language, str] = Language.PYTHON,
-    ):
+        language: Language | str = Language.PYTHON,
+    ) -> None:
         if not isinstance(stmt, str):
             raise ValueError("Currently only a `str` stmt is supported.")
 
@@ -207,7 +208,8 @@ class Timer:
                 )
 
         elif language in (Language.CPP, "cpp", "c++"):
-            assert self._timer_cls is timeit.Timer, "_timer_cls has already been swapped."
+            if self._timer_cls is not timeit.Timer:
+                raise AssertionError("_timer_cls has already been swapped.")
             self._timer_cls = CPPTimer
             setup = ("" if setup == "pass" else setup)
             self._language = Language.CPP
@@ -232,6 +234,7 @@ class Timer:
         setup = textwrap.dedent(setup)
         setup = (setup[1:] if setup and setup[0] == "\n" else setup).rstrip()
 
+        # pyrefly: ignore [bad-instantiation]
         self._timer = self._timer_cls(
             stmt=stmt,
             setup=setup,
@@ -274,7 +277,7 @@ class Timer:
     def repeat(self, repeat: int = -1, number: int = -1) -> None:
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
-    def autorange(self, callback: Optional[Callable[[int, float], NoReturn]] = None) -> None:
+    def autorange(self, callback: Callable[[int, float], NoReturn] | None = None) -> None:
         raise NotImplementedError("See `Timer.blocked_autorange.`")
 
     def _threaded_measurement_loop(
@@ -283,8 +286,8 @@ class Timer:
         time_hook: Callable[[], float],
         stop_hook: Callable[[list[float]], bool],
         min_run_time: float,
-        max_run_time: Optional[float] = None,
-        callback: Optional[Callable[[int, float], NoReturn]] = None
+        max_run_time: float | None = None,
+        callback: Callable[[int, float], NoReturn] | None = None
     ) -> list[float]:
         total_time = 0.0
         can_stop = False
@@ -322,7 +325,7 @@ class Timer:
 
     def blocked_autorange(
         self,
-        callback: Optional[Callable[[int, float], NoReturn]] = None,
+        callback: Callable[[int, float], NoReturn] | None = None,
         min_run_time: float = 0.2,
     ) -> common.Measurement:
         """Measure many replicates while keeping timer overhead to a minimum.
@@ -386,7 +389,7 @@ class Timer:
             *,
             min_run_time: float = 0.01,
             max_run_time: float = 10.0,
-            callback: Optional[Callable[[int, float], NoReturn]] = None,
+            callback: Callable[[int, float], NoReturn] | None = None,
     ) -> common.Measurement:
         """Similar to `blocked_autorange` but also checks for variablility in measurements
         and repeats until iqr/median is smaller than `threshold` or `max_run_time` is reached.
@@ -469,7 +472,7 @@ class Timer:
         self,
         number: int = 100,
         *,
-        repeats: Optional[int] = None,
+        repeats: int | None = None,
         collect_baseline: bool = True,
         retain_out_file: bool = False,
     ) -> Any:
@@ -484,7 +487,7 @@ class Timer:
         the fact that a small number of iterations is generally sufficient to
         obtain good measurements.
 
-        In order to to use this method `valgrind`, `callgrind_control`, and
+        In order to use this method `valgrind`, `callgrind_control`, and
         `callgrind_annotate` must be installed.
 
         Because there is a process boundary between the caller (this process)
@@ -515,7 +518,8 @@ class Timer:
         # the parent process rather than the valgrind subprocess.
         self._timeit(1)
         is_python = (self._language == Language.PYTHON)
-        assert is_python or not self._globals
+        if not is_python and self._globals:
+            raise AssertionError("_timer globals are only supported for Python timers")
         result = valgrind_timer_interface.wrapper_singleton().collect_callgrind(
             task_spec=self._task_spec,
             globals=self._globals,

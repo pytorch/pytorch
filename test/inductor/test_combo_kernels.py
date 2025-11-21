@@ -6,12 +6,13 @@ import unittest
 
 import torch
 import torch._inductor
+from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 aten = torch.ops.aten
@@ -55,7 +56,7 @@ class ComboKernelTests(TestCase):
         torch._inductor.metrics.reset()
         super().tearDown()
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_activation_functions(self):
         def test_activations(a, b, c):
             a1 = torch.nn.functional.relu(a)
@@ -75,7 +76,7 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_reduce_functions(self):
         def test_reduce(a, b, c, d):
             a1 = torch.sum(a, dim=0)
@@ -98,7 +99,7 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertTrue(torch._inductor.metrics.generated_kernel_count <= 2)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_mutated_args(self):
         def test_mutated(a, b, c, d):
             a.add_(1)
@@ -121,7 +122,7 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_reduce_split(self):
         def fn(a, b):
             a1 = torch.linalg.vector_norm(a)
@@ -137,7 +138,7 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_2d_blocking_partitioning(self):
         def fn(a0, a1, a2, b0, b1, b2):
             c0 = torch.add(a0, b0)
@@ -184,7 +185,7 @@ class ComboKernelBenchmarkTests(TestCase):
         torch._inductor.metrics.reset()
         super().tearDown()
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_activation_benchmark(self):
         def test_activations(a, b, c):
             a1 = torch.nn.functional.relu(a)
@@ -204,7 +205,7 @@ class ComboKernelBenchmarkTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_reduce_benchmark(self):
         def test_reduce(a, b, c, d):
             a1 = torch.sum(a, dim=0)
@@ -227,7 +228,7 @@ class ComboKernelBenchmarkTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertTrue(4 < torch._inductor.metrics.generated_kernel_count <= 10)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_mutated_benchmark(self):
         def test_mutated(a, b, c, d):
             a.add_(1)
@@ -250,7 +251,7 @@ class ComboKernelBenchmarkTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertTrue(torch._inductor.metrics.generated_kernel_count in [6, 9])
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_round_robin_dispatch(self):
         # combo kernel dispatch strategy: round robin
         def test_mutated(a, b, c, d):
@@ -274,7 +275,7 @@ class ComboKernelBenchmarkTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 6)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_2d_blocking_benchmark(self):
         def fn(a0, a1, a2, b0, b1, b2):
             c0 = torch.add(a0, b0)
@@ -296,7 +297,7 @@ class ComboKernelBenchmarkTests(TestCase):
 
         self.assertTrue(7 <= torch._inductor.metrics.generated_kernel_count <= 8)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_persistent_reduction_no_x_dim(self):
         def fn(x, y):
             return x.sum(1), y.sum(1)
@@ -346,7 +347,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         torch._inductor.metrics.reset()
         super().tearDown()
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_dynamic_shapes_activations(self):
         def test_activations(a, b, c):
             a1 = torch.nn.functional.relu(a)
@@ -366,7 +367,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_dynamic_shapes_2d_blocking(self):
         def fn(a0, a1, a2, b0, b1, b2):
             c0 = torch.add(a0, b0)
@@ -388,7 +389,7 @@ class ComboKernelDynamicShapesTests(TestCase):
 
         self.assertTrue(7 <= torch._inductor.metrics.generated_kernel_count <= 8)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_dynamic_shapes_reduce(self):
         def test_reduce(a, b, c, d):
             a1 = torch.sum(a, dim=0)
@@ -411,7 +412,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertTrue(4 < torch._inductor.metrics.generated_kernel_count <= 10)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_dynamic_shapes_mutated(self):
         # combo kernel dispatch strategy: round robin
         def test_mutated(a, b, c, d):
@@ -435,7 +436,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 6)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._inductor.config.patch("combo_kernels_autotune", 0)
     def test_dynamic_shapes_activations_no_autotune(self):
         def test_activations(a, b, c):
@@ -456,7 +457,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
     @torch._dynamo.config.patch("assume_static_by_default", True)
     def test_dynamic_shapes_persistent_reduction_no_x_dim(self):
@@ -475,7 +476,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
     @torch._dynamo.config.patch("assume_static_by_default", True)
     def test_dynamic_shapes_persistent_reduction_no_x_dim_2(self):
@@ -494,7 +495,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
     @torch._dynamo.config.patch("assume_static_by_default", True)
     def test_dynamic_shapes_2d_blocking_round_robin(self):
@@ -533,7 +534,7 @@ class ComboKernelDynamicShapesTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertTrue(5 <= torch._inductor.metrics.generated_kernel_count <= 6)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     @torch._dynamo.config.patch("automatic_dynamic_shapes", True)
     @torch._dynamo.config.patch("assume_static_by_default", True)
     @torch._inductor.config.patch("triton.autotune_at_compile_time", True)
@@ -554,9 +555,27 @@ class ComboKernelDynamicShapesTests(TestCase):
 
         self.assertEqual(out_eager, out_compiled)
 
+    @requires_cuda_and_triton
+    def test_helper_fn_defined(self):
+        def fn(x, y, z):
+            return x.sum(1), y.mean(1), z.cumsum(1)
+
+        inps = (
+            torch.rand(16, 128, device="cuda"),
+            torch.rand(32, 128, device="cuda"),
+            torch.rand(32, 256, device="cuda"),
+        )
+
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        code = " ".join(code)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(code.count("def _triton_helper_fn_add0(arg0_0, arg1_0):"), 1)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_CUDA_AND_TRITON:
         run_tests(needs="filelock")

@@ -41,6 +41,7 @@ def format_frame(frame: dict[str, str]) -> str:
 def format_frames(frames: list[dict[str, str]]) -> str:
     formatted_frames = []
     for frame in frames:
+        # pyrefly: ignore [bad-argument-type]
         formatted_frames.append(format_frame(frame))
     return "\n".join(formatted_frames)
 
@@ -115,13 +116,19 @@ def match_coalesced_groups(
             for r in all_ops:
                 if len(all_ops[r]) > i:
                     rank, event = all_rank_events[r][i]
-                    row.append(
-                        Op(
-                            event,
-                            memberships,
-                            _pg_guids[(event["process_group"][0], rank)],
+                    # Check if the pg_guid exists for this rank and process group
+                    pg_key = (event["process_group"][0], rank)
+                    if pg_key in _pg_guids:
+                        row.append(
+                            Op(
+                                event,
+                                memberships,
+                                _pg_guids[pg_key],
+                            )
                         )
-                    )
+                    else:
+                        # Skip this entry if pg_guid mapping doesn't exist
+                        row.append(None)  # type: ignore[arg-type]
                     progress = True
                 else:
                     row.append(None)  # type: ignore[arg-type]
@@ -244,13 +251,19 @@ def match_coalesced_groups_with_non_p2p(
             for r in all_ops:
                 if len(all_ops[r]) > i:
                     rank, event = all_rank_events[r][i]
-                    row.append(
-                        Op(
-                            event,
-                            memberships,
-                            _pg_guids[(event["process_group"][0], rank)],
+                    # Check if the pg_guid exists for this rank and process group
+                    pg_key = (event["process_group"][0], rank)
+                    if pg_key in _pg_guids:
+                        row.append(
+                            Op(
+                                event,
+                                memberships,
+                                _pg_guids[pg_key],
+                            )
                         )
-                    )
+                    else:
+                        # Skip this entry if pg_guid mapping doesn't exist
+                        row.append(None)  # type: ignore[arg-type]
                     progress = True
                 else:
                     row.append(None)  # type: ignore[arg-type]
@@ -616,6 +629,7 @@ def just_print_entries(
     _memberships: dict[str, set[Any]],
     _pg_guids: dict[tuple[str, int], str],
     args: argparse.Namespace,
+    stack_id_trace_map: dict[str, int],
 ) -> None:
     rows = []
     ranks = sorted(all_entries.keys())
@@ -650,6 +664,17 @@ def just_print_entries(
 
     logger.info(tabulate(rows, headers=headers))
 
+    if stack_id_trace_map and args.print_stack_trace:
+        headers = ["stack_id", "frame_stack"]
+        rows = []
+
+        for frame, stack_id in sorted(
+            stack_id_trace_map.items(), key=lambda item: item[1]
+        ):
+            rows.append([str(stack_id), frame])
+
+        logger.info(tabulate(rows, headers=headers))
+
 
 def check_no_missing_dump_files(
     entries: dict[int, Any], memberships: list[Membership]
@@ -671,10 +696,32 @@ def check_version(version_by_ranks: dict[str, str], version: str) -> None:
 
 
 def get_version_detail(version: str) -> tuple[int, int]:
+    # pyrefly: ignore [bad-assignment]
     version = version.split(".")
     assert len(version) == 2, f"Invalid version {version}"
     major, minor = map(int, version)
     return major, minor
+
+
+def add_stack_id_in_entries(
+    entries: dict[int, list[dict[str, Any]]],
+) -> tuple[dict[int, list[dict[str, Any]]], dict[str, int]]:
+    stack_id = 0
+    stack_id_trace_map = {}
+    for rank in entries:
+        for dump in entries[rank]:
+            if dump.get("frames", []):
+                frames = str(dump["frames"])
+                if frames not in stack_id_trace_map:
+                    stack_id_trace_map[frames] = stack_id
+                    dump["stack_id"] = stack_id
+                    stack_id += 1
+                else:
+                    dump["stack_id"] = stack_id_trace_map[frames]
+            else:
+                dump["stack_id"] = -1
+
+    return entries, stack_id_trace_map
 
 
 def align_trace_from_beginning(
@@ -707,6 +754,10 @@ def align_trace_from_beginning(
         # Rank 3: [0, 1, 2, 3, 4, 5, None]
         # Then we should start from collective 2 not 0 because any collective before,
         # we don't have complete records from all ranks so we need to ignore them.
+        # If we don't have any trace from some ranks, ignore them
+        # as well.
+        if len(entries[rank]) == 0:
+            continue
         first_record_id = entries[rank][0]["record_id"]
         maximum_starting_record_id = max(maximum_starting_record_id, first_record_id)
 

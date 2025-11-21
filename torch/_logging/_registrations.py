@@ -226,6 +226,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "node_runtime_estimation",
+    "Node runtime estimation for compile-time optimization decisions.",
+    off_by_default=True,
+)
+register_artifact(
     "autotuning",
     "Autotuning choice logs, such as kernel source, perf, and tuning parameters.",
     off_by_default=True,
@@ -244,6 +249,11 @@ register_artifact(
 register_artifact(
     "hierarchical_compile",
     "Logs debug info for hierarchical compilation",
+    off_by_default=True,
+)
+register_artifact(
+    "annotation",
+    "Logs detailed steps of the creating annotation on graph nodes",
     off_by_default=True,
 )
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")

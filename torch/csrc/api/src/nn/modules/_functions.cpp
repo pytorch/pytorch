@@ -103,9 +103,9 @@ variable_list CrossMapLRN2d::backward(
   double cache_ratio_value = 2 * ctx->saved_data["alpha"].toDouble() *
       ctx->saved_data["beta"].toDouble() /
       static_cast<double>(ctx->saved_data["size"].toInt());
-  int64_t inversePrePad = static_cast<int64_t>(
-      ctx->saved_data["size"].toInt() -
-      (ctx->saved_data["size"].toInt() - 1) / 2);
+  int64_t inversePrePad =
+      (ctx->saved_data["size"].toInt() -
+       (ctx->saved_data["size"].toInt() - 1) / 2);
 
   grad_input.resize_as_(input);
   torch::pow_out(

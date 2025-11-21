@@ -60,11 +60,11 @@ struct CUDAEvent {
   CUDAEvent& operator=(const CUDAEvent&) = delete;
 
   CUDAEvent(CUDAEvent&& other) noexcept {
-    moveHelper(other);
+    moveHelper(std::move(other));
   }
   CUDAEvent& operator=(CUDAEvent&& other) noexcept {
     if (this != &other) {
-      moveHelper(other);
+      moveHelper(std::move(other));
     }
     return *this;
   }
@@ -234,6 +234,12 @@ struct CUDAEvent {
     C10_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
   }
 
+  void create(DeviceIndex device_index) {
+    if (!is_created_) {
+      createEvent(device_index);
+    }
+  }
+
  private:
   unsigned int flags_ = cudaEventDisableTiming;
   bool is_created_ = false;
@@ -259,12 +265,19 @@ struct CUDAEvent {
     is_created_ = true;
   }
 
-  void moveHelper(CUDAEvent& other) {
-    std::swap(flags_, other.flags_);
-    std::swap(is_created_, other.is_created_);
-    std::swap(was_recorded_, other.was_recorded_);
-    std::swap(device_index_, other.device_index_);
-    std::swap(event_, other.event_);
+  void moveHelper(CUDAEvent&& other) {
+    // Transfer ownership of all state from other to this
+    flags_ = other.flags_;
+    is_created_ = other.is_created_;
+    was_recorded_ = other.was_recorded_;
+    external_ = other.external_;
+    device_index_ = other.device_index_;
+    event_ = other.event_;
+
+    // Reset other to a valid empty state to prevent double-free
+    // The moved-from object must not attempt to destroy the event
+    other.is_created_ = false;
+    other.event_ = cudaEvent_t{};
   }
 };
 

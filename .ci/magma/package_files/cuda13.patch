@@ -1,0 +1,26 @@
+diff --git a/interface_cuda/interface.cpp b/interface_cuda/interface.cpp
+index 73fed1b20..e77519bfe 100644
+--- a/interface_cuda/interface.cpp
++++ b/interface_cuda/interface.cpp
+@@ -438,14 +438,20 @@ magma_print_environment()
+         cudaDeviceProp prop;
+         err = cudaGetDeviceProperties( &prop, dev );
+         check_error( err );
++        #ifdef MAGMA_HAVE_CUDA
++#if CUDA_VERSION < 13000
+         printf( "%% device %d: %s, %.1f MHz clock, %.1f MiB memory, capability %d.%d\n",
+                 dev,
+                 prop.name,
+                 prop.clockRate / 1000.,
++#else
++        printf( "%% device %d: %s, ??? MHz clock, %.1f MiB memory, capability %d.%d\n",
++                dev,
++                prop.name,
++#endif
+                 prop.totalGlobalMem / (1024.*1024.),
+                 prop.major,
+                 prop.minor );
+-        #ifdef MAGMA_HAVE_CUDA
+         int arch = prop.major*100 + prop.minor*10;
+         if ( arch < MAGMA_CUDA_ARCH_MIN ) {
+             printf("\n"
