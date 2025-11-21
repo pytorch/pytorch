@@ -123,9 +123,6 @@ class L1Loss(_Loss):
 
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
-
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
         Runs the forward pass.
@@ -623,9 +620,6 @@ class MSELoss(_Loss):
 
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
-
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
         Runs the forward pass.
@@ -709,15 +703,6 @@ class BCELoss(_WeightedLoss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(
-        self,
-        weight: Optional[Tensor] = None,
-        size_average=None,
-        reduce=None,
-        reduction: str = "mean",
-    ) -> None:
-        super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
@@ -983,9 +968,6 @@ class MultiLabelMarginLoss(_Loss):
 
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
-
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
         return F.multilabel_margin_loss(input, target, reduction=self.reduction)
@@ -1172,9 +1154,6 @@ class SoftMarginLoss(_Loss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -1431,15 +1410,6 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(
-        self,
-        weight: Optional[Tensor] = None,
-        size_average=None,
-        reduce=None,
-        reduction: str = "mean",
-    ) -> None:
-        super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""

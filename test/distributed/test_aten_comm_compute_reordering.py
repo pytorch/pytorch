@@ -1061,6 +1061,63 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
             correct = func(a, b, c)
             self.assertTrue(same(out, correct))
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch(get_bucket_patches())
+    def test_multiple_hiding_nodes_bucketing(self):
+        """Test that collectives hidden by multiple compute ops can bucket together."""
+
+        # Use 0.5 compute multiplier so each collective needs 2 matmuls to be fully hidden
+        def estimate_with_half_compute(fx_node, override_size=None):
+            return estimate_aten_runtime(fx_node, compute_multiplier=0.5)
+
+        def func(a, b, *, ranks):
+            # Two all_gathers that will be hidden by multiple compute operations
+            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
+
+            # Multiple compute operations that can hide the collectives
+            # With 0.5 multiplier: mm1 and mm2 together hide ag1, mm2 and mm3 together hide ag2
+            mm1 = torch.matmul(a, a.T)
+            mm2 = torch.matmul(b, b.T)
+            mm3 = torch.matmul(a + b, (a + b).T)
+
+            return ag1.sum() + ag2.sum() + mm1.sum() + mm2.sum() + mm3.sum()
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+            ranks = list(range(self.world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+
+            # Patch with custom estimation that uses 0.5 multiplier
+            with torch._inductor.config.patch(
+                {
+                    "aten_distributed_optimizations.custom_runtime_estimation": estimate_with_half_compute
+                }
+            ):
+                compiled = torch.compile(func_c)
+                out, aten_graph_str = run_and_get_aten_graph(compiled, a, b)
+
+            # Should have 1 bucketed all_gather (both ag1 and ag2 bucketed together)
+            FileCheck().check_count(
+                "torch.ops._c10d_functional.wait_tensor.default", 1, exactly=True
+            ).run(aten_graph_str)
+
+            # Verify bucketed collective is scheduled before all matmuls
+            FileCheck().check("functional.all_gather_into_tensor").check(
+                "aten.mm"
+            ).check("aten.mm").check("aten.mm").check("wait_tensor").run(aten_graph_str)
+
+            # Verify correctness
+            correct = func(a, b, ranks=ranks)
+            self.assertTrue(same(out, correct))
+
 
 def get_toy_model(device_type: str):
     """
