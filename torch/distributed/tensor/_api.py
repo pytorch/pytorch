@@ -565,6 +565,10 @@ class DTensor(torch.Tensor):
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
                 placements[i] = Shard(placement.dim + self.ndim)
+            elif isinstance(placement, _StridedShard) and placement.dim < 0:
+                placements[i] = _StridedShard(
+                    placement.dim + self.ndim, split_factor=placement.split_factor
+                )
         placements = tuple(placements)
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
