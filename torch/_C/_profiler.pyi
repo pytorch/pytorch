@@ -1,6 +1,5 @@
 from enum import Enum
-from typing import Literal
-from typing_extensions import TypeAlias
+from typing import Literal, TypeAlias
 
 from torch._C import device, dtype, layout
 
@@ -61,6 +60,7 @@ class _ExperimentalConfig:
         verbose: bool = ...,
         performance_events: list[str] = ...,
         enable_cuda_sync_events: bool = ...,
+        profile_all_threads: bool = ...,
     ) -> None: ...
 
 class ProfilerConfig:

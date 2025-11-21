@@ -411,7 +411,7 @@ def forward(self, token, x, cc):
             F1(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
         )
 
-    def test_torchbind_register_attr_at_runtime_error(self):
+    def test_torchbind_register_attr_at_runtime_get_restored(self):
         # alias as model attribute
         class F3(torch.nn.Module):
             def forward(self, x, foo):
@@ -419,10 +419,8 @@ def forward(self, token, x, cc):
                 return x + self.foo.add_tensor(x)
 
         foo = torch.classes._TorchScriptTesting._Foo(10, 20)
-        with self.assertRaisesRegex(
-            ValueError, "following attrs were created in the model"
-        ):
-            torch.export.export(F3(), (torch.ones(2, 3), foo))
+        torch.export.export(F3(), (torch.ones(2, 3), foo), strict=False)
+        self.assertFalse(hasattr(foo, "foo"))
 
     @parametrize("pre_dispatch", [True, False])
     def test_torchbind_input_and_alias(self, pre_dispatch):

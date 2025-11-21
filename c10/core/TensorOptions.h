@@ -21,6 +21,8 @@
 #include <type_traits>
 #include <utility>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
+
 namespace c10 {
 
 inline ScalarType dtype_or_default(std::optional<ScalarType> dtype) {
@@ -780,3 +782,5 @@ inline bool backend_supports_empty_operator(const TensorOptions& options) {
 } // namespace detail
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

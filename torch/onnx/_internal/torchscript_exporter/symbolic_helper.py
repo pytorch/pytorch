@@ -103,8 +103,14 @@ import math
 import sys
 import typing
 import warnings
-from typing import Any, Callable, Literal, NoReturn, TypeVar as _TypeVar
-from typing_extensions import Concatenate as _Concatenate, ParamSpec as _ParamSpec
+from typing import (
+    Any,
+    Concatenate as _Concatenate,
+    Literal,
+    NoReturn,
+    TypeVar as _TypeVar,
+)
+from typing_extensions import ParamSpec as _ParamSpec
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -115,7 +121,7 @@ from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 
 
 if typing.TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.types import Number
 
@@ -815,9 +821,10 @@ def _is_fp(value) -> bool:
 
 
 def _is_bool(value) -> bool:
-    return _type_utils.JitScalarType.from_value(
-        value, _type_utils.JitScalarType.UNDEFINED
-    ) in {_type_utils.JitScalarType.BOOL}
+    return (
+        _type_utils.JitScalarType.from_value(value, _type_utils.JitScalarType.UNDEFINED)
+        == _type_utils.JitScalarType.BOOL
+    )
 
 
 def _generate_wrapped_number(g: jit_utils.GraphContext, scalar):
@@ -902,7 +909,8 @@ def _interpolate_warning(interpolate_mode):
         "ONNX's Upsample/Resize operator did not match Pytorch's Interpolation until opset 11. "
         "Attributes to determine how to transform the input were added in onnx:Resize in opset 11 "
         "to support Pytorch's behavior (like coordinate_transformation_mode and nearest_mode).\n"
-        "We recommend using opset 11 and above for models using this operator."
+        "We recommend using opset 11 and above for models using this operator.",
+        stacklevel=2,
     )
 
 
@@ -997,7 +1005,7 @@ def _interpolate_size_to_scales(g: jit_utils.GraphContext, input, output_size, d
             if i < 2
             else float(output_size[-(dim - i)])
             / float(input.type().sizes()[-(dim - i)])
-            for i in range(0, dim)
+            for i in range(dim)
         ]
         scales = g.op(
             "Constant", value_t=torch.tensor(scales_constant, dtype=torch.float32)
@@ -1229,7 +1237,8 @@ def __interpolate_helper(
             if not is_scalar:
                 warnings.warn(
                     "Cannot verify if the output_size is a scalar "
-                    "while exporting interpolate. Assuming that it is not a scalar."
+                    "while exporting interpolate. Assuming that it is not a scalar.",
+                    stacklevel=2,
                 )
 
         if is_scalar:
@@ -1570,7 +1579,8 @@ def check_training_mode(op_train_mode: int, op_name: str) -> None:
     # in training.
     warnings.warn(
         f"ONNX export mode is set to {GLOBALS.training_mode}, but operator '{op_name}' "
-        f"is set to {op_mode_text}. Exporting with {op_mode_text}."
+        f"is set to {op_mode_text}. Exporting with {op_mode_text}.",
+        stacklevel=2,
     )
 
 
@@ -1793,22 +1803,27 @@ def _op_with_optional_float_cast(g: jit_utils.GraphContext, op_name, *args, **kw
 
     if require_cast:
         for input in inputs:
+            # pyrefly: ignore [missing-attribute]
             if input.isCompleteTensor():
                 input_scalar_type = _type_utils.JitScalarType.from_value(input)
                 if input_scalar_type != dtype_0:
                     raise errors.SymbolicValueError(
                         f"Inputs of {op_name} must have same dtype."
                         f"Got {dtype_0.scalar_name()} and {input_scalar_type.scalar_name()}",
+                        # pyrefly: ignore [bad-argument-type]
                         input,
                     )
         for i, input in enumerate(inputs):
+            # pyrefly: ignore [missing-attribute]
             if input.isCompleteTensor() and not _is_fp(input):
                 inputs[i] = g.op(
                     "Cast",
+                    # pyrefly: ignore [bad-argument-type]
                     input,
                     to_i=target_float_t.onnx_type(),
                 )
 
+    # pyrefly: ignore [bad-argument-type]
     self = g.op(op_name, *inputs, **kwargs)
 
     if require_cast:

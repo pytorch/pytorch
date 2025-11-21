@@ -2,7 +2,7 @@
 import math
 import os
 from collections import defaultdict
-from typing import Any, Callable
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 
 import torch
@@ -14,6 +14,10 @@ from torch.distributed._tools.mod_tracker import ModTracker
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.flop_counter import flop_registry
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 aten = torch.ops.aten
@@ -74,6 +78,78 @@ _CREATE_OPS = {
 _IGNORE_OPS = _VIEW_OPS | _CREATE_OPS
 
 __all__ = ["RuntimeEstimator"]
+
+
+def get_compute_time(func_packet, args, kwargs, out, out_dtypes) -> float:  # type: ignore[no-untyped-def]
+    """
+    Estimates the compute time of an aten operator.
+
+    Args:
+        func_packet: The operator overload packet.
+        args: The arguments to the operator.
+        kwargs: The keyword arguments to the operator.
+        out: The output of the operator.
+        out_dtypes: The output data types.
+
+    Returns:
+        float: The estimated compute time in nanoseconds.
+    """
+    if func_packet in flop_registry:
+        assert len(out_dtypes) == 1, (
+            f"Only support single out dtype got {out_dtypes} for {func_packet}"
+        )
+        dtype = out_dtypes.pop()
+        # This actually gives peta-FLOPs/s hence multiply by 1e15 to get the FLOPs/s
+        peak_gpu_flops = get_device_tflops(dtype) * 1e15
+        # We can expect to achieve 75% of theoretical peak flops
+        factor = 0.75
+        peak_empirical_flops = factor * peak_gpu_flops
+        flop_count_func = flop_registry[func_packet]
+        # We divide by a factor of 2 to get the MACs (multiply and accumulate)
+        flop_count = flop_count_func(*args, **kwargs, out_val=out) / 2
+        # We multiply by 1e9 to get the time in nano seconds
+        compute_time = (flop_count / peak_empirical_flops) * 1e9
+        return compute_time
+    return 0.0
+
+
+def get_num_bytes(t: torch.Tensor) -> int:
+    """
+    Calculates the memory consumption of a tensor.
+
+    Args:
+        t (torch.Tensor): The input tensor.
+
+    Returns:
+        int: The memory consumption of the tensor in bytes.
+    """
+    num_bytes = t.untyped_storage().nbytes()
+    mem_consumed = math.ceil(num_bytes / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
+    return mem_consumed
+
+
+def get_transfer_time(flat_args_kwargs, flat_outs) -> float:  # type: ignore[no-untyped-def]
+    """
+    Estimates the memory transfer time of input and output tensors.
+
+    Args:
+        flat_args_kwargs (List[torch.Tensor]): The flat list of arguments and keyword arguments.
+        flat_outs (List[torch.Tensor]): The flat list of outputs.
+
+    Returns:
+        float: The estimated memory transfer time in nanoseconds.
+    """
+    gpu_memory_bandwidth = get_gpu_dram_gbps()
+    read_bytes = sum(
+        get_num_bytes(t) for t in flat_args_kwargs if isinstance(t, torch.Tensor)
+    )
+    write_bytes = sum(
+        get_num_bytes(t) for t in flat_outs if isinstance(t, torch.Tensor)
+    )
+    counted_bytes = read_bytes + write_bytes
+    # The GPU memory bandwidth is in GB/s so the transfer time is in nanoseconds
+    transfer_time = counted_bytes / gpu_memory_bandwidth
+    return transfer_time
 
 
 class RuntimeEstimator(TorchDispatchMode):
@@ -293,79 +369,6 @@ class RuntimeEstimator(TorchDispatchMode):
             "Roofline estimation needs to access CUDA capabilities to make estimations"
         )
 
-        def get_num_bytes(t: torch.Tensor) -> int:
-            """
-            Calculates the memory consumption of a tensor.
-
-            Args:
-                t (torch.Tensor): The input tensor.
-
-            Returns:
-                int: The memory consumption of the tensor in bytes.
-            """
-            num_bytes = t.untyped_storage().nbytes()
-            mem_consumed = (
-                math.ceil(num_bytes / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
-            )
-            return mem_consumed
-
-        def get_compute_time(func_packet, args, kwargs, out, out_dtypes) -> float:  # type: ignore[no-untyped-def]
-            """
-            Estimates the compute time of an aten operator.
-
-            Args:
-                func_packet: The operator overload packet.
-                args: The arguments to the operator.
-                kwargs: The keyword arguments to the operator.
-                out: The output of the operator.
-                out_dtypes: The output data types.
-
-            Returns:
-                float: The estimated compute time in nanoseconds.
-            """
-            if func_packet in flop_registry:
-                assert len(out_dtypes) == 1, (
-                    f"Only support single out dtype got {out_dtypes} for {func_packet}"
-                )
-                dtype = out_dtypes.pop()
-                # This actually gives peta-FLOPs/s hence multiply by 1e15 to get the FLOPs/s
-                peak_gpu_flops = get_device_tflops(dtype) * 1e15
-                # We can expect to achieve 75% of theoretical peak flops
-                factor = 0.75
-                peak_empirical_flops = factor * peak_gpu_flops
-                flop_count_func = flop_registry[func_packet]
-                # We divide by a factor of 2 to get the MACs (multiply and accumulate)
-                flop_count = flop_count_func(*args, **kwargs, out_val=out) / 2
-                # We multiply by 1e9 to get the time in nano seconds
-                compute_time = (flop_count / peak_empirical_flops) * 1e9
-                return compute_time
-            return 0.0
-
-        def get_transfer_time(flat_args_kwargs, flat_outs) -> float:  # type: ignore[no-untyped-def]
-            """
-            Estimates the memory transfer time of input and output tensors.
-
-            Args:
-                flat_args_kwargs (List[torch.Tensor]): The flat list of arguments and keyword arguments.
-                flat_outs (List[torch.Tensor]): The flat list of outputs.
-
-            Returns:
-                float: The estimated memory transfer time in nanoseconds.
-            """
-            gpu_memory_bandwidth = get_gpu_dram_gbps()
-            read_bytes = sum(
-                get_num_bytes(t)
-                for t in flat_args_kwargs
-                if isinstance(t, torch.Tensor)
-            )
-            write_bytes = sum(
-                get_num_bytes(t) for t in flat_outs if isinstance(t, torch.Tensor)
-            )
-            counted_bytes = read_bytes + write_bytes
-            # The GPU memory bandwidth is in GB/s so the transfer time is in nanoseconds
-            transfer_time = counted_bytes / gpu_memory_bandwidth
-            return transfer_time
-
         # Roofline Cost Model Explanation
 
         # The roofline cost model estimates the execution time of an operator based on
@@ -515,6 +518,7 @@ class RuntimeEstimator(TorchDispatchMode):
         super().__enter__()
         return self
 
+    # pyrefly: ignore [bad-override]
     def __exit__(self, *args: Any) -> None:
         print(
             f"Estimated ({self._estimate_mode_type})"

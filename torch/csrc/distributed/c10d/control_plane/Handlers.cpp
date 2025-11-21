@@ -1,5 +1,7 @@
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
+
 #include <fmt/format.h>
 #include <mutex>
 #include <shared_mutex>
@@ -49,8 +51,8 @@ class HandlerRegistry {
   }
 
  private:
-  std::shared_mutex handlersMutex_{};
-  std::unordered_map<std::string, HandlerFunc> handlers_{};
+  std::shared_mutex handlersMutex_;
+  std::unordered_map<std::string, HandlerFunc> handlers_;
 };
 
 HandlerRegistry& getHandlerRegistry() {
@@ -62,6 +64,14 @@ RegisterHandler pingHandler{"ping", [](const Request&, Response& res) {
                               res.setContent("pong", "text/plain");
                               res.setStatus(200);
                             }};
+
+RegisterHandler frTracehandler(
+    "fr_trace_json",
+    [](const Request&, Response& res) {
+      auto trace = ::c10d::dump_fr_trace_json(true, true);
+      res.setContent(std::move(trace), "application/json");
+      res.setStatus(200);
+    });
 
 } // namespace
 

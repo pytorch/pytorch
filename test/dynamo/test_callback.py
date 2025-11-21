@@ -30,7 +30,7 @@ class CallbackTests(TestCase):
 
     def test_callbacks_with_duplicate_prevention(self) -> None:
         trigger = CallbackTrigger.DYNAMO
-        compile_id = CompileId(0, 0)
+        compile_id = CompileId(frame_id=0, frame_compile_id=0)
         with (
             callback_handler.install_callbacks(trigger, compile_id),
             callback_handler.install_callbacks(trigger, compile_id),
@@ -40,7 +40,7 @@ class CallbackTests(TestCase):
 
     def test_counter(self) -> None:
         trigger = CallbackTrigger.DYNAMO
-        compile_id = CompileId(0, 0)
+        compile_id = CompileId(frame_id=0, frame_compile_id=0)
         with callback_handler.install_callbacks(trigger, compile_id):
             self.assertEqual(
                 callback_handler._CompilationCallbackHandler__pending_callbacks_counter,
@@ -56,7 +56,7 @@ class CallbackTests(TestCase):
             AssertionError, "Pending callbacks counter cannot become negative."
         ):
             trigger = CallbackTrigger.DYNAMO
-            compile_id = CompileId(0, 0)
+            compile_id = CompileId(frame_id=0, frame_compile_id=0)
             with callback_handler.install_callbacks(trigger, str(compile_id)):
                 pass
         self.assertEqual(

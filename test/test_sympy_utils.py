@@ -5,7 +5,7 @@ import itertools
 import math
 import pickle
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 import sympy
 
@@ -67,10 +67,12 @@ BINARY_OPS = [
     "mod",
     "bitwise_and",
     "bitwise_or",
+    "bitwise_xor",
 ]
 BITWISE_OPS = [
     "bitwise_and",
     "bitwise_or",
+    "bitwise_xor",
 ]
 
 UNARY_BOOL_OPS = ["not_"]

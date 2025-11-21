@@ -399,7 +399,7 @@ class TestArgmax(TestCase):
                     ([np.nan, 0, 1, 2, 3], 0),
                     ([np.nan, 0, np.nan, 2, 3], 0),
                     # To hit the tail of SIMD multi-level(x4, x1) inner loops
-                    # on variant SIMD widthes
+                    # on variant SIMD widths
                     ([1] * (2 * 5 - 1) + [np.nan], 2 * 5 - 1),
                     ([1] * (4 * 5 - 1) + [np.nan], 4 * 5 - 1),
                     ([1] * (8 * 5 - 1) + [np.nan], 8 * 5 - 1),
@@ -534,7 +534,7 @@ class TestArgmin(TestCase):
                     ([np.nan, 0, 1, 2, 3], 0),
                     ([np.nan, 0, np.nan, 2, 3], 0),
                     # To hit the tail of SIMD multi-level(x4, x1) inner loops
-                    # on variant SIMD widthes
+                    # on variant SIMD widths
                     ([1] * (2 * 5 - 1) + [np.nan], 2 * 5 - 1),
                     ([1] * (4 * 5 - 1) + [np.nan], 4 * 5 - 1),
                     ([1] * (8 * 5 - 1) + [np.nan], 8 * 5 - 1),
@@ -661,7 +661,7 @@ class TestIter(TestCase):
         # numpy generates array scalars, we do 0D arrays
         a = np.arange(5)
         lst = list(a)
-        assert all(type(x) == np.ndarray for x in lst), f"{[type(x) for x in lst]}"
+        assert all(type(x) is np.ndarray for x in lst), f"{[type(x) for x in lst]}"
         assert all(x.ndim == 0 for x in lst)
 
     def test_iter_2d(self):
@@ -669,7 +669,8 @@ class TestIter(TestCase):
         a = np.arange(5)[None, :]
         lst = list(a)
         assert len(lst) == 1
-        assert type(lst[0]) == np.ndarray
+        # FIXME: "is" cannot be used here because dynamo fails
+        assert type(lst[0]) == np.ndarray  # noqa: E721
         assert_equal(lst[0], np.arange(5))
 
 

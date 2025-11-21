@@ -58,7 +58,7 @@ scalar_t dot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y,
 template<typename scalar_t>
 scalar_t vdot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
 
-static constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
+static constexpr bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda >= std::max<int64_t>(1L, m);
 }
 
@@ -267,7 +267,7 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
 
   float input_scale = scale_a.item<float>();
   float weight_scale = scale_b.item<float>();
-  float output_scale = float(1.0);
+  float output_scale = 1.0f;
   if (scale_result.has_value() &&
       (*out_dtype == ScalarType::Float8_e4m3fn ||
        *out_dtype == ScalarType::Float8_e5m2)) {

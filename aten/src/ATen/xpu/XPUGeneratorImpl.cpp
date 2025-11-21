@@ -1,8 +1,13 @@
+#include <ATen/Functions.h>
+#include <ATen/Tensor.h>
 #include <ATen/Utils.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
+#include <ATen/xpu/XPUGraphsUtils.h>
 #include <c10/core/StreamGuard.h>
 #include <c10/util/CallOnce.h>
 #include <c10/xpu/XPUFunctions.h>
+
+constexpr uint64_t PHILOX_ROUND_SIZE = 4;
 
 namespace at {
 namespace xpu::detail {
@@ -58,29 +63,82 @@ Generator createXPUGenerator(DeviceIndex device) {
 
 } // namespace xpu::detail
 
+// Creates a clone of this XPU Generator State.
+c10::intrusive_ptr<XPUGeneratorState> XPUGeneratorState::clone() {
+  return make_intrusive<XPUGeneratorState>(
+      seed_, philox_offset_per_thread_, offset_intragraph_);
+}
+
+// Function to increase the internal offset based on the specified increment.
+void XPUGeneratorState::increase(uint64_t increment) {
+  increment = ((increment + PHILOX_ROUND_SIZE - 1) / PHILOX_ROUND_SIZE) *
+      PHILOX_ROUND_SIZE;
+  if (at::xpu::currentStreamCaptureStatus() !=
+      at::xpu::CaptureStatus::Executing) {
+    TORCH_INTERNAL_ASSERT(
+        capturing_,
+        "Attempt to increase offset for a XPU generator not in capture mode.");
+    TORCH_INTERNAL_ASSERT(
+        offset_intragraph_ % 4 == 0, "RNG offset must be a multiple of 4.");
+    TORCH_INTERNAL_ASSERT(
+        offset_intragraph_ <= std::numeric_limits<uint32_t>::max() - increment,
+        "Increment causes overflow in the offset value.");
+    offset_intragraph_ += increment;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        !capturing_,
+        "Offset increment outside graph capture encountered unexpectedly.");
+    TORCH_INTERNAL_ASSERT(
+        philox_offset_per_thread_ % 4 == 0,
+        "RNG offset must be a multiple of 4.");
+    philox_offset_per_thread_ += increment;
+  }
+}
+
 XPUGeneratorImpl::XPUGeneratorImpl(DeviceIndex device_index)
     : GeneratorImpl{
           Device(DeviceType::XPU, device_index),
-          DispatchKeySet(c10::DispatchKey::XPU)} {}
+          DispatchKeySet(c10::DispatchKey::XPU)} {
+  at::xpu::assertNotCapturing("Cannot construct a new XPUGeneratorImpl");
+  state_ = make_intrusive<XPUGeneratorState>();
+}
+
+XPUGeneratorImpl::XPUGeneratorImpl(
+    DeviceIndex device_index,
+    intrusive_ptr<XPUGeneratorState> state)
+    : GeneratorImpl{Device(DeviceType::XPU, device_index), DispatchKeySet(c10::DispatchKey::XPU)},
+      state_(std::move(state)) {}
 
 void XPUGeneratorImpl::set_current_seed(uint64_t seed) {
-  seed_ = seed;
-  set_philox_offset_per_thread(0);
+  if (C10_LIKELY(
+          at::xpu::currentStreamCaptureStatus() ==
+          at::xpu::CaptureStatus::Executing)) {
+    state_->seed_ = seed;
+    state_->philox_offset_per_thread_ = 0;
+  } else {
+    TORCH_CHECK(
+        state_->seed_ == seed,
+        "XPUGeneratorImpl::set_current_seed can be called during stream capture only if new seed is the same as the original seed.");
+  }
 }
 
 void XPUGeneratorImpl::set_offset(uint64_t offset) {
+  at::xpu::assertNotCapturing("Cannot call XPUGeneratorImpl::set_offset");
   set_philox_offset_per_thread(offset);
 }
 
 uint64_t XPUGeneratorImpl::get_offset() const {
-  return philox_offset_per_thread_;
+  at::xpu::assertNotCapturing("Cannot call XPUGeneratorImpl::get_offset");
+  return state_->philox_offset_per_thread_;
 }
 
 uint64_t XPUGeneratorImpl::current_seed() const {
-  return seed_;
+  at::xpu::assertNotCapturing("Cannot call XPUGeneratorImpl::current_seed");
+  return state_->seed_;
 }
 
 uint64_t XPUGeneratorImpl::seed() {
+  at::xpu::assertNotCapturing("Cannot call XPUGeneratorImpl::seed");
   auto random = c10::detail::getNonDeterministicRandom(true);
   this->set_current_seed(random);
   return random;
@@ -88,9 +146,9 @@ uint64_t XPUGeneratorImpl::seed() {
 
 c10::intrusive_ptr<c10::TensorImpl> XPUGeneratorImpl::get_state() const {
   // The RNG state comprises the seed, and an offset used for Philox.
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(uint64_t);
-  static const size_t total_size = seed_size + offset_size;
+  constexpr size_t seed_size = sizeof(uint64_t);
+  constexpr size_t offset_size = sizeof(uint64_t);
+  constexpr size_t total_size = seed_size + offset_size;
 
   // The internal state is returned as a CPU byte tensor.
   auto state_tensor = at::detail::empty_cpu(
@@ -110,39 +168,65 @@ c10::intrusive_ptr<c10::TensorImpl> XPUGeneratorImpl::get_state() const {
 }
 
 void XPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  static const size_t seed_size = sizeof(uint64_t);
-  static const size_t offset_size = sizeof(uint64_t);
-  static const size_t total_size = seed_size + offset_size;
+  at::xpu::assertNotCapturing(
+      "Please ensure to utilize the XPUGeneratorImpl::set_state_index method during capturing.");
+  constexpr size_t seed_size = sizeof(uint64_t);
+  constexpr size_t offset_size = sizeof(uint64_t);
+  constexpr size_t total_size = seed_size + offset_size;
 
   at::detail::check_rng_state(new_state);
-  auto new_state_size = new_state.numel();
-  TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
 
-  uint64_t input_seed;
+  bool no_philox_seed = false;
+  auto new_state_size = new_state.numel();
+  if (new_state_size == total_size - offset_size) {
+    no_philox_seed = true;
+  } else {
+    TORCH_CHECK(new_state_size == total_size, "RNG state is wrong size");
+  }
+
+  uint64_t input_seed = 0;
   auto new_rng_state = new_state.data_dtype_initialized<uint8_t>();
   memcpy(&input_seed, new_rng_state, seed_size);
   this->set_current_seed(input_seed);
-  uint64_t philox_offset;
-  memcpy(&philox_offset, new_rng_state + seed_size, offset_size);
+  uint64_t philox_offset = 0;
+  if (!no_philox_seed) {
+    memcpy(&philox_offset, new_rng_state + seed_size, offset_size);
+  }
   this->set_philox_offset_per_thread(philox_offset);
 }
 
 void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
-  philox_offset_per_thread_ = offset;
+  state_->philox_offset_per_thread_ = offset;
 }
 
 uint64_t XPUGeneratorImpl::philox_offset_per_thread() const {
-  return philox_offset_per_thread_;
+  return state_->philox_offset_per_thread_;
+}
+
+PhiloxXpuState XPUGeneratorImpl::philox_xpu_state(uint64_t increment) {
+  if (at::xpu::currentStreamCaptureStatus() !=
+      at::xpu::CaptureStatus::Executing) {
+    uint32_t offset = state_->offset_intragraph_;
+    state_->increase(increment);
+    return PhiloxXpuState(
+        state_->seed_extragraph_.data_ptr<int64_t>(),
+        state_->offset_extragraph_.data_ptr<int64_t>(),
+        offset);
+  } else {
+    uint64_t offset = state_->philox_offset_per_thread_;
+    state_->increase(increment);
+    return PhiloxXpuState(state_->seed_, offset);
+  }
 }
 
 std::pair<uint64_t, uint64_t> XPUGeneratorImpl::philox_engine_inputs(
     uint64_t increment) {
-  increment = ((increment + 3) / 4) * 4;
-  TORCH_INTERNAL_ASSERT(this->philox_offset_per_thread_ % 4 == 0);
-  uint64_t offset = this->philox_offset_per_thread_;
-  this->philox_offset_per_thread_ += increment;
-  return std::make_pair(this->seed_, offset);
+  at::xpu::assertNotCapturing(
+      "Refactor this op to use XPUGeneratorImpl::philox_xpu_state. Cannot call XPUGeneratorImpl::philox_engine_inputs");
+  uint64_t offset = state_->philox_offset_per_thread_;
+  state_->increase(increment);
+  return std::make_pair(state_->seed_, offset);
 }
 
 DeviceType XPUGeneratorImpl::device_type() {
@@ -154,9 +238,8 @@ std::shared_ptr<XPUGeneratorImpl> XPUGeneratorImpl::clone() const {
 }
 
 XPUGeneratorImpl* XPUGeneratorImpl::clone_impl() const {
-  auto gen = new XPUGeneratorImpl(this->device().index());
-  gen->set_current_seed(this->seed_);
-  gen->set_philox_offset_per_thread(this->philox_offset_per_thread_);
+  at::xpu::assertNotCapturing("Cannot call XPUGeneratorImpl::clone_impl");
+  auto gen = new XPUGeneratorImpl(this->device().index(), state_->clone());
   return gen;
 }
 

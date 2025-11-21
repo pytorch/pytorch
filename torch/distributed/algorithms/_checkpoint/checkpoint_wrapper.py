@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from enum import auto, Enum
 from functools import partial
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -103,9 +103,6 @@ class ActivationWrapper(torch.nn.Module, ABC):
 
 
 class OffloadWrapper(ActivationWrapper):
-    def __init__(self, mod):
-        super().__init__(mod)
-
     def forward(self, *args, **kwargs):
         with save_on_cpu(pin_memory=True):
             return self._checkpoint_wrapped_module(*args, **kwargs)

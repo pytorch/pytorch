@@ -18,15 +18,16 @@ from functorch.compile import (
     nop,
 )
 from torch._functorch.aot_autograd import aot_export_module
-from torch._higher_order_ops.effects import with_effects
+from torch._higher_order_ops.effects import (
+    _EffectType,
+    _get_effect,
+    _register_effectful_op,
+    with_effects,
+)
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
-from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
-    SM70OrLater,
-    SM80OrLater,
-)
+from torch.testing._internal.common_cuda import SM70OrLater, SM80OrLater
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -300,7 +301,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     @unittest.skipIf(IS_WINDOWS, "triton")
     @unittest.skipIf(TEST_WITH_ROCM, "triton")
     @unittest.skipIf(not SM80OrLater, "triton")
-    @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "triton")
     @unittest.skipIf(not TEST_CUDA, "triton")
     @skipIfNoDynamoSupport
     def test_register_effectful_custom_op(self):
@@ -308,41 +308,23 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             torch._dynamo.config.capture_scalar_outputs = True
             torch._dynamo.config.capture_dynamic_output_shape_ops = True
 
-            torch.library.define(
-                "mylib::record_scalar_tensor",
-                "(Tensor x, str prefix) -> ()",
-                lib=lib,
-            )
-
             # global variable to store the recorded tensor and prefix.
             recorded_dict = {}
 
-            # Pytorch custorm op implementation
-            @torch.library.impl(
-                "mylib::record_scalar_tensor",
-                "CompositeExplicitAutograd",
-                lib=lib,
-            )
-            def record_scalar_tensor(x, prefix):
+            # Pytorch custom op implementation
+            @torch.library.custom_op("mylib::record_scalar_tensor", mutates_args=())
+            def record_scalar_tensor(x: torch.Tensor, prefix: str) -> None:
                 recorded_dict[prefix] = x.clone()
                 return
 
             # Meta function of the custom op
-            @torch.library.register_fake(
-                "mylib::record_scalar_tensor",
-                lib=lib,
-            )
+            @record_scalar_tensor.register_fake
             def record_scalar_tensor_meta(x, prefix):
                 return
 
-            from torch._higher_order_ops.effects import (
-                _EffectType,
-                _register_effectful_op,
-            )
+            record_scalar_tensor.register_effect(_EffectType.ORDERED)
 
-            _register_effectful_op(
-                torch.ops.mylib.record_scalar_tensor.default, _EffectType.ORDERED
-            )
+            self.assertEqual(_get_effect(record_scalar_tensor), _EffectType.ORDERED)
 
             my_config = {}
             my_config["MockModule"] = "mean"
@@ -469,13 +451,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             torch.library.register_autograd("_mylib::zoo", foo_bwd, lib=lib)
 
-            from torch._higher_order_ops.effects import (
-                _EffectType,
-                _register_effectful_op,
+            torch.library._register_effectful_op(
+                torch.ops._mylib.zoo.default, _EffectType.ORDERED
             )
-
-            _register_effectful_op(torch.ops._mylib.zoo.default, _EffectType.ORDERED)
-            _register_effectful_op(torch.ops._mylib.zoo2.default, _EffectType.ORDERED)
+            torch.library._register_effectful_op(
+                torch.ops._mylib.zoo2.default, _EffectType.ORDERED
+            )
 
             def fn(x, y):
                 return torch.ops._mylib.zoo(x) + y
@@ -491,9 +472,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             def ins_dense():
                 return torch.tensor([1.0, 2.0, 3.0]), torch.tensor([4.0, 5.0, 6.0])
 
-            for i, (ins_fn, expected_fw_count) in enumerate(
-                zip([ins_sc, ins_dense], [2, 1])
-            ):
+            for ins_fn, expected_fw_count in zip([ins_sc, ins_dense], [2, 1]):
                 reset_counter()
                 ref_out = fn(*ins_fn())
                 assert_counter(expected_fw_count, 0)
@@ -524,16 +503,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
                     ),
                 )
 
-            for i, (
+            for (
                 ins_fn_req_grad,
                 (
                     expected_fw_count,
                     expected_fw_count_after_bw,
                     expected_bw_count_after_bw,
                 ),
-            ) in enumerate(
-                zip([ins_dense_req_grad, ins_sc_req_grad], [(1, 1, 1), (2, 2, 2)])
-            ):
+            ) in zip([ins_dense_req_grad, ins_sc_req_grad], [(1, 1, 1), (2, 2, 2)]):
                 ref_ins = ins_fn_req_grad()
                 reset_counter()
                 ref_out = fn(*ref_ins)
@@ -691,13 +668,13 @@ def forward(self, arg0_1, arg1_1):
 
             torch.library.register_autograd("_mylib::foo", foo_bwd, lib=lib)
 
-            from torch._higher_order_ops.effects import (
-                _deregister_effectful_op,
-                _EffectType,
-                _register_effectful_op,
+            handle = _register_effectful_op(
+                torch.ops._mylib.foo.default, _EffectType.ORDERED
+            )
+            self.assertEqual(
+                _get_effect(torch.ops._mylib.foo.default), _EffectType.ORDERED
             )
 
-            _register_effectful_op(torch.ops._mylib.foo.default, _EffectType.ORDERED)
             try:
 
                 def fn(x, y):
@@ -783,17 +760,13 @@ def forward(self, tangents_1, tangents_2, tangents_token):
                     else:
                         raise NotImplementedError
             finally:
-                _deregister_effectful_op(torch.ops._mylib.foo.default)
+                handle.destroy()
+
+            self.assertEqual(_get_effect(torch.ops._mylib.foo.default), None)
 
     @skipIfNoDynamoSupport
     def test_regular_effectful_op_only_in_backward(self):
-        from torch._higher_order_ops.effects import (
-            _deregister_effectful_op,
-            _EffectType,
-            _register_effectful_op,
-        )
-
-        _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
+        handle = _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
         try:
 
             def fn(x):
@@ -856,17 +829,11 @@ def forward(self, primals_1, primals_2, tangents_1, tangents_2, tangents_token):
     return (mul, mul_1, getitem_2)""",
             )
         finally:
-            _deregister_effectful_op(torch.ops.aten.cos.default)
+            handle.destroy()
 
     @skipIfNoDynamoSupport
     def test_regular_effectful_op_in_forward_and_backward(self):
-        from torch._higher_order_ops.effects import (
-            _deregister_effectful_op,
-            _EffectType,
-            _register_effectful_op,
-        )
-
-        _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
+        handle = _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
         try:
 
             def fn(x):
@@ -901,7 +868,7 @@ def forward(self, primals_2, getitem_1, tangents_1, tangents_token):
     return (mul_1, getitem_2)""",
             )
         finally:
-            _deregister_effectful_op(torch.ops.aten.cos.default)
+            handle.destroy()
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 import copy
 import warnings
 from dataclasses import asdict
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._subclasses import FakeTensor
@@ -117,7 +117,7 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
 
 
 def _get_observer_kwargs(
-    quant_spec: Union[QuantizationSpec, FixedQParamsQuantizationSpec],
+    quant_spec: QuantizationSpec | FixedQParamsQuantizationSpec,
 ):
     kwargs_dict = asdict(quant_spec)
     return copy.deepcopy(kwargs_dict)
@@ -127,14 +127,14 @@ def _get_qspec_for_arg(
     arg: Node,
     input_qspec_map: dict[Node, QuantizationSpecBase],
     named_modules: dict[str, torch.nn.Module],
-) -> Optional[QuantizationSpecBase]:
+) -> QuantizationSpecBase | None:
     while _is_activation_post_process_node(arg, named_modules):
         arg = arg.args[0]  # type: ignore[assignment]
-    return input_qspec_map.get(arg, None)
+    return input_qspec_map.get(arg)
 
 
 def _create_obs_or_fq_from_qspec(
-    quantization_spec: Optional[QuantizationSpecBase],
+    quantization_spec: QuantizationSpecBase | None,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ):
@@ -149,10 +149,11 @@ def _create_obs_or_fq_from_qspec(
         return None
     if isinstance(quantization_spec, SharedQuantizationSpec):
         edge_or_node = quantization_spec.edge_or_node
-        assert edge_or_node in obs_or_fq_map, (
-            "please make sure only refer to edge or node that has "
-            f"observer/fake_quant inserted: '{edge_or_node}' not in\n{obs_or_fq_map.keys()}"
-        )
+        if edge_or_node not in obs_or_fq_map:
+            raise AssertionError(
+                "please make sure only refer to edge or node that has "
+                f"observer/fake_quant inserted: '{edge_or_node}' not in\n{obs_or_fq_map.keys()}"
+            )
         return obs_or_fq_map[edge_or_node]
     elif isinstance(quantization_spec, DerivedQuantizationSpec):
         # can't use asdict, so not calling get_observer_kwargs here
@@ -166,6 +167,7 @@ def _create_obs_or_fq_from_qspec(
         }
         edge_or_nodes = quantization_spec.derived_from
         obs_or_fqs = [obs_or_fq_map[k] for k in edge_or_nodes]
+        # pyrefly: ignore [unsupported-operation]
         kwargs["obs_or_fqs"] = obs_or_fqs
         return _DerivedObserverOrFakeQuantize.with_args(**kwargs)()
     elif isinstance(quantization_spec, FixedQParamsQuantizationSpec):
@@ -176,7 +178,8 @@ def _create_obs_or_fq_from_qspec(
         else:
             return observer_ctr()
 
-    assert isinstance(quantization_spec, QuantizationSpec)
+    if not isinstance(quantization_spec, QuantizationSpec):
+        raise AssertionError("quantization_spec must be a QuantizationSpec")
     observer_or_fake_quant_ctr = quantization_spec.observer_or_fake_quant_ctr
     kwargs = _get_observer_kwargs(quantization_spec)
     kwargs.pop("observer_or_fake_quant_ctr")
@@ -213,10 +216,14 @@ def _needs_obs_or_fq(
     # need to insert placeholder observer for dynamic quantization so that it can
     # be converted to choose_qparams -> q -> dq in convert step
     if cur_target_is_dynamic:
-        assert cur_target_dtype in _OBS_DTYPE_LIST, (
-            f"Expected cur_target_dtype to be torch.float, but got: {cur_target_dtype}"
-        )
-        assert prev_output_dtype not in _DO_NOT_OBS_DTYPE_LIST
+        if cur_target_dtype not in _OBS_DTYPE_LIST:
+            raise AssertionError(
+                f"Expected cur_target_dtype to be torch.float, but got: {cur_target_dtype}"
+            )
+        if prev_output_dtype in _DO_NOT_OBS_DTYPE_LIST:
+            raise AssertionError(
+                "prev_output_dtype must not be in _DO_NOT_OBS_DTYPE_LIST"
+            )
         return is_zeroth_arg
     if reuse_input_obs_or_fq:
         return False
@@ -242,8 +249,8 @@ def _is_activation_post_process_node(
 
 
 def _get_dtype_and_is_dynamic(
-    obs_or_fq: Optional[ObserverOrFakeQuantize],
-) -> tuple[Optional[torch.dtype], bool]:
+    obs_or_fq: ObserverOrFakeQuantize | None,
+) -> tuple[torch.dtype | None, bool]:
     """Given a constructor for observer or fake quant module, returns
     a Tuple of dtype and is_dynamic
     """
@@ -386,8 +393,8 @@ def _is_observer_in_same_graph(
 
 
 def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
-    pattern: Optional[Pattern],
-    matched_node_pattern: Optional[list[Node]],
+    pattern: Pattern | None,
+    matched_node_pattern: list[Node] | None,
     qconfig: QConfigAny,
     backend_config: BackendConfig,
 ) -> bool:
@@ -397,7 +404,8 @@ def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
     """
     if backend_config is None or pattern is None:
         return True
-    assert matched_node_pattern is not None and len(matched_node_pattern) >= 1
+    if matched_node_pattern is None or len(matched_node_pattern) < 1:
+        raise AssertionError("matched_node_pattern must be non-empty")
     pattern_to_dtype_configs = get_pattern_to_dtype_configs(backend_config)
     dtype_configs: list[DTypeConfig] = pattern_to_dtype_configs.get(pattern, [])
     pattern_to_root_node_getter = get_fusion_pattern_to_root_node_getter(backend_config)
@@ -429,10 +437,8 @@ def _get_standalone_module_configs(
     named_modules: dict[str, torch.nn.Module],
     prepare_custom_config: PrepareCustomConfig,
     parent_qconfig: QConfigAny,
-    parent_backend_config: Optional[BackendConfig],
-) -> tuple[
-    QConfigMapping, tuple[Any, ...], PrepareCustomConfig, Optional[BackendConfig]
-]:
+    parent_backend_config: BackendConfig | None,
+) -> tuple[QConfigMapping, tuple[Any, ...], PrepareCustomConfig, BackendConfig | None]:
     """
     Returns the standalone module QConfigMapping and PrepareCustomConfig
     for `node`, assuming that the module pointed to by `node` is
@@ -478,7 +484,7 @@ def _insert_obs_or_fq(
     model: torch.nn.Module,
     named_modules: dict[str, torch.nn.Module],
     graph: Graph,
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> Node:
     """
     Attaches `obs_or_fq` to `model`, and creates a node which calls
@@ -508,7 +514,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
     matched_node_pattern: NodePattern,
     last_node: Node,
     qconfig: QConfigAny,
-    qhandler: Optional[QuantizeHandler],
+    qhandler: QuantizeHandler | None,
     backend_config: BackendConfig,
     named_modules: dict[str, torch.nn.Module],
     cache_for_no_tensor_check: dict[Node, bool],
@@ -534,7 +540,8 @@ def _set_target_dtype_info_for_matched_node_pattern(
     # other types of matched object, e.g. int, float literals, are ignored
     elif isinstance(matched_node_pattern, Node):
         # for pyre
-        assert isinstance(matched_node_pattern, Node)
+        if not isinstance(matched_node_pattern, Node):
+            raise AssertionError("matched_node_pattern must be a Node")
         node = matched_node_pattern
         if node in processed_nodes:
             return
@@ -562,7 +569,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
 def _get_target_activation_dtype_for_node(
     node: Node,
     qconfig: QConfigAny,
-    qhandler: Optional[QuantizeHandler],
+    qhandler: QuantizeHandler | None,
     named_modules: dict[str, torch.nn.Module],
     backend_config: BackendConfig,
     cache_for_no_tensor_check: dict[Node, bool],
@@ -665,7 +672,7 @@ def _get_output_act_obs_or_fq(
     named_modules: dict[str, torch.nn.Module],
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-) -> Optional[ObserverOrFakeQuantize]:
+) -> ObserverOrFakeQuantize | None:
     """Get the constructor for observer or fake quant object for
     the argument in the original graph as the output of previous node,
     skipping inserted observers
@@ -673,7 +680,8 @@ def _get_output_act_obs_or_fq(
     We are assuming that the observers are inserted correctly, and the dtype for
     argument in quantized graph will match what is specified by the qconfig
     """
-    assert isinstance(arg, Node)
+    if not isinstance(arg, Node):
+        raise AssertionError("arg must be a Node")
     if "quantization_annotation" in arg.meta:
         return _create_obs_or_fq_from_qspec(
             arg.meta["quantization_annotation"].output_qspec, obs_or_fq_map, is_qat
@@ -697,9 +705,8 @@ def _get_output_act_obs_or_fq(
         )
     elif _is_activation_post_process_node(arg, named_modules):
         observed_arg = arg.args[0]
-        assert isinstance(observed_arg, Node), (
-            "Currently we only support observing Node"
-        )
+        if not isinstance(observed_arg, Node):
+            raise AssertionError("Currently we only support observing Node")
         if "quantization_annotation" in observed_arg.meta:
             output_act_obs_or_fq = _create_obs_or_fq_from_qspec(
                 observed_arg.meta["quantization_annotation"].output_qspec,
@@ -707,7 +714,10 @@ def _get_output_act_obs_or_fq(
                 is_qat,
             )
         else:
-            assert "target_dtype_info" in observed_arg.meta
+            if "target_dtype_info" not in observed_arg.meta:
+                raise AssertionError(
+                    "expected 'target_dtype_info' in observed_arg.meta"
+                )
             output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"][
                 "output_act_obs_or_fq_ctr"
             ]
@@ -733,7 +743,7 @@ def _get_arg_target_dtype_as_output(
     named_modules: dict[str, torch.nn.Module],
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-) -> Optional[torch.dtype]:
+) -> torch.dtype | None:
     arg_as_output_act_obs_or_fq = _get_output_act_obs_or_fq(
         arg, named_modules, obs_or_fq_map, is_qat
     )
@@ -749,11 +759,12 @@ def _get_arg_as_input_act_obs_or_fq(
     named_modules: dict[str, torch.nn.Module],
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-) -> Optional[ObserverOrFakeQuantize]:
+) -> ObserverOrFakeQuantize | None:
     """Get the observer or fake quant constructor for the Argument `arg`, as input
     to Node `node`
     """
-    assert isinstance(arg, Node)
+    if not isinstance(arg, Node):
+        raise AssertionError("arg must be a Node")
     # "input_qspec_map" is the more general design we'll use for pt2e path
     # it is a map from input argument node to observer or fake quant constructor, for example
     # for the following graph:
@@ -796,18 +807,18 @@ def _get_arg_as_input_act_obs_or_fq(
 
 
 def _maybe_insert_input_observer_for_arg_or_kwarg(
-    node: Union[Node, Any],
+    node: Node | Any,
     arg: Argument,
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: dict[str, torch.nn.Module],
     graph: Graph,
-    qhandler: Optional[QuantizeHandler],
+    qhandler: QuantizeHandler | None,
     prepare_custom_config: PrepareCustomConfig,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    backend_config: Optional[BackendConfig] = None,
-    model_device: Optional[torch.device] = None,
+    backend_config: BackendConfig | None = None,
+    model_device: torch.device | None = None,
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -837,7 +848,8 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
 
     if not isinstance(arg, Node):
         return arg
-    assert isinstance(arg, Node)
+    if not isinstance(arg, Node):
+        raise AssertionError("arg must be a Node")
     # default (no observer)
     new_arg = arg
 
@@ -853,7 +865,8 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
                 "quantization_annotation"
             ]._reuse_input_obs_or_fq
         else:
-            assert "target_dtype_info" in node.meta
+            if "target_dtype_info" not in node.meta:
+                raise AssertionError("expected 'target_dtype_info' in node.meta")
             # TODO: we are assuming "target_dtype_info" exists here, maybe
             # a default value also need to be provided here
             target_dtype_info = node.meta["target_dtype_info"]
@@ -888,7 +901,8 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         )
 
     else:
-        assert qconfig is not None
+        if qconfig is None:
+            raise AssertionError("qconfig must not be None")
         # custom flow for standalone modules
         _, _, sm_prepare_custom_config, _ = _get_standalone_module_configs(
             node, named_modules, prepare_custom_config, qconfig, backend_config
@@ -934,18 +948,19 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # we should remove this
         # removing this means we insert one observer for each use, even if they
         # have the same dtype, we can have an extra pass that removes the extra observers
-        for maybe_obs_node in arg.users.keys():
+        for maybe_obs_node in arg.users:
             if maybe_obs_node.op == "call_module":
                 maybe_obs_mod = named_modules[maybe_obs_node.target]  # type: ignore[index]
                 if (
-                    type(maybe_obs_mod) == type(arg_as_input_act_obs_or_fq)
+                    type(maybe_obs_mod) is type(arg_as_input_act_obs_or_fq)
                     and maybe_obs_mod.dtype == arg_as_input_target_dtype  # type: ignore[possibly-undefined]
                 ):
                     arg_as_input_act_obs_or_fq = maybe_obs_mod  # type: ignore[assignment]
                     existing_obs_node = maybe_obs_node
                     break
 
-        assert arg_as_input_act_obs_or_fq is not None
+        if arg_as_input_act_obs_or_fq is None:
+            raise AssertionError("arg_as_input_act_obs_or_fq must not be None")
         obs_or_fq_map[(arg, node)] = arg_as_input_act_obs_or_fq
         if existing_obs_node is None:
             new_obs_node = _insert_obs_or_fq(
@@ -970,12 +985,12 @@ def _maybe_insert_input_observers_for_node(
     model: torch.nn.Module,
     named_modules: dict[str, torch.nn.Module],
     graph: Graph,
-    qhandler: Optional[QuantizeHandler],
+    qhandler: QuantizeHandler | None,
     prepare_custom_config: PrepareCustomConfig,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    backend_config: Optional[BackendConfig] = None,
-    model_device: Optional[torch.device] = None,
+    backend_config: BackendConfig | None = None,
+    model_device: torch.device | None = None,
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -1054,7 +1069,9 @@ def _maybe_insert_input_equalization_observers_for_node(
         return
 
     if is_branch:
-        warnings.warn(f"Cannot equalize {node} because it is part of a branch.")
+        warnings.warn(
+            f"Cannot equalize {node} because it is part of a branch.", stacklevel=2
+        )
         return
 
     new_args = []
@@ -1089,7 +1106,7 @@ def _maybe_insert_output_observer_for_node(
     graph: Graph,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-) -> Optional[Node]:
+) -> Node | None:
     """
     If `node` needs an output observer, creates it, inserts it into `graph`
     and returns it.
@@ -1099,7 +1116,8 @@ def _maybe_insert_output_observer_for_node(
     Note: inserting dynamic quantization ops for output is not supported in fx graph mode
     quantization code path right now
     """
-    assert node.op != "output", "observer insertion for outputs is handled elsewhere"
+    if node.op == "output":
+        raise AssertionError("observer insertion for outputs is handled elsewhere")
 
     is_standalone_module = False
     if "quantization_annotation" in node.meta:
@@ -1107,7 +1125,8 @@ def _maybe_insert_output_observer_for_node(
             node.meta["quantization_annotation"].output_qspec, obs_or_fq_map, is_qat
         )
     else:
-        assert "target_dtype_info" in node.meta
+        if "target_dtype_info" not in node.meta:
+            raise AssertionError("expected 'target_dtype_info' in node.meta")
         is_standalone_module = node.meta["target_dtype_info"].get(
             "_is_standalone_module", False
         )
@@ -1219,7 +1238,10 @@ def _maybe_insert_observers_before_graph_output(
                 and arg_as_input_target_dtype != torch.float
             )
             if need_obs:
-                assert observer_mod is not None
+                if observer_mod is None:
+                    raise AssertionError(
+                        "observer_mod must not be None when need_obs is True"
+                    )
                 # insert observer
                 observer_node = _insert_obs_or_fq(
                     maybe_node, observer_mod, model, named_modules, graph
@@ -1262,7 +1284,7 @@ def _maybe_insert_observers_before_graph_output(
 
 def _maybe_propagate_dtype_for_node(
     node: Node,
-    target_dtype: Union[torch.dtype, type],
+    target_dtype: torch.dtype | type,
     node_name_to_match_result_with_qconfig: dict[str, _MatchResultWithQConfig],
 ) -> None:
     """
@@ -1390,9 +1412,11 @@ def _maybe_make_input_output_share_observers(
         if iteration_guard > 10000:
             raise AssertionError("Unable to find observer of previous node")
 
-    assert isinstance(first_arg_arg, Node)
+    if not isinstance(first_arg_arg, Node):
+        raise AssertionError("first_arg_arg must be a Node")
     target_to_use = first_arg_arg.target
-    assert isinstance(target_to_use, str)
+    if not isinstance(target_to_use, str):
+        raise AssertionError("target_to_use must be a string")
     obs_mod_to_use = named_modules[target_to_use]
 
     if isinstance(first_arg, (list, tuple)):
@@ -1414,8 +1438,11 @@ def _maybe_make_input_output_share_observers(
             setattr(named_modules[parent_name], name, obs_mod_to_use)
 
     # set the output observer node to use that module
-    for output_obs_node in node.users.keys():
-        assert _is_activation_post_process_node(output_obs_node, named_modules)
+    for output_obs_node in node.users:
+        if not _is_activation_post_process_node(output_obs_node, named_modules):
+            raise AssertionError(
+                "output_obs_node must be an activation post process node"
+            )
         parent_name, name = _parent_name(output_obs_node.target)
         setattr(named_modules[parent_name], name, obs_mod_to_use)
 
@@ -1428,7 +1455,10 @@ def _remove_output_observer(
 ):
     items = list(node.users.items())
     for output_obs_node, _ in items:
-        assert _is_activation_post_process_node(output_obs_node, named_modules)
+        if not _is_activation_post_process_node(output_obs_node, named_modules):
+            raise AssertionError(
+                "output_obs_node must be an activation post process node"
+            )
         output_obs_node.replace_all_uses_with(node)
         model.graph.erase_node(output_obs_node)  # type: ignore[union-attr, operator]
 
@@ -1458,7 +1488,7 @@ def insert_observers_for_model(
     backend_config: BackendConfig,
     observed_node_names: set[str],
     is_qat: bool,
-) -> Optional[Node]:
+) -> Node | None:
     """
     Inserts observers, using the following high level algorithm:
 
@@ -1551,7 +1581,8 @@ def insert_observers_for_model(
             qhandler,
             qconfig,
         ) = match_res_with_qconfig
-        assert qhandler is not None
+        if qhandler is None:
+            raise AssertionError("qhandler must not be None")
         _set_target_dtype_info_for_matched_node_pattern(
             matched_node_pattern,
             last_node,
@@ -1629,7 +1660,8 @@ def insert_observers_for_model(
                 pattern, matched_node_pattern, qconfig, backend_config
             )
         )
-        assert qhandler is not None
+        if qhandler is None:
+            raise AssertionError("qhandler must not be None")
 
         # get output_act_dtype so that we don't also reset the special typed nodes
         # TODO: we might want to handle these more uniformly with the default path
@@ -1708,7 +1740,7 @@ def insert_observers_for_model(
 
             skip_inserting_observers = (
                 (qconfig is None) or not output_is_a_tensor
-            ) and (not node.op == "output")
+            ) and (node.op != "output")
 
             # TODO: take a closer look to see if we can remove this check
             # right now it is here because of `observed_node_names`, we are using
@@ -1723,7 +1755,8 @@ def insert_observers_for_model(
             if not skip_inserting_observers and is_supported_by_backend:
                 named_modules = dict(model.named_modules(remove_duplicate=False))
                 if node.op != "output":
-                    assert matched_node_pattern is not None
+                    if matched_node_pattern is None:
+                        raise AssertionError("matched_node_pattern must not be None")
                     # add matched nodes to the observed node name set
                     _add_matched_node_name_to_set(
                         matched_node_pattern, observed_node_names
@@ -1988,13 +2021,13 @@ def _save_state(
 
 def prepare(
     model: GraphModule,
-    qconfig_mapping: Union[QConfigMapping, dict[str, Any]],
+    qconfig_mapping: QConfigMapping | dict[str, Any],
     is_qat: bool,
     node_name_to_scope: dict[str, tuple[str, type]],
     example_inputs: tuple[Any, ...],
-    prepare_custom_config: Union[PrepareCustomConfig, dict[str, Any], None] = None,
-    _equalization_config: Union[QConfigMapping, dict[str, Any], None] = None,
-    backend_config: Union[BackendConfig, dict[str, Any], None] = None,
+    prepare_custom_config: PrepareCustomConfig | dict[str, Any] | None = None,
+    _equalization_config: QConfigMapping | dict[str, Any] | None = None,
+    backend_config: BackendConfig | dict[str, Any] | None = None,
     is_standalone_module: bool = False,
 ) -> GraphModule:
     """standalone_module means it a submodule that is not inlined in
@@ -2061,8 +2094,10 @@ def prepare(
         )
         backend_config = BackendConfig.from_dict(backend_config)
 
-    assert isinstance(qconfig_mapping, QConfigMapping)
-    assert isinstance(_equalization_config, QConfigMapping)
+    if not isinstance(qconfig_mapping, QConfigMapping):
+        raise AssertionError("qconfig_mapping must be a QConfigMapping")
+    if not isinstance(_equalization_config, QConfigMapping):
+        raise AssertionError("_equalization_config must be a QConfigMapping")
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     _equalization_config = copy.deepcopy(_equalization_config)
 
@@ -2085,8 +2120,11 @@ def prepare(
 
     root_node_getter_mapping = get_fusion_pattern_to_root_node_getter(backend_config)
 
+    # pyrefly: ignore [bad-argument-type]
     _update_qconfig_for_fusion(model, qconfig_mapping)
+    # pyrefly: ignore [bad-argument-type]
     _update_qconfig_for_fusion(model, _equalization_config)
+    # pyrefly: ignore [bad-argument-type]
     flattened_qconfig_dict = _get_flattened_qconfig_dict(qconfig_mapping)
     # TODO: support regex as well
     propagate_qconfig_(model, flattened_qconfig_dict, prepare_custom_config.to_dict())
@@ -2094,6 +2132,7 @@ def prepare(
     if is_qat:
         module_to_qat_module = get_module_to_qat_module(backend_config)
         _qat_swap_modules(model, module_to_qat_module)
+        # pyrefly: ignore [bad-argument-type]
         _update_qconfig_for_qat(qconfig_mapping, backend_config)
 
     # mapping from fully qualified module name to module instance
@@ -2107,10 +2146,20 @@ def prepare(
 
     # fill node_name_to_qconfig, a map from node name to qconfig, used in _find_matches
     equalization_node_name_to_qconfig = _generate_node_name_to_qconfig(
-        model, named_modules, model.graph, _equalization_config, node_name_to_scope
+        model,
+        named_modules,
+        model.graph,
+        # pyrefly: ignore [bad-argument-type]
+        _equalization_config,
+        node_name_to_scope,
     )
     node_name_to_qconfig = _generate_node_name_to_qconfig(
-        model, named_modules, model.graph, qconfig_mapping, node_name_to_scope
+        model,
+        named_modules,
+        model.graph,
+        # pyrefly: ignore [bad-argument-type]
+        qconfig_mapping,
+        node_name_to_scope,
     )
 
     # match the patterns that will get quantized
@@ -2170,17 +2219,19 @@ def prepare(
         node_name_to_scope,
         prepare_custom_config,
         equalization_node_name_to_qconfig,
+        # pyrefly: ignore [bad-argument-type]
         qconfig_mapping,
         is_qat,
         observed_node_names,
     )
 
     if is_standalone_module:
-        assert result_node is not None
-        assert isinstance(result_node.args[0], Node), (
-            "standalone module only supports returning simple value currently"
-            "(not tuple, dict etc.)"
-        )
+        if result_node is None:
+            raise AssertionError("result_node must not be None for standalone modules")
+        if not isinstance(result_node.args[0], Node):
+            raise AssertionError(
+                "standalone module only supports returning simple value currently (not tuple, dict etc.)"
+            )
         # these inputs are observed in parent
         # converting List[int] to Tensor since module attribute is
         # Union[Tensor, Module]

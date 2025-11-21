@@ -7,7 +7,7 @@ import logging
 import os
 import pkgutil
 import unittest
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch._utils_internal import get_file_path_2  # @manual
@@ -123,6 +123,7 @@ class TestPublicBindings(TestCase):
             "FutureType",
             "Generator",
             "GeneratorType",
+            "GreenContext",
             "get_autocast_cpu_dtype",
             "get_autocast_dtype",
             "get_autocast_ipu_dtype",
@@ -291,7 +292,7 @@ class TestPublicBindings(TestCase):
         # do not get imported by public code.
         # DO NOT add public modules here.
         private_allowlist = {
-            "torch._inductor.codegen.cuda.cuda_kernel",
+            "torch._inductor.codegen.cutlass.cuda_kernel",
             # TODO(#133647): Remove the onnx._internal entries after
             # onnx and onnxscript are installed in CI.
             "torch.onnx._internal.exporter",
@@ -356,7 +357,8 @@ class TestPublicBindings(TestCase):
             "torch.testing._internal.distributed.rpc.rpc_test",
             "torch.testing._internal.distributed.rpc.tensorpipe_rpc_agent_test_fixture",
             "torch.testing._internal.distributed.rpc_utils",
-            "torch._inductor.codegen.cuda.cuda_template",
+            "torch._inductor.codegen.cutlass.cuda_template",
+            "torch._inductor.codegen.cutedsl._cutedsl_utils",
             "torch._inductor.codegen.cuda.gemm_template",
             "torch._inductor.codegen.cpp_template",
             "torch._inductor.codegen.cpp_gemm_template",

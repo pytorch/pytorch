@@ -358,9 +358,7 @@ def _sequential_split_inline_tests():
 
         for i, node in enumerate(insert_locs):
             with gm.graph.inserting_before(node):
-                gm.graph.call_function(
-                    torch._C._set_grad_enabled, (True if i % 2 == 0 else False,), {}
-                )
+                gm.graph.call_function(torch._C._set_grad_enabled, (i % 2 == 0,), {})
         return gm
 
     x = torch.randn(2, 2)

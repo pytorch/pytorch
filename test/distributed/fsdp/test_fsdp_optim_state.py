@@ -2,9 +2,10 @@
 
 import bisect
 import sys
+from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import torch
 import torch.nn as nn
@@ -420,7 +421,7 @@ class TestFSDPOptimState(FSDPTest):
             return False
         for state_name, value1 in state1.items():
             value2 = state2[state_name]
-            if type(value1) != type(value2):
+            if type(value1) is not type(value2):
                 return False
             if torch.is_tensor(value1):  # tensor state
                 assert torch.is_tensor(value2)

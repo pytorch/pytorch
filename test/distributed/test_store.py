@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 if platform == "darwin":
     LOOPBACK = "lo0"
@@ -253,6 +253,14 @@ class StoreTestBase:
         a.set("foo", "bar")
         self.assertEqual(b.get("foo"), b"bar")
 
+    def test_list_keys(self):
+        a = self._create_store()
+        a.set("foo", "bar")
+        a.set("baz", "qux")
+        keys = a.list_keys()
+        self.assertIn("foo", keys)
+        self.assertIn("baz", keys)
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -317,6 +325,7 @@ class HashStoreTest(TestCase, StoreTestBase):
 
 class PrefixStoreTest(TestCase):
     def setUp(self):
+        super().setUp()
         # delete is false as FileStore will automatically clean up the file
         self.file = tempfile.NamedTemporaryFile(delete=False)
 
@@ -1178,6 +1187,6 @@ class TestClientProtocol(TestCase):
 if __name__ == "__main__":
     if device_type != "cpu":
         assert not torch.get_device_module()._initialized, (
-            "test_distributed must not have initialized {device_type} context on main process"
+            f"test_distributed must not have initialized {device_type} context on main process"
         )
     run_tests()

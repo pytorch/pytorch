@@ -345,7 +345,7 @@ class Attr {
         dnnl::memory binary_m;
         auto binary = ops_params_[i].binary_;
         auto md = ops_params_[i].meta_;
-        // qeury expected_md to achieve peak performance
+        // query expected_md to achieve peak performance
         auto expected_md = pd.query_md(
             dnnl::query::exec_arg_md,
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
