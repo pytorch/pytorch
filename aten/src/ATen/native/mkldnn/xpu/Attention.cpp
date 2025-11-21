@@ -82,9 +82,75 @@ bool can_use_cudnn_attention(sdp::sdp_params const& params, bool debug) {
   return false;
 }
 
-bool can_use_mem_efficient_attention(
-    sdp::sdp_params const& params,
-    bool debug) {
+int64_t minimum_gemm_alignment(sdp::sdp_params const& params) {
+  bool is_half = (params.query.dtype() == at::kHalf) ||
+      (params.query.dtype() == at::kBFloat16);
+  int64_t matmul_alignment_mn = 4;
+  int64_t bits_per_scalar = is_half ? 16 : 32;
+  matmul_alignment_mn = std::max(matmul_alignment_mn, 128 / bits_per_scalar);
+
+  return matmul_alignment_mn;
+}
+
+bool check_head_dim_size_mem_efficient(sdp::sdp_params const& params, bool debug) {
+  const auto query_size_last = params.query.sym_size(-1);
+  const auto value_size_last = params.value.sym_size(-1);
+  const int64_t alignment = minimum_gemm_alignment(params);
+  if (!(query_size_last == params.key.sym_size(-1) &&
+        query_size_last % alignment == 0 && query_size_last > 0 &&
+        value_size_last % alignment == 0 && value_size_last > 0)) {
+    if (debug) {
+      TORCH_WARN(
+          "Mem efficient attention requires last dimension of inputs to be divisible by ",
+          alignment,
+          ". ",
+          "Got Query.size(-1): ",
+          query_size_last,
+          ", Key.size(-1): ",
+          params.key.sym_size(-1),
+          ", Value.size(-1): ",
+          params.value.sym_size(-1),
+          " instead.");
+    }
+    return false;
+  }
+  return true;
+}
+
+bool can_use_mem_efficient_attention(sdp::sdp_params const& params, bool debug) {
+  // Define gate functions that determine if a mem efficient can be run
+  constexpr auto general_constraints = c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
+      sdp::check_runtime_disabled_mem_efficient,
+      sdp::check_tensor_shapes,
+      check_head_dim_size_mem_efficient
+  );
+  for (auto& constraint : general_constraints) {
+    if (!constraint(params, debug)) {
+      return false;
+    }
+  }
+  if (has_for_nested_inputs(params)) {
+    constexpr auto nested_constraints = c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
+        sdp::check_requires_grad_and_nested,
+        sdp::check_batch_size_nested,
+        sdp::check_for_seq_len_0_nested_tensor);
+    for (auto& constraint : nested_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
+  if (has_only_dense_inputs(params)) {
+    constexpr auto dense_constraints = c10::array_of<bool (*)(sdp::sdp_params const&, bool)>(
+        sdp::check_nonzero_sequence_lengths_dense,
+        sdp::check_last_dim_stride_equals_1_dense<false>,
+        sdp::check_batch_size_and_num_heads_dense<false>);
+    for (auto& constraint : dense_constraints) {
+      if (!constraint(params, debug)) {
+        return false;
+      }
+    }
+  }
   return true;
 }
 
