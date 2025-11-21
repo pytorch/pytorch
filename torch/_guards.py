@@ -713,6 +713,9 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.lazy_bwd_cache: dict[
             str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
         ] = defaultdict(dict)
+        self.effects_cache: dict[
+            str, set
+        ] = {}  # Maps identifier -> set of effect types
 
     def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None:
         self.dynamo_installed_submodules[fn_id].append(identifier)
@@ -750,6 +753,21 @@ class InvokeSubgraphCache(HopSubgraphCache):
             return (None, None)
 
         return self.lazy_bwd_cache[identifier].get(tangent_metadata, (None, None))
+
+    def add_effects(self, identifier: str, effects: set) -> None:
+        """Store the effect types for a given invoke_subgraph identifier."""
+        if prev_effects := self.effects_cache.get(identifier, None):
+            assert effects == prev_effects, (
+                "Different number of effects were found for invoke_subgraph "
+                f"call with identifier {identifier}. \n"
+                f"Previously we had the following effects: {prev_effects}.\n"
+                f"But now we have: {effects}."
+            )
+        self.effects_cache[identifier] = effects
+
+    def get_effects(self, identifier: str) -> Optional[set]:
+        """Retrieve the effect types for a given invoke_subgraph identifier."""
+        return self.effects_cache.get(identifier, None)
 
 
 class HopDispatchSetCache:
