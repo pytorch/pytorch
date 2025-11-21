@@ -215,12 +215,8 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
-    redistribute_input(0, S(0)[0]S(0)[1] -> S(0)R)
-      redistribute_input(t: f32[16, 8], trace: S(0)[0]S(0)[1]->S(0)R)
-        _c10d_functional::all_gather_into_tensor(t: f32[16, 8], 2, 3)
-        _c10d_functional::wait_tensor(t: f32[32, 8])
-    redistribute_input(1, S(1)[0]S(1)[1] -> RS(1))
-      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR->RS(1))
+    redistribute_input(1, S(1)[0]S(1)[1] -> RR)
+      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
         _c10d_functional::wait_tensor(t: f32[16, 16])
         aten::chunk(t: f32[16, 16], 2)
@@ -229,11 +225,9 @@ class TestDTensorDebugMode(TestCase):
         _c10d_functional::wait_tensor(t: f32[32, 32])
         aten::chunk(t: f32[32, 32], 4)
         aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
-        aten::chunk(t: f32[8, 128], 2, 1)
-        aten::clone(t: f32[8, 64])
-    aten::mm(t: f32[32, 8], t: f32[8, 64])
-  aten::sum(dt: f32[128, 128]| S(0)S(1))
-    aten::sum(t: f32[32, 64])""",
+    aten::mm(t: f32[16, 8], t: f32[8, 128])
+  aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
+    aten::sum(t: f32[16, 128])""",
         )
 
     def test_debug_mode_einsum(self):
