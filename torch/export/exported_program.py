@@ -1707,7 +1707,7 @@ def _convert_guards_to_code(graph_module):
         )
     }
     py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
-        shape_env.var_to_sources, lambda s: s.name(), shape_env.var_to_sources
+        shape_env.var_to_sources, lambda s: s.name, shape_env.var_to_sources
     )
     ret = [
         py_printer.doprint(guard.expr)
