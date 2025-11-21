@@ -7388,7 +7388,10 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
 
     return output
 
+
 from torch._inductor.fx_passes.control_dependencies import control_dep
+
+
 @register_lowering(control_dep, type_promotion_kind=None)
 def control_dep_op_lowering(additional_deps, out):
     # Realize all additional dependencies
@@ -7404,6 +7407,7 @@ def control_dep_op_lowering(additional_deps, out):
         V.graph.additional_buffer_deps[out.get_name()].add(dep_name)
 
     return out
+
 
 @register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)
 def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):

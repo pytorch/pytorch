@@ -95,6 +95,7 @@ def _trace_fn_mm_rs_scatter_dim_non0(
     )
 
     out_chunks = out.chunk(num_chunks)
+    ws = []
     for i in range(num_chunks):
         mm_i = torch.ops.aten.mm(a_flat_chunks[i], b)
         for op in post_mm_ops:
@@ -104,9 +105,10 @@ def _trace_fn_mm_rs_scatter_dim_non0(
         rso = torch.ops._c10d_functional.reduce_scatter_tensor_out(
             cat, reduce_op, group_size, group_name, out=out_chunks[i]
         )
-        torch.ops._c10d_functional.wait_tensor(rso)
+        ws.append(torch.ops._c10d_functional.wait_tensor(rso))
 
-    return (out,)
+    # Waits must finish before out read
+    return torch.ops.higher_order.control_dep(ws, out)
 
 
 def _mm_split_cat_rs_fn_view3d(
@@ -131,6 +133,7 @@ def _mm_split_cat_rs_fn_view3d(
         device=orig_out.device,
     )
     out_chunks = out.chunk(num_chunks)
+    ws = []
     for i in range(num_chunks):
         mm_i = torch.ops.aten.mm(a_flat_chunks[i], b)
         for op in post_mm_ops:
@@ -142,9 +145,10 @@ def _mm_split_cat_rs_fn_view3d(
         rso = torch.ops._c10d_functional.reduce_scatter_tensor_out(
             cat, reduce_op, group_size, group_name, out=out_chunks[i]
         )
-        w = torch.ops._c10d_functional.wait_tensor(rso)
+        ws.append(torch.ops._c10d_functional.wait_tensor(rso))
 
-    return (out,)
+    # Waits must finish before out read
+    return torch.ops.higher_order.control_dep(ws, out)
 
 
 def _size_hint(s: sympy.Expr) -> int:
@@ -454,36 +458,6 @@ class _ViewOp(_PostMMOp):
             shape[self.chunk_dim] //= num_chunks
         return self.n.target(t, shape)  # pyrefly: ignore[not-callable]
 
-def _add_out_collectives_deps(gm):
-    from torch._inductor.fx_passes.bucketing import is_wait_tensor
-    g = gm.graph
-    out = None
-    wait_ns = []
-    out_n = None
-    for n in g.nodes:
-        if n.op == "output":
-            out_n = n
-            outs = n.args[0]
-            out = outs[0]
-        if not is_wait_tensor(n):
-            continue
-
-        coll_n = n.args[0]
-        if "reduce_scatter_tensor_out" not in str(coll_n.target):
-            continue
-
-        wait_ns.append(n)
-    if len(wait_ns) == 0:
-        return
-    assert out_n is not None
-
-    with g.inserting_before(out_n):
-        control_dep_n = g.call_function(
-            torch.ops.higher_order.control_dep,
-            (wait_ns, out),
-        )
-        out_n.args = ([control_dep_n],)
-
 
 def _process_matmul_reduce_scatter(
     g, reduce_scatter: _ReduceScatterMatch, min_size_after_split, num_chunks: list[int]
@@ -590,7 +564,6 @@ def _process_matmul_reduce_scatter(
         mm_n,  # insert before
         [arg_a, arg_b],
         [rs_wait_tensor_node],
-        _add_out_collectives_deps,
     )
     # Cleanup previous nodes
     for n in reversed(reduce_scatter.match.nodes):
