@@ -120,14 +120,7 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool query_event(CUDAEventPool::Event& event) override {
-    cudaError_t err = cudaEventQuery(*event);
-    if (err == cudaErrorNotReady) {
-      (void)cudaGetLastError(); // clear CUDA error
-      return false;
-    } else if (err != cudaSuccess) {
-      C10_CUDA_CHECK(err);
-    }
-    return true;
+    return event->query();
   }
 
   CUDAEventPool::Event create_event_internal(DeviceIndex idx) {
