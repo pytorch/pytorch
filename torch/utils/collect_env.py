@@ -654,11 +654,12 @@ def get_pip_packages(run_lambda, patterns=None):
     return pip_version, filtered_out
 
 
-def get_cachingallocator_config():
-    ca_config = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
-    if not ca_config:
-        ca_config = os.environ.get("PYTORCH_HIP_ALLOC_CONF", "")
-    return ca_config
+def get_cachingallocator_config() -> str:
+    """Return the caching allocator configuration from environment variables."""
+    for var in ("PYTORCH_ALLOC_CONF", "PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_HIP_ALLOC_CONF"):
+        if config := os.environ.get(var):
+            return config
+    return ""
 
 
 def get_cuda_module_loading_config():

@@ -4629,7 +4629,7 @@ print(torch.cuda.get_allocator_backend())
     def test_allocator_memory_fraction_setting(self):
         def make_env(fraction):
             env = os.environ.copy()
-            var = "PYTORCH_CUDA_ALLOC_CONF"
+            var = "PYTORCH_ALLOC_CONF"
             key = "per_process_memory_fraction"
             value = [
                 x
