@@ -58,8 +58,7 @@ wrapper__scaled_dot_product_fused_attention_overrideable(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale,
-    bool compute_log_sumexp) {
+    std::optional<double> scale) {
   return at::native::openreg::_scaled_dot_product_fused_attention_overrideable(
       query,
       key,
@@ -68,8 +67,7 @@ wrapper__scaled_dot_product_fused_attention_overrideable(
       dropout_p,
       is_causal,
       return_debug_mask,
-      scale,
-      compute_log_sumexp);
+      scale);
 }
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
