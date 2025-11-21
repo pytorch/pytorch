@@ -759,7 +759,7 @@ class PallasTestsCPU(PallasTestsMixin, TestCase):
 
 
 @unittest.skipUnless(has_jax_tpu_backend(), "requires JAX TPU backend")
-@config.patch({"pallas_target_tpu": True})
+@config.patch({"_debug_cpu_to_tpu_pallas": True})
 class PallasTestsTPU(PallasTestsMixin, TestCase):
     DEVICE = "cpu"
 

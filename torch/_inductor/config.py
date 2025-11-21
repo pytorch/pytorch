@@ -1211,7 +1211,9 @@ file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "
 
 enable_autograd_for_aot: bool = False
 
-pallas_target_tpu: bool = Config(env_name_force="PALLAS_TARGET_TPU", default=False)
+_debug_cpu_to_tpu_pallas: bool = Config(
+    env_name_force="PALLAS_TARGET_TPU", default=False
+)
 pallas_take_first_jax_device_only: bool = Config(
     env_name_force="PALLAS_TAKE_FIRST_JAX_DEVICE_ONLY", default=True
 )

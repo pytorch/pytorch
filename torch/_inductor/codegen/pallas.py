@@ -887,7 +887,7 @@ class PallasKernel(SIMDKernel):
 
         kernel_name = name or "<KERNEL_NAME>"
         interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
-        is_tpu = torch._inductor.config.pallas_target_tpu
+        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
         if is_tpu:
             if not torch._inductor.config.pallas_take_first_jax_device_only:
                 raise RuntimeError(
