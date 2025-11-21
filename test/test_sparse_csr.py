@@ -1938,6 +1938,37 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, False, index_dtype)
             test_shape(7, 8, 9, 20, True, index_dtype)
 
+    @onlyCUDA
+    @dtypesIfCUDA(*([torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else []),
+                  *([torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
+    @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
+    def test_sparse_mm_backward_half_precision(self, device, dtype):
+        crow = torch.tensor([0, 2, 4], device=device)
+        cols = torch.tensor([0, 1, 1, 2], device=device)
+        values = torch.randn(4, dtype=dtype, device=device, requires_grad=True)
+
+        A = torch.sparse_csr_tensor(crow, cols, values, size=(2, 3), device=device)
+        B = torch.randn(3, 2, dtype=dtype, device=device, requires_grad=True)
+
+        out = torch.sparse.mm(A, B)
+        loss = out.sum()
+        loss.backward()
+
+        self.assertIsNotNone(values.grad)
+        self.assertIsNotNone(B.grad)
+        self.assertEqual(values.grad.dtype, dtype)
+        self.assertEqual(B.grad.dtype, dtype)
+
+        values_dense = values.detach().clone().requires_grad_(True)
+        B_dense = B.detach().clone().requires_grad_(True)
+        A_dense = torch.sparse_csr_tensor(crow, cols, values_dense, size=(2, 3), device=device).to_dense()
+        out_dense = torch.mm(A_dense, B_dense)
+        loss_dense = out_dense.sum()
+        loss_dense.backward()
+
+        self.assertEqual(values.grad, values_dense.grad)
+        self.assertEqual(B.grad, B_dense.grad)
+
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
                   *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
