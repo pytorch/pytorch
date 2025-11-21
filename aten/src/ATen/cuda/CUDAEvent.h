@@ -75,7 +75,6 @@ class CUDAEventPool {
   // cudaEventCreate() from invoking during steady-state execution.
   void reserve_events_on_pools(size_t num_events) {
     for (const auto device : c10::irange(pools_.size())) {
-      CUDAGuard guard(device);
       std::vector<Event> temp_events;
       temp_events.reserve(num_events);
       pools_[device].event_pool_.reserve(num_events);
