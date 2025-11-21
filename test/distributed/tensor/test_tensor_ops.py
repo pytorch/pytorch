@@ -2,7 +2,6 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
-import unittest
 
 import torch
 from torch.distributed.tensor import (
@@ -14,7 +13,6 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, skipIfRocm
@@ -335,34 +333,6 @@ class DistTensorOpsTest(DTensorTestBase):
             stack_dim1_shard1_dt.full_tensor(),
             torch.stack([global_input, global_input], dim=1),
         )
-
-    @with_comms
-    def test_stack_cache(self):
-        device_mesh = self.build_device_mesh()
-
-        shape = (4, 8)
-        placements = [Replicate()]
-        dtensor_list = []
-        for _ in range(3):
-            local_tensor = torch.randn(shape)
-            dt = DTensor.from_local(local_tensor, device_mesh, placements)
-            dtensor_list.append(dt)
-
-        _ = torch.stack(dtensor_list)
-
-        dtensor_list2 = []
-        for _ in range(3):
-            local_tensor = torch.randn(shape)
-            dt = DTensor.from_local(local_tensor, device_mesh, placements)
-            dtensor_list2.append(dt)
-
-        def error(*args, **kwargs):
-            raise AssertionError
-
-        with unittest.mock.patch.object(
-            ShardingPropagator, "_propagate_tensor_meta_non_cached", error
-        ):
-            _ = torch.stack(dtensor_list2)
 
     @with_comms
     def test_equal(self):
@@ -736,11 +706,11 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_dtensor_dtype_conversion(self):
         from torch.distributed.tensor.debug import (
-            _clear_sharding_prop_cache,
-            _get_sharding_prop_cache_info,
+            _clear_fast_path_sharding_prop_cache,
+            _get_fast_path_sharding_prop_cache_stats,
         )
 
-        _clear_sharding_prop_cache()
+        _clear_fast_path_sharding_prop_cache()
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
@@ -760,13 +730,13 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertEqual(bf16_sharded_dtensor1.to_local().dtype, torch.bfloat16)
 
         # by this point we only have cache misses
-        hits, misses, _, _ = _get_sharding_prop_cache_info()
+        hits, misses = _get_fast_path_sharding_prop_cache_stats()
         self.assertEqual(hits, 0)
         self.assertEqual(misses, 2)
 
         # convert to fp32 again and see if there's cache hit
         bf16_sharded_dtensor1.float()
-        hits, misses, _, _ = _get_sharding_prop_cache_info()
+        hits, misses = _get_fast_path_sharding_prop_cache_stats()
         # by now we should have cache hit
         self.assertEqual(hits, 1)
         self.assertEqual(misses, 2)
