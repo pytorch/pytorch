@@ -5,19 +5,18 @@ import unittest
 import torch
 import torch.nn as nn
 from torch.distributed._tools import MemoryTracker
-from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestMemoryTracker(TestCase):
-    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda/xpu")
+    @unittest.skipIf(not torch.accelerator.is_available(), "no accelerator")
     def test_local_model(self):
         """
         Minimal test case to check the memory tracker can collect the expected
         memory stats at operator level, as well as can print the summary result
         without crash.
         """
-        device = "cuda" if TEST_CUDA else "xpu"
+        device = torch.accelerator.current_accelerator()
         # Create a model with a hierarchy of modules
         torch.manual_seed(0)
         model = nn.Sequential(
@@ -35,9 +34,9 @@ class TestMemoryTracker(TestCase):
         tracker = MemoryTracker()
         tracker.start_monitor(model)
 
-        x = torch.randn(size=(2, 3, 224, 224), device=torch.device(device))
-        # torch.LongTensor expects cpu device type, not device type in
-        # constructor, so calling .to(device) outside constructor here.
+        x = torch.randn(size=(2, 3, 224, 224), device=device)
+        # torch.LongTensor expects cpu device type, not gpu device type in
+        # constructor, so calling .to() outside constructor here.
         target = torch.LongTensor([0, 1]).to(device)
         criterion = nn.CrossEntropyLoss()
         criterion(model(x), target).backward()

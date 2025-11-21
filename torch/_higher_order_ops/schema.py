@@ -35,7 +35,7 @@ class HopArgumentInfoGen:
         kw_only: bool = False,
     ) -> HopArgumentInfo:
         if default_value is not None:
-            assert type(example_value) == type(default_value), (
+            assert type(example_value) is type(default_value), (
                 f"example_value type {type(example_value)} doesn't match default_value type: {type(default_value)}"
             )
 
@@ -65,6 +65,8 @@ class CTypeGen:
             return torch._C.AnyType.get()
         elif isinstance(obj, torch.SymInt):
             return torch._C.SymIntType.get()
+        elif isinstance(obj, torch.SymBool):
+            return torch._C.SymBoolType.get()
         return torch._C._jit_try_infer_type(obj).type()
 
 

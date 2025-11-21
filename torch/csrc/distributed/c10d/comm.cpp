@@ -109,7 +109,7 @@ at::Tensor parseCppCommHookResult(const c10::IValue& result) {
   if (result.isPyObject()) {
     std::vector<at::Tensor> tensors =
         result.toPyObjectHolder()->extractTensors();
-    return tensors[0];
+    return std::move(tensors[0]);
   }
   TORCH_INTERNAL_ASSERT(
       result.isTensor() || result.isTensorList(),

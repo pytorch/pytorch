@@ -224,6 +224,12 @@ AMD/ROCm/HIP
 -  Jithun Nair (`jithunnair-amd <https://github.com/jithunnair-amd>`__)
 -  (emeritus) Junjie Bai (`bddppq <https://github.com/bddppq>`__)
 
+XPU/Intel GPU
+~~~~~~~~~~~~~
+
+- Eikan Wang (`EikanWang <https://github.com/EikanWang>`__)
+- Guangye Yu (`guangyey <https://github.com/guangyey>`__)
+
 Build + CI
 ~~~~~~~~~~
 
@@ -327,6 +333,11 @@ AArch64 CPU
 
 -  Sunita Nadampalli (`snadampal <https://github.com/snadampal>`__)
 
+Out-of-tree Backend Integration (PrivateUse1)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+-  Jiawei Li (`fffrog <https://github.com/fffrog>`__)
+
 Docs / Tutorials
 ~~~~~~~~~~~~~~~~
 
@@ -339,13 +350,16 @@ XLA
 ~~~
 
 -  Jack Cao (`JackCaoG <https://github.com/JackCaoG>`__)
--  Daniel Sohn (`jysohn23 <https://github.com/jysohn23>`__)
--  Zach Cain (`zcain117 <https://github.com/zcain117>`__)
+-  Han Qi (`qihqi <https://github.com/qihqi>`__)
+-  Yifei Teng (`tengyifei <https://github.com/tengyifei>`__)
+-  Siyuan Liu (`lsy323 <https://github.com/lsy323>`__)
 -  Brian Hirsh (`bdhirsh <https://github.com/bdhirsh>`__)
--  Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
+-  (emeritus) Gregory Chanan (`gchanan <https://github.com/gchanan>`__)
 -  (emeritus) Ailing Zhang (`ailzhang <https://github.com/ailzhang>`__)
 -  (emeritus) Davide Libenzi (`dlibenzi <https://github.com/dlibenzi>`__)
 -  (emeritus) Alex Suhan (`asuhan <https://github.com/asuhan>`__)
+-  (emeritus) Daniel Sohn (`jysohn23 <https://github.com/jysohn23>`__)
+-  (emeritus) Zach Cain (`zcain117 <https://github.com/zcain117>`__)
 
 TorchServe
 ~~~~~~~~~~

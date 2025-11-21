@@ -44,7 +44,7 @@ struct alignas(1) Float8_e4m3fn {
 
   Float8_e4m3fn() = default;
 
-  constexpr C10_HOST_DEVICE Float8_e4m3fn(uint8_t bits, from_bits_t)
+  constexpr C10_HOST_DEVICE Float8_e4m3fn(uint8_t bits, from_bits_t /*unused*/)
       : x(bits) {}
   inline C10_HOST_DEVICE Float8_e4m3fn(float value);
   inline C10_HOST_DEVICE operator float() const;
@@ -169,19 +169,19 @@ inline C10_HOST_DEVICE float fp8e4m3fn_to_fp32_value(uint8_t input) {
  */
 inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
   /*
-   * Representation of +inf in fp32 format, which separates
-   * fp32 normal range values from NaNs:
+   * Representation of +inf in fp32 format, which is the last
+   * non-NaN fp32 value:
    * 0 11111111 00000000000000000000000 - fp32
    */
   constexpr uint32_t fp32_inf = UINT32_C(255) << 23;
 
   /*
-   * Representation of 480.0f in fp32 format, which represents
-   * +NaN in fp8e4m3fn format:
-   * 0 1111 111 - fp8e4m3fn
-   * 0 10000111 11100000000000000000000 - fp32
+   * Representation of 448.0f in fp32 format, which is the last
+   * non-NaN fp8e4m3fn value
+   * 0 1111 110 - fp8e4m3fn
+   * 0 10000111 11000000000000000000000 - fp32
    */
-  constexpr uint32_t fp8_inf = UINT32_C(1087) << 20;
+  constexpr uint32_t fp8_max = UINT32_C(543) << 21;
 
   /*
    * A mask for converting fp32 numbers lower than fp8e4m3fn normal range
@@ -212,8 +212,8 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
   if (f_bits > fp32_inf) {
     // NaN - all exponent and mantissa bits set to 1
     result = 0x7F;
-  } else if (f_bits >= fp8_inf) {
-    // Input number is 480 or larger and thus needs to be clamped
+  } else if (f_bits >= fp8_max) {
+    // Input number is 448 or larger and thus needs to be clamped
     // Largest fp8e4m3fn normal number is 448
     result = 0x7E;
   } else if (f_bits < (UINT32_C(121) << 23)) {
@@ -471,7 +471,7 @@ C10_CLANG_DIAGNOSTIC_POP()
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::Float8_e4m3fn;
 using c10::operator<<;
 using c10::operator+;
@@ -482,7 +482,7 @@ using c10::operator+=;
 using c10::operator-=;
 using c10::operator*=;
 using c10::operator/=;
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 namespace std {
 

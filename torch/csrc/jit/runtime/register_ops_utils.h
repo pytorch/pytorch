@@ -121,7 +121,7 @@ double radians(double x);
 
 // Equivalent to list.at(idx)
 template <typename T>
-decltype(auto) getItem(const c10::List<T>& list, int64_t idx) {
+auto getItem(const c10::List<T>& list, int64_t idx) {
   const int64_t list_size = list.size();
   const int64_t normalized_idx = normalizeIndex(idx, list_size);
   if (normalized_idx < 0 || normalized_idx >= list_size) {
@@ -418,8 +418,8 @@ struct OperatorGeneratorArgs {
 
   template <typename... Args>
   explicit constexpr OperatorGeneratorArgs(
-      torch::detail::SelectiveStr<false>,
-      Args...)
+      torch::detail::SelectiveStr<false> /*unused*/,
+      Args... /*unused*/)
       : schema_str(nullptr),
         isOperationCreator(false),
         operation(nullptr),

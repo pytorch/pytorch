@@ -131,7 +131,7 @@ def functional_call(
             raise ValueError(
                 "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
             )
-        all_keys = [k for d in parameter_and_buffer_dicts for k in d.keys()]
+        all_keys = [k for d in parameter_and_buffer_dicts for k in d]
         all_keys_counter: dict[str, int] = {}
         for k in all_keys:
             v = all_keys_counter.get(k, 0)
@@ -230,7 +230,7 @@ def stack_module_state(
             "stack_module_state: Expected all models to have the same training/eval mode."
         )
     model0_typ = type(models[0])
-    if not all(type(m) == model0_typ for m in models):
+    if not all(type(m) is model0_typ for m in models):
         raise RuntimeError(
             "stack_module_state: Expected all models to be of the same class."
         )

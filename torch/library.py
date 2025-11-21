@@ -6,17 +6,8 @@ import re
 import sys
 import traceback
 import weakref
-from collections.abc import Sequence
-from typing import (
-    Any,
-    Callable,
-    Literal,
-    Optional,
-    overload,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -28,6 +19,7 @@ from torch._library.custom_ops import (
     CustomOpDef,
     device_types_t,
 )
+from torch._library.effects import EffectType
 from torch._library.infer_schema import infer_schema  # noqa: F401
 from torch._library.triton import triton_op, wrap_triton
 from torch._ops import OpOverload
@@ -45,6 +37,7 @@ __all__ = [
     "register_torch_dispatch",
     "register_vmap",
     "get_ctx",
+    "get_kernel",
     "custom_op",
     "triton_op",
     "wrap_triton",
@@ -103,7 +96,7 @@ class Library:
                 " is a reserved namespace. Please try creating a library with another name.",
             )
 
-        frame = traceback.extract_stack(limit=3)[0]
+        frame = traceback.extract_stack(limit=2)[0]
         filename, lineno = frame.filename, frame.lineno
         self.m: Optional[Any] = torch._C._dispatch_library(
             kind, ns, dispatch_key, filename, lineno
@@ -250,6 +243,7 @@ class Library:
 
         if dispatch_key == "":
             dispatch_key = self.dispatch_key
+        # pyrefly: ignore [bad-argument-type]
         assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
 
         if isinstance(op_name, str):
@@ -404,6 +398,22 @@ class Library:
         assert self.m is not None
 
         self.m.fallback(dispatch_key, fn, with_keyset)
+
+    def _register_effectful_op(self, op_name: str, effect: Optional[EffectType]):
+        """
+        Registers an effect to an operator. This is used to register an op that
+        has side effects that is not capturable by the schema.
+
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            effect: The effect of the op.
+        """
+        from torch._higher_order_ops.effects import (
+            _register_effectful_op as hoo_register_effect,
+        )
+
+        handle = hoo_register_effect(op_name, effect)
+        self._registration_handles.append(handle)
 
     def _destroy(self):
         if self.m is not None:
@@ -561,7 +571,7 @@ def _(lib: Library, schema, alias_analysis=""):
 def impl(
     qualname: str,
     types: Union[str, Sequence[str]],
-    func: Literal[None] = None,
+    func: None = None,
     *,
     lib: Optional[Library] = None,
 ) -> Callable[[Callable[..., object]], None]: ...
@@ -651,6 +661,7 @@ def impl(
         >>> y2 = torch.sin(x) + 1
         >>> assert torch.allclose(y1, y2)
     """
+
     return _impl(qualname, types, func, lib=lib, disable_dynamo=False)
 
 
@@ -673,7 +684,7 @@ if not TYPE_CHECKING:
 def _impl(
     qualname: str,
     types: Union[str, Sequence[str]],
-    func: Literal[None] = None,
+    func: None = None,
     *,
     lib: Optional[Library] = None,
     disable_dynamo: bool = False,
@@ -1069,6 +1080,44 @@ def register_fake(
     else:
         stacklevel += 1
         return register(func)
+
+
+def _register_effectful_op(
+    op: _op_identifier,
+    effect: Optional[EffectType],
+    *,
+    lib: Optional[Library] = None,
+) -> None:
+    r"""
+    To specify that an operator has side-effects, we must register an effect
+    type for the operator. This will prevent graph passes in torch.compile from
+    reordering operations with the same effect type.
+
+    Args:
+        op_name: Operator name (along with the overload) or OpOverload object.
+        effect: Effect type to register. None means the operator is not effectful.
+    """
+    if not isinstance(
+        op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)
+    ):
+        raise ValueError(
+            f"register_effectful_op({op}): got unexpected type for op: {type(op)}"
+        )
+
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        opdef.register_effect(effect)
+    assert isinstance(op, str)
+
+    namespace, _ = torch._library.utils.parse_namespace(op)
+    if lib is None:
+        use_lib = Library(namespace, "FRAGMENT")
+        _keep_alive.append(use_lib)
+    else:
+        use_lib = lib
+    use_lib._register_effectful_op(op, effect)
 
 
 def register_autograd(
@@ -1473,6 +1522,80 @@ def get_ctx() -> "torch._library.fake_impl.FakeImplCtx":
     (see :func:`torch.library.register_fake` for more usage details.
     """
     return torch._library.fake_impl.global_ctx_getter()
+
+
+def get_kernel(
+    op: _op_identifier, dispatch_key: Union[str, torch.DispatchKey]
+) -> torch._C._SafeKernelFunction:
+    """Returns the computed kernel for a given operator and dispatch key.
+
+    This function retrieves the kernel that would be executed for a given
+    operator and dispatch key combination. The returned SafeKernelFunction
+    can be used to call the kernel in a boxed fashion. The intended use
+    case for this function is to retrieve the original kernel for a given
+    dispatch key and then register another kernel to the same dispatch key
+    that calls into the original kernel for certain cases.
+
+    Args:
+        op: Operator name (along with the overload) or OpOverload object
+            Can be a string (e.g., "aten::add.Tensor"), an OpOverload, or a CustomOpDef.
+        dispatch_key (str | torch.DispatchKey): The dispatch key to get the kernel for.
+            Can be a string (e.g., "CPU", "CUDA") or a DispatchKey enum value.
+
+    Returns:
+        torch._C._SafeKernelFunction: A safe kernel function that can be used to
+            call the kernel.
+
+    Raises:
+        RuntimeError: If the operator does not exist.
+
+    Example:
+        >>> # Get the CPU kernel for torch.add
+        >>> kernel = torch.library.get_kernel("aten::add.Tensor", "CPU")
+        >>>
+        >>> # You can also use DispatchKey enum
+        >>> kernel = torch.library.get_kernel("aten::add.Tensor", torch.DispatchKey.CPU)
+        >>>
+        >>> # Or use an OpOverload directly
+        >>> kernel = torch.library.get_kernel(torch.ops.aten.add.Tensor, "CPU")
+        >>>
+        >>> # Example: Using get_kernel in a custom op with conditional dispatch
+        >>> # Get the original kernel for torch.sin
+        >>> original_sin_kernel = torch.library.get_kernel("aten::sin", "CPU")
+        >>>
+        >>> # If input has negative values, use original sin, otherwise return zeros
+        >>> def conditional_sin_impl(dispatch_keys, x):
+        >>>     if (x < 0).any():
+        >>>         return original_sin_kernel.call_boxed(dispatch_keys, x)
+        >>>     else:
+        >>>         return torch.zeros_like(x)
+        >>>
+        >>> lib = torch.library.Library("aten", "IMPL")
+        >>> # with_keyset=True so the first argument to the impl is the current DispatchKeySet
+        >>> which needs to be the first argument to ``kernel.call_boxed``
+        >>> lib.impl("sin", conditional_sin_impl, "CPU", with_keyset=True)
+        >>>
+        >>> # Test the conditional behavior
+        >>> x_positive = torch.tensor([1.0, 2.0])
+        >>> x_mixed = torch.tensor([-1.0, 2.0])
+        >>> torch.sin(x_positive)
+        tensor([0., 0.])
+        >>> torch.sin(x_mixed)
+        tensor([-0.8415, 0.9093])
+    """
+    if not isinstance(op, (str, torch._ops.OpOverload)):
+        raise ValueError(f"get_kernel({op}): got unexpected type for op: {type(op)}")
+
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+
+    if isinstance(dispatch_key, str):
+        try:
+            dispatch_key = torch._C.DispatchKey.__members__[dispatch_key]
+        except KeyError:
+            raise ValueError(f"Invalid dispatch key: {dispatch_key}") from None
+
+    return torch._C._dispatch_get_computed_kernel_for_dispatch_key(op, dispatch_key)
 
 
 _OPCHECK_DEFAULT_UTILS = (

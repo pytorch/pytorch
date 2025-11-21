@@ -3,8 +3,9 @@
 import json
 import os
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
@@ -18,6 +19,7 @@ class GitHubComment:
     body_text: str
     created_at: str
     author_login: str
+    author_url: Optional[str]
     author_association: str
     editor_login: Optional[str]
     database_id: int

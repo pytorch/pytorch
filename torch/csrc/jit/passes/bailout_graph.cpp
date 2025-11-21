@@ -196,7 +196,7 @@ struct BailOutGraphBuilderForNode {
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
     // add graph inputs for guard's input
     // and loop counts for loops `n` is contained in
-    // to make sure we can line bailout grap's inputs up properly
+    // to make sure we can line bailout graph's inputs up properly
     // with arguments to this BailOut node.
     for (auto bi : n->inputs()) {
       getOrAddInputForValue(bi);

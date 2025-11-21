@@ -8,8 +8,6 @@
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/operations/BinaryKernel.h>
-// For MTLLanguageVersion_3_1
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -91,6 +89,14 @@ static void zeta_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "zeta");
 }
 
+static void logaddexp_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "logaddexp");
+}
+
+static void logaddexp2_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "logaddexp2");
+}
+
 static void xlog1py_mps_kernel(TensorIteratorBase& iter) {
   TORCH_CHECK_TYPE(isFloatingType(iter.common_dtype()), "xlog1py_mps not implemented for non-floating types");
   lib.exec_binary_kernel(iter, "xlog1py");
@@ -168,6 +174,10 @@ static void lerp_scalar_mps_kernel(at::TensorIteratorBase& iter, const Scalar& w
   lib.exec_binary_kernel(iter, "lerp_alpha", weight);
 }
 
+static void native_dropout_mask_and_scale_mps_kernel(at::TensorIteratorBase& iter, const Scalar& scale) {
+  lib.exec_binary_kernel(iter, "native_dropout_mask_and_scale", scale);
+}
+
 static void mul_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "mul");
 }
@@ -192,11 +202,25 @@ static void fmod_mps_kernel(TensorIteratorBase& iter) {
   lib.exec_binary_kernel(iter, "fmod");
 }
 
+static void igamma_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "igamma");
+}
+
+static void igammac_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "igammac");
+}
+
+static void hypot_mps_kernel(TensorIteratorBase& iter) {
+  lib.exec_binary_kernel(iter, "hypot");
+}
+
 REGISTER_DISPATCH(fmax_stub, &fmax_mps_kernel)
 REGISTER_DISPATCH(fmin_stub, &fmin_mps_kernel)
 REGISTER_DISPATCH(copysign_stub, &copysign_mps_kernel)
 REGISTER_DISPATCH(nextafter_stub, &nextafter_mps_kernel)
 REGISTER_DISPATCH(zeta_stub, &zeta_mps_kernel)
+REGISTER_DISPATCH(logaddexp_stub, &logaddexp_mps_kernel);
+REGISTER_DISPATCH(logaddexp2_stub, &logaddexp2_mps_kernel);
 REGISTER_DISPATCH(xlog1py_stub, &xlog1py_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_t_stub, &chebyshev_polynomial_t_mps_kernel)
 REGISTER_DISPATCH(chebyshev_polynomial_u_stub, &chebyshev_polynomial_u_mps_kernel)
@@ -217,4 +241,7 @@ REGISTER_DISPATCH(div_floor_stub, &div_floor_mps_kernel)
 REGISTER_DISPATCH(div_trunc_stub, &div_trunc_mps_kernel)
 REGISTER_DISPATCH(fmod_stub, &fmod_mps_kernel)
 REGISTER_DISPATCH(remainder_stub, &remainder_mps_kernel)
+REGISTER_DISPATCH(igamma_stub, &igamma_mps_kernel)
+REGISTER_DISPATCH(igammac_stub, &igammac_mps_kernel)
+REGISTER_DISPATCH(hypot_stub, &hypot_mps_kernel)
 } // namespace at::native
