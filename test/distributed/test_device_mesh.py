@@ -38,7 +38,11 @@ from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeSt
 from torch.utils._typing_utils import not_none
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 device_count = torch.accelerator.device_count()
 
 try:
