@@ -48,6 +48,7 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/equal.h>
 #include <ATen/ops/zeros_like.h>
 #include <ATen/ops/index_select.h>
 #include <ATen/ops/indices_native.h>
@@ -65,6 +66,8 @@
 #include <ATen/ops/to_sparse_native.h>
 #include <ATen/ops/unique_dim.h>
 #include <ATen/ops/values_native.h>
+#include <ATen/ops/view_as_complex.h>
+#include <ATen/ops/view_as_complex_native.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/ones.h>
 #endif
@@ -737,6 +740,7 @@ SparseTensor _coalesce_sparse_cpu(const SparseTensor& self) {
 
 DEFINE_DISPATCH(sparse_mask_intersection_out_stub);
 DEFINE_DISPATCH(sparse_mask_projection_out_stub);
+DEFINE_DISPATCH(view_as_complex_sparse_stub);
 
 using OptTensor = std::optional<Tensor>;
 
@@ -917,6 +921,15 @@ Tensor _pin_memory_sparse_coo(const Tensor& self, std::optional<Device> device) 
       self._values().pin_memory(device),
       options,
       self.is_coalesced());
+}
+
+Tensor view_as_complex_sparse(const Tensor& self) {
+  TORCH_CHECK_VALUE(self.is_sparse(), "view_as_complex_sparse is only supported for sparse tensors");
+  TORCH_CHECK_TYPE(
+    self.scalar_type() == kFloat || self.scalar_type() == kDouble || self.scalar_type() == kHalf,
+    "view_as_complex is only supported for half, float and double tensors, but got a tensor of scalar type: ", self.scalar_type());
+  // Use dispatch stub to dispatch to CPU or CUDA implementation
+  return view_as_complex_sparse_stub(self.device().type(), self);
 }
 
 } // namespace at::native

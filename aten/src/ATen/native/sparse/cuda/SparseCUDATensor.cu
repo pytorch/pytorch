@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
+#include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/cuda/SortingCommon.cuh>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/native/SparseTensorUtils.h>
@@ -18,10 +19,14 @@
 #else
 #include <ATen/ops/_coalesce_native.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
+#include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/arange.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <thrust/adjacent_difference.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/gather.h>
@@ -70,7 +75,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   Tensor origIndices = at::empty({nnz}, self._indices().options());
   Tensor uniqueOffsets = at::empty({nnz}, self._indices().options());
 
-  typedef thrust::device_ptr<int64_t> thrust_ptr;
+  using thrust_ptr = thrust::device_ptr<int64_t>;
   thrust_ptr indicesIter(indices1D.data_ptr<int64_t>());
   thrust_ptr origIndicesIter(origIndices.data_ptr<int64_t>());
   thrust_ptr uniqueOffsetsIter(uniqueOffsets.data_ptr<int64_t>());
@@ -192,5 +197,164 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   AT_CUDA_CHECK(cudaGetLastError());
   return dst;
 }
+
+template<typename scalar_t>
+__global__ void _get_real_imag_kernel(
+    const int64_t* __restrict__ last_dim_indices,
+    const scalar_t* __restrict__ values,
+    c10::complex<scalar_t>* __restrict__ complex_values,
+    int64_t nnz) {
+
+  int64_t idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (idx < nnz) {
+    int64_t last_idx = last_dim_indices[idx]; // indices[last_dim][idx]
+
+    if (last_idx == 0) {
+      // Real part
+      complex_values[idx] = c10::complex<scalar_t>(values[idx], scalar_t(0));
+    } else {
+      // Imaginary part
+      complex_values[idx] = c10::complex<scalar_t>(scalar_t(0), values[idx]);
+    }
+  }
+}
+
+Tensor view_as_complex_sparse_cuda(const Tensor& self) {
+  auto new_sizes = self.sizes().vec();
+  TORCH_CHECK(!new_sizes.empty(), "Input tensor must have one or more dimensions");
+  TORCH_CHECK(new_sizes[new_sizes.size() - 1] == 2, "Tensor must have a last dimension of size 2");
+  new_sizes.pop_back();
+
+  auto values = self._values();
+  auto indices = self._indices();
+  auto ndim = indices.size(0);
+  auto nnz = indices.size(1);
+
+  auto new_indices = indices.slice(/*dim=*/0, /*start=*/0, /*end=*/ndim-1);
+  const auto complex_type = c10::toComplexType(self.scalar_type());
+  auto options = values.options().dtype(complex_type).layout(kStrided);
+  auto complex_values = at::empty(nnz, options);
+
+  if (nnz == 0) {
+    // Handle empty tensor
+    return at::_sparse_coo_tensor_with_dims_and_tensors(
+        self.sparse_dim() - 1,
+        self.dense_dim(),
+        new_sizes,
+        new_indices,
+        complex_values,
+        self.options().dtype(complex_type),
+        self.is_coalesced()
+    );
+  }
+
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  // values after complex_values in the same position are combined
+  Tensor reduced_values = at::empty({nnz}, complex_values.options());
+
+  at::cuda::ThrustAllocator allocator;
+  auto policy = thrust::cuda::par(allocator).on(stream);
+
+  // Create a flattened hash for sorting
+  Tensor indices_hash = at::sparse::flatten_indices(new_indices, new_sizes);
+
+  // Sort columns by new_indices and reorder indices/values
+  auto sort_result = indices_hash.sort();
+  Tensor sorted_hash = std::get<0>(sort_result);
+  Tensor sort_perm = std::get<1>(sort_result);
+  new_indices = new_indices.index_select(1, sort_perm);
+
+  using int_ptr = thrust::device_ptr<int64_t>;
+  int_ptr hash_begin(sorted_hash.data_ptr<int64_t>());
+  int_ptr hash_end = hash_begin + nnz;
+
+  Tensor unique_hash = at::empty({nnz}, sorted_hash.options());
+  int_ptr unique_hash_begin(unique_hash.data_ptr<int64_t>());
+
+  int64_t new_nnz = 0;
+
+  AT_DISPATCH_FLOATING_TYPES_AND(kHalf, values.scalar_type(), "view_as_complex_sparse_cuda", [&] {
+    using complex_t = c10::complex<scalar_t>;
+
+    int64_t threads = 256;
+    int64_t blocks = (nnz + threads - 1) / threads;
+    auto last_dim_indices = indices.select(0, ndim-1);
+
+    _get_real_imag_kernel<scalar_t><<<blocks, threads, 0, stream>>>(
+        last_dim_indices.data_ptr<int64_t>(),
+        values.data_ptr<scalar_t>(),
+        complex_values.data_ptr<complex_t>(),
+        nnz
+      );
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+    complex_values = complex_values.index_select(0, sort_perm);
+
+    using complex_ptr = thrust::device_ptr<complex_t>;
+    complex_ptr vals_begin(complex_values.data_ptr<complex_t>());
+    complex_ptr reduced_vals_begin(reduced_values.data_ptr<complex_t>());
+
+    // Use Thrust to group by indices and sum complex values
+    auto new_end = thrust::reduce_by_key(
+        policy,
+        hash_begin,
+        hash_end,
+        vals_begin,
+        unique_hash_begin,
+        reduced_vals_begin,
+        thrust::equal_to<int64_t>(),
+        thrust::plus<complex_t>()
+    );
+    new_nnz = new_end.first - unique_hash_begin;
+  });
+
+  reduced_values = reduced_values.narrow(0, 0, new_nnz);
+
+  // Create mask to remove indices with the same position.
+  Tensor keep_mask = at::empty({nnz}, at::TensorOptions().dtype(at::kBool).device(self.device()));
+  using bool_ptr = thrust::device_ptr<bool>;
+  bool_ptr mask_begin(keep_mask.data_ptr<bool>());
+
+  // Mark positions where hash changes (keep first of each group)
+  thrust::adjacent_difference(
+      policy,
+      hash_begin,
+      hash_end,
+      mask_begin,
+      thrust::not_equal_to<int64_t>()
+  );
+  // First element is always kept
+  thrust::fill_n(policy, mask_begin, 1, true);
+
+  // Below does the same as kept_positions = keep_mask.nonzero().squeeze(1);
+  // but keeps data in GPU (nonzero() moves data to CPU).
+  Tensor kept_positions = at::empty({nnz}, indices.options());
+  auto positions = at::arange(nnz, indices.options());
+  thrust::copy_if(
+      policy,
+      thrust::device_ptr<int64_t>(positions.data_ptr<int64_t>()),
+      thrust::device_ptr<int64_t>(positions.data_ptr<int64_t>()) + nnz,
+      mask_begin,
+      thrust::device_ptr<int64_t>(kept_positions.data_ptr<int64_t>()),
+      thrust::identity<bool>()
+  );
+  kept_positions = kept_positions.narrow(0, 0, new_nnz);
+
+  new_indices = new_indices.index_select(1, kept_positions);
+
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      self.sparse_dim() - 1,
+      self.dense_dim(),
+      new_sizes,
+      new_indices,
+      reduced_values,
+      self.options().dtype(complex_type),
+      true
+  );
+}
+
+REGISTER_CUDA_DISPATCH(view_as_complex_sparse_stub, &view_as_complex_sparse_cuda)
 
 } // namespace at::native
