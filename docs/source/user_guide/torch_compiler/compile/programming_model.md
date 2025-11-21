@@ -1,3 +1,5 @@
+(compile_programming_model)=
+
 # torch.compile Programming Model
 
 The `torch.compile` programming model:
