@@ -7,6 +7,7 @@ from torch._dynamo.variables.streams import get_current_stream, new_event
 
 
 Node: TypeAlias = torch.fx.Node
+Graph: TypeAlias = torch.fx.Graph
 
 
 def is_gradient_acc(node: Node) -> bool:
@@ -43,8 +44,32 @@ def set_stream(node: Node, ind: int) -> None:
         node.meta["custom"] = {"stream": ind}
 
 
+def insert_record_event_after_node(graph: Graph, node: Node, event_ind: int) -> None:
+    with graph.inserting_after(node):
+        node = graph.call_function(
+            torch.ops.streams.record_event.default,
+            (
+                event_ind,
+                get_stream_or_current_stream(node),
+            ),
+        )
+        node.meta["partitioner_tag"] = "must_be_in_backward"
+
+
+def insert_wait_event_before_node(graph: Graph, node: Node, event_ind: int) -> None:
+    with graph.inserting_before(node):
+        node = graph.call_function(
+            torch.ops.streams.wait_event.default,
+            (
+                event_ind,
+                get_stream_or_current_stream(node),
+            ),
+        )
+        node.meta["partitioner_tag"] = "must_be_in_backward"
+
+
 def insert_sync(
-    graph: torch.fx.Graph,
+    graph: Graph,
     consumer: Node,
     producer: Node,
     node_to_wait_event_ind: dict[Node, int],
@@ -52,25 +77,10 @@ def insert_sync(
     if producer not in node_to_wait_event_ind:
         node_to_wait_event_ind[producer] = new_event()
 
-        with graph.inserting_after(producer):
-            node = graph.call_function(
-                torch.ops.streams.record_event.default,
-                (
-                    node_to_wait_event_ind[producer],
-                    get_stream_or_current_stream(producer),
-                ),
-            )
-            node.meta["partitioner_tag"] = "must_be_in_backward"
-
-        with graph.inserting_before(consumer):
-            node = graph.call_function(
-                torch.ops.streams.wait_event.default,
-                (
-                    node_to_wait_event_ind[producer],
-                    get_stream_or_current_stream(consumer),
-                ),
-            )
-            node.meta["partitioner_tag"] = "must_be_in_backward"
+        insert_record_event_after_node(
+            graph, producer, node_to_wait_event_ind[producer]
+        )
+        insert_wait_event_before_node(graph, consumer, node_to_wait_event_ind[producer])
 
 
 def assign_backward_streams(gm: torch.fx.GraphModule) -> None:
