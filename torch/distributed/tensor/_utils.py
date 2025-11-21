@@ -224,6 +224,7 @@ def _compute_local_shape_and_global_offset(
         global_offset[shard_dim] = _get_first_offset(global_offsets)
     return tuple(local_shape), tuple(global_offset)
 
+
 compute_global_tensor_info = torch._C._DTensor_compute_global_tensor_info
 
 
