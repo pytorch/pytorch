@@ -1060,6 +1060,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             and mod.__call__.__func__ is unpatched_nn_module_call
             and mod._call_impl.__func__ is unpatched_nn_module_call_impl
             and "forward" not in mod.__dict__
+            and not tx.output.side_effects.has_pending_mutation_of_attr(self, "forward")
         ):
             forward_method = inspect.getattr_static(mod, "forward")
             if isinstance(forward_method, types.FunctionType):
