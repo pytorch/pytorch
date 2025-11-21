@@ -291,7 +291,11 @@ its type to `common_constant_types`.
                         tree_map_kwargs,
                     )
             else:
-                none_is_leaf = False
+                tree_map_module = getattr(getattr(tree_map_fn, "fn", None), "__module__", "")
+                # torch.utils._pytree and torch.utils._cxx_pytree treat None as a leaf
+                # by default, while optree keeps it as an internal node unless
+                # none_is_leaf=True is provided.
+                none_is_leaf = not tree_map_module.startswith("optree")
             if none_is_leaf:
                 return map_fn.call_function(tx, [self, *rest], {})
             else:

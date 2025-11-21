@@ -185,6 +185,24 @@ class TreeMapCompileTests(TestCase):
         ):
             compiled(lhs, rhs)
 
+    @parametrize("tree_map_name,tree_map_impl", TREE_MAP_IMPLEMENTATIONS)
+    def test_tree_map_none_nodes_default_behavior(
+        self, tree_map_name: str, tree_map_impl
+    ) -> None:
+        if tree_map_name == "optree":
+            self.skipTest("optree treats None as an internal node by default")
+
+        def fn(a, b):
+            return tree_map_impl(lambda u, v: (u, v), a, b)
+
+        tree = {"k": None}
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(tree, tree)
+        result = compiled(tree, tree)
+
+        self.assertEqual(result["k"], (None, None))
+        self.assertEqual(result, expected)
+
     def test_constantvariable_handles_none_is_leaf_kwarg(self) -> None:
         tree = {"none": None}
 
