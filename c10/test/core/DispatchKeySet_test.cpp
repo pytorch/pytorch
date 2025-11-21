@@ -435,7 +435,7 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
     if (i > 0) {
       ASSERT_TRUE(res.find("Unknown") == std::string::npos)
           << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
-          << ")";
+          << ')';
     } else {
       ASSERT_TRUE(res.find("Unknown") == std::string::npos) << i;
     }

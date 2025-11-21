@@ -33,6 +33,7 @@ inline Device Tensor::device() const {
   return Device(extension_device_type, static_cast<DeviceIndex>(device_index));
 }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 // The following data ptr cast methods mirror the methods defined in
 // aten/src/ATen/templates/TensorMethods.cpp
 #define DEFINE_DATA_PTR_CAST(T, name, PRED)               \
@@ -63,5 +64,6 @@ DEFINE_CAST(uint32_t, UInt32)
 DEFINE_CAST(uint64_t, UInt64)
 #undef DEFINE_CAST
 #undef _PRED
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)
