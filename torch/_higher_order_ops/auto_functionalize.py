@@ -630,7 +630,7 @@ def do_auto_functionalize_v2(
 
     # All of the (args, kwargs), but all as kwargs. The names for the
     # args come from the schema. This makes it easier for us to work with them.
-    normalized_kwargs = normalize_args_kwargs_by_schema(op._schema, args, kwargs)
+    normalized_kwargs = normalize_args_kwargs_by_schema(schema, args, kwargs)
 
     # List of the name of args that get mutated (according to the schema)
     mutable_args_names, mutable_args_types = get_mutable_args_from_schema(schema)
