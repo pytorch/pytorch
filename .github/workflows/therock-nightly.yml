@@ -1,0 +1,98 @@
+name: therock-nightly
+
+on:
+  # Run at midnight UTC every day
+  schedule:
+    - cron: "0 0 * * *"
+  # Also allow manual triggering
+  workflow_dispatch:
+
+env:
+  PYTORCH_NIGHTLY_REF: nightly
+
+  THEROCK_NIGHTLY_INDEX_URL: https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/
+
+  # Whether to install ROCm via TheRock nightly wheels in install_rocm.sh
+  USE_THEROCK_NIGHTLY: "1"
+
+jobs:
+  therock-nightly-build:
+    # You can change this to a self-hosted GPU runner if desired.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout pytorch
+        uses: actions/checkout@v4
+
+      - name: Show runner info
+        run: |
+          uname -a
+          docker version
+
+      - name: Build TheRock-based ROCm CI image
+        env:
+          THEROCK_NIGHTLY_INDEX_URL: ${{ env.THEROCK_NIGHTLY_INDEX_URL }}
+          USE_THEROCK_NIGHTLY: ${{ env.USE_THEROCK_NIGHTLY }}
+        run: |
+          set -euxo pipefail
+          # Tag is local to this runner; we don't push anywhere in this workflow.
+          IMAGE_TAG="pytorch-therock-rocm-ci:nightly"
+
+          # Build using the existing ROCm CI Dockerfile, but flip on TheRock mode.
+          docker build \
+            -f .ci/docker/ubuntu-rocm/Dockerfile \
+            --build-arg USE_THEROCK_NIGHTLY="${USE_THEROCK_NIGHTLY}" \
+            --build-arg THEROCK_NIGHTLY_INDEX_URL="${THEROCK_NIGHTLY_INDEX_URL}" \
+            -t "${IMAGE_TAG}" .
+
+          echo "BUILT_IMAGE=${IMAGE_TAG}" >> "$GITHUB_ENV"
+
+      - name: Build PyTorch nightly using TheRock ROCm CI image
+        env:
+          PYTORCH_NIGHTLY_REF: ${{ env.PYTORCH_NIGHTLY_REF }}
+          THEROCK_NIGHTLY_INDEX_URL: ${{ env.THEROCK_NIGHTLY_INDEX_URL }}
+        run: |
+          set -euxo pipefail
+          IMAGE_TAG="${BUILT_IMAGE:-pytorch-therock-rocm-ci:nightly}"
+
+          # Build PyTorch inside the container
+          docker run --rm \
+            -e PYTORCH_NIGHTLY_REF="${PYTORCH_NIGHTLY_REF}" \
+            -e THEROCK_NIGHTLY_INDEX_URL="${THEROCK_NIGHTLY_INDEX_URL}" \
+            "${IMAGE_TAG}" \
+            bash -lc '
+              set -euxo pipefail
+
+              # Basic build deps (adjust as needed if your ROCm CI image already has them)
+              apt-get update
+              DEBIAN_FRONTEND=noninteractive apt-get install -y git python3 python3-pip python3-venv
+
+              # Clone the nightly ref of PyTorch
+              git clone --depth 1 --branch "$PYTORCH_NIGHTLY_REF" https://github.com/pytorch/pytorch.git /pytorch
+              cd /pytorch
+
+              python3 -m venv .venv
+              . .venv/bin/activate
+
+              python3 -m pip install --upgrade pip
+              python3 -m pip install -r requirements.txt
+
+              # Configure ROCm + TheRock SDK environment inside the container.
+              # The rocm-sdk CLI is provided by the TheRock nightly wheels. 
+              export ROCM_HOME="$(rocm-sdk path --root)"
+              export CMAKE_PREFIX_PATH="$(rocm-sdk path --cmake)"
+              export PATH="$(rocm-sdk path --bin):$PATH"
+
+              # Standard ROCm build flags for PyTorch; adjust ARCH / FLAGS as needed.
+              export USE_ROCM=1
+              : "${PYTORCH_ROCM_ARCH:=gfx1100}"
+              export PYTORCH_ROCM_ARCH
+              : "${MAX_JOBS:=8}"
+              export MAX_JOBS
+
+              # Build PyTorch wheel
+              python3 setup.py bdist_wheel
+
+              # Stash built artifacts somewhere predictable
+              mkdir -p /artifacts
+              cp dist/*.whl /artifacts/
