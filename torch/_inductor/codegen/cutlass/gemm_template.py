@@ -32,6 +32,7 @@ from ...ir import (
 from ...utils import is_dynamic, Placeholder
 from ...virtualized import V
 from ..common import IndentedBuffer
+from ..cuda import cuda_env
 from . import utils as cutlass_utils
 from .kernel import CUTLASSTemplateKernel
 from .python_evt import CutlassEVTCodegen, scaled_mm_evt
@@ -621,7 +622,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 #include "cutlass/gemm/device/gemm_universal.h"
                 #include "cutlass/gemm/device/gemm_universal_adapter.h"
                 #include "cutlass/gemm/kernel/gemm_universal.hpp"
-                #include "cutlass/gemm/device/gemm_sparse.h"
                 #include "cutlass/gemm/collective/collective_builder.hpp"
                 #include "cutlass/epilogue/collective/collective_builder.hpp"
                 #include "cutlass/epilogue/collective/default_epilogue.hpp"
@@ -635,6 +635,13 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
                 #include "cutlass/util/tensor_view_io.h"
             """
         )
+        if self.device_type != "xpu":
+            # XPU SYCL-TLA does not support sparse gemm yet
+            res.splice(
+                """
+                #include "cutlass/gemm/device/gemm_sparse.h"
+                """
+            )
         if inductor_cutlass_config.generate_test_runner and not is_dynamic(
             *self.input_nodes, self.output_node
         ):
@@ -712,12 +719,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             bool: True if the alignment was successfully updated, False otherwise.
         """
         alignment = cutlass_utils.get_max_alignment(torch_layout)
-        cuda_arch = cutlass_utils.get_cuda_arch()
-        if cuda_arch and int(cuda_arch) >= 90 and alignment < op_element.alignment:
-            return False
-        else:
-            op_element.alignment = alignment
-            return True
+        if torch.cuda.is_available():
+            cuda_arch = cuda_env.get_cuda_arch()
+            cuda_arch = cutlass_utils._normalize_cuda_arch(cuda_arch)
+            if cuda_arch and int(cuda_arch) >= 90 and alignment < op_element.alignment:
+                return False
+
+        op_element.alignment = alignment
+        return True
 
     @staticmethod
     def should_swap_XW(
@@ -988,6 +997,12 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             ):
                 return None
 
+        # `_procedural_name` is decorated with @functools.cached_property in cutlass, and its value is
+        # cached based on the key `self`. After we modify some attributes of
+        # `self` (e.g., layout or alignment), the `self` itself doesn’t change, so the
+        # cached value remains stale. We therefore need to clear the cached value so that
+        # `_procedural_name` can be recomputed with the updated attributes.
+        del op._procedural_name
         return op
 
     def gen_ops(self) -> "list[tuple[str, cutlass_gemm_op.GemmOperation]]":  # type: ignore[name-defined]  # noqa: F821
@@ -1009,10 +1024,10 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return self.filtered_ops_cache[self.cache_key]
 
         with dynamo_timed("CUTLASSGemmTemplate.maybe_fetch_ops"):
-            maybe_ops = maybe_fetch_ops()
+            maybe_ops = maybe_fetch_ops(self.device_type)
         if maybe_ops is None:
             log.debug("Cannot fetch ops from cache, generating ops from scratch")
-            full_ops = cutlass_utils.gen_ops()
+            full_ops = cutlass_utils.gen_ops(self.device_type)
             ops = pytree.tree_flatten(full_ops)[0]
         else:
             log.debug("Using cached ops from cache")
@@ -1070,7 +1085,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
     ) -> str:
         """
         The primary entry point for the code rendering process used in this template.
-        Renders the Cutlass based CUDA C++ code for the GEMM Kernel that this template is designed to implement,
+        Renders the Cutlass based CUDA/XPU C++ code for the GEMM Kernel that this template is designed to implement,
         including potentially fused epilogues.
 
         Args:
@@ -1080,7 +1095,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             **kwargs: Additional keyword arguments. Currently unused.
 
         Returns:
-            str: Cutlass based CUDA C++ code fragment as a string, to be used by the current
+            str: Cutlass based CUDA/XPU C++ code fragment as a string, to be used by the current
             CUTLASSTemplateKernel or autotuning code.
 
         Note:
@@ -1299,7 +1314,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         names_str: str = "",
     ) -> str:
         """
-        Helper method to render the Cutlass CUDA C++ code required for calling the GEMM operation in the standalone
+        Helper method to render the Cutlass CUDA/XPU C++ code required for calling the GEMM operation in the standalone
         test runner that might also be generated along with the rest of the code, if the corresponding config is
         enabled.
 
@@ -1558,7 +1573,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         op: GemmOperation,
         evt_name: Optional[str] = None,
     ) -> tuple[str, str]:
-        """Defines and renders the Cutlass / CUDA C++ code for a given GEMM operation instance.
+        """Defines and renders the Cutlass / CUDA/XPU C++ code for a given GEMM operation instance.
 
         This function uses the Cutlass library to generate key parts of the codegen process. General Matrix Multiply
         forms a core part of a number of scientific applications, so this efficient and adaptable implementation is
@@ -1576,7 +1591,9 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
         from .lib_extensions import gemm_operation_extensions as gemm_extensions
 
-        emitter = gemm_extensions.EmitGemmUniversal3xInstanceWithEVT(evt_name=evt_name)  # type: ignore[call-arg]
+        emitter = gemm_extensions.EmitGemmUniversal3xInstanceWithEVT(
+            evt_name=evt_name, device_type=self.device_type
+        )  # type: ignore[call-arg]
 
         if not hasattr(op, "epilogue_functor") or not isinstance(
             op.epilogue_functor, enum.Enum
@@ -1637,7 +1654,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         epilogue_args,
     ) -> str:
         """
-        Render the Cutlass CUDA C++ code required for passing arguments to the GEMM operation.
+        Render the Cutlass CUDA/XPU C++ code required for passing arguments to the GEMM operation.
 
         Args:
             argument_template (str): Template for the GEMM operation arguments.
@@ -1650,11 +1667,11 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             Y (IRNode): The output tensor.
             alpha (float): Scaling factor for the product of the inputs.
             beta (float): Scaling factor for the output tensor.
-            kernel (CUTLASSTemplateKernel): CUDA Template kernel for the operation.
+            kernel (CUTLASSTemplateKernel): CUDA/XPU Template kernel for the operation.
             epilogue_args (any): Additional arguments for the epilogue state.
 
         Returns:
-            str: A block of CUDA C++ code as a string, ready to be used as arguments for the GEMM operation.
+            str: A block of CUDA/XPU C++ code as a string, ready to be used as arguments for the GEMM operation.
 
         Note: If `should_swap_xw` is True, a transpose operation will be applied to the X, W, Bias, and Y
         tensors. This operation also implies the M and N dimensions of Bias and GEMM output to be swapped

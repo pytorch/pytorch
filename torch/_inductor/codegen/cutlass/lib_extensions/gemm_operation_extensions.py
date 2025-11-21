@@ -16,7 +16,7 @@ if try_import_cutlass():
     class EmitGemmUniversal3xInstanceWithEVT:
         """Responsible for emitting a CUTLASS 3.x template definition"""
 
-        def __init__(self, operation_suffix="", evt_name=None):
+        def __init__(self, operation_suffix="", evt_name=None, device_type="cuda"):
             self.operation_suffix = operation_suffix
             self.includes = [
                 "cutlass/cutlass.h",
@@ -32,8 +32,8 @@ if try_import_cutlass():
             ${element_c},
             ${element_epilogue}
             >"""
-
             self.evt_name = evt_name
+            self.device_type = device_type
             self.gemm_template = """
 using ${operation_name}_epilogue =
 typename cutlass::epilogue::collective::CollectiveBuilder<
@@ -175,6 +175,8 @@ ${compile_guard_end}
                     f"cutlass::gemm::collective::StageCountAutoCarveout<static_cast<int>(\
 sizeof(typename {str(operation.procedural_name())}_epilogue::SharedStorage))>"
                 )
+            if self.device_type == "xpu":
+                stage_count_string = "cutlass::gemm::collective::StageCountAuto"
 
             epi_tile_mn = "cutlass::epilogue::collective::EpilogueTileAuto"
 
@@ -350,6 +352,11 @@ cute::Layout<cute::Shape<int,int,int>, {operation_name_str}_StrideNarrow>{{}}));
             if self.evt_name:
                 epilogue_functor = self.evt_name
 
+            if self.device_type == "xpu":
+                arch = f"cutlass::arch::Xe{operation.arch}"
+            else:
+                arch = f"cutlass::arch::Sm{operation.arch}"
+
             values = {
                 "operation_name": operation_name_str,
                 "operation_suffix": self.operation_suffix,
@@ -369,7 +376,7 @@ cute::Layout<cute::Shape<int,int,int>, {operation_name_str}_StrideNarrow>{{}}));
                 "element_accumulator": DataTypeTag[operation.accumulator_type()],
                 "opcode_class_main": OpcodeClassTag[opcode_class_main],
                 "opcode_class_epi": OpcodeClassTag[opcode_class_epi],
-                "arch": f"cutlass::arch::Sm{operation.arch}",
+                "arch": arch,
                 "tile_shape_m": str(tile_shape_m),
                 "tile_shape_n": str(tile_shape_n),
                 "tile_shape_k": str(tile_shape_k),
