@@ -104,14 +104,16 @@ def download_s3_artifacts(
     paths = []
     for obj in objs:
         object_name = Path(obj.key).name
-        # target an artifact for a specific job_id if provided, otherwise skip the download.
         if job_id is not None and str(job_id) not in object_name:
             continue
         found_one = True
         p = Path(Path(obj.key).name)
         print(f"Downloading {p}")
+        s3_resource = get_s3_resource()
+        bucket_obj = s3_resource.Bucket(GHA_ARTIFACTS_BUCKET)
+        obj_data = bucket_obj.Object(obj.key).get()
         with open(p, "wb") as f:
-            f.write(obj.get()["Body"].read())
+            f.write(obj_data["Body"].read())
         paths.append(p)
 
     if not found_one:
