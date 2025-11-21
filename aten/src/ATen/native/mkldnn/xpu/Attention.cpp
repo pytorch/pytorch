@@ -315,8 +315,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale,
-    bool compute_logsumexp) {
+    std::optional<double> scale) {
   TORCH_INTERNAL_ASSERT(
       query.dim() == 4 && key.dim() == 4 && value.dim() == 4,
       "scaled_dot_product_fused_attention_overrideable_xpu: Accept only 4 dims inputs shape of {B, H, T, K}");
@@ -372,7 +371,7 @@ _scaled_dot_product_fused_attention_overrideable_xpu(
       is_causal,
       scale.has_value() ? scale.value() : (1.0 / std::sqrt(head_dim_qk)),
       attention,
-      compute_logsumexp,
+      true,
       logsumexp);
 
   // rng not used

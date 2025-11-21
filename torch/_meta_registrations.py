@@ -5946,7 +5946,6 @@ def meta__scaled_dot_product_fused_attention_overrideable(
     is_causal: bool = False,
     return_debug_mask: bool = False,
     scale: float | None = None,
-    compute_log_sumexp: bool = False
 ):
     B = query.size(0)
     H_Q = query.size(1)
