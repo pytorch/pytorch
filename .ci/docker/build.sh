@@ -1,3 +1,4 @@
+
 #!/bin/bash
 # The purpose of this script is to:
 # 1. Extract the set of parameters to be used for a docker build based on the provided image name.
@@ -188,6 +189,20 @@ case "$tag" in
     if [[ $tag =~ "benchmarks" ]]; then
       INDUCTOR_BENCHMARKS=yes
     fi
+    ;;
+  pytorch-linux-noble-rocm-nightly-py3)
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    VISION=yes
+    ROCM_VERSION=nightly
+    NINJA_VERSION=1.9.0
+    TRITON=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    PYTORCH_ROCM_ARCH="gfx942"
+    USE_THEROCK_NIGHTLY=1
+    THEROCK_NIGHTLY_INDEX_URL=https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/
     ;;
   pytorch-linux-jammy-xpu-n-1-py3)
     ANACONDA_PYTHON_VERSION=3.10
@@ -385,6 +400,8 @@ docker build \
        --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
+       --build-arg "USE_THEROCK_NIGHTLY=${USE_THEROCK_NIGHTLY:-}" \
+       --build-arg "THEROCK_NIGHTLY_INDEX_URL=${THEROCK_NIGHTLY_INDEX_URL:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \
