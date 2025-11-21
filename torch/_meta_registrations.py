@@ -3640,7 +3640,7 @@ def meta__int_mm(a, b):
     torch._check(a.dim() == 2, lambda: "a must be a 2D tensor")
     torch._check(b.dim() == 2, lambda: "b must be a 2D tensor")
     torch._check(
-        a.dtype is torch.int8 or a.dtype is torch.uint8,
+        a.dtype in [torch.int8, torch.uint8],
         lambda: f"expected self to be int8 or uint8, got {a.dtype}",
     )
     torch._check(

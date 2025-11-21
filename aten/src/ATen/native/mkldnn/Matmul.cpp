@@ -507,9 +507,15 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
     const Tensor &mat2,
     const Tensor &result) {
   // Create ideep tensors for oneDNN computation
+  ideep::tensor::data_type src_dtype;
+  if (mat1.scalar_type() == at::kByte) {
+    src_dtype = ideep::tensor::data_type::u8;
+  } else {
+    src_dtype = ideep::tensor::data_type::s8;
+  }
   auto src = ideep::tensor(
       {mat1.sizes().vec(),
-       ideep::tensor::data_type::s8,
+       src_dtype,
        mat1.strides().vec()},
       mat1.data_ptr());
   auto wei = ideep::tensor(
@@ -547,66 +553,41 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
 
 template <typename a_type>
 static void _mkldnn_gemm_i8i8i32_with_blas(
-  const Tensor& mat1,
+  const Tensor& self,
   const Tensor& mat2,
   const Tensor& result) {
     const int m = result.size(0);
     const int n = result.size(1);
-    const int k = mat1.size(1);
+    const int k = self.size(1);
 
-    const char transa = mat1.strides()[1] == 1 ? 'N' : 'T';
+    const char transa = self.strides()[1] == 1 ? 'N' : 'T';
     const char transb = mat2.strides()[1] == 1 ? 'N' : 'T';
     const char offsetc = 'F';
 
-    const int lda = transa == 'T' ? mat1.stride(1) : mat1.stride(0);
+    const int lda = transa == 'T' ? self.stride(1) : self.stride(0);
     const int ldb = transb == 'T' ? mat2.stride(1) : mat2.stride(0);
     const int ldc = n;
 
     const float alpha = 1;
     const float beta = 0;
 
-    a_type ao=0;
+    a_type ao = 0;
     int8_t bo = 0;
     int32_t co = 0;
 
-    if (mat1.scalar_type() == at::kByte) {//uint8
-      dnnl::gemm_u8s8s32(
-          transa,
-          transb,
-          offsetc,
-          m,
-          n,
-          k,
-          alpha,
-          static_cast<uint8_t*>(mat1.data_ptr()),
-          lda,
-          ao,
-          static_cast<int8_t*>(mat2.data_ptr()),
-          ldb,
-          bo,
-          beta,
-          static_cast<int32_t*>(result.data_ptr()),
-          ldc,
-          &co);
-    } else {
-      dnnl::gemm_s8s8s32(//int8
-          transa,
-          transb,
-          offsetc,
-          m,
-          n,
-          k,
-          alpha,
-          static_cast<int8_t*>(mat1.data_ptr()),
-          lda,
-          ao,
-          static_cast<int8_t*>(mat2.data_ptr()),
-          ldb,
-          bo,
-          beta,
-          static_cast<int32_t*>(result.data_ptr()),
-          ldc,
-          &co);
+    #define CALL_DNNL_GEMM(gemm_func, a_ptr_type, a_data_ptr) \
+    gemm_func(                                            \
+      transa, transb, offsetc, m, n, k,                \
+      alpha,                                            \
+      static_cast<a_ptr_type>(a_data_ptr), lda, ao,    \
+      static_cast<int8_t*>(mat2.data_ptr()), ldb, bo,  \
+      beta,                                             \
+      static_cast<int32_t*>(result.data_ptr()), ldc, &co)
+
+    if (self.scalar_type() == at::kByte) { //uint8
+      CALL_DNNL_GEMM(dnnl::gemm_u8s8s32, uint8_t*, self.data_ptr());
+    } else { //int8
+      CALL_DNNL_GEMM(dnnl::gemm_s8s8s32, int8_t*, self.data_ptr());
     }
   }
 
