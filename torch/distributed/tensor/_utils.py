@@ -92,11 +92,15 @@ def compute_local_shape_and_global_offset(
         global_shape (ShapeType): The global shape of the DTensor.
         mesh (:class:`DeviceMesh`): The device mesh this DTensor is distributed on.
         placements (Sequence[:class:`Placement`]]): The placements of the DTensor.
+        skip_offset (bool): If True, skip computing the global offsets and return an empty
+            tuple for global_offset. This can improve performance when only the local shape
+            is needed. Defaults to False.
 
     Return:
         local_shape: the shape of the DTensor's _local_tensor on the current rank.
         global_offset: a tuple of offsets for each dimension of the global tensor shape,
-        identifying how this shard fits into the global tensor in each dimension.
+        identifying how this shard fits into the global tensor in each dimension. If
+        skip_offset is True, this will be an empty tuple.
 
     """
     return _compute_local_shape_and_global_offset(
@@ -157,6 +161,22 @@ def _compute_local_shape_and_global_offset(
     This function is fairly simple if your tensor is evenly sharded; the complication
     is around uneven splits.  There is also some complication for handling StridedShard,
     which changes the order you should apply sharding.
+
+    Args:
+        global_shape (ShapeType): The global shape of the tensor.
+        mesh_shape (ShapeType): The shape of the device mesh.
+        my_coordinate (Optional[list[int]]): The coordinate of the current rank in the device mesh.
+        placements (Sequence[Placement]): The placements of the DTensor.
+        skip_offset (bool): If True, skip computing the global offsets and return an empty
+            tuple for global_offset. This can improve performance when only the local shape
+            is needed. Defaults to False.
+
+    Returns:
+        tuple: A tuple containing:
+            - local_shape (tuple[int, ...]): The shape of the local shard on the current rank.
+            - global_offset (tuple[int, ...]): The offsets for each dimension identifying where
+              this shard begins in the global tensor. If skip_offset is True, this will be an
+              empty tuple.
     """
 
     empty_offset = ()
