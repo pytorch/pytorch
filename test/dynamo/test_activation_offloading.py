@@ -211,6 +211,59 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
                 atol=1e-5,
             )
 
+    @torch._functorch.config.patch(
+        enable_activation_offloading=True,
+        activation_offload_separate_stream=True,
+        activation_offload_sink_wait=True,
+        activation_reload_prefetch=True,
+    )
+    def test_partitioner_offload_sep_stream_reorder(self):
+        reset_user_object_tracking()
+        torch._dynamo.reset()
+        torch._functorch.config.joint_custom_pass = self.joint_custom_pass
+        fw_graph, bw_graph = get_fw_bw_graph(self.fn, [self.x])
+
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals_6):
+    add = torch.ops.aten.add.Tensor(primals_1, primals_2);  primals_1 = primals_2 = None
+    sin = torch.ops.aten.sin.default(add)
+    add_1 = torch.ops.aten.add.Tensor(primals_3, primals_4);  primals_3 = primals_4 = None
+    sin_1 = torch.ops.aten.sin.default(add_1)
+    add_2 = torch.ops.aten.add.Tensor(sin, sin_1);  sin = sin_1 = None
+    add_3 = torch.ops.aten.add.Tensor(primals_5, primals_6);  primals_5 = primals_6 = None
+    sin_2 = torch.ops.aten.sin.default(add_3)
+    add_4 = torch.ops.aten.add.Tensor(add_2, sin_2);  add_2 = sin_2 = None
+    cos = torch.ops.aten.cos.default(add_3);  add_3 = None
+    cos_1 = torch.ops.aten.cos.default(add_1);  add_1 = None
+    record_event_default = torch.ops.streams.record_event.default(2, 0);  record_event_default = None
+    stream_in_cpu_offload_cos_1 = torch.ops.streams.fork.default(0, 1);  stream_in_cpu_offload_cos_1 = None
+    wait_event_default = torch.ops.streams.wait_event.default(2, 1);  wait_event_default = None
+    cpu_offload_cos_1 = torch.ops.prims.device_put.default(cos_1, device(type='cpu'), non_blocking = True);  cos_1 = None
+    record_event_default_1 = torch.ops.streams.record_event.default(3, 1);  record_event_default_1 = None
+    stream_out_cpu_offload_cos_1 = torch.ops.streams.join.default(1, 0);  stream_out_cpu_offload_cos_1 = None
+    cos_2 = torch.ops.aten.cos.default(add);  add = None
+    wait_event_default_1 = torch.ops.streams.wait_event.default(3, 0);  wait_event_default_1 = None
+    return (add_4, cos, cpu_offload_cos_1, cos_2)""",
+        )
+
+        self.assertExpectedInline(
+            bw_graph.code.strip(),
+            """\
+def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
+    stream_in_gpu_reload_cos_1 = torch.ops.streams.fork.default(4, 5);  stream_in_gpu_reload_cos_1 = None
+    wait_stream_default = torch.ops.streams.wait_stream.default(5, 4);  wait_stream_default = None
+    gpu_reload_cos_1 = torch.ops.prims.device_put.default(cpu_offload_cos_1, device(type='cuda', index=0), non_blocking = True);  cpu_offload_cos_1 = None
+    record_event_default = torch.ops.streams.record_event.default(6, 5);  record_event_default = None
+    stream_out_gpu_reload_cos_1 = torch.ops.streams.join.default(5, 4);  stream_out_gpu_reload_cos_1 = None
+    mul = torch.ops.aten.mul.Tensor(tangents_1, cos);  cos = None
+    wait_event_default = torch.ops.streams.wait_event.default(6, 4);  wait_event_default = None
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, gpu_reload_cos_1);  gpu_reload_cos_1 = None
+    mul_2 = torch.ops.aten.mul.Tensor(tangents_1, cos_2);  tangents_1 = cos_2 = None
+    return (mul_2, mul_2, mul_1, mul_1, mul, mul)""",
+        )
+
 
 if __name__ == "__main__":
     if HAS_GPU:
