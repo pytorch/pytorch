@@ -779,7 +779,6 @@ DistTensorRandomOpTestWithLocalTensor = create_local_tensor_test_class(
 DistTensorRandomOpsTest3DWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomOpsTest3D,
 )
->>>>>>> 02df234aa3ad58516211750ed6c776e67278c454
 
 if __name__ == "__main__":
     run_tests()
