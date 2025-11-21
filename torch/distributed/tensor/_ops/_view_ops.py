@@ -542,10 +542,13 @@ def propagate_shape_and_sharding(
 
     def maybe_get_shard_mesh_dim_and_placement(
         input_dim: InputDim,
-    ) -> tuple[Optional[int], Optional[Shard]]:
+    ) -> tuple[Optional[int], Optional[Shard | _StridedShard]]:
         # if input_dim is sharded, return the mesh_dim and shard placement
         for i, placement in enumerate(input_src_placements):
-            if isinstance(placement, Shard) and placement.dim == input_dim.input_dim:
+            if (
+                isinstance(placement, Shard | _StridedShard)
+                and placement.dim == input_dim.input_dim
+            ):
                 return i, placement
         return None, None
 
@@ -627,7 +630,7 @@ def propagate_shape_and_sharding(
                 # 2. here we special case things like [Shard(0), Shard(0)]
                 submesh_size = 1
                 for size, shard in zip(mesh_sizes, input_src_placements):
-                    if isinstance(shard, Shard) and shard.dim == in_dim:
+                    if isinstance(shard, Shard | _StridedShard) and shard.dim == in_dim:
                         submesh_size *= size
                 if not out_size % submesh_size == 0:
                     raise AssertionError(
@@ -654,13 +657,14 @@ def propagate_shape_and_sharding(
     input_tgt_placements = [
         (
             Replicate()
-            if isinstance(p, Shard) and not shardable_dims[p.dim][mesh_dim]
+            if isinstance(p, Shard | _StridedShard)
+            and not shardable_dims[p.dim][mesh_dim]
             else p
         )
         for mesh_dim, p in enumerate(input_src_placements)
     ]
 
-    def _rewrite_shard_dim(p: Shard):
+    def _rewrite_shard_dim(p: Shard | _StridedShard):
         """
         Rewrite the shard dim to the corresponding tensor dim in output.
         For ``_StridedShard``, we can safely keep the placement type and
@@ -682,7 +686,7 @@ def propagate_shape_and_sharding(
             return Shard(shard_dim_map[p.dim])
 
     output_placements = [
-        _rewrite_shard_dim(p) if isinstance(p, Shard) else p
+        _rewrite_shard_dim(p) if isinstance(p, Shard | _StridedShard) else p
         for p in input_tgt_placements
     ]
 
