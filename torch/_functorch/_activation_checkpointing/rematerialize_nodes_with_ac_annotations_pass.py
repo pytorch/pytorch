@@ -46,8 +46,8 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
 
     if has_recomputable_rng_ops(gm):
         raise RuntimeError(
-            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops in checkpointed regions. "
-            "Please move RNG operations outside "
+            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops "
+            "in checkpointed regions. Please move RNG operations outside "
             "of checkpoint regions, or use joint graph mode (where partitioner handles RNG)."
         )
 
@@ -71,7 +71,7 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     if bwd_start is None:
         raise RuntimeError(
             "We are trying to rematerialize AC nodes in the backward region, but we could not find any backward nodes. "
-            "This is likely because you forgot to annotate your backward region with fx.traceback.annotate({\"backward\": 0}) "
+            'This is likely because you forgot to annotate your backward region with fx.traceback.annotate({"backward": 0}) '
         )
 
     # Build reordered graph
@@ -114,6 +114,7 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
                 gather_checkpointed_deps(inp, deps)
 
         # Insert deps in forward order (guaranteed disjoint from already-inserted)
+        # This ensures topological order is preserved (a, b, c, d where c=a+b)
         for dep in sorted(deps, key=lambda n: order[n]):
             assert dep not in recomputed_nodes, "We shouldn't have recomputed it before"
             dup = new_graph.node_copy(dep, remat_input)
