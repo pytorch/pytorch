@@ -112,9 +112,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
 
-    def reset_parameters(self):
-        super().reset_parameters()
-
     def update_bn_stats(self):
         self.freeze_bn = False
         self.bn.training = True
@@ -534,44 +531,6 @@ class ConvBnReLU1d(ConvBn1d):
     # module class after fusing bn into conv
     _FUSED_FLOAT_MODULE: ClassVar[type[nn.Module] | None] = nni.ConvReLU1d
 
-    def __init__(
-        self,
-        # Conv1d args
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride=1,
-        padding=0,
-        dilation=1,
-        groups=1,
-        bias=None,
-        padding_mode="zeros",
-        # BatchNorm1d args
-        # num_features: out_channels
-        eps=1e-05,
-        momentum=0.1,
-        # affine: True
-        # track_running_stats: True
-        # Args for this module
-        freeze_bn=False,
-        qconfig=None,
-    ):
-        super().__init__(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bias,
-            padding_mode,
-            eps,
-            momentum,
-            freeze_bn,
-            qconfig,
-        )
-
     def forward(self, input):
         return F.relu(self._forward(input))
 
@@ -735,44 +694,6 @@ class ConvBnReLU2d(ConvBn2d):
     # module class after fusing bn into conv
     _FUSED_FLOAT_MODULE: ClassVar[type[nni.ConvReLU2d] | None] = nni.ConvReLU2d
 
-    def __init__(
-        self,
-        # Conv2d args
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride=1,
-        padding=0,
-        dilation=1,
-        groups=1,
-        bias=None,
-        padding_mode="zeros",
-        # BatchNorm2d args
-        # num_features: out_channels
-        eps=1e-05,
-        momentum=0.1,
-        # affine: True
-        # track_running_stats: True
-        # Args for this module
-        freeze_bn=False,
-        qconfig=None,
-    ):
-        super().__init__(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bias,
-            padding_mode,
-            eps,
-            momentum,
-            freeze_bn,
-            qconfig,
-        )
-
     def forward(self, input):
         return F.relu(self._forward(input))
 
@@ -934,44 +855,6 @@ class ConvBnReLU3d(ConvBn3d):
     _FLOAT_RELU_MODULE: ClassVar[type[nn.ReLU] | None] = nn.ReLU
     # module class after fusing bn into conv
     _FUSED_FLOAT_MODULE: ClassVar[type[nni.ConvReLU3d] | None] = nni.ConvReLU3d
-
-    def __init__(
-        self,
-        # Conv3d args
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride=1,
-        padding=0,
-        dilation=1,
-        groups=1,
-        bias=None,
-        padding_mode="zeros",
-        # BatchNorm3d args
-        # num_features: out_channels
-        eps=1e-05,
-        momentum=0.1,
-        # affine: True
-        # track_running_stats: True
-        # Args for this module
-        freeze_bn=False,
-        qconfig=None,
-    ):
-        super().__init__(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bias,
-            padding_mode,
-            eps,
-            momentum,
-            freeze_bn,
-            qconfig,
-        )
 
     def forward(self, input):
         return F.relu(ConvBn3d._forward(self, input))
