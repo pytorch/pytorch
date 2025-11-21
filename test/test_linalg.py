@@ -7692,31 +7692,31 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             if non_contig_type != 0:
                 y = y * 2
             if dtype == torch.int8:
-                x_int = torch.randint(-128, 127, (x, y), dtype=dtype, device=device)
+                x_int8 = torch.randint(-128, 127, (x, y), dtype=dtype, device=device)
             else:  # torch.uint8
-                x_int = torch.randint(0, 255, (x, y), dtype=dtype, device=device)
-            x_float = x_int.to(torch.float32)
+                x_int8 = torch.randint(0, 255, (x, y), dtype=dtype, device=device)
+            x_float = x_int8.to(torch.float32)
             if non_contig_type == 1:
-                x_int = x_int[:, : y // 2]
+                x_int8 = x_int8[:, : y // 2]
                 x_float = x_float[:, : y // 2]
             elif non_contig_type == 2:
-                x_int = x_int[:, ::2]
+                x_int8 = x_int8[:, ::2]
                 x_float = x_float[:, ::2]
             if use_transpose:
-                return x_int.t(), x_float.t()
-            return x_int, x_float
+                return x_int8.t(), x_float.t()
+            return x_int8, x_float
 
         if non_contig_type != 0 and (m == 0 or k == 0):
             return
-        a_int, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
+        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type, x_dtype)
         b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type, torch.int8)
-        c_int32 = torch._int_mm(a_int, b_int8)
+        c_int32 = torch._int_mm(a_int8, b_int8)
         self.assertTrue(c_int32.dtype is torch.int32)
         self.assertEqual(c_int32.device, torch.device(device))
         self.assertEqual(c_int32.float(), torch.mm(a_float, b_float))
         c_int32_result = c_int32.new_empty(c_int32.size())
         # Checking out variant
-        torch._int_mm(a_int, b_int8, out=c_int32_result)
+        torch._int_mm(a_int8, b_int8, out=c_int32_result)
         self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
 
 
