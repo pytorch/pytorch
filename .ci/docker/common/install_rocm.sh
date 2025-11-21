@@ -51,14 +51,8 @@ install_ubuntu() {
       echo "ROCM_BIN=${ROCM_BIN}"
       echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
 
-      cat >/etc/profile.d/rocm-sdk.sh <<EOF
-export ROCM_HOME="${ROCM_HOME}"
-export PATH="${ROCM_BIN}:\$PATH"
-export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
-EOF
-
       export ROCM_HOME
-      export PATH="${ROCM_BIN}:${PATH}"
+      export ROCM_PATH="${ROCM_BIN}:${PATH}"
       export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:${CMAKE_PREFIX_PATH:-}"
 
       echo "install_rocm.sh: TheRock nightly ROCm install complete"
