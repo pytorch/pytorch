@@ -634,6 +634,25 @@ class DistTensorRandomOpTest(DTensorTestBase):
 
             blockwise_iter_if_localtensor(local_tensor, local_shard_offset)
 
+    def test_philox_state_seed_roundtrip(self):
+        """
+        Test that _PhiloxState seed can be read and re-set without error.
+
+        This test addresses the issue where reading a seed value from the state
+        (which uses uint64 view) and then re-setting it would fail with:
+        OverflowError: can't convert negative int to unsigned
+
+        The fix ensures the seed getter uses uint64 view, preventing negative
+        values from appearing when the high bit is set.
+        """
+        from torch.distributed.tensor._random import _PhiloxState
+
+        state = torch.zeros(16, dtype=torch.uint8, device="cpu")
+        philox = _PhiloxState(state)
+        test_seed = 2**63 + 42  # This has the sign bit set when viewed as int64
+        philox.seed = test_seed
+        philox.seed = philox.seed
+
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):
     @property
