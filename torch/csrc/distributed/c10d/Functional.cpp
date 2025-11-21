@@ -214,7 +214,7 @@ static std::vector<at::Tensor> reduce_scatter_tensor_coalesced_out(
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
 
-  auto group = c10d::resolve_process_group(group_name);
+  auto group = c10d::resolve_process_group(std::move(group_name));
   auto work = group->reduce_scatter_tensor_coalesced(outputs, inputs, opts);
   for (const auto& tensor : outputs) {
     c10d::register_work(tensor, work);
@@ -249,9 +249,9 @@ at::Tensor reduce_scatter_tensor_out(
   if (input.is_complex()) {
     TORCH_CHECK(output.is_complex())
     auto real_input = at::view_as_real(input);
-    std::vector<at::Tensor> inputs{real_input};
+    std::vector<at::Tensor> inputs{std::move(real_input)};
     auto real_output = at::view_as_real(output);
-    std::vector<at::Tensor> outputs{real_output};
+    std::vector<at::Tensor> outputs{std::move(real_output)};
     return at::view_as_complex(reduce_scatter_tensor_coalesced_out(
         inputs,
         std::move(reduce_op),
@@ -259,8 +259,8 @@ at::Tensor reduce_scatter_tensor_out(
         std::move(group_name),
         outputs)[0]);
   }
-  std::vector<at::Tensor> inputs{input};
-  std::vector<at::Tensor> outputs{output};
+  std::vector<at::Tensor> inputs{std::move(input)};
+  std::vector<at::Tensor> outputs{std::move(output)};
   return reduce_scatter_tensor_coalesced_out(
       inputs,
       std::move(reduce_op),
@@ -292,7 +292,7 @@ at::Tensor all_to_all_single(
       output_split_sizes.begin(), output_split_sizes.end(), int64_t(0));
   auto output = input.new_empty(output_sizes);
 
-  auto group = c10d::resolve_process_group(group_name);
+  auto group = c10d::resolve_process_group(std::move(group_name));
   auto work = group->alltoall_base(
       output,
       // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
