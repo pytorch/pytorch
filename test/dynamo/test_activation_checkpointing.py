@@ -67,6 +67,11 @@ def checkpoint_wrapper(fn):
     return inner
 
 
+@torch._dynamo.allow_in_graph
+def _grad(*args, **kwargs):
+    return torch.autograd.grad(*args, **kwargs)
+
+
 def count_ops(
     gm, args, freq=None, freq_ge=None, op=None, freqs=None, freqs_ge=None, ops=None
 ):
@@ -1991,6 +1996,301 @@ class GraphModule(torch.nn.Module):
         add: "f32[4, 4]" = torch.ops.aten.add.Tensor(cos, sin_2);  cos = sin_2 = None
         return (add, sin, primals_1)
 """,
+        )
+
+
+class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
+    """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
+
+    def _get_ac_nodes(self, gm):
+        """Get nodes tagged for AC recomputation."""
+        from torch.utils.checkpoint import CheckpointPolicy
+
+        ac_nodes = []
+        for node in gm.graph.nodes:
+            if node.meta.get("recompute") in [
+                CheckpointPolicy.MUST_RECOMPUTE,
+                CheckpointPolicy.PREFER_RECOMPUTE,
+            ]:
+                ac_nodes.append(node)
+        return ac_nodes
+
+    def _get_backward_nodes(self, gm):
+        """Get nodes tagged as backward."""
+        backward_nodes = []
+        for node in gm.graph.nodes:
+            if node.meta.get("custom", {}).get("backward") is not None:
+                backward_nodes.append(node)
+        return backward_nodes
+
+    def _get_node_order(self, gm):
+        """Get mapping from node to its position in graph."""
+        return {node: idx for idx, node in enumerate(gm.graph.nodes)}
+
+    def _compile_and_capture(self, fn, rematerialize_nodes_with_ac_annotations):
+        """Helper to compile a function and capture the graph."""
+        captured_gm = None
+
+        def compiler(gm, example_inputs):
+            nonlocal captured_gm
+            captured_gm = gm
+            return gm.forward
+
+        backend = aot_autograd(
+            fw_compiler=compiler,
+            bw_compiler=None,
+            partition_fn=None,
+        )
+
+        with torch._functorch.config.patch(
+            rematerialize_nodes_with_ac_annotations=rematerialize_nodes_with_ac_annotations
+        ):
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=False)
+            result = compiled_fn()
+
+        return result, captured_gm
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_ac_rematerialize_simple_forward_backward(self):
+        """AC reordering: verify correctness, recomputation, and graph structure."""
+        x_data = torch.randn(4, 4)
+        y_data = torch.randn(4, 4)
+
+        def simple_fwd_bwd():
+            x = x_data.detach().requires_grad_(True)
+            y = y_data.detach().requires_grad_(True)
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a, b: torch.sigmoid(torch.matmul(a, b)),
+                x,
+                y,
+                use_reentrant=False,
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"backward": 0}):
+                dx, dy = _grad(loss, (x, y))
+
+            return dx.detach(), dy.detach()
+
+        (dx1, dy1), gm_without = self._compile_and_capture(simple_fwd_bwd, False)
+        (dx2, dy2), gm_with = self._compile_and_capture(simple_fwd_bwd, True)
+
+        self.assertTrue(torch.allclose(dx1, dx2))
+        self.assertTrue(torch.allclose(dy1, dy2))
+
+        mm_with = sum(
+            1 for n in gm_with.graph.nodes if n.target == torch.ops.aten.mm.default
+        )
+        mm_without = sum(
+            1 for n in gm_without.graph.nodes if n.target == torch.ops.aten.mm.default
+        )
+        sigmoid_with = sum(
+            1 for n in gm_with.graph.nodes if n.target == torch.ops.aten.sigmoid.default
+        )
+        sigmoid_without = sum(
+            1
+            for n in gm_without.graph.nodes
+            if n.target == torch.ops.aten.sigmoid.default
+        )
+
+        # With reordering: 4 mm (1 fwd + 2 bwd grad + 1 recompute), 2 sigmoid (1 fwd + 1 recompute)
+        # Without: 3 mm (1 fwd + 2 bwd grad), 1 sigmoid (1 fwd, saved)
+        self.assertEqual(mm_with, 4, "mm should be recomputed in backward")
+        self.assertEqual(mm_without, 3)
+        self.assertEqual(sigmoid_with, 2, "sigmoid should be recomputed in backward")
+        self.assertEqual(sigmoid_without, 1)
+
+        self.assertExpectedInline(
+            gm_with.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sigmoid = torch.ops.aten.sigmoid.default(mm);  mm = None
+    sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sigmoid_recomputed = torch.ops.aten.sigmoid.default(mm_recomputed);  mm_recomputed = None
+    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    mm_2 = torch.ops.aten.mm.default(t, sigmoid_backward);  t = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_3 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
+    detach_3 = torch.ops.aten.detach.default(mm_3);  mm_3 = None
+    detach_4 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
+    return (detach_3, detach_4)""",
+        )
+
+    def test_ac_rematerialize_with_rng_ops_raises_error(self):
+        x_data = torch.randn(4, 4)
+
+        def fwd_bwd_with_rng():
+            x = x_data.detach().requires_grad_(True)
+
+            # Checkpoint with RNG op (rand_like)
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a: torch.sigmoid(a + torch.rand_like(a)), x, use_reentrant=False
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"backward": 0}):
+                dx = _grad(loss, x)[0]
+
+            return dx
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops in checkpointed regions.",
+        ):
+            self._compile_and_capture(fwd_bwd_with_rng, True)
+
+    def test_ac_rematerialize_with_no_annotations_raises_error(self):
+        """Verify error is raised when RNG ops are in checkpointed regions."""
+
+        x_data = torch.randn(4, 4)
+
+        def fwd_bwd_with_rng():
+            x = x_data.detach().requires_grad_(True)
+
+            # Checkpoint with RNG op (rand_like)
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a: torch.sigmoid(a + 4), x, use_reentrant=False
+            )
+            loss = z.sum()
+            return _grad(loss, x)[0]
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "We are trying to rematerialize AC nodes in the backward region",
+        ):
+            self._compile_and_capture(fwd_bwd_with_rng, True)
+
+    def test_ac_rematerialize_with_selective_checkpoint_policy(self):
+        x_data = torch.randn(4, 128)
+        weight1 = torch.randn(128, 128)
+        bias1 = torch.randn(128)
+
+        # Policy: MUST_SAVE addmm, PREFER_RECOMPUTE everything else
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.addmm.default:
+                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+            return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
+        )
+
+        def fwd_bwd_with_policy():
+            x = x_data.detach().requires_grad_(True)
+            w1 = weight1.detach().requires_grad_(True)
+            b1 = bias1.detach().requires_grad_(True)
+
+            def checkpoint_fn(inp, w, b):
+                # addmm will be MUST_SAVE (not recomputed)
+                # relu will be PREFER_RECOMPUTE (recomputed)
+                linear = torch.nn.functional.linear(inp, w, b)  # addmm
+                return torch.relu(linear)
+
+            result = torch.utils.checkpoint.checkpoint(
+                checkpoint_fn, x, w1, b1, use_reentrant=False, context_fn=context_fn
+            )
+            loss = result.sum()
+
+            with torch.fx.traceback.annotate({"backward": 0}):
+                dx, dw, db = _grad(loss, (x, w1, b1))
+            return dx, dw, db
+
+        result_with, gm_with = self._compile_and_capture(fwd_bwd_with_policy, True)
+        result_without, gm_without = self._compile_and_capture(
+            fwd_bwd_with_policy, False
+        )
+
+        torch.testing.assert_close(result_with[0], result_without[0])
+        torch.testing.assert_close(result_with[1], result_without[1])
+        torch.testing.assert_close(result_with[2], result_without[2])
+
+        def count_op(gm, target):
+            return sum(1 for n in gm.graph.nodes if n.target == target)
+
+        addmm_without = count_op(gm_without, torch.ops.aten.addmm.default)
+        relu_without = count_op(gm_without, torch.ops.aten.relu.default)
+
+        addmm_with = count_op(gm_with, torch.ops.aten.addmm.default)
+        relu_with = count_op(gm_with, torch.ops.aten.relu.default)
+
+        # addmm should NOT be recomputed (same count in both)
+        self.assertEqual(addmm_without, addmm_with)
+
+        # relu SHOULD be recomputed (more in WITH due to 1 fwd + 1 recomputed)
+        self.assertEqual(relu_with, relu_without + 1)
+
+        recomputed_nodes = [
+            n.name for n in gm_with.graph.nodes if "_recomputed" in n.name
+        ]
+        self.assertNotIn("addmm_recomputed", recomputed_nodes)
+
+        self.assertTrue(
+            any("relu" in name for name in recomputed_nodes),
+            f"Expected relu_recomputed but got: {recomputed_nodes}",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_ac_rematerialize_transitive_dependency_sorting(self):
+        """
+        Verify dependencies are inserted in correct topological order.
+        """
+
+        x_data = torch.randn(4, 4)
+        y_data = torch.randn(4, 4)
+        z_data = torch.randn(4, 4)
+
+        def fwd_bwd_with_transitive_deps():
+            x = x_data.detach().requires_grad_(True)
+            y = y_data.detach().requires_grad_(True)
+            z = z_data.detach().requires_grad_(True)
+
+            # Forward region - all checkpointed
+            a = torch.utils.checkpoint.checkpoint(
+                lambda t: t.clone(), x, use_reentrant=False
+            )
+            b = torch.utils.checkpoint.checkpoint(
+                lambda t: t.clone(), y, use_reentrant=False
+            )
+            c = torch.utils.checkpoint.checkpoint(
+                lambda t1, t2: t1 + t2, a, b, use_reentrant=False
+            )
+            d = torch.utils.checkpoint.checkpoint(
+                lambda t: t.clone(), z, use_reentrant=False
+            )
+
+            # Backward region: e = d + c
+            # all_input_nodes returns [clone_2, add] which needs all transitive deps
+            with torch.fx.traceback.annotate({"backward": 0}):
+                e = d + c
+                loss = e.sum()
+                dx = _grad(loss, x)[0]
+
+            return dx.detach()
+
+        _, captured_gm = self._compile_and_capture(fwd_bwd_with_transitive_deps, True)
+
+        # clone and clone_1 are must_save so they are not recomputed
+        self.assertExpectedInline(
+            captured_gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    clone_1 = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    add_recomputed = torch.ops.aten.add.Tensor(clone, clone_1);  clone = clone_1 = None
+    clone_2_recomputed = torch.ops.aten.clone.default(arg2_1);  arg2_1 = None
+    add_2 = torch.ops.aten.add.Tensor(clone_2_recomputed, add_recomputed);  clone_2_recomputed = add_recomputed = None
+    sum_1 = torch.ops.aten.sum.default(add_2);  add_2 = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    detach = torch.ops.aten.detach.default(expand);  expand = None
+    return (detach,)""",
         )
 
 

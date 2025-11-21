@@ -236,6 +236,14 @@ def aot_stage1_graph_capture(
                     fw_metadata=aot_state.fw_metadata,
                 )
             )
+            # Apply AC reordering ONLY to forward+loss+bwd graph
+            # For joint graphs with autograd, the partitioner handles AC recomputation correctly
+            if torch._functorch.config.rematerialize_nodes_with_ac_annotations:
+                from torch._functorch._activation_checkpointing.rematerialize_nodes_with_ac_annotations_pass import (
+                    rematerialize_nodes_with_ac_annotations,
+                )
+
+                graph = rematerialize_nodes_with_ac_annotations(graph)
 
     if config.selective_decompose:
         from torch.fx.experimental.proxy_tensor import selective_decompose
