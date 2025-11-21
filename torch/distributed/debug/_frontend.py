@@ -96,6 +96,7 @@ templates = {
     <a href="/fr_trace">FlightRecorder</a> <!--@lint-ignore-->
     <a href="/fr_trace_nccl">FlightRecorder NCCL</a> <!--@lint-ignore-->
     <a href="/profile">torch profiler</a> <!--@lint-ignore-->
+    <a href="/wait_counters">Wait Counters</a> <!--@lint-ignore-->
 </nav>
 
 <section class="content">
@@ -257,6 +258,7 @@ class FrontendServer:
             "/fr_trace": self._handle_fr_trace,
             "/fr_trace_nccl": self._handle_fr_trace_nccl,
             "/profile": self._handle_profiler,
+            "/wait_counters": self._handle_wait_counters,
         }
 
         # Create HTTP server
@@ -345,6 +347,12 @@ class FrontendServer:
         addrs, resps = fetch_all("torch_profile", f"duration={duration}")
 
         return self._render_template("profile.html", addrs=addrs, resps=resps)
+
+    def _handle_wait_counters(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("wait_counter_values")
+        return self._render_template(
+            "json_resp.html", title="Wait Counters", addrs=addrs, resps=resps
+        )
 
 
 def main(port: int) -> None:
