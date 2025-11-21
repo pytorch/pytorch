@@ -216,7 +216,6 @@ def _adapt_user_input_gen_fns(
     }
 
 
-
 def _group_ranges_by_impl(
     range_to_best_impl: dict[tuple[int, Union[int, float]], tuple[Callable, dict, str]],
 ) -> list[tuple[list[tuple[int, Union[int, float]]], Callable, dict, str]]:
@@ -283,10 +282,15 @@ def _group_ranges_by_impl(
         for ranges_list, impl, kwargs, name in result:
             if len(ranges_list) > 1:
                 ranges_str = ", ".join(
-                    "[{}, {}]".format(s, e if e != float('inf') else 'inf')
+                    "[{}, {}]".format(s, e if e != float("inf") else "inf")
                     for s, e in ranges_list
                 )
-                log.info("   Grouped %d ranges for %s: %s", len(ranges_list), name, ranges_str)
+                log.info(
+                    "   Grouped %d ranges for %s: %s",
+                    len(ranges_list),
+                    name,
+                    ranges_str,
+                )
 
     return result
 
@@ -397,7 +401,9 @@ def _cleanup_subgraph_placeholders(
     )
 
     # Remove placeholders at the specified indices
-    for idx in sorted(removed_indices, reverse=True):  # Remove from end to avoid index shifting
+    for idx in sorted(
+        removed_indices, reverse=True
+    ):  # Remove from end to avoid index shifting
         if idx < len(placeholders):
             placeholder = placeholders[idx]
             log.info("    Removing placeholder: %s", placeholder.name)
@@ -484,89 +490,22 @@ def _extract_winning_decomposition_index(
     # Try to match decomposition by name
     for i, decomp in enumerate(decompositions):
         decomp_name = decomp.__name__
-        # Check if decomposition name appears in choice name
         if decomp_name in choice_name:
             log.debug(
-                f"Matched choice '{choice_name}' to decomposition[{i}] '{decomp_name}'"
+                "Matched choice '%s' to decomposition[%d] '%s'",
+                choice_name,
+                i,
+                decomp_name,
             )
             return i
 
     # Fallback: could not determine, use first
     log.warning(
-        f"Could not determine winning decomposition from choice name '{choice_name}', "
-        f"defaulting to first decomposition"
+        "Could not determine winning decomposition from choice name '%s', "
+        "defaulting to first decomposition",
+        choice_name,
     )
     return 0
-
-
-def _extract_tensor_by_name(
-    args: tuple[Any, ...],
-    kwargs: dict[str, Any],
-    tensor_name: str,
-    op_overload: torch._ops.OpOverload,
-) -> Optional[Any]:
-    """Extract a tensor from args/kwargs by parameter name.
-
-    Args:
-        args: Positional arguments
-        kwargs: Keyword arguments
-        tensor_name: Name of the parameter to extract
-        op_overload: OpOverload to get parameter names
-
-    Returns:
-        The tensor (TensorBox/Buffer) if found, None otherwise
-    """
-    import inspect
-
-    # Get parameter names from the op's signature
-    try:
-        sig = inspect.signature(op_overload)
-        param_names = list(sig.parameters.keys())
-    except Exception:
-        log.warning("Could not get signature for %s, using fallback", op_overload)
-        # Fallback: assume tensor_name matches position or kwargs
-        if tensor_name in kwargs:
-            return kwargs[tensor_name]
-        return None
-
-    # Check if tensor_name is in kwargs
-    if tensor_name in kwargs:
-        return kwargs[tensor_name]
-
-    # Check if tensor_name is in positional args
-    if tensor_name in param_names:
-        param_index = param_names.index(tensor_name)
-        if param_index < len(args):
-            return args[param_index]
-
-    return None
-
-
-def _get_dimension_value(tensor: Any, dim_index: int) -> Any:
-    """Get the dimension value from a tensor IR node.
-
-    Args:
-        tensor: TensorBox or Buffer IR node
-        dim_index: Dimension index to extract
-
-    Returns:
-        Dimension value (may be symbolic or concrete)
-    """
-    if hasattr(tensor, "get_size"):
-        # Buffer has get_size()
-        shape = tensor.get_size()
-    elif hasattr(tensor, "data") and hasattr(tensor.data, "get_size"):
-        # TensorBox wraps data
-        shape = tensor.data.get_size()
-    else:
-        raise RuntimeError(f"Cannot extract shape from {type(tensor)}")
-
-    if dim_index >= len(shape):
-        raise IndexError(
-            f"dim_index {dim_index} out of range for tensor with {len(shape)} dimensions"
-        )
-
-    return shape[dim_index]
 
 
 def _create_fallback_choice(
@@ -1232,7 +1171,9 @@ def _range_based_lowering_fn(
         dispatch_tensor = fake_tensors[0]
         dim_value = dispatch_tensor.size(dim_index)
 
-        def build_range_predicate(ranges_list: list[tuple[int, Union[int, float]]]) -> torch.Tensor:
+        def build_range_predicate(
+            ranges_list: list[tuple[int, Union[int, float]]],
+        ) -> torch.Tensor:
             """Build OR predicate for multiple ranges.
 
             Args:
@@ -1245,7 +1186,7 @@ def _range_based_lowering_fn(
                 # Single range: start <= dim <= end
                 range_start, range_end = ranges_list[0]
                 start_int = int(range_start)
-                end_int = int(range_end) if range_end != float('inf') else None
+                end_int = int(range_end) if range_end != float("inf") else None
 
                 if end_int is None:
                     # [start, inf): dim >= start
@@ -1258,7 +1199,7 @@ def _range_based_lowering_fn(
             predicates = []
             for range_start, range_end in ranges_list:
                 start_int = int(range_start)
-                end_int = int(range_end) if range_end != float('inf') else None
+                end_int = int(range_end) if range_end != float("inf") else None
 
                 if end_int is None:
                     # [start, inf): dim >= start
