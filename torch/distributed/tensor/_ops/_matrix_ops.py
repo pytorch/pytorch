@@ -1090,7 +1090,7 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             meta: TensorMeta = spec.output_specs.tensor_meta
             local_stride = compute_local_stride(meta.stride, mesh, placements)
             local_shape, _ = compute_local_shape_and_global_offset(
-                meta.shape, mesh, placements
+                meta.shape, mesh, placements, skip_offset=True
             )
             return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
 
