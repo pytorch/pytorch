@@ -369,7 +369,8 @@ static PoolSizes process_pool_sizes(const Tensor& input,
       out_size += stride_expanded[dim] - 1;
     }
 
-    out_size = out_size / stride_expanded[dim] + 1;
+    // Use div_rtn for proper floor division (matching CPU behavior)
+    out_size = div_rtn<int64_t>(out_size, static_cast<int64_t>(stride_expanded[dim])) + 1;
 
     if (ceil_mode) {
       if (((out_size - 1) * stride_expanded[dim]) >= (input.size(leading_dims + dim) + padding_expanded[dim])) {
@@ -385,6 +386,30 @@ static PoolSizes process_pool_sizes(const Tensor& input,
   }
   for (const auto dim : c10::irange(pooling_dims)) {
     output_size[leading_dims + dim] = output_pooling_size[dim];
+  }
+
+  // Validate output sizes are not too small (matching CPU behavior)
+  for (const auto dim : c10::irange(pooling_dims)) {
+    if (output_pooling_size[dim] < 1) {
+      std::stringstream input_size_str, output_size_str;
+      // Build input size string for pooling dimensions
+      for (const auto d : c10::irange(pooling_dims)) {
+        if (d > 0) input_size_str << "x";
+        input_size_str << input.size(leading_dims + d);
+      }
+      // Build output size string for pooling dimensions
+      for (const auto d : c10::irange(pooling_dims)) {
+        if (d > 0) output_size_str << "x";
+        output_size_str << output_pooling_size[d];
+      }
+      // Always throw error - no need for extra bool flag
+      TORCH_CHECK(output_pooling_size[dim] >= 1,
+                  "Given input size: (",
+                  input.size(leading_dims - 1), "x", input_size_str.str(), "). ",
+                  "Calculated output size: (",
+                  input.size(leading_dims - 1), "x", output_size_str.str(), "). ",
+                  "Output size is too small");
+    }
   }
 
   return PoolSizes(dims,
