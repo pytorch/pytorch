@@ -28,7 +28,7 @@ LlgaKernel::LlgaKernel(const Node* fusionNode)
   partition_ = partitions[0];
   nPartitionInputs_ = partition_.get_input_ports().size();
 #ifdef GRAPH_DEBUG_ENABLED
-  GRAPH_DEBUG("Initialized ", debugName(), "\n", graph_->toString());
+  GRAPH_DEBUG("Initialized ", debugName(), '\n', graph_->toString());
 #endif
 }
 
@@ -243,7 +243,7 @@ compiled_partition LlgaKernel::compile(const partition& partition) {
 
 void LlgaKernel::run(Stack& stack) {
 #ifdef GRAPH_DEBUG_ENABLED
-  GRAPH_DEBUG("In ", debugName(), "\n");
+  GRAPH_DEBUG("In ", debugName(), '\n');
 #endif
 
   // Grab input values from stack

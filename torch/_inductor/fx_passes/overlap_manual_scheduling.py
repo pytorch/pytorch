@@ -8,9 +8,9 @@ import torch
 import torch.fx as fx
 from torch._dynamo.graph_deduplication import _stable_topological_sort
 from torch._inductor.fx_passes.bucketing import (
+    _schedulable_wait_node,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
-    is_wait_tensor,
     merge_all_gather_bucket,
     merge_reduce_scatter_bucket,
 )
@@ -36,7 +36,10 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
     """
 
     def __init__(
-        self, node_users: dict[fx.Node, OrderedSet[fx.Node]], *args: Any, **kwargs: Any
+        self,
+        node_users: dict[fx.Node, OrderedSet[fx.Node]],
+        *args: Any,
+        **kwargs: Any,
     ):
         super().__init__(*args, **kwargs)
         self.node_users = node_users
@@ -97,7 +100,7 @@ class ManualOverlapPreservingBucketer(OverlapPreservingBucketer):
             )
 
         # Identify the new wait and start
-        new_waits = [n for n in new_nodes if is_wait_tensor(n)]
+        new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
         assert len(new_waits) == 1, f"Expected exactly one new wait, got {new_waits}"
         new_wait = new_waits[0]
         new_start = new_wait.args[0]
@@ -169,6 +172,8 @@ class ManualOverlapScheduler(OverlapScheduler):
             max_coll_distance=0,
             custom_runtime_estimation=None,
             collective_estimator="analytical",
+            max_memory_increase_gb=None,
+            max_memory_increase_ratio=None,
         )
         self.module_bucket_plans = module_bucket_plans
         self.nodes_in_subgraph: list[list[fx.Node]] = []
@@ -177,7 +182,6 @@ class ManualOverlapScheduler(OverlapScheduler):
         self.bucketer = ManualOverlapPreservingBucketer(
             graph=self.graph,
             collective_info=self.collective_info,
-            node_ancestors=self.node_ancestors,
             node_users=self.node_users,
             scheduled=OrderedSet(self.graph.nodes),
         )
@@ -186,7 +190,7 @@ class ManualOverlapScheduler(OverlapScheduler):
     def _identify_collectives(self) -> None:
         """Identify all collective operations."""
         for node in self.nodes:
-            if is_wait_tensor(node):
+            if _schedulable_wait_node(node):
                 start = node.args[0]
                 info = CollectiveInfo(
                     start_node=start,

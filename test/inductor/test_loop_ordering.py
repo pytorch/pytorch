@@ -1188,6 +1188,22 @@ class TestTiling(TestCase):
         with torch._inductor.config.patch(_post_fusion_custom_pass=fn), torch.no_grad():
             torch.compile(f)(x)
 
+    def test_find_broadcast_var(self):
+        """Test broadcast variable detection for tiling improvements."""
+        from torch._inductor import tiling_utils
+
+        i, j, k = sympy.symbols("i j k", integer=True)
+
+        # Test broadcast pattern detection: FloorDiv creates broadcast
+        result = tiling_utils.find_broadcast_var(
+            FloorDiv(i, 10), {i: 100, j: 50, k: 20}
+        )
+        self.assertEqual(result, i)
+
+        # Test non-broadcast: linear access pattern
+        result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8, k: 20})
+        self.assertEqual(result, None)
+
 
 class TestIndexInversion(TestCase):
     @classmethod
