@@ -582,6 +582,32 @@ class TestDTensorDebugMode(TestCase):
         with self.assertRaisesRegex(ValueError, "Log lengths don't match"):
             DebugMode.check_hash_mismatches(dm1.logs, dm3.logs)
 
+    @unittest.skipIf(
+        not torch.cuda.is_available()
+        or torch.cuda.get_device_properties(0).total_memory < 2**26,
+        "Being conservative, test peak memory is 25MB?",
+    )
+    def test_tensor_hash_waits_on_collective(self):
+        # test that hashing collectives gives correct results
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        local_tensor = torch.ones(2**18, device=self.device_type)
+        dt = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
+            dt.redistribute(mesh, [Replicate()])
+
+        # Find all_gather hash
+        all_gather_logs = [
+            op
+            for op in debug_mode.logs
+            if isinstance(op, _OpCall)
+            and op.op == torch.ops._c10d_functional.all_gather_into_tensor.default
+        ]
+        self.assertEqual(len(all_gather_logs), 1)
+        actual_hash = all_gather_logs[0].log["hash"]
+        self.assertEqual(actual_hash, float(local_tensor.numel() * self.world_size))
+
     def test_pretty_print_dtensor_make_fx(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
