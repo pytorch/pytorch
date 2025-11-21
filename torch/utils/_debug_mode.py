@@ -924,7 +924,9 @@ class DebugMode(TorchDispatchMode):
     @staticmethod
     @contextlib.contextmanager
     def log_tensor_hashes(
-        hash_fn: Union[Callable, str, list[str]] = "norm", hash_inputs: bool = False
+        hash_fn: Union[Callable, str, list[str]] = "norm",
+        hash_inputs: bool = False,
+        wait_on_collectives: bool = True,
     ):
         """
         Installs hook for tensor hash logging.
@@ -936,6 +938,7 @@ class DebugMode(TorchDispatchMode):
                 - "hash_tensor": uses torch.hash_tensor (XOR sum reduction)
             - List of strings: returns tuple of hashes from above options
         hash_inputs: if True, also hashes tensors in (args, kwargs), storing them in "input_hash".
+        wait_on_collectives: if True (default), waits on async collective Work handles before hashing.
         NOTE: this is currently a post-hook, so e.g. inplace ops will log the "output" hashes.
         """
 
@@ -965,6 +968,12 @@ class DebugMode(TorchDispatchMode):
         def _dispatch_hash_hook(func, types, args, kwargs, result):
             if "empty" in str(func) or "profiler" in str(func):
                 return None
+
+            # Wait on async collective Work handles before hashing
+            if wait_on_collectives and isinstance(result, (tuple, list)):
+                for item in result:
+                    if isinstance(item, torch.ScriptObject) and hasattr(item, "wait"):
+                        item.wait()
 
             out = {}
             out["hash"] = _tree_hash(result)
