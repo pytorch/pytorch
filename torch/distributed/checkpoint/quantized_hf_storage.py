@@ -82,7 +82,7 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
         # Store the complete weight map for file location lookups
         self._weight_map = weight_map
 
-        for tensor_name in weight_map.keys():
+        for tensor_name in weight_map:
             if tensor_name.endswith(".weight_scale_inv"):
                 weight_name = tensor_name.replace(".weight_scale_inv", ".weight")
                 if weight_name in weight_map:
@@ -107,9 +107,10 @@ class QuantizedHuggingFaceStorageReader(HuggingFaceStorageReader):
 
         target_tensor = planner.resolve_tensor(req).detach()
 
-        assert target_tensor.size() == tensor.size(), (
-            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-        )
+        if target_tensor.size() != tensor.size():
+            raise AssertionError(
+                f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+            )
 
         target_tensor.copy_(tensor)
         planner.commit_tensor(req, target_tensor)

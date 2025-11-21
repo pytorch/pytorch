@@ -195,7 +195,7 @@ if not TEST_WITH_DEV_DBG_ASAN:
                 for i, t in enumerate(tensors):
                     self.assertEqual(t, torch.ones(5, 5, device=device) + i)
             elif self.rank == 0:
-                for i, t in enumerate(tensors):
+                for t in tensors:
                     zeros = torch.zeros(5, 5, device=device)
                     self.assertEqual(t, zeros)
             y = torch.sum(torch.stack(tensors), axis=0)

@@ -63,7 +63,7 @@ print('Compile Success! ✅')
 ### Single Seed Execution
 
 ```bash
-cd tools/experimental/dynamic_shapes/torchfuzz
+cd tools/experimental/torchfuzz
 python fuzzer.py --seed 42
 ```
 

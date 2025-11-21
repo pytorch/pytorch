@@ -19,8 +19,8 @@ optimization of both forward and backward passes.
 import contextlib
 import functools
 import logging
-from collections.abc import Iterable
-from typing import Any, Callable
+from collections.abc import Callable, Iterable
+from typing import Any
 from typing_extensions import ParamSpec, TypeVar
 from unittest.mock import patch
 
@@ -104,7 +104,7 @@ class AotAutograd:
 
         # debug asserts slow down compile time noticeably,
         # So only default them on when the aot_eager backend is used.
-        if self.kwargs.get("fw_compiler", None) == nop:
+        if self.kwargs.get("fw_compiler", None) is nop:
             patch_config: contextlib.AbstractContextManager[Any] = patch(
                 "functorch.compile.config.debug_assert", True
             )

@@ -279,7 +279,7 @@ class _CudaModule:
             return self._kernels[name]
 
         # Import the CUDA library inside the method
-        # pyrefly: ignore  # missing-module-attribute
+        # pyrefly: ignore [missing-module-attribute]
         from torch.cuda._utils import _get_gpu_runtime_library
 
         libcuda = _get_gpu_runtime_library()

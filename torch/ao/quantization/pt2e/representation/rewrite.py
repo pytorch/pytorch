@@ -2,7 +2,7 @@
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch._export.utils import _disable_aten_to_metadata_assertions
@@ -614,8 +614,8 @@ class _RewriteInfo:
     pattern: Callable
     replacement: Callable
     # post transformation on the exported pattern and replacement GraphModule
-    pattern_post_trans: Optional[Callable[[GraphModule], GraphModule]] = None
-    replacement_post_trans: Optional[Callable[[GraphModule], GraphModule]] = None
+    pattern_post_trans: Callable[[GraphModule], GraphModule] | None = None
+    replacement_post_trans: Callable[[GraphModule], GraphModule] | None = None
 
 
 def reference_representation_rewrite(model: GraphModule) -> GraphModule:

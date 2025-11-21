@@ -399,6 +399,13 @@ def get_args_parser() -> ArgumentParser:
     """Parse the command line options."""
     parser = ArgumentParser(description="Torch Distributed Elastic Training Launcher")
 
+    def comma_separated_list(value):
+        placeholder = "<COMMA_PLACEHOLDER>"
+        value = value.replace(",,", placeholder)
+        items = value.split(",")
+        items = [item.replace(placeholder, ",") for item in items]
+        return items
+
     #
     # Worker/node size related arguments.
     #
@@ -571,6 +578,28 @@ def get_args_parser() -> ArgumentParser:
         "log files saved via --redirect or --tee",
     )
 
+    parser.add_argument(
+        "--duplicate-stdout-filters",
+        "--duplicate_stdout_filters",
+        action=env,
+        type=comma_separated_list,
+        default=[],
+        help="Duplicates logs streamed to stdout to another specified file with a list of filters (e.g. "
+        "[--duplicate_stdout_filters 'apple,orange'] will duplicate log lines matching 'apple' "
+        "OR 'orange'. An empty filters list won't duplicate any lines. Use double comma to escape a comma) ",
+    )
+
+    parser.add_argument(
+        "--duplicate-stderr-filters",
+        "--duplicate_stderr_filters",
+        action=env,
+        type=comma_separated_list,
+        default=[],
+        help="Duplicates logs streamed to stderr to another specified file with a list of filters (e.g. "
+        "[--duplicate_stdout_filters 'apple,orange'] will duplicate log lines matching 'apple' "
+        "OR 'orange'. An empty filters list won't duplicate any lines. Use double comma to escape a comma) ",
+    )
+
     #
     # Backwards compatible parameters with caffe2.distributed.launch.
     #
@@ -657,6 +686,15 @@ def get_args_parser() -> ArgumentParser:
         help="Comma-separated list of signals to handle and forward to subprocesses. "
         "Default: SIGTERM,SIGINT,SIGHUP,SIGQUIT. "
         "Common additional signals: SIGUSR1,SIGUSR2 (used in SLURM environments).",
+    )
+
+    parser.add_argument(
+        "--virtual-local-rank",
+        "--virtual_local_rank",
+        action=check_env,
+        help="Enable virtual local rank mode for workers. When enabled, LOCAL_RANK is set to 0 "
+        "for all workers and CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its "
+        "assigned GPU at device index 0.",
     )
 
     #
@@ -792,8 +830,12 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
 def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str]]:
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
-    assert 0 < min_nodes <= max_nodes
-    assert args.max_restarts >= 0
+    if not (0 < min_nodes <= max_nodes):
+        raise AssertionError(
+            f"min_nodes must be > 0 and <= max_nodes, got min_nodes={min_nodes}, max_nodes={max_nodes}"
+        )
+    if args.max_restarts < 0:
+        raise AssertionError("max_restarts must be >= 0")
 
     if (
         hasattr(args, "master_addr")
@@ -833,14 +875,15 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
     if args.local_ranks_filter:
         try:
             ranks = set(map(int, args.local_ranks_filter.split(",")))
-            assert ranks
+            if not ranks:
+                raise AssertionError("ranks set cannot be empty")
         except Exception as e:
             raise ValueError(
                 "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
 
     logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
-    # pyrefly: ignore  # bad-instantiation
+    # pyrefly: ignore [bad-instantiation]
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),
@@ -871,6 +914,9 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         event_log_handler=args.event_log_handler,
         numa_options=numa_options,
         signals_to_handle=args.signals_to_handle,
+        duplicate_stdout_filters=args.duplicate_stdout_filters,
+        duplicate_stderr_filters=args.duplicate_stderr_filters,
+        virtual_local_rank=args.virtual_local_rank,
     )
 
     with_python = not args.no_python

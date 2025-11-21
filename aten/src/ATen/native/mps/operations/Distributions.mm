@@ -57,6 +57,7 @@ Tensor& random_mps_impl(Tensor& self,
   if (self.numel() == 0) {
     return self;
   }
+  at::assert_no_internal_overlap(self);
   // MPS random is broken for 5D+ tensors, see https://github.com/pytorch/pytorch/issues/147624
   const auto need_reshape = self.ndimension() > 4;
   auto mps_gen = get_generator_or_default<MPSGeneratorImpl>(gen, at::mps::detail::getDefaultMPSGenerator());
@@ -153,8 +154,16 @@ Tensor& random_mps_impl(Tensor& self,
       feeds[meanPlaceholder.getMPSGraphTensor()] = meanPlaceholder.getMPSGraphTensorData();
     }
 
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, self);
+    // Handle non-contiguous output tensors by creating a contiguous temporary
+    const auto needs_gather = needsGather(self);
+    Tensor self_ = needs_gather ? at::empty_like(self, MemoryFormat::Contiguous) : self;
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->resultTensor, self_);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
+
+    // Copy results back to original non-contiguous output
+    if (needs_gather) {
+      self.copy_(self_);
+    }
   }
 
   return self;

@@ -657,7 +657,6 @@ class CommonTemplate:
             (False, 0),  # We can't infer that the load is a power of 2.
         ],
     )
-    @skipIfXpu(msg="Remove this after Intel triton issue #4000 resolved.")
     def test_dynamic_shapes_reduction(self, with_tiling: bool, num_block_pointers: int):
         """
         Test a reduction kernel with dynamic shapes.
@@ -824,7 +823,7 @@ class CommonTemplate:
         [
             ((8, 8), 1, 1, True),  # Persistent Welford fallback
             subtest(
-                ((128, 128), 9, 2, False), decorators=[xfail_if_use_tensor_descriptor]
+                ((128, 128), 7, 2, False), decorators=[xfail_if_use_tensor_descriptor]
             ),  # Looped Welford reduction
         ],
     )
@@ -906,6 +905,10 @@ class CommonTemplate:
         # Check for 2 reduction dimensions.
         self._assert_reduction_ndims(code, 2)
 
+    @skipIfXpu(
+        msg="AssertionError: Scalars are not equal!, "
+        "https://github.com/intel/torch-xpu-ops/issues/2332"
+    )
     @xfail_if_use_tensor_descriptor  # Cannot use TMA API for store with no x dimension.
     @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
     def test_2d_reduction_multi_kernel(self):
@@ -924,7 +927,7 @@ class CommonTemplate:
         result, (code,) = self._run_and_compare(
             foo,
             view,
-            expected_num_block_pointers=6,
+            expected_num_block_pointers=5,
             expected_num_triton_kernels=2,
             config_patches={
                 "triton.multi_kernel": True,

@@ -62,7 +62,8 @@ class Distribution:
                 warnings.warn(
                     f"{self.__class__} does not define `arg_constraints`. "
                     + "Please set `arg_constraints = {}` or initialize the distribution "
-                    + "with `validate_args=False` to turn off validation."
+                    + "with `validate_args=False` to turn off validation.",
+                    stacklevel=2,
                 )
             for param, constraint in arg_constraints.items():
                 if constraints.is_dependent(constraint):
@@ -313,7 +314,8 @@ class Distribution:
             warnings.warn(
                 f"{self.__class__} does not define `support` to enable "
                 + "sample validation. Please initialize the distribution with "
-                + "`validate_args=False` to turn off validation."
+                + "`validate_args=False` to turn off validation.",
+                stacklevel=2,
             )
             return
         assert support is not None

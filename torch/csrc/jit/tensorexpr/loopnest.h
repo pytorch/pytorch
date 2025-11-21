@@ -43,11 +43,11 @@ class TORCH_API LoopNest {
     return root_stmt_;
   }
 
-  std::vector<ForPtr> getLoopStmtsFor(const Tensor&) const;
-  std::vector<ForPtr> getLoopStmtsFor(const BufPtr&) const;
-  std::vector<ForPtr> getLoopStmtsFor(StmtPtr) const;
-  StmtPtr getLoopBodyFor(const Tensor&) const;
-  StmtPtr getLoopBodyFor(BufPtr) const;
+  std::vector<ForPtr> getLoopStmtsFor(const Tensor& /*t*/) const;
+  std::vector<ForPtr> getLoopStmtsFor(const BufPtr& /*buf*/) const;
+  std::vector<ForPtr> getLoopStmtsFor(StmtPtr /*s*/) const;
+  StmtPtr getLoopBodyFor(const Tensor& /*t*/) const;
+  StmtPtr getLoopBodyFor(BufPtr /*buf*/) const;
 
   // Returns the For stmt indexed by 'indices' in the 'root' For stmt.
   //'indices' indicates the path to the returned loop from 'root' in AST, e.g.,
@@ -77,7 +77,7 @@ class TORCH_API LoopNest {
   static std::vector<ForPtr> getEnclosingLoopNest(const StmtPtr& st);
 
   // Returns a list of all Stmts that write to the given buf.
-  std::vector<StmtPtr> getAllWritesToBuf(BufPtr) const;
+  std::vector<StmtPtr> getAllWritesToBuf(BufPtr /*buf*/) const;
 
   // The following methods return the For loops that contain writes to
   // the given buf.
@@ -97,13 +97,14 @@ class TORCH_API LoopNest {
   // to buf.
   // For the above example:
   //   getAllInnermostLoopsWritingToBuf(a) => {j1, k2, j3}
-  std::vector<ForPtr> getAllInnermostLoopsWritingToBuf(BufPtr) const;
+  std::vector<ForPtr> getAllInnermostLoopsWritingToBuf(BufPtr /*buf*/) const;
 
   // Returns a list of For loopnests which contain a Stmt that writes to
   // the given buf. Each loopnest here is a vector For loops.
   // For the above example:
   //   getAllLoopNestsWritingToBuf(a) => {{i1,j1}, {i2,j2,k2}, {i2,j3}}
-  std::vector<std::vector<ForPtr>> getAllLoopNestsWritingToBuf(BufPtr) const;
+  std::vector<std::vector<ForPtr>> getAllLoopNestsWritingToBuf(
+      BufPtr /*buf*/) const;
 
   StmtPtr simplify();
 
@@ -561,7 +562,7 @@ class TORCH_API LoopNest {
   // Vectorize the given loop. This method requires that the given loop
   // does not perform a reduction.
   // It returns true if vectorization is successful and false otherwise.
-  static bool vectorize(const ForPtr&);
+  static bool vectorize(const ForPtr& /*f*/);
 
   // Find the inner-most loops and vectorize them. Currently, this only works
   // for the LLVM backend, when no reductions are involved.

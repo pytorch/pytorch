@@ -71,7 +71,7 @@
 namespace at::native {
 namespace {
 
-static void col2im_out_cpu_template(
+void col2im_out_cpu_template(
     Tensor& output,
     const Tensor& input_,
     IntArrayRef output_size,

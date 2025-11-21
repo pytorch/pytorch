@@ -53,6 +53,16 @@ struct OperatorRegistry {
     to_register.clear();
   }
 
+  const std::vector<std::shared_ptr<Operator>>& getOperatorsWithLockHeld(
+      Symbol name) {
+    registerPendingOperators();
+    static std::vector<std::shared_ptr<Operator>> empty;
+    auto it = operators.find(name);
+    if (it != operators.end())
+      return it->second;
+    return empty;
+  }
+
  public:
   void registerOperator(Operator&& op) {
     std::lock_guard<std::mutex> guard(lock);
@@ -143,14 +153,35 @@ struct OperatorRegistry {
     return it->second;
   }
 
-  const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
+  // This function returns internal lock-protected state. We need to
+  // copy it to avoid race conditions.
+  std::vector<std::shared_ptr<Operator>> getOperators(Symbol name) {
     std::lock_guard<std::mutex> guard(lock);
-    registerPendingOperators();
-    static std::vector<std::shared_ptr<Operator>> empty;
-    auto it = operators.find(name);
-    if (it != operators.end())
-      return it->second;
-    return empty;
+    return getOperatorsWithLockHeld(name);
+  }
+
+  std::vector<std::shared_ptr<Operator>> getSortedOperators(Symbol name) {
+    std::lock_guard<std::mutex> guard(lock);
+    const auto& unsortedOps = getOperatorsWithLockHeld(name);
+    // Depending on the order of registration, aten or jit ops may be
+    // registered first. This sorting is helpful in cases where
+    // deterministic (i.e. not dependent on build config) behavior is
+    // desired; e.g. torch.ops.aten.* uses this function, and tries to
+    // find the "first" op that matches input args. Without the sorting,
+    // the "first" op may change depending on registration order.
+    std::vector<std::shared_ptr<Operator>> sortedOps;
+    sortedOps.reserve(unsortedOps.size());
+    std::copy_if(
+        unsortedOps.begin(),
+        unsortedOps.end(),
+        std::back_inserter(sortedOps),
+        [](const std::shared_ptr<Operator>& op) { return op->isC10Op(); });
+    std::copy_if(
+        unsortedOps.begin(),
+        unsortedOps.end(),
+        std::back_inserter(sortedOps),
+        [](const std::shared_ptr<Operator>& op) { return !op->isC10Op(); });
+    return sortedOps;
   }
 
   std::vector<Symbol> findSimilarOperators(Symbol input_op) {
@@ -387,35 +418,16 @@ void deregisterOperator(const FunctionSchema& schema) {
   getRegistry().deregisterOperator(schema);
 }
 
-const std::vector<std::shared_ptr<Operator>> getAllOperators() {
+std::vector<std::shared_ptr<Operator>> getAllOperators() {
   return getRegistry().getAllOperators();
 }
 
-const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
+std::vector<std::shared_ptr<Operator>> getAllOperatorsFor(Symbol name) {
   return getRegistry().getOperators(name);
 }
 
 std::vector<std::shared_ptr<Operator>> getAllSortedOperatorsFor(Symbol name) {
-  const auto& unsortedOps = getAllOperatorsFor(name);
-  // Depending on the order of registration, aten or jit ops may be
-  // registered first. This sorting is helpful in cases where
-  // deterministic (i.e. not dependent on build config) behavior is
-  // desired; e.g. torch.ops.aten.* uses this function, and tries to
-  // find the "first" op that matches input args. Without the sorting,
-  // the "first" op may change depending on registration order.
-  std::vector<std::shared_ptr<Operator>> sortedOps;
-  sortedOps.reserve(unsortedOps.size());
-  std::copy_if(
-      unsortedOps.begin(),
-      unsortedOps.end(),
-      std::back_inserter(sortedOps),
-      [](const std::shared_ptr<Operator>& op) { return op->isC10Op(); });
-  std::copy_if(
-      unsortedOps.begin(),
-      unsortedOps.end(),
-      std::back_inserter(sortedOps),
-      [](const std::shared_ptr<Operator>& op) { return !op->isC10Op(); });
-  return sortedOps;
+  return getRegistry().getSortedOperators(name);
 }
 
 std::shared_ptr<Operator> findOperatorFor(const c10::OperatorName& full_name) {

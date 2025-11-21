@@ -24,7 +24,7 @@ These schema definitions enable the DTensor system to:
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, Optional, Union
 from typing_extensions import deprecated
@@ -205,7 +205,7 @@ class OpStrategy(StrategyType):
     def __str__(self) -> str:
         strategy_list_str = ", ".join([str(strategy) for strategy in self.strategies])
         mesh_shape = self.mesh_shape
-        return f"OpStragety[{strategy_list_str}] @ mesh: {mesh_shape}"
+        return f"OpStrategy[{strategy_list_str}] @ mesh: {mesh_shape}"
 
     def max_num_shards(self) -> int:
         """
@@ -335,8 +335,6 @@ class OpSchema:
 
     _comparison_key: Optional[tuple[object, ...]] = None
 
-    has_symints: bool = field(init=False)
-
     @property
     def args_spec(self) -> tuple[DTensorSpec, ...]:
         """
@@ -362,6 +360,16 @@ class OpSchema:
             else self.args_schema
         )
         return tuple(item for item in args if isinstance(item, OpStrategy))
+
+    @property
+    def kwargs_strategy(self) -> tuple[OpStrategy, ...]:
+        # returns OpStrategy items from kwargs_schema.
+        kwargs_vals = (
+            tree_leaves(self.kwargs_schema)
+            if self.schema_info is not None and self.schema_info.needs_pytree
+            else self.kwargs_schema.values()
+        )
+        return tuple(item for item in kwargs_vals if isinstance(item, OpStrategy))
 
     def __repr__(self) -> str:
         args_schema = ", ".join([str(arg_schema) for arg_schema in self.args_schema])

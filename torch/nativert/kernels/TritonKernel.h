@@ -24,6 +24,8 @@ class TritonKernel : public OpKernel {
 
   // unnamed node attributes will be passed as arguments to the kernel
   std::vector<void*> attr_ptrs_;
+  // Storage for float attributes that were serialized as doubles
+  std::vector<float> float_attrs_;
   std::vector<int64_t> output_indices_;
   LaunchParams launch_params_;
 };

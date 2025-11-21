@@ -56,7 +56,7 @@ void memset_junk(void* data, size_t num) {
 }
 
 #if defined(__linux__) && !defined(__ANDROID__)
-static inline bool is_thp_alloc_enabled() {
+inline bool is_thp_alloc_enabled() {
   static bool value = [&] {
     auto env = c10::utils::check_env("THP_MEM_ALLOC_ENABLE");
     return env.has_value() ? env.value() : 0;

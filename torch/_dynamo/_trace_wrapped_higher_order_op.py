@@ -95,7 +95,7 @@ class ModIndex(torch.autograd.Function):
     generate_vmap_rule = True
 
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(x: Tensor, indices: list[Tensor]) -> Tensor:
         return torch.ops.aten.index(x, indices)
 
@@ -140,7 +140,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
         args: tuple[object, ...] = (),
         kwargs: Optional[dict[str, object]] = None,
     ) -> object:
-        if func == torch.Tensor.__getitem__:
+        if func is torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])
             if all(isinstance(x, torch.Tensor) for x in index_args):
                 return mod_index(args[0], index_args)
@@ -243,7 +243,7 @@ def _trace_wrapped_functionalized(ctx: Any, *args: Any, **kwargs: Any) -> Any:
 
 def autograd_function_backward_rewritten(original_backward: Any) -> Any:
     def new_backward(ctx: Any, *grads: Any) -> Any:
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         grads = [g.contiguous() for g in grads]
         return original_backward(ctx, *grads)
 

@@ -163,7 +163,7 @@ bool has_large_prime_factor(int64_t n) {
 }
 
 // Execute a general fft operation (can be c2c, onesided r2c or onesided c2r)
-static const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
+const Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
                          IntArrayRef dim, bool forward) {
   const auto ndim = self.dim();
   const int64_t signal_ndim = dim.size();

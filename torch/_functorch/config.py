@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Callable
+from collections.abc import Callable
 
 
 """
@@ -20,7 +20,7 @@ from torch.utils._config_module import Config, install_config_module
 
 # [@compile_ignored: debug]
 _save_config_ignore = [
-    # callable not serializeable
+    # callable not serializable
     "joint_custom_pass",
 ]
 
@@ -162,8 +162,9 @@ activation_memory_budget = 1.0
 activation_memory_budget_runtime_estimator = "flops"
 
 # This controls the solver used for the 0-1 knapsack. By default we use a
-# quantized DP solution ("dp"). The other approaches are a "greedy" and a "ilp"
-# (which has a scipy dependency).
+# quantized DP solution ("dp"). The other approaches are a "greedy", a "ilp"
+# (which has a scipy dependency) and "dp_knapsack_sliding_hirschberg", which
+# used memory-efficient quantized DP solution
 activation_memory_budget_solver = "dp"
 
 # This dumps out a SVG visualization of the expected runtime vs. activation
@@ -280,7 +281,7 @@ backward_pass_autocast = "same_as_forward"
 
 # This controls whether we collect donated buffer. This flag must be set
 # False if a user wants to retain_graph=True for backward.
-donated_buffer = False if is_fbcode() else True
+donated_buffer = not is_fbcode()
 
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/
@@ -311,6 +312,9 @@ graphsafe_rng_functionalization = True
 # TODO: once AOT compile calls aot autograd directly instead of
 # through compile_fx, we can remove this
 force_non_lazy_backward_lowering = False
+
+# only for testing, used to turn functionalization off in AOTDispatcher
+_test_disable_functionalization = True
 
 # Error on BypassAOTAutogradCache instead of just a warning
 # Used for tests
@@ -370,6 +374,13 @@ saved_tensors_hooks_filtering_mode = "donated"
 
 # This callback is invoked on the joint graph before partitioning
 joint_custom_pass: Callable = None  # type: ignore[assignment]
+
+# Note [Selective Decomposition]
+# This config allows selective decomposition of certain operators in the graph.
+# When True, it does NOT decompose any nodes, except those nodes that users explicitly
+# annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
+# on to explicitly annotate. This is currently only used by inductor lite mode.
+selective_decompose: bool = False
 
 
 if TYPE_CHECKING:
