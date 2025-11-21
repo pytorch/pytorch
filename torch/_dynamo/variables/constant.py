@@ -8,6 +8,7 @@ maintaining type safety through the compilation process.
 
 import enum
 import operator
+from collections.abc import Sequence
 from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -27,6 +28,8 @@ from .base import ValueMutationNew, VariableTracker
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    from .functions import UserFunctionVariable
 
 
 class ConstantVariable(VariableTracker):
@@ -265,6 +268,43 @@ its type to `common_constant_types`.
                     type(e), tx, args=list(map(ConstantVariable.create, e.args))
                 )
         return super().call_method(tx, name, args, kwargs)
+
+    def call_tree_map(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.value is None:
+            none_is_leaf_var = tree_map_kwargs.get("none_is_leaf")
+            if none_is_leaf_var is not None:
+                try:
+                    none_is_leaf = bool(none_is_leaf_var.as_python_constant())
+                except NotImplementedError:
+                    return self._tree_map_fallback(
+                        tx,
+                        tree_map_fn,
+                        map_fn,
+                        rest,
+                        tree_map_kwargs,
+                    )
+            else:
+                none_is_leaf = False
+            if none_is_leaf:
+                return map_fn.call_function(tx, [self, *rest], {})
+            else:
+                return self.clone()
+        if isinstance(self.value, (int, float, bool, complex, str, bytes, torch.dtype)):
+            return map_fn.call_function(tx, [self, *rest], {})
+        return super().call_tree_map(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+        )
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
