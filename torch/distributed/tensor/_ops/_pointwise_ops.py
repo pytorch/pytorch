@@ -20,6 +20,7 @@ from torch.distributed.tensor._ops.utils import (
     register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -524,7 +525,7 @@ def common_pointwise_strategy(
 
         out_placements: list[Placement] = []
         for placement in spec_to_follow.placements:
-            if isinstance(placement, Shard):
+            if isinstance(placement, Shard | _StridedShard):
                 shard_dim = normalize_dim(placement.dim, len(spec_to_follow.shape))
                 common_ndim = len(common_shape)
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
