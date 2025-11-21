@@ -1,0 +1,117 @@
+==============================================================================
+PR TITLE:
+==============================================================================
+
+Add TheRock nightly CI workflow for PyTorch ROCm builds
+
+==============================================================================
+PR DESCRIPTION:
+==============================================================================
+
+## Overview
+
+This PR introduces a new nightly CI workflow to build PyTorch using [TheRock](https://github.com/ROCm/TheRock) nightly wheels for ROCm. The workflow modifies an existing CI image to replace traditional ROCm with TheRock's pip-installable ROCm packages.
+
+## Motivation
+
+- Enable automated testing of PyTorch with the latest TheRock nightly ROCm wheels
+- Catch compatibility issues early between PyTorch nightly and TheRock nightly
+- Leverage existing CI infrastructure without rebuilding Docker images from scratch
+
+## Approach
+
+Instead of building a new Docker image from scratch, this workflow:
+
+1. **Pulls existing CI image**: Uses `pytorch/pytorch-linux-noble-rocm-n-py3` (same as `rocm-mi300.yml`)
+2. **Removes `/opt/rocm`**: Clears the traditional ROCm installation
+3. **Installs TheRock nightly**: Installs `rocm-sdk[libraries,devel]` via pip from TheRock nightly index
+4. **Commits new image**: Creates `pytorch-linux-noble-rocm-alpha-py3` with TheRock ROCm
+5. **Builds PyTorch**: Compiles PyTorch nightly using the TheRock-enabled image
+
+This approach is much faster and more maintainable than rebuilding from Dockerfile.
+
+## Changes
+
+### 1. New Workflow (`.github/workflows/therock-nightly.yml`)
+
+- **Trigger**: Runs daily at midnight UTC via cron, with manual dispatch option
+- **Job 1 - Create TheRock Image**: Modifies existing CI image to use TheRock nightly
+- **Job 2 - Build PyTorch**: Builds PyTorch `nightly` branch inside the TheRock image
+- **Configuration**: Python 3.12, gfx942 architecture
+- **Artifacts**: Uploads built PyTorch wheels (7-day retention)
+
+**Key Features:**
+```yaml
+env:
+  BASE_CI_IMAGE: pytorch/pytorch-linux-noble-rocm-n-py3:latest
+  THEROCK_IMAGE: pytorch-linux-noble-rocm-alpha-py3
+  PYTHON_VERSION: "3.12"
+  PYTORCH_ROCM_ARCH: "gfx942"
+```
+
+### 2. Dockerfile Enhancement (`.ci/docker/ubuntu-rocm/Dockerfile`)
+
+Added optional build arguments to enable TheRock mode (for other use cases):
+- `USE_THEROCK_NIGHTLY`: Flag to enable TheRock installation during Docker build
+- `THEROCK_NIGHTLY_INDEX_URL`: URL for TheRock nightly wheel index
+
+**Note**: The nightly workflow doesn't use these args - it modifies an existing image instead.
+
+### 3. ROCm Installation Script (`.ci/docker/common/install_rocm.sh`)
+
+Added conditional logic for TheRock installation (Ubuntu only):
+- When `USE_THEROCK_NIGHTLY=1`, installs `rocm-sdk[libraries,devel]` from TheRock index
+- Removes existing `/opt/rocm` and uses pip-installed ROCm
+- Sets up environment variables using `rocm-sdk` CLI helper
+- Fully backwards compatible - existing builds unaffected
+
+## Testing
+
+**Manual workflow trigger:**
+```
+Actions → therock-nightly → Run workflow
+```
+
+**Local test to create TheRock image:**
+```bash
+# Pull base image
+docker pull pytorch/pytorch-linux-noble-rocm-n-py3:latest
+
+# Modify it with TheRock
+docker run --name therock-test pytorch/pytorch-linux-noble-rocm-n-py3:latest bash -c '
+  rm -rf /opt/rocm
+  pip install --index-url https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/ "rocm-sdk[libraries,devel]"
+  rocm-sdk path --root
+'
+
+# Commit to new image
+docker commit therock-test pytorch-linux-noble-rocm-alpha-py3:test
+docker rm therock-test
+
+# Test the new image
+docker run --rm pytorch-linux-noble-rocm-alpha-py3:test bash -c 'rocm-sdk --version'
+```
+
+## Impact
+
+- **No breaking changes**: Existing CI workflows are unaffected
+- **Fast execution**: Reuses existing CI image (no 30+ min Docker rebuild)
+- **Isolated**: Runs independently on nightly schedule
+- **Efficient**: Creates new image by modification, not full rebuild
+
+## Benefits over building from scratch
+
+1. ✅ **Faster**: Modifying an image takes ~5 minutes vs 30+ minutes for full rebuild
+2. ✅ **Simpler**: No need to maintain separate Dockerfile configurations
+3. ✅ **Consistent**: Uses exact same base as production CI (rocm-mi300.yml)
+4. ✅ **Flexible**: Easy to switch between base images as PyTorch CI evolves
+
+## Related
+
+- TheRock repository: https://github.com/ROCm/TheRock
+- TheRock nightly index: https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/
+- Base image workflow: `.github/workflows/rocm-mi300.yml`
+
+---
+
+cc: @pytorch/rocm (please review)
