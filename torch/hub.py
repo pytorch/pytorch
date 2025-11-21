@@ -500,7 +500,7 @@ def list(
     return entrypoints
 
 
-def help(github, model, force_reload=False, skip_validation=False, trust_repo=None):
+def help(github, model, force_reload=False, skip_validation=False, trust_repo="Check"):
     r"""
     Show the docstring of entrypoint ``model``.
 
