@@ -280,6 +280,16 @@ class TestValueRanges(TestCase):
             ValueRanges.wrap(0.0),
         )
 
+    def test_trunc_infinite(self):
+        self.assertEqual(
+            ValueRangeAnalysis.trunc(ValueRanges.wrap(sympy.Float('inf'))),
+            ValueRanges.wrap(sympy.Float('inf')),
+        )
+        self.assertEqual(
+            ValueRangeAnalysis.trunc(ValueRanges.wrap(sympy.Float('-inf'))),
+            ValueRanges.wrap(sympy.Float('-inf')),
+        )
+
     @parametrize("fn", UNARY_BOOL_OPS)
     def test_unary_bool_ref_range(self, fn):
         vals = [sympy.false, sympy.true]
