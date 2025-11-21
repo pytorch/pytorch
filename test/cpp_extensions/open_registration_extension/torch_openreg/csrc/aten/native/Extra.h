@@ -39,7 +39,8 @@ _scaled_dot_product_fused_attention_overrideable(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale);
+    std::optional<double> scale,
+    bool compute_log_sumexp);
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 _scaled_dot_product_fused_attention_overrideable_backward(
     const at::Tensor& grad_out,

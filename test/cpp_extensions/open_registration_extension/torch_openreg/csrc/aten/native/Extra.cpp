@@ -47,7 +47,8 @@ _scaled_dot_product_fused_attention_overrideable(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    bool compute_log_sumexp) {
   const int64_t batch_size = query.size(0);
   const int64_t num_heads = query.size(1);
   const int64_t head_dim_v = value.size(3);
