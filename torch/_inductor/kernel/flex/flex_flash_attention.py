@@ -106,10 +106,21 @@ def patch_fixed_layout_indexer_for_cutedsl():
 
 
 def wrap_choice_render_with_cutedsl_indexer(choice: Any) -> None:
+    """
+    Wrap a template choice's kernel render to apply CuteDSL indexer patching.
+
+    See Note [CuteDSL indexer patch]:
+    This wrapper allows the template to construct its closures normally, then
+    scopes the indexer patch to the actual render call that emits the kernel.
+    This ensures CuteDSL templates see colexicographic indexing while preserving
+    the template's setup logic.
+    """
     original_make_kernel_render = choice.make_kernel_render
 
     def make_kernel_render_with_patch(*args, **kwargs):
         render_kernel, render = original_make_kernel_render(*args, **kwargs)
+        # Let the template construct its closures, then scope the indexer patch
+        # to the actual render call that emits the kernel
         render_with_patch = patch_fixed_layout_indexer_for_cutedsl()(render)
         return render_kernel, render_with_patch
 
