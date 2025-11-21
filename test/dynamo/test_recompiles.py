@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import functools
 from unittest.mock import patch
 
 import torch
@@ -547,6 +548,30 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
         Foo.__call__ = lambda self, x: x + 2
         f(x, foo1)
         self.assertEqual(counter.frame_count, 2)
+
+    @dc.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
+    def test_wrap_inline_recompiles(self):
+        inp = torch.ones(3)
+
+        wrap_fns = (
+            torch._dynamo.external_utils.wrap_inline,
+            functools.partial(
+                torch._dynamo.external_utils.wrap_inline_with_error_on_graph_break,
+                error_on_graph_break=True,
+            ),
+            functools.partial(
+                torch._dynamo.external_utils.wrap_inline_with_error_on_graph_break,
+                error_on_graph_break=False,
+            ),
+        )
+
+        for fn in wrap_fns:
+            for i in range(2):
+                opt_fn = torch.compile(
+                    fn(lambda x: x + i),
+                    backend="eager",
+                )
+                self.assertEqual(inp + i, opt_fn(inp))
 
     def test_no_recompile_over_unused_objects(self):
         # This is a regression test case that imitates
