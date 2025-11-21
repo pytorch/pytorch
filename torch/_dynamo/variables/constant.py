@@ -295,6 +295,18 @@ its type to `common_constant_types`.
             if none_is_leaf:
                 return map_fn.call_function(tx, [self, *rest], {})
             else:
+                for other in rest:
+                    if not (
+                        other.is_python_constant()
+                        and other.as_python_constant() is None
+                    ):
+                        return self._tree_map_fallback(
+                            tx,
+                            tree_map_fn,
+                            map_fn,
+                            rest,
+                            tree_map_kwargs,
+                        )
                 return self.clone()
         if isinstance(self.value, (int, float, bool, complex, str, bytes, torch.dtype)):
             return map_fn.call_function(tx, [self, *rest], {})

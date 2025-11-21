@@ -168,6 +168,23 @@ class TreeMapCompileTests(TestCase):
         result = compiled(tree)
         _assert_trees_allclose(self, expected, result)
 
+    def test_tree_map_none_nodes_reject_mismatched_siblings(self) -> None:
+        def fn(a, b):
+            return optree.tree_map(lambda u, v: (u, v), a, b)
+
+        lhs = {"k": None}
+        rhs = {"k": torch.ones(2)}
+
+        with self.assertRaisesRegex(ValueError, "Expected None"):
+            fn(lhs, rhs)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            (ValueError, torch._dynamo.exc.Unsupported),
+            r"(Expected None|expected <class 'NoneType'>)",
+        ):
+            compiled(lhs, rhs)
+
     def test_constantvariable_handles_none_is_leaf_kwarg(self) -> None:
         tree = {"none": None}
 
