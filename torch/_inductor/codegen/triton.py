@@ -6020,11 +6020,16 @@ def debug_triton_code(node: BaseSchedulerNode) -> list[str]:
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
         )
+        from torch._inductor.codegen.xpu.xpu_combined_scheduling import (
+            XPUCombinedScheduling,
+        )
 
         device = node.get_device()
         assert device is not None
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling)), (
+        assert isinstance(
+            backend, (SIMDScheduling, CUDACombinedScheduling, XPUCombinedScheduling)
+        ), (
             f"Scheduling backend should be SIMD or CUDACombined when generating debug Triton strings, got: {type(backend)}"
         )
 
