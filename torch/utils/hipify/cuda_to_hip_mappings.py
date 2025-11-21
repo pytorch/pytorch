@@ -9231,6 +9231,8 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
                 API_PYTORCH,
             ),
         ),
+        ("cuda::CUDAEvent", ("hip::HIPEventMasqueradingAsCUDA", API_PYTORCH)),
+        ("CUDAEvent", ("HIPEventMasqueradingAsCUDA", API_PYTORCH)),
         ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         (
@@ -9284,6 +9286,14 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         (
             "c10/cuda/CUDACachingAllocator.h",
             ("ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h", API_PYTORCH),
+        ),
+        (
+            "ATen/cuda/CUDAEvent.h",  # To keep BC, we have to keep this mapping
+            ("ATen/hip/HIPEvent.h", API_PYTORCH),
+        ),
+        (
+            "c10/cuda/CUDAEvent.h",
+            ("ATen/hip/impl/HIPEventMasqueradingAsCUDA.h", API_PYTORCH),
         ),
         (
             "c10/cuda/CUDAStream.h",
@@ -9425,6 +9435,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
         ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
         ("c10/cuda/CUDAMiscFunctions.h", ("c10/hip/HIPMiscFunctions.h", API_C10)),
+        ("c10/cuda/CUDAEvent.h", ("c10/hip/HIPEvent.h", API_C10)),
         ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
         ("c10/cuda/CUDAGraphsC10Utils.h", ("c10/hip/HIPGraphsC10Utils.h", API_C10)),
         ("c10/cuda/CUDAAllocatorConfig.h", ("c10/hip/HIPAllocatorConfig.h", API_C10)),
