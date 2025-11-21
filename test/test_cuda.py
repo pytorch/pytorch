@@ -5718,6 +5718,7 @@ class TestMemPool(TestCase):
         pool3 = torch.cuda.MemPool()
 
         data = []
+
         def allocate_data():
             x = torch.empty(1024, device="cuda")
             data.append(x)
