@@ -53,7 +53,9 @@ ENV INSTALLED_VISION ${VISION}
 # Install rocm
 ARG ROCM_VERSION
 ARG USE_THEROCK_NIGHTLY
+ARG THEROCK_NIGHTLY_INDEX_URL
 ENV USE_THEROCK_NIGHTLY=${USE_THEROCK_NIGHTLY}
+ENV THEROCK_NIGHTLY_INDEX_URL=${THEROCK_NIGHTLY_INDEX_URL}
 RUN mkdir ci_commit_pins
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
@@ -67,19 +69,13 @@ RUN rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
 
-RUN if [ "${USE_THEROCK_NIGHTLY}" = "1" ]; then \
-        ROCM_PATH_DETECTED="$(python3 -m rocm_sdk path --root)"; \
-    else \
-        ROCM_PATH_DETECTED="/opt/rocm"; \
-    fi; \
-    echo "ROCM_PATH=${ROCM_PATH_DETECTED}" >> /etc/environment && \
-    echo "PATH=${ROCM_PATH_DETECTED}/bin:${ROCM_PATH_DETECTED}/hcc/bin:${ROCM_PATH_DETECTED}/hip/bin:${ROCM_PATH_DETECTED}/opencl/bin:${ROCM_PATH_DETECTED}/llvm/bin:\${PATH}" >> /etc/environment && \
-    echo "MAGMA_HOME=${ROCM_PATH_DETECTED}/magma" >> /etc/environment
-
-# Set default ENV for traditional builds - will be overridden by /etc/environment for TheRock
+# Set default ENV for traditional builds - will be overridden by entrypoint.sh for TheRock
 ENV ROCM_PATH /opt/rocm
 ENV PATH /opt/rocm/bin:$PATH
+ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
+ENV PATH /opt/rocm/opencl/bin:$PATH
+ENV PATH /opt/rocm/llvm/bin:$PATH
 ENV MAGMA_HOME /opt/rocm/magma
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
@@ -149,6 +145,11 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
+
+# Copy and set entrypoint script to handle ROCm path detection
+COPY ./ubuntu-rocm/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
 
 USER jenkins
 CMD ["bash"]

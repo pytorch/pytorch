@@ -26,8 +26,7 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
-    # Make sure rocm packages from repo.radeon.com have highest priority
-        # When USE_THEROCK_NIGHTLY=1, install ROCm from TheRock nightly wheels
+    # When USE_THEROCK_NIGHTLY=1, install ROCm from TheRock nightly wheels
     if [[ "${USE_THEROCK_NIGHTLY:-0}" == "1" ]]; then
       echo "install_rocm.sh: installing ROCm from TheRock nightly wheels"
 
@@ -51,13 +50,23 @@ install_ubuntu() {
       echo "ROCM_BIN=${ROCM_BIN}"
       echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
 
+      cat >/etc/profile.d/rocm-sdk.sh <<EOF
+export ROCM_HOME="${ROCM_HOME}"
+export ROCM_PATH="${ROCM_HOME}"
+export PATH="${ROCM_BIN}:\$PATH"
+export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+EOF
+
       export ROCM_HOME
-      export ROCM_PATH="${ROCM_BIN}:${PATH}"
+      export ROCM_PATH="${ROCM_HOME}"
+      export PATH="${ROCM_BIN}:${PATH}"
       export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:${CMAKE_PREFIX_PATH:-}"
 
       echo "install_rocm.sh: TheRock nightly ROCm install complete"
       exit 0
     fi
+
+    # Make sure rocm packages from repo.radeon.com have highest priority
     cat << EOF > /etc/apt/preferences.d/rocm-pin-600
 Package: *
 Pin: release o=repo.radeon.com
