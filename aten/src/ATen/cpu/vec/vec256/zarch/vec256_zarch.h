@@ -1874,13 +1874,6 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
   template <
       typename U = T,
       std::enable_if_t<Vectorized<U>::int_num_vecs() == 4, int> = 0>
-  int_vec_return_type widening_subtract(Vectorized<U> b) const {
-    auto ret16 = unpack(_vec);
-    auto ret16B = unpack(b.vec());
-    auto ret32_0 = unpack(ret16.first);
-    auto ret32_1 = unpack(ret16.second);
-    auto ret32B_0 = unpack(ret16B.first);
-    auto ret32B_1 = unpack(ret16B.second);
 
     return {
         Vectorized<c10::qint32>(ret32_0.first - ret32B_0.first),
@@ -1897,9 +1890,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
       Vectorized<float> zero_point,
       Vectorized<float> scale_zp_premul) const {
     // unpacking unsigned as signed
-    auto ret16 = unpack(_vec);
-    auto ret32_0 = unpack(ret16.first);
-    auto ret32_1 = unpack(ret16.second);
+    
 
     auto vecf_0 = zvec_convert_to_float(ret32_0.first);
     auto vecf_1 = zvec_convert_to_float(ret32_0.second);
@@ -1919,10 +1910,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
   float_vec_return_type dequantize(
       Vectorized<float> scale,
       Vectorized<float> zero_point) const {
-    // unpacking unsigned as signed
-    auto ret16 = unpack(_vec);
-    auto ret32_0 = unpack(ret16.first);
-    auto ret32_1 = unpack(ret16.second);
+    
 
     auto vecf_0 = zvec_convert_to_float(ret32_0.first);
     auto vecf_1 = zvec_convert_to_float(ret32_0.second);
