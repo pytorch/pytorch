@@ -147,7 +147,7 @@ class HIPEventPoolMasqueradingAsCUDA {
       pools_[device].event_pool_.reserve(num_events);
       for (auto const _ : c10::irange(num_events)) {
         auto event = get(device);
-        event->create();
+        event->create(device);
         temp_events.emplace_back(std::move(event));
       }
       // Events will be returned to pool when temp_events is destroyed.
