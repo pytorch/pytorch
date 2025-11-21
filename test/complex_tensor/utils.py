@@ -57,11 +57,9 @@ def _as_gradcheck_tensor(
     if not isinstance(arg, torch.Tensor):
         return arg
     arg = _as_complex_tensor(arg)
-    if not (arg.dtype.is_floating_point or arg.dtype.is_complex):
-        input_list.append(arg)
-        return arg
+    if arg.dtype.is_floating_point or arg.dtype.is_complex:
+        arg = arg.requires_grad_()
 
-    arg = arg.requires_grad_()
     input_list.append(arg)
     return arg
 

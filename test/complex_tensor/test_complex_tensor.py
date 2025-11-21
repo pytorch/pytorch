@@ -32,10 +32,7 @@ from torch.testing._internal.common_device_type import (
     OpDTypes,
     ops,
 )
-from torch.testing._internal.common_utils import (
-    run_tests,
-    unMarkDynamoStrictTest,
-)
+from torch.testing._internal.common_utils import run_tests, unMarkDynamoStrictTest
 
 
 if TYPE_CHECKING:
