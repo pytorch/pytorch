@@ -928,8 +928,8 @@ class TypePropagationTests(torch._dynamo.test_case.TestCase):
             foo_source = LocalSource("foo")
             foo_x_source = AttrSource(foo_source, "x")
 
-            self.assertTrue(builder.get(foo_source.name()) is foo)
-            self.assertTrue(builder.get(foo_x_source.name()) is foo.x)
+            self.assertTrue(builder.get(foo_source.name) is foo)
+            self.assertTrue(builder.get(foo_x_source.name) is foo.x)
 
             # Check types of foo.x
             foo_x_mgr = builder.get_guard_manager_from_source(foo_x_source)
