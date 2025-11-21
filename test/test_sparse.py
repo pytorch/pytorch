@@ -1680,7 +1680,6 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, True, (1, 1))
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
@@ -1698,7 +1697,9 @@ class TestSparse(TestSparseBase):
 
             def fn(S, D):
                 return torch.sparse.mm(S, D)
-            gradcheck(fn, (S, D), masked=True)
+
+            kwargs = {"eps": 1e-4, "atol": 2e-5} if device == "mps:0" else {}
+            gradcheck(fn, (S, D), masked=True, **kwargs)
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
