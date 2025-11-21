@@ -1537,8 +1537,10 @@ std::tuple<Tensor, Tensor> lstm_cell(
   const Tensor& b_hh = b_hh_opt.value_or(Tensor());
 
   TORCH_CHECK(hx.size() == 2, "lstm_cell expects two hidden states");
-  check_rnn_cell_forward_input(input, w_ih.sym_size(1));
   auto hidden_size = w_hh.sym_size(1);
+  TORCH_CHECK(w_ih.size(0) == 4 * hidden_size, "lstm_cell expects weight_ih to have 4 * hidden_size rows");
+  TORCH_CHECK(w_hh.size(0) == 4 * hidden_size, "lstm_cell expects weight_hh to have 4 * hidden_size rows");
+  check_rnn_cell_forward_input(input, w_ih.sym_size(1));
   check_rnn_cell_forward_hidden(input, hx[0], hidden_size, 0);
   check_rnn_cell_forward_hidden(input, hx[1], std::move(hidden_size), 1);
   static at::Tensor undefined;

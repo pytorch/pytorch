@@ -7555,6 +7555,24 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
         self.assertEqual(len(w), 0)
 
+    def test_lstm_cell_invalid_gate_weight_size(self):
+        x = torch.randn(4, 8)
+        hx = torch.randn(4, 16)
+        cx = torch.randn(4, 16)
+
+        w_ih_invalid = torch.randn(60, 8)
+        w_ih = torch.randn(64, 8)
+        w_hh__invalid = torch.randn(50, 16)
+        w_hh = torch.randn(64, 16)
+        b_ih = torch.randn(64)
+        b_hh = torch.randn(64)
+
+        with self.assertRaisesRegex(RuntimeError, "weight_ih"):
+            torch.lstm_cell(x, (hx, cx), w_ih_invalid, w_hh, b_ih, b_hh)
+
+        with self.assertRaisesRegex(RuntimeError, "weight_hh"):
+            torch.lstm_cell(x, (hx, cx), w_ih, w_hh__invalid, b_ih, b_hh)
+
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
     @given(X=hu.tensor(shapes=((5, 3, 5, 5),), dtype=np.double),
