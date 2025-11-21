@@ -196,8 +196,8 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
     needs_backward = any(
         isinstance(t, torch.Tensor) and t.requires_grad for t in (q, k, v)
     )
-    grad = torch.randn_like(out_flash)
     if needs_backward:
+        grad = torch.randn_like(out_flash)
         inputs = (q, k, v)
         grads_ref = torch.autograd.grad(out_ref_fp32, inputs, grad)
         grads_triton = torch.autograd.grad(out_triton, inputs, grad)
