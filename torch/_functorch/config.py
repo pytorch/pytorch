@@ -183,6 +183,12 @@ memory_budget_pareto_dir = os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO_DIR"
 # cost of some performance
 aggressive_recomputation = False
 
+# activation offloading enablement (testing purpose)
+enable_activation_offloading = False
+
+# activation offloading with separate CUDA stream
+activation_offload_separate_stream = False
+
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
 # is to turn it off during torch.compile.

@@ -2931,6 +2931,19 @@ def min_cut_rematerialization_partition(
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
 
+    # pyrefly: ignore [unbound-name]
+    if config.enable_activation_offloading:
+        from ._activation_offloading.activation_offloading import (
+            enable_activation_offloading,
+        )
+
+        enable_activation_offloading(
+            fw_module,
+            bw_module,
+            num_fwd_outputs,
+            node_info.static_lifetime_input_nodes,
+        )
+
     # raise all getitem ops to as early as possible
     # this is helpful for memory, especially in the case of aot_eager backend
     fw_module = raise_getitems(fw_module)
