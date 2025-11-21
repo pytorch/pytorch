@@ -145,7 +145,7 @@ class HIPEventPoolMasqueradingAsCUDA {
       std::vector<Event> temp_events;
       temp_events.reserve(num_events);
       pools_[device].event_pool_.reserve(num_events);
-      for (auto const _ : c10::irange(num_events)) {
+      for ([[maybe_unused]] const auto _ : c10::irange(num_events)) {
         auto event = get(device);
         event->create(device);
         temp_events.emplace_back(std::move(event));
