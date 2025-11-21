@@ -941,7 +941,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         ).run(graph_str)
 
         FileCheck().check_count(
-            "torch.ops._c10d_functional.reduce_scatter_tensor.default",
+            "torch.ops._c10d_functional.reduce_scatter_tensor_out.default",
             num_chunks,
             exactly=True,
         ).run(graph_str)
