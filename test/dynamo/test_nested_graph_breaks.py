@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import sys
+import unittest
 
 import torch
 import torch._dynamo.test_case
@@ -8,6 +9,18 @@ import torch._dynamo.testing
 
 # for use in test_side_effects_globals
 global1, global2, global3, global4 = (torch.zeros(3),) * 4
+
+
+class CustomizedCtxManager:
+    def __init__(self, x):
+        self.x = x
+        torch._dynamo.graph_break()
+
+    def __enter__(self):
+        pass
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
 
 
 class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
@@ -836,6 +849,44 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 2)
         # multiplication by 32, 64, 128, 256
         self.assertEqual(cnts.op_count, 4)
+
+    @unittest.expectedFailure
+    def test_nested_decorated_function(self):
+        # decorator must call ContextWrappingVariable.cleanup_assert to trigger this test
+        def f(x):
+            @torch.autocast("cpu")
+            def inner(y):
+                y = y + 1
+                torch._dynamo.graph_break()
+                return y + 1
+
+            return inner(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f)
+        x = torch.zeros(3)
+        res = f(x)
+        ref = opt_fn(x)
+        print(ref, res)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 6)
+
+    @unittest.expectedFailure
+    def test_nested_graph_break_in_custom_ctx_manager_init(self):
+        def f(x):
+            with CustomizedCtxManager(x):
+                return x + 1
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f)
+        x = torch.zeros(3)
+        res = f(x)
+        ref = opt_fn(x)
+        print(ref, res)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
 
 
 if __name__ == "__main__":

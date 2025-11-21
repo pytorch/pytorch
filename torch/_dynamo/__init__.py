@@ -157,6 +157,7 @@ def reset() -> None:
         GenerationTracker.clear()
         TensorifyState.clear()
         torch._dynamo.utils.warn_once_cache.clear()
+        torch._dynamo.symbolic_convert._debug_force_graph_break_on_leaf_return_disable_codes.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
 
 
