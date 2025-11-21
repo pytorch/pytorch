@@ -16,6 +16,7 @@ from torch.utils._sympy.functions import Identity
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
+from ...virtualized import V
 from .common import infer_dense_strides, load_flex_template, SubgraphResults
 
 
@@ -41,6 +42,10 @@ from ...codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 
 flash_attention_cutedsl_template = CuteDSLTemplate(
     name="flash_attention_cutedsl", source=load_flex_template("flash_attention")
+)
+flash_attention_backward_cutedsl_template = CuteDSLTemplate(
+    name="flash_attention_backward_cutedsl",
+    source=load_flex_template("flash_attention_backward"),
 )
 
 
@@ -101,6 +106,17 @@ def patch_fixed_layout_indexer_for_cutedsl():
         FixedLayout.make_indexer = original_make_indexer  # type: ignore[assignment]
 
 
+def wrap_choice_render_with_cutedsl_indexer(choice: Any) -> None:
+    original_make_kernel_render = choice.make_kernel_render
+
+    def make_kernel_render_with_patch(*args, **kwargs):
+        render_kernel, render = original_make_kernel_render(*args, **kwargs)
+        render_with_patch = patch_fixed_layout_indexer_for_cutedsl()(render)
+        return render_kernel, render_with_patch
+
+    choice.make_kernel_render = make_kernel_render_with_patch
+
+
 def input_buffers_require_grads(graph_module, num_score_mod_placeholders: int):
     """Check if any of the input buffers (beyond the score mod placeholders) require gradients."""
     inputs = []
@@ -134,6 +150,25 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
 def _supports_nontrivial_mask_graphs() -> bool:
     """Currently only supported on Hopper (SM90) GPUs."""
     return torch.cuda.get_device_capability()[0] in [9, 10]
+
+
+def _is_identity_score_mod_graph(fw_graph: Any) -> bool:
+    graph = getattr(fw_graph, "graph", None)
+    if graph is None:
+        graph_module = getattr(fw_graph, "graph_module", None)
+        graph = getattr(graph_module, "graph", None)
+    if graph is None:
+        return False
+
+    nodes = list(graph.nodes)
+    placeholders = [n for n in nodes if n.op == "placeholder"]
+    outputs = [n for n in nodes if n.op == "output"]
+    if len(outputs) != 1 or not placeholders:
+        return False
+    non_trivial = [n for n in nodes if n.op not in ("placeholder", "output")]
+    if non_trivial:
+        return False
+    return outputs[0].args[0] is placeholders[0]
 
 
 def _can_use_flex_flash_attention(
@@ -287,23 +322,8 @@ def create_flex_flash_attention_kernel(
         NEEDS_BLOCK_MASK=needs_block_mask,
     )
 
-    def wrap_choice_render(choice):
-        # See Note [CuteDSL indexer patch]
-        original_make_kernel_render = choice.make_kernel_render
-
-        def make_kernel_render_with_patch(*args, **kwargs):
-            render_kernel, render = original_make_kernel_render(*args, **kwargs)
-
-            # Let the template construct its closures, then scope the indexer patch
-            # to the actual render call that emits the kernel
-            render_with_patch = patch_fixed_layout_indexer_for_cutedsl()(render)
-
-            return render_kernel, render_with_patch
-
-        choice.make_kernel_render = make_kernel_render_with_patch
-
     for choice in choices:
-        wrap_choice_render(choice)
+        wrap_choice_render_with_cutedsl_indexer(choice)
 
     if error or not choices:
         # Fallback to original implementation
@@ -313,3 +333,159 @@ def create_flex_flash_attention_kernel(
     template_output = choices[0].output_node()
 
     return (template_output, lse)
+
+
+def _use_flex_flash_attention_backward(
+    backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
+    mask_graph: Subgraph | GraphModule,
+    score_mod_other_buffers: tuple[Any, ...],
+    fw_graph: Any,
+    query: TensorBox,
+    key: TensorBox,
+) -> tuple[bool, str]:
+    if backend != "FLASH":
+        return False, ""
+
+    if not ensure_flash_available():
+        return False, "CUTE flash attention is not available"
+
+    if score_mod_other_buffers:
+        return (
+            False,
+            "BACKEND='FLASH' for flex attention backward requires no score_mod captures.",
+        )
+
+    if isinstance(mask_graph, GraphModule):
+        mask_graph_module = mask_graph
+    elif hasattr(mask_graph, "graph_module"):
+        mask_graph_module = mask_graph.graph_module
+    else:
+        mask_graph_module = None
+    if mask_graph_module is None or not is_trivial_mask_graph(mask_graph_module):
+        return (
+            False,
+            "BACKEND='FLASH' for flex attention backward requires the default mask_mod.",
+        )
+
+    if not _is_identity_score_mod_graph(fw_graph):
+        return (
+            False,
+            "BACKEND='FLASH' for flex attention backward requires the default score_mod.",
+        )
+
+    device = query.get_device()
+    if device is None or device.type != "cuda":
+        return False, "BACKEND='FLASH' for flex attention backward only supports CUDA."
+
+    dtype = query.get_dtype()
+    if dtype not in (torch.float16, torch.bfloat16):
+        return (
+            False,
+            "BACKEND='FLASH' for flex attention backward supports float16/bfloat16 only.",
+        )
+
+    Bq = query.get_size()[0]
+    Bkv = key.get_size()[0]
+    if not V.graph.sizevars.statically_known_true(sympy.Eq(Bq, Bkv)):
+        return (
+            False,
+            "BACKEND='FLASH' for flex attention backward requires Bq == Bkv.",
+        )
+
+    Hq = query.get_size()[1]
+    Hkv = key.get_size()[1]
+    if not V.graph.sizevars.statically_known_true(sympy.Eq(Hq, Hkv)):
+        return (
+            False,
+            "BACKEND='FLASH' for flex attention backward requires matching head counts.",
+        )
+
+    return True, ""
+
+
+def create_flex_flash_attention_backward_kernel(
+    query: TensorBox,
+    key: TensorBox,
+    value: TensorBox,
+    out: TensorBox,
+    logsumexp: TensorBox,
+    grad_out: TensorBox,
+    scale: float,
+) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox]:
+    """Create a CuteDSL flash attention backward kernel for the default mod path."""
+    if not ensure_flash_available():
+        raise RuntimeError("CUTE flash attention not available")
+
+    batch_size, num_heads, seq_len_q, head_dim = query.get_size()
+    v_head_dim = value.get_size()[-1]
+    device = query.get_device()
+    dtype = query.get_dtype()
+    assert device is not None
+
+    grad_query_strides = infer_dense_strides(
+        [batch_size, num_heads, seq_len_q, head_dim], query.get_stride()
+    )
+    grad_query = empty_strided(
+        size=[batch_size, num_heads, seq_len_q, head_dim],
+        stride=grad_query_strides,
+        dtype=dtype,
+        device=device,
+    )
+
+    grad_key_strides = infer_dense_strides(
+        [batch_size, num_heads, value.get_size()[2], head_dim], key.get_stride()
+    )
+    grad_key = empty_strided(
+        size=[batch_size, num_heads, value.get_size()[2], head_dim],
+        stride=grad_key_strides,
+        dtype=dtype,
+        device=device,
+    )
+
+    grad_value_strides = infer_dense_strides(
+        [batch_size, num_heads, value.get_size()[2], v_head_dim], value.get_stride()
+    )
+    grad_value = empty_strided(
+        size=[batch_size, num_heads, value.get_size()[2], v_head_dim],
+        stride=grad_value_strides,
+        dtype=dtype,
+        device=device,
+    )
+
+    output_layout = FixedLayout(
+        device=device,
+        dtype=dtype,
+        size=[batch_size, num_heads, seq_len_q, head_dim],
+        stride=[sympy.sympify(s) for s in grad_query.get_stride()],
+    )
+
+    choices: list[Any] = []
+
+    input_nodes = [
+        query,
+        key,
+        value,
+        out,
+        grad_out,
+        logsumexp,
+        grad_key,
+        grad_value,
+    ]
+
+    error = flash_attention_backward_cutedsl_template.maybe_append_choice(
+        choices,
+        input_nodes=input_nodes,
+        layout=output_layout,
+        mutated_inputs=[grad_key, grad_value],
+        SM_SCALE=scale,
+    )
+
+    for choice in choices:
+        wrap_choice_render_with_cutedsl_indexer(choice)
+
+    if error or not choices:
+        raise RuntimeError(f"CuteDSL template failed: {error}")
+
+    template_output = choices[0].output_node()
+
+    return (template_output, grad_key, grad_value)

@@ -39,6 +39,8 @@ from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
 from .flex_flash_attention import (
     _use_flex_flash_attention,
+    _use_flex_flash_attention_backward,
+    create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
 )
 
@@ -660,7 +662,17 @@ def flex_attention_backward(*args, **kwargs):
         f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
     )
 
-    kernel_options, _ = _sanitize_kernel_options_for_triton(kernel_options)
+    kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    use_flash_bwd, flash_bwd_reason = _use_flex_flash_attention_backward(
+        backend, mask_graph, score_mod_other_buffers, fw_graph, query, key
+    )
+    if use_flash_bwd:
+        grad_query, grad_key, grad_value = create_flex_flash_attention_backward_kernel(
+            query, key, value, out, logsumexp, grad_out, scale
+        )
+        return (grad_query, grad_key, grad_value, tuple())
+    if backend == "FLASH" and flash_bwd_reason:
+        raise RuntimeError(flash_bwd_reason)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
