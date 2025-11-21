@@ -7,11 +7,9 @@ import torch.utils._pytree as pytree
 from torch._dynamo.graph_utils import _get_flat_args
 from torch._dynamo.variables.streams import get_current_stream, new_event
 from torch.distributed._tools.runtime_estimator import (
-    _IGNORE_OPS,
-    get_compute_time,
-    get_transfer_time,
     RuntimeEstimator,
 )
+from torch._inductor.utils import get_compute_time, get_transfer_time, _IGNORE_OPS
 
 
 Node: TypeAlias = torch.fx.Node
