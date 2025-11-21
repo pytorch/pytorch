@@ -11,9 +11,12 @@ runs:
       run: |
         # Prune all stopped containers.
         # If other runner is pruning on this node, will skip.
-        nprune=$(ps -ef | grep -c "docker container prune")
-        if [[ $nprune -eq 1 ]]; then
+        nprune=$(ps -ef | grep "docker" | grep -c "prune")
+        if [[ $nprune -eq 0 ]]; then
           docker container prune -f
+        else
+          echo "Another prune process is running, skip prune."
+          ps -ef | grep "docker" | grep "prune"
         fi
     - name: Runner diskspace health check
       uses: ./.github/actions/diskspace-cleanup
