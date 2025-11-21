@@ -8,6 +8,8 @@ import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
+    ArgsType,
+    KwargsType,
     OpSchema,
     OpSpec,
     OpStrategy,
@@ -34,8 +36,10 @@ from torch.distributed.tensor._utils import (
 from torch.distributed.tensor.placement_types import (
     Partial,
     Placement,
+    PlacementPlaceholder,
     Replicate,
     Shard,
+    ShardingPlaceholder,
 )
 
 
@@ -251,10 +255,9 @@ from ._einsum_strategy import EinsumDims
 
 def gen_single_dim_einsum_strategies(
     equation: str,
-    mesh: DeviceMesh,
     *,
     linearity: bool = False,
-) -> list[list[Placement]]:
+) -> list[list[Placement | PlacementPlaceholder]]:
     """
     Generate a strategy list for the ops that follow einsum style notation.
 
@@ -280,15 +283,15 @@ def gen_single_dim_einsum_strategies(
     edims = EinsumDims.parse_dims(input_dims, output_dim)
 
     # generate strategies for each mesh dim and do cartesian product for final strategy. E.g., for a 2D mesh, we can have [P(),R,R]
-    strategies_over_one_mesh_dim: list[list[Placement]] = []
-    placement_list: list[Placement]
+    strategies_over_one_mesh_dim: list[list[Placement | PlacementPlaceholder]] = []
+    placement_list: list[Placement | PlacementPlaceholder]
     # split batch dim
     for batch_dim in edims.batch_dims:
         output_batch_dim = output_dim.index(batch_dim)
-        placement_list = [Shard(output_batch_dim)]
+        placement_list = [ShardingPlaceholder(output_batch_dim)]
         for input_dim in input_dims:
             input_batch_dim = input_dim.index(batch_dim)
-            placement_list.append(Shard(input_batch_dim))
+            placement_list.append(ShardingPlaceholder(input_batch_dim))
 
         strategies_over_one_mesh_dim.append(placement_list)
 
@@ -300,7 +303,7 @@ def gen_single_dim_einsum_strategies(
         placement_list = [Partial()]
         for input_dim in input_dims:
             input_contracting_dim = input_dim.index(contracting_dim)
-            placement_list.append(Shard(input_contracting_dim))
+            placement_list.append(ShardingPlaceholder(input_contracting_dim))
 
         strategies_over_one_mesh_dim.append(placement_list)
 
@@ -310,9 +313,9 @@ def gen_single_dim_einsum_strategies(
         lhs_free_dim_input = input_dims[0].index(lhs_dim)
         # this means split the lhs input and output
         # i.e. S(0), R -> S(0)
-        lhs_placement_list: list[Placement] = [
-            Shard(lhs_free_dim_output),
-            Shard(lhs_free_dim_input),
+        lhs_placement_list: list[Placement | PlacementPlaceholder] = [
+            ShardingPlaceholder(lhs_free_dim_output),
+            ShardingPlaceholder(lhs_free_dim_input),
             Replicate(),
         ]
         strategies_over_one_mesh_dim.append(lhs_placement_list)
@@ -321,16 +324,16 @@ def gen_single_dim_einsum_strategies(
     for rhs_dim in edims.rhs_out_only_dims:
         rhs_free_dim_output = output_dim.index(rhs_dim)
         rhs_free_dim_input = input_dims[1].index(rhs_dim)
-        rhs_placement_list: list[Placement] = [
-            Shard(rhs_free_dim_output),
+        rhs_placement_list: list[Placement | PlacementPlaceholder] = [
+            ShardingPlaceholder(rhs_free_dim_output),
             Replicate(),
-            Shard(rhs_free_dim_input),
+            ShardingPlaceholder(rhs_free_dim_input),
         ]
         strategies_over_one_mesh_dim.append(rhs_placement_list)
 
     # linearity strategy
     if linearity:
-        linearity_placement_list: list[Placement] = [Partial()]
+        linearity_placement_list: list[Placement | PlacementPlaceholder] = [Partial()]
         for _ in input_dims:
             linearity_placement_list.append(Partial())
         strategies_over_one_mesh_dim.append(linearity_placement_list)
@@ -339,15 +342,13 @@ def gen_single_dim_einsum_strategies(
 
 
 @register_single_dim_strategy(aten.mm.default)
-def mm_single_dim_strategy(op_schema: OpSchema) -> list[list[Placement]]:
-    self_strategy, mat2_strategy = op_schema.args_schema
-    if not isinstance(self_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(self_strategy)}")
-    if not isinstance(mat2_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {type(mat2_strategy)}")
-    # generate all possible strategies for mm
-    mesh = op_schema.get_mesh_from_args()
-    return gen_single_dim_einsum_strategies("mk,kn->mn", mesh)
+def mm_single_dim_strategy(
+    args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | PlacementPlaceholder]]:
+    self_strategy, mat2_strategy = args_schema
+    assert isinstance(self_strategy, TensorMeta), type(self_strategy)
+    assert isinstance(mat2_strategy, TensorMeta), type(mat2_strategy)
+    return gen_single_dim_einsum_strategies("mk,kn->mn")
 
 
 @register_op_strategy(aten.addmm.default)

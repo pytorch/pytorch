@@ -35,29 +35,36 @@ class PlacementPlaceholder(ABC):
     expanding to real Placement types at runtime.
     """
 
+    # @abstractmethod
+    # def check(self, placement: Placement) -> bool:
+    #     raise NotImplementedError
+
     @abstractmethod
-    def check_placement(self, placement: Placement) -> bool:
-        pass
+    def __repr__(self) -> str:
+        raise NotImplementedError
 
 
 class ShardingPlaceholder(PlacementPlaceholder):
     """
     Any type of sharding can be used.
 
-    # TODO: how shall we opt shardings into this? hardcode in 'check' fn? subclass relationship?
-    # TODO: express 'even' sharding requirement via placeholder?
+    TODO: how shall we opt shardings into this? hardcode in 'check' fn? subclass relationship?
+    TODO: express 'even' sharding requirement via placeholder?
     """
 
     def __init__(self, dim: int) -> None:
         self.dim = dim
 
-    def check(self, placement: Placement) -> bool:
-        """
-        Check if the given placement is compatible with the placeholder.
-        """
-        return (
-            isinstance(placement, (Shard, _StridedShard)) and placement.dim == self.dim
-        )
+    # def check(self, placement: Placement) -> bool:
+    #     """
+    #     Check if the given placement is compatible with the placeholder.
+    #     """
+    #     return (
+    #         isinstance(placement, (Shard, _StridedShard)) and placement.dim == self.dim
+    #     )
+
+    def __repr__(self) -> str:
+        return f"ShardingPlaceholder(dim={self.dim})"
 
 
 class Shard(torch._C._distributed.Shard):
@@ -77,6 +84,16 @@ class Shard(torch._C._distributed.Shard):
     .. warning:: sharding on a tensor dimension where the tensor dimension size is not
         evenly divisible on a DeviceMesh dimension is currently experimental and subject to change.
     """
+
+    @classmethod
+    def _supports_placeholder(cls, placeholder: PlacementPlaceholder) -> bool:
+        return isinstance(placeholder, ShardingPlaceholder)
+
+    def _from_placeholder(self, placeholder: PlacementPlaceholder) -> "Shard":
+        assert isinstance(placeholder, ShardingPlaceholder), (
+            "Can only convert ShardingPlaceholder to Shard"
+        )
+        return Shard(placeholder.dim)
 
     def _split_tensor(
         self,
@@ -590,6 +607,16 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
     def __str__(self) -> str:
         """human readable representation of the _StridedShard placement"""
         return f"_S({self.dim}, {self.split_factor})"
+
+    @classmethod
+    def _supports_placeholder(cls, placeholder: PlacementPlaceholder) -> bool:
+        return isinstance(placeholder, ShardingPlaceholder)
+
+    def _from_placeholder(self, placeholder: PlacementPlaceholder) -> "Shard":
+        assert isinstance(placeholder, ShardingPlaceholder), (
+            "Can only convert ShardingPlaceholder to Shard"
+        )
+        return _StridedShard(placeholder.dim, split_factor=self.split_factor)
 
     @classmethod
     def _make_shard_tensor(

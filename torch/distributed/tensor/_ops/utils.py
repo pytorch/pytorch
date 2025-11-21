@@ -9,8 +9,10 @@ from typing import cast, Optional, Union
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
 from torch.distributed.tensor._collective_utils import redistribute_cost
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
+    ArgsType,
+    KwargsType,
     OpSchema,
     OpSpec,
     OpStrategy,
@@ -19,35 +21,128 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
+    PlacementPlaceholder,
     Replicate,
     Shard,
 )
 
 
+def _args_schema_with_tensor_meta(
+    args_schema: ArgsType, kwargs_schema: KwargsType
+) -> tuple[ArgsType, KwargsType]:
+    """
+    Replace DTensorSpec with TensorMeta in args_schema, for use with single-dim strategies
+    """
+
+    def spec_to_strategy(spec: object) -> object:
+        if isinstance(spec, DTensorSpec):
+            return spec.tensor_meta
+        elif (
+            isinstance(spec, (list, tuple))
+            and len(spec) > 0
+            and isinstance(spec[0], DTensorSpec)
+        ):
+            raise NotImplementedError("Tuples!")
+            #     # tensor list create tuple strategy
+            #     tuple_strategy = [spec_to_strategy(s) for s in spec]
+            #     tuple_strategy = cast(Sequence[StrategyType], tuple_strategy)
+            #     return TupleStrategy(
+            #         tuple(tuple_strategy) if isinstance(spec, tuple) else tuple_strategy
+            #     )
+        else:
+            return spec
+
+    args_op_strategy = tuple([spec_to_strategy(a) for a in args_schema])
+
+    kwargs_op_strategy = {k: spec_to_strategy(v) for k, v in kwargs_schema.items()}
+
+    return args_op_strategy, kwargs_op_strategy
+
+
 def _expand_single_dim_strategy_to_mesh(
-    single_dim_strategy: Callable[[OpSchema], list[list[Placement]]],
-) -> Callable[[OpSchema], StrategyType]:
+    op_schema: OpSchema,
+    single_dim_strategy: Callable[
+        [ArgsType, KwargsType], list[list[Placement | PlacementPlaceholder]]
+    ],
+) -> Callable[[ArgsType, KwargsType], StrategyType]:
     """
     Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
     sharding types used by inputs.
     """
+    # TODO: pass mesh in
+    mesh = op_schema.args_schema[0].mesh
 
-    def expanded_strategy(op_schema: OpSchema) -> StrategyType:
-        strategies_over_one_mesh_dim = single_dim_strategy(op_schema)
-        args_strategy = [
-            s for s in op_schema.args_strategy if isinstance(s, OpStrategy)
-        ]
+    def expanded_strategy(
+        args_schema: ArgsType, kwargs_schema: KwargsType
+    ) -> StrategyType:
+        strategies_over_one_mesh_dim = single_dim_strategy(args_schema, kwargs_schema)
+        # TODO rename args_Strategy..
+        args_strategy = [s for s in args_schema if isinstance(s, TensorMeta)]
         assert len(args_strategy) > 0, "expected at least one Tensor arg"
-        mesh = args_strategy[0].mesh
+
+        # Expand 'ShardingPlaceholder' to concrete placements used in inputs
+
+        # TODO: can we just pass the input placements in a mode convenient form?
+        sharding_types = set()
+        for spec in op_schema.args_spec:
+            # assert len(arg_strategy.strategies) == 1, (
+            #     "we should only get one strategy for each input at this point"
+            # )
+            # assert len(arg_strategy.strategies[0].output_spec.placements) > 0, (
+            #     "we expect valid output placements"
+            # )
+            for p in spec.placements:
+                # This is ugly, the point is we don't care about the dim,
+                # because we're going to replace the dim with the placeholder's dim when expanding the sharding rule,
+                # but we do care about the split-factor so we can't just store the unique types
+                # (e.g. Shard, _StridedShard).
+                if isinstance(p, _StridedShard):
+                    sharding_types.add(_StridedShard(1234, split_factor=p.split_factor))
+                elif isinstance(p, Shard):
+                    sharding_types.add(Shard(1234))
+
+        # if any of the placements is a placeholder, we need to expand the strategy
+        # to all possible combinations of placements
+        expanded_strategies_over_one_mesh_dim = []
+        for s in strategies_over_one_mesh_dim:
+            if not any(isinstance(p, PlacementPlaceholder) for p in s):
+                continue
+            for placement_base in sharding_types:
+                expanded_strategy = []
+                success = True
+                for maybe_placeholder in s:
+                    if isinstance(maybe_placeholder, PlacementPlaceholder):
+                        # TODO: too lazy to modify Placement base in C++, making mypy happy this way for now
+                        if isinstance(
+                            placement_base,
+                            (
+                                Shard,
+                                _StridedShard,
+                            ),
+                        ) and placement_base._supports_placeholder(maybe_placeholder):
+                            # we combine the tensor dim to shard from the placeholder
+                            # with other metadata (e.g. split_factor) from the sharding class
+                            expanded_strategy.append(
+                                placement_base._from_placeholder(maybe_placeholder)
+                            )
+                        else:
+                            success = False
+                            break
+                    else:
+                        expanded_strategy.append(maybe_placeholder)
+                if success:
+                    expanded_strategies_over_one_mesh_dim.append(expanded_strategy)
 
         # implicitly allow replicating output, all inputs
-        strategies_over_one_mesh_dim.append([Replicate()] * (1 + len(args_strategy)))
+        expanded_strategies_over_one_mesh_dim.append(
+            [Replicate()] * (1 + len(args_strategy))
+        )
 
-        # TODO: handle 'ShardingPlaceholder' expansion (doesn't exist yet)
         # TODO: identify differences between this and 'expand_' util
-        all_mesh_dim_strategies = [strategies_over_one_mesh_dim] * mesh.ndim
+        all_mesh_dim_strategies = [expanded_strategies_over_one_mesh_dim] * mesh.ndim
         strategy_combs = itertools.product(*all_mesh_dim_strategies)
         all_strategies = []
         for strategy_comb in strategy_combs:
@@ -55,8 +150,12 @@ def _expand_single_dim_strategy_to_mesh(
                 DTensorSpec(mesh, tuple(specs)) for specs in zip(*strategy_comb)
             ]
             arg_specs = spec_list[1:]
+            # Sad.. i am wrapping the DTensorSpec back into an OpStrategy to make it compatible with gen_redistribute_costs
+            # but I want to avoid having OpStrategy at all in here
             src_strategies = [
-                s for s in op_schema.args_schema if isinstance(s, OpStrategy)
+                OpStrategy([OpSpec(s)])
+                for s in op_schema.args_schema
+                if isinstance(s, DTensorSpec)
             ]
             if any(
                 not is_tensor_shardable(src_strat.shape, arg_spec)
