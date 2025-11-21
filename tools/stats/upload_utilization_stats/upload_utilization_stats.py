@@ -3,7 +3,6 @@
 import os
 import sys
 from pathlib import Path
-from typing import Union
 
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -11,7 +10,7 @@ import argparse
 import json
 import zipfile
 from dataclasses import asdict
-from typing import Any, Optional
+from typing import Any
 
 import pandas as pd  # type: ignore[import]
 from tools.stats.upload_stats_lib import download_s3_artifacts, upload_to_s3
@@ -284,7 +283,7 @@ class UploadUtilizationData:
         file_path: str,
         artifact_prefix: str = "",
     ) -> tuple[
-        Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
+        UtilizationMetadata | None, list[UtilizationRecord], list[UtilizationRecord]
     ]:
         test_log_content = read_file(file_path)
         if not test_log_content:
@@ -302,7 +301,7 @@ class UploadUtilizationData:
         workflow_run_attempt: int,
         artifact_prefix: str = JOB_TEST_ARTIFACT_PREFIX,
     ) -> tuple[
-        Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
+        UtilizationMetadata | None, list[UtilizationRecord], list[UtilizationRecord]
     ]:
         artifact_paths = download_s3_artifacts(
             artifact_prefix, workflow_run_id, workflow_run_attempt, job_id
@@ -331,9 +330,7 @@ class UploadUtilizationData:
         print(f"Converted Log Model: UtilizationMetadata:\n {metadata}")
         return metadata, records, error_records
 
-    def _process_raw_record(
-        self, line: str
-    ) -> tuple[Optional[UtilizationRecord], bool]:
+    def _process_raw_record(self, line: str) -> tuple[UtilizationRecord | None, bool]:
         try:
             record = UtilizationRecord.from_json(line)
             if record.error:
@@ -360,7 +357,7 @@ class UploadUtilizationData:
         self,
         content: str,
     ) -> tuple[
-        Optional[UtilizationMetadata], list[UtilizationRecord], list[UtilizationRecord]
+        UtilizationMetadata | None, list[UtilizationRecord], list[UtilizationRecord]
     ]:
         if not content:
             return None, [], []
@@ -397,7 +394,7 @@ def handle_file(file_path: Path) -> str:
     return ""
 
 
-def read_file(file_path: Union[str, Path]) -> str:
+def read_file(file_path: str | Path) -> str:
     try:
         if isinstance(file_path, Path):
             if file_path.is_file():
