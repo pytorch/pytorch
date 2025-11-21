@@ -165,54 +165,61 @@ class TestCase(PytorchTestCase):
         transform_fn = TRANSFORM_FUNCS[variant]
 
         for sample_input in sample_inputs:
-            if variant != Variant.GradCheck:
+            match variant:
+                case Variant.Op | Variant.Distributed:
 
-                def expected(sample_input=sample_input):
-                    return op(
-                        sample_input.input, *sample_input.args, **sample_input.kwargs
+                    def expected(sample_input=sample_input):
+                        return op(
+                            sample_input.input,
+                            *sample_input.args,
+                            **sample_input.kwargs,
+                        )
+
+                    subclass_sample = sample_input.transform(transform_fn)
+
+                    def actual(subclass_sample=subclass_sample):
+                        return op(
+                            subclass_sample.input,
+                            *subclass_sample.args,
+                            **subclass_sample.kwargs,
+                        )
+
+                    self.assertSameResult(expected, actual, **kwargs)
+                case Variant.GradCheck:
+                    input_list = []
+                    # Mark all applicable tensors with `requires_grad=True`
+                    # Come up with a list of applicable tensors.
+                    subclass_sample = sample_input.transform(
+                        functools.partial(transform_fn, input_list=input_list)
                     )
 
-                subclass_sample = sample_input.transform(transform_fn)
+                    # The function to gradcheck is the op, replacing the appropriate tensors
+                    # with the input ones
+                    def func(*t: torch.Tensor):
+                        it = iter(t)
 
-                def actual(subclass_sample=subclass_sample):
-                    return op(
-                        subclass_sample.input,
-                        *subclass_sample.args,
-                        **subclass_sample.kwargs,
+                        def f(x):
+                            if not isinstance(x, torch.Tensor):
+                                return x
+                            return next(it)
+
+                        input_sample = sample_input.transform(f)
+                        return op(
+                            input_sample.input,
+                            *input_sample.args,
+                            **input_sample.kwargs,
+                        )
+
+                    # Do the actual gradcheck
+                    gradcheck(
+                        func,
+                        input_list,
+                        raise_exception=True,
+                        fast_mode=True,
+                        check_batched_grad=True,
                     )
-
-                self.assertSameResult(expected, actual, **kwargs)
-            else:
-                input_list = []
-                # Mark all applicable tensors with `requires_grad=True`
-                # Come up with a list of applicable tensors.
-                subclass_sample = sample_input.transform(
-                    functools.partial(transform_fn, input_list=input_list)
-                )
-
-                # The function to gradcheck is the op, replacing the appropriate tensors
-                # with the input ones
-                def func(*t: torch.Tensor):
-                    it = iter(t)
-
-                    def f(x):
-                        if not isinstance(x, torch.Tensor):
-                            return x
-                        return next(it)
-
-                    input_sample = sample_input.transform(f)
-                    return op(
-                        input_sample.input, *input_sample.args, **input_sample.kwargs
-                    )
-
-                # Do the actual gradcheck
-                gradcheck(
-                    func,
-                    input_list,
-                    raise_exception=True,
-                    fast_mode=True,
-                    check_batched_grad=True,
-                )
+                case _:
+                    self.assertTrue(False, "Testcase not implemented for variant.")
 
 
 aten = torch.ops.aten
