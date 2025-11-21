@@ -5,7 +5,7 @@ import functools
 import importlib
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import sympy
 from sympy import Expr, Integer
@@ -133,7 +133,7 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
 @functools.lru_cache(maxsize=1)
 def _supports_nontrivial_mask_graphs() -> bool:
     """Currently only supported on Hopper (SM90) GPUs."""
-    return torch.cuda.get_device_capability()[0] == 9
+    return torch.cuda.get_device_capability()[0] in [9, 10]
 
 
 def _can_use_flex_flash_attention(
@@ -171,20 +171,34 @@ def _use_flex_flash_attention(
     mask_graph: Subgraph,
     kernel_options: dict[str, Any],
     num_score_mod_placeholders: int,
+    backend: Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"],
 ) -> bool:
-    """Determine if we should use flex flash attention for the given inputs."""
-    force_flash = kernel_options.get("force_flash", False)
+    """Determine if we should use flex flash attention for the given inputs.
+
+    Args:
+        subgraph: The score modification subgraph
+        mask_graph: The mask modification subgraph
+        kernel_options: Kernel configuration options
+        num_score_mod_placeholders: Number of placeholders in score_mod
+        backend: Implementation selector (AUTO, TRITON, FLASH, TRITON_DECODE)
+
+    Returns:
+        True if flash attention should be used, False otherwise
+    """
+    # Flash is experimental and must be explicitly requested
+    if backend != "FLASH":
+        return False
 
     can_use, reason = _can_use_flex_flash_attention(
         subgraph, mask_graph, num_score_mod_placeholders
     )
 
-    if force_flash and not can_use:
+    if not can_use:
         raise RuntimeError(
-            f"force_flash=True but flash attention cannot be used: {reason}"
+            f"BACKEND='FLASH' but flash attention cannot be used: {reason}"
         )
 
-    return force_flash and can_use
+    return True
 
 
 def create_flex_flash_attention_kernel(

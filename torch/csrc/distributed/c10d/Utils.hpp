@@ -48,14 +48,14 @@ TORCH_API std::vector<at::Tensor> getTensorShapes(
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
-  ss << "(";
+  ss << '(';
   for (const auto i : c10::irange(l.size())) {
     if (i > 0) {
       ss << ", ";
     }
     ss << l[i];
   }
-  ss << ")";
+  ss << ')';
   return ss.str();
 }
 
