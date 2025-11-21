@@ -9,7 +9,6 @@ import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
-
 from . import _functional_collectives_impl as fun_col_impl
 
 
@@ -127,15 +126,6 @@ all_reduce(...)
 """
 
 
-def wait_tensor(tensor):
-    """
-    Wait on a tensor returned by the collectives ops.
-
-    Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
-    """
-    return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
-
-
 def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     """
     Broadcasts the tensor to all processes in the given process group.
@@ -147,28 +137,6 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     """
     group_name = _resolve_group_name(group, tag)
     tensor = torch.ops._c10d_functional.broadcast(self, src, group_name)
-    return _maybe_wrap_tensor(tensor)
-
-
-def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
-    """
-    Reduces the tensor data across all machines in such a way that all get
-    the final result.
-
-    The input tensor is left unmodified.
-
-    Group can be one of:
-        List[int]: ranks participating in the collective.
-        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
-        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
-        DeviceMesh: Do a SPMD collective over all ranks of the mesh
-        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
-
-    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
-    that information and perform collective algebraic optimization. Use other forms of input for that.
-    """
-    group_name = _resolve_group_name(group, tag)
-    tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp.lower(), group_name)
     return _maybe_wrap_tensor(tensor)
 
 
@@ -544,6 +512,308 @@ def all_to_all_single_autograd(
         group_name,
     )
     return _FromTorchTensor.apply(tensor)
+
+
+# ============================================================================
+# Differentiable Collectives
+# ============================================================================
+
+
+def wait_tensor(tensor):
+    """
+    Wait on a tensor returned by the collectives ops.
+
+    Waiting follows device semantics, which means blocking on CPU and synchronizing streams on CUDA.
+    """
+    return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+
+
+def wait_tensor_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for wait_tensor: identity (no-op).
+    Wait is just a synchronization primitive, so gradient flows through unchanged.
+
+    Args:
+        ctx: Context object
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Gradient unchanged (identity)
+    """
+    return grad_output
+
+
+def wait_tensor_setup_context(ctx, inputs, output):
+    """
+    Setup context for wait_tensor backward.
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (tensor,)
+        output: Output from forward pass
+    """
+    return
+
+
+torch.library.register_autograd(
+    "_c10d_functional::wait_tensor",
+    wait_tensor_backward,
+    setup_context=wait_tensor_setup_context,
+)
+
+
+def all_reduce(input: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
+    """
+    Reduces the tensor data across all machines in such a way that all get
+    the final result.
+
+    The input tensor is left unmodified.
+
+    Group can be one of:
+        List[int]: ranks participating in the collective.
+        List[List[int]]: 2D mesh of ranks taking part of this collective in MPMD.
+        ProcessGroup: Will perform a collective using the ranks and tag of the PG.
+        DeviceMesh: Do a SPMD collective over all ranks of the mesh
+        (DeviceMesh, int): Do a MPMD collective over one dimension of the DeviceMesh
+
+    :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
+    that information and perform collective algebraic optimization. Use other forms of input for that.
+    """
+    group_name = _resolve_group_name(group, tag)
+
+    if not input.requires_grad:
+        output = torch.ops._c10d_functional.all_reduce(
+            input, reduceOp.lower(), group_name
+        )
+        return _maybe_wrap_tensor(output)
+
+    if reduceOp.lower() != "sum":
+        raise AssertionError(
+            "all_reduce differentiability is only supported for 'sum' reduction"
+        )
+    output = torch.ops._c10d_functional.all_reduce(input, reduceOp.lower(), group_name)
+    return wait_tensor(output)
+
+
+
+def all_reduce_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for all_reduce: all_reduce with same reduce_op.
+    Forward aggregates tensors, backward aggregates gradients.
+
+    Args:
+        ctx: Context object
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Tuple of (grad_input, grad_group_name, grad_reduce_op)
+        grad_group_name and grad_reduce_op are None (not differentiable)
+    """
+    group_name = ctx.group_name
+    reduce_op = ctx.reduce_op
+
+    # Backward does all_reduce with the same reduce_op
+    output = torch.ops._c10d_functional.all_reduce(
+        grad_output.contiguous(), reduce_op, group_name
+    )
+    return wait_tensor(output), None, None
+
+
+def all_reduce_setup_context(ctx, inputs, output):
+    """
+    Setup context for all_reduce backward.
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (input, reduce_op, group_name)
+        output: Output from forward pass
+    """
+    input, reduce_op, group_name = inputs
+    ctx.group_name = group_name
+    ctx.reduce_op = reduce_op.lower()
+
+
+torch.library.register_autograd(
+    "_c10d_functional::all_reduce",
+    all_reduce_backward,
+    setup_context=all_reduce_setup_context,
+)
+
+
+def all_reduce_sum_invariant(
+    input: torch.Tensor,
+    group: RANK_TYPES,
+    tag: str = "",
+) -> torch.Tensor:
+    """
+    All-reduce (sum) for tensors with invariant gradients.
+
+    Forward: all_reduce with sum
+    Backward: identity (no gradient aggregation)
+
+    Args:
+        input: Input tensor (varying across ranks)
+        group: Process group specification. Can be one of:
+            - List[int]: ranks participating in the collective
+            - List[List[int]]: 2D mesh of ranks (MPMD)
+            - ProcessGroup: Use ranks and tag from the PG
+            - DeviceMesh: SPMD collective over all ranks
+            - (DeviceMesh, int): MPMD collective over one dimension
+        tag: Optional tag for identifying the collective (default: "")
+
+    Returns:
+        Reduced tensor (aggregated across ranks)
+    """
+    group_name = _resolve_group_name(group, tag)
+    return torch.ops._c10d_functional.all_reduce_sum_invariant(input, group_name)
+
+
+@torch.library.custom_op("_c10d_functional::all_reduce_sum_invariant", mutates_args=())
+def all_reduce_sum_invariant_op(input: torch.Tensor, group_name: str) -> torch.Tensor:
+    """
+    This is the low-level implementation. Users should call the wrapper function.
+    Args:
+        input: Input tensor
+        group_name: Process group name string
+
+    Returns:
+        Reduced tensor
+    """
+    output = torch.ops._c10d_functional.all_reduce(input, "sum", group_name)
+    if not input.requires_grad:
+        return _maybe_wrap_tensor(output)
+
+    return wait_tensor(output)
+
+
+@all_reduce_sum_invariant_op.register_fake
+def _(input: torch.Tensor, group_name: str) -> torch.Tensor:
+    """
+    Meta kernel for all_reduce_sum_invariant.
+    """
+    return torch.empty_like(input)
+
+
+def all_reduce_sum_invariant_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for all_reduce_sum_invariant: identity (no gradient aggregation).
+    Args:
+        ctx: Context object (unused)
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Tuple of (grad_input, grad_group_name)
+        grad_group_name is None (not differentiable)
+    """
+    return grad_output, None
+
+
+def all_reduce_sum_invariant_setup_context(ctx, inputs, output):
+    """
+    Setup context for all_reduce_sum_invariant backward.
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (input, group_name)
+        output: Output from forward pass
+    """
+    input, group_name = inputs
+    ctx.group_name = group_name
+    return
+
+
+all_reduce_sum_invariant_op.register_autograd(
+    all_reduce_sum_invariant_backward,
+    setup_context=all_reduce_sum_invariant_setup_context,
+)
+
+
+def mark_varying(
+    input: torch.Tensor,
+    group: RANK_TYPES,
+    tag: str = "",
+) -> torch.Tensor:
+    """
+    Mark tensor with varying gradients
+
+    Forward: identity (no-op)
+    Backward: all_reduce gradients with sum
+
+    Args:
+        input: Input tensor (varying across ranks)
+        group: Process group specification. Can be one of:
+            - List[int]: ranks participating in the collective
+            - List[List[int]]: 2D mesh of ranks (MPMD)
+            - ProcessGroup: Use ranks and tag from the PG
+            - DeviceMesh: SPMD collective over all ranks
+            - (DeviceMesh, int): MPMD collective over one dimension
+        tag: Optional tag for identifying the collective (default: "")
+
+    Returns:
+        Input tensor unchanged
+    """
+    group_name = _resolve_group_name(group, tag)
+    return torch.ops._c10d_functional.mark_varying(input, group_name)
+
+
+@torch.library.custom_op(
+    "_c10d_functional::mark_varying",
+    mutates_args=(),
+    schema="(Tensor(a) input, str group) -> Tensor(a)",
+)
+def mark_varying_op(input: torch.Tensor, group_name: str) -> torch.Tensor:
+    """
+    This is the low-level implementation. Users should call the wrapper function.
+    Args:
+        input: Input tensor
+        group_name: Process group name string
+
+    Returns:
+        Input tensor unchanged
+    """
+    return input.view_as(input)
+
+
+@mark_varying_op.register_fake
+def _(input: torch.Tensor, group_name: str) -> torch.Tensor:
+    """
+    Meta kernel for mark_varying.
+    """
+    return input.view_as(input)
+
+
+def mark_varying_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for mark_varying: all_reduce with sum.
+    Args:
+        ctx: Context object
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Tuple of (grad_input, grad_group_name)
+        grad_group_name is None because group_name is not differentiable
+    """
+    group_name = ctx.group_name
+    output = torch.ops._c10d_functional.all_reduce(
+        grad_output.contiguous(), "sum", group_name
+    )
+    return wait_tensor(output), None
+
+
+def mark_varying_setup_context(ctx, inputs, output):
+    """
+    Setup context for mark_varying backward.
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (input, group_name)
+        output: Output from forward pass
+    """
+    input, group_name = inputs
+    ctx.group_name = group_name
+    return
+
+
+mark_varying_op.register_autograd(
+    mark_varying_backward,
+    setup_context=mark_varying_setup_context,
+)
 
 
 def permute_tensor(
