@@ -253,19 +253,23 @@ class MixOrderReduction:
         # small workload. When a workload is small enough, data can be
         # fully cached by L2
         size_thres = 5 * 2**20
-        if not V.graph.sizevars.statically_known_geq(nrow * ncol, size_thres):
+
+        # Call evaluate_expr rather than statically_known_geq since nrow can
+        # have dynamic shape in real models.
+        # Don't use hint directly since hint can be non-representative.
+        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
             return False
 
         # We require more more row than columns since
         # 1, we prefer doing persistent reduction for each row
         # 2, we will split the reduction across the rows
-        if not V.graph.sizevars.statically_known_geq(nrow, ncol * 2):
+        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, ncol * 2)):
             return False
 
         # When nrow is small, ncol should also be small (due to the check
         # above). Thus the entire tensor should be well cached in L2.
         # Mix order reduction is less beneficial.
-        if not V.graph.sizevars.statically_known_geq(nrow, 4096):
+        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, 4096)):
             return False
 
         contiguous_node, other_node = (
@@ -301,6 +305,8 @@ class MixOrderReduction:
             return False
 
         # rnumel so large that we will not generated persistent reduction
+        # We don't see real use cases with dynamic ncol. But if we do,
+        # we should call evaluete_expr here which adds guards.
         if not V.graph.sizevars.statically_known_leq(ncol, 1024 * 16):
             return False
 
@@ -2714,12 +2720,22 @@ class Scheduler:
             if (
                 used_non_deterministic_runtime_estimations()
                 and config_comms.runtime_estimations_align_across_all_distributed_ranks
-            ):
-                from .comms import (
-                    align_runtime_estimations_across_all_distributed_ranks,
+                and (
+                    config.runtime_estimations_mms_benchmark
+                    or config_comms.runtime_estimations_use_nccl_lib_estimations
                 )
+            ):
+                has_collectives = False
+                for node in self.nodes:
+                    if is_collective(node.node):
+                        has_collectives = True
+                        break
+                if has_collectives:
+                    from .comms import (
+                        align_runtime_estimations_across_all_distributed_ranks,
+                    )
 
-                align_runtime_estimations_across_all_distributed_ranks(self.nodes)
+                    align_runtime_estimations_across_all_distributed_ranks(self.nodes)
 
             from torch._logging import trace_structured
 
@@ -2742,8 +2758,11 @@ class Scheduler:
         self.process_grouped_nodes()
 
         if (
+            # pyrefly: ignore[unbound-name]
             config.graph_partition
+            # pyrefly: ignore[unbound-name]
             and config.triton.cudagraphs
+            # pyrefly: ignore[unbound-name]
             and config.triton.reorder_for_reducing_graph_partitions
         ):
             self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
@@ -2755,6 +2774,7 @@ class Scheduler:
             self.insert_memory_check_nodes()
 
         log_ir_post_fusion(self.nodes)
+        # pyrefly: ignore[unbound-name]
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
