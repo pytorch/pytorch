@@ -251,7 +251,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             cache_entries = _debug_get_cache_entry_list(frame.f_code)
             if cache_entries:
                 reasons = get_and_maybe_log_recompilation_reasons(
-                    cache_entries[0], frame, skip_logging=True
+                    cache_entries[0], frame, innermost_fn(callback), skip_logging=True
                 )
                 if reasons:
                     failures = textwrap.indent("\n".join(reasons), "- ")
