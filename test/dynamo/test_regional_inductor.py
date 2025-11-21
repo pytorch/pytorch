@@ -1,8 +1,8 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
-from typing import TYPE_CHECKING
 import warnings
+from typing import TYPE_CHECKING
 
 import torch
 import torch._inductor.test_case
@@ -55,6 +55,7 @@ def aot_eager_regional_inductor(serialize=False):
 
         def regional_inductor_pickle(gm, *example_args):
             from torch.fx.passes.regional_inductor import _BoxedCallWrapper
+
             result = regional_inductor(gm, *example_args)
             serialized = GraphPickler.dumps(result)
 
@@ -128,7 +129,11 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
 
         msgs = [str(warn.message) for warn in w]
         self.assertTrue(
-            not any("Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments" in m for m in msgs)
+            not any(
+                "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments"
+                in m
+                for m in msgs
+            )
         )
 
     @parametrize("serialize", [False, True])

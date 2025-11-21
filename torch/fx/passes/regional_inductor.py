@@ -121,39 +121,9 @@ def _needs_inductor_compile(node):
     )
 
 
-class _BoxedCallWrapper:
-    """
-    A pickleable wrapper for GraphModule that provides boxed calling convention.
-
-    This wrapper allows the compiled graph module to be pickled while maintaining
-    the _boxed_call attribute needed for AOT Autograd integration.
-    """
-    def __init__(self, graph_module):
-        self.graph_module = graph_module
-        self._boxed_call = True
-
-    def __call__(self, args):
-        return self.graph_module.forward(args)
-
-    def __reduce__(self):
-        # Return a callable (the class itself) and arguments to reconstruct
-        return (_BoxedCallWrapper, (self.graph_module,))
-
-    def recompile(self):
-        """Delegate recompile to the underlying GraphModule and reapply boxed codegen."""
-        from torch.fx.graph import _BoxedCodeGen
-        # Recompile with boxed codegen
-        self.graph_module.graph.set_codegen(_BoxedCodeGen())
-        return self.graph_module.recompile()
-
-    def __getattr__(self, name):
-        """Delegate attribute access to the underlying GraphModule."""
-        return getattr(self.graph_module, name)
-
-
 def _compile_fx_annotated_nodes_with_inductor(gm):
-    from torch.fx.passes.operator_support import OperatorSupport
     from torch.fx.graph import _BoxedCodeGen
+    from torch.fx.passes.operator_support import OperatorSupport
 
     found_marked_node = False
     for node in gm.graph.nodes:
@@ -177,8 +147,7 @@ def _compile_fx_annotated_nodes_with_inductor(gm):
     gm.recompile()
 
     # Use a pickleable wrapper class that provides boxed calling convention
-    wrapper = _BoxedCallWrapper(gm)
-    return wrapper
+    return gm
 
 
 def _recursive_compile_fx_annotated_nodes_with_inductor(gm):
