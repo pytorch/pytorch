@@ -152,9 +152,6 @@ log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
 
-autotune_warmup = int(os.getenv("TORCH_AUTOTUNE_WARMUP", 25))
-autotune_rep = int(os.getenv("TORCH_AUTOTUNE_REP", 100))
-
 """ [Note: Inductor IR]
 
 Inductor's IR is produced by executing 'lowering' code (see lowering.py).  Each
@@ -5218,8 +5215,8 @@ class ChoiceCaller:
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
         benchmark_configs = {
-            "warmup": autotune_warmup,
-            "rep": autotune_rep,
+            "warmup": config.max_autotune_gemm_benchmark_warmup,
+            "rep": config.max_autotune_gemm_benchmark_reps,
         }
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)  # type: ignore[arg-type]

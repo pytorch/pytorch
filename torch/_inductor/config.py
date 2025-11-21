@@ -466,6 +466,9 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 
+max_autotune_gemm_benchmark_warmup = int(os.getenv("TORCHINDUCTOR_MAX_AUTOTUNE_WARMUP", 25))
+max_autotune_gemm_benchmark_reps = int(os.getenv("TORCHINDUCTOR_MAX_AUTOTUNE_REP", 100))
+
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
 

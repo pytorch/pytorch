@@ -2254,7 +2254,11 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         assert self.bmreq is not None
         if config.profile_bandwidth_with_do_bench_using_profiling:
             algo = self.bmreq.make_run_fn(*args, out=out)
-            return do_bench_using_profiling(algo)
+            benchmark_configs = {
+                "warmup": config.max_autotune_gemm_benchmark_warmup,
+                "rep": config.max_autotune_gemm_benchmark_reps,
+            }
+            return do_bench_using_profiling(algo, **benchmark_configs)
         return self.bmreq.benchmark(*args, out=out)
 
     def precompile(self):
@@ -2339,9 +2343,13 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
+            benchmark_configs = {
+                "warmup": config.max_autotune_gemm_benchmark_warmup,
+                "rep": config.max_autotune_gemm_benchmark_reps,
+            }
             if config.profile_bandwidth_with_do_bench_using_profiling:
-                return do_bench_using_profiling(lambda: algo(*args))
-            return benchmarker.benchmark(algo, args, {})
+                return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)
+            return benchmarker.benchmark(algo, args, {}, **benchmark_configs)
 
     def to_callable(self):
         fn = self.choice.to_callable()

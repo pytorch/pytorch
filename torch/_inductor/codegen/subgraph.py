@@ -126,12 +126,17 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
                 bm_func = mod.call
 
                 bm_func([*sym_inputs, *args])
+        benchmark_configs = {
+            "warmup": inductor_config.max_autotune_gemm_benchmark_warmup,
+            "rep": inductor_config.max_autotune_gemm_benchmark_reps,
+        }
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
+            return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]), **benchmark_configs)
         return benchmarker.benchmark(
             # Shallow clone args since bm_func may clear args
             lambda: bm_func([*sym_inputs, *args]),
             device=benchmarker.infer_device(*sym_inputs, *args),
+            **benchmark_configs,
         )
 
     def hash_key(self) -> str:
