@@ -8,7 +8,6 @@ from collections.abc import Iterator
 from typing_extensions import ParamSpec
 from collections import defaultdict
 from torch.utils._python_dispatch import TorchDispatchMode
-
 from math import prod
 from functools import wraps
 import warnings
@@ -17,7 +16,6 @@ __all__ = ["FlopCounterMode", "register_flop_formula"]
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
-
 
 aten = torch.ops.aten
 
