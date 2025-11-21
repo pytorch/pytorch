@@ -32,6 +32,7 @@ from ..utils import cmp_name_to_op_mapping, istype
 if TYPE_CHECKING:
     from ..codegen import PyCodegen
     from ..symbolic_convert import InstructionTranslator
+    from .constant import ConstantVariable
 
 
 class SourceType(Enum):
@@ -150,9 +151,6 @@ class AttributeMutation(MutationType):
     This case of VariableTracker.mutation_type marker indicates that Dynamo
     allows mutation on the value's attributes.
     """
-
-    def __init__(self, typ: SourceType) -> None:
-        super().__init__(typ)
 
 
 class AttributeMutationExisting(AttributeMutation):
@@ -443,7 +441,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
-    def call_obj_hasattr(self, tx: Any, name: str) -> "VariableTracker":
+    def call_obj_hasattr(self, tx: Any, name: str) -> "ConstantVariable":
         unimplemented(
             gb_type="Unsupported hasattr call",
             context=f"call_obj_hasattr {self} {name}",

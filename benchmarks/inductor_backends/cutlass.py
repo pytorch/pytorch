@@ -125,7 +125,7 @@ class CutlassExperimentConfig(ExperimentConfig):
     def to_options(self) -> dict[str, Any]:
         return {
             **super().to_options(),
-            "cuda.cutlass_instantiation_level": self.cutlass_instantiation_level,
+            "cutlass.cutlass_instantiation_level": self.cutlass_instantiation_level,
         }
 
 

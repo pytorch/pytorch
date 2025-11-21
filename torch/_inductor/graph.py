@@ -522,7 +522,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.bw_donated_idxs = get_donated_idxs()
 
         # Cache for dep size hints to avoid expensive recomputation
-        self.dep_size_hint_cache: dict[tuple[Dep, bool], int] = {}
+        self.dep_size_hint_cache: dict[Dep, int] = {}
 
     def freeze_runtime_asserts(self) -> None:
         self._shape_env.freeze_runtime_asserts()
@@ -610,25 +610,22 @@ class GraphLowering(torch.fx.Interpreter):
         assert isinstance(feature, BackendFeature), feature
         return feature in self.get_backend_features(get_device_type(device))
 
-    def get_dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
+    def get_dep_size_hint(self, dep: Dep) -> int:
         """
         Get the size hint for a dependency with caching to avoid expensive recomputation.
         """
-        if (dep, count_bytes) not in self.dep_size_hint_cache:
+        if dep not in self.dep_size_hint_cache:
             res = 0
             try:
                 if not dep.has_unbacked_symbols():
-                    if count_bytes:
-                        res = dep.numbytes_hint()
-                    else:
-                        res = dep.numel_hint()
+                    res = dep.numbytes_hint()
             except KeyError:
                 # In at least one test (test/inductor/test_torchbind.py) we
                 # create a StarDep that doesn't exist in the graph and calling
                 # `has_unbacked_symbols()` throws an error.
                 pass
-            self.dep_size_hint_cache[(dep, count_bytes)] = res
-        return self.dep_size_hint_cache[(dep, count_bytes)]
+            self.dep_size_hint_cache[dep] = res
+        return self.dep_size_hint_cache[dep]
 
     def get_current_device_or_throw(self) -> torch.device:
         if device := self.current_device:
@@ -1117,10 +1114,34 @@ class GraphLowering(torch.fx.Interpreter):
         with torch.utils._python_dispatch._disable_current_modes():
             # caller might have OrderedSet fake tensor mode which will create a fake tensor
             # when calling .to, so unset modes here
-            return self.allocate_non_dup_const_name(
+            non_dup_const_name = self.allocate_non_dup_const_name(
                 f"{name}_{device_override.type}{device_override.index or 0}",
                 self.constants[name].to(device_override),
             )
+
+            assert non_dup_const_name in self.constants, (
+                f"{non_dup_const_name} should be in V.graph.constants already"
+            )
+
+            # register device-copied buffers and parameters to graph as well
+            # to codegen correct torch::aot_inductor::ConstantType for them rather than `Unknown`
+            if any(
+                name == normalize_name(buffer_name)
+                for buffer_name in self.named_buffers
+            ):
+                self.named_buffers[non_dup_const_name] = self.constants[
+                    non_dup_const_name
+                ]
+
+            if any(
+                name == normalize_name(param_name)
+                for param_name in self.named_parameters
+            ):
+                self.named_parameters[non_dup_const_name] = self.constants[
+                    non_dup_const_name
+                ]
+
+            return non_dup_const_name
 
     # pyrefly: ignore [bad-override]
     def placeholder(
