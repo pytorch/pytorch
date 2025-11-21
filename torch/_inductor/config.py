@@ -438,6 +438,9 @@ intra_node_bw = 300
 # default value is InfiniBand
 inter_node_bw = 25
 
+# unit: GB/s, uni-directional CPU<>GPU bandwidth
+cpu_gpu_bw = 50.0
+
 # use Inductor's experimental benchmarker (runtime/benchmarking.py)
 # to benchmark kernels during autotuning, otherwise fall back to
 # Triton's `do_bench`. the experimental benchmarker may produce

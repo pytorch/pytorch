@@ -7,15 +7,18 @@ and reload them during backward pass, reducing GPU memory usage.
 
 import logging
 import operator
+from dataclasses import dataclass
 
 import torch
 import torch.fx as fx
 from torch._dynamo.variables.streams import get_current_stream, new_event, new_stream
+from torch._inductor import config as inductor_config
+from torch._inductor.fx_passes.overlap_scheduling import benchmark_node, is_compute_node
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.utils._ordered_set import OrderedSet
 
 from .. import config
-from ..partitioners import get_default_op_list, OpTypes
+from ..partitioners import _size_of, get_default_op_list, OpTypes
 
 
 log: logging.Logger = logging.getLogger(__name__)
@@ -24,6 +27,42 @@ log: logging.Logger = logging.getLogger(__name__)
 # Node name prefixes for offload/reload operations
 CPU_OFFLOAD_PREFIX = "cpu_offload_"
 GPU_RELOAD_PREFIX = "gpu_reload_"
+
+
+@dataclass
+class ReloadNodeInfo:
+    """
+    Information about backward reload related nodes for each reload operation.
+
+    Pattern: fork → wait_stream → device_put → record_event → join → wait_event
+
+    This pattern is divided into two logical groups for optimization purposes:
+    - Reload group (fork → wait_stream → device_put → record_event → join):
+      Performs the actual asynchronous data transfer on a separate stream.
+      These nodes can be moved earlier in the graph to overlap with computation.
+    - Wait group (wait_event):
+      Synchronization point that blocks until the data transfer completes.
+      This must remain at the point where the reloaded data is first needed.
+    """
+
+    reload_group_nodes: list[fx.Node]
+    wait_event_node: fx.Node
+    transfer_size_bytes: int
+    transfer_time_ms: float
+
+
+@dataclass
+class ReloadQueueEntry:
+    """
+    Entry in the reload queue for prefetch scheduling.
+
+    Attributes:
+        pattern: The reload pattern information
+        remaining_time_ms: Remaining overlap time needed in milliseconds
+    """
+
+    pattern: ReloadNodeInfo
+    remaining_time_ms: float
 
 
 def offload_activation_fw(graph: fx.Graph) -> None:
@@ -429,6 +468,261 @@ def put_offload_nodes_on_separate_stream(
     add_backward_reload_stream_ops(bwd_module.graph)
 
 
+def _validate_pattern_nodes(
+    fork_node: fx.Node,
+    wait_stream_node: fx.Node,
+    device_put_node: fx.Node,
+    record_event_node: fx.Node,
+    join_node: fx.Node,
+    wait_event_node: fx.Node,
+) -> None:
+    """
+    Validate that the pattern nodes match the expected structure.
+
+    Raises ValueError if any node doesn't match expectations.
+    """
+
+    if not (
+        fork_node.op == "call_function"
+        and fork_node.name == f"stream_in_{device_put_node.name}"
+        and fork_node.target == torch.ops.streams.fork.default
+    ):
+        raise ValueError("Expected fork node two nodes before device_put node")
+
+    if not (
+        wait_stream_node.op == "call_function"
+        and wait_stream_node.target == torch.ops.streams.wait_stream.default
+    ):
+        raise ValueError("Expected wait_stream node one node before device_put node")
+
+    if not (
+        record_event_node.op == "call_function"
+        and record_event_node.target == torch.ops.streams.record_event.default
+    ):
+        raise ValueError("Expected record_event node one node after device_put node")
+
+    if not (
+        join_node.op == "call_function"
+        and join_node.name == f"stream_out_{device_put_node.name}"
+        and join_node.target == torch.ops.streams.join.default
+    ):
+        raise ValueError("Expected join node two nodes after device_put node")
+
+    if not (
+        wait_event_node.op == "call_function"
+        and wait_event_node.target == torch.ops.streams.wait_event.default
+    ):
+        raise ValueError("Expected wait_event node three nodes after device_put node")
+
+
+def _calculate_transfer_size(device_put_node: fx.Node) -> int:
+    """Calculate the size in bytes of data being transferred."""
+
+    return _size_of(device_put_node.args[0])  # pyrefly: ignore [bad-argument-type]
+
+
+def _estimate_transfer_time_in_ms(transfer_size_bytes: int) -> float:
+    """Estimate transfer time in milliseconds based on size and bandwidth."""
+
+    return transfer_size_bytes / (1024**3) * 1_000 / inductor_config.cpu_gpu_bw
+
+
+def identify_reload_patterns(
+    graph: fx.Graph, nodes_list: list[fx.Node], node_to_idx: dict[fx.Node, int]
+) -> dict[fx.Node, ReloadNodeInfo]:
+    """
+    Identify backward reload patterns in the graph.
+
+    Pattern: fork → wait_stream → device_put → record_event → join → wait_event
+
+    Returns a dict mapping device_put node to ReloadNodeInfo containing:
+    - reload_group_nodes: fork → wait_stream → device_put → record_event → join
+    - wait_event_node: the wait_event node
+    - transfer_size_bytes: size of data being transferred
+    - transfer_time_ms: estimated transfer time in milliseconds
+    """
+    patterns: dict[fx.Node, ReloadNodeInfo] = {}
+
+    # Find all GPU reload device_put nodes
+    reload_nodes: list[fx.Node] = [
+        node
+        for node in graph.find_nodes(
+            op="call_function", target=torch.ops.prims.device_put.default
+        )
+        if GPU_RELOAD_PREFIX in node.name
+    ]
+
+    # Extract patterns for each reload device_put node
+    for reload_node in reload_nodes:
+        reload_node_idx: int = node_to_idx[reload_node]
+
+        fork_node: fx.Node = nodes_list[reload_node_idx - 2]
+        wait_stream_node: fx.Node = nodes_list[reload_node_idx - 1]
+        record_event_node: fx.Node = nodes_list[reload_node_idx + 1]
+        join_node: fx.Node = nodes_list[reload_node_idx + 2]
+        wait_event_node: fx.Node = nodes_list[reload_node_idx + 3]
+
+        # Validate the nodes are what we expect
+        _validate_pattern_nodes(
+            fork_node,
+            wait_stream_node,
+            reload_node,
+            record_event_node,
+            join_node,
+            wait_event_node,
+        )
+
+        # Calculate transfer size and time
+        transfer_size_bytes: int = _calculate_transfer_size(reload_node)
+        transfer_time_ms: float = _estimate_transfer_time_in_ms(transfer_size_bytes)
+
+        patterns[reload_node] = ReloadNodeInfo(
+            reload_group_nodes=[
+                fork_node,
+                wait_stream_node,
+                reload_node,
+                record_event_node,
+                join_node,
+            ],
+            wait_event_node=wait_event_node,
+            transfer_size_bytes=transfer_size_bytes,
+            transfer_time_ms=transfer_time_ms,
+        )
+
+    return patterns
+
+
+def reorder_for_prefetch(
+    graph: fx.Graph,
+    nodes_list: list[fx.Node],
+    reload_patterns: dict[fx.Node, ReloadNodeInfo],
+) -> None:
+    """
+    Reorder nodes to prefetch reload operations by directly manipulating the graph.
+
+    This follows the algorithm as follows:
+    - Go through nodes in reverse order
+    - When encountering a reload pattern, add it to a queue with its transfer time
+    - When encountering a compute node, use its runtime to satisfy overlap requirements
+    - Place reload patterns when their overlap requirement is satisfied
+    - When encountering placeholder nodes, flush queue as reloads cannot move before inputs
+    """
+
+    # Build a set of all nodes in reload groups for quick lookup
+    reload_group_nodes_set: set[fx.Node] = set()
+    for pattern in reload_patterns.values():
+        reload_group_nodes_set.update(pattern.reload_group_nodes)
+
+    # Queue to hold reload group nodes waiting to be placed (FIFO)
+    reload_queue: list[ReloadQueueEntry] = []
+
+    # Loop through nodes in reverse
+    for node in reversed(nodes_list):
+        if node.op == "output":
+            continue
+        elif node.op == "placeholder":
+            # Flush queue - place all remaining reloads after the last placeholder
+            while reload_queue:
+                entry: ReloadQueueEntry = reload_queue.pop(0)
+                for reload_group_node in reversed(entry.pattern.reload_group_nodes):
+                    node.append(reload_group_node)
+            break
+        elif node in reload_patterns:
+            pattern: ReloadNodeInfo = reload_patterns[node]
+            reload_queue.append(
+                ReloadQueueEntry(
+                    pattern=pattern, remaining_time_ms=pattern.transfer_time_ms
+                )
+            )
+        elif node in reload_group_nodes_set:
+            continue
+        else:
+            if not reload_queue:
+                continue
+            compute_runtime_ms: float = (
+                benchmark_node(node) if is_compute_node(node) else 0
+            )
+            reload_queue[0].remaining_time_ms -= compute_runtime_ms
+
+            # Pop and place reload if its remaining time is satisfied (<= 0)
+            if reload_queue[0].remaining_time_ms <= 0:
+                entry: ReloadQueueEntry = reload_queue.pop(0)
+                for reload_group_node in entry.pattern.reload_group_nodes:
+                    node.prepend(reload_group_node)
+
+
+def activation_offload_sink_wait(fwd_module: fx.GraphModule) -> None:
+    """
+    Sink wait_event operations for offload completion to the end of the graph.
+
+    This function identifies wait_event nodes for offload completion and moves them
+    to the end of the graph, allowing computation to overlap with offload operations.
+
+    Args:
+        fwd_module: Forward module graph
+    """
+    graph: fx.Graph = fwd_module.graph
+    nodes_list: list[fx.Node] = list(graph.nodes)
+    node_to_idx: dict[fx.Node, int] = {node: idx for idx, node in enumerate(nodes_list)}
+
+    # Find all CPU offload device_put nodes
+    offload_nodes: list[fx.Node] = [
+        node
+        for node in graph.find_nodes(
+            op="call_function", target=torch.ops.prims.device_put.default
+        )
+        if CPU_OFFLOAD_PREFIX in node.name
+    ]
+
+    # Collect all wait_event nodes that need to be moved
+    wait_nodes_to_sink: list[fx.Node] = []
+    for offload_node in offload_nodes:
+        offload_idx: int = node_to_idx[offload_node]
+        wait_event_node: fx.Node = nodes_list[offload_idx + 3]
+
+        # Validate it's actually a wait_event node
+        if not (
+            wait_event_node.op == "call_function"
+            and wait_event_node.target == torch.ops.streams.wait_event.default
+        ):
+            raise ValueError(
+                f"Expected wait_event node three positions after {offload_node.name}"
+            )
+
+        wait_nodes_to_sink.append(wait_event_node)
+
+    # Find the output node, and move all wait_event nodes to just before the output node
+    output_node: fx.Node = graph.find_nodes(op="output")[0]
+    for wait_node in wait_nodes_to_sink:
+        output_node.prepend(wait_node)
+
+
+def activation_reload_prefetch(bwd_module: fx.GraphModule) -> None:
+    """
+    Prefetch backward reload operations by moving them earlier in the graph
+    to overlap communication with computation.
+
+    This function identifies backward reload patterns (fork → wait_stream → device_put →
+    record_event → join) and moves them earlier in the execution order to overlap
+    the data transfer with computation, while keeping the wait_event at its original
+    position.
+
+    Args:
+        bwd_module: Backward module graph
+    """
+    graph: fx.Graph = bwd_module.graph
+    nodes_list: list[fx.Node] = list(graph.nodes)
+    node_to_idx: dict[fx.Node, int] = {node: idx for idx, node in enumerate(nodes_list)}
+
+    # Step 1: Identify reload patterns
+    reload_patterns: dict[fx.Node, ReloadNodeInfo] = identify_reload_patterns(
+        graph, nodes_list, node_to_idx
+    )
+
+    # Step 2: Reorder nodes by directly manipulating the graph
+    reorder_for_prefetch(graph, nodes_list, reload_patterns)
+
+
 def enable_activation_offloading(
     fwd_module: fx.GraphModule,
     bwd_module: fx.GraphModule,
@@ -460,6 +754,10 @@ def enable_activation_offloading(
     # Step 3: Put offload nodes on separate stream if configured
     if config.activation_offload_separate_stream:
         put_offload_nodes_on_separate_stream(fwd_module, bwd_module)
+        if config.activation_offload_sink_wait:
+            activation_offload_sink_wait(fwd_module)
+        if config.activation_reload_prefetch:
+            activation_reload_prefetch(bwd_module)
 
     fwd_module.graph.lint()
     bwd_module.graph.lint()
