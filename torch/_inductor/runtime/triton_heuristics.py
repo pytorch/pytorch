@@ -2443,6 +2443,7 @@ def triton_config_reduction(
     waves_per_eu=None,
     dynamic_scale_rblock=True,
     reduction_hint=None,
+    min_num_warps=None,
 ) -> Config:
     """
     Construct a reduction triton config with some adjustment heuristics
@@ -2478,7 +2479,12 @@ def triton_config_reduction(
             num_warps = total_numel() // 128
 
     max_num_warps = 16 if r <= 8192 else 32
-    num_warps = _num_warps(
+    if min_num_warps is not None:
+        _num_warps_func = functools.partial(_num_warps, min_num_warps=min_num_warps)
+    else:
+        _num_warps_func = _num_warps
+
+    num_warps = _num_warps_func(
         num_warps, max_num_warps=max_num_warps, register_intensive=register_intensive
     )
 
@@ -3293,9 +3299,6 @@ def _persistent_reduction_configs(
 ):
     xnumel = size_hints["x"]
     rnumel = get_total_reduction_numel(size_hints)
-    loads_and_stores = inductor_meta.get("num_load", 0) + inductor_meta.get(
-        "num_store", 0
-    )
 
     MAX_PERSISTENT_BLOCK_NUMEL = 4096
 
@@ -3366,12 +3369,11 @@ def _persistent_reduction_configs(
     # TODO(jansel): we should be able to improve these heuristics
     elif not max_autotune_enabled:  # Do not filter configs when tuning
         if reduction_hint == ReductionHint.INNER and rnumel >= 256:
-            if rnumel > 1024:
+            if rnumel > 1024 or xnumel // 8 < 128 or inductor_meta.get("RSPLIT_SIZE"):
                 configs = configs[:1]
             else:
-                x_block = 8
-                if xnumel // x_block < 128 or loads_and_stores >= 5:
-                    x_block = 1
+                num_warps, min_num_warps = 1, 1
+                x_block = min(1024 // rnumel, 8)
 
                 configs = [
                     triton_config_reduction(
@@ -3379,6 +3381,9 @@ def _persistent_reduction_configs(
                         x_block,
                         rnumel,
                         register_intensive=True,
+                        num_warps=num_warps,
+                        min_num_warps=min_num_warps,
+                        reduction_hint=reduction_hint,
                     )
                 ]
 
