@@ -1027,9 +1027,7 @@ class LocalTensor(torch.Tensor):
         with LocalTensorMode(local_tensor._ranks):
             return func(*args, **kwargs)
 
-    def numpy(
-        self, *, force: bool = False
-    ) -> np.ndarray:  # pyrefly: ignore  # missing-attribute
+    def numpy(self, *, force: bool = False) -> Any:
         if HAS_NUMPY:
             return self.reconcile().numpy(force=force)
         else:

@@ -17,8 +17,13 @@ std::string get_cuda_error_help(cudaError_t error) noexcept {
     default:
       help_text.append("\nSearch for `")
           .append(cudaGetErrorName(error))
+#if defined(USE_ROCM)
+          .append(
+              "' in https://rocm.docs.amd.com/projects/HIP/en/latest/index.html for more information.");
+#else
           .append(
               "' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.");
+#endif
       break;
   }
   return help_text;
