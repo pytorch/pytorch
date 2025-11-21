@@ -265,3 +265,23 @@ def my_string_op(t, accessor, passthru) -> tuple[list[str], int]:
     Returns: tuple - (list of [accessor, value, passthru] as strings, value)
     """
     return torch.ops.libtorch_agnostic_2_10.my_string_op.default(t, accessor, passthru)
+
+
+def my_from_blob(data_ptr, sizes, strides, device, dtype) -> Tensor:
+    """
+    Creates a Tensor from existing memory using torch::stable::from_blob.
+
+    Args:
+        data_ptr: int - pointer to the data buffer
+        sizes: tuple[int] - size of the tensor
+        strides: tuple[int] - strides of the tensor
+        device: Device - device on which the tensor resides
+        dtype: ScalarType - data type of the tensor
+        storage_offset: int - offset in the storage
+        layout: Layout - layout of the tensor
+
+    Returns: Tensor - tensor wrapping the existing memory
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_from_blob.default(
+        data_ptr, sizes, strides, device, dtype
+    )
