@@ -4,7 +4,7 @@ import json
 from enum import Enum
 from typing import Any, Optional
 
-from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 
 
 class CUTLASSOperationSerializer:
