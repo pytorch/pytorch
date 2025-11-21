@@ -866,6 +866,118 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """860160""")
 
+    def test_skip_unsupported_default_behavior(self):
+        """Test that unsupported operations work by default but don't count FLOPs"""
+        @torch.library.custom_op("mylib::unregistered_op", mutates_args=())
+        def unregistered_op(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @unregistered_op.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.randn(10, 10)
+
+        # Without skip_unsupported, custom ops execute but don't count FLOPs
+        # (no error is raised)
+        with FlopCounterMode() as mode:
+            result = unregistered_op(x)
+
+        # Should have zero FLOPs since the op was not registered
+        self.assertEqual(mode.get_total_flops(), 0)
+        # And unsupported ops are not tracked unless skip_unsupported=True
+        self.assertEqual(len(mode.get_unsupported_ops()), 0)
+
+    def test_skip_unsupported_enabled(self):
+        """Test that unsupported operations are skipped when skip_unsupported=True"""
+        @torch.library.custom_op("mylib::unregistered_op2", mutates_args=())
+        def unregistered_op2(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @unregistered_op2.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.randn(10, 10)
+
+        # Should succeed with skip_unsupported=True
+        with FlopCounterMode(skip_unsupported=True) as mode:
+            result = unregistered_op2(x)
+            # The operation should execute successfully
+            self.assertEqual(result.shape, x.shape)
+
+        # Should have zero FLOPs since the op was skipped
+        self.assertEqual(mode.get_total_flops(), 0)
+
+        # Should track the unsupported operation
+        unsupported = mode.get_unsupported_ops()
+        self.assertIn("mylib.unregistered_op2", unsupported)
+        self.assertEqual(unsupported["mylib.unregistered_op2"], 1)
+
+    def test_skip_unsupported_with_mixed_ops(self):
+        """Test skip_unsupported with a mix of supported and unsupported operations"""
+        @torch.library.custom_op("mylib::custom_mul", mutates_args=())
+        def custom_mul(x: torch.Tensor) -> torch.Tensor:
+            return x * 2
+
+        @custom_mul.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.randn(4, 5)
+        y = torch.randn(5, 6)
+
+        with FlopCounterMode(skip_unsupported=True) as mode:
+            # Supported operation
+            z = torch.mm(x, y)
+            # Unsupported operation
+            w = custom_mul(z)
+
+        # Should count FLOPs for mm but not for custom_mul
+        self.assertEqual(mode.get_total_flops(), 240)  # 4 * 6 * 2 * 5
+
+        # Should track the unsupported operation
+        unsupported = mode.get_unsupported_ops()
+        self.assertIn("mylib.custom_mul", unsupported)
+        self.assertEqual(unsupported["mylib.custom_mul"], 1)
+
+    def test_skip_unsupported_multiple_calls(self):
+        """Test that unsupported ops counter tracks multiple calls correctly"""
+        @torch.library.custom_op("mylib::repeat_op", mutates_args=())
+        def repeat_op(x: torch.Tensor) -> torch.Tensor:
+            return x + 1
+
+        @repeat_op.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.randn(10, 10)
+
+        with FlopCounterMode(skip_unsupported=True) as mode:
+            for i in range(5):
+                repeat_op(x)
+
+        # Should track 5 calls to the unsupported operation
+        unsupported = mode.get_unsupported_ops()
+        self.assertIn("mylib.repeat_op", unsupported)
+        self.assertEqual(unsupported["mylib.repeat_op"], 5)
+
+    def test_skip_unsupported_warning(self):
+        """Test that skip_unsupported emits warnings"""
+        @torch.library.custom_op("mylib::warned_op", mutates_args=())
+        def warned_op(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @warned_op.register_fake
+        def _(x):
+            return torch.empty_like(x)
+
+        x = torch.randn(5, 5)
+
+        with self.assertWarnsRegex(UserWarning, "does not have a registered FLOP formula"):
+            with FlopCounterMode(skip_unsupported=True) as mode:
+                warned_op(x)
+
 
 if __name__ == "__main__":
     run_tests()
