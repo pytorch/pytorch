@@ -647,9 +647,9 @@ def dynamo_graph_capture_for_export(
             graph_module._non_persistent_buffers_set = (
                 pyt.root._non_persistent_buffers_set.copy()
             )
-            annotations = torch.nn.Module.__annotations__
+            annotations = getattr(torch.nn.Module, "__annotations__", None)
             for name, value in pyt.root.__dict__.items():
-                if name not in annotations:
+                if annotations and name not in annotations:
                     graph_module.__dict__[name] = value
         graph_module._in_spec = pyt.in_spec
         graph_module._out_spec = pyt.out_spec
