@@ -7347,6 +7347,7 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
         else:
             assert node not in V.graph.env
             V.graph.env[node] = V.graph.run_node(node)
+
     if output is None:
         raise RuntimeError("No output node found in graph")
 
