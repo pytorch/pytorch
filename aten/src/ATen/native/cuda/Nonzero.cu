@@ -212,7 +212,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
       std::nullopt /* memory format */
   );
   at::cuda::memcpy_and_sync(
-      (void*)pinned_num_nonzeros_h.const_data_ptr<int>(),
+      pinned_num_nonzeros_h.data_ptr<int>(),
       num_nonzeros.get(),
       sizeof(int) * num_chunks,
       cudaMemcpyDeviceToHost,
