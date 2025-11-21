@@ -22,6 +22,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -262,14 +263,21 @@ def map_placements_after_broadcast(
         elif isinstance(placement, Replicate):
             new_placements.append(placement)
         else:
-            assert isinstance(placement, Shard)
+            assert isinstance(placement, Shard | _StridedShard)
             shard_dim = normalize_dim(placement.dim, len(shape))
             new_shard_dim = broadcast_dims_map[shard_dim]
             if new_shard_dim != -1:
                 # there's a map from the common shape shard dim to
                 # the input shape shard dim before broadcasting,
                 # use that instead
-                new_placements.append(Shard(new_shard_dim))
+                if isinstance(placement, _StridedShard):
+                    new_placements.append(
+                        _StridedShard(
+                            new_shard_dim, split_factor=placement.split_factor
+                        )
+                    )
+                else:
+                    new_placements.append(Shard(new_shard_dim))
             else:
                 # there's no map between common shape shard dim and
                 # the input shape shard dim before broadcasting,
