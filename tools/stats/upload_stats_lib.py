@@ -163,10 +163,8 @@ def upload_to_s3(
         json.dump(doc, body)
         body.write("\n")
 
-    get_s3_resource().Object(
-        f"{bucket_name}",
-        f"{key}",
-    ).put(
+    s3_obj = get_s3_resource().Object(f"{bucket_name}", f"{key}")
+    s3_obj.put(
         Body=gzip.compress(body.getvalue().encode()),
         ContentEncoding="gzip",
         ContentType="application/json",
@@ -188,7 +186,8 @@ def read_from_s3(
         .get()["Body"]
         .read()
     )
-    results = gzip.decompress(body).decode().split("\n")
+    decompressed = gzip.decompress(body).decode()
+    results = decompressed.split("\n")
     return [json.loads(result) for result in results if result]
 
 

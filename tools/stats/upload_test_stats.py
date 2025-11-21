@@ -170,6 +170,8 @@ def summarize_test_cases(test_cases: list[dict[str, Any]]) -> list[dict[str, Any
     manually instead of using the `test-suite` XML tag because xmlrunner does
     not produce reliable output for it.
     """
+    
+    test_cases = sorted(test_cases, key=lambda x: (x.get("file", ""), x.get("classname", "")))
 
     def get_key(test_case: dict[str, Any]) -> Any:
         return (
