@@ -15,7 +15,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.distributed.tensor.placement_utils import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -206,8 +206,12 @@ class TestDTensorDebugMode(TestCase):
         y = torch.randn(8, 16, requires_grad=True)
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0), Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1), Shard(1)], run_check=False)
-        x_dtensor._spec.shard_order = (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),)
-        y_dtensor._spec.shard_order = (ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 1)),)
+        x_dtensor._spec._maybe_update_placements_given_shard_order(
+            (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),)
+        )
+        y_dtensor._spec._maybe_update_placements_given_shard_order(
+            (ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 1)),)
+        )
         with DebugMode(record_torchfunction=False) as debug_mode:
             torch.mm(x_dtensor, y_dtensor).sum()
 

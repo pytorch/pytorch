@@ -653,11 +653,12 @@ class CodeGen:
             if verbose:
                 # override annotation with more detailed information
                 try:
-                    from torch.distributed.tensor._api import DTensor, DTensorSpec
-
-                    dtensorspec_format_shard_order_str = (
-                        DTensorSpec.format_shard_order_str
+                    from torch.distributed.tensor._api import DTensor
+                    from torch.distributed.tensor.placement_utils import (
+                        format_shard_order_str,
                     )
+
+                    dtensorspec_format_shard_order_str = format_shard_order_str
                 except ModuleNotFoundError:
                     DTensor = None  # type: ignore[assignment,misc]
                     dtensorspec_format_shard_order_str = None
