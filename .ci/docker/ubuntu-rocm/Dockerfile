@@ -53,9 +53,7 @@ ENV INSTALLED_VISION ${VISION}
 # Install rocm
 ARG ROCM_VERSION
 ARG USE_THEROCK_NIGHTLY
-ARG THEROCK_NIGHTLY_INDEX_URL
 ENV USE_THEROCK_NIGHTLY=${USE_THEROCK_NIGHTLY}
-ENV THEROCK_NIGHTLY_INDEX_URL=${THEROCK_NIGHTLY_INDEX_URL}
 RUN mkdir ci_commit_pins
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
@@ -81,10 +79,7 @@ RUN if [ "${USE_THEROCK_NIGHTLY}" = "1" ]; then \
 # Set default ENV for traditional builds - will be overridden by /etc/environment for TheRock
 ENV ROCM_PATH /opt/rocm
 ENV PATH /opt/rocm/bin:$PATH
-ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
-ENV PATH /opt/rocm/opencl/bin:$PATH
-ENV PATH /opt/rocm/llvm/bin:$PATH
 ENV MAGMA_HOME /opt/rocm/magma
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
