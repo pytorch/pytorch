@@ -61,6 +61,7 @@ jobs:
           pytorch-linux-jammy-py3.14-clang12,
           pytorch-linux-jammy-rocm-n-py3,
           pytorch-linux-noble-rocm-n-py3,
+          pytorch-linux-noble-rocm-nightly-py3,
           pytorch-linux-jammy-rocm-n-py3-benchmarks,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12,
           pytorch-linux-jammy-py3.10-gcc11,
@@ -90,6 +91,8 @@ jobs:
     # Docker uploads fail from LF runners, see https://github.com/pytorch/pytorch/pull/137358
     # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
     runs-on: "${{ matrix.runner }}"
+    outputs:
+      pytorch-linux-noble-rocm-n-py3: ${{ steps.build-docker-image.outputs.docker-image }}
     steps:
       - name: Clean workspace
         shell: bash
