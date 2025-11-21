@@ -1,3 +1,9 @@
+## ⚠️ DEPRECATION NOTICE ⚠️
+
+**The `torch.utils.data.datapipes` module is deprecated and will be removed in a future version of PyTorch.**
+
+---
+
 The [`datapipes`](https://github.com/pytorch/pytorch/tree/main/torch/utils/data/datapipes) folder holds the implementation of the `IterDataPipe` and `MapDataPipe`.
 
 This document serves as an entry point for DataPipe implementation.
