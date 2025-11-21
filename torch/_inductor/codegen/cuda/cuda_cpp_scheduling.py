@@ -257,7 +257,7 @@ size: {cuda_template_buffer.get_size()}"
             )
             return False
         elif (
-            not config.cuda.cutlass_epilogue_fusion_enabled
+            not config.cutlass.cutlass_epilogue_fusion_enabled
             or not config.epilogue_fusion
         ):
             why("cutlass epilogue fusion is not enabled")
