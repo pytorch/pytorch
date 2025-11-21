@@ -84,6 +84,10 @@ jobs:
             echo "ROCM_BIN=${ROCM_BIN}"
             echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
             
+            # Save paths for docker commit
+            echo "${ROCM_HOME}" > /tmp/rocm_home.txt
+            echo "${ROCM_BIN}" > /tmp/rocm_bin.txt
+            
             # Create environment setup script
             cat > /etc/profile.d/rocm-sdk.sh <<EOF
 export ROCM_HOME="${ROCM_HOME}"
@@ -101,9 +105,21 @@ EOF
             echo "=== TheRock setup complete ==="
           '
           
-          # Commit the container to a new image
-          echo "Committing container to new image..."
-          docker commit therock-setup "${IMAGE_TAG}"
+          # Get the ROCM paths from the container
+          ROCM_HOME=$(docker exec therock-setup cat /tmp/rocm_home.txt)
+          ROCM_BIN=$(docker exec therock-setup cat /tmp/rocm_bin.txt)
+          
+          echo "ROCM_HOME=${ROCM_HOME}"
+          echo "ROCM_BIN=${ROCM_BIN}"
+          
+          # Commit the container to a new image with ENV variables
+          echo "Committing container to new image with environment variables..."
+          docker commit \
+            --change "ENV ROCM_PATH=${ROCM_HOME}" \
+            --change "ENV ROCM_HOME=${ROCM_HOME}" \
+            --change "ENV PATH=${ROCM_BIN}:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+            --change "ENV ROCM_VERSION=nightly" \
+            therock-setup "${IMAGE_TAG}"
           
           # Clean up container
           docker rm therock-setup
