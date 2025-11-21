@@ -9,7 +9,7 @@
 namespace at::cuda {
 
 // EventPool - A thread-safe pool of CUDA events to avoid the overhead of
-// repeatedly calling cudaEventCreate. Concurrent cudaEventCreate calls
+// repeatedly calling cudaEventCreate(). Concurrent cudaEventCreate() calls
 // can incur significant cost on some device/driver combinations.
 //
 // This pool maintains per-device lists of pre-created CUDA events.
@@ -59,7 +59,7 @@ class EventPool {
 
     // Pool is empty then create a new Event
     return Event(
-        std::make_unique<CUDAEvent>(cudaEventDisableTiming).release(),
+        std::make_unique<CUDAEvent>().release(),
         destructor);
   }
 
@@ -88,8 +88,8 @@ class EventPool {
     }
   }
 
-  struct alignas(64) PerDevicePool {
-    alignas(64) std::mutex mutex_;
+  struct alignas(c10::hardware_destructive_interference_size) PerDevicePool {
+    alignas(c10::hardware_destructive_interference_size) std::mutex mutex_;
     std::vector<std::unique_ptr<CUDAEvent>> event_pool_;
   };
 
