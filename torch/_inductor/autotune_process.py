@@ -30,6 +30,7 @@ from torch._inductor.codecache import (
     DLLWrapper,
     get_hash,
     PyCodeCache,
+    XPUCodeCache,
 )
 from torch._inductor.utils import (
     get_gpu_type,
@@ -716,7 +717,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self.hash_key: str = ""
         self.source_file: str = ""
         self.device_type = device_type
-        self.codecache_cls = CUDACodeCache
+        self.codecache_cls = XPUCodeCache if device_type == "xpu" else CUDACodeCache
         self.device_interface = get_interface_for_device(device_type)
         self.hash_key, self.source_file = self.codecache_cls.write(
             self.source_code, "so"
@@ -728,7 +729,7 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         This may happen in a separate thread pool.
         """
         autotuning_log.debug("Precompiling %s", self)
-        CUDACodeCache.compile(self.source_code, "so")
+        self.codecache_cls.compile(self.source_code, "so")
         autotuning_log.debug("Done precompiling %s", self)
 
     def make_run_fn(
@@ -750,8 +751,9 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             args,
             self.extra_args,
         )
-        current_stream = self.device_interface.current_stream()
-        stream_ptr = c_void_p(current_stream.cuda_stream)  # type: ignore[attr-defined]
+        stream_ptr = c_void_p(
+            self.device_interface.get_raw_stream(self.device_interface.current_device())
+        )
         run_method = getattr(self.DLL, self.kernel_name)
         workspace_ptr = c_void_p(0)
         if self.workspace_size > 0:
@@ -794,8 +796,9 @@ class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             dict.fromkeys(meta.name for meta in self.input_tensor_meta)
         )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
-        current_stream = self.device_interface.current_stream()
-        stream_ptr = c_void_p(current_stream.cuda_stream)  # type: ignore[attr-defined]
+        stream_ptr = c_void_p(
+            self.device_interface.get_raw_stream(self.device_interface.current_device())
+        )
 
         run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
