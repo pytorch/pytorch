@@ -2650,24 +2650,25 @@ def pointwise(
             ]
             # Additional configs appended for ROCm builds
             if torch.version.hip:
-                configs.extend(
-                    [
-                        triton_config_with_settings(
-                            size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
-                        ),
-                        triton_config_with_settings(
-                            size_hints,
-                            4096,  # wrt: better than the max_block for some kernel
-                        ),
-                        triton_config_with_settings(
-                            size_hints,
-                            2048,
-                            num_warps=8,
-                            num_stages=2,
-                            waves_per_eu=1,  # 20% improvement
-                        ),
-                    ]
-                )
+                if inductor_meta.get("extend_amd_autotune_search_space", False):
+                    configs.extend(
+                        [
+                            triton_config_with_settings(
+                                size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
+                            ),
+                            triton_config_with_settings(
+                                size_hints,
+                                4096,  # wrt: better than the max_block for some kernel
+                            ),
+                            triton_config_with_settings(
+                                size_hints,
+                                2048,
+                                num_warps=8,
+                                num_stages=2,
+                                waves_per_eu=1,  # 20% improvement
+                            ),
+                        ]
+                    )
                 if inductor_meta.get("atomic_add_found"):
                     configs.extend(
                         [
@@ -2702,22 +2703,23 @@ def pointwise(
             ]
             # Additional configs appended for ROCm builds
             if torch.version.hip:
-                configs.extend(
-                    [
-                        triton_config_with_settings(
-                            size_hints, 64, 32
-                        ),  # better for some kernels
-                        triton_config_with_settings(
-                            size_hints, 128, 16
-                        ),  # +10% for some kernels
-                        triton_config_with_settings(
-                            size_hints, 128, 32
-                        ),  # additional 10% more
-                        triton_config_with_settings(
-                            size_hints, 32, 512
-                        ),  # +30% for some kernels
-                    ]
-                )
+                if inductor_meta.get("extend_amd_autotune_search_space", False):
+                    configs.extend(
+                        [
+                            triton_config_with_settings(
+                                size_hints, 64, 32
+                            ),  # better for some kernels
+                            triton_config_with_settings(
+                                size_hints, 128, 16
+                            ),  # +10% for some kernels
+                            triton_config_with_settings(
+                                size_hints, 128, 32
+                            ),  # additional 10% more
+                            triton_config_with_settings(
+                                size_hints, 32, 512
+                            ),  # +30% for some kernels
+                        ]
+                    )
     if len(size_hints) == 3:
         if not inductor_meta.get("autotune_pointwise", True):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
@@ -2999,12 +3001,13 @@ def _reduction_configs(
     ]
 
     if torch.version.hip:
-        result_configs.extend(
-            [
-                make_config(1024, 8, num_warps=4, num_stages=1, waves_per_eu=2),
-                make_config(512, 8, num_warps=4, num_stages=1, waves_per_eu=1),
-            ]
-        )
+        if inductor_meta.get("extend_amd_autotune_search_space", False):
+            result_configs.extend(
+                [
+                    make_config(1024, 8, num_warps=4, num_stages=1, waves_per_eu=2),
+                    make_config(512, 8, num_warps=4, num_stages=1, waves_per_eu=1),
+                ]
+            )
 
     return result_configs
 

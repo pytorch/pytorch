@@ -84,6 +84,7 @@ def inductor_meta_from_config() -> _InductorMetaTy:
         "backend_hash": backend_hash,
         "bundled_autotune_remote_cache": config.bundled_autotune_remote_cache,
         "coordinate_descent_tuning": config.coordinate_descent_tuning,
+        "extend_amd_autotune_search_space": config.extend_amd_autotune_search_space,
         "is_fbcode": config.is_fbcode(),
         "is_hip": is_hip,
     }
