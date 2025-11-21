@@ -30,7 +30,7 @@ namespace c10::cuda {
  * is called before the event is ever recorded, it will use the current device.
  * Later streams that record the event must match this device.
  */
-struct CUDAEvent {
+struct C10_CUDA_API CUDAEvent {
   // Constructors
   // Default value for `flags` is specified below - it's cudaEventDisableTiming
   CUDAEvent() noexcept = default;
@@ -290,7 +290,7 @@ struct CUDAEvent {
 // This pool maintains per-device lists of pre-created CUDA events.
 // Borrowed events are returned to the pool via a custom unique_ptr deleter.
 
-class CUDAEventPool {
+class C10_CUDA_API CUDAEventPool {
  public:
   using Event = std::unique_ptr<
       c10::cuda::CUDAEvent,
