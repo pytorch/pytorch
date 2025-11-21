@@ -33,7 +33,12 @@ from .graph_capture_wrappers import (
     handle_effect_tokens_fn,
 )
 from .schemas import AOTConfig, FxValue, SubclassMeta, TraceFn, ViewAndMutationMeta
-from .streams import assign_backward_streams, insert_backward_syncs, sync_deallocations
+from .streams import (
+    assign_backward_streams,
+    assign_epilogue_copy_streams,
+    insert_backward_syncs,
+    sync_deallocations,
+)
 from .utils import (
     call_and_expect_output_descs,
     copy_fwd_metadata_to_bw_nodes,
@@ -283,6 +288,7 @@ def aot_dispatch_base_graph(
     # there should be *NO* mutating ops in the graph at this point.
     if not aot_config.disable_functionalization:
         copy_count = assert_functional_graph(fw_module.graph)
+        assign_epilogue_copy_streams(fw_module)
         fw_module.graph.eliminate_dead_code()
         fw_module.recompile()
         copy_count2 = assert_functional_graph(fw_module.graph)
@@ -476,6 +482,8 @@ def aot_dispatch_autograd_graph(
 
     # After copying metadata, assign streams to gradient accumulation nodes
     assign_backward_streams(fx_g)
+
+    assign_epilogue_copy_streams(fx_g)
 
     # Insert syncs for newly assigned backward streams
     insert_backward_syncs(fx_g)
