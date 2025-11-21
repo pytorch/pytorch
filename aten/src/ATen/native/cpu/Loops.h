@@ -326,7 +326,7 @@ void cpu_kernel(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::
 // of `multiple_outputs_loop` returns `std::tuple` instead of `scalar_t`.
 // The `gpu_kernel_multiple_outputs` is also implemented without this check,
 // We could extend `needs_dynamic_casting` to support both `std::tuple` and
-// `thrust::tuple` in the future.
+// `cuda::std::tuple` in the future.
 template <typename func_t>
 void cpu_kernel_multiple_outputs(TensorIteratorBase& iter, func_t&& op, int64_t grain_size = at::internal::GRAIN_SIZE) {
   using traits = function_traits<func_t>;

@@ -5,7 +5,7 @@
 
 #include <cmath>
 
-#include <thrust/tuple.h>
+#include <cuda/std/tuple>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>

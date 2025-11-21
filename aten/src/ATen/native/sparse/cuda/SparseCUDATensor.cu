@@ -22,6 +22,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <cuda/std/utility>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/gather.h>
@@ -89,7 +90,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   );
 
   // this forces device-host synchronization!
-  thrust::pair<thrust_ptr, thrust_ptr> newEnd = thrust::unique_by_key(policy,
+  ::cuda::std::pair<thrust_ptr, thrust_ptr> newEnd = thrust::unique_by_key(policy,
     indicesIter, indicesIter + nnz,
     uniqueOffsetsIter
   );

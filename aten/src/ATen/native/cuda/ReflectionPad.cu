@@ -23,7 +23,7 @@
 #include <ATen/ops/reflection_pad3d_backward_native.h>
 #endif
 
-#include <thrust/pair.h>
+#include <cuda/std/utility>
 
 namespace at::native {
 namespace {
@@ -31,7 +31,7 @@ namespace {
 using at::cuda::detail::canUse32BitIndexMath;
 
 __device__
-inline thrust::pair<int64_t, int64_t> get_index_mapping1d(
+inline ::cuda::std::pair<int64_t, int64_t> get_index_mapping1d(
     int64_t input_w, int64_t output_w,
     int64_t output_x,
     int64_t pad_l) {
@@ -50,13 +50,13 @@ inline thrust::pair<int64_t, int64_t> get_index_mapping1d(
                     + 2 * pad_l + input_w - 1
                     - o_start_x + i_start_x;
 
-  return thrust::make_pair<int64_t, int64_t>(
+  return ::cuda::std::make_pair<int64_t, int64_t>(
     input_offset + input_x, output_offset + output_x);
 }
 
 
 __device__
-inline thrust::pair<int64_t, int64_t>  get_index_mapping2d(
+inline ::cuda::std::pair<int64_t, int64_t>  get_index_mapping2d(
     int64_t input_dim_x, int64_t input_dim_y,
     int64_t output_dim_x, int64_t output_dim_y,
     int64_t pad_l, int64_t pad_t,
@@ -87,7 +87,7 @@ inline thrust::pair<int64_t, int64_t>  get_index_mapping2d(
                  + 2 * pad_t + input_dim_y - 1
                  - o_start_y + i_start_y;
 
-  return thrust::make_pair<int64_t, int64_t>(
+  return ::cuda::std::make_pair<int64_t, int64_t>(
     input_offset + input_y * input_dim_x + input_x,
     output_offset + output_y * output_dim_x + output_x);
 }

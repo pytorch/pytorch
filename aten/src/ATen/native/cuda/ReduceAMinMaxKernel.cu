@@ -22,7 +22,7 @@ void _min_max_values_kernel_cuda_impl(TensorIterator& iter) {
   gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MinMaxOps<scalar_t, scalar_t, int32_t>{},
-      thrust::pair<scalar_t, scalar_t>(
+      ::cuda::std::pair<scalar_t, scalar_t>(
           at::numeric_limits<scalar_t>::upper_bound(),
           at::numeric_limits<scalar_t>::lower_bound()));
 }
@@ -40,7 +40,7 @@ void aminmax_launch_kernel(TensorIterator& iter) {
         gpu_reduce_kernel<scalar_t, scalar_t>(
             iter,
             MinMaxOps<scalar_t, scalar_t, int32_t>{},
-            thrust::pair<scalar_t, scalar_t>(
+            ::cuda::std::pair<scalar_t, scalar_t>(
                 at::numeric_limits<scalar_t>::upper_bound(),
                 at::numeric_limits<scalar_t>::lower_bound()));
       });
