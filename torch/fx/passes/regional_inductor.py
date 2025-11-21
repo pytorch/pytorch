@@ -122,6 +122,7 @@ def _needs_inductor_compile(node):
 
 
 def _compile_fx_annotated_nodes_with_inductor(gm):
+    from torch.fx.graph import _BoxedCodeGen
     from torch.fx.passes.operator_support import OperatorSupport
 
     found_marked_node = False
@@ -141,6 +142,11 @@ def _compile_fx_annotated_nodes_with_inductor(gm):
     marked_nodes = InductorMarkedNodes()
     gm = _partition_by_supported_nodes(gm, marked_nodes, "__marked_inductor_submod")
     gm = _compile_submod(gm, "__marked_inductor_submod")
+
+    gm.graph.set_codegen(_BoxedCodeGen())
+    gm.recompile()
+
+    # Use a pickleable wrapper class that provides boxed calling convention
     return gm
 
 

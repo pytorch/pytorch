@@ -552,7 +552,10 @@ def _(subgraph, identifier, *operands):
 
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
-    return subgraph(*operands)
+    if getattr(subgraph, "_boxed_call", False):
+        return subgraph(list(operands))
+    else:
+        return subgraph(*operands)
 
 
 @invoke_subgraph.py_functionalize_impl
