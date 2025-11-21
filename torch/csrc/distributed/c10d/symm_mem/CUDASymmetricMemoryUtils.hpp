@@ -103,7 +103,7 @@ class StoreExchange {
   size_t seq_id_ = 0;
 };
 
-// Teturns a pointer of virtual address that is mapped to the physical memory
+// Returns a pointer of virtual address that is mapped to the physical memory
 // held by the handle.
 void map_block(
     void** ptr,

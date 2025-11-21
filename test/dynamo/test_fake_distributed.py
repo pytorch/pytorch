@@ -13,7 +13,7 @@ if dist.is_available():
         all_to_all_single_autograd,
         wait_tensor,
     )
-    from torch.testing._internal.distributed.fake_pg import FakeStore
+    from torch.distributed.device_mesh import init_device_mesh
 
 
 def normalize_graph(gm):
@@ -24,8 +24,9 @@ def normalize_graph(gm):
 class TestFakeDistributed(DynamoTestCase):
     def setUp(self):
         # Use FakeProcessGroup to run tests on a single process
-        self.store = FakeStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=2, store=self.store)
+        dist.init_process_group(backend="fake", rank=0, world_size=2)
+        self.local_rank = 0
+        self.world_size = 2
 
     def tearDown(self):
         dist.destroy_process_group()
@@ -114,6 +115,25 @@ class GraphModule(torch.nn.Module):
         return (None, None, None, wait_tensor_1)
 """,  # noqa: B950
         )
+
+    def test_device_mesh_get_local_rank(self):
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(self.world_size,),
+            mesh_dim_names=("dp",),  # data parallel dimension
+        )
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            local_rank = device_mesh.get_local_rank()
+            global_rank = device_mesh.get_rank()
+            if "dp" not in device_mesh.mesh_dim_names:
+                x = x * 2
+            return x + local_rank + global_rank
+
+        x = torch.ones(10)
+        res = fn(x)
+        self.assertEqual(res, x)
 
 
 instantiate_parametrized_tests(TestFakeDistributed)

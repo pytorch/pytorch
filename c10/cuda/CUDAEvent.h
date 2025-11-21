@@ -1,9 +1,11 @@
 #pragma once
 
+#include <c10/core/alignment.h>
 #include <c10/core/impl/GPUTrace.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/Exception.h>
+#include <c10/util/irange.h>
 
 /*
  * `cudaEventExternal` is a torch-specific flag that is used to
@@ -60,11 +62,11 @@ struct CUDAEvent {
   CUDAEvent& operator=(const CUDAEvent&) = delete;
 
   CUDAEvent(CUDAEvent&& other) noexcept {
-    moveHelper(other);
+    moveHelper(std::move(other));
   }
   CUDAEvent& operator=(CUDAEvent&& other) noexcept {
     if (this != &other) {
-      moveHelper(other);
+      moveHelper(std::move(other));
     }
     return *this;
   }
@@ -234,6 +236,12 @@ struct CUDAEvent {
     C10_CUDA_CHECK(cudaIpcGetEventHandle(handle, event_));
   }
 
+  void create(DeviceIndex device_index) {
+    if (!is_created_) {
+      createEvent(device_index);
+    }
+  }
+
  private:
   unsigned int flags_ = cudaEventDisableTiming;
   bool is_created_ = false;
@@ -259,66 +267,104 @@ struct CUDAEvent {
     is_created_ = true;
   }
 
-  void moveHelper(CUDAEvent& other) {
-    std::swap(flags_, other.flags_);
-    std::swap(is_created_, other.is_created_);
-    std::swap(was_recorded_, other.was_recorded_);
-    std::swap(device_index_, other.device_index_);
-    std::swap(event_, other.event_);
+  void moveHelper(CUDAEvent&& other) {
+    // Transfer ownership of all state from other to this
+    flags_ = other.flags_;
+    is_created_ = other.is_created_;
+    was_recorded_ = other.was_recorded_;
+    external_ = other.external_;
+    device_index_ = other.device_index_;
+    event_ = other.event_;
+
+    // Reset other to a valid empty state to prevent double-free
+    // The moved-from object must not attempt to destroy the event
+    other.is_created_ = false;
+    other.event_ = cudaEvent_t{};
   }
 };
 
-// Note: cudaEventCreate when concurrently invoked from multiple threads can be
-// very expensive (at least on certain device/driver combinations). Thus, we a)
-// serialize event creation at a per-device level, and b) pool the events to
-// avoid constantly calling cudaEventCreate/cudaEventDestroy. This results in
-// significant improvements in multithreaded workloads with high allocation
-// rates.
+// CUDAEventPool - A thread-safe pool of CUDA events to avoid the overhead of
+// repeatedly calling cudaEventCreate(). Concurrent cudaEventCreate() calls
+// can incur significant cost on some device/driver combinations.
+//
+// This pool maintains per-device lists of pre-created CUDA events.
+// Borrowed events are returned to the pool via a custom unique_ptr deleter.
+
 class CUDAEventPool {
  public:
   using Event = std::unique_ptr<
       c10::cuda::CUDAEvent,
       std::function<void(c10::cuda::CUDAEvent*)>>;
-  CUDAEventPool() = default;
 
-  Event get(DeviceIndex device) {
-    TORCH_INTERNAL_ASSERT(0 <= device);
-    TORCH_INTERNAL_ASSERT(device < static_cast<DeviceIndex>(pools_.size()));
+  CUDAEventPool(size_t init_num_events = 0)
+      : pools_(c10::cuda::device_count()) {
+    if (init_num_events > 0) {
+      reserve_events_on_pools(init_num_events);
+    }
+  }
+
+  // Acquire an event associated with a given device. If device is invalid, fall
+  // back to a regular CUDAEvent and no pooling.
+  Event get(const DeviceIndex device) {
+    if (device < 0 || device >= (DeviceIndex)pools_.size()) {
+      auto deleter = [](CUDAEvent* event) { delete event; };
+      return Event(std::make_unique<CUDAEvent>().release(), deleter);
+    }
+
     auto& pool = pools_[device];
-    auto destructor = [&pool](c10::cuda::CUDAEvent* event) {
-      std::lock_guard<std::mutex> g(pool.mutex_);
-      pool.event_pool_.push_back(std::unique_ptr<c10::cuda::CUDAEvent>(event));
+
+    // Create a destructor that returns the event to the appropriate device pool
+    auto destructor = [&pool](CUDAEvent* event) noexcept {
+      if (event != nullptr) {
+        std::lock_guard<std::mutex> lock(pool.mutex_);
+        pool.event_pool_.emplace_back(event);
+      }
     };
 
-    // Try to acquire an event from the per-device pool.
     {
-      std::lock_guard<std::mutex> g(pool.mutex_);
+      std::lock_guard<std::mutex> lock(pool.mutex_);
       if (!pool.event_pool_.empty()) {
-        auto* event = pool.event_pool_.back().release();
+        auto event = std::move(pool.event_pool_.back());
         pool.event_pool_.pop_back();
-        return Event(event, destructor);
+        return Event(event.release(), destructor);
       }
     }
-    // otherwise, allocate a new event that will be returned to the pool on
-    // destruction.
-    return Event(
-        std::make_unique<c10::cuda::CUDAEvent>().release(), destructor);
+
+    // Pool is empty then create a new Event
+    return Event(std::make_unique<CUDAEvent>().release(), destructor);
   }
 
   void empty_cache() {
     for (auto& pool : pools_) {
-      std::lock_guard<std::mutex> g(pool.mutex_);
+      std::lock_guard<std::mutex> lock(pool.mutex_);
       pool.event_pool_.clear();
     }
   }
 
  private:
-  struct PerDevicePool {
-    alignas(64) std::mutex mutex_;
-    std::vector<std::unique_ptr<c10::cuda::CUDAEvent>> event_pool_;
+  // Pre-initialize each device pool with N events. This prevents
+  // cudaEventCreate() from invoking during steady-state execution.
+  void reserve_events_on_pools(size_t num_events) {
+    for (const auto device : c10::irange(pools_.size())) {
+      CUDAGuard guard(device);
+      std::vector<Event> temp_events;
+      temp_events.reserve(num_events);
+      pools_[device].event_pool_.reserve(num_events);
+      for (auto const _ : c10::irange(num_events)) {
+        auto event = get(device);
+        event->create(device);
+        temp_events.emplace_back(std::move(event));
+      }
+      // Events will be returned to pool when temp_events is destroyed.
+    }
+  }
+
+  struct alignas(c10::hardware_destructive_interference_size) PerDevicePool {
+    alignas(c10::hardware_destructive_interference_size) std::mutex mutex_;
+    std::vector<std::unique_ptr<CUDAEvent>> event_pool_;
   };
-  std::vector<PerDevicePool> pools_ =
-      std::vector<PerDevicePool>(c10::cuda::device_count());
+
+  std::vector<PerDevicePool> pools_;
 };
 
 } // namespace c10::cuda

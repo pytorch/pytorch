@@ -48,7 +48,7 @@ sccache --zero-stats
 sccache --show-stats
 
 :: Call PyTorch build script
-python setup.py bdist_wheel -d "%PYTORCH_FINAL_PACKAGE_DIR%"
+python -m build --wheel --no-isolation --outdir "%PYTORCH_FINAL_PACKAGE_DIR%"
 
 :: show sccache stats
 sccache --show-stats
