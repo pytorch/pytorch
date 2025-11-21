@@ -86,6 +86,62 @@ jobs:
       test-matrix: ${{ needs.linux-jammy-py3_10-gcc11-build.outputs.test-matrix }}
     secrets: inherit
 
+  linux-jammy-py3_13t-clang12-build:
+    name: linux-jammy-py3.13t-clang12
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.13t-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.13t-clang12
+      test-matrix: |
+        { include: [
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-py3_13t-clang12-test:
+    name: linux-jammy-py3.13t-clang12
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-py3_13t-clang12-build
+      - target-determination
+    with:
+      build-environment: linux-jammy-py3.13t-clang12
+      docker-image: ${{ needs.linux-jammy-py3_13t-clang12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_13t-clang12-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-jammy-py3_14t-clang12-build:
+    name: linux-jammy-py3.14t-clang12
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.14t-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.14t-clang12
+      test-matrix: |
+        { include: [
+          { config: "dynamo_wrapped", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+          { config: "dynamo_wrapped", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-py3_14t-clang12-test:
+    name: linux-jammy-py3.14t-clang12
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-py3_14t-clang12-build
+      - target-determination
+    with:
+      build-environment: linux-jammy-py3.14t-clang12
+      docker-image: ${{ needs.linux-jammy-py3_14t-clang12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_14t-clang12-build.outputs.test-matrix }}
+    secrets: inherit
+
   linux-docs:
     name: linux-docs
     uses: ./.github/workflows/_docs.yml
