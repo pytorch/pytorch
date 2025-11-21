@@ -10,6 +10,15 @@ from .flop_counter import flop_registry
 
 aten = torch.ops.aten
 
+_FLOAT_TYPES = OrderedSet(
+    [
+        torch.float16,
+        torch.bfloat16,
+        torch.float32,
+        torch.float64,
+    ]
+)
+
 # This value is hard-coded here:
 # https://github.com/pytorch/pytorch/blob/5fba5d83f0703ff8077ab65448a998e9ad6598fd/c10/cuda/CUDACachingAllocator.cpp#L117
 _PYTORCH_MIN_ALLOCATE = (

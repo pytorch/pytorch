@@ -11,6 +11,7 @@ from torch.distributed._tools.mod_tracker import ModTracker
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._runtime_estimation import (
+    _FLOAT_TYPES,
     _IGNORE_OPS,
     _VIEW_OPS,
     get_compute_time,
@@ -69,12 +70,6 @@ class RuntimeEstimator(TorchDispatchMode):
                 runtime_estimator.display_modulewise_stats()
     """
 
-    _float_types: set[torch.dtype] = {
-        torch.float16,
-        torch.bfloat16,
-        torch.float32,
-        torch.float64,
-    }
     _no_fallback_kernel: set[torch._ops._OpNamespace] = set()
     fake_mode: FakeTensorMode
 
@@ -130,7 +125,7 @@ class RuntimeEstimator(TorchDispatchMode):
 
             def to_real_tensor(e):  # type: ignore[no-untyped-def]
                 if cls.fake_mode.is_our_fake(e):
-                    if e.dtype in cls._float_types:
+                    if e.dtype in _FLOAT_TYPES:
                         out = torch.rand_like(e, device=e.fake_device)
                     else:
                         out = torch.ones_like(e, device=e.fake_device)
@@ -277,7 +272,7 @@ class RuntimeEstimator(TorchDispatchMode):
             out_dtypes = {
                 t.dtype
                 for t in flat_outs
-                if isinstance(t, torch.Tensor) and t.dtype in cls._float_types
+                if isinstance(t, torch.Tensor) and t.dtype in _FLOAT_TYPES
             }
 
             args, kwargs = pytree.tree_unflatten(flat_args_kwargs, args_spec)
