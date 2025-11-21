@@ -813,21 +813,18 @@ class TestMaxPool(TestCaseMPS):
         x = torch.randn(1, 1, 4)
 
         # Test CPU
-        cpu_error = None
         try:
             cpu_result = max_pool(x)
         except RuntimeError as e:
-            cpu_error = str(e)
+            cpu_result = str(e)
 
         # Test MPS
-        mps_error = None
         try:
             x_mps = x.to("mps")
             mps_result = max_pool(x_mps)
         except RuntimeError as e:
-            mps_error = str(e)
+            mps_result = str(e)
         
-        self.assertEqual(cpu_error, mps_error)
         self.assertEqual(cpu_result, mps_result)
 
 
@@ -837,23 +834,20 @@ class TestMaxPool(TestCaseMPS):
         x = torch.randn(1, 1, 1, 4, 4)
 
         # Test CPU
-        cpu_error = None
         try:
             cpu_result = max_pool(x)
         except RuntimeError as e:
-            cpu_error = str(e)
+            cpu_result = str(e)
 
         # Test MPS
-        mps_error = None
         try:
             x_mps = x.to("mps")
             mps_result = max_pool(x_mps)
         except RuntimeError as e:
-            mps_error = str(e)
-
-        self.assertEqual(cpu_error, mps_error)
-        self.assertEqual(cpu_result, mps_result)
+            mps_result = str(e)
         
+        self.assertEqual(cpu_result, mps_result)
+
 class TestMPS(TestCaseMPS):
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
