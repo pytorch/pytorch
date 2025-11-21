@@ -9,7 +9,7 @@ from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtensio
 
 
 ROOT_DIR = Path(__file__).parent
-CSRC_DIR = ROOT_DIR / "libtorch_agnostic" / "csrc"
+CSRC_DIR = ROOT_DIR / "libtorch_agnostic_2_9" / "csrc"
 
 
 class clean(distutils.command.clean.clean):
@@ -18,13 +18,13 @@ class clean(distutils.command.clean.clean):
         distutils.command.clean.clean.run(self)
 
         # Remove extension
-        for path in (ROOT_DIR / "libtorch_agnostic").glob("**/*.so"):
+        for path in (ROOT_DIR / "libtorch_agnostic_2_9").glob("**/*.so"):
             path.unlink()
         # Remove build and dist and egg-info directories
         dirs = [
             ROOT_DIR / "build",
             ROOT_DIR / "dist",
-            ROOT_DIR / "libtorch_agnostic.egg-info",
+            ROOT_DIR / "libtorch_agnostic_2_9.egg-info",
         ]
         for path in dirs:
             if path.exists():
@@ -33,7 +33,11 @@ class clean(distutils.command.clean.clean):
 
 def get_extension():
     extra_compile_args = {
-        "cxx": ["-fdiagnostics-color=always"],
+        "cxx": [
+            "-fdiagnostics-color=always",
+            "-DTORCH_STABLE_ONLY",
+            "-DTORCH_TARGET_VERSION=0x0209000000000000",
+        ],
     }
     sources = list(CSRC_DIR.glob("**/*.cpp"))
 
@@ -41,13 +45,16 @@ def get_extension():
     # allow including <cuda_runtime.h>
     if torch.cuda.is_available():
         extra_compile_args["cxx"].append("-DLAE_USE_CUDA")
-        extra_compile_args["nvcc"] = ["-O2"]
+        extra_compile_args["nvcc"] = [
+            "-O2",
+            "-DTORCH_TARGET_VERSION=0x0209000000000000",
+        ]
         extension = CUDAExtension
         sources.extend(CSRC_DIR.glob("**/*.cu"))
 
     return [
         extension(
-            "libtorch_agnostic._C",
+            "libtorch_agnostic_2_9._C",
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,
             extra_compile_args=extra_compile_args,
@@ -57,12 +64,12 @@ def get_extension():
 
 
 setup(
-    name="libtorch_agnostic",
+    name="libtorch_agnostic_2_9",
     version="0.0",
     author="PyTorch Core Team",
-    description="Example of libtorch agnostic extension",
+    description="Example of libtorch agnostic extension for PyTorch 2.9",
     packages=find_packages(exclude=("test",)),
-    package_data={"libtorch_agnostic": ["*.dll", "*.dylib", "*.so"]},
+    package_data={"libtorch_agnostic_2_9": ["*.dll", "*.dylib", "*.so"]},
     install_requires=[
         "torch",
     ],
