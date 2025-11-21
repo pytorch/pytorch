@@ -152,7 +152,7 @@ Tensor upsample_bilinear2d_quantized_cpu(
       output_size.size());
 
   TORCH_CHECK(
-      input.dim() == 4,
+      input.dim() == 4 && input.size(1) > 0,
       "Non-empty 4D data tensor expected but got a tensor with sizes ",
       input.sizes());
 
@@ -163,7 +163,20 @@ Tensor upsample_bilinear2d_quantized_cpu(
   int64_t channels = input.size(1);
   int64_t input_height = input.size(2);
   int64_t input_width = input.size(3);
-  AT_ASSERT(input_width > 0 && output_width > 0);
+
+  TORCH_CHECK(
+  input_height > 0 && input_width > 0 && output_height > 0 &&
+      output_width > 0,
+  "Input and output sizes should be greater than 0,"
+  " but got input (H: ",
+  input_height,
+  ", W: ",
+  input_width,
+  ") output (H: ",
+  output_height,
+  ", W: ",
+  output_width,
+  ")");
 
   if (input.is_contiguous(c10::MemoryFormat::ChannelsLast)) {
     Tensor output = at::_empty_affine_quantized(
