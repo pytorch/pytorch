@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import product
 from typing import Optional, TypeVar, Union
-from unittest import expectedFailure, skip, skipUnless
+from unittest import expectedFailure, mock, skip, skipUnless
 from unittest.mock import patch
 
 import torch
@@ -28,6 +28,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
+    _apply_kernel_options,
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
@@ -3523,6 +3524,184 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         FileCheck().check("BLOCK_M : tl.constexpr = 16").run(code[0])
 
     @supported_platform
+    @skip_on_cpu
+    def test_backend_auto_matches_triton_large(self, device):
+        """BACKEND='AUTO' should follow Triton heuristics on large shapes."""
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 256, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        def compile_and_run(kernel_options):
+            return run_and_get_code(
+                torch.compile(flex_attention, fullgraph=True),
+                q,
+                k,
+                v,
+                kernel_options=kernel_options,
+            )
+
+        default_out, default_code = compile_and_run({"BACKEND": "AUTO"})
+        triton_out, triton_code = compile_and_run({"BACKEND": "TRITON"})
+
+        torch.testing.assert_close(default_out, triton_out, atol=0.0, rtol=0.0)
+
+        default_src = "\n".join(default_code)
+        FileCheck().check("flex_attention").check_not("flex_decoding").run(default_src)
+
+        triton_src = "\n".join(triton_code)
+        FileCheck().check("flex_attention").check_not("flex_decoding").run(triton_src)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_backend_triton_decode_matches_auto(self, device):
+        """BACKEND='TRITON_DECODE' should match heuristics on decode-friendly shapes."""
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 2, 64, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        def compile_and_run(kernel_options):
+            return run_and_get_code(
+                torch.compile(flex_attention, fullgraph=True),
+                q,
+                k,
+                v,
+                kernel_options=kernel_options,
+            )
+
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        with mock.patch.object(
+            flex_kernel_mod,
+            "create_flex_decoding_kernel",
+            wraps=flex_kernel_mod.create_flex_decoding_kernel,
+        ) as decode_kernel:
+            default_out, _ = compile_and_run({"BACKEND": "AUTO"})
+            self.assertTrue(
+                decode_kernel.called,
+                "Expected heuristics to dispatch to flex decoding kernel.",
+            )
+
+        with mock.patch.object(
+            flex_kernel_mod,
+            "create_flex_decoding_kernel",
+            wraps=flex_kernel_mod.create_flex_decoding_kernel,
+        ) as decode_kernel:
+            decode_out, _ = compile_and_run({"BACKEND": "TRITON_DECODE"})
+            self.assertTrue(
+                decode_kernel.called,
+                "Expected explicit BACKEND='TRITON_DECODE' to use flex decoding kernel.",
+            )
+
+        self.assertEqual(decode_out.shape, (1, 2, 64, 64))
+        torch.testing.assert_close(default_out, decode_out, atol=3e-3, rtol=3e-3)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_backend_triton_decode_errors_when_not_supported(self, device):
+        """Requesting decode on unsupported shapes should raise a helpful error."""
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 2, 256, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"BACKEND='TRITON_DECODE' was specified but flex_decoding cannot be used",
+        ):
+            flex_compiled(q, k, v, kernel_options={"BACKEND": "TRITON_DECODE"})
+
+    @supported_platform
+    @skip_on_cpu
+    def test_backend_triton_decode_errors_with_non_power_of_two_gqa(self, device):
+        """BACKEND='TRITON_DECODE' should fail when GQA ratio is not a power of two."""
+        q = torch.randn(
+            1, 3, 64, 64, device=device, dtype=torch.float16, requires_grad=False
+        )
+        k = torch.randn(
+            1, 1, 64, 64, device=device, dtype=torch.float16, requires_grad=False
+        )
+        v = torch.randn(
+            1, 1, 64, 64, device=device, dtype=torch.float16, requires_grad=False
+        )
+
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"BACKEND='TRITON_DECODE' was specified but flex_decoding cannot be used",
+        ):
+            flex_compiled(
+                q,
+                k,
+                v,
+                enable_gqa=True,
+                kernel_options={"BACKEND": "TRITON_DECODE"},
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    def test_backend_rejects_legacy_force_use_flag(self, device):
+        """Combining BACKEND with FORCE_USE_FLEX_ATTENTION should raise an error."""
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"BACKEND cannot be combined with legacy FORCE_USE_FLEX_ATTENTION",
+        ):
+            flex_compiled(
+                q,
+                k,
+                v,
+                kernel_options={
+                    "BACKEND": "TRITON",
+                    "FORCE_USE_FLEX_ATTENTION": True,
+                },
+            )
+
+    @supported_platform
+    def test_backend_defaults_and_rejects_invalid(self, device):
+        device = torch.device(device)
+        query = torch.randn(1, 1, 4, 8, device=device, dtype=torch.float32)
+        key = torch.randn(1, 1, 4, 8, device=device, dtype=torch.float32)
+        value = torch.randn(1, 1, 4, 8, device=device, dtype=torch.float32)
+
+        kernel_options = _apply_kernel_options(
+            query, key, value, return_lse=True, kernel_options={}
+        )
+        self.assertEqual(kernel_options["BACKEND"], "AUTO")
+
+        with self.assertRaisesRegex(ValueError, r"Invalid BACKEND value 'INVALID'"):
+            _apply_kernel_options(
+                query,
+                key,
+                value,
+                return_lse=True,
+                kernel_options={"BACKEND": "INVALID"},
+            )
+
+    @supported_platform
     def test_block_mask_non_divisible(self, device):
         seq = torch.arange(1023, device=device) // 128
 
@@ -4154,7 +4333,7 @@ class GraphModule(torch.nn.Module):
 
         score_mod_0 = self.score_mod_0
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -4190,11 +4369,11 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
-        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
+        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_7: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -4214,7 +4393,7 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
+            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
             return full_default
 """.replace(  # noqa: B950
                 "GPU_TYPE", torch.device(device).type

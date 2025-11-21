@@ -57,10 +57,6 @@ class Dep(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def numel_hint(self) -> int:
-        pass
-
-    @abc.abstractmethod
     def has_unbacked_symbols(self) -> bool:
         pass
 
@@ -264,12 +260,6 @@ class MemoryDep(Dep):
         except NotImplementedError:  # NoneLayout
             return 0
 
-    def numel_hint(self) -> int:
-        try:
-            return V.graph.sizevars.size_hint(self.get_numel())
-        except NotImplementedError:  # NoneLayout
-            return 0
-
     def has_unbacked_symbols(self) -> bool:
         return len(free_unbacked_symbols(self.get_numel())) > 0
 
@@ -349,12 +339,6 @@ class StarDep(Dep):
         except NotImplementedError:
             return 0  # NoneLayout, MultiOutputLayout, etc
 
-    def numel_hint(self) -> int:
-        try:
-            return V.graph.sizevars.size_hint(self.get_numel())
-        except NotImplementedError:
-            return 0  # NoneLayout, MultiOutputLayout, etc
-
     def has_unbacked_symbols(self) -> bool:
         return len(free_unbacked_symbols(self.get_numel())) > 0
 
@@ -409,9 +393,6 @@ class WeakDep(Dep):
         return self
 
     def numbytes_hint(self) -> int:
-        return 1  # Purely inserted for ordering, not an actual dep
-
-    def numel_hint(self) -> int:
         return 1  # Purely inserted for ordering, not an actual dep
 
     def has_unbacked_symbols(self) -> bool:
