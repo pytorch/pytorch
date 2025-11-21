@@ -19,14 +19,6 @@ from torch.utils._ordered_set import OrderedSet
 
 log = logging.getLogger(__name__)
 
-# ============================================================================
-# 🧪 TEST MODE: Force different implementations for different ranges
-# ============================================================================
-# When enabled, bypasses autotuning and forces each range to use a different
-# implementation (cycling through available impls). This is useful for testing
-# the dispatch logic without needing to actually benchmark.
-_FORCE_DIFFERENT_RANGE_IMPLS = False
-
 
 def _detect_collective_ops(choices: list) -> bool:
     """
@@ -224,55 +216,79 @@ def _adapt_user_input_gen_fns(
     }
 
 
-def _merge_identical_implementations(
+
+def _group_ranges_by_impl(
     range_to_best_impl: dict[tuple[int, Union[int, float]], tuple[Callable, dict, str]],
-) -> dict[tuple[int, Union[int, float]], tuple[Callable, dict, str]]:
-    """Merge consecutive ranges using the same implementation."""
+) -> list[tuple[list[tuple[int, Union[int, float]]], Callable, dict, str]]:
+    """Group all ranges by their implementation, even if not adjacent.
+
+    This enables more aggressive optimization: ranges with the same impl are
+    grouped together and can use OR predicates in torch.cond.
+
+    Args:
+        range_to_best_impl: Mapping from range to (impl, kwargs, name)
+
+    Returns:
+        List of (ranges_list, impl, kwargs, name) tuples, sorted by first range start
+
+    Example:
+        Input: {
+            (1, 64): (impl_a, {}, "a"),
+            (65, 128): (impl_b, {}, "b"),
+            (129, 256): (impl_a, {}, "a"),  # Same as first!
+        }
+        Output: [
+            ([(1, 64), (129, 256)], impl_a, {}, "a"),  # Grouped!
+            ([(65, 128)], impl_b, {}, "b"),
+        ]
+    """
+    from collections import defaultdict
+
     if not range_to_best_impl:
-        return {}
+        return []
 
-    sorted_ranges = sorted(range_to_best_impl.items(), key=lambda x: x[0][0])
-    merged = {}
-    current_range_start, current_range_end = sorted_ranges[0][0]
-    current_impl, current_kwargs, current_name = sorted_ranges[0][1]
+    # Group ranges by (impl, kwargs, name) tuple
+    impl_to_ranges = defaultdict(list)
 
-    for i in range(1, len(sorted_ranges)):
-        (next_start, next_end), (next_impl, next_kwargs, next_name) = sorted_ranges[i]
+    for range_key, (impl, kwargs, name) in range_to_best_impl.items():
+        # Use id(impl) and frozenset of kwargs as key
+        # We need a hashable key, so convert dict to frozenset of items
+        kwargs_key = frozenset(kwargs.items()) if kwargs else frozenset()
+        group_key = (id(impl), kwargs_key, name)
+        impl_to_ranges[group_key].append((range_key, impl, kwargs, name))
 
-        if (
-            current_impl == next_impl
-            and current_kwargs == next_kwargs
-            and current_name == next_name
-            and next_start == current_range_end + 1
-        ):
-            current_range_end = next_end
-        else:
-            merged[(current_range_start, current_range_end)] = (
-                current_impl,
-                current_kwargs,
-                current_name,
-            )
-            current_range_start, current_range_end = next_start, next_end
-            current_impl, current_kwargs, current_name = (
-                next_impl,
-                next_kwargs,
-                next_name,
-            )
+    # Convert to list format, keeping ranges sorted
+    result = []
+    for group_key, group_items in impl_to_ranges.items():
+        # Sort ranges within each group
+        group_items.sort(key=lambda x: x[0][0])
+        ranges_list = [item[0] for item in group_items]
+        impl = group_items[0][1]
+        kwargs = group_items[0][2]
+        name = group_items[0][3]
+        result.append((ranges_list, impl, kwargs, name))
 
-    merged[(current_range_start, current_range_end)] = (
-        current_impl,
-        current_kwargs,
-        current_name,
-    )
+    # Sort groups by their first range start
+    result.sort(key=lambda x: x[0][0][0])
 
-    if len(merged) < len(range_to_best_impl):
+    original_count = len(range_to_best_impl)
+    grouped_count = len(result)
+
+    if grouped_count < original_count:
         log.info(
-            "Range merging: reduced from %d to %d ranges",
-            len(range_to_best_impl),
-            len(merged),
+            "Implementation grouping: reduced from %d ranges to %d impl groups",
+            original_count,
+            grouped_count,
         )
+        for ranges_list, impl, kwargs, name in result:
+            if len(ranges_list) > 1:
+                ranges_str = ", ".join(
+                    f"[{s}, {e if e != float('inf') else 'inf'}]"
+                    for s, e in ranges_list
+                )
+                log.info(f"   Grouped {len(ranges_list)} ranges for {name}: {ranges_str}")
 
-    return merged
+    return result
 
 
 def _cleanup_torch_cond_operands(
@@ -1126,184 +1142,181 @@ def _range_based_lowering_fn(
         merged_kwargs = _merge_config_and_runtime_kwargs(cfg.params, runtime_kwargs)
         non_tensor_args.append(merged_kwargs)
 
-    # TEST MODE: Force different implementations for different ranges
-    if _FORCE_DIFFERENT_RANGE_IMPLS:
-        for range_idx, (range_start, range_end) in enumerate(ranges):
-            # Force each range to use a different implementation
-            forced_impl_idx = range_idx % len(decompositions)
-            impl = decompositions[forced_impl_idx]
-            impl_kwargs = non_tensor_args[forced_impl_idx]
-
-            range_to_best_impl[(range_start, range_end)] = (
-                impl,
-                impl_kwargs,
-                impl.__name__,
+    # Benchmark each range and collect winning implementations
+    for range_start, range_end in ranges:
+        # Create range-specific input generator
+        range_input_gen_fns = None
+        if input_gen_fns and tensor_name in input_gen_fns:
+            base_gen_fn = input_gen_fns[tensor_name]
+            range_gen_fn = _create_range_input_gen_fn(
+                base_gen_fn, dim_index, range_start, range_end
             )
+            range_input_gen_fns = {**input_gen_fns, tensor_name: range_gen_fn}
 
-            log.warning(
-                "   Range [%s, %s] -> FORCED to use impl[%d]: %s",
-                range_start,
-                range_end if range_end != float("inf") else "inf",
-                forced_impl_idx,
-                impl.__name__,
-            )
+        range_name = f"{name}_range_{int(range_start)}_{int(range_end) if range_end != float('inf') else 'inf'}"
 
-        log.warning("=" * 80)
-    else:
-        # Normal autotuning path
-        for range_start, range_end in ranges:
-            # Create range-specific input generator
-            range_input_gen_fns = None
-            if input_gen_fns and tensor_name in input_gen_fns:
-                base_gen_fn = input_gen_fns[tensor_name]
-                range_gen_fn = _create_range_input_gen_fn(
-                    base_gen_fn, dim_index, range_start, range_end
-                )
-                range_input_gen_fns = {**input_gen_fns, tensor_name: range_gen_fn}
-
-            range_name = f"{name}_range_{int(range_start)}_{int(range_end) if range_end != float('inf') else 'inf'}"
-
-            # Run autotuning for this range
-            autotuned_result, winning_choice = autotune_custom_op(
-                name=range_name,
-                decompositions=decompositions,
-                inputs=tensor_inputs,
-                non_tensor_args=non_tensor_args,
-                op_overload=op_overload,
-                user_input_gen_fns=range_input_gen_fns,
-                return_choice=True,
-            )
-
-            # Extract winning implementation
-            winning_impl_idx = _extract_winning_decomposition_index(
-                winning_choice.name, decompositions
-            )
-            winning_impl = decompositions[winning_impl_idx]
-            winning_kwargs = non_tensor_args[winning_impl_idx]
-
-            range_to_best_impl[(range_start, range_end)] = (
-                winning_impl,
-                winning_kwargs,
-                winning_impl.__name__,
-            )
-
-            log.info(
-                "   Range [%s, %s] -> %s",
-                range_start,
-                range_end if range_end != float("inf") else "inf",
-                winning_impl.__name__,
-            )
-
-    # Merge consecutive ranges with same implementation
-    sorted_ranges = list(_merge_identical_implementations(range_to_best_impl).items())
-
-    log.info("After merging identical implementations: %d ranges", len(sorted_ranges))
-    for (range_start, range_end), (impl, impl_kwargs, impl_name) in sorted_ranges:
-        log.info(
-            "   [%s, %s] -> %s",
-            range_start,
-            range_end if range_end != float("inf") else "inf",
-            impl_name,
+        # Run autotuning for this range
+        autotuned_result, winning_choice = autotune_custom_op(
+            name=range_name,
+            decompositions=decompositions,
+            inputs=tensor_inputs,
+            non_tensor_args=non_tensor_args,
+            op_overload=op_overload,
+            user_input_gen_fns=range_input_gen_fns,
+            return_choice=True,
         )
 
-    # If only one range remains after merging, just inline that implementation
-    if len(sorted_ranges) == 1:
-        (range_start, range_end), (impl, impl_kwargs, _) = sorted_ranges[0]
-        log.info("Only one range after merging, directly inlining implementation")
+        # Extract winning implementation
+        winning_impl_idx = _extract_winning_decomposition_index(
+            winning_choice.name, decompositions
+        )
+        winning_impl = decompositions[winning_impl_idx]
+        winning_kwargs = non_tensor_args[winning_impl_idx]
+
+        range_to_best_impl[(range_start, range_end)] = (
+            winning_impl,
+            winning_kwargs,
+            winning_impl.__name__,
+        )
+
+        log.info(
+            "   Range [%s, %s] -> %s",
+            range_start,
+            range_end if range_end != float("inf") else "inf",
+            winning_impl.__name__,
+        )
+
+    # Group ranges by implementation (more aggressive than adjacent merging)
+    impl_groups = _group_ranges_by_impl(range_to_best_impl)
+
+    log.info("After grouping by implementation: %d impl groups", len(impl_groups))
+    for ranges_list, impl, impl_kwargs, impl_name in impl_groups:
+        ranges_str = ", ".join(
+            f"[{s}, {e if e != float('inf') else 'inf'}]" for s, e in ranges_list
+        )
+        log.info("   %s: %s", impl_name, ranges_str)
+
+    # If only one impl group remains, just inline that implementation
+    if len(impl_groups) == 1:
+        ranges_list, impl, impl_kwargs, impl_name = impl_groups[0]
+        log.info("Only one implementation after grouping, directly inlining")
         return _lower_single_impl(
             impl, impl_kwargs, runtime_kwargs, tensor_inputs, name
         )
 
-    # Build dispatch function for N ranges
+    # Build dispatch function for N impl groups using recursive nested torch.cond
+    # Each impl group may contain multiple non-adjacent ranges (OR predicate)
     def dispatch_fn(*fake_tensors):
         """Main dispatch function that will be traced by make_fx.
 
-        Supports 2-3 ranges using nested torch.cond.
+        Supports arbitrary number of impl groups with OR predicates for non-adjacent ranges.
+        Structure: cond(pred_group1, impl1, cond(pred_group2, impl2, ...))
+        where pred_group can be: (dim in range1) OR (dim in range2) OR ...
         """
-        num_ranges = len(sorted_ranges)
+        num_groups = len(impl_groups)
 
-        if num_ranges < 2:
+        if num_groups < 2:
             raise RuntimeError(
-                f"dispatch_fn requires at least 2 ranges, got {num_ranges}"
-            )
-
-        if num_ranges > 3:
-            raise NotImplementedError(
-                f"Range-based dispatch currently supports up to 3 ranges, got {num_ranges}. "
-                f"Support for 4+ ranges requires additional implementation."
+                f"dispatch_fn requires at least 2 impl groups, got {num_groups}"
             )
 
         dispatch_tensor = fake_tensors[0]
         dim_value = dispatch_tensor.size(dim_index)
 
-        if num_ranges == 2:
-            # Simple case: just one torch.cond for 2 ranges
-            (r1_start, r1_end), (impl1, impl1_kwargs, _) = sorted_ranges[0]
-            (r2_start, r2_end), (impl2, impl2_kwargs, _) = sorted_ranges[1]
+        def build_range_predicate(ranges_list: list[tuple[int, Union[int, float]]]) -> torch.Tensor:
+            """Build OR predicate for multiple ranges.
 
-            merged_kwargs1 = {**runtime_kwargs, **impl1_kwargs}
-            merged_kwargs2 = {**runtime_kwargs, **impl2_kwargs}
+            Args:
+                ranges_list: List of (start, end) tuples
 
+            Returns:
+                SymBool: (dim in range1) OR (dim in range2) OR ...
+            """
+            if len(ranges_list) == 1:
+                # Single range: start <= dim <= end
+                range_start, range_end = ranges_list[0]
+                start_int = int(range_start)
+                end_int = int(range_end) if range_end != float('inf') else None
+
+                if end_int is None:
+                    # [start, inf): dim >= start
+                    return dim_value >= start_int
+                else:
+                    # [start, end]: start <= dim <= end
+                    return (dim_value >= start_int) & (dim_value <= end_int)
+
+            # Multiple ranges: OR them together
+            predicates = []
+            for range_start, range_end in ranges_list:
+                start_int = int(range_start)
+                end_int = int(range_end) if range_end != float('inf') else None
+
+                if end_int is None:
+                    # [start, inf): dim >= start
+                    pred = dim_value >= start_int
+                else:
+                    # [start, end]: start <= dim <= end
+                    pred = (dim_value >= start_int) & (dim_value <= end_int)
+
+                predicates.append(pred)
+
+            # Combine with OR
+            result = predicates[0]
+            for pred in predicates[1:]:
+                result = result | pred
+
+            return result
+
+        def build_nested_cond(group_idx: int):
+            """Recursively build nested torch.cond for impl_groups[group_idx:].
+
+            Args:
+                group_idx: Index into impl_groups to start building from
+
+            Returns:
+                A callable that takes operands and returns the result
+            """
+            if group_idx >= num_groups:
+                # Should never happen if called correctly
+                raise RuntimeError(f"Invalid group_idx: {group_idx}")
+
+            ranges_list, impl, impl_kwargs, impl_name = impl_groups[group_idx]
+            merged_kwargs = {**runtime_kwargs, **impl_kwargs}
+
+            # Create the function for this group's implementation
             @torch._dynamo.dont_skip_tracing
-            def true_fn(*ops):
-                return impl1(*ops, **merged_kwargs1)
+            def current_group_fn(*ops):
+                return impl(*ops, **merged_kwargs)
 
+            # Base case: last group
+            if group_idx == num_groups - 1:
+                # Return a function that directly calls the implementation
+                return current_group_fn
+
+            # Recursive case: build cond for remaining groups
+            # Build predicate for current group (may be OR of multiple ranges)
+            group_pred = build_range_predicate(ranges_list)
+
+            # Build the false branch recursively for remaining groups
+            next_branch_fn = build_nested_cond(group_idx + 1)
+
+            # Create a wrapper that builds the torch.cond
             @torch._dynamo.dont_skip_tracing
-            def false_fn(*ops):
-                return impl2(*ops, **merged_kwargs2)
-
-            return torch.cond(
-                pred=dim_value <= r1_end,
-                true_fn=true_fn,
-                false_fn=false_fn,
-                operands=list(fake_tensors),
-            )
-
-        elif num_ranges == 3:
-            # Nested torch.cond for 3 ranges
-            (r1_start, r1_end), (impl1, impl1_kwargs, _) = sorted_ranges[0]
-            (r2_start, r2_end), (impl2, impl2_kwargs, _) = sorted_ranges[1]
-            (r3_start, r3_end), (impl3, impl3_kwargs, _) = sorted_ranges[2]
-
-            merged_kwargs1 = {**runtime_kwargs, **impl1_kwargs}
-            merged_kwargs2 = {**runtime_kwargs, **impl2_kwargs}
-            merged_kwargs3 = {**runtime_kwargs, **impl3_kwargs}
-
-            # CRITICAL: Use int() to convert endpoints to Python ints
-            # This prevents them from being captured as variables in the closure
-            r1_end_int = int(r1_end)
-            r2_end_int = int(r2_end)
-
-            @torch._dynamo.dont_skip_tracing
-            def range1_fn(*ops):
-                return impl1(*ops, **merged_kwargs1)
-
-            @torch._dynamo.dont_skip_tracing
-            def range2_fn(*ops):
-                return impl2(*ops, **merged_kwargs2)
-
-            @torch._dynamo.dont_skip_tracing
-            def range3_fn(*ops):
-                return impl3(*ops, **merged_kwargs3)
-
-            # Inner cond: check if dim_value <= r2_end
-            @torch._dynamo.dont_skip_tracing
-            def inner_false_fn(*ops):
-                # Use hardcoded constant instead of variable
+            def cond_wrapper(*ops):
                 return torch.cond(
-                    pred=dim_value <= r2_end_int,
-                    true_fn=range2_fn,
-                    false_fn=range3_fn,
+                    pred=group_pred,
+                    true_fn=current_group_fn,
+                    false_fn=next_branch_fn,
                     operands=list(ops),
                 )
 
-            # Outer cond: check if dim_value <= r1_end
-            return torch.cond(
-                pred=dim_value <= r1_end_int,
-                true_fn=range1_fn,
-                false_fn=inner_false_fn,
-                operands=list(fake_tensors),
-            )
+            return cond_wrapper
+
+        # Build the nested cond structure starting from group 0
+        nested_cond_fn = build_nested_cond(0)
+
+        # Execute the nested cond
+        return nested_cond_fn(*fake_tensors)
 
     # Trace with make_fx using fake mode
     with V.fake_mode:
@@ -1354,7 +1367,7 @@ def _range_based_lowering_fn(
     result = inline_subgraph_to_ir_nodes(dispatch_gm, tensor_inputs, f"{name}_dispatch")
 
     log.info(
-        "Successfully created torch.cond dispatch for %d ranges", len(sorted_ranges)
+        "Successfully created torch.cond dispatch for %d impl groups", len(impl_groups)
     )
 
     validate_ir(result)
