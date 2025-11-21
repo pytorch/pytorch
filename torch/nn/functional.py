@@ -2613,7 +2613,9 @@ def embedding_bag(
             :attr:`offsets`, if those are not None.
 
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
-            The last element is the size of the input, or the ending index position of the last bag (sequence).
+                                              The last element is the size of the input, or the ending index position
+                                              of the last bag (sequence). This matches the CSR format. Ignored when
+                                              input is 2D. Default ``False``.
 
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
                                      gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
@@ -2724,7 +2726,7 @@ def embedding_bag(
         offsets = torch.arange(
             0, input.numel(), input.size(1), dtype=input.dtype, device=input.device
         )
-
+        include_last_offset = False
         input = input.reshape(-1)
         if per_sample_weights is not None:
             per_sample_weights = per_sample_weights.reshape(-1)
