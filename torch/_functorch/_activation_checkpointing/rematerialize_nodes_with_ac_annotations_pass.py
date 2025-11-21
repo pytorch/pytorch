@@ -1,5 +1,5 @@
 """
-AC reordering pass: Duplicates checkpointed nodes for backward, then DCE removes unused forward versions.
+AC rematerialize pass: Duplicates checkpointed nodes for backward, then DCE removes unused forward versions.
 """
 
 import torch
@@ -41,17 +41,13 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     """
     Duplicate checkpointed nodes for backward use. DCE removes unused forward versions.
     """
-    # Early exit if no checkpointed ops
     if not has_recomputable_ops(gm):
         return gm
 
-    # Ban RNG ops in checkpointed regions (like partitioner does for inference mode)
-    # Note: RNG functionalization is not currently supported for inference mode graphs
     if has_recomputable_rng_ops(gm):
         raise RuntimeError(
-            "Activation checkpoint reordering in fullgraph does not support RNG ops in checkpointed regions. "
-            "RNG state cannot be properly synchronized between "
-            "forward and recomputed backward operations. Please move RNG operations outside "
+            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops in checkpointed regions. "
+            "Please move RNG operations outside "
             "of checkpoint regions, or use joint graph mode (where partitioner handles RNG)."
         )
 
@@ -65,17 +61,18 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     force_save_bw_mutation_src(gm)
 
     # Find backward boundary and build ordering
-    first_node_in_bwd = None
-    bwd_start = None
+    bwd_start: int | None = None
     order = {}
     for idx, node in enumerate(gm.graph.nodes):
         order[node] = idx
-        if _is_backward_node(node) and first_node_in_bwd is None:
-            first_node_in_bwd = node
+        if _is_backward_node(node) and bwd_start is None:
             bwd_start = idx
 
-    if first_node_in_bwd is None:
-        return gm
+    if bwd_start is None:
+        raise RuntimeError(
+            "We are trying to rematerialize AC nodes in the backward region, but we could not find any backward nodes. "
+            "This is likely because you forgot to annotate your backward region with fx.traceback.annotate({\"backward\": 0}) "
+        )
 
     # Build reordered graph
     new_graph = fx.Graph()
@@ -88,7 +85,6 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
             return x
         return recomputed_nodes.get(x, env[x])
 
-    # Add placeholders
     for node in gm.graph.find_nodes(op="placeholder"):
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 

@@ -67,6 +67,11 @@ def checkpoint_wrapper(fn):
     return inner
 
 
+@torch._dynamo.allow_in_graph
+def _grad(*args, **kwargs):
+    return torch.autograd.grad(*args, **kwargs)
+
+
 def count_ops(
     gm, args, freq=None, freq_ge=None, op=None, freqs=None, freqs_ge=None, ops=None
 ):
@@ -1994,7 +1999,7 @@ class GraphModule(torch.nn.Module):
         )
 
 
-class ACReorderingTests(torch._dynamo.test_case.TestCase):
+class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
 
     def _get_ac_nodes(self, gm):
@@ -2022,7 +2027,7 @@ class ACReorderingTests(torch._dynamo.test_case.TestCase):
         """Get mapping from node to its position in graph."""
         return {node: idx for idx, node in enumerate(gm.graph.nodes)}
 
-    def _compile_and_capture(self, fn, enable_reordering):
+    def _compile_and_capture(self, fn, rematerialize_nodes_with_ac_annotations):
         """Helper to compile a function and capture the graph."""
         captured_gm = None
 
@@ -2038,7 +2043,7 @@ class ACReorderingTests(torch._dynamo.test_case.TestCase):
         )
 
         with torch._functorch.config.patch(
-            enable_inference_mode_ac_reordering=enable_reordering
+            rematerialize_nodes_with_ac_annotations=rematerialize_nodes_with_ac_annotations
         ):
             compiled_fn = torch.compile(fn, backend=backend, fullgraph=False)
             result = compiled_fn()
@@ -2046,10 +2051,8 @@ class ACReorderingTests(torch._dynamo.test_case.TestCase):
         return result, captured_gm
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_ac_reordering_simple_forward_backward(self):
+    def test_ac_rematerialize_simple_forward_backward(self):
         """AC reordering with checkpoint used in both forward and backward."""
-        torch._dynamo.allow_in_graph(torch.autograd.grad)
-
         x_data = torch.randn(4, 4)
         y_data = torch.randn(4, 4)
 
@@ -2065,7 +2068,7 @@ class ACReorderingTests(torch._dynamo.test_case.TestCase):
             loss = z.sum()
 
             with torch.fx.traceback.annotate({"backward": 0}):
-                dx, dy = torch.autograd.grad(loss, (x, y))
+                dx, dy = _grad(loss, (x, y))
 
             return dx.detach(), dy.detach()
 
@@ -2101,9 +2104,8 @@ def forward(self, arg0_1, arg1_1):
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_ac_reordering_defers_backward_only_nodes(self):
+    def test_ac_rematerialize_defers_backward_only_nodes(self):
         """AC nodes only used in backward are deferred (DCE removes forward version)."""
-        torch._dynamo.allow_in_graph(torch.autograd.grad)
 
         x_data = torch.randn(4, 4)
 
@@ -2114,7 +2116,7 @@ def forward(self, arg0_1, arg1_1):
             )
             loss = z.sum()
             with torch.fx.traceback.annotate({"backward": 0}):
-                dx = torch.autograd.grad(loss, x)[0]
+                dx = _grad(loss, x)[0]
             return dx.detach()
 
         dx1, gm_without = self._compile_and_capture(forward_backward_with_ac, False)
@@ -2162,9 +2164,8 @@ def forward(self, arg0_1):
         self.assertEqual(ac_in_fwd, 1)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_ac_reordering_graph_structure(self):
+    def test_ac_rematerialize_graph_structure(self):
         """Verify graph structure with AC reordering enabled."""
-        torch._dynamo.allow_in_graph(torch.autograd.grad)
 
         x_data = torch.randn(4, 4)
         y_data = torch.randn(4, 4)
@@ -2177,7 +2178,7 @@ def forward(self, arg0_1):
             )
             loss = z.sum()
             with torch.fx.traceback.annotate({"backward": 0}):
-                dx, dy = torch.autograd.grad(loss, (x, y))
+                dx, dy = _grad(loss, (x, y))
             return dx.detach(), dy.detach()
 
         _, captured_gm = self._compile_and_capture(simple_fwd_bwd, True)
@@ -2201,9 +2202,8 @@ def forward(self, arg0_1, arg1_1):
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_ac_reordering_duplicates_nodes_used_in_both_regions(self):
+    def test_ac_rematerialize_duplicates_nodes_used_in_both_regions(self):
         """AC nodes used in both forward and backward are duplicated."""
-        torch._dynamo.allow_in_graph(torch.autograd.grad)
 
         x_data = torch.randn(4, 4)
         w_data = torch.randn(4, 4)
@@ -2222,7 +2222,7 @@ def forward(self, arg0_1, arg1_1):
             loss = out.sum()
 
             with torch.fx.traceback.annotate({"backward": 0}):
-                dx, dw = torch.autograd.grad(loss, (x, w))  # relu needs h
+                dx, dw = _grad(loss, (x, w))  # relu needs h
 
             return out.detach(), dx.detach(), dw.detach()
 
@@ -2258,9 +2258,8 @@ def forward(self, arg0_1, arg1_1):
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_ac_reordering_recomputes_checkpointed_ops(self):
+    def test_ac_rematerialize_recomputes_checkpointed_ops(self):
         """Verify AC nodes are recomputed in backward (not just deferred)."""
-        torch._dynamo.allow_in_graph(torch.autograd.grad)
 
         x_data = torch.randn(4, 4)
         y_data = torch.randn(4, 4)
@@ -2276,7 +2275,7 @@ def forward(self, arg0_1, arg1_1):
             )
             loss = z.sum()
             with torch.fx.traceback.annotate({"backward": 0}):
-                dx, dy = torch.autograd.grad(loss, (x, y))
+                dx, dy = _grad(loss, (x, y))
             return dx.detach(), dy.detach()
 
         _, gm_with = self._compile_and_capture(fwd_bwd_with_checkpoint, True)
@@ -2306,9 +2305,8 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(sigmoid_without, 1)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_ac_reordering_chain_not_needed_for_forward(self):
+    def test_ac_rematerialize_chain_not_needed_for_forward(self):
         """AC chain not needed for forward output is fully deferred."""
-        torch._dynamo.allow_in_graph(torch.autograd.grad)
 
         x_data = torch.randn(4, 4, device="cuda", requires_grad=False)
         y_data = torch.randn(4, 4, device="cuda", requires_grad=False)
@@ -2327,9 +2325,9 @@ def forward(self, arg0_1, arg1_1):
             z = (x + y).sum()  # doesn't use a or b
 
             with torch.fx.traceback.annotate({"backward": 0}):
-                grad_x = torch.autograd.grad(z, x, create_graph=True)[0]
+                grad_x = _grad(z, x, create_graph=True)[0]
                 loss = (grad_x * b).sum()  # b used only in backward
-                dx = torch.autograd.grad(loss, x)[0]
+                dx = _grad(loss, x)[0]
             return dx.detach()
 
         result_with, gm_with = self._compile_and_capture(fwd_bwd_with_ac_chain, True)
@@ -2346,9 +2344,8 @@ def forward(self, arg0_1, arg1_1):
         )
         self.assertEqual(ac_in_fwd, 0, "AC chain should be fully deferred")
 
-    def test_ac_reordering_with_rng_ops_raises_error(self):
+    def test_ac_rematerialize_with_rng_ops_raises_error(self):
         """Verify error is raised when RNG ops are in checkpointed regions."""
-        torch._dynamo.allow_in_graph(torch.autograd.grad)
 
         x_data = torch.randn(4, 4)
 
@@ -2362,20 +2359,41 @@ def forward(self, arg0_1, arg1_1):
             loss = z.sum()
 
             with torch.fx.traceback.annotate({"backward": 0}):
-                dx = torch.autograd.grad(loss, x)[0]
+                dx = _grad(loss, x)[0]
 
             return dx
 
         # Should raise error about RNG ops not being supported
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
-            "Activation checkpoint reordering in fullgraph does not support RNG ops",
+            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops in checkpointed regions.",
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True)
 
-    def test_ac_reordering_with_tuple_output(self):
+    def test_ac_rematerialize_with_no_annotations_raises_error(self):
+        """Verify error is raised when RNG ops are in checkpointed regions."""
+
+        x_data = torch.randn(4, 4)
+
+        def fwd_bwd_with_rng():
+            x = x_data.detach().requires_grad_(True)
+
+            # Checkpoint with RNG op (rand_like)
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a: torch.sigmoid(a + 4), x, use_reentrant=False
+            )
+            loss = z.sum()
+            return _grad(loss, x)[0]
+
+        # Should raise error about RNG ops not being supported
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "We are trying to rematerialize AC nodes in the backward region",
+        ):
+            self._compile_and_capture(fwd_bwd_with_rng, True)
+
+    def test_ac_rematerialize_with_tuple_output(self):
         """Verify AC reordering handles checkpoints with tuple outputs (getitem ops)."""
-        torch._dynamo.allow_in_graph(torch.autograd.grad)
 
         x_data = torch.randn(4, 6)
         y_data = torch.randn(6, 4)
@@ -2398,7 +2416,7 @@ def forward(self, arg0_1, arg1_1):
             loss = sig_out.sum() + linear_out.sum()
 
             with torch.fx.traceback.annotate({"backward": 0}):
-                dx, dy = torch.autograd.grad(loss, (x, y))
+                dx, dy = _grad(loss, (x, y))
             return dx, dy
 
         result_with, gm_with = self._compile_and_capture(fwd_bwd_with_tuple, True)
@@ -2473,9 +2491,8 @@ graph():
     return (mm_3, mm_2)""",  # noqa: B950
         )
 
-    def test_ac_reordering_with_selective_checkpoint_policy(self):
+    def test_ac_rematerialize_with_selective_checkpoint_policy(self):
         """Verify AC reordering respects MUST_SAVE policy (addmm saved, relu recomputed)."""
-        torch._dynamo.allow_in_graph(torch.autograd.grad)
 
         x_data = torch.randn(4, 128)
         weight1 = torch.randn(128, 128)
@@ -2508,7 +2525,7 @@ graph():
             loss = result.sum()
 
             with torch.fx.traceback.annotate({"backward": 0}):
-                dx, dw, db = torch.autograd.grad(loss, (x, w1, b1))
+                dx, dw, db = _grad(loss, (x, w1, b1))
             return dx, dw, db
 
         result_with, gm_with = self._compile_and_capture(fwd_bwd_with_policy, True)
@@ -2553,7 +2570,7 @@ graph():
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_ac_reordering_transitive_dependency_sorting(self):
+    def test_ac_rematerialize_transitive_dependency_sorting(self):
         """Verify transitive dependencies are sorted correctly in forward order.
 
         This tests the fix for the bug where processing inputs one at a time
@@ -2561,7 +2578,6 @@ graph():
         and d, if backward node processes [d, c], we must get order a, b, c, d
         (not d, a, b, c).
         """
-        torch._dynamo.allow_in_graph(torch.autograd.grad)
 
         x_data = torch.randn(4, 4)
         y_data = torch.randn(4, 4)
@@ -2592,7 +2608,7 @@ graph():
             with torch.fx.traceback.annotate({"backward": 0}):
                 e = d + c
                 loss = e.sum()
-                dx = torch.autograd.grad(loss, x)[0]
+                dx = _grad(loss, x)[0]
 
             return dx.detach()
 
