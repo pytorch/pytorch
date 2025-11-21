@@ -10,10 +10,11 @@ on:
 env:
   PYTORCH_NIGHTLY_REF: nightly
   THEROCK_NIGHTLY_INDEX_URL: https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/
+  ROCM_VERSION: nightly
   # Base CI image to modify (same as rocm-mi300.yml uses)
   BASE_CI_IMAGE: pytorch/pytorch-linux-noble-rocm-n-py3:latest
   # New image name after installing TheRock
-  THEROCK_IMAGE: pytorch-linux-noble-rocm-alpha-py3
+  THEROCK_IMAGE: pytorch-linux-noble-rocm-nightly-py3
   PYTORCH_ROCM_ARCH: "gfx942"
   PYTHON_VERSION: "3.12"
 
@@ -89,6 +90,7 @@ export ROCM_HOME="${ROCM_HOME}"
 export ROCM_PATH="${ROCM_HOME}"
 export PATH="${ROCM_BIN}:\$PATH"
 export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+export ROCM_VERSION=nightly
 EOF
             
             echo "=== Verifying TheRock installation ==="

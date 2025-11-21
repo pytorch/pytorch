@@ -90,6 +90,8 @@ jobs:
     # Docker uploads fail from LF runners, see https://github.com/pytorch/pytorch/pull/137358
     # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
     runs-on: "${{ matrix.runner }}"
+    outputs:
+      pytorch-linux-noble-rocm-n-py3: ${{ steps.build-docker-image.outputs.docker-image }}
     steps:
       - name: Clean workspace
         shell: bash
@@ -159,6 +161,174 @@ jobs:
         uses: ./.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/${{ contains(matrix.runner, 'arm64') && 'arm64v8' || 'tool' }}/alpine
+        if: always()
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
+
+  # New job: Build TheRock nightly variant of pytorch-linux-noble-rocm-n-py3
+  docker-build-therock-nightly:
+    needs: docker-build
+    if: github.repository_owner == 'pytorch'
+    runs-on: linux.12xlarge
+    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    env:
+      THEROCK_NIGHTLY_INDEX_URL: https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/
+      ROCM_VERSION: nightly
+
+    steps:
+      - name: Clean workspace
+        shell: bash
+        run: |
+          echo "${GITHUB_WORKSPACE}"
+          sudo rm -rf "${GITHUB_WORKSPACE}"
+          mkdir "${GITHUB_WORKSPACE}"
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Pull base ROCm image
+        run: |
+          BASE_IMAGE="${{ needs.docker-build.outputs.pytorch-linux-noble-rocm-n-py3 }}"
+          echo "Pulling base image: ${BASE_IMAGE}"
+          docker pull "${BASE_IMAGE}"
+          echo "BASE_IMAGE=${BASE_IMAGE}" >> $GITHUB_ENV
+
+      - name: Create TheRock nightly variant
+        id: create-therock-image
+        env:
+          THEROCK_NIGHTLY_INDEX_URL: ${{ env.THEROCK_NIGHTLY_INDEX_URL }}
+        run: |
+          set -euxo pipefail
+          
+          BASE_IMAGE="${{ env.BASE_IMAGE }}"
+          DATE_TAG=$(date +%Y%m%d)
+          THEROCK_IMAGE="ci-image:pytorch-linux-noble-rocm-nightly-py3-${DATE_TAG}"
+          
+          echo "Creating TheRock nightly image from: ${BASE_IMAGE}"
+          echo "Target image: ${THEROCK_IMAGE}"
+          
+          # Run the base image and modify it
+          docker run --name therock-setup "${BASE_IMAGE}" bash -c '
+            set -euxo pipefail
+            
+            echo "=== Removing existing /opt/rocm ==="
+            if [ -d /opt/rocm ]; then
+              rm -rf /opt/rocm
+              echo "/opt/rocm removed successfully"
+            else
+              echo "/opt/rocm does not exist"
+            fi
+            
+            echo "=== Installing TheRock nightly wheels ==="
+            python3 -m pip install --upgrade pip
+            python3 -m pip install \
+              --index-url "'"${THEROCK_NIGHTLY_INDEX_URL}"'" \
+              "rocm-sdk[libraries,devel]"
+            
+            echo "=== Setting up ROCm environment ==="
+            ROCM_HOME="$(rocm-sdk path --root)"
+            ROCM_BIN="$(rocm-sdk path --bin)"
+            ROCM_CMAKE_PREFIX="$(rocm-sdk path --cmake)"
+            
+            echo "ROCM_HOME=${ROCM_HOME}"
+            echo "ROCM_BIN=${ROCM_BIN}"
+            echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
+            
+            # Create environment setup script
+            cat > /etc/profile.d/rocm-sdk.sh <<EOF
+export ROCM_HOME="${ROCM_HOME}"
+export ROCM_PATH="${ROCM_HOME}"
+export PATH="${ROCM_BIN}:\$PATH"
+export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+export ROCM_VERSION=nightly
+EOF
+            
+            echo "=== Verifying TheRock installation ==="
+            rocm-sdk --version || true
+            rocm-sdk path --root
+            ls -la "${ROCM_HOME}" || true
+            
+            echo "=== TheRock setup complete ==="
+          '
+          
+          # Commit the container to a new image
+          echo "Committing container to new image..."
+          docker commit therock-setup "${THEROCK_IMAGE}"
+          
+          # Clean up container
+          docker rm therock-setup
+          
+          # Also tag as latest
+          docker tag "${THEROCK_IMAGE}" "ci-image:pytorch-linux-noble-rocm-nightly-py3"
+          
+          echo "docker-image=${THEROCK_IMAGE}" >> "$GITHUB_OUTPUT"
+          
+          # Show image info
+          docker images | grep "rocm-nightly" || true
+
+      - name: Generate output
+        id: generate_output
+        run: |
+          docker_image_name="pytorch-linux-noble-rocm-nightly-py3"
+          docker_image_tag="${{ steps.create-therock-image.outputs.docker-image }}"
+          echo "${docker_image_name}=${docker_image_tag}" >> docker-builds-output-${docker_image_name}.txt
+          cat docker-builds-output-${docker_image_name}.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4.4.0
+        with:
+          name: docker-builds-artifacts-pytorch-linux-noble-rocm-nightly-py3
+          retention-days: 14
+          path: ./docker-builds-output-pytorch-linux-noble-rocm-nightly-py3.txt
+
+      - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
+        name: Push to ECR
+        id: push-to-ecr
+        if: ${{ github.event_name == 'push' }}
+        env:
+          DOCKER_IMAGE: ${{ steps.create-therock-image.outputs.docker-image }}
+        with:
+          shell: bash
+          timeout_minutes: 60
+          max_attempts: 5
+          retry_wait_seconds: 90
+          command: |
+            # Login is handled by setup-linux action
+            docker push "${DOCKER_IMAGE}"
+            docker push "ci-image:pytorch-linux-noble-rocm-nightly-py3"
+
+      - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
+        name: Push to https://ghcr.io/
+        id: push-to-ghcr-io
+        if: ${{ github.event_name == 'push' }}
+        env:
+          DOCKER_IMAGE: ${{ steps.create-therock-image.outputs.docker-image }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+        with:
+          shell: bash
+          timeout_minutes: 60
+          max_attempts: 5
+          retry_wait_seconds: 90
+          command: |
+            ghcr_image="ghcr.io/pytorch/ci-image"
+            tag=${DOCKER_IMAGE##*:}
+            # Push docker image to ghcr.io
+            echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
+            docker tag "${DOCKER_IMAGE}" "${ghcr_image}:${tag}"
+            docker push "${ghcr_image}:${tag}"
+            # Also push the latest tag
+            docker tag "${DOCKER_IMAGE}" "${ghcr_image}:pytorch-linux-noble-rocm-nightly-py3"
+            docker push "${ghcr_image}:pytorch-linux-noble-rocm-nightly-py3"
+
+      - name: Chown workspace
+        uses: ./.github/actions/chown-workspace
+        with:
+          ALPINE_IMAGE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine
         if: always()
 
       - name: Teardown Linux
