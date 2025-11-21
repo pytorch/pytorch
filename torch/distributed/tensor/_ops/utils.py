@@ -260,15 +260,7 @@ def map_placements_after_broadcast(
                 # there's a map from the common shape shard dim to
                 # the input shape shard dim before broadcasting,
                 # use that instead
-                if isinstance(placement, _StridedShard):
-                    new_placements.append(
-                        _StridedShard(
-                            new_shard_dim, split_factor=placement.split_factor
-                        )
-                    )
-                else:
-                    new_placements.append(Shard(new_shard_dim))
-
+                new_placements.append(Shard(new_shard_dim))
             else:
                 # there's no map between common shape shard dim and
                 # the input shape shard dim before broadcasting,

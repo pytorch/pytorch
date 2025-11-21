@@ -8,7 +8,6 @@ import unittest
 from numpy.testing import assert_array_equal
 
 import torch
-import torch.distributed.tensor.placement_utils as putils
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.device_mesh import init_device_mesh
@@ -21,7 +20,11 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor._api import _shard_tensor
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._dtensor_spec import (
+    DTensorSpec,
+    ShardOrderEntry,
+    TensorMeta,
+)
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.experimental import implicit_replication
 from torch.distributed.tensor.parallel import (
@@ -30,7 +33,6 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.placement_types import _StridedShard
-from torch.distributed.tensor.placement_utils import ShardOrderEntry
 from torch.testing import make_tensor
 from torch.testing._internal.common_utils import IS_FBCODE, run_tests, skipIfHpu
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -1129,11 +1131,11 @@ class TestDTensorSpec(DTensorTestBase):
 
     def test_dtensor_spec_print(self):
         self.assertExpectedInline(
-            putils.format_shard_order_str((Shard(2), Shard(1), Shard(0)), None),
+            DTensorSpec.format_shard_order_str((Shard(2), Shard(1), Shard(0)), None),
             """S(2)S(1)S(0)""",
         )
         self.assertExpectedInline(
-            putils.format_shard_order_str(
+            DTensorSpec.format_shard_order_str(
                 (Shard(2), Shard(1), Shard(0)),
                 (
                     ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
@@ -1144,20 +1146,22 @@ class TestDTensorSpec(DTensorTestBase):
             """S(2)S(1)S(0)""",
         )
         self.assertExpectedInline(
-            putils.format_shard_order_str(
+            DTensorSpec.format_shard_order_str(
                 (Shard(1), Shard(1), Shard(1)),
                 (ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0, 1)),),
             ),
             """S(1)[1]S(1)[2]S(1)[0]""",
         )
         self.assertExpectedInline(
-            putils.format_shard_order_str(
+            DTensorSpec.format_shard_order_str(
                 (Replicate(), Replicate(), Replicate()), None
             ),
             """RRR""",
         )
         self.assertExpectedInline(
-            putils.format_shard_order_str((Replicate(), Replicate(), Shard(1)), None),
+            DTensorSpec.format_shard_order_str(
+                (Replicate(), Replicate(), Shard(1)), None
+            ),
             """RRS(1)""",
         )
 
@@ -1169,75 +1173,45 @@ class TestDTensorSpec(DTensorTestBase):
         tensor_global = DTensor.from_local(
             tensor_local, mesh, [Shard(1), Shard(1), Shard(0)]
         )
-        putils._verify_shard_order(
-            tensor_global.placements,
-            (
-                (
-                    ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
-                    ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
-                )
-            ),
+        tensor_global._spec.shard_order = (
+            ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+            ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
         )
         with self.assertRaisesRegex(
             AssertionError, r"shard_order .* has empty mesh dim"
         ):
-            putils._verify_shard_order(
-                tensor_global.placements,
-                (
-                    (
-                        ShardOrderEntry(tensor_dim=1, mesh_dims=()),
-                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
-                    )
-                ),
+            tensor_global._spec.shard_order = (
+                ShardOrderEntry(tensor_dim=1, mesh_dims=()),
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
             )
         with self.assertRaisesRegex(
             AssertionError, "tensor dim should be sorted in shard_order"
         ):
-            putils._verify_shard_order(
-                tensor_global.placements,
-                (
-                    (
-                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
-                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
-                    )
-                ),
+            tensor_global._spec.shard_order = (
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
             )
         with self.assertRaisesRegex(
             AssertionError,
             r"placement\[\d+\] doesn't have a matching shard in shard_order",
         ):
-            putils._verify_shard_order(
-                tensor_global.placements,
-                (
-                    (
-                        ShardOrderEntry(tensor_dim=0, mesh_dims=(1,)),
-                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
-                    )
-                ),
+            tensor_global._spec.shard_order = (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(1,)),
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
             )
         with self.assertRaisesRegex(
             AssertionError, r"shard_order .* has invalid mesh dim \([\d,]+\)"
         ):
-            putils._verify_shard_order(
-                tensor_global.placements,
-                (
-                    (
-                        ShardOrderEntry(tensor_dim=0, mesh_dims=(3,)),
-                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
-                    )
-                ),
+            tensor_global._spec.shard_order = (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(3,)),
+                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
             )
         with self.assertRaisesRegex(
             AssertionError, r"shard_order .* has invalid tensor dim -?\d+"
         ):
-            putils._verify_shard_order(
-                tensor_global.placements,
-                (
-                    (
-                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
-                        ShardOrderEntry(tensor_dim=-1, mesh_dims=(1, 0)),
-                    )
-                ),
+            tensor_global._spec.shard_order = (
+                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                ShardOrderEntry(tensor_dim=-1, mesh_dims=(1, 0)),
             )
 
     @with_comms
@@ -1255,11 +1229,9 @@ class TestDTensorSpec(DTensorTestBase):
         self.assertEqual(hash(tensor_global_1._spec), hash(tensor_global_2._spec))
         self.assertEqual(tensor_global_1._spec, tensor_global_2._spec)
         # not using the default shard_order
-        tensor_global_1._spec._maybe_update_placements_given_shard_order(
-            (
-                ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
-                ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
-            )
+        tensor_global_1._spec.shard_order = (
+            ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+            ShardOrderEntry(tensor_dim=1, mesh_dims=(1, 0)),
         )
         # hash should be recomputed in DTensorSpec.__setattr__()
         self.assertNotEqual(hash(tensor_global_1._spec), hash(tensor_global_2._spec))
@@ -1293,16 +1265,13 @@ class TestDTensorSpec(DTensorTestBase):
         )
         self.assertEqual(tensor_global._spec.shard_order, ())
 
-        # shard_order works with _StridedShard
+        # shard_order doesn't work with _StridedShard
         tensor_global = DTensor.from_local(
             tensor_local,
             mesh,
             [Replicate(), _StridedShard(0, split_factor=2), Shard(0)],
         )
-        self.assertEqual(
-            tensor_global._spec.shard_order,
-            (ShardOrderEntry(tensor_dim=0, mesh_dims=(2, 1)),),
-        )
+        self.assertEqual(tensor_global._spec.shard_order, ())
 
     @with_comms
     def test_default_shard_order(self):
@@ -1321,16 +1290,16 @@ class TestDTensorSpec(DTensorTestBase):
                 ShardOrderEntry(tensor_dim=2, mesh_dims=(1,)),
             ),
         )
-        self.assertTrue(putils._is_default_shard_order(tensor_global._spec.shard_order))
+        self.assertTrue(
+            DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
+        )
         # manually set the shard_order by exchange mesh dim 0 and 2
-        tensor_global._spec._maybe_update_placements_given_shard_order(
-            (
-                ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0)),
-                ShardOrderEntry(tensor_dim=2, mesh_dims=(1,)),
-            )
+        tensor_global._spec.shard_order = (
+            ShardOrderEntry(tensor_dim=1, mesh_dims=(2, 0)),
+            ShardOrderEntry(tensor_dim=2, mesh_dims=(1,)),
         )
         self.assertFalse(
-            putils._is_default_shard_order(tensor_global._spec.shard_order)
+            DTensorSpec.is_default_device_order(tensor_global._spec.shard_order)
         )
 
 

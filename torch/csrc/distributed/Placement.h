@@ -8,7 +8,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <typeinfo>
 
 namespace torch::distributed {
 
@@ -48,17 +47,8 @@ class Shard : public Placement {
     return !dim_.has_value() || *dim_ == dim;
   }
 
-  // Virtual method for polymorphic comparison
-  virtual bool equals(const Shard& rhs) const {
-    // Only equal if both are exactly Shard type and have same dim
-    if (typeid(*this) != typeid(rhs)) {
-      return false;
-    }
-    return dim == rhs.dim;
-  }
-
   bool operator==(const Shard& rhs) const {
-    return equals(rhs);
+    return dim == rhs.dim;
   }
 
   bool operator!=(const Shard& rhs) const {
