@@ -1699,7 +1699,7 @@ class VariableBuilder:
         if (
             istype(value, tuple)
             and all(ConstantVariable.is_literal(item) for item in value)
-            and self.source.guard_source().is_unspecialized_nn_module()
+            and self.source.guard_source.is_unspecialized_nn_module()
         ):
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return TupleVariable([ConstantVariable.create(item) for item in value])
@@ -2017,8 +2017,8 @@ class VariableBuilder:
                 if is_int_specialization_case(value, self.source):
                     recompile_hint = None
                     if (
-                        self.source.guard_source().is_unspecialized_builtin_nn_module()
-                        or self.source.guard_source().is_unspecialized_nn_module()
+                        self.source.guard_source.is_unspecialized_builtin_nn_module()
+                        or self.source.guard_source.is_unspecialized_nn_module()
                     ):
                         # This means that it is an integer from a NN module.
                         # Dynamo considers nn module int attributes to be static
@@ -2036,7 +2036,7 @@ class VariableBuilder:
                         self.tx,
                         self.source.name,
                         FrameStateSizeEntry.make_scalar(value),
-                        is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+                        is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
                     )
                     self.install_guards(
                         functools.partial(
@@ -2078,7 +2078,7 @@ class VariableBuilder:
                 isinstance(value, torch.nn.Parameter)
                 # mark tensor attributes of nn modules static. This is done to keep inline_inbuilt_nn_modules behavior
                 # compatible with previous behavior.
-                or (source and source.guard_source().is_unspecialized_nn_module())
+                or (source and source.guard_source.is_unspecialized_nn_module())
             )
         ):
             self.mark_static_input(value, guard=is_parameter_freezing())
@@ -2101,8 +2101,8 @@ class VariableBuilder:
         )
 
         if should_install_free_tensor or (
-            (source.guard_source().is_specialized_nn_module() or make_graph_attribute)
-            and not source.guard_source().is_fsdp_module()
+            (source.guard_source.is_specialized_nn_module() or make_graph_attribute)
+            and not source.guard_source.is_fsdp_module()
         ):
             self.assert_not_wrapped_by_this_graph(value)
             return self.tx.output.register_attr_or_module(
@@ -2446,7 +2446,7 @@ class VariableBuilder:
                 self.tx,
                 name,
                 FrameStateSizeEntry.make_scalar(value),
-                is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+                is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
             )
 
             # TODO: This should be dynamic, as we in general do not
@@ -2541,7 +2541,7 @@ class VariableBuilder:
             self.tx,
             self.source.name,
             FrameStateSizeEntry.make_scalar(value),
-            is_unspecialized_nn_module=self.source.guard_source().is_unspecialized_nn_module(),
+            is_unspecialized_nn_module=self.source.guard_source.is_unspecialized_nn_module(),
         )
 
         # NB: we specialize on nan input, because our guard modeling in
