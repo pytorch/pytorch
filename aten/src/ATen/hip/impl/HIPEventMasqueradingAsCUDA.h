@@ -4,8 +4,7 @@
 
 // Use of c10::hip namespace here makes hipification easier, because
 // I don't have to also fix namespaces.  Sorry!
-namespace c10 {
-namespace hip {
+namespace c10 { namespace hip {
 
 // See Note [Masquerading as CUDA] for motivation
 
@@ -166,5 +165,4 @@ class HIPEventPoolMasqueradingAsCUDA {
   std::vector<PerDevicePool> pools_;
 };
 
-} // namespace hip
-} // namespace c10
+}} // namespace c10::hip
