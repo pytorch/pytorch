@@ -241,6 +241,13 @@ def get_template_any_data_ptr(t, dtype, mutable) -> int:
     )
 
 
+def my_get_curr_cuda_blas_handle() -> int:
+    """
+    Return the current cuBlasHandle_t pointer value.
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_get_curr_cuda_blas_handle.default()
+
+
 def my_string_op(t, accessor) -> tuple[list[str], int]:
     """
     The purpose of this op is to test inputting and outputting strings in a

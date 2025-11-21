@@ -826,6 +826,15 @@ if not IS_WINDOWS:
                                 )
 
         @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_get_curr_cuda_blas_handle(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            res = libtorch_agnostic.ops.my_get_curr_cuda_blas_handle()
+            expected = torch.cuda.current_blas_handle()
+            self.assertEqual(res, expected)
+
+        @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op(self, device):
             import libtorch_agnostic_2_10 as libtorch_agnostic
 
