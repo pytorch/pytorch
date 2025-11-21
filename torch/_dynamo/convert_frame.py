@@ -933,7 +933,11 @@ class GraphRuntimeEnv:
     argdefs: Optional[tuple[Any, ...]]
 
     def forward_callable(
-        self, backend_id: str, compiled_fn: Callable[..., Any]
+        self,
+        backend_id: str,
+        compiled_fn: Callable[..., Any],
+        *,
+        extra_globals: Optional[dict[str, Any]] = None,
     ) -> Callable[..., Any]:
         import_sources = {
             alias: importlib.import_module(module_name)
@@ -942,6 +946,7 @@ class GraphRuntimeEnv:
         f_globals = {
             **import_sources,
             **self.used_globals,
+            **(extra_globals or {}),
             backend_id: compiled_fn,
         }
         return types.FunctionType(
@@ -1026,13 +1031,16 @@ class CaptureOutput:
         self,
         *,
         compiled_fn: Optional[Callable[..., Any]] = None,
+        extra_globals: Optional[dict[str, Any]] = None,
     ) -> Callable[..., Any]:
         runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
         backend_id = self.backend_input.backend_id
         # pyrefly: ignore [not-callable]
         compiled_fn = compiled_fn or self.backend_input.graph_module
-        return runtime_env.forward_callable(backend_id, compiled_fn)
+        return runtime_env.forward_callable(
+            backend_id, compiled_fn, extra_globals=extra_globals
+        )
 
 
 def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
