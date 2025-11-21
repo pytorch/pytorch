@@ -66,6 +66,9 @@ def _schedulable_wait_node(node: torch.fx.Node) -> bool:
     if not is_wait_tensor(node):
         return False
     assert isinstance(node.args[0], torch.fx.Node)
+    if isinstance(node.args[0].target, str):
+        return False
+
     assert isinstance(node.args[0].target.name(), str)
     is_callable: bool = node.args[0].op == "call_function"
     coll: NCCL_COLL = get_collective_type_from_kernel_name(node.args[0].target.name())
