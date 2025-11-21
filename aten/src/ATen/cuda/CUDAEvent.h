@@ -23,7 +23,7 @@ class CUDAEventPool {
 
   CUDAEventPool(size_t init_num_events = 0) : pools_(c10::cuda::device_count()) {
     if (init_num_events > 0) {
-      init_events(init_num_events);
+      reserve_events_on_pools(init_num_events);
     }
   }
 
@@ -73,7 +73,7 @@ class CUDAEventPool {
  private:
   // Pre-initialize each device pool with N events. This prevents
   // cudaEventCreate() from invoking during steady-state execution.
-  void init_events(size_t num_events) {
+  void reserve_events_on_pools(size_t num_events) {
     for (const auto device : c10::irange(pools_.size())) {
       CUDAGuard guard(device);
       std::vector<Event> temp_events;
