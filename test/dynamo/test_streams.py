@@ -27,7 +27,7 @@ def remove_file_comment(gm_str: str) -> str:
 
 
 def print_graph(graph: torch.fx.GraphModule) -> str:
-    return remove_file_comment(graph.print_readable())
+    return remove_file_comment(graph.print_readable(print_output=False))
 
 
 class TestStreams(torch._dynamo.test_case.TestCase):
@@ -584,6 +584,10 @@ class GraphModule(torch.nn.Module):
 
         # Annotation: {'stream': 1}
         mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
+
+        # No stacktrace found for following nodes
+        record_event_default = torch.ops.streams.record_event.default(2, 1);  record_event_default = None
+        wait_event_default = torch.ops.streams.wait_event.default(2, 0);  wait_event_default = None
 
         # Annotation: {'stream': 0}
         add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
