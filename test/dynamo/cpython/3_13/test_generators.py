@@ -1959,7 +1959,7 @@ class Queens:
         for i in range(n):
             squares = [" " for j in range(n)]
             squares[row2col[i]] = "Q"
-            print("|" + "|".join(squares) + "|")
+            print(f"|{'|'.join(squares)}|")
             print(sep)
 
 # A conjoin-based Knight's Tour solver.  This is pretty sophisticated
@@ -2155,7 +2155,7 @@ class Knights:
         print(sep)
         for i in range(m):
             row = squares[i]
-            print("|" + "|".join(row) + "|")
+            print(f"|{'|'.join(row)}|")
             print(sep)
 
 conjoin_tests = """

@@ -188,7 +188,7 @@ def gen_wrappers(xnnpack_path):
         print(BANNER, file=wrapper_defs)
         print('"""', file=wrapper_defs)
         for name in WRAPPER_SRC_NAMES:
-            print('\n' + name + ' = [', file=wrapper_defs)
+            print(f"\n{name} = [", file=wrapper_defs)
             for file_name in sources[name]:
                 print(f'    "xnnpack_wrappers/{file_name}",', file=wrapper_defs)
             print(']', file=wrapper_defs)
@@ -199,7 +199,7 @@ def gen_wrappers(xnnpack_path):
         print(BANNER, file=src_defs)
         print('"""', file=src_defs)
         for name in SRC_NAMES:
-            print('\n' + name + ' = [', file=src_defs)
+            print(f"\n{name} = [", file=src_defs)
             for file_name in sources[name]:
                 print(f'    "XNNPACK/src/{file_name}",', file=src_defs)
             print(']', file=src_defs)

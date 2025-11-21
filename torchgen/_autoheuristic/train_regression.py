@@ -70,7 +70,7 @@ class AHTrainRegressionTree(AHTrain):
         for set_name in results_df["dataset"].unique():
             dataset_results = results_df[results_df["dataset"] == set_name]
             dataset_results = dataset_results.sort_values(by="correct")
-            print(dataset_results.to_string() + "\n")
+            print(f"{dataset_results.to_string()}\n"
 
         feature_names = feature_columns + choice_columns
         self.dt_to_python(

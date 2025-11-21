@@ -356,7 +356,7 @@ class AHTrainDecisionTree(AHTrain):
         for set_name in results_df["set"].unique():
             dataset_results = results_df[results_df["set"] == set_name]
             dataset_results = dataset_results.sort_values(by=sort_metric)
-            print(dataset_results.to_string() + "\n")
+            print(f"{dataset_results.to_string()}\n")
 
         if best_model is not None:
             if save_dot:

@@ -167,5 +167,5 @@ if __name__ == "__main__":
 
     comparison = benchmark_utils.Compare(measurements)
 
-    print("== Results " + "=" * 80 + "\n" + "/" * 95 + "\n")
+    print(f"== Results {'=' * 80}\n{'/' * 95}\n")
     comparison.print()

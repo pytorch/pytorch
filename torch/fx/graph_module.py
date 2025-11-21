@@ -359,7 +359,7 @@ def _print_readable(
 
     output = module_code + submodule_code
     if print_output:
-        print(module_code + submodule_code)
+        print(f"{module_code}{submodule_code}")
     return output
 
 

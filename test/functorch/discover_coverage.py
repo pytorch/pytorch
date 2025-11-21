@@ -903,7 +903,7 @@ class OperatorSet:
 opset = OperatorSet.all()
 has_no_opinfo = opset.query(Operator.has_opinfo, (False,))
 
-print("=" * 30 + " Summary " + "=" * 30)
+print(f"{'=' * 30} Summary {'=' * 30}")
 print(f"% of usages on github: {get_ops_percentage(99999, 99999)}")
 print(opset.summary())
 
@@ -911,7 +911,7 @@ print(opset.summary())
 result = opset.query(Operator.supports_vjp, (Support.NO, Support.UNKNOWN))
 # pprint.pprint(result)
 
-print("=" * 30 + " Top 60 Summary " + "=" * 30)
+print(f"{'=' * 30} Top 60 Summary {'=' * 30}")
 print(f"% of usages on github: {get_ops_percentage(35, 25)}")
 opset = OperatorSet.from_top_ops_threshold(35, 25)
 # result = opset.query(Operator.supports_vmapjvp, (Support.NO, Support.UNKNOWN))
@@ -927,7 +927,7 @@ opset = OperatorSet.from_top_ops_threshold(35, 25)
 # pprint.pprint(result)
 print(opset.summary())
 
-print("=" * 30 + " Top 125 Summary " + "=" * 30)
+print(f"{'=' * 30} Top 125 Summary {'=' * 30}")
 print(f"% of usages on github: {get_ops_percentage(100, 25)}")
 opset = OperatorSet.from_top125()
 # result = opset.query(Operator.supports_vmap, (Support.NO, Support.UNKNOWN))

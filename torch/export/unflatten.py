@@ -559,7 +559,7 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
 
     def _print_graph(self):
         for fqn, mod in self.named_modules():
-            print(fqn + ":")
+            print(f"{fqn}:")
             if hasattr(mod, "graph") and isinstance(mod.graph, torch.fx.Graph):
                 print(mod.graph)
 

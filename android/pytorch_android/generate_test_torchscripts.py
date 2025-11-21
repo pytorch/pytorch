@@ -14,7 +14,7 @@ def scriptAndSave(module, fileName):
     outputFileName = OUTPUT_DIR + fileName
     # note that the lite interpreter model can also be used in full JIT
     script_module._save_for_lite_interpreter(outputFileName)
-    print("Saved to " + outputFileName)
+    print(f"Saved to {outputFileName}")
     print("=" * 80)
 
 

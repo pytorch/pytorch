@@ -217,7 +217,7 @@ class _CommModeModuleTracker(ModTracker):
 
     def print_sharding_info(self):
         for key, value in self.sharding_dict.items():
-            print(key + ": " + str(value))
+            print(f"{key}: {str(value)}")
 
 
 class CommDebugMode(TorchDispatchMode):

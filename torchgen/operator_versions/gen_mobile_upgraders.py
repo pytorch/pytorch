@@ -359,7 +359,7 @@ def write_cpp(cpp_path: str, upgrader_dict: list[dict[str, Any]]) -> None:
         operator_version_map=version_map_src,
         upgrader_bytecode="".join(all_upgrader_src_string).lstrip("\n"),
     )
-    print("writing file to : ", cpp_path + "/" + UPGRADER_MOBILE_FILE_NAME)
+    print(f"writing file to :  {cpp_path}/{UPGRADER_MOBILE_FILE_NAME}")
     with open(os.path.join(cpp_path, UPGRADER_MOBILE_FILE_NAME), "wb") as out_file:
         out_file.write(upgrader_file_content.encode("utf-8"))
 

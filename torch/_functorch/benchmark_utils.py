@@ -213,7 +213,7 @@ def benchmark_utilization(
     isExist = os.path.exists(trace_folder)
     if not isExist:
         os.makedirs(trace_folder)
-        print("create folder " + trace_folder)
+        print(f"create folder {trace_folder}")
 
     if optimize_ctx is None:
         optimize_ctx = contextlib.nullcontext()

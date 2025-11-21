@@ -157,7 +157,7 @@ def calcOpsCoverage(ops):
 
 def getModuleFromName(model_name):
     if model_name not in all_modules:
-        print("Cannot find test model for " + model_name)
+        print(f"Cannot find test model for {model_name}")
         return None, []
 
     module = all_modules[model_name]
@@ -200,7 +200,7 @@ def generateAllModels(folder, on_the_fly=False):
         all_ops = all_ops + ops
         path = folder + name + ("_temp.ptl" if on_the_fly else ".ptl")
         module._save_for_lite_interpreter(path)
-        print("model saved to " + path)
+        print(f"model saved to {path}")
     calcOpsCoverage(all_ops)
 
 
@@ -213,7 +213,7 @@ def generateModel(name):
     path_android = test_path_android + name + ".ptl"
     module._save_for_lite_interpreter(path_ios)
     module._save_for_lite_interpreter(path_android)
-    print("model saved to " + path_ios + " and " + path_android)
+    print(f"model saved to {path_ios} and {path_android}")
 
 
 def main(argv):

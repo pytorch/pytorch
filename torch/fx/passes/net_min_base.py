@@ -916,7 +916,7 @@ class _MinimizerBase:
     def print_report(self, report: list[str]):
         for i in range(len(report)):
             if i > 0:
-                print(" . " + report[i])
+                print(f" . {report[i]}")
             else:
                 print(report[i])
 
