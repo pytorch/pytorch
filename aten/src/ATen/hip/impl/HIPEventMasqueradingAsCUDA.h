@@ -79,6 +79,10 @@ struct HIPEventMasqueradingAsCUDA {
     event_.ipc_handle(handle);
   }
 
+  void create(DeviceIndex device_index) {
+    event_.create(device_index);
+  }
+
  private:
   HIPEvent event_;
 };
