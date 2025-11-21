@@ -825,6 +825,15 @@ if not IS_WINDOWS:
                                     t, rdtype, mutable
                                 )
 
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_get_curr_cuda_blas_handle(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            res = libtorch_agnostic.ops.my_get_curr_cuda_blas_handle()
+            expected = torch.cuda.current_blas_handle()
+            self.assertEqual(res, expected)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
