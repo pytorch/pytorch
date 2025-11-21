@@ -85,12 +85,11 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     MI200_ARCH,
-    parametrize,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
+    skipIfRocm,
     skipIfRocmArch,
     TemporaryFileName,
-    skipIfRocm,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
@@ -4803,7 +4802,6 @@ class DistributedTest:
 
             for j, model in enumerate(models_to_test):
                 model_optim_in_bwd = copy.deepcopy(model)
-
                 model = nn.parallel.DistributedDataParallel(
                     model,
                     device_ids=[self.rank],

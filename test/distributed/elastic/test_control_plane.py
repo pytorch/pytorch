@@ -16,7 +16,6 @@ from torch.distributed.elastic.control_plane import (
     TORCH_WORKER_SERVER_SOCKET,
     worker_main,
 )
-
 from torch.monitor import _WaitCounter
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
