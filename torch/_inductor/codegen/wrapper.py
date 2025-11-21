@@ -2122,6 +2122,10 @@ class PythonWrapperCodegen(CodeGen):
             output.writeline(f"{name} = {val}")
 
         def add_torchbind_input(name, value):
+            if value is None:
+                output.writeline(f"{name} = None")
+                return
+
             import pickle
 
             assert isinstance(value, torch.ScriptObject)
