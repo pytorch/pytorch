@@ -382,9 +382,6 @@ def sample_inputs_linalg_norm(
                 elif is_matrix_norm:
                     dims_to_check = {
                         None: (0,),
-                        np.inf: (0,),
-                        2: (0, 1),
-                        1: (1,),
                         -1: (1,),
                         -2: (0, 1),
                         -np.inf: (0,),
@@ -393,6 +390,18 @@ def sample_inputs_linalg_norm(
                     if any(test_size[d] == 0 for d in dims_to_check):
                         # IndexError: amax(): Expected reduction dim {dim} to
                         # have non-zero size.
+                        continue
+
+                    no_grad_dims_to_check = {
+                        np.inf: (0,),
+                        2: (0, 1),
+                        1: (1,),
+                    }.get(ord, ())
+
+                    if (
+                        any(test_size[d] == 0 for d in no_grad_dims_to_check)
+                        and requires_grad
+                    ):
                         continue
 
                 if variant == "subgradient_at_zero":
