@@ -23,7 +23,7 @@ from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
 from ..cpp_utils import DTYPE_TO_CPP
-from .cuda_env import get_cuda_arch, get_cuda_version
+from ..cuda.cuda_env import get_cuda_arch, get_cuda_version
 
 
 log = logging.getLogger(__name__)
@@ -98,14 +98,14 @@ def try_import_cutlass() -> bool:
 
     # contains both cutlass and cutlass_library
     # we need cutlass for eVT
-    cutlass_python_path = path_join(config.cuda.cutlass_dir, "python")
+    cutlass_python_path = path_join(config.cutlass.cutlass_dir, "python")
     torch_root = os.path.abspath(os.path.dirname(torch.__file__))
     mock_src_path = os.path.join(
         torch_root,
         "_inductor",
         "codegen",
-        "cuda",
-        "cutlass_lib_extensions",
+        "cutlass",
+        "lib_extensions",
         "cutlass_mock_imports",
     )
 
@@ -252,7 +252,7 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
         )
         return {}
     arch = _normalize_cuda_arch(arch)
-    instantiation_level: str = config.cuda.cutlass_instantiation_level
+    instantiation_level: str = config.cutlass.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=arch,
         cuda_version=version,
