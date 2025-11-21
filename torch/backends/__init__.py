@@ -113,9 +113,6 @@ def _set_fp32_precision_setter(backend, op):
 
 
 class GenericModule(PropModule):
-    def __init__(self, m, name):
-        super().__init__(m, name)
-
     fp32_precision = ContextProp(
         _get_fp32_precision_getter("generic", "all"),
         _set_fp32_precision_setter("generic", "all"),
