@@ -1,5 +1,5 @@
 from collections.abc import Iterator, MutableMapping
-from typing import Generic, Optional, TypeAlias, TypeVar
+from typing import Any, Generic, Optional, TypeAlias, TypeVar
 
 import torch.fx
 import torch.fx.traceback
@@ -19,7 +19,7 @@ Graph: TypeAlias = torch.fx.Graph
 def get_roofline_estimate(node: Node) -> float:
     assert node.op == "call_function", "non-func node in roofline estimate"
 
-    def map_value(x):
+    def map_value(x: Any) -> Any:
         return x.meta.get("value", x) if isinstance(x, Node) else x
 
     func = node.target
@@ -190,7 +190,7 @@ def handle_synced_deallocation(
     stream_to_exec_trace: dict[Optional[int], IndexedDict[Node, float]],
     node: Node,
     last_usage: Node,
-):
+) -> None:
     assert is_bwd_node(node), (
         "synced allocations should only be handled on backward nodes"
     )
@@ -293,7 +293,7 @@ def assign_backward_streams(gm: torch.fx.GraphModule) -> None:
 
 def insert_backward_syncs(gm: torch.fx.GraphModule) -> None:
     """Inserts stream syncs for backward nodes if consumer and producer are on different streams"""
-    node_to_wait_event_ind = {}
+    node_to_wait_event_ind: dict[Node, int] = {}
     for node in gm.graph.nodes:
         if is_bwd_node(node):
             flat_args = _get_flat_args(node, {})

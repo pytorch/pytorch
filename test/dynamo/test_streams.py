@@ -763,14 +763,114 @@ class GraphModule(torch.nn.Module):
         # first allocated on the first stream used on the second stream
         # used on the first stream again then finally used on the last stream
         def fn(x):
+            e = torch.Event()
             with torch.Stream(device="cuda:0"):
                 y = torch.ones(2, 2, device="cuda:0")
                 z = y * x
+                e.record()
 
             with torch.Stream(device="cuda:0"):
-                z0 = y * 2 * x
+                e.wait()
+                z0 = y * 2 * z
+                e.record()
 
-            return z0, z
+            with torch.Stream(device="cuda:0"):
+                e.wait()
+                z1 = y * x * z0
+                e.record()
+
+            with torch.Stream(device="cuda:0"):
+                e.wait()
+                z2 = y * 4 * z1
+                e.record()
+
+            e.wait()
+            return z, z1, z2
+
+        inp = (torch.ones(2, 2, device="cuda", requires_grad=True),)
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, *inp)
+
+        actual[1].sum().backward()
+
+        self.assertExpectedInline(
+            print_graph(bw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[2, 2]", mul: "f32[2, 2]", tangents_1: "f32[2, 2]", \
+tangents_2: "f32[2, 2]", tangents_3: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        ones: "f32[2, 2]" = torch.ops.aten.ones.default([2, 2], device = device(type='cuda', index=0), pin_memory = False)
+
+        # Annotation: {'stream': 4}
+        mul_5: "f32[2, 2]" = torch.ops.aten.mul.Tensor(ones, 4)
+        mul_7: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_3, mul_5);  tangents_3 = mul_5 = None
+
+        # No stacktrace found for following nodes
+        record_event_default = torch.ops.streams.record_event.default(6, 4);  record_event_default = None
+        wait_event_default = torch.ops.streams.wait_event.default(6, 3);  wait_event_default = None
+
+        # Annotation: {'stream': 3}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, mul_7);  tangents_2 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_4 = torch.ops.streams.record_event.default(10, 3);  record_event_default_4 = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(10, 4, mul_7);  mul_7 = sync_dealloc_default = None
+
+        # Annotation: {'stream': 3}
+        mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(ones, primals_1);  primals_1 = None
+        mul_8: "f32[2, 2]" = torch.ops.aten.mul.Tensor(add, mul_3);  mul_3 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_1 = torch.ops.streams.record_event.default(7, 3);  record_event_default_1 = None
+
+        # Annotation: {'stream': 2}
+        mul_1: "f32[2, 2]" = torch.ops.aten.mul.Tensor(ones, 2)
+        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(mul_1, mul);  mul = None
+
+        # Annotation: {'stream': 3}
+        mul_9: "f32[2, 2]" = torch.ops.aten.mul.Tensor(add, mul_2);  add = mul_2 = None
+        mul_10: "f32[2, 2]" = torch.ops.aten.mul.Tensor(mul_9, ones);  mul_9 = None
+
+        # No stacktrace found for following nodes
+        wait_event_default_1 = torch.ops.streams.wait_event.default(7, 2);  wait_event_default_1 = None
+
+        # Annotation: {'stream': 2}
+        mul_11: "f32[2, 2]" = torch.ops.aten.mul.Tensor(mul_8, mul_1);  mul_1 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_5 = torch.ops.streams.record_event.default(11, 2);  record_event_default_5 = None
+        sync_dealloc_default_1 = torch.ops.streams.sync_dealloc.default(11, 3, mul_8);  mul_8 = sync_dealloc_default_1 = None
+        record_event_default_2 = torch.ops.streams.record_event.default(8, 2);  record_event_default_2 = None
+        wait_event_default_2 = torch.ops.streams.wait_event.default(8, 1);  wait_event_default_2 = None
+
+        # Annotation: {'stream': 1}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_1, mul_11);  tangents_1 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_6 = torch.ops.streams.record_event.default(12, 1);  record_event_default_6 = None
+        sync_dealloc_default_2 = torch.ops.streams.sync_dealloc.default(12, 2, mul_11);  mul_11 = sync_dealloc_default_2 = None
+
+        # Annotation: {'stream': 1}
+        mul_12: "f32[2, 2]" = torch.ops.aten.mul.Tensor(add_1, ones);  add_1 = ones = None
+
+        # No stacktrace found for following nodes
+        record_event_default_3 = torch.ops.streams.record_event.default(9, 1);  record_event_default_3 = None
+        wait_event_default_3 = torch.ops.streams.wait_event.default(9, 3);  wait_event_default_3 = None
+
+        # Annotation: {'stream': 3}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_10, mul_12);  mul_10 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_7 = torch.ops.streams.record_event.default(13, 3);  record_event_default_7 = None
+        sync_dealloc_default_3 = torch.ops.streams.sync_dealloc.default(13, 1, mul_12);  mul_12 = sync_dealloc_default_3 = None
+        return (add_2,)
+""",
+        )
 
     @requires_cuda
     def test_inductor_lowering(self):
