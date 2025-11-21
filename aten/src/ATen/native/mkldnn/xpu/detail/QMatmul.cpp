@@ -355,10 +355,12 @@ struct ScaleSpec {
         "'");
 
     // For rowwise: SRC groups={1, K}, WEI groups={K, 1}
+    // For channelwise: WEI groups={N, 1}
     TORCH_INTERNAL_ASSERT(
         (groups == dnnl::memory::dims{1, inner_dim} ||
-         groups == dnnl::memory::dims{inner_dim, 1}),
-        "The groups must be either {1, inner_dim} or {inner_dim, 1}. But got ",
+         groups == dnnl::memory::dims{inner_dim, 1} ||
+         groups == dnnl::memory::dims{outer_dim, 1}),
+        "The groups must be either {1, inner_dim} or {inner_dim, 1} or {outer_dim, 1}. But got ",
         groups,
         ".");
     return outer_dim;
@@ -392,8 +394,9 @@ inline ScaleSpec make_scale_spec(
       "'");
   TORCH_INTERNAL_ASSERT(
       (scaling_type == at::blas::ScalingType::TensorWise ||
-       scaling_type == at::blas::ScalingType::RowWise),
-      "Currently only support scaling_type for TensorWise or RowWise");
+       scaling_type == at::blas::ScalingType::RowWise ||
+       scaling_type == at::blas::ScalingType::ChannelWise),
+      "Currently only support scaling_type for TensorWise or RowWise or ChannelWise");
   int64_t dim = K; // Currently only K is used for grouping
   bool is_src = (arg_type == "src");
   if (scaling_type == at::blas::ScalingType::TensorWise) {
@@ -401,7 +404,7 @@ inline ScaleSpec make_scale_spec(
     // mask=0 : scale whole tensor
     // groups={1, 1}: indicates that there is only one group for scaling
     return {0, {1, 1}, dnnl::memory::data_type::f32};
-  } else {
+  } else if (scaling_type == at::blas::ScalingType::RowWise) {
     // (scaling_type == at::blas::ScalingType::RowWise)
     // Scale RowWise. The same as `--attr-scales=per_dim_01`.
     // mask={(1 << 0) | (1 << 1)}: Scale on both dim0 and dim1
@@ -410,6 +413,17 @@ inline ScaleSpec make_scale_spec(
         (1 << 0) | (1 << 1),
         is_src ? dnnl::memory::dims{1, dim} : dnnl::memory::dims{dim, 1},
         dnnl::memory::data_type::f32};
+  } else if (scaling_type == at::blas::ScalingType::ChannelWise) {
+    // Scale ChannelWise. The same as `--attr-scales=per_dim_0`.
+    // mask={(1 << 0)}: Scale on dim0
+    // SRC: groups={M, 1}, WEIGHTS: groups={N, 1}
+    TORCH_CHECK(
+        !is_src,
+        "ChannelWise scaling is only supported for WEIGHTS, but trying to scale SRC.");
+    return {(1 << 1), dnnl::memory::dims{N, 1}, dnnl::memory::data_type::f32};
+  } else {
+    TORCH_CHECK(
+        false, "Unsupported scaling_type: ", static_cast<int>(scaling_type));
   }
 }
 
