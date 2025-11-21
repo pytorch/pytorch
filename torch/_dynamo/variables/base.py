@@ -151,9 +151,6 @@ class AttributeMutation(MutationType):
     allows mutation on the value's attributes.
     """
 
-    def __init__(self, typ: SourceType) -> None:
-        super().__init__(typ)
-
 
 class AttributeMutationExisting(AttributeMutation):
     """
