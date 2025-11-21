@@ -15,7 +15,7 @@ if [ -z "${image}" ]; then
 fi
 
 function extract_version_from_image_name() {
-  eval export $2=$(echo "${image}" | perl -n -e"/$1(\d+(\.\d+)?(\.\d+)?)/ && print \$1")
+  eval export $2=$(echo "${image}" | perl -n -e"/$1(\d+(\.\d+)?(\.\d+)?t?)/ && print \$1")
   if [ "x${!2}" = x ]; then
     echo "variable '$2' not correctly parsed from image='$image'"
     exit 1
@@ -309,6 +309,11 @@ case "$tag" in
     echo "image '$image' did not match an existing build configuration"
     if [[ "$image" == *py* ]]; then
       extract_version_from_image_name py ANACONDA_PYTHON_VERSION
+      if [[ "$ANACONDA_PYTHON_VERSION" == *t ]]
+      then
+        ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION%?}
+        PYTHON_FREETHREADED=1
+      fi
     fi
     if [[ "$image" == *cuda* ]]; then
       extract_version_from_image_name cuda CUDA_VERSION
@@ -360,6 +365,7 @@ docker build \
        --build-arg "GLIBC_VERSION=${GLIBC_VERSION}" \
        --build-arg "CLANG_VERSION=${CLANG_VERSION}" \
        --build-arg "ANACONDA_PYTHON_VERSION=${ANACONDA_PYTHON_VERSION}" \
+       --build-arg "PYTHON_FREETHREADED=${PYTHON_FREETHREADED}" \
        --build-arg "PYTHON_VERSION=${PYTHON_VERSION}" \
        --build-arg "GCC_VERSION=${GCC_VERSION}" \
        --build-arg "CUDA_VERSION=${CUDA_VERSION}" \
