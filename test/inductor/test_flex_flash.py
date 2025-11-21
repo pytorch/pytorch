@@ -374,7 +374,7 @@ class TestFlexFlash(InductorTestCase):
         compiled_fn = torch.compile(flex_attention)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"BACKEND='FLASH' for flex attention backward requires the default mask_mod",
+            r"NYI: Flex Flash Attention doesn't support block_sparsity yet",
         ):
             compiled_fn(
                 q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
@@ -393,7 +393,7 @@ class TestFlexFlash(InductorTestCase):
         compiled_fn = torch.compile(flex_attention)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"BACKEND='FLASH' for flex attention backward requires the default score_mod",
+            r"NYI: Flex Flash Attention doesn't support score_mods in bwds yet",
         ):
             compiled_fn(
                 q,
@@ -416,7 +416,7 @@ class TestFlexFlash(InductorTestCase):
         compiled_fn = torch.compile(flex_attention)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"BACKEND='FLASH' for flex attention backward requires the default score_mod",
+            r"NYI: Flex Flash Attention doesn't support score_mods in bwds yet",
         ):
             compiled_fn(
                 q,
