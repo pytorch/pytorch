@@ -6,6 +6,7 @@ from typing import Any
 
 import torch
 import torch.distributed as dist
+import torch.distributed.tensor.placement_utils as putils
 from torch.distributed._local_tensor import (
     local_tensor_mode,
     LocalTensor,
@@ -806,13 +807,13 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
                     shard_order, mesh
                 )
                 placements_with_stridedshard = (
-                    DTensorSpec._convert_shard_order_to_StridedShard(
+                    putils.convert_shard_order_to_StridedShard(
                         shard_order, placement_without_stridedshard, mesh
                     )
                 )
                 b = distribute_tensor(x, mesh, placements_with_stridedshard)
                 shard_order_from_stridedshard = (
-                    DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+                    putils.maybe_convert_StridedShard_to_shard_order(
                         placements_with_stridedshard, mesh
                     )
                 )
@@ -829,7 +830,7 @@ class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
                 [_StridedShard(1, split_factor=16), Shard(1)],
             ]
             for placements in unconvertible_placements_list:
-                shard_order = DTensorSpec._maybe_convert_StridedShard_to_shard_order(
+                shard_order = putils.maybe_convert_StridedShard_to_shard_order(
                     tuple(placements), mesh
                 )
                 self.assertIsNone(shard_order)
