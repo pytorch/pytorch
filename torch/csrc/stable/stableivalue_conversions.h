@@ -274,10 +274,10 @@ struct FromImpl<torch::stable::Tensor> {
 // =============================================================================
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
-// Specialization for c10::Layout => StableIValue
+// Specialization for torch::headeronly::Layout => StableIValue
 // Note that we call into the shim to translate between the user's
 // Layout and libtorch's Layout, which can be different!
-using c10::Layout;
+using torch::headeronly::Layout;
 template <>
 struct FromImpl<Layout> {
   static StableIValue call(
@@ -309,10 +309,10 @@ struct FromImpl<Layout> {
   }
 };
 
-// Specialization for c10::MemoryFormat => StableIValue
+// Specialization for torch::headeronly::MemoryFormat => StableIValue
 // Note that we call into the shim to translate between the user's
 // MemoryFormat and libtorch's MemoryFormat, which can be different!
-using c10::MemoryFormat;
+using torch::headeronly::MemoryFormat;
 template <>
 struct FromImpl<MemoryFormat> {
   static StableIValue call(
@@ -615,7 +615,7 @@ struct ToImpl<torch::stable::Tensor> {
 // =============================================================================
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
-// Specialization for StableIValue => c10::Layout
+// Specialization for StableIValue => torch::headeronly::Layout
 template <>
 struct ToImpl<Layout> {
   static Layout call(
@@ -649,7 +649,7 @@ struct ToImpl<Layout> {
   }
 };
 
-// Specialization for StableIValue => c10::MemoryFormat
+// Specialization for StableIValue => torch::headeronly::MemoryFormat
 template <>
 struct ToImpl<MemoryFormat> {
   static MemoryFormat call(

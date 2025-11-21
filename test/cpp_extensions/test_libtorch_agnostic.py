@@ -859,6 +859,62 @@ if not IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "Unsupported accessor value: "):
                 libtorch_agnostic.ops.my_string_op(t, "invalid", "")
 
+        @skipIfTorchVersionLessThan(2, 10)
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+        def test_my_from_blob(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            # Create reference implementation using unstable torch::from_blob via load_inline
+            source = """
+            #include <torch/extension.h>
+
+            at::Tensor reference_from_blob(at::Tensor t) {
+                void* data_ptr = t.storage().data_ptr().get();
+                auto options = torch::TensorOptions()
+                    .dtype(t.dtype())
+                    .device(t.device());
+
+                return torch::from_blob(
+                    data_ptr,
+                    t.sizes(),
+                    t.strides(),
+                    options);
+            }
+            """
+
+            module = torch.utils.cpp_extension.load_inline(
+                name="test_from_blob_reference",
+                cpp_sources=[source],
+                functions=["reference_from_blob"],
+            )
+
+            # Test basic from_blob with contiguous tensor
+            original = torch.rand(2, 3, device=device, dtype=torch.float32)
+            stable_result = libtorch_agnostic.ops.my_from_blob(
+                original.data_ptr(),
+                original.size(),
+                original.stride(),
+                device,
+                torch.float32,
+            )
+            reference_result = module.reference_from_blob(original)
+            self.assertEqual(stable_result, reference_result)
+            self.assertEqual(stable_result.data_ptr(), original.data_ptr())
+
+            # Test with non-contiguous strides
+            transposed = torch.rand(4, 6, device=device, dtype=torch.float32).t()
+
+            stable_transposed = libtorch_agnostic.ops.my_from_blob(
+                transposed.data_ptr(),
+                transposed.size(),
+                transposed.stride(),
+                device,
+                transposed.dtype,
+            )
+
+            reference_transposed = module.reference_from_blob(transposed)
+            self.assertEqual(stable_transposed, reference_transposed)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
