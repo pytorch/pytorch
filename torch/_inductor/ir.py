@@ -119,7 +119,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cuda.cuda_template import CUDATemplate
+    from .codegen.cutlass.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
@@ -1435,9 +1435,7 @@ class Reduction(Loops):
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
             )
-            # A 0 stride does not make a reduction contiguous.
-            # This can happen when the reduction ranges contains a 1.
-            outer = all(s == 0 or s > 1 for s in strides)
+            outer = all(s > 1 for s in strides)
             if outer:
                 num_outer += 1
             else:
