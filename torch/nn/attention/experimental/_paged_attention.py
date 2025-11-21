@@ -4,8 +4,6 @@ This module implements Paged Attention on top of flex_attention.
 This module is experimental and subject to change.
 """
 
-from typing import Union
-
 import torch
 from torch.nn.attention.flex_attention import (
     _identity,
@@ -19,9 +17,7 @@ from torch.nn.attention.flex_attention import (
 __all__ = ["PagedAttention"]
 
 
-def _cdiv(
-    x: Union[int, float, torch.Tensor], multiple: Union[int, float, torch.Tensor]
-):
+def _cdiv(x: int | float | torch.Tensor, multiple: int | float | torch.Tensor):
     return (x + multiple - 1) // multiple
 
 

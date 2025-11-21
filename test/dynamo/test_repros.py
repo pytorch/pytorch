@@ -8146,7 +8146,6 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             unsafe_grad(y)  # should not warn
             self.assertEqual(len(w), 1)
 
-    @torch._dynamo.config.patch(install_free_tensors=True)
     def test_partial_export(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -8166,14 +8165,14 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             def forward(self, a, b):
                 return a + b
 
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
         foo = Foo()
         foo.parallelize()
         x = torch.randn(4, 4, dtype=torch.float32)
         y = torch.randn(4, 4, dtype=torch.float32)
         ref = foo(x, y)
-        gm = _dynamo_graph_capture_for_export(foo)(x, y)
+        gm = dynamo_graph_capture_for_export(foo)(x, y)
         res = gm(x, y)
         self.assertEqual(res, ref)
 
@@ -8184,6 +8183,65 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             return x + 1
 
         self.assertEqual(fn(torch.ones(3)), torch.ones(3) + 1)
+
+    def test_pytree_get_node_type_not_traced(self):
+        # Test that torch.utils._pytree._get_node_type is not traced into
+        # and doesn't cause excessive trace time overhead
+        from torch.utils._pytree import _get_node_type
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y):
+            # Call _get_node_type which is used internally by pytree operations
+            node_type = _get_node_type([x, y])
+            assert node_type is list
+            # Do some work with pytree structures
+            data = {"a": x, "b": y}
+            flat, spec = pytree.tree_flatten(data)
+            result = flat[0] + flat[1]
+            return result
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_get_node_type_with_namedtuple(self):
+        # Test that torch.utils._pytree._get_node_type handles namedtuples correctly
+        # without being traced into, even when is_namedtuple_class is True
+        from collections import namedtuple
+
+        from torch.utils._pytree import _get_node_type
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            # Create a namedtuple
+            point = Point(a, b)
+            # Call _get_node_type with a namedtuple instance
+            node_type = _get_node_type(point)
+            assert node_type is namedtuple
+            # Use pytree operations with namedtuples
+            flat, spec = pytree.tree_flatten(point)
+            result = flat[0] + flat[1]
+            return result
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
 
 
 instantiate_parametrized_tests(ReproTests)
