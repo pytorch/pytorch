@@ -2096,7 +2096,10 @@ class TestCutlassBackend(TestCase):
         for op, deserialized_op in zip(ops, deserialized_ops, strict=False):
             self.assertTrue(_check_if_instances_equal(op, deserialized_op))
 
-    @unittest.skipIf(torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @unittest.skipIf(
+        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+",
+    )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @fp8_config
     @parametrize("float8_dtype", (torch.float8_e4m3fn,))
@@ -2170,7 +2173,10 @@ class TestCutlassBackend(TestCase):
         self.assertEqual(y_compiled.dtype, output_dtype)
         torch.testing.assert_close(y_eager, y_compiled, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @unittest.skipIf(
+        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+",
+    )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @fp8_config
     @parametrize("float8_dtype", (torch.float8_e4m3fn,))
@@ -2264,7 +2270,10 @@ class TestCutlassBackend(TestCase):
 
         torch.testing.assert_close(expected, actual, rtol=1e-2, atol=0.05)
 
-    @unittest.skipIf(torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8, "FP8 is only supported on H100+")
+    @unittest.skipIf(
+        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+",
+    )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @fp8_config
     @parametrize("float8_dtype", (torch.float8_e4m3fn,))
