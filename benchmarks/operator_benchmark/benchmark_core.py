@@ -268,8 +268,10 @@ class BenchmarkRunner:
                 )
                 print(f"Peak Memory (KB) : {results['peak_memory']}")
                 # Calculate and print memory bandwidth if operator provides memory traffic
-                if results.get('memory_bandwidth_gb_s') is not None:
-                    print(f"Memory Bandwidth (GB/s) : {results['memory_bandwidth_gb_s']:.2f}")
+                if results.get("memory_bandwidth_gb_s") is not None:
+                    print(
+                        f"Memory Bandwidth (GB/s) : {results['memory_bandwidth_gb_s']:.2f}"
+                    )
                 print()
 
     def _perf_result_to_dict(self, results, test_case):
@@ -720,7 +722,9 @@ class BenchmarkRunner:
                 memory_traffic_bytes = test_case.op_bench.get_memory_traffic_bytes()
                 if memory_traffic_bytes is not None:
                     execution_time_s = result_dict["reported_run_time_us"][0] / 1e6
-                    result_dict["memory_bandwidth_gb_s"] = memory_traffic_bytes / execution_time_s / 1e9
+                    result_dict["memory_bandwidth_gb_s"] = (
+                        memory_traffic_bytes / execution_time_s / 1e9
+                    )
                 else:
                     result_dict["memory_bandwidth_gb_s"] = None
 
