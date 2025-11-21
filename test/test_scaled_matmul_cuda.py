@@ -708,10 +708,6 @@ class TestFP8Matmul(TestCase):
             self.assertEqual(out_dtype, out_fp8.dtype)
         self.assertEqual(out_fp32, out_fp8.to(torch.float))
 
-    @unittest.skipIf(
-        _get_torch_cuda_version() >= (13, 0),
-        "Skip on CUDA 13.0+ due to known issues with FP8"
-    )
     def test_float8_basics(self, device) -> None:
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)
@@ -1142,10 +1138,6 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(SM100OrLater, "fast_accum is SM90-only")
-    @unittest.skipIf(
-        _get_torch_cuda_version() >= (13, 0),
-        "Skip on CUDA 13.0+ due to known issues with FP8"
-    )
     def test_float8_scale_fast_accum(self, device) -> None:
         size = (16, 16)
         x = torch.full(size, .5, device=device, dtype=e4m3_type)

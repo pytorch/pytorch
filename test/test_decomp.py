@@ -15,11 +15,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
-    SM70OrLater,
-    tf32_off,
-)
+from torch.testing._internal.common_cuda import SM70OrLater, tf32_off
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyCPU,
@@ -552,9 +548,6 @@ comprehensive_failures = {
     xfail(
         "nn.functional.upsample_bilinear", "", dtypes=(torch.uint8,)
     ),  # off by one error
-    skip(
-        "torch._scaled_mm", "", dtypes=(torch.float8_e4m3fn,)
-    ),  # Skip _scaled_mm with FP8 on CUDA 13.0+
 }
 
 
