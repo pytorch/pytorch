@@ -547,10 +547,28 @@ def broadcast_symbolic_shapes(a, b):
     return tuple(reversed(output))
 
 
+def _normalize_scalar_like(x):
+    """
+    Some higher-level passes annotate scalar SymInts as tuples like
+    (is_symbolic_flag, sympy_expr).  Strip the metadata so the rest of
+    the lowering stack only sees the underlying scalar expression.
+    """
+    while (
+        isinstance(x, tuple)
+        and len(x) == 2
+        and isinstance(x[0], bool)
+        and isinstance(x[1], (sympy.Basic, int, float))
+    ):
+        x = x[1]
+    return x
+
+
 def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=None):
     assert override_return_dtype is None or type_promotion_kind is None, (
         "only one of override_return_dtype or type_promotion_kind may be given"
     )
+
+    inputs = tuple(_normalize_scalar_like(x) for x in inputs)
 
     if override_return_dtype is None and type_promotion_kind is None:
         type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
