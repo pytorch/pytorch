@@ -525,7 +525,11 @@ class GraphModule(torch.nn.Module):
         mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
 
         # Annotation: {'stream': 0}
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = None
+
+        # No stacktrace found for following nodes
+        record_event_default = torch.ops.streams.record_event.default(2, 0);  record_event_default = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(2, 1, mul_3);  mul_3 = sync_dealloc_default = None
         return (add_3, add_2)
 """,
         )
@@ -590,7 +594,11 @@ class GraphModule(torch.nn.Module):
         wait_event_default = torch.ops.streams.wait_event.default(2, 0);  wait_event_default = None
 
         # Annotation: {'stream': 0}
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_1 = torch.ops.streams.record_event.default(3, 0);  record_event_default_1 = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(3, 1, mul_3);  mul_3 = sync_dealloc_default = None
         return (add_3, add_2)
 """,
         )
@@ -688,6 +696,81 @@ class <lambda>(torch.nn.Module):
         ]
         for args in sample_inputs:
             opcheck(wait_stream, args)
+
+    @requires_cuda
+    def test_record_stream_problem_basic(self):
+        # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
+        # for what this tests/solves for
+        # We expect there to be a sync_dealloc op added to the graph for y
+        # synchronizing the first stream w/ the second stream after the second stream is finished
+        def fn(x):
+            e = torch.Event()
+            with torch.Stream(device="cuda:0"):
+                y = torch.ones(2, 2, device="cuda:0")
+                e.record()
+                z = y * x
+
+            with torch.Stream(device="cuda:0"):
+                e.wait()
+                z0 = y * 2 * x
+
+            return z0, z
+
+        inp = (torch.ones(2, 2, device="cuda", requires_grad=True),)
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, *inp)
+
+        actual[1].sum().backward()
+
+        self.assertExpectedInline(
+            print_graph(bw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        ones: "f32[2, 2]" = torch.ops.aten.ones.default([2, 2], device = device(type='cuda', index=0), pin_memory = False)
+
+        # Annotation: {'stream': 2}
+        mul_1: "f32[2, 2]" = torch.ops.aten.mul.Tensor(ones, 2)
+        mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, mul_1);  tangents_1 = mul_1 = None
+
+        # Annotation: {'stream': 1}
+        mul_4: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, ones);  tangents_2 = ones = None
+
+        # No stacktrace found for following nodes
+        record_event_default = torch.ops.streams.record_event.default(3, 1);  record_event_default = None
+        wait_event_default = torch.ops.streams.wait_event.default(3, 2);  wait_event_default = None
+
+        # Annotation: {'stream': 2}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_3, mul_4);  mul_3 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_1 = torch.ops.streams.record_event.default(4, 2);  record_event_default_1 = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(4, 1, mul_4);  mul_4 = sync_dealloc_default = None
+        return (add,)
+""",
+        )
+
+    @requires_cuda
+    def test_record_stream_problem_interleaved(self):
+        # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
+        # for what this tests/solves for
+        # This will have interleaved computation where y is
+        # first allocated on the first stream used on the second stream
+        # used on the first stream again then finally used on the last stream
+        def fn(x):
+            with torch.Stream(device="cuda:0"):
+                y = torch.ones(2, 2, device="cuda:0")
+                z = y * x
+
+            with torch.Stream(device="cuda:0"):
+                z0 = y * 2 * x
+
+            return z0, z
 
     @requires_cuda
     def test_inductor_lowering(self):
