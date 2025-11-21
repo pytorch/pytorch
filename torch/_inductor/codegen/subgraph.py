@@ -37,7 +37,12 @@ def inline_subgraph_to_ir_nodes(
     """
     from torch._inductor.lowering import process_subgraph_nodes
 
-    return process_subgraph_nodes(gm, inputs)
+    original_module = V.graph.module
+    try:
+        V.graph.module = gm
+        return process_subgraph_nodes(gm, inputs)
+    finally:
+        V.graph.module = original_module
 
 
 class SubgraphChoiceCaller(ir.ChoiceCaller):
