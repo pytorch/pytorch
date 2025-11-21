@@ -7,6 +7,7 @@
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/eval_frame.h>
+#include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
@@ -249,6 +250,9 @@ void initDynamoBindings(PyObject* torch) {
       }))
       .def_readwrite("cur_action", &FrameExecStrategy::cur_action)
       .def_readwrite("recursive_action", &FrameExecStrategy::recursive_action);
+
+  m.def("set_c_recursion_limit", &dynamo_set_c_recursion_limit);
+  m.def("get_c_recursion_limit", &dynamo_get_c_recursion_limit);
 
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
   m.def("_reset_precompile_entries", &_reset_precompile_entries);
