@@ -1348,13 +1348,6 @@ class SetVariable(ConstDictVariable):
 
 
 class FrozensetVariable(SetVariable):
-    def __init__(
-        self,
-        items: list[VariableTracker],
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(items, **kwargs)
-
     def debug_repr(self) -> str:
         if not self.items:
             return "frozenset()"
@@ -1412,13 +1405,6 @@ class FrozensetVariable(SetVariable):
 
 
 class DictKeySetVariable(SetVariable):
-    def __init__(
-        self,
-        items: list[VariableTracker],
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(items, **kwargs)
-
     def debug_repr(self) -> str:
         if not self.items:
             return "dict_keys([])"

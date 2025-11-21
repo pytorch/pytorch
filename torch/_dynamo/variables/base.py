@@ -14,6 +14,7 @@ computations.
 """
 
 import collections
+import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from enum import Enum
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
@@ -33,6 +34,9 @@ if TYPE_CHECKING:
     from ..codegen import PyCodegen
     from ..symbolic_convert import InstructionTranslator
     from .functions import UserFunctionVariable
+
+
+log = logging.getLogger(__name__)
 
 
 class SourceType(Enum):
@@ -151,9 +155,6 @@ class AttributeMutation(MutationType):
     This case of VariableTracker.mutation_type marker indicates that Dynamo
     allows mutation on the value's attributes.
     """
-
-    def __init__(self, typ: SourceType) -> None:
-        super().__init__(typ)
 
 
 class AttributeMutationExisting(AttributeMutation):
@@ -623,6 +624,12 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> "VariableTracker":
         tree_map_fn_copy = tree_map_fn.clone()
         tree_map_fn_copy._maybe_call_tree_map_fastpath = lambda *args, **kwargs: None  # type: ignore[missing-attribute]
+        log.debug(
+            "tree_map fastpath fallback triggered for %s (rest=%s, kwargs=%s)",
+            self,
+            rest,
+            tree_map_kwargs,
+        )
         return tree_map_fn_copy.call_function(
             tx,
             [map_fn, self, *rest],

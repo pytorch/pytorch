@@ -262,7 +262,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         and use_cutlass_template(layout, m, n, k)
         and _use_cutlass_for_op(name)
     ):
-        from ..codegen.cuda.gemm_template import CUTLASS3xGemmTemplate
+        from ..codegen.cutlass.gemm_template import CUTLASS3xGemmTemplate
 
         CUTLASS3xGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, kernel_inputs.nodes()
