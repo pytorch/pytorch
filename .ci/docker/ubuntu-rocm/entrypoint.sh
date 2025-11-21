@@ -23,7 +23,7 @@ except Exception as e:
 }
 
 # Determine if we're using TheRock nightly or traditional ROCm
-if [[ "${USE_THEROCK_NIGHTLY:-0}" == "1" ]]; then
+if [[ "${ROCM_VERSION}" == "nightly" ]]; then
     echo "Detected TheRock nightly installation, configuring paths dynamically..."
     
     # Check if rocm_sdk is available

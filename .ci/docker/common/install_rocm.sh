@@ -26,8 +26,8 @@ install_ubuntu() {
     apt-get install -y libc++1
     apt-get install -y libc++abi1
 
-    # When USE_THEROCK_NIGHTLY=1, install ROCm from TheRock nightly wheels
-    if [[ "${USE_THEROCK_NIGHTLY:-0}" == "1" ]]; then
+    # When ROCM_VERSION=nightly, install ROCm from TheRock nightly wheels
+    if [[ "${ROCM_VERSION}" == "nightly" ]]; then
       echo "install_rocm.sh: installing ROCm from TheRock nightly wheels"
 
       # Clean any previous ROCm installation in the base CI image.
