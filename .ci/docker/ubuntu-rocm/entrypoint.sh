@@ -50,15 +50,7 @@ if [[ "${ROCM_VERSION}" == "nightly" ]]; then
             echo "  ROCM_PATH=$ROCM_PATH"
             echo "  ROCM_HOME=$ROCM_HOME"
             echo "  MAGMA_HOME=$MAGMA_HOME"
-        else
-            echo "Warning: Could not detect ROCm path from rocm_sdk, falling back to /opt/rocm"
-            export ROCM_PATH="/opt/rocm"
-            export ROCM_HOME="/opt/rocm"
         fi
-    else
-        echo "Warning: rocm_sdk not found, falling back to /opt/rocm"
-        export ROCM_PATH="/opt/rocm"
-        export ROCM_HOME="/opt/rocm"
     fi
 else
     echo "Using traditional ROCm installation from /opt/rocm"
