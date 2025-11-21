@@ -383,7 +383,7 @@ class BaseUserFunctionVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         result = False
 
         try:
@@ -547,7 +547,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         result = hasattr(self.fn, name)
         return variables.ConstantVariable.create(result)
 
@@ -784,7 +784,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         if name in self.python_type().__dict__:
             return ConstantVariable.create(True)
         return ConstantVariable.create(False)
@@ -1436,7 +1436,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         if name == "__code__":
             return variables.ConstantVariable.create(hasattr(self, "code"))
         if name == "__defaults__":
@@ -1753,7 +1753,7 @@ class SkipFunctionVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         return variables.ConstantVariable.create(hasattr(self.value, name))
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
@@ -2113,7 +2113,7 @@ class FunctoolsPartialVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         # functools.partial uses slots, so attributes are constant
         return variables.ConstantVariable.create(
             hasattr(functools.partial(identity), name)

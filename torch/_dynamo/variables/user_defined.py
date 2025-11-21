@@ -114,6 +114,8 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
+    from .constant import ConstantVariable
+
 
 def is_standard_setattr(val):
     return val in (object.__setattr__, BaseException.__setattr__)
@@ -913,7 +915,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> "VariableTracker":
+    ) -> "ConstantVariable":
         if self.source:
             source = AttrSource(self.source, name)
             install_guard(source.make_guard(GuardBuilder.HASATTR))

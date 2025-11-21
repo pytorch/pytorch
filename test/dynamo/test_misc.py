@@ -9650,6 +9650,36 @@ def ___make_guard_fn():
         self.assertEqual(fn_out, compiled_out)
         self.assertFalse(fn_out)
 
+    def test_constant_hasattr_returns_bool(self):
+        """Test that hasattr on constant values properly returns boolean ConstantVariable."""
+
+        # Test various constant types
+        def fn():
+            # String constant
+            s = "hello"
+            result1 = hasattr(s, "upper")  # True
+            result2 = hasattr(s, "nonexistent")  # False
+
+            # Integer constant
+            i = 42
+            result3 = hasattr(i, "bit_length")  # True
+            result4 = hasattr(i, "fake_method")  # False
+
+            # Float constant
+            f = 3.14
+            result5 = hasattr(f, "is_integer")  # True
+            result6 = hasattr(f, "missing_attr")  # False
+
+            # Use all results to ensure they're compiled
+            return (result1, result2, result3, result4, result5, result6)
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        fn_out = fn()
+        compiled_out = compiled_fn()
+        self.assertEqual(fn_out, compiled_out)
+        self.assertEqual(fn_out, (True, False, True, False, True, False))
+
     def test_torch_objects_as_keys(self):
         remap = {torch.float16: torch.float32}
 
