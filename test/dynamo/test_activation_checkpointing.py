@@ -2075,11 +2075,9 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
         (dx1, dy1), gm_without = self._compile_and_capture(simple_fwd_bwd, False)
         (dx2, dy2), gm_with = self._compile_and_capture(simple_fwd_bwd, True)
 
-        # Verify correctness
         self.assertTrue(torch.allclose(dx1, dx2))
         self.assertTrue(torch.allclose(dy1, dy2))
 
-        # Verify recomputation via op counting
         mm_with = sum(
             1 for n in gm_with.graph.nodes if n.target == torch.ops.aten.mm.default
         )
@@ -2102,7 +2100,6 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(sigmoid_with, 2, "sigmoid should be recomputed in backward")
         self.assertEqual(sigmoid_without, 1)
 
-        # Verify graph structure shows _recomputed nodes
         self.assertExpectedInline(
             gm_with.code.strip(),
             """\
@@ -2127,8 +2124,6 @@ def forward(self, arg0_1, arg1_1):
         )
 
     def test_ac_rematerialize_with_rng_ops_raises_error(self):
-        """Verify error is raised when RNG ops are in checkpointed regions."""
-
         x_data = torch.randn(4, 4)
 
         def fwd_bwd_with_rng():
@@ -2145,7 +2140,6 @@ def forward(self, arg0_1, arg1_1):
 
             return dx
 
-        # Should raise error about RNG ops not being supported
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
             "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops in checkpointed regions.",
@@ -2167,7 +2161,6 @@ def forward(self, arg0_1, arg1_1):
             loss = z.sum()
             return _grad(loss, x)[0]
 
-        # Should raise error about RNG ops not being supported
         with self.assertRaisesRegex(
             torch._dynamo.exc.BackendCompilerFailed,
             "We are trying to rematerialize AC nodes in the backward region",
@@ -2175,8 +2168,6 @@ def forward(self, arg0_1, arg1_1):
             self._compile_and_capture(fwd_bwd_with_rng, True)
 
     def test_ac_rematerialize_with_selective_checkpoint_policy(self):
-        """Verify AC reordering respects MUST_SAVE policy (addmm saved, relu recomputed)."""
-
         x_data = torch.randn(4, 128)
         weight1 = torch.randn(128, 128)
         bias1 = torch.randn(128)
@@ -2216,21 +2207,16 @@ def forward(self, arg0_1, arg1_1):
             fwd_bwd_with_policy, False
         )
 
-        # Verify correctness
         torch.testing.assert_close(result_with[0], result_without[0])
         torch.testing.assert_close(result_with[1], result_without[1])
         torch.testing.assert_close(result_with[2], result_without[2])
 
-        # Key insight: WITH reordering, addmm is MUST_SAVE (not recomputed)
-        # but relu is PREFER_RECOMPUTE (recomputed in backward)
         def count_op(gm, target):
             return sum(1 for n in gm.graph.nodes if n.target == target)
 
-        # WITHOUT: addmm saved, relu saved
         addmm_without = count_op(gm_without, torch.ops.aten.addmm.default)
         relu_without = count_op(gm_without, torch.ops.aten.relu.default)
 
-        # WITH: addmm still saved (MUST_SAVE), relu recomputed (PREFER_RECOMPUTE)
         addmm_with = count_op(gm_with, torch.ops.aten.addmm.default)
         relu_with = count_op(gm_with, torch.ops.aten.relu.default)
 
@@ -2240,13 +2226,11 @@ def forward(self, arg0_1, arg1_1):
         # relu SHOULD be recomputed (more in WITH due to 1 fwd + 1 recomputed)
         self.assertEqual(relu_with, relu_without + 1)
 
-        # Verify no addmm_recomputed node exists
         recomputed_nodes = [
             n.name for n in gm_with.graph.nodes if "_recomputed" in n.name
         ]
         self.assertNotIn("addmm_recomputed", recomputed_nodes)
 
-        # Verify relu_recomputed exists
         self.assertTrue(
             any("relu" in name for name in recomputed_nodes),
             f"Expected relu_recomputed but got: {recomputed_nodes}",
