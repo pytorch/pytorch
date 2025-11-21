@@ -61,7 +61,6 @@ from .codegen.common import (
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
-    gen_common_triton_imports,
     texpr,
     TMACompatibilityChecker,
     TritonKernel,
@@ -742,7 +741,7 @@ class TritonTemplateKernel(TritonKernel):
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
             code = IndentedBuffer()
-            code.splice(gen_common_triton_imports())
+            code.splice(self.gen_common_triton_imports())
             code.splice(self.jit_lines())
             code.writeline(
                 f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
@@ -777,7 +776,7 @@ class TritonTemplateKernel(TritonKernel):
             val = self.output_node.get_stride()
         else:
             assert isinstance(name, str)
-            val = self.named_input_nodes[name].get_stride()
+            val = self.get_stride_and_maybe_freeze_layout(self.named_input_nodes[name])
 
         if isinstance(index, int):
             return texpr(self.rename_indexing(val[index]))
@@ -955,7 +954,6 @@ class TritonTemplateKernel(TritonKernel):
             self.template_mask = mask if mask is not None else "None"
             self.template_out_shape = index_shape if index_shape else "xindex"
             self.template_indices = indices
-            self.named_input_nodes[input_name].data.freeze_layout()
             self.cse.invalidate(OrderedSet())
 
             template_mask = self.template_mask
@@ -1412,7 +1410,7 @@ class TritonTemplateKernel(TritonKernel):
         assert isinstance(indices, (list, tuple))
         assert isinstance(name, str)
         assert isinstance(mask, str)
-        stride = self.named_input_nodes[name].get_stride()
+        stride = self.get_stride_and_maybe_freeze_layout(self.named_input_nodes[name])
         indices = list(map(OpOverrides.paren, indices))
         assert len(indices) == len(stride)
         index = " + ".join(
@@ -1501,6 +1499,10 @@ class TritonTemplateKernel(TritonKernel):
                 *V.graph.sizevars.size_hints(self.call_sizes), self.meta
             )
         ]
+
+    def get_stride_and_maybe_freeze_layout(self, node) -> list[int]:
+        node.data.freeze_layout()
+        return node.get_stride()
 
 
 @functools.cache
@@ -2705,7 +2707,7 @@ class AlgorithmSelectorCache(PersistentCache):
         best_config_future=None,
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
     ):
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -2740,162 +2742,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         inputs_key = create_inputs_key(input_nodes)
 
-        # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
-        has_autotuned = False
-
-        def benchmark(choices, hint_override: Optional[int] = None):
-            nonlocal has_autotuned
-            # TODO(nmacchioni): remove this hacky way to tell if we ran benchmarking
-            has_autotuned = True
-            counters["inductor"]["select_algorithm_autotune"] += 1
-            # TODO(nmacchioni): remove this layer of abstraction
-            # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
-            benchmark_fn = self.make_benchmark_fn(
-                choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
-            )
-            # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
-            # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
-            return benchmark_fn(choices)
-
-        def autotune(choices, hint_override: Optional[int] = None):
-            log.debug("Starting autotuning")
-
-            with dynamo_timed(
-                f"{name}_template_autotuning",
-                log_pt2_compile_event=True,
-                dynamo_compile_column_us="compile_time_autotune_time_us",
-                metadata=_autotune_metadata(input_nodes),
-            ):
-                benchmark_results = benchmark(choices, hint_override=hint_override)
-                if config.max_autotune_report_choices_stats:
-                    _log_autotune_choices_stats(
-                        f"{name}_template_autotuning", benchmark_results
-                    )
-                return benchmark_results
-
         if config.autotune_in_subproc:
             # Initialize the suprocess pool so it will warmup early.
             torch._inductor.autotune_process.get_tuning_process_pool()
-
-        def do_autotuning(choices, precompile_fn, hint_override: Optional[int] = None):
-            precompile_start_ts = time.time()
-            with dynamo_timed(
-                f"{name}_template_precompiling",
-                log_pt2_compile_event=True,
-                dynamo_compile_column_us="compile_time_autotune_time_us",
-            ):
-                precompile_fn()
-            precompile_elapse = time.time() - precompile_start_ts
-            log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
-            # Prune anything that failed to compile
-            choices = [c for c in choices if not c.failed]
-            if len(choices) == 0:
-                raise self.create_no_valid_choices(
-                    name, "All choices failed to compile for backend."
-                )
-
-            candidates = self.prescreen_choices(
-                choices, name, inputs_key, self.prescreening_cache
-            )
-            prescreening_elapse: Optional[float] = None
-            if candidates:
-                prescreening_start_ts = time.time()
-                timings = self.lookup(
-                    candidates,
-                    name,
-                    inputs_key,
-                    lambda choices: autotune(choices, hint_override=hint_override),
-                    hint_override=hint_override,
-                )
-                choices = self.prune_choices_postscreen(
-                    choices, timings, name, inputs_key, self.prescreening_cache
-                )
-                prescreening_elapse = time.time() - prescreening_start_ts
-                log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
-
-            autotune_start_ts = time.time()
-
-            if best_config_future is not None:
-                best_config = await_sync(best_config_future)
-
-                important_keys = [
-                    "ACC_TYPE",
-                    "ALLOW_TF32",
-                    "BLOCK_K",
-                    "BLOCK_M",
-                    "BLOCK_N",
-                    "EVEN_K",
-                    "GROUP_M",
-                    "USE_FAST_ACCUM",
-                    "num_stages",
-                    "num_warps",
-                    "num_consumer_groups",
-                    "num_buffers_warp_spec",
-                ]
-                choices = [
-                    choice
-                    for choice in choices
-                    if all(
-                        f"{k}={best_config[k]}" in choice.description
-                        for k in important_keys
-                    )
-                    for k in important_keys
-                ]
-                log.info("Filtered to %d choices based on best_config", len(choices))
-
-            timings = self.lookup(
-                choices,
-                name,
-                inputs_key,
-                lambda choices: autotune(choices, hint_override=hint_override),
-                hint_override=hint_override,
-            )
-
-            autotune_elapse = time.time() - autotune_start_ts
-            log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
-
-            if timings and all(
-                not math.isfinite(timing) for timing in timings.values()
-            ):
-                raise NoValidChoicesError
-
-            if (
-                has_autotuned
-                or log.getEffectiveLevel() == logging.DEBUG
-                or config.trace.log_autotuning_results
-            ):
-                self.log_results(
-                    name,
-                    input_nodes,
-                    timings,
-                    autotune_elapse,
-                    precompile_elapse,
-                    prescreening_elapse,
-                    hint_override=hint_override,
-                )
-
-            def profiler_bench_function():
-                # we're not running through the normal caching autotuner method here because we want to avoid returning
-                # the cached value.
-                # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
-                # should use the profiler.
-                with config.patch(
-                    profile_bandwidth_with_do_bench_using_profiling=True,
-                    autotune_in_subproc=False,
-                ):
-                    return benchmark(choices)
-
-            for feedback_fn in self.feedback_saver_fns:
-                # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
-                feedback_fn(
-                    timings,
-                    name,
-                    input_nodes,
-                    choices,
-                    profiler_bench_function,
-                )
-
-            return timings
 
         precompile_fn = self.make_precompile_fn(
             choices,
@@ -2913,8 +2762,16 @@ class AlgorithmSelectorCache(PersistentCache):
                     if not hasattr(c, "hint_override")
                     or c.hint_override == hint_override
                 ]
-                timings = do_autotuning(
-                    filtered_choices, precompile_fn, hint_override=hint_override
+                timings = self.do_autotuning(
+                    name,
+                    input_nodes,
+                    layout,
+                    input_gen_fns,
+                    inputs_key,
+                    filtered_choices,
+                    precompile_fn,
+                    hint_override=hint_override,
+                    best_config_future=best_config_future,
                 )
                 min_extern_choice = float("inf")
                 for choice, timing in timings.items():
@@ -2950,7 +2807,16 @@ class AlgorithmSelectorCache(PersistentCache):
                 )
             )
 
-        timings = do_autotuning(choices, precompile_fn)
+        timings = self.do_autotuning(
+            name,
+            input_nodes,
+            layout,
+            input_gen_fns,
+            inputs_key,
+            choices,
+            precompile_fn,
+            best_config_future=best_config_future,
+        )
         # if timings is empty, we really have no choice but to return a semi-random
         # choice. returning the first `ExternKernelCaller` is probably the safest bet
         # in this case, since it will generally be the ATen kernel. if there are no
@@ -2985,6 +2851,229 @@ class AlgorithmSelectorCache(PersistentCache):
         if return_choice:
             return node, choice
         return node
+
+    def benchmark(
+        self,
+        choices,
+        input_nodes,
+        layout,
+        input_gen_fns,
+        hint_override: Optional[int] = None,
+    ):
+        counters["inductor"]["select_algorithm_autotune"] += 1
+        # TODO(nmacchioni): remove this layer of abstraction
+        # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
+        benchmark_fn = self.make_benchmark_fn(
+            choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+        )
+        # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
+        # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
+        return benchmark_fn(choices)
+
+    def autotune(
+        self,
+        name,
+        input_nodes,
+        layout,
+        input_gen_fns,
+        choices,
+        hint_override: Optional[int] = None,
+    ):
+        log.debug("Starting autotuning")
+
+        with dynamo_timed(
+            f"{name}_template_autotuning",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="compile_time_autotune_time_us",
+            metadata=_autotune_metadata(input_nodes),
+        ):
+            benchmark_results = self.benchmark(
+                choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+            )
+            if config.max_autotune_report_choices_stats:
+                _log_autotune_choices_stats(
+                    f"{name}_template_autotuning", benchmark_results
+                )
+            return benchmark_results
+
+    def do_autotuning(
+        self,
+        name,
+        input_nodes,
+        layout,
+        input_gen_fns,
+        inputs_key,
+        choices,
+        precompile_fn,
+        hint_override: Optional[int] = None,
+        best_config_future=None,
+    ):
+        """Execute the autotuning process for kernel algorithm selection.
+
+        This method orchestrates the complete autotuning pipeline including precompilation,
+        prescreening, benchmarking, and feedback collection to select the optimal kernel
+        implementation for given inputs.
+
+        Args:
+            name: Name identifier for the operation being autotuned (e.g., 'mm', 'convolution').
+            input_nodes: List of input IR nodes used for benchmarking.
+            layout: Layout information specifying device and memory format for the operation.
+            input_gen_fns: Optional dict mapping argument indices to functions that generate
+                torch.Tensor inputs from ir.Buffer for benchmarking. If provided, these are
+                used instead of random tensors.
+            inputs_key: Cache key representing the input characteristics (sizes, strides, dtypes).
+            choices: List of ChoiceCaller objects representing candidate kernel implementations.
+            precompile_fn: Callable that precompiles all kernel choices before benchmarking.
+            hint_override: Optional index to override which choice is selected, used for testing
+                or forced selection.
+            best_config_future: Optional future containing pre-determined best configuration to
+                filter choices by specific config parameters.
+
+        Returns:
+            dict: Mapping from ChoiceCaller to benchmark timing in seconds. Choices with
+                non-finite timings (inf/nan) indicate failures.
+
+        Raises:
+            NoValidChoicesError: When all choices fail to compile or benchmark, or when all
+                timing results are non-finite.
+        """
+        precompile_start_ts = time.time()
+        with dynamo_timed(
+            f"{name}_template_precompiling",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="compile_time_autotune_time_us",
+        ):
+            precompile_fn()
+        precompile_elapse = time.time() - precompile_start_ts
+        log.debug("Precompilation elapsed time: %.02fs", precompile_elapse)
+        # Prune anything that failed to compile
+        choices = [c for c in choices if not c.failed]
+        if len(choices) == 0:
+            raise self.create_no_valid_choices(
+                name, "All choices failed to compile for backend."
+            )
+
+        candidates = self.prescreen_choices(
+            choices, name, inputs_key, self.prescreening_cache
+        )
+        prescreening_elapse: Optional[float] = None
+        if candidates:
+            prescreening_start_ts = time.time()
+            timings = self.lookup(
+                candidates,
+                name,
+                inputs_key,
+                lambda choices: self.autotune(
+                    name,
+                    input_nodes,
+                    layout,
+                    input_gen_fns,
+                    choices,
+                    hint_override=hint_override,
+                ),
+                hint_override=hint_override,
+            )
+            choices = self.prune_choices_postscreen(
+                choices, timings, name, inputs_key, self.prescreening_cache
+            )
+            prescreening_elapse = time.time() - prescreening_start_ts
+            log.debug("Prescreening elapsed time: %.02fs", prescreening_elapse)
+
+        autotune_start_ts = time.time()
+
+        if best_config_future is not None:
+            best_config = await_sync(best_config_future)
+
+            important_keys = [
+                "ACC_TYPE",
+                "ALLOW_TF32",
+                "BLOCK_K",
+                "BLOCK_M",
+                "BLOCK_N",
+                "EVEN_K",
+                "GROUP_M",
+                "USE_FAST_ACCUM",
+                "num_stages",
+                "num_warps",
+                "num_consumer_groups",
+                "num_buffers_warp_spec",
+            ]
+            choices = [
+                choice
+                for choice in choices
+                if all(
+                    f"{k}={best_config[k]}" in choice.description
+                    for k in important_keys
+                )
+                for k in important_keys
+            ]
+            log.info("Filtered to %d choices based on best_config", len(choices))
+
+        has_autotuned: bool = False
+
+        def track_has_autotuned(choices):
+            nonlocal has_autotuned
+            has_autotuned = True
+            return self.autotune(
+                name,
+                input_nodes,
+                layout,
+                input_gen_fns,
+                choices,
+                hint_override=hint_override,
+            )
+
+        timings = self.lookup(
+            choices,
+            name,
+            inputs_key,
+            track_has_autotuned,
+            hint_override=hint_override,
+        )
+
+        autotune_elapse = time.time() - autotune_start_ts
+        log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
+
+        if timings and all(not math.isfinite(timing) for timing in timings.values()):
+            raise NoValidChoicesError
+
+        if (
+            has_autotuned
+            or log.getEffectiveLevel() == logging.DEBUG
+            or config.trace.log_autotuning_results
+        ):
+            self.log_results(
+                name,
+                input_nodes,
+                timings,
+                autotune_elapse,
+                precompile_elapse,
+                prescreening_elapse,
+                hint_override=hint_override,
+            )
+
+        def profiler_bench_function():
+            # we're not running through the normal caching autotuner method here because we want to avoid returning
+            # the cached value.
+            # Avoid benchmarking in a separate process because it's not easy to signal to the TuningProcess that we
+            # should use the profiler.
+            with config.patch(
+                profile_bandwidth_with_do_bench_using_profiling=True,
+                autotune_in_subproc=False,
+            ):
+                return self.benchmark(choices, input_nodes, layout, input_gen_fns)
+
+        for feedback_fn in self.feedback_saver_fns:
+            # re-benchmarking the same choices with profiler is a bit expensive, so pass it in as a thunk.
+            feedback_fn(
+                timings,
+                name,
+                input_nodes,
+                choices,
+                profiler_bench_function,
+            )
+
+        return timings
 
     def create_no_valid_choices(self, name: str, reason: str) -> NoValidChoicesError:
         backend_config = (
@@ -3134,7 +3223,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         "select_algorithm_num_precompilation_exceptions"
                     ] += 1
                     exceptions.append((futures[future], e))
-                    from torch._inductor.codegen.cuda.cuda_kernel import (
+                    from torch._inductor.codegen.cutlass.cuda_kernel import (
                         CUDATemplateCaller,
                     )
 
@@ -3321,7 +3410,9 @@ class AlgorithmSelectorCache(PersistentCache):
             try:
                 timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.codegen.cutlass.cuda_kernel import (
+                    CUDATemplateCaller,
+                )
 
                 if not isinstance(choice, CUDATemplateCaller):
                     log.exception(
@@ -3332,7 +3423,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
-                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+                from torch._inductor.codegen.cutlass.cuda_kernel import (
+                    CUDATemplateCaller,
+                )
 
                 msg = str(e)
                 if "invalid argument" in msg:
@@ -3477,12 +3570,12 @@ class AlgorithmSelectorCache(PersistentCache):
             return prescreen_winners
 
         # prescreen cutlass
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         candidates = []
         if (
-            config.cuda.cutlass_prescreening
-            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
+            config.cutlass.cutlass_prescreening
+            and len(config.cutlass.cutlass_max_profiling_swizzle_options) > 1
         ):
             candidates.extend(
                 [
@@ -3511,7 +3604,7 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Prune the choices after prescreening.
         """
-        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
+        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
         prescreen_key = f"{name}:{inputs_key}"
 

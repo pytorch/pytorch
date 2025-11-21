@@ -151,9 +151,6 @@ class AttributeMutation(MutationType):
     allows mutation on the value's attributes.
     """
 
-    def __init__(self, typ: SourceType) -> None:
-        super().__init__(typ)
-
 
 class AttributeMutationExisting(AttributeMutation):
     """
@@ -442,14 +439,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         assert self.has_force_unpack_var_sequence(tx)
         for v in self.unpack_var_sequence(tx):
             fn(v)
-
-    def inspect_parameter_names(self) -> list[str]:
-        unimplemented(
-            gb_type="Unsupported inspect call",
-            context=f"inspect_parameter_names {self}",
-            explanation=f"Dynamo does not know how to trace the function `{self.debug_repr()}`",
-            hints=[],
-        )
 
     def call_obj_hasattr(self, tx: Any, name: str) -> "VariableTracker":
         unimplemented(

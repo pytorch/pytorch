@@ -1610,10 +1610,7 @@ class SIMDScheduling(BaseScheduling):
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
-        if not V.graph.sizevars.statically_known_gt(
-            numel,
-            rnumel,
-        ):
+        if not V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel)):
             return self._codegen_mix_order_reduction(node2, node1)
 
         def _pick_split_size():
@@ -1625,7 +1622,10 @@ class SIMDScheduling(BaseScheduling):
             device_prop = DeviceProperties.create(node1.get_device())
             num_sm = device_prop.multi_processor_count
             estimated_num_splits = num_sm * 8
-            split_size = max(next_power_of_2(numel // estimated_num_splits), 16)
+
+            # split_size is decided based on hint
+            numel_hint = V.graph.sizevars.size_hint(numel)
+            split_size = max(next_power_of_2(numel_hint // estimated_num_splits), 16)
             split_size = min(split_size, 128)
             return split_size
 
@@ -1634,10 +1634,7 @@ class SIMDScheduling(BaseScheduling):
         # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
 
-        assert V.graph.sizevars.statically_known_gt(
-            numel,
-            rnumel,
-        )
+        assert V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel))
 
         # split epilogue out of node2
         node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
@@ -1726,6 +1723,8 @@ class SIMDScheduling(BaseScheduling):
                 if node.get_outputs()[0].node.get_name() not in rename:
                     node.mark_run()
 
+        V.graph.wrapper_code.make_comment("# Call mix order reduction kernel")
+        self.codegen_comment(node_schedule, None)
         # workspace args is still needed after the call
         kernel.call_kernel(kernel.kernel_name, deallocate_ws=False)
         V.graph.removed_buffers |= kernel.removed_buffers
@@ -1733,7 +1732,9 @@ class SIMDScheduling(BaseScheduling):
 
         # a extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
-        nsplit = (numel + split_size - 1) // split_size
+        nsplit = V.graph.wrapper_code.codegen_python_sizevar(
+            (numel + split_size - 1) // split_size
+        )
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
 
@@ -2273,7 +2274,11 @@ class SIMDScheduling(BaseScheduling):
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
     ) -> list[tuple[str, Any, Any]]:
+        from .triton import TritonKernel
         from .triton_combo_kernel import ComboKernel
+
+        # This is currently the only type supported by this method
+        assert issubclass(self.kernel_type, TritonKernel)
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         subkernel_map, node_schedule_map = {}, {}
@@ -2286,6 +2291,7 @@ class SIMDScheduling(BaseScheduling):
                 tiling,
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
                 optimize_mask=not mixed_sizes,
+                triton_kernel_cls=self.kernel_type,
             )
 
         partitions = ComboKernel.horizontal_partition(
@@ -2305,6 +2311,7 @@ class SIMDScheduling(BaseScheduling):
             if len(node_group) == 0:
                 continue
             kernel = ComboKernel(
+                triton_kernel_cls=self.kernel_type,
                 enable_autotune=enable_autotune,
                 mixed_sizes=mixed_sizes,
             )
@@ -2819,6 +2826,8 @@ class SIMDScheduling(BaseScheduling):
         bad_size_additional_tiling_penalty = 1.025
         good_size_tiling_penalty = 1.005
 
+        total_uncoalesced = sum(coalesce_analysis.uncoalesced_addrs.values())
+
         def score_mod(t):
             score_factor = 1.0
             for tile_size in t[0].tiling.values():
@@ -2827,12 +2836,19 @@ class SIMDScheduling(BaseScheduling):
                 else:
                     score_factor = score_factor / good_size_tiling_penalty
 
-            return -t[0].score * score_factor
+            # Add uncoalesced memory score to prevent small coalesced benefits
+            # from dominating large amounts of uncoalesced memory
+            uncoalesced_penalty = total_uncoalesced * 0.05
+
+            return -(t[0].score + uncoalesced_penalty) * score_factor
 
         # apply penalty for longer tilings that dont increase score much
         for cand, tiling_score in sorted(tilings, key=score_mod):
-            if cls.tiling_is_compatible(
-                node_schedule, pointwise_numel, reduction_numel, cand.tiling
+            if (
+                cls.tiling_is_compatible(
+                    node_schedule, pointwise_numel, reduction_numel, cand.tiling
+                )
+                or cand.tiling == default_tiling
             ):
                 # we always include default reduction numel == 1, dont include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
