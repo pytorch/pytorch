@@ -65,6 +65,9 @@ struct FromImpl {
         !is_std_vector_v<T>,
         "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     static_assert(
+        !std::is_same_v<T, std::string>,
+        "std::string requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
     static_assert(std::is_trivially_copyable_v<T>);
@@ -423,7 +426,6 @@ struct ToImpl {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    static_assert(std::is_trivially_copyable_v<T>);
     // Ensure 2.10+ types don't accidentally use the base case - provide clear
     // compile-time errors.
     static_assert(
@@ -435,6 +437,10 @@ struct ToImpl {
     static_assert(
         !is_std_vector_v<T>,
         "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !std::is_same_v<T, std::string>,
+        "std::string requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(std::is_trivially_copyable_v<T>);
     // T may not have a default constructor. (For example, it might be
     // c10::Device.) However, std::memcpy implicitly creates a T at the
     // destination. So, we can use a union to work around this lack of
