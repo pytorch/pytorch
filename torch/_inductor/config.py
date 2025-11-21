@@ -1818,7 +1818,10 @@ class aot_inductor_mode:
 
 
 class cutlass:
-    # Optimization level for the host compiler.
+    """
+    Config specific to cutlass backend.
+    """
+
     compile_opt_level: Literal["-O0", "-O1", "-O2", "-O3", "-OS"] = "-O1"
 
     # Whether to enable debug info, e.g. line number, cutlass debug info.
