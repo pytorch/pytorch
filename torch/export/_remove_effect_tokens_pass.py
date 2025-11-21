@@ -62,6 +62,17 @@ def _replace_with_effects_node(
                 if user_user.op == "output":
                     output_tokens.append(user)
 
+    # Copy metadata from old node to new node
+    for k, v in node.meta.items():
+        new_node.meta[k] = v
+        if k == "unbacked_bindings":
+            # Remove the extra layer for effect token
+            old_bindings = new_node.meta[k]
+            new_bindings = {
+                k: path[1:] if path else path for k, path in old_bindings.items()
+            }
+            new_node.meta[k] = new_bindings
+
     # Fix up the getitem nodes based on return count
     if len(schema.returns) == 1:
         # Single return: replace getitem(with_effects, 1) with the node itself
@@ -80,17 +91,6 @@ def _replace_with_effects_node(
         assert len(schema.returns) == 0
         assert len(new_node.users) == 0
         new_node.meta["val"] = None
-
-    # Copy metadata from old node to new node
-    for k, v in node.meta.items():
-        new_node.meta[k] = v
-        if k == "unbacked_bindings":
-            # Remove the extra layer for effect token
-            old_bindings = new_node.meta[k]
-            new_bindings = {
-                k: path[1:] if path else path for k, path in old_bindings.items()
-            }
-            new_node.meta[k] = new_bindings
 
 
 def _replace_invoke_subgraph_node(node, module, output_tokens, input_tokens):
@@ -124,7 +124,6 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
 
     This function does an inplace modification on the given ExportedProgram.
     """
-    print("before", ep)
     inputs_to_lifted_custom_objs = ep.graph_signature.inputs_to_lifted_custom_objs
 
     # mark submodules with effects as having effects. This will be used in the following pass to remove effects from subgraphs
@@ -210,5 +209,4 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
 
     assert num_tokens == num_out_tokens
 
-    print("after", ep)
     return ep
