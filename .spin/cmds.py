@@ -191,6 +191,7 @@ SLOW_LINTERS = {
     "FLAKE8",
     "GB_REGISTRY",
     "PYFMT",
+    "PYLINT",
     "PYREFLY",
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
