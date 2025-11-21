@@ -9,7 +9,7 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.11b")
+  set(__AOTRITON_VER "0.11.1b")
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.2
       "manylinux_2_28"  # rocm6.3
@@ -24,7 +24,7 @@ if(NOT __AOTRITON_INCLUDED)
       "rocm7.0"
       "rocm7.1"
       )
-  set(__AOTRITON_CI_COMMIT "972223c501ffc22068bb035ac5d64cf54318d895")
+  set(__AOTRITON_CI_COMMIT "0373139cfbf7e05c275d22b9f426769b0c155e0d")
   set(__AOTRITON_SHA256_LIST
       "6cae3d5de75ee205d22e088f7dfaab1227056d02ea67f29ccdbc09f2be4e8c8f"  # rocm6.2
       "72a153549ea20707331e8a1f1e3d1b8de2913f9d5af2b900c56235d578b57efe"  # rocm6.3
@@ -43,7 +43,7 @@ if(NOT __AOTRITON_INCLUDED)
      "c19a41c9480510ab32e6fb05e6ed0a3832d6b07634f050b836b760200befa735" # amd-gfx90a
      "3a06a99971dddb7703a30378f1c5d6b41468d926ea51821156d1b6857b985bc4" # amd-gfx942
      "27fc21f6761d57987a700436de8cf29cbdd9eeee91318dfed596eeb147d219ad" # amd-gfx950
-     "ec134032087344176695505db659387374d1916adfee16f0db47dee38d9c8603" # amd-gfx11xx
+     "6632040c405d833be6ff72029249c776838baf5f03a3c13ba4e8d37a87b7a740" # amd-gfx11xx
      "fec05205747ff51649b1e151545267d5aa2037ba9d0338cad286882915b941b0" # amd-gfx120x
      )
   set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")  # @lint-ignore
