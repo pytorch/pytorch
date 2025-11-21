@@ -133,14 +133,14 @@ def input_buffers_require_grads(graph_module, num_score_mod_placeholders: int):
 
 
 def is_trivial_score_graph(graph_module: GraphModule) -> bool:
-    """Bacwards currently doesnt support score_mods, match against identity"""
+    """Backwards currently doesn't support score_mods, match against identity"""
     graph = graph_module.graph
     nodes = list(graph.nodes)
     placeholders = [n for n in nodes if n.op == "placeholder"]
     output = [n for n in nodes if n.op == "output"]
     assert len(output) == 1, "Got graph w/ multiple outputs"
     output_val = output[0].args[0]
-    # The identity graph just sends the score striaght through
+    # The identity graph just sends the score straight through
     return output_val == placeholders[0]
 
 
@@ -354,10 +354,13 @@ def _can_use_flex_flash_attention_backward(
         return False, "CUTE flash attention is not available"
 
     if not is_trivial_score_graph(fw_subgraph.graph_module):
-        return False, "NYI: Flex Flash Attention doesnt support score_mods in bwds yet."
+        return (
+            False,
+            "NYI: Flex Flash Attention doesn't support score_mods in bwds yet.",
+        )
 
     if not is_trivial_mask_graph(mask_graph.graph_module):
-        return False, "NYI: Flex Flash Attention doesnt supprot block_sparsity yet."
+        return False, "NYI: Flex Flash Attention doesn't support block_sparsity yet."
 
     return True, ""
 
