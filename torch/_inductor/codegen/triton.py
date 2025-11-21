@@ -1686,7 +1686,11 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def tanh(x):
-        dtype = V.kernel.cse.varname_map.get(x).dtype
+        cse_var = V.kernel.cse.varname_map.get(x)
+        if cse_var and hasattr(cse_var, "dtype"):
+            dtype = cse_var.dtype
+        else:
+            dtype = None
         if (
             torch.version.hip
             and get_triton_version() > (3, 5)
