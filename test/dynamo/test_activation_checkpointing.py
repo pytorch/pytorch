@@ -159,9 +159,7 @@ def _get_custom_policy(no_recompute_list=None, must_recompute_list=None):
     return _custom_policy
 
 
-class ActivationCheckpointingViaTagsTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
     def _validate(
         self,
         fn,
