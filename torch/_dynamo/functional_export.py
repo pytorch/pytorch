@@ -1,5 +1,6 @@
 import inspect
 import logging
+import sys
 import traceback
 from collections import namedtuple
 from collections.abc import Callable
@@ -651,7 +652,12 @@ def dynamo_graph_capture_for_export(
             graph_module._non_persistent_buffers_set = (
                 pyt.root._non_persistent_buffers_set.copy()
             )
-            annotations = torch.nn.Module.__dict__.get("__annotations__", None)
+            if sys.version_info >= (3, 14):
+                import annotationlib  # added in 3.14
+
+                annotations = annotationlib.get_annotations(torch.nn.Module)
+            else:
+                annotations = getattr(torch.nn.Module, "__annotations__", None)
             for name, value in pyt.root.__dict__.items():
                 if annotations and name not in annotations:
                     graph_module.__dict__[name] = value
