@@ -10,6 +10,8 @@ from torch._inductor.utils import _IGNORE_OPS, get_compute_time, get_transfer_ti
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 
 
+aten = torch.ops.aten
+
 Node: TypeAlias = torch.fx.Node
 Graph: TypeAlias = torch.fx.Graph
 
@@ -286,6 +288,8 @@ def assign_backward_streams(gm: torch.fx.GraphModule) -> None:
                     set_stream(node, ind)
                     break
 
+    assign_epilogue_copy_streams(gm)
+
 
 def insert_backward_syncs(gm: torch.fx.GraphModule) -> None:
     """Inserts stream syncs for backward nodes if consumer and producer are on different streams"""
@@ -326,3 +330,11 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
                 handle_synced_deallocation(
                     gm.graph, stream_to_exec_trace, node, last_user
                 )
+
+
+def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
+    for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
+        arg_stream = get_stream(epi_copy.args[0])
+        copy_stream = get_stream(epi_copy)
+        if arg_stream != copy_stream:
+            set_stream(epi_copy, get_stream_or_current_stream(epi_copy))
