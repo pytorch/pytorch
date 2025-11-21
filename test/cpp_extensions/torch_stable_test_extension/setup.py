@@ -4,12 +4,11 @@ from pathlib import Path
 
 from setuptools import find_packages, setup
 
-import torch
-from torch.utils.cpp_extension import BuildExtension, CppExtension, CUDAExtension
+from torch.utils.cpp_extension import BuildExtension, CppExtension
 
 
 ROOT_DIR = Path(__file__).parent
-CSRC_DIR = ROOT_DIR / "libtorch_agnostic_2_10" / "csrc"
+CSRC_DIR = ROOT_DIR / "torch_stable_test" / "csrc"
 
 
 class clean(distutils.command.clean.clean):
@@ -18,13 +17,13 @@ class clean(distutils.command.clean.clean):
         distutils.command.clean.clean.run(self)
 
         # Remove extension
-        for path in (ROOT_DIR / "libtorch_agnostic_2_10").glob("**/*.so"):
+        for path in (ROOT_DIR / "torch_stable_test").glob("**/*.so"):
             path.unlink()
         # Remove build and dist and egg-info directories
         dirs = [
             ROOT_DIR / "build",
             ROOT_DIR / "dist",
-            ROOT_DIR / "libtorch_agnostic_2_10.egg-info",
+            ROOT_DIR / "torch_stable_test.egg-info",
         ]
         for path in dirs:
             if path.exists():
@@ -33,25 +32,14 @@ class clean(distutils.command.clean.clean):
 
 def get_extension():
     extra_compile_args = {
-        "cxx": [
-            "-fdiagnostics-color=always",
-            "-DTORCH_STABLE_ONLY",
-            "-DTORCH_TARGET_VERSION=0x020a000000000000",
-        ],
+        "cxx": ["-fdiagnostics-color=always", "-DTORCH_STABLE_ONLY"],
     }
+
     sources = list(CSRC_DIR.glob("**/*.cpp"))
 
-    extension = CppExtension
-    # allow including <cuda_runtime.h>
-    if torch.cuda.is_available():
-        extra_compile_args["cxx"].append("-DLAE_USE_CUDA")
-        extra_compile_args["nvcc"] = ["-O2"]
-        extension = CUDAExtension
-        sources.extend(CSRC_DIR.glob("**/*.cu"))
-
     return [
-        extension(
-            "libtorch_agnostic_2_10._C",
+        CppExtension(
+            "torch_stable_test._C",
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,
             extra_compile_args=extra_compile_args,
@@ -61,12 +49,12 @@ def get_extension():
 
 
 setup(
-    name="libtorch_agnostic_2_10",
+    name="torch_stable_test",
     version="0.0",
     author="PyTorch Core Team",
-    description="Example of libtorch agnostic extension for PyTorch 2.10+",
+    description="Test extension to verify TORCH_STABLE_ONLY flag",
     packages=find_packages(exclude=("test",)),
-    package_data={"libtorch_agnostic_2_10": ["*.dll", "*.dylib", "*.so"]},
+    package_data={"torch_stable_test": ["*.dll", "*.dylib", "*.so"]},
     install_requires=[
         "torch",
     ],

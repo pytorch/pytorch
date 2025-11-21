@@ -405,10 +405,15 @@ def cumsum_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [aten.var.correction, aten.var.correction_out],
+    [
+        aten.std.correction,
+        aten.std.correction_out,
+        aten.var.correction,
+        aten.var.correction_out,
+    ],
     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
 )
-def var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
+def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     if not isinstance(input_strategy, OpStrategy):

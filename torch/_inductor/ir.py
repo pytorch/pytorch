@@ -1435,9 +1435,7 @@ class Reduction(Loops):
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
             )
-            # A 0 stride does not make a reduction contiguous.
-            # This can happen when the reduction ranges contains a 1.
-            outer = all(s == 0 or s > 1 for s in strides)
+            outer = all(s > 1 for s in strides)
             if outer:
                 num_outer += 1
             else:
