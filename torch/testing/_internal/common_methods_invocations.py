@@ -6185,6 +6185,9 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(tensor_nd(), dim=(1,), correction=S // 2)
     yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
     yield SampleInput(tensor_nd(), dim=None, correction=None)
+    yield SampleInput(tensor_nd(), dim=None, correction=-1)
+    yield SampleInput(tensor_nd(), dim=None, correction=-5)
+    yield SampleInput(tensor_nd(), correction=0.5, keepdim=True)
     yield SampleInput(tensor_nd(), correction=0, keepdim=True)
     yield SampleInput(make_tensor(3, 4, 5, device=device, dtype=dtype, requires_grad=requires_grad), dim=-3)
 
@@ -14264,15 +14267,11 @@ op_db: list[OpInfo] = [
                     ], ),
     BinaryUfuncInfo('logaddexp',
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-                    dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+                    dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.complex32),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_rhs_python_scalar=False,
-                    skips=(
-                        # TODO: FIXME: RuntimeError: not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
-                    )),
+                    supports_rhs_python_scalar=False),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
@@ -23643,10 +23642,12 @@ python_ref_db = [
         torch_opinfo_name="logaddexp",
         skips=(
             # failure due to mismatch in edge cases, which boils down to what torch.exp(inf + infj) should be
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='cpu',
-                         dtypes=(torch.complex64, torch.complex128)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='cpu',
-                         dtypes=(torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
         ),
     ),
     PythonRefInfo(
