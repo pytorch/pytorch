@@ -6,8 +6,8 @@ import torch.fx.traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.graph_utils import _get_flat_args
 from torch._dynamo.variables.streams import get_current_stream, new_event
-from torch._inductor.utils import _IGNORE_OPS, get_compute_time, get_transfer_time
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
+from torch.utils.flop_counter import _IGNORE_OPS, get_compute_time, get_transfer_time
 
 
 aten = torch.ops.aten
