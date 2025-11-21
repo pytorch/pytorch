@@ -3,6 +3,7 @@
 #include <ATen/native/transformers/attention.h>
 #include <ATen/native/transformers/sdp_utils.h>
 #include <ATen/native/transformers/sdp_utils_cpp.h>
+#include <ATen/native/transformers/xpu/sdp_utils.h>
 #include <c10/util/Array.h>
 #include <torch/library.h>
 
@@ -74,11 +75,6 @@ bool can_use_overrideable_attention(sdp::sdp_params const& params, bool debug) {
   return sdp::check_tensor_dtype(params, supported_dtypes, debug);
 }
 
-bool can_use_flash_attention(sdp::sdp_params const& params, bool debug) {
-  // Currently, XPU fallbacks flash attention to overridable
-  return can_use_overrideable_attention(params, debug);
-}
-
 bool can_use_cudnn_attention(sdp::sdp_params const& params, bool debug) {
   if (debug) {
     TORCH_WARN("XPU don't support SDPA cudnn attention backend.");
@@ -142,10 +138,8 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
         break;
       case sdp::SDPBackend::flash_attention:
         if (ctx.userEnabledFlashSDP() &&
-            can_use_flash_attention(kernel_params, print_debug)) {
-          TORCH_WARN_ONCE(
-              "SDPA Flash Attention backend is not supported on XPU, falling back to OVERRIDEABLE backend.");
-          return sdp::SDPBackend::overrideable;
+            sdp::can_use_flash_attention(kernel_params, print_debug)) {
+          return sdp::SDPBackend::flash_attention;
         }
         break;
       case sdp::SDPBackend::cudnn_attention:
@@ -172,7 +166,7 @@ sdp::SDPBackend select_sdp_backend_xpu(sdp::sdp_params const& kernel_params) {
 
   print_debug = true;
   TORCH_WARN("Flash attention kernel not used because:");
-  can_use_flash_attention(kernel_params, print_debug);
+  sdp::can_use_flash_attention(kernel_params, print_debug);
   TORCH_WARN("Overrideable attention kernel not used because:");
   can_use_overrideable_attention(kernel_params, print_debug);
   TORCH_WARN("CuDNN attention kernel not used because:");
