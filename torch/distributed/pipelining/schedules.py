@@ -1485,6 +1485,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         use_full_backward: Optional[bool] = None,
         scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
     ):
         # Init parent
         super().__init__(
@@ -1516,6 +1517,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
         # This will be set during init of derived schedules
         self.pipeline_order: dict[int, list[Optional[_Action]]] = {}
+
+        # When using a custom backward function, we may or may not need autograd to be used
+        # for the backward pass. This flag is used to determine whether or torch.is_grad_enabled()
+        # check should be performed before the step function.
+        self._backward_requires_autograd = backward_requires_autograd
 
         if use_full_backward is not None:
             logger.warning(
@@ -1609,7 +1615,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
         losses: a list to store the losses for each microbatch.
         return_outputs: whether to return the outputs from the last stage.
         """
-        if self._has_backward and not torch.is_grad_enabled():
+        if (
+            self._has_backward
+            and self._backward_requires_autograd
+            and not torch.is_grad_enabled()
+        ):
             raise RuntimeError(
                 "step() requires gradients to be enabled for backward computation; "
                 "it should not be used under torch.no_grad() context. "
@@ -1891,7 +1901,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
         Args:
             computation_type: The computation type for which to register the custom function
             custom_function: The function to execute when this computation type is encountered.
-                Must have signature: (stage: _PipelineStageBase, mb_index: int, *args, **kwargs) -> None
+                Must have signature: (action: _Action, ctx: _PipelineContext) -> None
         """
         # Ensure that the computation type is valid
         if computation_type not in (
@@ -1900,10 +1910,13 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             BACKWARD_INPUT,
             BACKWARD_WEIGHT,
             OVERLAP_F_B,
+            UNSHARD,
+            RESHARD,
+            REDUCE_GRAD,
         ):
             raise ValueError(
                 f"Invalid computation type {computation_type}. Only FORWARD, FULL_BACKWARD, \
-BACKWARD_INPUT, BACKWARD_WEIGHT, and OVERLAP_F_B are supported."
+                BACKWARD_INPUT, BACKWARD_WEIGHT, OVERLAP_F_B, UNSHARD, RESHARD and REDUCE_GRAD are supported."
             )
 
         # Check if computation_type is already registered
@@ -2296,6 +2309,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
         loss_fn: Optional[Union[Callable, _Loss]] = None,
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
     ):
         super().__init__(
             stages=stages,
@@ -2303,6 +2317,7 @@ class ScheduleLoopedBFS(_PipelineScheduleRuntime):
             loss_fn=loss_fn,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            backward_requires_autograd=backward_requires_autograd,
         )
 
         # 1. Create the pipeline_order (all ranks do this calculation)
@@ -2510,6 +2525,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
     ):
         self.pp_group_size = stages[0].group_size
         super().__init__(
@@ -2520,6 +2536,7 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            backward_requires_autograd=backward_requires_autograd,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -2622,6 +2639,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
     ):
         # TODO: we dont support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -2634,6 +2652,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            backward_requires_autograd=backward_requires_autograd,
         )
         self.n_local_stages = len(stages)
         self.rank = stages[0].group_rank
@@ -2819,6 +2838,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
     ):
         # TODO: we dont support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -2831,6 +2851,7 @@ class ScheduleZBVZeroBubble(_PipelineScheduleRuntime):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            backward_requires_autograd=backward_requires_autograd,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"
@@ -2995,6 +3016,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
         kwargs_chunk_spec: Optional[dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[dict[str, Any], tuple[Any]]] = None,
         scale_grads: bool = True,
+        backward_requires_autograd: bool = True,
     ):
         # TODO: we dont support input/weight backward split with torch.compile
         _check_torch_compile_compatibility(stages, self.__class__.__name__)
@@ -3007,6 +3029,7 @@ class ScheduleDualPipeV(_PipelineScheduleRuntime):
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
             scale_grads=scale_grads,
+            backward_requires_autograd=backward_requires_autograd,
         )
         self.stage_index_to_group_rank = generate_stage_to_rank_mapping(
             self.pp_group_size, self._num_stages, style="v"

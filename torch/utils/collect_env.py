@@ -899,7 +899,7 @@ def get_pretty_env_info():
     return pretty_str(get_env_info())
 
 
-def main():
+def main() -> None:
     print("Collecting environment information...")
     output = get_pretty_env_info()
     print(output)

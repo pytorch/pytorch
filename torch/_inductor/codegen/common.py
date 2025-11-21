@@ -521,6 +521,7 @@ def init_backend_registration() -> None:
             "cpp": CppScheduling,
             "halide": HalideScheduling,
             "triton": TritonScheduling,
+            "pallas": PallasScheduling,
         }
         register_backend_for_device(
             "cpu",
