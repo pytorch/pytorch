@@ -382,6 +382,37 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
+    def test_layer_norm_bwd_with_dynamic_shape(self):
+        def f(x, w, eps):
+            return F.layer_norm(x, x.shape[-1:], weight=w, bias=None, eps=eps)
+
+        def fwd_bwd(f):
+            x.grad = None
+            w.grad = None
+            out = f(x, w, eps)
+            out.backward(dy)
+            return x.grad, w.grad
+
+        M0, M1, N = 251, 223, 128
+        wbdtype = torch.float
+        xdtype = torch.float
+        x = torch.randn(M0, M1, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, 0)
+        w = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
+        dy = torch.randn_like(x)
+        eps = 1e-5
+
+        opt_f = torch.compile(f)
+
+        ref = fwd_bwd(f)
+        act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+
     @parametrize("split_reductions", (False, True))
     @parametrize("shape", ((32768, 768), (32769, 768)))
     def test_layer_norm_bwd_no_bias(self, split_reductions, shape):

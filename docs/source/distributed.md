@@ -987,6 +987,24 @@ In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `T
 collective desynchronization checks will work for all applications that use `c10d` collective calls backed by process groups created with the
 {func}`torch.distributed.init_process_group` and {func}`torch.distributed.new_group` APIs.
 
+
+### torch.distributed.debug HTTP Server
+
+The `torch.distributed.debug` module provides a HTTP server that can be used to debug distributed applications. The server can
+be started by calling {func}`torch.distributed.debug.start_debug_server`. This
+allows users to collect data across all workers at runtime.
+
+```{eval-rst}
+.. automodule:: torch.distributed.debug
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :special-members: __init__
+    :member-order: bysource
+
+```
+
+
 ## Logging
 
 In addition to explicit debugging support via {func}`torch.distributed.monitored_barrier` and `TORCH_DISTRIBUTED_DEBUG`, the underlying C++ library of `torch.distributed` also outputs log
