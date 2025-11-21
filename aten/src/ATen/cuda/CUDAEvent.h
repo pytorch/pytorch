@@ -96,4 +96,6 @@ class EventPool {
   std::vector<PerDevicePool> pools_;
 };
 
+using CUDAEventPtr = EventPool::Event;
+
 } // namespace at::cuda
