@@ -11,6 +11,7 @@ from sympy import Expr, symbols
 
 import torch._inductor.config as config
 from torch import dtype as torch_dtype
+from torch._inductor.codegen.common import get_device_op_overrides
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
 from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import do_bench_using_profiling, OrderedSet, Placeholder
@@ -197,13 +198,12 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
     Template kernels defined by Cutlass in C++.
     """
 
-    _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
-
     def __init__(
         self,
         kernel_name: str,
         runtime_arg_info: list["ArgInfo"],
         runtime_arg_values: list[Any],
+        device_type: str = "cuda",  # type: ignore[assignment]
     ) -> None:
         """
         Initializes a new instance of the CUTLASSTemplateKernel class.
@@ -215,6 +215,9 @@ class CUTLASSTemplateKernel(CUTLASSKernel):
         self.kernel_name = kernel_name
         self.runtime_arg_info = runtime_arg_info
         self.runtime_arg_values = runtime_arg_values
+        self.device_type = device_type
+        self.device_codegen = get_device_op_overrides(self.device_type)
+        self._EXTRA_CPP_ARGS = f"size_t* workspace_size, uint8_t* workspace, {self.device_codegen.cpp_stream_type()} stream"
 
     def check_not_null(self, node: IRNode) -> str:
         """
