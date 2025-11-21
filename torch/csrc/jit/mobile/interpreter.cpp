@@ -17,7 +17,7 @@
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch::jit {
-std::ostream& operator<<(std::ostream& out, Instruction inst);
+
 namespace mobile {
 InterpreterState::InterpreterState(const Code& code) {
   enterFrame(code);

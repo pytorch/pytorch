@@ -487,17 +487,17 @@ static Tensor _grid_sampler_2d_cpu_quantized(
   int64_t out_sC = output.stride(1);
   int64_t out_sH = output.stride(2);
   int64_t out_sW = output.stride(3);
-  uint8_t* inp_ptr = (uint8_t*)input.data_ptr<quint8>();
-  uint8_t* out_ptr = (uint8_t*)output.data_ptr<quint8>();
-  float* grid_ptr = grid.data_ptr<float>();
+  const uint8_t* inp_ptr = input.const_data_ptr<uint8_t>();
+  uint8_t* out_ptr = output.data_ptr<uint8_t>();
+  const float* grid_ptr = grid.const_data_ptr<float>();
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
     for (const auto n : c10::irange(start, end)) {
-      float* grid_ptr_N = grid_ptr + n * grid_sN;
-      uint8_t* inp_ptr_N = inp_ptr + n * inp_sN;
+      const float* grid_ptr_N = grid_ptr + n * grid_sN;
+      const uint8_t* inp_ptr_N = inp_ptr + n * inp_sN;
       for (const auto h : c10::irange(out_H)) {
         for (const auto w : c10::irange(out_W)) {
           // get the corresponding input x, y, z coordinates from grid
-          float* grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
+          const float* grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
           float x = *grid_ptr_NHW;
           float y = grid_ptr_NHW[grid_sCoor];
 
@@ -527,7 +527,7 @@ static Tensor _grid_sampler_2d_cpu_quantized(
           float se = (ix - ix_nw) * (iy - iy_nw);
 
           // calculate bilinear weighted pixel value and set output pixel
-          uint8_t* inp_ptr_NC = inp_ptr_N;
+          const uint8_t* inp_ptr_NC = inp_ptr_N;
           uint8_t* out_ptr_NCHW =
               out_ptr + n * out_sN + h * out_sH + w * out_sW;
           for (int64_t c = 0; c < C;

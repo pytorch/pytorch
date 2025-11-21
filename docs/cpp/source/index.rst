@@ -14,7 +14,7 @@ Combining, these building blocks form a research and
 production ready C++ library for tensor computation and dynamic neural
 networks with strong emphasis on GPU acceleration as well as fast CPU
 performance. It is currently in use at Facebook in research and
-production; we are looking forward to welcome more users of the PyTorch C++ API.
+production; we are looking forward to welcoming more users of the PyTorch C++ API.
 
 .. warning::
 

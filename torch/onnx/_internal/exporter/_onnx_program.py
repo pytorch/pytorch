@@ -13,8 +13,8 @@ import os
 import tempfile
 import textwrap
 import warnings
-from collections.abc import Sequence
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
@@ -128,7 +128,7 @@ def _to_numpy_array(input: torch.Tensor | int | float | str | bool) -> np.ndarra
 
 def _from_numpy_array(array: np.ndarray) -> torch.Tensor:
     """Convert a NumPy array to a PyTorch tensor."""
-    import ml_dtypes
+    import ml_dtypes  # type: ignore[import-not-found]
     import numpy as np
 
     if array.dtype == ml_dtypes.bfloat16:
@@ -157,6 +157,7 @@ def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValu
             int: np.int64,
             float: np.float32,
         }
+        # pyrefly: ignore [no-matching-overload]
         dtype = dtype_mapping.get(type(input), None)
         return ort.OrtValue.ortvalue_from_numpy(np.array(input, dtype=dtype))
 
@@ -210,7 +211,7 @@ class ONNXProgram:
 
     def __init__(
         self, model: ir.Model, exported_program: torch.export.ExportedProgram | None
-    ):
+    ) -> None:
         """Initialize the ONNX program with the specified model and exported program.
         Args:
             model: The ONNX model.
@@ -252,6 +253,7 @@ ONNXProgram(
         run_options = ort.RunOptions()
         run_options.log_severity_level = 3  # 3: Error
         logger.debug("Running the inference session with %s arguments.", len(ort_input))
+        # pyrefly: ignore [missing-attribute]
         outputs = self._inference_session.run_with_ort_values(
             None, ort_input, run_options=run_options
         )
@@ -325,7 +327,7 @@ ONNXProgram(
         include_initializers: bool = True,
         keep_initializers_as_inputs: bool = False,
         external_data: bool | None = None,
-    ):
+    ) -> None:
         """Save the ONNX model to the specified destination.
 
         When ``external_data`` is ``True`` or the model is larger than 2GB,

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.ao.nn.quantized as nnq
@@ -20,10 +21,10 @@ NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
 
 
 def _find_match(
-    str_list: Union[dict[str, Any], list[str]],
+    str_list: dict[str, Any] | list[str],
     key_str: str,
     postfix: str,
-) -> Optional[str]:
+) -> str | None:
     split_str = key_str.split(".")
     if split_str[-1] == postfix:
         match_string = "".join(key_str.split(".")[0:-1])
@@ -136,7 +137,7 @@ def _get_logger_dict_helper(
     def get_prefix(prefix):
         return prefix if prefix == "" else prefix + "."
 
-    for name, child in mod.named_children():
+    for child in mod.children():
         if isinstance(child, Logger):
             target_dict[get_prefix(prefix) + "stats"] = child.stats
             break

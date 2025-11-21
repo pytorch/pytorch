@@ -160,8 +160,8 @@ struct _cuda_scatter_gather_internal_kernel {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(index_t*)(index_ptr + offsets[2]);
-      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
-        && "scatter gather kernel index out of bounds");
+      CUDA_KERNEL_ASSERT_VERBOSE(idx_dim >= 0 && idx_dim < index_size
+        && "scatter gather kernel index out of bounds", "Expected 0 <= idx_dim < index_size (%ld), but got idx_dim = %ld", index_size, idx_dim);
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
@@ -406,9 +406,8 @@ struct _cuda_scatter_fill_internal_kernel {
       auto offsets = offset_calc.get(i);
 
       int64_t idx_dim = *(index_t*)(index_ptr + offsets[1]);
-      CUDA_KERNEL_ASSERT(idx_dim >= 0 && idx_dim < index_size
-        && "index out of bounds"
-      );
+      CUDA_KERNEL_ASSERT_VERBOSE(idx_dim >= 0 && idx_dim < index_size
+        && "index out of bounds", "Expected 0 <= idx_dim < index_size (%ld), but got idx_dim = %ld", index_size, idx_dim);
 
       f(
         (scalar_t*)(self_ptr + offsets[0]),
