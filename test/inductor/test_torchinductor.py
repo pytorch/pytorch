@@ -15165,7 +15165,7 @@ if RUN_GPU:
         def test_grouped_mm(self):
             @torch.compile(fullgraph=True)
             def f(a, b, offs, out_dtype):
-                return torch._grouped_mm(
+                return F.grouped_mm(
                     a, b.transpose(-2, -1), offs=offs, out_dtype=out_dtype
                 )
 
