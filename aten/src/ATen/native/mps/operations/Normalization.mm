@@ -3,6 +3,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/TensorUtils.h>
 #include <ATen/native/Pool.h>
+#include <ATen/native/cpu/mixed_data_type.h>
 #include <ATen/native/layer_norm.h>
 #include <ATen/native/mps/OperationUtils.h>
 
@@ -155,6 +156,17 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                              bias_opt.value_or(Tensor()),
                              running_mean_opt.value_or(Tensor()),
                              running_var_opt.value_or(Tensor())});
+
+    const Tensor weight = has_weight ? weight_opt.value() : Tensor();
+    const Tensor bias = has_bias ? bias_opt.value() : Tensor();
+    const Tensor running_mean = has_running_mean ? running_mean_opt.value() : Tensor();
+    const Tensor running_var = has_running_mean ? running_var_opt.value() : Tensor();
+
+    const bool mixed_type = ::at::native::is_mixed_type(self, weight, bias, running_mean, running_var);
+    if (mixed_type) {
+      ::at::native::check_mixed_data_type(self, weight, bias, running_mean, running_var);
+    }
+
     auto input_mps_dtype = getMPSDataType(self);
 
     // Dim where channels are located
@@ -273,17 +285,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
       }
 
       // Compute output of batch norm
-      auto castTensorIfNeeded = [&](MPSGraphTensor* tensor, NSString* name) -> MPSGraphTensor* {
-        if (tensor && tensor.dataType != input_mps_dtype) {
-          return [mpsGraph castTensor:tensor toType:input_mps_dtype name:name];
-        }
-        return tensor;
-      };
-
-      MPSGraphTensor* normMeanTensor = castTensorIfNeeded(saveMeanTensor, @"bn_norm_mean_cast");
-      MPSGraphTensor* normVarTensor = castTensorIfNeeded(varTensor, @"bn_norm_var_cast");
-      MPSGraphTensor* normWeightTensor = castTensorIfNeeded(weightTensor, @"bn_norm_weight_cast");
-      MPSGraphTensor* normBiasTensor = castTensorIfNeeded(biasTensor, @"bn_norm_bias_cast");
+      MPSGraphTensor* normMeanTensor = castMPSTensor(mpsGraph, saveMeanTensor, input_mps_dtype);
+      MPSGraphTensor* normVarTensor = castMPSTensor(mpsGraph, varTensor, input_mps_dtype);
+      MPSGraphTensor* normWeightTensor = has_weight ? castMPSTensor(mpsGraph, weightTensor, input_mps_dtype) : nil;
+      MPSGraphTensor* normBiasTensor = has_bias ? castMPSTensor(mpsGraph, biasTensor, input_mps_dtype) : nil;
 
       MPSGraphTensor* outputTensor = [mpsGraph normalizationWithTensor:inputTensor
                                                             meanTensor:normMeanTensor
