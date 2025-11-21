@@ -824,7 +824,7 @@ class TestMaxPool(TestCaseMPS):
             mps_result = max_pool(x_mps)
         except RuntimeError as e:
             mps_result = str(e)
-        
+
         self.assertEqual(cpu_result, mps_result)
 
 
@@ -845,7 +845,7 @@ class TestMaxPool(TestCaseMPS):
             mps_result = max_pool(x_mps)
         except RuntimeError as e:
             mps_result = str(e)
-        
+
         self.assertEqual(cpu_result, mps_result)
 
 class TestMPS(TestCaseMPS):
