@@ -382,7 +382,51 @@ class MixOrderReductionTest(TestBase):
             metrics.codegen_mix_order_reduction,
         )
 
-    def test_layer_norm_bwd_with_dynamic_shape(self):
+    @parametrize("dynamic_dims", ([0], [1], [0, 1]))
+    def test_rms_norm_bwd_with_dynamic_shape(self, dynamic_dims):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        def f(x, w, eps):
+            return F.rms_norm(x, x.shape[-1:], weight=w, eps=eps)
+
+        def fwd_bwd(f):
+            x.grad = None
+            w.grad = None
+            out = f(x, w, eps)
+            out.backward(dy)
+            return x.grad, w.grad
+
+        M0, M1, N = 251, 223, 128
+        wbdtype = torch.float
+        xdtype = torch.float
+        x = torch.randn(M0, M1, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
+        torch._dynamo.mark_dynamic(x, (0, 1))
+        w = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
+        dy = torch.randn_like(x)
+        eps = 1e-5
+
+        opt_f = torch.compile(
+            f,
+            options={
+                "split_reductions": False,
+            },
+        )
+
+        ref = fwd_bwd(f)
+        act, (_, bwd_wrapper) = utils.run_and_get_code(fwd_bwd, opt_f)
+
+        self.assertTrue(same(ref, act, tol=1e-2), f"ref:\n{ref}\nact:\n{act}")
+        self.assertEqual(
+            inductor_config.triton.mix_order_reduction,
+            metrics.codegen_mix_order_reduction,
+        )
+
+    @parametrize("dynamic_dims", ([0], [1], [0, 1]))
+    def test_layer_norm_bwd_with_dynamic_shape(self, dynamic_dims):
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
         def f(x, w, eps):
             return F.layer_norm(x, x.shape[-1:], weight=w, bias=None, eps=eps)
 
@@ -397,7 +441,7 @@ class MixOrderReductionTest(TestBase):
         wbdtype = torch.float
         xdtype = torch.float
         x = torch.randn(M0, M1, N, dtype=xdtype, device=GPU_TYPE, requires_grad=True)
-        torch._dynamo.mark_dynamic(x, 0)
+        torch._dynamo.mark_dynamic(x, dynamic_dims)
         w = torch.randn(N, dtype=wbdtype, device=GPU_TYPE, requires_grad=True)
         dy = torch.randn_like(x)
         eps = 1e-5
