@@ -253,12 +253,26 @@ class RNNBase(Module):
         # a sufficient check, because overlapping parameter buffers that don't completely
         # alias would break the assumptions of the uniqueness check in
         # Module.named_parameters().
-        unique_data_ptrs = {
-            p.data_ptr()  # type: ignore[union-attr]
-            for p in self._flat_weights
-        }
-        if len(unique_data_ptrs) != len(self._flat_weights):
-            return
+        # Try to use data_ptr() first, fallback to untyped_storage() if not accessible
+        try:
+            unique_data_ptrs = {
+                p.data_ptr()  # type: ignore[union-attr]
+                for p in self._flat_weights
+            }
+            if len(unique_data_ptrs) != len(self._flat_weights):
+                return
+        except RuntimeError:
+            # PT2 specific path to make RNN traceable with fake tensor
+            from torch._subclasses.fake_tensor import FakeTensor
+
+            if not all(isinstance(p, FakeTensor) for p in self._flat_weights):  # type: ignore[union-attr]
+                raise
+            unique_storage_refs = {
+                p.untyped_storage()
+                for p in self._flat_weights  # type: ignore[union-attr]
+            }
+            if len(unique_storage_refs) != len(self._flat_weights):
+                return
 
         with torch.cuda.device_of(first_fw):
             import torch.backends.cudnn.rnn as rnn
