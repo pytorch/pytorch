@@ -37,7 +37,12 @@ def inline_subgraph_to_ir_nodes(
     """
     from torch._inductor.lowering import process_subgraph_nodes
 
-    return process_subgraph_nodes(gm, inputs)
+    original_module = V.graph.module
+    try:
+        V.graph.module = gm
+        return process_subgraph_nodes(gm, inputs)
+    finally:
+        V.graph.module = original_module
 
 
 class SubgraphChoiceCaller(ir.ChoiceCaller):
@@ -90,7 +95,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             extern_node_serializer=V.graph.extern_node_serializer,
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
-            name=f"benchmark_{self.name}",
+            name=f"benchmark_{self.name.replace('::', '_')}",
         )
 
         for sym_inp in self.sym_inputs:
