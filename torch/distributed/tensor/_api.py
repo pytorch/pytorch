@@ -1,7 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import copy
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
@@ -97,23 +96,16 @@ class _ToTorchTensor(torch.autograd.Function):
         )
         tensor_stride = tuple(tensor_stride)
         grad_placements = grad_placements or dtensor_spec.placements
-        if (
-            tensor_stride == dtensor_meta.stride
-            and grad_placements == dtensor_spec.placements
-        ):
-            # Avoid actual sharing of specs in case they're modified during (e.g.)
-            # sharding propagation.
-            grad_spec = copy.copy(dtensor_spec)
-        else:
-            grad_spec = DTensorSpec(
-                mesh,
-                grad_placements,
-                tensor_meta=TensorMeta(
-                    shape=dtensor_meta.shape,
-                    stride=tensor_stride,
-                    dtype=dtensor_meta.dtype,
-                ),
-            )
+        grad_spec = DTensorSpec(
+            mesh,
+            grad_placements,
+            tensor_meta=TensorMeta(
+                shape=dtensor_meta.shape,
+                stride=tensor_stride,
+                dtype=dtensor_meta.dtype,
+            ),
+        )
+
         return (
             # pyrefly: ignore [bad-argument-type]
             DTensor(
@@ -346,11 +338,14 @@ class DTensor(torch.Tensor):
         )
 
     @classmethod
+    @torch._disable_dynamo
+    # pyre-fixme[3]: Return type must be annotated.
+    # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
-        # We just need to have an implementation here; the __torch_dispatch__ machinery
-        # calls into a specific C++ fast path that doesn't call here.
-        raise NotImplementedError(
-            "DTensor.__torch_dispatch__ should not actually get called"
+        return DTensor._op_dispatcher.dispatch(
+            func,
+            args,
+            kwargs or {},
         )
 
     @staticmethod
@@ -818,6 +813,11 @@ def distribute_tensor(
             local_tensor = Replicate._make_replicate_tensor(
                 local_tensor, device_mesh, idx, src_data_rank
             )
+        elif isinstance(placement, Partial):
+            local_tensor = Replicate._make_replicate_tensor(
+                local_tensor, device_mesh, idx, src_data_rank
+            )
+            local_tensor = placement._partition_value(local_tensor, device_mesh, idx)
         else:
             raise RuntimeError(
                 f"Trying to distribute tensor with unsupported placements {placement} on device mesh dimension {idx}!"
