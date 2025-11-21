@@ -66,6 +66,7 @@ from ..source import (
     DefaultsSource,
     GetItemSource,
     SkipGuardSource,
+    TorchSource,
     TypeSource,
 )
 from ..utils import (
@@ -117,6 +118,13 @@ CO_VARKEYWORDS = 0x08
 
 # Module-level cache keyed by the function object
 _spec_cache: WeakKeyDictionary[Any, Any] = WeakKeyDictionary()
+
+
+@functools.lru_cache
+def get_pytree_SUPPORTED_NODES_source():
+    return AttrSource(
+        AttrSource(AttrSource(TorchSource(), "utils"), "_pytree"), "SUPPORTED_NODES"
+    )
 
 
 class FunctionSpec:
@@ -2758,3 +2766,60 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
             type_source = AttrSource(CollectionsSource(), "namedtuple")
             return VariableTracker.build(tx, namedtuple, type_source)
         return VariableTracker.build(tx, python_type, source=type_source)
+
+
+class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
+    """
+    `torch.utils._pytree.tree_is_leaf` function is a hot function. We want to special case it to reduce Dynamo tracing time.
+
+    def tree_is_leaf(
+        tree: PyTree,
+        is_leaf: Callable[[PyTree], bool] | None = None,
+    ) -> bool:
+        if is_leaf is not None and is_leaf(tree):
+            return True
+        return _get_node_type(tree) not in SUPPORTED_NODES
+
+    When is_leaf is None (the common case), we can optimize by not tracing into the function.
+    When is_leaf is not None, we fall back to regular tracing since it requires executing user code.
+    """
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # tree_is_leaf(tree, is_leaf=None)
+        if len(args) < 1 or len(args) > 2:
+            raise_type_error_exc(
+                tx,
+                f"tree_is_leaf requires 1 or 2 arguments, got {len(args)}",
+            )
+
+        # Check if is_leaf parameter is provided
+        is_leaf = kwargs.get("is_leaf", ConstantVariable.create(None))
+        if len(args) == 2:
+            is_leaf = args[1]
+
+        if not (
+            isinstance(is_leaf, variables.ConstantVariable) and is_leaf.value is None
+        ):
+            return super().call_function(tx, args, kwargs)
+
+        # Optimize the case where is_leaf is None
+        # return _get_node_type(tree) not in SUPPORTED_NODES
+        tree = args[0]
+        node_type_var = PyTreeGetNodeTypeFunctionVariable(
+            torch.utils._pytree._get_node_type
+        ).call_function(tx, [tree], {})
+
+        # If the SUPPORTED_NODES was seen earlier and mutated, there would be a
+        # source and that will give us the mutated SUPPORTED_NODES.
+        supported_nodes_var = VariableTracker.build(
+            tx,
+            torch.utils._pytree.SUPPORTED_NODES,
+            source=get_pytree_SUPPORTED_NODES_source(),
+        )
+        out = supported_nodes_var.call_method(tx, "__contains__", [node_type_var], {})
+        return ConstantVariable.create(not out.value)
