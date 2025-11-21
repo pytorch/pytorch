@@ -1,11 +1,11 @@
 # Owner(s): ["module: inductor"]
 import contextlib
 import os
+import pathlib
 import subprocess
 import sys
 import tempfile
 import unittest
-import pathlib
 
 import torch
 import torch._inductor.config as inductor_config
@@ -15,10 +15,11 @@ from torch._inductor.utils import fresh_cache
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
-    HAS_CUDA_AND_TRITON,
+    HAS_GPU_AND_TRITON,
     IS_BIG_GPU,
 )
 
@@ -46,6 +47,7 @@ class DeterministicTest(TestCase):
         finally:
             torch.use_deterministic_algorithms(old_val, warn_only=True)
 
+    @skipIfXpu(msg="pad_mm is not enabled for XPU.")
     @parametrize("deterministic", [False, True])
     def test_mm_padding(self, deterministic):
         with inductor_config.patch(deterministic=deterministic):
@@ -122,12 +124,6 @@ class DeterministicTest(TestCase):
         The test assumes benchmarks/dynamo/huggingface.py can be found from
         the current working directory.
         """
-        # XXX log to remove
-        # step1: fail since benchmark script not found
-        # step2: found the benchmark script but fail numeric check <==
-        # step3: run the benchmark script and pass
-
-        # if not os.path.exists("benchmarks/dynamo/huggingface.py"): self.skipTest("Skip due to benchmarks/dynamo/huggingface.py not found.")
 
         def _setup_env(env):
             env["TORCHINDUCTOR_FORCE_DISABLE_CACHES"] = "1"  # disable autotune cache
@@ -138,7 +134,7 @@ class DeterministicTest(TestCase):
 
         # set to false if you want to check how the test fails without
         # the deterministic mode
-        enable_determinism = False
+        enable_determinism = True
         with tempfile.TemporaryDirectory() as tmpdir:
             saved_pkl = os.path.join(tmpdir, "saved.pkl")
             cmd = (
@@ -175,5 +171,5 @@ class DeterministicTest(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA_AND_TRITON:
+    if HAS_GPU_AND_TRITON:
         run_tests()

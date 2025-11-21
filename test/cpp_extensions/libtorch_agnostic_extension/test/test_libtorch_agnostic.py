@@ -14,9 +14,36 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     IS_WINDOWS,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
     xfailIfTorchDynamo,
 )
+
+
+def get_supported_dtypes():
+    """Return a list of dtypes that are supported by torch stable ABI."""
+    return [
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.uint16,
+        torch.uint32,
+        torch.uint64,
+        torch.bfloat16,
+        torch.float16,
+        torch.float32,
+        torch.float64,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2fnuz,
+        torch.float8_e4m3fnuz,
+        torch.complex32,
+        torch.complex64,
+        torch.complex128,
+        torch.bool,
+    ]
 
 
 # TODO: Fix this error in Windows:
@@ -273,6 +300,43 @@ if not IS_WINDOWS:
             out0 = libtorch_agnostic.ops.my_narrow(t, dim0, start0, length0)
             expected0 = torch.narrow(t, dim0, start0, length0)
             self.assertEqual(out0, expected0)
+
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+        def test_get_any_data_ptr(self, device):
+            import libtorch_agnostic
+
+            t = torch.empty(2, 5, device=device, dtype=torch.float32)
+            expected_p = t.data_ptr()
+
+            for mutable in [True, False]:
+                p = libtorch_agnostic.ops.get_any_data_ptr(t, mutable)
+                self.assertEqual(p, expected_p)
+
+        @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
+        def test_get_template_any_data_ptr(self, device):
+            import libtorch_agnostic
+
+            supported_dtypes = get_supported_dtypes()
+
+            for dtype in supported_dtypes:
+                t = torch.empty(2, 5, device=device, dtype=dtype)
+                expected_p = t.data_ptr()
+
+                for rdtype in supported_dtypes:
+                    if dtype == rdtype:
+                        for mutable in [True, False]:
+                            p = libtorch_agnostic.ops.get_template_any_data_ptr(
+                                t, rdtype, mutable
+                            )
+                            self.assertEqual(p, expected_p)
+                    else:
+                        for mutable in [True, False]:
+                            with self.assertRaisesRegex(
+                                RuntimeError, "expected scalar type.* but found"
+                            ):
+                                libtorch_agnostic.ops.get_template_any_data_ptr(
+                                    t, rdtype, mutable
+                                )
 
         @onlyCUDA
         @deviceCountAtLeast(2)
@@ -615,6 +679,22 @@ if not IS_WINDOWS:
             result_flat = libtorch_agnostic.ops.my_view(t, [-1])
             expected_flat = t.view([-1])
             self.assertEqual(result_flat, expected_flat)
+
+        def test_mv_tensor_accessor(self, device):
+            import libtorch_agnostic
+
+            m = torch.rand(3, 5, device=device)
+            v = torch.rand(5, device=device)
+            result = libtorch_agnostic.ops.mv_tensor_accessor(m, v)
+            expected = torch.mv(m, v)
+            self.assertEqual(result, expected)
+
+            # non-contiguous inputs
+            m = torch.rand(3 * 2, 5 * 3, device=device)[::2, ::3]
+            v = torch.rand(5 * 4, device=device)[::4]
+            result = libtorch_agnostic.ops.mv_tensor_accessor(m, v)
+            expected = torch.mv(m, v)
+            self.assertEqual(result, expected)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
