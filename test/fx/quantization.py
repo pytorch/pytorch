@@ -341,7 +341,7 @@ class Quantizer:
                     lambda a: map_arg(a, lambda n: load_arg(n, quantized=True)),
                 )
                 if r is NotImplemented:
-                    # quantizer choose to to quantize the node take the entire match, and just copy it over
+                    # quantizer choose to quantize the node take the entire match, and just copy it over
                     env[node.name] = copy_recursive(node)
                 else:
                     quant_env[node.name] = r

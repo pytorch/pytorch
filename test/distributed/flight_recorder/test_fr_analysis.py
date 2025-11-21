@@ -143,6 +143,19 @@ class FlightRecorderEventTest(TestCase):
             match_one_event(e11, e12, membership, "0").state,
             MatchState.FULLY_MATCHED,
         )
+        e13 = create_one_event(
+            "gather",
+            ("0", "default"),
+            [[4, 4]],
+            [[4, 4]],
+            "completed",
+            1,
+            output_dtypes="",
+        )
+        self.assertEqual(
+            match_one_event(e11, e13, membership, "0").state,
+            MatchState.FULLY_MATCHED,
+        )
 
     def test_all_events(self):
         for collective in sorted(COLLECTIVES):

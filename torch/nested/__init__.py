@@ -26,8 +26,8 @@ torch.serialization.add_safe_globals([_NestedTensor, _rebuild_njt])
 
 def as_nested_tensor(
     ts: Union[Tensor, list[Tensor], tuple[Tensor, ...]],
-    dtype: Optional[DType] = None,
-    device: Optional[Device] = None,
+    dtype: DType | None = None,
+    device: Device | None = None,
     layout=None,
 ) -> Tensor:
     r"""
@@ -281,8 +281,8 @@ def nested_tensor(
 def narrow(
     tensor: Tensor,
     dim: int,
-    start: Union[int, Tensor],
-    length: Union[int, Tensor],
+    start: int | Tensor,
+    length: int | Tensor,
     layout=torch.strided,
 ) -> Tensor:
     r"""
@@ -358,11 +358,11 @@ def narrow(
 
 def nested_tensor_from_jagged(
     values: Tensor,
-    offsets: Optional[Tensor] = None,
-    lengths: Optional[Tensor] = None,
-    jagged_dim: Optional[int] = None,
-    min_seqlen: Optional[int] = None,
-    max_seqlen: Optional[int] = None,
+    offsets: Tensor | None = None,
+    lengths: Tensor | None = None,
+    jagged_dim: int | None = None,
+    min_seqlen: int | None = None,
+    max_seqlen: int | None = None,
 ) -> Tensor:
     r"""
     Constructs a jagged layout nested tensor from the given jagged components. The jagged layout

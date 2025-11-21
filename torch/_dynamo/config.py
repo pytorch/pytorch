@@ -3,6 +3,7 @@ Configuration module for TorchDynamo compiler and optimization settings.
 
 This module contains various configuration flags and settings that control TorchDynamo's
 behavior, including:
+
 - Runtime behavior flags (e.g., guard settings, specialization options)
 - Debugging and development options
 - Performance tuning parameters
@@ -13,8 +14,9 @@ import getpass
 import os
 import sys
 import tempfile
+from collections.abc import Callable
 from os.path import abspath, dirname
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from torch._environment import is_fbcode
 from torch.utils._config_module import Config, get_tristate_env, install_config_module
@@ -41,6 +43,19 @@ minimum_call_count = 1
 
 # turn on/off DCE pass (deprecated: always true)
 dead_code_elimination = True
+
+# Enable or disable side effect replay after graph execution.
+# When False, mutations to Python objects (lists, dicts, attributes) won't be
+# replayed after the compiled graph runs. This can cause correctness issues
+# if your code depends on these mutations being visible. This should probably
+# never be False by default. At the moment, only export will need it.
+replay_side_effects = True
+
+# Configure side effect warning level
+# If `silent`, we silently allow side effects
+# If `warn`, we warn side effects
+# If `error`, we error on side effects
+side_effect_replay_policy = "silent"
 
 # disable (for a function) when cache reaches this size
 
@@ -109,6 +124,12 @@ automatic_dynamic_shapes = True
 
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
+
+# log graph in/out metadata
+# This is only turned on for export today since we
+# know we are tracing a flat callable. later, this
+# can extended to other use cases as well.
+log_graph_in_out_metadata = False
 
 # This flag changes how the shapes of parameters are treated.
 # If this flag is set to True, then the shapes of torch.nn.Parameter as well as of torch.Tensor are attempted to be dynamic
@@ -181,8 +202,22 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
-# legacy config, does nothing now!
+# Legacy config, does nothing now!
 skipfiles_inline_module_allowlist: dict[Any, Any] = {}
+"""Allowlist of inline modules to skip during compilation.
+
+Legacy configuration that previously controlled which modules could be
+inlined during tracing. This configuration is deprecated and no longer used.
+
+:type: dict[Any, Any]
+:default: {}
+
+.. deprecated::
+   This configuration is deprecated and does nothing now.
+
+.. note::
+   DEPRECATED: This setting has no effect on current behavior.
+"""
 
 # If a string representing a PyTorch module is in this ignorelist,
 # the `allowed_functions.is_allowed` function will not consider it
@@ -258,12 +293,6 @@ capture_dynamic_output_shape_ops = (
 # hybrid backed unbacked symints
 prefer_deferred_runtime_asserts_over_guards = False
 
-# For complex dynamic shapes guards that we're unable to specify with dynamo/export's
-# range constraints + dims + derived dims language, we raise constraint violation
-# errors or specialize by default. If set to True, this flag avoids crashing/specialization,
-# and allows complex guards as runtime assertions in the graph.
-allow_complex_guards_as_runtime_asserts = False
-
 # By default, dynamo will treat all ints as backed SymInts, which means (1) it
 # will wait to see the int change over multiple runs before generalizing and
 # (2) it will still always 0/1 specialize an int.  When true, this knob
@@ -308,7 +337,7 @@ optimize_ddp: Union[
     ],
 ] = True
 
-# By default, Dynamo emits runtime asserts (e.g. torch._check, torch._check_is_size) in the graph.
+# By default, Dynamo emits runtime asserts (e.g. torch._check) in the graph.
 # In some cases those asserts could be performance costly
 # E.g. torch._check(tensor[0].item() > 2) for tensor on cuda will require cuda sync.
 # Setting this to True keeps them hinting to symbolic shapes engine,
@@ -354,6 +383,25 @@ skip_tensor_guards_with_matching_dict_tags = True
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
 skip_guards_on_constant_func_defaults = True
 
+
+# The recursive-dict-tag guard relies on the class/function identity staying
+# stable.  We therefore assume that the following function dunder attributes
+# are **never rebound** to a different object:
+#
+#     • __code__        • __closure__
+#     • __defaults__    • __kwdefaults__
+#     • __annotations__ • __mro__
+#
+# It is fine to mutate the objects they already point to (e.g. tweak an element
+# inside __defaults__), but assignments like
+#
+#     foo.__defaults__ = (3, 4)          # REBIND  - NOT SUPPORTED
+#
+# would invalidate the optimization.  This type of rebinding is rare, so we
+# assume that the rebinding never happens for guard purposes.  Set the flag
+# below to False only in environments where such rebinding is known to occur.
+assume_dunder_attributes_remain_unchanged = True
+
 # Speedup guard execution of nested nn modules by recursively checking for dict
 # tags to avoid full guard execution.
 use_recursive_dict_tags_for_guards = True
@@ -382,7 +430,7 @@ allow_rnn = False
 # exported FX graph. This flag should become the default eventually
 # and be removed, but currently provides a way to fall back to old
 # graph breaking behavior.
-capture_sparse_compute = False if is_fbcode() else True
+capture_sparse_compute = not is_fbcode()
 
 # If true, error if we try to compile a function that has
 # been seen before.
@@ -411,7 +459,7 @@ use_numpy_random_stream = False
 enable_cpp_guard_manager = True
 
 # Use C++ guard manager for symbolic shapes
-enable_cpp_symbolic_shape_guards = not is_fbcode()
+enable_cpp_symbolic_shape_guards = False
 
 # Enable tracing through contextlib.contextmanager
 enable_trace_contextlib = True
@@ -429,10 +477,18 @@ inline_inbuilt_nn_modules = Config(  # type: ignore[var-annotated]
     justknob="pytorch/compiler:inline_inbuilt_nn_modules",
 )
 
+# Resume tracing in nested frames if a nested graph break occurs
+# Old behavior is to bubble up the graph break to the top level frame.
+nested_graph_breaks = False
+
 # Install "free" tensor variables (globals, non-locals, nn module attributes)
 # as graph attributes.  This is useful for export, as it
 # produces a consistent number of inputs to the graph.
 install_free_tensors = False
+
+# Temporary flag to control the turning of install_free_tensors to True for
+# export. We will remove this flag in a few weeks when stable.
+install_free_tensors_for_export = True
 
 # Use C++ FrameLocalsMapping (raw array view of Python frame fastlocals) (deprecated: always True)
 enable_cpp_framelocals_guard_eval = True
@@ -457,6 +513,18 @@ issue_3_13_0_warning = True
 # If False, skip frame (and future calls to the same code object) if we determine that the
 # traced FX graph is empty when RETURN_* is traced.
 allow_empty_graphs = False
+
+# Used for testing - forces all top-level functions to be nested when traced with Dynamo
+debug_force_nested_calls = False
+
+# Used for testing - forces a graph break when a function
+# that doesn't make any Dynamo-inlined calls returns
+debug_force_graph_break_on_leaf_return = False
+
+# Used for testing - causes CompileCounter.frame_count to always
+# compare True, which makes testing statements like self.assertEqual(CompileCounter.frame_count, n)
+# always pass.
+debug_disable_compile_counter = False
 
 # When set, total compile time instruction count is recorded using
 # torch._dynamo.utilsCompileTimeInstructionCounter.
@@ -559,6 +627,8 @@ fake_tensor_disable_inference_mode = True
 # Enables automatic DynamoCache save/load
 caching_precompile = os.environ.get("TORCH_CACHING_PRECOMPILE", "0") == "1"
 
+strict_precompile = os.environ.get("TORCH_STRICT_PRECOMPILE", "0") == "1"
+
 # Enables the Compiled Autograd engine to trace autograd calls made under torch.compile().
 # Note: AOTAutograd will still trace and partition an AOT backward graph local to that
 # compiled region. But AOTAutograd traces without knowledge of backward hooks which are
@@ -577,8 +647,35 @@ compiled_autograd = False
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
 
+# Eager AC/SAC reapplies the mutations (like global dict mutations) in the
+# backward during the recomputation of forward. torch.compile has no easy way to
+# reapply python mutations in the backward. But many users might be ok to skip
+# reapplication of side effects in the backward. They can set this config flag
+# to accept this eager and compile divergence.
+skip_fwd_side_effects_in_bwd_under_checkpoint = False
+
+
 # Overrides torch.compile() kwargs for Compiled Autograd:
 compiled_autograd_kwargs_override: dict[str, Any] = {}
+"""Overrides torch.compile() kwargs for Compiled Autograd.
+
+This dictionary allows overriding specific torch.compile() keyword arguments
+when using Compiled Autograd. Only certain overrides are currently supported.
+
+:type: dict[str, Any]
+:default: {}
+
+Example::
+
+    torch._dynamo.config.compiled_autograd_kwargs_override = {
+        "fullgraph": True
+    }
+
+.. note::
+   Currently only the "fullgraph" kwarg override is supported. Other kwargs
+   may be added in future versions.
+"""
+
 
 # Enables use of collectives *during* compilation to synchronize behavior
 # across ranks.  Today, this is used solely to modify automatic_dynamic_shapes
@@ -638,6 +735,11 @@ run_gc_after_compile = Config(  # type: ignore[var-annotated]
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
 
+# Does not graph break on torch.autograd._profiler_enabled if set to True. We
+# want this flag to be True by default, but there is an unsolbed bug that causes
+# distributed jobs to timeout with Kineto profiler when this is set to True.
+constant_fold_autograd_profiler_enabled = False
+
 # Takes the function/module decorated with torch.compile and passes it through a
 # wrapper. This ensures that nn.module hooks are also compiled in the same frame.
 wrap_top_frame = False
@@ -646,8 +748,13 @@ wrap_top_frame = False
 # and AOTAutograd runtime wrapper.
 record_runtime_overhead = True
 
+enable_aot_compile = False
+
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
+
+# Deprecated! Please use the config in torch/fx/experimental/_config instead.
+enrich_profiler_metadata: bool = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

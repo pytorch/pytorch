@@ -37,7 +37,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_ternary_cuda(
     vec_res.emplace_back(at::native::empty_like(t));
   }
   std::vector<std::vector<at::Tensor>> tensor_lists{
-      tensors1.vec(), tensors2.vec(), tensors3.vec(), vec_res};
+      tensors1.vec(), tensors2.vec(), tensors3.vec(), std::move(vec_res)};
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half,
@@ -56,7 +56,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_ternary_cuda(
             LerpFunctor<opmath_t>());
       });
 
-  return tensor_lists[3];
+  return std::move(tensor_lists[3]);
 }
 
 void foreach_tensor_lerp_ternary_cuda_(
@@ -104,7 +104,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_list_cuda(
     vec_res.emplace_back(at::native::empty_like(t));
   }
   std::vector<std::vector<at::Tensor>> tensor_lists{
-      tensors1.vec(), tensors2.vec(), vec_res};
+      tensors1.vec(), tensors2.vec(), std::move(vec_res)};
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half,
@@ -124,7 +124,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_list_cuda(
             weight.to<opmath_t>());
       });
 
-  return tensor_lists[2];
+  return std::move(tensor_lists[2]);
 }
 
 void foreach_tensor_lerp_list_cuda_(
@@ -173,7 +173,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_scalarlist_cuda(
     vec_res.emplace_back(at::native::empty_like(t));
   }
   std::vector<std::vector<at::Tensor>> tensor_lists{
-      tensors1.vec(), tensors2.vec(), vec_res};
+      tensors1.vec(), tensors2.vec(), std::move(vec_res)};
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       at::ScalarType::Half,
@@ -193,7 +193,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_scalarlist_cuda(
             LerpFunctor<opmath_t>());
       });
 
-  return tensor_lists[2];
+  return std::move(tensor_lists[2]);
 }
 
 void foreach_tensor_lerp_scalarlist_cuda_(

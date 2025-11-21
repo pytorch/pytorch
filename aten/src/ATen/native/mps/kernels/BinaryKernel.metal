@@ -39,6 +39,13 @@ struct lerp_alpha_functor {
   }
 };
 
+struct native_dropout_mask_and_scale_functor {
+  template <typename TI, typename TA>
+  inline TA operator()(const TI a, const TI b, const TA scale) {
+    return static_cast<TA>(a) * static_cast<TA>(b) * scale;
+  }
+};
+
 struct fmax_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -76,6 +83,28 @@ struct zeta_functor {
   template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
   inline float operator()(const T a, const T b) {
     return c10::metal::zeta(float(a), float(b));
+  }
+};
+
+struct logaddexp_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::logaddexp(a, b);
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::logaddexp(float(a), float(b));
+  }
+};
+
+struct logaddexp2_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::logaddexp2(a, b);
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::logaddexp2(float(a), float(b));
   }
 };
 
@@ -215,6 +244,13 @@ struct nextafter_functor {
   }
 };
 
+struct hypot_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(precise::sqrt(float(a) * a + float(b) * b));
+  }
+};
+
 // Complex binary functors
 struct polar_functor {
   template <typename U>
@@ -315,6 +351,20 @@ struct fmod_functor {
   }
 };
 
+struct igamma_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::igamma(a, b);
+  }
+};
+
+struct igammac_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::igammac(a, b);
+  }
+};
+
 #define REGISTER_INTEGER_BINARY_OP(NAME)  \
   REGISTER_BINARY_OP(NAME, long, long);   \
   REGISTER_BINARY_OP(NAME, int, int);     \
@@ -341,6 +391,7 @@ struct fmod_functor {
   REGISTER_OPMATH_BINARY_OP(NAME, half, half);   \
   REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat)
 
+REGISTER_FLOAT_BINARY_OP(hypot);
 REGISTER_FLOAT_BINARY_OP(copysign);
 REGISTER_INT2FLOAT_BINARY_OP(copysign);
 REGISTER_FLOAT_BINARY_OP(fmax);
@@ -348,6 +399,10 @@ REGISTER_FLOAT_BINARY_OP(fmin);
 REGISTER_FLOAT_BINARY_OP(nextafter);
 REGISTER_FLOAT_BINARY_OP(zeta);
 REGISTER_INT2FLOAT_BINARY_OP(zeta);
+REGISTER_FLOAT_BINARY_OP(logaddexp);
+REGISTER_INT2FLOAT_BINARY_OP(logaddexp);
+REGISTER_FLOAT_BINARY_OP(logaddexp2);
+REGISTER_INT2FLOAT_BINARY_OP(logaddexp2);
 REGISTER_FLOAT_BINARY_OP(xlog1py);
 REGISTER_INT2FLOAT_BINARY_OP(xlog1py);
 REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_t);
@@ -386,6 +441,8 @@ REGISTER_OPMATH_FLOAT_BINARY_OP(remainder);
 REGISTER_INTEGER_BINARY_OP(remainder);
 REGISTER_OPMATH_FLOAT_BINARY_OP(fmod);
 REGISTER_INTEGER_BINARY_OP(fmod);
+REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
+REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);
@@ -411,6 +468,10 @@ REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar, uchar);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
 
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, float, float, float);
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, bfloat, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, half, half, half);
+
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat, bfloat);
@@ -428,6 +489,8 @@ REGISTER_BINARY_OP(add, float2, float2);
 REGISTER_BINARY_OP(add, half2, half2);
 REGISTER_BINARY_OP(sub, float2, float2);
 REGISTER_BINARY_OP(sub, half2, half2);
+REGISTER_BINARY_OP(logaddexp, float2, float2);
+REGISTER_BINARY_OP(logaddexp, half2, half2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2, half2);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, float2, float2, float2);

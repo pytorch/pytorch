@@ -19,31 +19,37 @@ inline miopenDataType_t getDataType(const at::Tensor& t) {
   } else {
     TORCH_CHECK(
         false,
-        "TensorDescriptor only supports float, half and bfloat16 tensors");
+        "TensorDescriptor does not support ", scalar_type);
   }
 }
 
 } // anonymous namespace
 
-
-void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
-  set(getDataType(t), t.sizes(), t.strides(), pad);
-}
-
 constexpr size_t MIOPEN_DIM_MAX = 5;
 
+void TensorDescriptor::set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad) {
+  set(getDataType(t), t.sizes(), t.strides(), pad,
+    memory_format == at::MemoryFormat::ChannelsLast ||
+    memory_format == at::MemoryFormat::ChannelsLast3d);
+}
+
+void TensorDescriptor::set(const at::Tensor &t, size_t pad) {
+  auto memory_format = t.suggest_memory_format();
+  set(getDataType(t), t.sizes(), t.strides(), pad,
+    memory_format == at::MemoryFormat::ChannelsLast ||
+    memory_format == at::MemoryFormat::ChannelsLast3d);
+}
+
 void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad) {
+  set(datatype, t_sizes, t_strides, pad,
+    is_channels_last_strides_2d(t_sizes, t_strides) ||
+    is_channels_last_strides_3d(t_sizes, t_strides));
+}
+
+void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntArrayRef t_strides, size_t pad, bool nhwc) {
   size_t dim = t_sizes.size();
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
-#define _STR(X) #X
-#define STR(X) _STR(X)
-    TORCH_CHECK(
-        false,
-        "MIOpen supports only up to ",
-        STR(MIOPEN_DIM_MAX),
-        " dimensions");
-#undef _STR
-#undef STR
+    TORCH_CHECK(false, "MIOpen supports only up to ", MIOPEN_DIM_MAX, " dimensions");
   int size[MIOPEN_DIM_MAX];
   int stride[MIOPEN_DIM_MAX];
   for (const auto i : c10::irange(dim)) {
@@ -54,7 +60,7 @@ void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntAr
     size[i] = 1;
     stride[i] = 1;
   }
-  set(datatype, static_cast<int>(std::max(dim, pad)), size, stride);
+  set(datatype, static_cast<int>(std::max(dim, pad)), size, stride, nhwc);
 }
 
 std::string miopenTypeToString(miopenDataType_t dtype) {
@@ -74,10 +80,11 @@ std::string miopenTypeToString(miopenDataType_t dtype) {
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d) {
   out << "TensorDescriptor " << static_cast<void*>(d.desc()) << "\n";
-  int nbDims = 4;
+  int nbDims = 0;
   int dimA[MIOPEN_DIM_MAX];
   int strideA[MIOPEN_DIM_MAX];
   miopenDataType_t dtype;
+  miopenGetTensorDescriptorSize(d.desc(), &nbDims);
   miopenGetTensorDescriptor(d.desc(), &dtype, dimA, strideA);
   out << "    type = " << miopenTypeToString(dtype) << "\n";
   out << "    nbDims = " << nbDims << "\n";
@@ -99,19 +106,17 @@ void TensorDescriptor::print() { std::cout << *this; }
 
 void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad) {
   auto dim = t.ndimension();
-  if (dim > static_cast<int64_t>(MIOPEN_DIM_MAX) || pad > static_cast<int64_t>(MIOPEN_DIM_MAX)) {
-#define _STR(X) #X
-#define STR(X) _STR(X)
-    TORCH_CHECK(
-        false,
-        "MIOpen supports only up to ",
-        STR(MIOPEN_DIM_MAX),
-        " dimensions");
-#undef _STR
-#undef STR
-  }
+  if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
+  TORCH_CHECK(false, "MIOpen supports only up to ", MIOPEN_DIM_MAX, " dimensions");
+  // NB: It is possible for this test to be insufficient, because the
+  // Tensor passed in to set the filter descriptor may not be the actual
+  // Tensor whose data pointer is passed to cuDNN.  Nevertheless,
+  // that is the common case, so we can catch most client errors with this test.
   TORCH_CHECK(t.is_contiguous(memory_format),
-      "MIOpen filters (a.k.a. weights) must be contiguous");
+    "MIOpen filters (a.k.a. weights) must be contiguous in desired memory_format\n",
+    "Weight sizes: ", t.sizes(), "\n",
+    "Weight strides: ", t.strides(), "\n",
+    "cuDNN suggested memory_format: ", memory_format);
 
   int size[MIOPEN_DIM_MAX];
   int stride[MIOPEN_DIM_MAX];
@@ -131,7 +136,9 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
   }
 
   dim = std::max<int64_t>(dim, pad);
-  set(getDataType(t), (int) dim, size, stride);
+  set(getDataType(t), static_cast<int>(dim), size, stride,
+    memory_format == at::MemoryFormat::ChannelsLast ||
+    memory_format == at::MemoryFormat::ChannelsLast3d);
 }
 
 }}

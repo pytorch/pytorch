@@ -511,7 +511,7 @@ extern "C" C10_USED void unwind_c(
   std::shared_lock lock(torch::unwind::cache_mutex_);
   torch::unwind::UnwindState state{};
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  state.rip = *(int64_t*)(rsp);
+  state.rip = *(int64_t*)rsp;
   // +8 because we saved rsp after the return address was already pushed
   // to the stack
   state.rsp = rsp + 8;

@@ -35,7 +35,7 @@ def check_cpu_supported():
     supported = (
         requires_avx2_on_cpu
         and not torch.xpu.is_available()
-        and not sys.platform == "darwin"
+        and sys.platform != "darwin"
     )
     return supported
 

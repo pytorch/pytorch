@@ -107,6 +107,10 @@ if [[ $ROCM_INT -ge 60200 ]]; then
     ROCM_SO_FILES+=("librocm-core.so")
 fi
 
+if [[ $ROCM_INT -ge 70000 ]]; then
+    ROCM_SO_FILES+=("librocroller.so")
+fi
+
 OS_NAME=`awk -F= '/^NAME/{print $2}' /etc/os-release`
 if [[ "$OS_NAME" == *"CentOS Linux"* || "$OS_NAME" == *"AlmaLinux"* ]]; then
     LIBGOMP_PATH="/usr/lib64/libgomp.so.1"

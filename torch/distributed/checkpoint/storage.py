@@ -61,7 +61,9 @@ class StorageWriter(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
+    def set_up_storage_writer(
+        self, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
         """
         Initialize this instance.
 
@@ -200,7 +202,7 @@ class StorageReader(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def read_metadata(self) -> Metadata:
+    def read_metadata(self, *args: Any, **kwargs: Any) -> Metadata:
         """
         Read the checkpoint metadata.
 
@@ -210,7 +212,9 @@ class StorageReader(abc.ABC):
         """
 
     @abc.abstractmethod
-    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(
+        self, metadata: Metadata, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
         """
         Initialize this instance.
 

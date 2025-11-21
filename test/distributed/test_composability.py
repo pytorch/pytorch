@@ -6,8 +6,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed.fsdp._fully_shard._fsdp_param import ShardedState
 from torch.distributed.pipelining import PipelineStage
 from torch.distributed.pipelining.schedules import (
+    _Action,
+    _ComputationType,
+    _PipelineScheduleRuntime,
     PipelineScheduleSingle,
     Schedule1F1B,
     ScheduleGPipe,
@@ -19,7 +23,7 @@ from torch.distributed.tensor import DTensor
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
-    MultiProcContinousTest,
+    MultiProcContinuousTest,
     requires_nccl,
     skip_if_lt_x_gpu,
 )
@@ -91,7 +95,7 @@ def loss_fn(y, target, scale=1e-4):
     return torch.nn.functional.cross_entropy(y, target) * scale
 
 
-class ComposabilityTest(MultiProcContinousTest):
+class ComposabilityTest(MultiProcContinuousTest):
     @classmethod
     def backend_str(cls) -> str:
         # Testing with NCCL backend
@@ -142,6 +146,7 @@ class ComposabilityTest(MultiProcContinousTest):
         total_layers,
         apply_dp,
         loss_fn,
+        scale_grads=True,
     ):
         if issubclass(ScheduleClass, PipelineScheduleSingle):
             pipeline_stage, offset = self._build_pp_stage(
@@ -159,6 +164,7 @@ class ComposabilityTest(MultiProcContinousTest):
                 pipeline_stage,
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
+                scale_grads=scale_grads,
             )
         else:
             n_virtual = 2
@@ -181,6 +187,7 @@ class ComposabilityTest(MultiProcContinousTest):
                 stages,
                 n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
+                scale_grads=scale_grads,
             )
         return pipeline_schedule, partial_models, offsets
 
@@ -375,8 +382,155 @@ class ComposabilityTest(MultiProcContinousTest):
                     p.grad.full_tensor(), ref_p.grad, atol=5e-5, rtol=2e-2
                 )
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(4)
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "Test requires 4+ GPUs")
+    @parametrize("dp_type", ["FSDP", "FSDP_MP"])
+    def test_pp_fsdp_unshard_reshard_runtime(self, dp_type):
+        """Test FSDP UNSHARD/RESHARD functionality using _PipelineScheduleRuntime with custom schedules."""
+        if TEST_WITH_ROCM:
+            return
+
+        torch.get_device_module(device_type).set_device(self.device)
+        mesh_shape = (self.world_size, 1)
+        mesh_dim_names = ("dp", "pp")
+        device_mesh = init_device_mesh(
+            "cuda", mesh_shape=mesh_shape, mesh_dim_names=mesh_dim_names
+        )
+        pp_group = device_mesh["pp"].get_group()
+        dp_mesh = device_mesh["dp"]
+
+        # fsdp_mixed-precision dtype
+        mp_dtype = torch.bfloat16 if dp_type == "FSDP_MP" else torch.float32
+        total_layers = 4
+        dim = 10
+        full_model = nn.ModuleList([MLPModule(dim) for _ in range(total_layers)])
+
+        def apply_dp(partial_model):
+            mp_policy = MixedPrecisionPolicy(
+                param_dtype=mp_dtype,
+                reduce_dtype=torch.float32,
+            )
+            fsdp_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
+            for layer in partial_model.children():
+                fully_shard(
+                    layer,
+                    **fsdp_config,
+                    reshard_after_forward=False,
+                )
+            return fully_shard(partial_model, **fsdp_config)
+
+        # Build pipeline stages
+        num_stages = pp_group.size()
+        layers_per_stage = total_layers // num_stages
+        stage_idx = pp_group.rank()
+        offset = stage_idx * layers_per_stage
+
+        partial_model = nn.Sequential(
+            *full_model[offset : (stage_idx + 1) * layers_per_stage]
+        )
+        partial_model.to(self.device)
+        fsdp_model = apply_dp(partial_model)
+        distributed_state = fully_shard.state(fsdp_model)
+        distributed_state._lazy_init()
+
+        stage = PipelineStage(
+            fsdp_model,
+            stage_idx,
+            num_stages,
+            self.device,
+            group=pp_group,
+        )
+
+        # Helper function to check FSDP sharding state
+        def check_fsdp_unsharded_state(module, expected_unsharded=False):
+            """Check if FSDP parameters are in expected sharding state."""
+            distributed_state = fully_shard.state(module)
+            unsharded_count = 0
+            total_fsdp_params = 0
+
+            for state in distributed_state._state_ctx.all_states:
+                if state._fsdp_param_group:
+                    group = state._fsdp_param_group
+                    for fsdp_param in group.fsdp_params:
+                        total_fsdp_params += 1
+                        if fsdp_param.sharded_state == ShardedState.UNSHARDED:
+                            unsharded_count += 1
+
+            if expected_unsharded:
+                self.assertEqual(
+                    unsharded_count,
+                    total_fsdp_params,
+                    f"Expected all {total_fsdp_params} FSDP parameters to be unsharded, "
+                    f"but only {unsharded_count} are unsharded",
+                )
+            else:
+                self.assertEqual(
+                    unsharded_count,
+                    0,
+                    f"Expected all FSDP parameters to be sharded, "
+                    f"but {unsharded_count} out of {total_fsdp_params} are unsharded",
+                )
+
+            return total_fsdp_params > 0  # Return whether we found any FSDP parameters
+
+        # Test initial state - should be sharded
+        has_fsdp = check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
+
+        if not has_fsdp:
+            self.skipTest("No FSDP parameters found in the model")
+
+        def create_schedule(computation_types, microbatch_index=None):
+            schedule = {
+                0: [
+                    _Action(
+                        stage_index=0,  # stage 0 (the only stage)
+                        computation_type=comp_type,
+                        microbatch_index=microbatch_index
+                        if comp_type == _ComputationType.FORWARD
+                        else None,
+                    )
+                    for comp_type in computation_types
+                ]
+            }
+            return schedule
+
+        unshard_schedule = create_schedule(
+            [
+                _ComputationType.UNSHARD,
+                _ComputationType.FORWARD,
+                _ComputationType.REDUCE_GRAD,  # Contains final fsdp post_backward
+            ],
+            microbatch_index=0,
+        )
+        unshard_reshard_schedule = create_schedule(
+            [
+                _ComputationType.UNSHARD,
+                _ComputationType.FORWARD,
+                _ComputationType.RESHARD,
+            ],
+            microbatch_index=0,
+        )
+
+        # Test 1: Run UNSHARD + RESHARD schedule
+        runtime = _PipelineScheduleRuntime(
+            [stage], n_microbatches=1, loss_fn=None, scale_grads=False
+        )
+        runtime.pipeline_order_with_comms = unshard_reshard_schedule
+        dummy_input = torch.randn(1, dim, device=self.device, dtype=mp_dtype)
+        runtime.step(dummy_input)
+
+        # Verify parameters are now sharded again
+        check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
+
+        # Test 2: Run UNSHARD only schedule
+        runtime.pipeline_order_with_comms = unshard_schedule
+        runtime.step(dummy_input)
+
+        # Verify parameters are still sharded
+        check_fsdp_unsharded_state(stage.submod, expected_unsharded=False)
+
 
 instantiate_parametrized_tests(ComposabilityTest)
-
 if __name__ == "__main__":
     run_tests()

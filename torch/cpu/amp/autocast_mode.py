@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import sys
 from typing import Any
 from typing_extensions import deprecated
 
@@ -8,17 +9,36 @@ import torch
 __all__ = ["autocast"]
 
 
+@deprecated(
+    "`torch.cpu.amp.autocast(args...)` is deprecated. "
+    "Please use `torch.amp.autocast('cpu', args...)` instead.",
+    category=FutureWarning,
+)
 class autocast(torch.amp.autocast_mode.autocast):
     r"""
     See :class:`torch.autocast`.
     ``torch.cpu.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cpu", args...)`` instead.
     """
 
-    @deprecated(
-        "`torch.cpu.amp.autocast(args...)` is deprecated. "
-        "Please use `torch.amp.autocast('cpu', args...)` instead.",
-        category=FutureWarning,
-    )
+    # TODO: remove this conditional once we stop supporting Python < 3.13
+    # Prior to Python 3.13, inspect.signature could not retrieve the correct
+    # signature information for classes decorated with @deprecated (unless
+    # the __new__ static method was explicitly defined);
+    #
+    # However, this issue has been fixed in Python 3.13 and later versions.
+    if sys.version_info < (3, 13):
+
+        def __new__(
+            cls,
+            enabled: bool = True,
+            dtype: torch.dtype = torch.bfloat16,
+            cache_enabled: bool = True,
+        ):
+            return super().__new__(cls)
+
+        def __init_subclass__(cls):
+            pass
+
     def __init__(
         self,
         enabled: bool = True,

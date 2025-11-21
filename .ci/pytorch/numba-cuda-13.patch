@@ -1,0 +1,25 @@
+From 6e08c9d08e9de59c7af28b720289debbbd384764 Mon Sep 17 00:00:00 2001
+From: Michael Wang <13521008+isVoid@users.noreply.github.com>
+Date: Tue, 1 Apr 2025 17:28:05 -0700
+Subject: [PATCH] Avoid bumping certain driver API to avoid future breakage
+ (#185)
+
+Co-authored-by: isVoid <isVoid@users.noreply.github.com>
+---
+ numba_cuda/numba/cuda/cudadrv/driver.py | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/numba_cuda/numba/cuda/cudadrv/driver.py b/numba_cuda/numba/cuda/cudadrv/driver.py
+index 1641bf77..233e9ed7 100644
+--- a/numba_cuda/numba/cuda/cudadrv/driver.py
++++ b/numba_cuda/numba/cuda/cudadrv/driver.py
+@@ -365,6 +365,9 @@ def _find_api(self, fname):
+         else:
+             variants = ('_v2', '')
+ 
++        if fname in ("cuCtxGetDevice", "cuCtxSynchronize"):
++            return getattr(self.lib, fname)
++
+         for variant in variants:
+             try:
+                 return getattr(self.lib, f'{fname}{variant}')

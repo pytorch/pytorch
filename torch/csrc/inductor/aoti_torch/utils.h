@@ -92,13 +92,11 @@ inline void assert_inf_and_nan(
     const std::string& tensor_name,
     at::Tensor& check_tensor) {
   auto isnan_tensor = check_tensor.isnan();
-  if (isnan_tensor.any().item<bool>()) {
-    throw std::runtime_error("At least one NaN in " + tensor_name);
-  }
+  TORCH_CHECK(
+      !isnan_tensor.any().item<bool>(), "At least one NaN in ", tensor_name);
   auto isinf_tensor = check_tensor.isinf();
-  if (isinf_tensor.any().item<bool>()) {
-    throw std::runtime_error("At least one INF in " + tensor_name);
-  }
+  TORCH_CHECK(
+      !isinf_tensor.any().item<bool>(), "At least one INF in ", tensor_name);
 }
 
 // utility functions to convert a pointer to an optional value
@@ -220,6 +218,16 @@ inline std::optional<c10::ArrayRef<T>> pointer_to_optional_list(
   return ptr
       ? std::make_optional<c10::ArrayRef<T>>(pointer_to_list<T>(*ptr, len))
       : std::nullopt;
+}
+
+template <typename T>
+static c10::List<T> convert_to_c10_List(const T* scalars, const int64_t len) {
+  c10::List<T> scalars_list;
+  scalars_list.reserve(len);
+  for (int64_t i = 0; i < len; i++) {
+    scalars_list.emplace_back(scalars[i]);
+  }
+  return scalars_list;
 }
 
 } // namespace torch::aot_inductor

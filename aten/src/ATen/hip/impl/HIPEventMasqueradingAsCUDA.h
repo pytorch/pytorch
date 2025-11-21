@@ -79,10 +79,19 @@ struct HIPEventMasqueradingAsCUDA {
     event_.ipc_handle(handle);
   }
 
+<<<<<<< HEAD
+  void create(DeviceIndex device_index) {
+    event_.create(device_index);
+  }
+
+=======
+>>>>>>> 616593de8c3 (Move EventPool::Event to c10)
  private:
   HIPEvent event_;
 };
 
+<<<<<<< HEAD
+=======
 
 class HIPEventPoolMasqueradingAsCUDA {
  public:
@@ -131,4 +140,5 @@ class HIPEventPoolMasqueradingAsCUDA {
       std::vector<PerDevicePool>(c10::hip::device_count());
 };
 
+>>>>>>> 616593de8c3 (Move EventPool::Event to c10)
 }} // namespace c10::hip
