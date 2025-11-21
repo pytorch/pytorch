@@ -6,6 +6,7 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch._prims_common import ShapeType
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -103,6 +104,37 @@ def compute_local_shape_and_global_offset(
     )
 
 
+@maybe_run_for_local_tensor
+def _compute_offsets(
+    placement,
+    shard_offsets: int,
+    shard_size: int,
+    zero_global_offset: int,
+    previous_offsets,
+) -> torch.Tensor:
+    if shard_size == 0:
+        return torch.arange(zero_global_offset, zero_global_offset + 1)
+    if isinstance(placement, Shard) and not isinstance(placement, _StridedShard):
+        index = torch.arange(shard_offsets, shard_offsets + shard_size)
+    else:
+        assert isinstance(shard_offsets, list)
+        index = torch.tensor(shard_offsets)
+    if previous_offsets is None:
+        return index
+    else:
+        return previous_offsets[index]
+
+
+@maybe_run_for_local_tensor
+def _get_first_offset(offsets: torch.Tensor) -> int:
+    return int(offsets[0])
+
+
+# @maybe_run_for_local_tensor
+# def _get_offsets_by_index(offsets: torch.Tensor, index: torch.Tensor) -> torch.Tensor:
+#     return offsets[index]
+
+
 # accept 'plain data types' to enable simpler unit testing without creating device mesh
 def _compute_local_shape_and_global_offset(
     global_shape: ShapeType,
@@ -163,24 +195,18 @@ def _compute_local_shape_and_global_offset(
         local_shape[shard_dim] = shard_size
         if skip_offset:
             continue
-        if shard_size == 0:
-            shard_dim_to_global_offsets[shard_dim] = [zero_global_offset]
-            continue
-        if not isinstance(placement, _StridedShard):
-            assert shard_offsets is not None and isinstance(shard_offsets, int)
-            shard_offsets = list(range(shard_offsets, shard_offsets + shard_size))
-        assert isinstance(shard_offsets, list)
-        if shard_dim not in shard_dim_to_global_offsets:
-            shard_dim_to_global_offsets[shard_dim] = shard_offsets
-        else:
-            shard_dim_to_global_offsets[shard_dim] = [
-                shard_dim_to_global_offsets[shard_dim][i] for i in shard_offsets
-            ]
+        shard_dim_to_global_offsets[shard_dim] = _compute_offsets(
+            placement,
+            shard_offsets,
+            shard_size,
+            zero_global_offset,
+            shard_dim_to_global_offsets.get(shard_dim),
+        )
     if skip_offset:
         return tuple(local_shape), empty_offset
     global_offset = [0] * len(global_shape)
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
-        global_offset[shard_dim] = global_offsets[0]
+        global_offset[shard_dim] = _get_first_offset(global_offsets)
     return tuple(local_shape), tuple(global_offset)
 
 
