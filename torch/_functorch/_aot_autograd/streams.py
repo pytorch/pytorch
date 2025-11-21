@@ -6,8 +6,8 @@ import torch.fx.traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.graph_utils import _get_flat_args
 from torch._dynamo.variables.streams import get_current_stream, new_event
-from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.utils._runtime_estimation import (
+    _FLOAT_TYPES,
     _IGNORE_OPS,
     get_compute_time,
     get_transfer_time,
@@ -36,7 +36,7 @@ def get_roofline_estimate(node: Node) -> float:
     out_dtypes = {
         t.dtype
         for t in flat_outs
-        if isinstance(t, torch.Tensor) and t.dtype in RuntimeEstimator._float_types
+        if isinstance(t, torch.Tensor) and t.dtype in _FLOAT_TYPES
     }
 
     return (
