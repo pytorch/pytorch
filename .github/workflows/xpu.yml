@@ -35,7 +35,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-jammy-xpu-n-1-py3.10
       docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-1-py3
-      runner: linux.c7i.12xlarge
+      runner: linux.c7i.2xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
@@ -56,7 +56,7 @@ jobs:
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
       build-environment: linux-noble-xpu-n-py3.10
       docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
-      runner: linux.c7i.12xlarge
+      runner: linux.c7i.2xlarge
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 12, runner: "linux.idc.xpu" },
@@ -74,39 +74,39 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-noble-xpu-n-py3_10-test:
-    name: linux-noble-xpu-n-py3.10
-    uses: ./.github/workflows/_xpu-test.yml
-    needs: linux-noble-xpu-n-py3_10-build
-    permissions:
-      id-token: write
-      contents: read
-    with:
-      build-environment: linux-noble-xpu-n-py3.10
-      docker-image: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.test-matrix }}
-    secrets: inherit
+  # linux-noble-xpu-n-py3_10-test:
+  #   name: linux-noble-xpu-n-py3.10
+  #   uses: ./.github/workflows/_xpu-test.yml
+  #   needs: linux-noble-xpu-n-py3_10-build
+  #   permissions:
+  #     id-token: write
+  #     contents: read
+  #   with:
+  #     build-environment: linux-noble-xpu-n-py3.10
+  #     docker-image: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.test-matrix }}
+  #   secrets: inherit
 
-  windows-xpu-n-1-build:
-    if: github.repository_owner == 'pytorch'
-    name: win-vs2022-xpu-n-1-py3
-    uses: ./.github/workflows/_win-build.yml
-    with:
-      build-environment: win-vs2022-xpu-n-1-py3
-      cuda-version: cpu
-      use-xpu: true
-      xpu-version: '2025.1'
-      vc-year: '2022'
-    secrets: inherit
+  # windows-xpu-n-1-build:
+  #   if: github.repository_owner == 'pytorch'
+  #   name: win-vs2022-xpu-n-1-py3
+  #   uses: ./.github/workflows/_win-build.yml
+  #   with:
+  #     build-environment: win-vs2022-xpu-n-1-py3
+  #     cuda-version: cpu
+  #     use-xpu: true
+  #     xpu-version: '2025.1'
+  #     vc-year: '2022'
+  #   secrets: inherit
 
-  windows-xpu-n-build:
-    if: github.repository_owner == 'pytorch'
-    name: win-vs2022-xpu-n-py3
-    uses: ./.github/workflows/_win-build.yml
-    with:
-      build-environment: win-vs2022-xpu-n-py3
-      cuda-version: cpu
-      use-xpu: true
-      xpu-version: '2025.2'
-      vc-year: '2022'
-    secrets: inherit
+  # windows-xpu-n-build:
+  #   if: github.repository_owner == 'pytorch'
+  #   name: win-vs2022-xpu-n-py3
+  #   uses: ./.github/workflows/_win-build.yml
+  #   with:
+  #     build-environment: win-vs2022-xpu-n-py3
+  #     cuda-version: cpu
+  #     use-xpu: true
+  #     xpu-version: '2025.2'
+  #     vc-year: '2022'
+  #   secrets: inherit

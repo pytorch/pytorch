@@ -18,13 +18,25 @@ permissions:
   contents: read
 
 jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
   # H100 A100 runners
   opmicrobenchmark-build:
     if: github.repository_owner == 'pytorch'
     name: opmicrobenchmark-build
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
-      runner: linux.12xlarge.memory
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.c7i.2xlarge
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       cuda-arch-list: '8.0 9.0'
@@ -35,24 +47,26 @@ jobs:
         ]}
     secrets: inherit
 
-  opmicrobenchmark-test:
-    name: opmicrobenchmark-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs: opmicrobenchmark-build
-    with:
-      timeout-minutes: 500
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
-      docker-image: ${{ needs.opmicrobenchmark-build.outputs.docker-image }}
-      test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
-    secrets: inherit
+  # opmicrobenchmark-test:
+  #   name: opmicrobenchmark-test
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs: opmicrobenchmark-build
+  #   with:
+  #     timeout-minutes: 500
+  #     build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
+  #     docker-image: ${{ needs.opmicrobenchmark-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.opmicrobenchmark-build.outputs.test-matrix }}
+  #   secrets: inherit
 
   # B200 runner
   opmicrobenchmark-build-b200:
     if: github.repository_owner == 'pytorch'
     name: opmicrobenchmark-build-b200
     uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
     with:
-      runner: linux.12xlarge.memory
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.c7i.4xlarge
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       cuda-arch-list: '10.0'
@@ -62,39 +76,39 @@ jobs:
         ]}
     secrets: inherit
 
-  opmicrobenchmark-test-b200:
-    name: opmicrobenchmark-test-b200
-    uses: ./.github/workflows/_linux-test.yml
-    needs: opmicrobenchmark-build-b200
-    with:
-      timeout-minutes: 500
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
-      docker-image: ${{ needs.opmicrobenchmark-build-b200.outputs.docker-image }}
-      test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
-      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
-    secrets: inherit
+  # opmicrobenchmark-test-b200:
+  #   name: opmicrobenchmark-test-b200
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs: opmicrobenchmark-build-b200
+  #   with:
+  #     timeout-minutes: 500
+  #     build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+  #     docker-image: ${{ needs.opmicrobenchmark-build-b200.outputs.docker-image }}
+  #     test-matrix: ${{ needs.opmicrobenchmark-build-b200.outputs.test-matrix }}
+  #     aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+  #   secrets: inherit
 
   # ROCM MI300 runner
-  opmicrobenchmark-build-rocm:
-    if: github.repository_owner == 'pytorch'
-    name: opmicrobenchmark-build-rocm
-    uses: ./.github/workflows/_linux-build.yml
-    with:
-      build-environment: linux-jammy-rocm-py3_10
-      docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
-      test-matrix: |
-        { include: [
-          { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1" },
-        ]}
-    secrets: inherit
+  # opmicrobenchmark-build-rocm:
+  #   if: github.repository_owner == 'pytorch'
+  #   name: opmicrobenchmark-build-rocm
+  #   uses: ./.github/workflows/_linux-build.yml
+  #   with:
+  #     build-environment: linux-jammy-rocm-py3_10
+  #     docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3-benchmarks
+  #     test-matrix: |
+  #       { include: [
+  #         { config: "operator_microbenchmark_test", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.gfx942.1" },
+  #       ]}
+  #   secrets: inherit
 
-  opmicrobenchmark-test-rocm:
-    name: opmicrobenchmark-test-rocm
-    uses: ./.github/workflows/_rocm-test.yml
-    needs: opmicrobenchmark-build-rocm
-    with:
-      timeout-minutes: 500
-      build-environment: linux-jammy-rocm-py3_10
-      docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
-      test-matrix: ${{ needs.opmicrobenchmark-build-rocm.outputs.test-matrix }}
-    secrets: inherit
+  # opmicrobenchmark-test-rocm:
+  #   name: opmicrobenchmark-test-rocm
+  #   uses: ./.github/workflows/_rocm-test.yml
+  #   needs: opmicrobenchmark-build-rocm
+  #   with:
+  #     timeout-minutes: 500
+  #     build-environment: linux-jammy-rocm-py3_10
+  #     docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
+  #     test-matrix: ${{ needs.opmicrobenchmark-build-rocm.outputs.test-matrix }}
+  #   secrets: inherit

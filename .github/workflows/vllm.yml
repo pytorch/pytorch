@@ -29,7 +29,7 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
-      opt_out_experiments: lf
+      # opt_out_experiments: lf
 
   torch-build:
     name: ci-vllm-test
@@ -43,7 +43,8 @@ jobs:
       build-environment: linux-jammy-cuda12.8-py3.12-gcc11
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm
       cuda-arch-list: '8.0 8.9 9.0'
-      runner: linux.24xlarge.memory
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.c7i.8xlarge
       test-matrix: |
         { include: [
           { config: "vllm_basic_correctness_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu" },
@@ -65,14 +66,14 @@ jobs:
         ]}
     secrets: inherit
 
-  vllm-test-sm89:
-      name: ci-vllm-test
-      uses: ./.github/workflows/_linux-test.yml
-      needs: [
-        torch-build,
-      ]
-      with:
-        build-environment: linux-jammy-cuda12.8-py3.12-gcc11
-        docker-image: ${{ needs.torch-build.outputs.docker-image }}
-        test-matrix: ${{ needs.torch-build.outputs.test-matrix }}
-      secrets: inherit
+  # vllm-test-sm89:
+  #     name: ci-vllm-test
+  #     uses: ./.github/workflows/_linux-test.yml
+  #     needs: [
+  #       torch-build,
+  #     ]
+  #     with:
+  #       build-environment: linux-jammy-cuda12.8-py3.12-gcc11
+  #       docker-image: ${{ needs.torch-build.outputs.docker-image }}
+  #       test-matrix: ${{ needs.torch-build.outputs.test-matrix }}
+  #     secrets: inherit

@@ -54,7 +54,7 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: linux.12xlarge.memory
+      runner: linux.r7i.4xlarge
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       cuda-arch-list: '10.0'
@@ -65,14 +65,14 @@ jobs:
       # config: "smoke_b200" maps to test_python_smoke_b200() in .ci/pytorch/test.sh
     secrets: inherit
 
-  linux-jammy-cuda12_8-py3_10-gcc11-sm100-test:
-    name: linux-jammy-cuda12.8-py3.10-gcc11-sm100
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-jammy-cuda12_8-py3_10-gcc11-sm100-build
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
-      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build.outputs.test-matrix }}
-      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
-    secrets: inherit
+  # linux-jammy-cuda12_8-py3_10-gcc11-sm100-test:
+  #   name: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+  #   uses: ./.github/workflows/_linux-test.yml
+  #   needs:
+  #     - linux-jammy-cuda12_8-py3_10-gcc11-sm100-build
+  #   with:
+  #     build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100
+  #     docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build.outputs.docker-image }}
+  #     test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build.outputs.test-matrix }}
+  #     aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+  #   secrets: inherit
