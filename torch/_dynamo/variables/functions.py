@@ -704,19 +704,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             and getattr(self.fn, "__module__", None) in self._TREE_MAP_MODULES
         )
 
-    def disable_tree_map_fastpath(self) -> "VariableTracker":
-        return UserFunctionVariableTreeMapFallback(self.fn, self.is_constant)
-
-
-class UserFunctionVariableTreeMapFallback(UserFunctionVariable):
-    def _maybe_call_tree_map_fastpath(
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> Optional[VariableTracker]:
-        return None
-
 
 class BuiltinMethodVariable(BaseUserFunctionVariable):
     def __init__(

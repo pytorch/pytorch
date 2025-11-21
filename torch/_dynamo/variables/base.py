@@ -621,7 +621,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         rest: Sequence["VariableTracker"],
         tree_map_kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
-        return tree_map_fn.disable_tree_map_fastpath().call_function(
+        tree_map_fn_copy = tree_map_fn.clone()
+        tree_map_fn_copy._maybe_call_tree_map_fastpath = lambda *args, **kwargs: None  # type: ignore[missing-attribute]
+        return tree_map_fn_copy.call_function(
             tx,
             [map_fn, self, *rest],
             tree_map_kwargs,
