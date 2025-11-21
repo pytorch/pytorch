@@ -290,7 +290,7 @@ struct C10_CUDA_API CUDAEvent {
 // This pool maintains per-device lists of pre-created CUDA events.
 // Borrowed events are returned to the pool via a custom unique_ptr deleter.
 
-class C10_CUDA_API CUDAEventPool {
+class CUDAEventPool {
  public:
   using Event = std::unique_ptr<
       c10::cuda::CUDAEvent,
