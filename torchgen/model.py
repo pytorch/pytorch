@@ -5,7 +5,7 @@ import itertools
 import re
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 from typing_extensions import assert_never
 
 from torchgen.utils import NamespaceHelper, OrderedSet
@@ -2563,7 +2563,7 @@ class BaseOperatorName:
     # as part of the base operator name, for __str__() to consume.
     # The canonical input (from the rest of the infra) will not contain namespace, but
     # we have a usecase in ExecuTorch where we want to support BaseOperatorName with namespace.
-    namespace: Optional[str] = None
+    namespace: str | None = None
 
     @staticmethod
     def parse(op: str) -> BaseOperatorName:
