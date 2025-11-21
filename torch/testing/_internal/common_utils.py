@@ -1370,8 +1370,6 @@ def run_tests(argv=None):
             This works with unittest_xml_reporting<=3.2.0,>=2.0.0
             (3.2.0 is latest at the moment)
             """
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
 
             def addSkip(self, test, reason):
                 super().addSkip(test, reason)

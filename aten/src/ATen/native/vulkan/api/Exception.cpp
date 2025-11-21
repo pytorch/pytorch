@@ -33,7 +33,7 @@ std::ostream& operator<<(std::ostream& out, const VkResult result) {
     VK_RESULT_CASE(VK_ERROR_FORMAT_NOT_SUPPORTED)
     VK_RESULT_CASE(VK_ERROR_FRAGMENTED_POOL)
     default:
-      out << "VK_ERROR_UNKNOWN (VkResult " << result << ")";
+      out << "VK_ERROR_UNKNOWN (VkResult " << result << ')';
       break;
   }
   return out;
@@ -46,7 +46,7 @@ std::ostream& operator<<(std::ostream& out, const VkResult result) {
 //
 
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
-  out << loc.function << " at " << loc.file << ":" << loc.line;
+  out << loc.function << " at " << loc.file << ':' << loc.line;
   return out;
 }
 
@@ -66,7 +66,7 @@ Error::Error(SourceLocation source_location, const char* cond, std::string msg)
     : msg_(std::move(msg)), source_location_{source_location} {
   std::ostringstream oss;
   oss << "Exception raised from " << source_location_ << ": ";
-  oss << "(" << cond << ") is false! ";
+  oss << '(' << cond << ") is false! ";
   oss << msg_;
   what_ = oss.str();
 }
