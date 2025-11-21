@@ -37,9 +37,6 @@ def flags(
 
 
 class MiopenModule(PropModule):
-    def __init__(self, m, name):
-        super().__init__(m, name)
-
     immediate = ContextProp(
         torch._C._get_miopen_immediate, torch._C._set_miopen_immediate
     )
