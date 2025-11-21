@@ -75,7 +75,8 @@ TORCH_API c10::DeviceIndex exchangeDevice(c10::DeviceIndex device_index);
 TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
 
 // Get the device capability of the given device index.
-TORCH_API c10::DeviceCapability getDeviceCapability(c10::DeviceIndex device_index);
+TORCH_API c10::DeviceCapability getDeviceCapability(
+    c10::DeviceIndex device_index);
 
 TORCH_API inline void emptyCache() {
   const auto device_type = getAccelerator(true).value();
