@@ -191,6 +191,7 @@ SLOW_LINTERS = {
     "FLAKE8",
     "GB_REGISTRY",
     "PYFMT",
+    "PYLINT",
     "PYREFLY",
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
@@ -328,3 +329,10 @@ def quicklint(ctx, apply_patches, **kwargs):
 def quickfix(ctx, **kwargs):
     """Autofix changed files."""
     ctx.invoke(quicklint, apply_patches=True)
+
+
+@click.command()
+def regenerate_github_workflows():
+    """Regenerate GitHub workflows from templates."""
+    cmd = [sys.executable, "scripts/generate_ci_workflows.py"]
+    spin.util.run(cmd, cwd="./.github")
