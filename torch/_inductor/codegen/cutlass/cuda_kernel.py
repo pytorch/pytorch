@@ -16,7 +16,7 @@ from torch._inductor.scheduler import BaseSchedulerNode
 from torch._inductor.utils import do_bench_using_profiling, OrderedSet, Placeholder
 from torch.utils._sympy.value_ranges import ValueRanges
 
-from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
+from .utils import DTYPE_TO_CUTLASS_TYPE
 
 
 if TYPE_CHECKING:
@@ -47,7 +47,7 @@ from ..cpp_utils import CppPrinter, DTYPE_TO_CPP
 
 
 if TYPE_CHECKING:
-    from torch._inductor.codegen.cuda.cuda_template import CUDATemplate
+    from torch._inductor.codegen.cutlass.cuda_template import CUDATemplate
 
 log = logging.getLogger(__name__)
 
@@ -424,7 +424,7 @@ class CUDATemplateKernel(CUDAKernel):
         # Helper method, called into from CUTLASSGemmTemplate
         if node is None:
             return default_dtype
-        from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
+        from torch._inductor.codegen.cutlass.cuda_template import CUTLASSTemplate
 
         return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
 
