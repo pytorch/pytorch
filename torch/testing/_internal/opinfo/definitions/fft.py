@@ -158,9 +158,7 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
-        decorators=[
-            precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
-        ],
+        decorators=[precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})],
         skips=(
             DecorateInfo(
                 unittest.skip("Skipped!"),
@@ -192,9 +190,7 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
         check_batched_forward_grad=False,
-        decorators=[
-            precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
-        ],
+        decorators=[precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4})],
     ),
     SpectralFuncInfo(
         "fft.hfft",
