@@ -804,6 +804,56 @@ class TestAvgPool(TestCaseMPS):
             self.assertEqual(out_mps, out_cpu, msg=msg)
 
 
+class TestMaxPool(TestCaseMPS):
+    """Tests for MaxPool output size validation (Issue #168246)"""
+
+    def test_max_pool2d_output_size_validation(self):
+        """Test MaxPool2d output size validation with CPU and MPS"""
+        max_pool = torch.nn.MaxPool2d(kernel_size=2)
+        x = torch.randn(1, 1, 4)
+
+        # Test CPU
+        cpu_error = None
+        try:
+            cpu_result = max_pool(x)
+        except RuntimeError as e:
+            cpu_error = str(e)
+
+        # Test MPS
+        mps_error = None
+        try:
+            x_mps = x.to("mps")
+            mps_result = max_pool(x_mps)
+        except RuntimeError as e:
+            mps_error = str(e)
+        
+        self.assertEqual(cpu_error, mps_error)
+        self.assertEqual(cpu_result, mps_result)
+
+
+    def test_max_pool3d_output_size_validation(self):
+        """Test MaxPool3d output size validation with CPU and MPS"""
+        max_pool = torch.nn.MaxPool3d(kernel_size=2)
+        x = torch.randn(1, 1, 1, 4, 4)
+
+        # Test CPU
+        cpu_error = None
+        try:
+            cpu_result = max_pool(x)
+        except RuntimeError as e:
+            cpu_error = str(e)
+
+        # Test MPS
+        mps_error = None
+        try:
+            x_mps = x.to("mps")
+            mps_result = max_pool(x_mps)
+        except RuntimeError as e:
+            mps_error = str(e)
+
+        self.assertEqual(cpu_error, mps_error)
+        self.assertEqual(cpu_result, mps_result)
+        
 class TestMPS(TestCaseMPS):
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
