@@ -23,7 +23,7 @@ from ...config import cutlass as inductor_cutlass_config
 from ...ir import (
     Buffer,
     ChoiceCaller,
-    CUDATemplateBuffer,
+    CUTLASSTemplateBuffer,
     FixedLayout,
     IRNode,
     Layout,
@@ -33,7 +33,7 @@ from ...utils import is_dynamic, Placeholder
 from ...virtualized import V
 from ..common import IndentedBuffer
 from . import utils as cutlass_utils
-from .cuda_kernel import CUDATemplateKernel
+from .kernel import CUTLASSTemplateKernel
 from .python_evt import CutlassEVTCodegen, scaled_mm_evt
 from .template import CUTLASSTemplate
 from .utils import (
@@ -1062,9 +1062,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
     def render(  # type: ignore[override]
         self,
-        kernel: CUDATemplateKernel,
+        kernel: CUTLASSTemplateKernel,
         op: "cutlass_gemm_op.GemmOperation" = None,  # type: ignore[name-defined]  # noqa: F821
-        template_buffer_node: Optional[CUDATemplateBuffer] = None,
+        template_buffer_node: Optional[CUTLASSTemplateBuffer] = None,
         epilogue_nodes: Optional[list[BaseSchedulerNode]] = None,
         **kwargs,
     ) -> str:
@@ -1074,14 +1074,14 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         including potentially fused epilogues.
 
         Args:
-            kernel (CUDATemplateKernel): The kernel to be rendered.
+            kernel (CUTLASSTemplateKernel): The kernel to be rendered.
             op (cutlass_gemm_op.GemmOperation, optional): A GEMM operation that is required to be compatible with the
                 input and output definitions as well as a possible epilogue. Defaults to None.
             **kwargs: Additional keyword arguments. Currently unused.
 
         Returns:
             str: Cutlass based CUDA C++ code fragment as a string, to be used by the current
-            CUDATemplateKernel or autotuning code.
+            CUTLASSTemplateKernel or autotuning code.
 
         Note:
             All inputs and their corresponding buffer addresses and names take precedence over previously
@@ -1633,7 +1633,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
         Y: IRNode,
         alpha: float,
         beta: float,
-        kernel: CUDATemplateKernel,
+        kernel: CUTLASSTemplateKernel,
         epilogue_args,
     ) -> str:
         """
@@ -1650,7 +1650,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
             Y (IRNode): The output tensor.
             alpha (float): Scaling factor for the product of the inputs.
             beta (float): Scaling factor for the output tensor.
-            kernel (CUDATemplateKernel): CUDA Template kernel for the operation.
+            kernel (CUTLASSTemplateKernel): CUDA Template kernel for the operation.
             epilogue_args (any): Additional arguments for the epilogue state.
 
         Returns:
@@ -1924,7 +1924,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         Y: IRNode,
         alpha: float,
         beta: float,
-        kernel: CUDATemplateKernel,
+        kernel: CUTLASSTemplateKernel,
         epilogue_args,
     ) -> str:
         """
@@ -1943,7 +1943,7 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
             Y (IRNode): The output tensor.
             alpha (float): Scaling factor for the product of the inputs.
             beta (float): Scaling factor for the output tensor.
-            kernel (CUDATemplateKernel): CUDA Template kernel for the operation.
+            kernel (CUTLASSTemplateKernel): CUDA Template kernel for the operation.
             epilogue_args (any): Additional arguments for the epilogue state.
 
         Returns:
