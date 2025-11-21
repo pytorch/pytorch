@@ -216,6 +216,18 @@ class MixOrderReduction:
     ) -> bool:
         return len(cls.get_common_read(node1, node2)) > 0
 
+    @classmethod
+    def get_numel(cls, node: BaseSchedulerNode) -> int:
+        g1 = cls.get_numel_rnumel(node)
+        return V.graph.sizevars.size_hint(g1[0] * g1[1])
+
+    @classmethod
+    def get_fusion_score(
+        cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+    ) -> int:
+        # node2 is ignored for now
+        return cls.get_numel(node1)
+
     # TODO add a cache
     @classmethod
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
@@ -2052,6 +2064,49 @@ class FusedMixOrderReductions(FusedSchedulerNode):
         super().__init__(
             node1.scheduler, list(node1.get_nodes()) + list(node2.get_nodes())
         )
+        self.numel = MixOrderReduction.get_numel(self.node1)
+
+    def sub_node_can_fuse(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
+        """
+        node1 is from the current mix order reduction; node2 is another node we want to fuse in.
+        """
+        assert not isinstance(node1, FusedMixOrderReductions)
+        assert not isinstance(node2, FusedMixOrderReductions)
+
+        if not self.scheduler.can_fuse(node1, node2):
+            return False
+
+        return (
+            not node2.is_reduction()
+            or self.scheduler.score_fusion_memory(node1, node2, count_bytes=False)
+            >= self.numel
+        )
+
+    def can_fuse_with(self, other: BaseSchedulerNode):
+        if not isinstance(other, FusedMixOrderReductions):
+            return self.sub_node_can_fuse(self.node1, other) or self.sub_node_can_fuse(
+                self.node2, other
+            )
+        else:
+            return self.sub_node_can_fuse(
+                self.node1, other.node1
+            ) and self.sub_node_can_fuse(self.node2, other.node2)
+
+    def fuse_with(self, other: BaseSchedulerNode):
+        device = self.node1.get_device()
+        backend = self.scheduler.get_backend(device)
+
+        if isinstance(other, FusedMixOrderReductions):
+            fused_node1 = backend.fuse(self.node1, other.node1)
+            fused_node2 = backend.fuse(self.node2, other.node2)
+            return FusedMixOrderReductions(fused_node1, fused_node2)
+        else:
+            if self.scheduler.can_fuse(self.node1, other):
+                fused_node = backend.fuse(self.node1, other)
+                return FusedMixOrderReductions(fused_node, self.node2)
+            else:
+                fused_node = backend.fuse(self.node2, other)
+                return FusedMixOrderReductions(self.node1, fused_node)
 
 
 class ForeachKernelSchedulerNode(FusedSchedulerNode):
@@ -4772,14 +4827,8 @@ class Scheduler:
         if node1 is node2:
             return False
 
-        # We don't further fuse with FusedMixOrderReductions for now.
-        # It's not a big deal since the score for fusion with
-        # mix order reduction is low. When we do this kind of fusion,
-        # the participants should have already been well fused.
-        if isinstance(node1, FusedMixOrderReductions) or isinstance(
-            node2, FusedMixOrderReductions
-        ):
-            return False
+        if isinstance(node1, FusedMixOrderReductions):
+            return node1.can_fuse_with(node2)
 
         why = WhyNoFuse(node1, node2)
 
@@ -5077,16 +5126,27 @@ class Scheduler:
                 return True
         return False
 
-    def dep_size_hint(self, dep: Dep) -> int:
-        return V.graph.get_dep_size_hint(dep)
+    def dep_size_hint(self, dep: Dep, count_bytes: bool = True) -> int:
+        return V.graph.get_dep_size_hint(dep, count_bytes)
 
     def score_fusion_memory(
-        self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        count_bytes: bool = True,
     ) -> int:
         """
         The first term in our fusion score that estimates number of saved
         memory operations.
         """
+
+        if MixOrderReduction.can_fuse(node1, node2):
+            # The fusion score for mix order reduction only count
+            # numel so far. It's actually fine. This makes other fusions
+            # sharing the same amount of numels go first; but make
+            # fusions only share weight/bias go later.
+            return MixOrderReduction.get_fusion_score(node1, node2)
+
         node1_dep_len = len(node1.read_writes.reads) + len(node1.read_writes.writes)
         node2_dep_len = len(node2.read_writes.reads) + len(node2.read_writes.writes)
 
@@ -5101,7 +5161,7 @@ class Scheduler:
                 if dep in node2.read_writes.reads or dep in node2.read_writes.writes
             ]
 
-            return sum(self.dep_size_hint(dep) for dep in deps)
+            return sum(self.dep_size_hint(dep, count_bytes) for dep in deps)
 
         common_memory_deps = (node1.read_writes.reads | node1.read_writes.writes) & (
             node2.read_writes.reads | node2.read_writes.writes
@@ -6271,6 +6331,8 @@ class BaseScheduling:  # noqa: docstring_linter
             return ForeachKernelSchedulerNode.fuse(node1, node2)
         elif MixOrderReduction.are_mix_order_reductions(node1, node2):
             return FusedMixOrderReductions(node1, node2)
+        elif isinstance(node1, FusedMixOrderReductions):
+            return node1.fuse_with(node2)
         else:
             return FusedSchedulerNode.fuse(node1, node2)
 
