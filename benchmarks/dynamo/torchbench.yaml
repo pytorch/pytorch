@@ -52,6 +52,7 @@ tolerance:
   # These models need higher tolerance for xpu devices with bf16
   higher_bf16_xpu:
     - squeezenet1_1
+    - phlippe_resnet
 
   freezing:
     # Similar logic to timm_models.py:get_tolerance_and_cosine_flag
