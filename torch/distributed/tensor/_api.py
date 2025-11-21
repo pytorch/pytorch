@@ -5,7 +5,7 @@ import copy
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Any, cast, Optional
+from typing import Any, Optional
 from typing_extensions import deprecated
 
 import torch
@@ -430,10 +430,15 @@ class DTensor(torch.Tensor):
             placements = list(placements)
             for idx, placement in enumerate(placements):
                 # normalize shard dim to be positive
-                if placement.is_shard():
-                    placement = cast(Shard, placement)
+                if isinstance(placement, Shard | _StridedShard):
                     if placement.dim < 0:
-                        placements[idx] = Shard(placement.dim + local_tensor.ndim)
+                        normalized_dim = placement.dim + local_tensor.ndim
+                        if type(placement) is _StridedShard:
+                            placements[idx] = _StridedShard(
+                                normalized_dim, split_factor=placement.split_factor
+                            )
+                        elif type(placement) is Shard:
+                            placements[idx] = Shard(normalized_dim)
 
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
@@ -560,6 +565,10 @@ class DTensor(torch.Tensor):
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
                 placements[i] = Shard(placement.dim + self.ndim)
+            elif isinstance(placement, _StridedShard) and placement.dim < 0:
+                placements[i] = _StridedShard(
+                    placement.dim + self.ndim, split_factor=placement.split_factor
+                )
         placements = tuple(placements)
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
@@ -800,23 +809,25 @@ def distribute_tensor(
             placement_dim = (
                 placement.dim + tensor.ndim if placement.dim < 0 else placement.dim
             )
-            if isinstance(placement, _StridedShard):
-                local_tensor = _StridedShard._make_shard_tensor(
-                    placement_dim,
-                    local_tensor,
-                    device_mesh,
-                    idx,
-                    src_data_rank,
-                    split_factor=placement.split_factor,
-                )
-                placements[idx] = _StridedShard(
-                    placement_dim, split_factor=placement.split_factor
-                )
-            else:
-                local_tensor = Shard._make_shard_tensor(
-                    placement_dim, local_tensor, device_mesh, idx, src_data_rank
-                )
-                placements[idx] = Shard(placement_dim)
+            local_tensor = Shard._make_shard_tensor(
+                placement_dim, local_tensor, device_mesh, idx, src_data_rank
+            )
+            placements[idx] = Shard(placement_dim)
+        elif isinstance(placement, _StridedShard):
+            placement_dim = (
+                placement.dim + tensor.ndim if placement.dim < 0 else placement.dim
+            )
+            local_tensor = _StridedShard._make_shard_tensor(
+                placement_dim,
+                local_tensor,
+                device_mesh,
+                idx,
+                src_data_rank,
+                split_factor=placement.split_factor,
+            )
+            placements[idx] = _StridedShard(
+                placement_dim, split_factor=placement.split_factor
+            )
         elif isinstance(placement, Replicate):
             local_tensor = Replicate._make_replicate_tensor(
                 local_tensor, device_mesh, idx, src_data_rank

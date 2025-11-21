@@ -8,7 +8,7 @@ from typing import Optional, Union
 import torch
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
-from torch.distributed.tensor.placement_types import Shard
+from torch.distributed.tensor.placement_types import _StridedShard, Shard
 
 
 logger = getLogger(__name__)
@@ -342,7 +342,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         # case. Replace the custom logic with dim_map once we support it.
         dim_map: list[Union[int, list[int]]] = [-1] * spec.ndim
         for i, placement in enumerate(spec.placements):
-            if isinstance(placement, Shard):
+            if isinstance(placement, Shard | _StridedShard):
                 shard_dim = placement.dim
                 if dim_map[shard_dim] == -1:
                     dim_map[shard_dim] = [i]
@@ -383,7 +383,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         # compute starting offset using the first shard's size
         local_size_on_rank_0 = list(dtensor_shape)
         for idx, placement in enumerate(spec.placements):
-            if isinstance(placement, Shard):
+            if isinstance(placement, Shard | _StridedShard):
                 mesh_dim_size = mesh.size(idx)
                 shard_dim = placement.dim
                 local_size_on_rank_0[shard_dim], _ = (
