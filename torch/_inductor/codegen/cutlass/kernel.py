@@ -22,7 +22,7 @@ from .utils import DTYPE_TO_CUTLASS_TYPE
 if TYPE_CHECKING:
     from .template import ArgInfo
 
-from ...autotune_process import CUDABenchmarkRequest
+from ...autotune_process import CUTLASSBenchmarkRequest
 from ...ir import (
     Buffer,
     ChoiceCaller,
@@ -571,7 +571,7 @@ class CUTLASSTemplateCaller(ChoiceCaller):
     Attributes:
         name (str): The name of the caller.
         category (str): The category of the caller.
-        bmreq (CUDABenchmarkRequest): The benchmark request for the caller.
+        bmreq (CUTLASSBenchmarkRequest): The benchmark request for the caller.
         template_buffer (CUTLASSTemplateBuffer): The template buffer for the caller.
     """
 
@@ -585,7 +585,7 @@ class CUTLASSTemplateCaller(ChoiceCaller):
             [CUTLASSTemplateBuffer, Optional[list[BaseSchedulerNode]]],
             tuple[CUTLASSTemplateKernel, functools.partial[str]],
         ],
-        bmreq: CUDABenchmarkRequest,
+        bmreq: CUTLASSBenchmarkRequest,
         supports_epilogue_fusion: bool,
         template: "CUTLASSTemplate",  # type: ignore[name-defined]
         info_kwargs: Optional[

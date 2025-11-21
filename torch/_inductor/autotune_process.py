@@ -688,7 +688,7 @@ class TritonCPUBenchmarkRequest(CPUDeviceBenchmarkMixin, TritonBenchmarkRequest)
     pass
 
 
-class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
+class CUTLASSBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
     """
     A class to handle CUDA (CUTLASS) benchmark requests. This class is for
     managing the lifecycle of a CUDA kernel benchmark, including compiling
@@ -705,6 +705,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         extra_args: Iterable[Any],
         source_code: str,
+        device_type: str = "cuda",
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, extra_args)
         self.source_code = source_code
@@ -714,7 +715,12 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self._workspace_size_updated = False
         self.hash_key: str = ""
         self.source_file: str = ""
-        self.hash_key, self.source_file = CUDACodeCache.write(self.source_code, "so")
+        self.device_type = device_type
+        self.codecache_cls = CUDACodeCache
+        self.device_interface = get_interface_for_device(device_type)
+        self.hash_key, self.source_file = self.codecache_cls.write(
+            self.source_code, "so"
+        )
 
     def precompile(self):
         """
@@ -729,7 +735,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
         """
-        Create a function to run the CUDA kernel with the given input and output tensors.
+        Create a function to run the CUDA/XPU kernel with the given input and output tensors.
         """
 
         self.ensure_dll_loaded()
@@ -744,7 +750,8 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             args,
             self.extra_args,
         )
-        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
+        current_stream = self.device_interface.current_stream()
+        stream_ptr = c_void_p(current_stream.cuda_stream)  # type: ignore[attr-defined]
         run_method = getattr(self.DLL, self.kernel_name)
         workspace_ptr = c_void_p(0)
         if self.workspace_size > 0:
@@ -787,7 +794,8 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             dict.fromkeys(meta.name for meta in self.input_tensor_meta)
         )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
-        stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)
+        current_stream = self.device_interface.current_stream()
+        stream_ptr = c_void_p(current_stream.cuda_stream)  # type: ignore[attr-defined]
 
         run_method = getattr(self.DLL, self.kernel_name)
         # Retrieve workspace_size and initialize workspace.
@@ -801,7 +809,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             None,  # null workspace ptr
             stream_ptr,
         )
-        torch.cuda.synchronize()  # shake out any CUDA errors
+        self.device_interface.synchronize()  # shake out any device errors
         self.workspace_size = c_workspace_size.value
         autotuning_log.debug(
             "update_workspace_size called: new workspace size=%d, self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",  # noqa: B950
@@ -817,7 +825,7 @@ class CUDABenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
 
     def ensure_dll_loaded(self):
         if self.DLL is None:
-            self.DLL, self.hash_key, self.source_file = CUDACodeCache.load(
+            self.DLL, self.hash_key, self.source_file = self.codecache_cls.load(
                 self.source_code, "so"
             )
 
