@@ -37,7 +37,7 @@ class ConcaterMapDataPipe(MapDataPipe):
 
     datapipes: tuple[MapDataPipe]
 
-    def __init__(self, *datapipes: MapDataPipe):
+    def __init__(self, *datapipes: MapDataPipe) -> None:
         if len(datapipes) == 0:
             raise ValueError("Expected at least one DataPipe, but got nothing")
         if not all(isinstance(dp, MapDataPipe) for dp in datapipes):

@@ -279,7 +279,7 @@ def _hide_source_ranges() -> Iterator[None]:
         torch._C.Graph.set_global_print_source_ranges(old_enable_source_ranges)  # type: ignore[attr-defined]
 
 
-def enable_onednn_fusion(enabled: bool):
+def enable_onednn_fusion(enabled: bool) -> None:
     """Enable or disables onednn JIT fusion based on the parameter `enabled`."""
     torch._C._jit_set_llga_enabled(enabled)
 

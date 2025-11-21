@@ -207,7 +207,7 @@ class TestDefaultStager(TestCase):
         for i, result in enumerate(staged_results):
             self.assertIsInstance(result, dict)
             # Verify the result contains the expected keys
-            for key in state_dicts[i].keys():
+            for key in state_dicts[i]:
                 self.assertIn(key, result)
 
         stager.close()

@@ -221,7 +221,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 """
             )
 
-        self.add_device_include(self.device)
+        for device in V.graph.device_types:
+            if device != "meta":
+                self.add_device_include(device)
 
         if V.graph.aot_mode:
             if config.aot_inductor.dynamic_linkage:
@@ -631,7 +633,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 debug_printer_manager.codegen_model_inputs_value_print(
                     input_args_to_print=[
                         input_key
-                        for input_key in V.graph.graph_inputs.keys()
+                        for input_key in V.graph.graph_inputs
                         if input_key.startswith("arg")
                     ]
                 )
@@ -811,7 +813,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
 
             all_cuda = all(
                 V.graph.get_original_value_of_constant(name).is_cuda
-                for name in V.graph.constants.keys()
+                for name in V.graph.constants
                 if name not in V.graph.folded_constants
             )
             for idx, name in enumerate(V.graph.constants.keys()):
@@ -1423,11 +1425,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
         src_is_tensor,
         reduce,
         kwargs,
+        device,
     ):
         reduce = self._get_scatter_reduce_enum(reduce)
 
         # call the ABI shim function instead of the ATen one
-        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, self.device)
+        self.add_device_include(device)
+        cpp_kernel_name = self.get_c_shim_func_name(cpp_kernel_name, device)
         # TODO: consider remove "_out" and add missing inplace variants to fallback_ops.py
         cpp_kernel_name = cpp_kernel_name.replace("__", "_") + "_out"
         inputs_wrapped = [str(x) for x in inputs]
@@ -2557,13 +2561,13 @@ if (!custom_op_wrapper) {
                     codegen_arg = codegen_arg.removeprefix("&")
 
                     if codegen_arg == "nullptr":
-                        return "from(std::nullopt)"
+                        return "torch::stable::detail::from(std::nullopt)"
 
                     var_name = f"tmp_var_{next(tmp_var_number)}"
                     dispatch_lines.writeline(
                         f"std::optional {var_name}{{{parse_arg(arg_type.getElementType(), codegen_arg)}}};"
                     )
-                    return f"from({var_name})"
+                    return f"torch::stable::detail::from({var_name})"
 
                 raii_var = self.create_tmp_raii_handle_var_if_needed(
                     codegen_arg, dispatch_lines
@@ -2580,11 +2584,11 @@ if (!custom_op_wrapper) {
                         dispatch_lines.writeline(
                             f"aoti_torch_new_tensor_handle({raii_var}, &{var_name});"
                         )
-                        return f"from({var_name})"
+                        return f"torch::stable::detail::from({var_name})"
                     # If the RAII tensor _is_ a temporary scoped to this fallback call,
                     # simply release and steal the handle.
-                    return f"from({raii_var}.release())"
-                return f"from({codegen_arg})"
+                    return f"torch::stable::detail::from({raii_var}.release())"
+                return f"torch::stable::detail::from({codegen_arg})"
 
             codegen_args = get_args()
             ivalue_args = (
@@ -2605,7 +2609,7 @@ if (!custom_op_wrapper) {
             if len(output_args) == 1 and (output := output_args[0]) is not None:
                 # result is a single tensor
                 dispatch_lines.writeline(
-                    f"{output} = to<AtenTensorHandle>(dispatch_vars[0]);"
+                    f"{output} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[0]);"
                 )
             else:
                 # result is a tuple of tensors
@@ -2613,7 +2617,7 @@ if (!custom_op_wrapper) {
                     if output_arg is None:
                         continue
                     dispatch_lines.writeline(
-                        f"{output_arg} = to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                        f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
                     )
 
         dispatch_lines.writeline("}")

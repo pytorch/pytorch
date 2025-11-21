@@ -454,6 +454,11 @@ def _copy_metadata_to_bw_nodes_in_subgraph(
         if not _is_backward_node_with_seq_nr(node):
             continue
 
+        # We exclude gradient accumulation nodes from copying tags
+        if node.meta.get("is_gradient_acc", False):
+            annotation_log.debug("is_gradient_acc")
+            continue
+
         # fwd_node should always exist, but handle non-existence just in case
         fwd_node = fwd_seq_nr_to_node.get(node.meta["seq_nr"])
         if fwd_node is not None:
