@@ -1002,7 +1002,13 @@ class OpInfo:
         self.backward_dtypesIfXPU = (
             set(self.backward_dtypesIfXPU)
             if self.backward_dtypesIfXPU is not None
-            else self.backward_dtypesIfCUDA
+            else (
+                self.backward_dtypesIfCUDA
+                if self.backward_dtypesIfCUDA is not None
+                else self.backward_dtypes
+                if self.backward_dtypes is not None
+                else self.dtypes
+            )
         )
         self.backward_dtypes = (
             set(self.backward_dtypes)

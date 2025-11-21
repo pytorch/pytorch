@@ -1,6 +1,7 @@
 # Owner(s): ["module: unknown"]
 
 import platform
+from collections import defaultdict
 from functools import partial
 from unittest import skipIf as skipif
 
@@ -32,12 +33,39 @@ _gradcheck_ops = partial(
     ops, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble]
 )
 
+backward_skips = defaultdict(dict)
+backward_skips["xpu"] = {
+    #  Jacobian mismatch, https://github.com/intel/torch-xpu-ops/issues/2360
+    "addmm": {torch.float64},
+    "addbmm": {torch.float64},
+    "baddbmm": {torch.float64},
+    "_rmatmul_": {torch.float64},
+    "__rmatmul__": {torch.float64},
+    "addmv": {torch.float64},
+    "addr": {torch.float64},
+    "matmul": {torch.float64},
+    "mv": {torch.float64},
+    "cdist": {torch.float64},
+    "nn.functional.multi_head_attention_forward": {torch.float64},
+    "index_reduce": {torch.float64},
+}
+
 
 @unMarkDynamoStrictTest
 class TestFwdGradients(TestGradients):
     # Test that forward-over-reverse gradgrad is computed correctly
     @_gradcheck_ops(op_db)
     def test_fn_fwgrad_bwgrad(self, device, dtype, op):
+        _device = device.split(":")[0]
+        if (
+            _device in backward_skips
+            and op.name in backward_skips[_device]
+            and dtype in backward_skips[_device][op.name]
+        ):
+            self.skipTest(
+                f"Skipped! {op.name} does not support forward-over-backward gradgrad test for dtype {dtype} on {device} device!"
+            )
+
         self._skip_helper(op, device, dtype)
 
         if op.supports_fwgrad_bwgrad:
@@ -85,6 +113,15 @@ class TestFwdGradients(TestGradients):
         reason="Different precision of openblas functions: https://github.com/OpenMathLib/OpenBLAS/issues/4194",
     )
     def test_forward_mode_AD(self, device, dtype, op):
+        _device = device.split(":")[0]
+        if (
+            _device in backward_skips
+            and op.name in backward_skips[_device]
+            and dtype in backward_skips[_device][op.name]
+        ):
+            self.skipTest(
+                f"Skipped! {op.name} does not support forward AD test for dtype {dtype} on {device} device!"
+            )
         self._skip_helper(op, device, dtype)
 
         self._forward_grad_helper(device, dtype, op, op.get_op(), is_inplace=False)
@@ -92,6 +129,15 @@ class TestFwdGradients(TestGradients):
     @_gradcheck_ops(op_db)
     @skipIfTorchInductor("to be fixed")
     def test_inplace_forward_mode_AD(self, device, dtype, op):
+        _device = device.split(":")[0]
+        if (
+            _device in backward_skips
+            and op.name in backward_skips[_device]
+            and dtype in backward_skips[_device][op.name]
+        ):
+            self.skipTest(
+                f"Skipped! {op.name} does not support inplace forward AD test for dtype {dtype} on {device} device!"
+            )
         self._skip_helper(op, device, dtype)
 
         if not op.inplace_variant or not op.supports_inplace_autograd:
