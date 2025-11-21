@@ -135,7 +135,9 @@ class OpDispatcher:
         self._random_ops = {
             aten.native_dropout.default,
             aten.normal_.default,
+            aten.rand.default,
             aten.rand_like.default,
+            aten.randn.default,
             aten.randn_like.default,
             aten.randint_like.default,
             aten.randint_like.low_dtype,
@@ -151,6 +153,17 @@ class OpDispatcher:
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
         }
+
+    # ********************************************************************************************
+    # def dispatch(...)
+    #
+    # NOTE: this class no longer contains the top-level dispatch entrypoint!
+    # See #167051 for details
+    #
+    # The entrypoint has been moved to C++, and it handles common cases and then calls back into
+    # OpDispatcher python to handle corner cases.
+    # See dispatchDTensorOp() defined in python_variable.cpp and called from python_arg_parser.cpp
+    # ********************************************************************************************
 
     # This flag is used internally to control whether we treat the torch.Tensor(non-DTensor)
     # as implicitly replicated or we throw error to user.

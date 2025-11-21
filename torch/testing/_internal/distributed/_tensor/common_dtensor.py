@@ -386,7 +386,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        backend = dist.get_default_backend_for_device(self.device_type)
         return backend
 
     def init_manual_seed_for_rank(self) -> None:
@@ -724,6 +724,9 @@ class LocalDTensorTestBase(DTensorTestBase):
         torch.autograd._enable_record_function(False)
 
     def tearDown(self) -> None:
+        from torch.distributed.tensor import _random as random
+
+        random._rng_tracker = None
         super().tearDown()
         torch.autograd._enable_record_function(True)
 
