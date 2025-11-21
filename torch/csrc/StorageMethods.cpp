@@ -529,9 +529,8 @@ static PyObject* THPStorage__setCdata(PyObject* _self, PyObject* new_cdata) {
       THPUtils_typename(new_cdata));
   c10::StorageImpl* ptr =
       static_cast<c10::StorageImpl*>(PyLong_AsVoidPtr(new_cdata));
-  self->cdata.~MaybeOwned<c10::Storage>();
-  self->cdata = c10::MaybeOwned<c10::Storage>::owned(
-      c10::Storage(c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(ptr)));
+  self->cdata =
+      c10::Storage(c10::intrusive_ptr<c10::StorageImpl>::reclaim_copy(ptr));
   Py_INCREF(self);
   return reinterpret_cast<PyObject*>(self);
   END_HANDLE_TH_ERRORS
