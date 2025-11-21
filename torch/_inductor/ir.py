@@ -530,6 +530,16 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
     return list(sym_vars)
 
 
+def try_get_name(x):
+    if isinstance(x, TensorBox):
+        x = x.data
+    if isinstance(x, BaseView):
+        x = x.unwrap_view()
+    if isinstance(x, StorageBox):
+        x = x.data
+    return x.get_name() if isinstance(x, Buffer) else None
+
+
 class IRNode:
     """Base class for all intermediate representation (IR) nodes in TorchInductor.
 
@@ -7429,6 +7439,8 @@ class DeviceCopy(ExternKernelOut):
     def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
         if (
             not x.is_extern()
+            # Can not apply this optimization if x has been mutated
+            and try_get_name(x) not in V.graph.mutated_buffers
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
