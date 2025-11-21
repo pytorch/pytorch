@@ -647,7 +647,13 @@ def dynamo_graph_capture_for_export(
             graph_module._non_persistent_buffers_set = (
                 pyt.root._non_persistent_buffers_set.copy()
             )
-            annotations = getattr(torch.nn.Module, "__annotations__", None)
+            try:
+                import annotationlib  # added in 3.14
+
+                # pyrefly: ignore[missing-attribute]
+                annotations = annotationlib.get_annotations(torch.nn.Module)
+            except ModuleNotFoundError:
+                annotations = getattr(torch.nn.Module, "__annotations__", None)
             for name, value in pyt.root.__dict__.items():
                 if annotations and name not in annotations:
                     graph_module.__dict__[name] = value
