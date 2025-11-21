@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
+from torch._inductor.codegen.cutlass.serialization import (
+    get_cutlass_operation_serializer,
+)
 from torch._inductor.utils import clear_caches
 from torch.export import Dim
 from torch.testing._internal.logging_utils import log_settings
@@ -32,11 +34,8 @@ import torch.version
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
-from torch._inductor.codegen.cuda.cutlass_utils import (
-    _gen_ops_cached,
-    get_max_alignment,
-)
+from torch._inductor.codegen.cutlass.cuda_kernel import CUDATemplateCaller
+from torch._inductor.codegen.cutlass.utils import _gen_ops_cached, get_max_alignment
 from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
@@ -206,7 +205,7 @@ class TestCutlassBackend(TestCase):
     def test_check_paths(self):
         cutlass_mock_imports_path = os.path.join(
             os.path.dirname(torch.__file__),
-            "_inductor/codegen/cuda/cutlass_lib_extensions/cutlass_mock_imports",
+            "_inductor/codegen/cutlass/lib_extensions/cutlass_mock_imports",
         )
         cutlass_mock_cuda_path = os.path.join(cutlass_mock_imports_path, "cuda")
         cutlass_mock_pydot_path = os.path.join(cutlass_mock_imports_path, "pydot")
@@ -251,7 +250,7 @@ class TestCutlassBackend(TestCase):
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):
-        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 
         self.assertTrue(try_import_cutlass())
 
@@ -259,7 +258,7 @@ class TestCutlassBackend(TestCase):
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):
-        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
+        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
 
         self.assertTrue(try_import_cutlass())
         from torch._inductor.codecache import cutlass_key
@@ -1467,7 +1466,7 @@ class TestCutlassBackend(TestCase):
         ):
             from tempfile import NamedTemporaryFile
 
-            from torch._inductor.codegen.cuda.cutlass_utils import (
+            from torch._inductor.codegen.cutlass.utils import (
                 cuda_standalone_runner_compile_command,
                 CUDACompileSourceCapturingContext,
             )
@@ -1553,7 +1552,7 @@ class TestCutlassBackend(TestCase):
             with (
                 log_settings("+inductor"),
                 self.assertLogs(
-                    logger="torch._inductor.codegen.cuda", level=logging.DEBUG
+                    logger="torch._inductor.codegen.cutlass", level=logging.DEBUG
                 ) as test_log,
             ):
                 Y_compiled = torch.compile(mm, dynamic=False)(a, b)
@@ -1591,7 +1590,7 @@ class TestCutlassBackend(TestCase):
         expected = model(A, B)
 
         # Track render calls
-        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+        from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
 
         original_render = CUTLASSGemmTemplate.render
         render_call_count = 0
@@ -1645,7 +1644,7 @@ class TestCutlassBackend(TestCase):
         d = torch.randn(64, 128).cuda().half().t()
 
         # Track render calls
-        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+        from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
 
         original_render = CUTLASSGemmTemplate.render
         render_call_count = 0
@@ -1706,7 +1705,7 @@ class TestCutlassBackend(TestCase):
         b = torch.randn(32, 64).cuda().half().t()
 
         # Track render calls
-        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
+        from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
 
         original_render = CUTLASSGemmTemplate.render
         render_call_count = 0
