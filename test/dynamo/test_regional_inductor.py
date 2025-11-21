@@ -54,8 +54,6 @@ def aot_eager_regional_inductor(serialize=False):
     if serialize:
 
         def regional_inductor_pickle(gm, *example_args):
-            from torch.fx.passes.regional_inductor import _BoxedCallWrapper
-
             result = regional_inductor(gm, *example_args)
             serialized = GraphPickler.dumps(result)
 
@@ -66,8 +64,7 @@ def aot_eager_regional_inductor(serialize=False):
             context = torch._guards.TracingContext(fake_mode)
             with torch._guards.tracing(context):
                 result = GraphPickler.loads(serialized, fake_mode)
-                # Result can be either a GraphModule or a _BoxedCallWrapper
-                assert isinstance(result, (torch.fx.GraphModule, _BoxedCallWrapper))
+                assert isinstance(result, torch.fx.GraphModule)
                 result.recompile()
                 return result
 
