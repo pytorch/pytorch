@@ -16,9 +16,9 @@ from torch._export.utils import _is_cia_op
 from torch._ops import DispatchKey
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
     SM70OrLater,
     tf32_off,
-    _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
