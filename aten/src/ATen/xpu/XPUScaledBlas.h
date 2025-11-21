@@ -61,6 +61,7 @@ enum class ScaledGemmImplementation {
   ROWWISE_ROWWISE = 2,
   A16W8_TENSORWISE = 3,
   A16W8_ROWWISE = 4,
+  A16W8_CHANNELWISE = 5,
 };
 
 /**
@@ -101,6 +102,12 @@ bool check_a16w8_tensorwise_recipe(
     ArrayRef<Tensor>&);
 
 bool check_a16w8_rowwise_recipe(
+    c10::ScalarType,
+    c10::ScalarType,
+    std::vector<ScalingType>&,
+    ArrayRef<Tensor>&);
+
+bool check_a16w8_channelwise_recipe(
     c10::ScalarType,
     c10::ScalarType,
     std::vector<ScalingType>&,

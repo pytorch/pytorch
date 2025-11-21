@@ -1494,6 +1494,8 @@ def forward(self, x_1, w_1):
 
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
+
+
 # ======== Utilis functions for TestFP8MatMul ========
 # [TODO: stonepia] These functions are ported from the scaled_mm, and they will be removed once
 # scaled_mm PR is merged.
@@ -1627,6 +1629,32 @@ class TestFP8MatMul(TestCase):
             atol, rtol = 3e-3, 3e-3
         torch.testing.assert_close(res_actual, res_emulated, atol=atol, rtol=rtol)
 
+    @parametrize("m", [128])
+    @parametrize("k", [512, 1024])
+    @parametrize("n", [512, 1024])
+    @parametrize("a_dtype", [torch.float16, torch.bfloat16])
+    @parametrize("w_dtype", [torch.float8_e4m3fn, torch.float8_e5m2])
+    def test__weight_fp8pack_mm_channelwise_scaling(
+        self, m, k, n, a_dtype, w_dtype, device="xpu"
+    ):
+        torch.manual_seed(42)
+        a = torch.rand((m, k), dtype=a_dtype, device=device)
+        w = torch.rand((k, n), dtype=a_dtype, device=device)
+        # Channel-wise scaling: one scale per output channel (per column of w)
+        scales = tensor_to_scale(w, w_dtype, dim=0).float().to(device)
+        w_fp8 = to_fp8_saturated(w * scales, w_dtype)
+        # Reshape scales for broadcasting
+        res_actual = weight_float8_mm(a, w_fp8, scales)
+        res_emulated = weight_float8_mm_emulated(a, w_fp8, scales)
+        atol, rtol = (
+            (7e-2, 7e-2) if a_dtype in {torch.bfloat16, torch.float16} else (3e-3, 3e-3)
+        )
+        torch.testing.assert_close(res_actual, res_emulated, atol=atol, rtol=rtol)
+
+        # Also test with flattened scales (1D tensor)
+        scales_flat = scales.reshape(-1)
+        res_actual_flat = weight_float8_mm(a, w_fp8, scales_flat)
+        torch.testing.assert_close(res_actual, res_actual_flat, atol=atol, rtol=rtol)
 
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
