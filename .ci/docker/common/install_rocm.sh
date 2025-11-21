@@ -27,6 +27,60 @@ install_ubuntu() {
     apt-get install -y libc++abi1
 
     # Make sure rocm packages from repo.radeon.com have highest priority
+# When USE_THEROCK_NIGHTLY=1, install ROCm from TheRock nightly wheels
+
+if [[ "${USE_THEROCK_NIGHTLY:-0}" == "1" ]]; then
+  echo "install_rocm.sh: installing ROCm from TheRock nightly wheels"
+
+  # Clean any previous ROCm installation in the base CI image.
+  if [[ -d /opt/rocm ]]; then
+    echo "Removing existing /opt/rocm from base image"
+    rm -rf /opt/rocm
+  fi
+
+  # Allow overriding the index URL via env; default to gfx110X Linux nightlies.
+  : "${THEROCK_NIGHTLY_INDEX_URL:=https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/}"
+
+  # Ensure python/pip are present; most CI images already have them.
+  if ! command -v python3 >/dev/null 2>&1; then
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y python3 python3-pip
+  fi
+
+  python3 -m pip install --upgrade pip
+
+  # Install TheRock ROCm SDK from nightlies. The 'rocm-sdk' package and
+  # its CLI are documented in TheRock issues/README for PyTorch builds. 
+  python3 -m pip install \
+    --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
+    "rocm-sdk[libraries,devel]"
+
+  # Use the rocm-sdk CLI helper to populate environment defaults
+  # that PyTorch's ROCm build expects.
+  ROCM_HOME="$(rocm-sdk path --root)"
+  ROCM_BIN="$(rocm-sdk path --bin)"
+  ROCM_CMAKE_PREFIX="$(rocm-sdk path --cmake)"
+
+  echo "ROCM_HOME=${ROCM_HOME}"
+  echo "ROCM_BIN=${ROCM_BIN}"
+  echo "ROCM_CMAKE_PREFIX=${ROCM_CMAKE_PREFIX}"
+
+  # Export these in a profile file so interactive shells and subsequent
+  # Dockerfile RUN steps see them.
+  cat >/etc/profile.d/rocm-sdk.sh <<EOF
+export ROCM_HOME="${ROCM_HOME}"
+export PATH="${ROCM_BIN}:\$PATH"
+export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+EOF
+
+  # Also export into the current shell for the rest of the Docker build.
+  export ROCM_HOME
+  export PATH="${ROCM_BIN}:${PATH}"
+  export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:${CMAKE_PREFIX_PATH:-}"
+
+  echo "install_rocm.sh: TheRock nightly ROCm install complete"
+  exit 0
+fi
     cat << EOF > /etc/apt/preferences.d/rocm-pin-600
 Package: *
 Pin: release o=repo.radeon.com
