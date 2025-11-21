@@ -115,7 +115,7 @@ class TestFullyShardStateDictMultiProcess(FSDPTest):
         sharded_sd = model2.state_dict()
         self.assertEqual(set(ref_sharded_sd.keys()), set(sharded_sd.keys()))
         for key, value in ref_sharded_sd.items():
-            self.assertEqual(value, sharded_sd[key])
+            self.assertEqual(value.to_local(), sharded_sd[key].to_local())
 
     @skip_if_lt_x_gpu(2)
     def test_cached_state_dict(self):

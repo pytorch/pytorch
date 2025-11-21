@@ -20,6 +20,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorConverter,
     DTensorTestBase,
+    map_local_for_rank,
     with_comms,
 )
 
@@ -825,6 +826,21 @@ class DistTensorOpsTest(DTensorTestBase):
                     unbinded_dist_tensors, local_tensor.unbind(dim=unbind_dim)
                 ):
                     self.assertEqual(x.full_tensor(), y)
+
+    @with_comms
+    def test_item(self):
+        mesh = self.build_device_mesh()
+        rank = self.rank
+
+        local_tensor = map_local_for_rank(rank, lambda rank: torch.tensor([rank]))
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+
+        with self.assertRaisesRegex(
+            RuntimeError, "local_scalar_dense doesn't support partial dtensor"
+        ):
+            _ = dt.item()
 
 
 DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(

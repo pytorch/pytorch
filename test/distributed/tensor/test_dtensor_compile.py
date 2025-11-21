@@ -331,7 +331,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         opt_fn = torch.compile(fn_with_str_arg, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
-        self.assertEqual(res, ref)
+        self.assertEqual(res.to_local(), ref.to_local())
 
         def fn_with_int_arg(x):
             local_rank = x.device_mesh.get_local_rank(0)
@@ -340,7 +340,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         ref2 = fn_with_int_arg(x)
         opt_fn2 = torch.compile(fn_with_int_arg, backend="aot_eager", fullgraph=True)
         res2 = opt_fn2(x)
-        self.assertEqual(res2, ref2)
+        self.assertEqual(res2.to_local(), ref2.to_local())
 
         def fn_without_arg(x):
             # will fail if device_mesh.ndim > 1
@@ -350,7 +350,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         ref3 = fn_without_arg(x)
         opt_fn3 = torch.compile(fn_without_arg, backend="aot_eager", fullgraph=True)
         res3 = opt_fn3(x)
-        self.assertEqual(res3, ref3)
+        self.assertEqual(res3.to_local(), ref3.to_local())
 
     def test_fakify_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -364,7 +364,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
-        self.assertEqual(res, ref)
+        self.assertEqual(res.to_local(), ref.to_local())
 
     def test_dynamo_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -378,7 +378,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         res = opt_fn(x)
-        self.assertEqual(res, ref)
+        self.assertEqual(res.to_local(), ref.to_local())
 
     @skipIfHpu
     def test_dtensor_dynamic(self):
@@ -735,11 +735,11 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         cnt = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=False)
-        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(fn(x).to_local(), opt_fn(x).to_local())
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(fn(x2), opt_fn(x2))
+        self.assertEqual(fn(x2).to_local(), opt_fn(x2).to_local())
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(fn(x3), opt_fn(x3))
+        self.assertEqual(fn(x3).to_local(), opt_fn(x3).to_local())
         self.assertEqual(cnt.frame_count, 2)
 
     @skipIfHpu
@@ -1013,7 +1013,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x_dt)
-        self.assertEqual(ref, res)
+        self.assertEqual(ref.to_local(), res.to_local())
 
     @skipIfHpu
     def test_graph_input_is_async(self):
