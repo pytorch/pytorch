@@ -19,7 +19,7 @@ from ..partitioners import get_default_op_list, OpTypes
 
 
 log: logging.Logger = logging.getLogger(__name__)
-log.setLevel(logging.DEBUG)
+
 
 # Node name prefixes for offload/reload operations
 CPU_OFFLOAD_PREFIX = "cpu_offload_"
@@ -96,7 +96,7 @@ def offload_activation_fw(graph: fx.Graph) -> None:
     )
 
 
-def offload_activation_bw(graph: torch.fx.Graph) -> None:
+def offload_activation_bw(graph: fx.Graph) -> None:
     """
     Backward pass modification for GPU reloading, by inserting reloaindg nodes.
 
@@ -140,9 +140,9 @@ def offload_activation_bw(graph: torch.fx.Graph) -> None:
 
 
 def can_offload(
-    node: torch.fx.Node,
-    fwd_outputs: OrderedSet[torch.fx.Node],
-    model_outputs: OrderedSet[torch.fx.Node],
+    node: fx.Node,
+    fwd_outputs: OrderedSet[fx.Node],
+    model_outputs: OrderedSet[fx.Node],
     static_lifetime_input_nodes: OrderedSet[fx.Node],
 ) -> bool:
     """
@@ -269,12 +269,16 @@ def add_forward_offload_stream_ops(graph: fx.Graph) -> None:
     """
     Add stream operations for forward pass CPU offloading.
 
-    Pattern: record_event → fork → wait_event → device_put → join
+    Pattern: record_event → fork → wait_event → device_put → record_event_2 → join → wait_event_2
 
     This ensures that:
     1. Offloading waits for the last use to complete (record_event on default stream)
     2. Offloading happens on a separate stream (fork → wait_event → device_put)
-    3. Execution returns to the default stream after offloading (join)
+    3. Execution returns to the default stream after offloading and
+       waits for offload to complete (record_event_2 → join → wait_event_2)
+
+    NOTE: For stream optimization and overlapping compute with communication,
+          the "wait_event_2" ops can be sinked to the end of the graph.
 
     Args:
         graph: The forward graph to modify
@@ -294,13 +298,14 @@ def add_forward_offload_stream_ops(graph: fx.Graph) -> None:
     offload_stream_id: int = new_stream()
 
     for offload_node in offload_nodes:
-        event_id: int = new_event()
+        offload_ready_event_id: int = new_event()
+        offload_completion_event_id: int = new_event()
 
         with graph.inserting_before(offload_node):
             # Record event on default stream to ensure last use completes
             graph.call_function(
                 torch.ops.streams.record_event.default,
-                args=(event_id, default_stream_id),
+                args=(offload_ready_event_id, default_stream_id),
             )
             # Fork to offload stream
             graph.call_function(
@@ -311,14 +316,26 @@ def add_forward_offload_stream_ops(graph: fx.Graph) -> None:
             # Wait for the event on offload stream
             graph.call_function(
                 torch.ops.streams.wait_event.default,
-                args=(event_id, offload_stream_id),
+                args=(offload_ready_event_id, offload_stream_id),
             )
         with graph.inserting_after(offload_node):
+            # Record event on offload stream after device_put completes
+            record_event_node = graph.call_function(
+                torch.ops.streams.record_event.default,
+                args=(offload_completion_event_id, offload_stream_id),
+            )
+        with graph.inserting_after(record_event_node):
             # Join back to default stream
-            graph.call_function(
+            join_node = graph.call_function(
                 torch.ops.streams.join.default,
                 args=(offload_stream_id, default_stream_id),
                 name=f"stream_out_{offload_node.name}",
+            )
+        with graph.inserting_after(join_node):
+            # Wait for the offload to complete on default stream
+            graph.call_function(
+                torch.ops.streams.wait_event.default,
+                args=(offload_completion_event_id, default_stream_id),
             )
 
 
@@ -333,7 +350,7 @@ def add_backward_reload_stream_ops(graph: fx.Graph) -> None:
     2. Reloading happens on a separate stream (device_put)
     3. First use waits for reload completion (record_event → join → wait_event)
 
-    Note: The pattern consists of two logical groups:
+    NOTE: The pattern consists of two logical groups:
           - First group (fork → wait_stream → device_put → record_event → join):
             Performs asynchronous data transfer on a separate stream
           - Second group (wait_event):
@@ -443,3 +460,6 @@ def enable_activation_offloading(
     # Step 3: Put offload nodes on separate stream if configured
     if config.activation_offload_separate_stream:
         put_offload_nodes_on_separate_stream(fwd_module, bwd_module)
+
+    fwd_module.graph.lint()
+    bwd_module.graph.lint()
