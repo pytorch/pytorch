@@ -858,6 +858,59 @@ class TestLazyModules(TestCase):
         with self.assertRaisesRegex(ValueError, "uninitialized parameter"):
             param + param
 
+    @suppress_warnings
+    def test_lazy_linear_with_dynamic_compile(self):
+        class LinearModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lazy_fc = nn.LazyLinear(out_features=10)
+
+            def forward(self, x):
+                return self.lazy_fc(x)
+
+        model = LinearModel()
+        compiled_model = torch.compile(model, backend="aot_eager", dynamic=True)
+        x = torch.randn(2, 20)
+        output = compiled_model(x)
+        self.assertEqual(output.shape, (2, 10))
+        self.assertEqual(model.lazy_fc.in_features, 20)
+
+    @suppress_warnings
+    def test_lazy_conv_with_dynamic_compile(self):
+        class ConvModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lazy_conv = nn.LazyConv2d(out_channels=16, kernel_size=3)
+
+            def forward(self, x):
+                return self.lazy_conv(x)
+
+        conv_model = ConvModel()
+        compiled_conv = torch.compile(conv_model, backend="aot_eager", dynamic=True)
+        x_conv = torch.randn(2, 3, 28, 28)
+        output_conv = compiled_conv(x_conv)
+        self.assertEqual(output_conv.shape[0], 2)
+        self.assertEqual(output_conv.shape[1], 16)
+        self.assertEqual(conv_model.lazy_conv.in_channels, 3)
+
+    @suppress_warnings
+    def test_lazy_batchnorm_with_dynamic_compile(self):
+        class BNModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lazy_bn = nn.LazyBatchNorm1d()
+
+            def forward(self, x):
+                return self.lazy_bn(x)
+
+        bn_model = BNModel()
+        bn_model.eval()  # Set to eval mode to avoid batch norm stats issues
+        compiled_bn = torch.compile(bn_model, backend="aot_eager", dynamic=True)
+        x_bn = torch.randn(2, 16, 50)
+        output_bn = compiled_bn(x_bn)
+        self.assertEqual(output_bn.shape, (2, 16, 50))
+        self.assertEqual(bn_model.lazy_bn.num_features, 16)
+
 
 if __name__ == "__main__":
     run_tests()
