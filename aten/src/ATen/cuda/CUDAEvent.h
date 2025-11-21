@@ -8,20 +8,20 @@
 
 namespace at::cuda {
 
-// EventPool - A thread-safe pool of CUDA events to avoid the overhead of
+// CUDAEventPool - A thread-safe pool of CUDA events to avoid the overhead of
 // repeatedly calling cudaEventCreate(). Concurrent cudaEventCreate() calls
 // can incur significant cost on some device/driver combinations.
 //
 // This pool maintains per-device lists of pre-created CUDA events.
 // Borrowed events are returned to the pool via a custom unique_ptr deleter.
 
-class EventPool {
+class CUDAEventPool {
  public:
  using Event = std::unique_ptr<
       c10::cuda::CUDAEvent,
       std::function<void(c10::cuda::CUDAEvent*)>>;
 
-  EventPool(size_t init_num_events = 0) : pools_(c10::cuda::device_count()) {
+  CUDAEventPool(size_t init_num_events = 0) : pools_(c10::cuda::device_count()) {
     if (init_num_events > 0) {
       init_events(init_num_events);
     }
@@ -95,7 +95,5 @@ class EventPool {
 
   std::vector<PerDevicePool> pools_;
 };
-
-using CUDAEventPtr = EventPool::Event;
 
 } // namespace at::cuda
