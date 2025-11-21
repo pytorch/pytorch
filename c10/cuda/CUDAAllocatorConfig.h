@@ -127,13 +127,13 @@ class C10_CUDA_API CUDAAllocatorConfig {
         env = c10::utils::get_env("PYTORCH_HIP_ALLOC_CONF");
       }
 #endif
-      if (env.has_value()) {
-        inst->parseArgs(env.value());
-      }
       // Note: keep the parsing order and logic stable to avoid potential
       // performance regressions in internal tests.
       if (!env.has_value()) {
         env = c10::utils::get_env("PYTORCH_ALLOC_CONF");
+      }
+      if (env.has_value()) {
+        inst->parseArgs(env.value());
       }
       return inst;
     })();

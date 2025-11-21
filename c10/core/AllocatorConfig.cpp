@@ -17,7 +17,6 @@ AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
   if (env##_name.has_value()) {                \
     instance.parseArgs(env##_name.value());    \
     return true;                               \
-    \                                          \
   }
   static bool env_flag [[maybe_unused]] = []() {
     // Parse allocator configuration from environment variables.

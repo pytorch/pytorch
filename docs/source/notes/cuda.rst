@@ -496,7 +496,7 @@ Use of a caching allocator can interfere with memory checking tools such as
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
 
 The behavior of the caching allocator can be controlled via the environment variable
-``PYTORCH_ALLOC_CONF``. ``PYTORCH_CUDA_ALLOC_CONF`` is deprecated and is provided only
+``PYTORCH_ALLOC_CONF``. ``PYTORCH_CUDA_ALLOC_CONF`` is its alias and is provided only
 for backward compatibility.
 The format is ``PYTORCH_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
