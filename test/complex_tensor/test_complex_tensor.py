@@ -34,7 +34,6 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_utils import (
     run_tests,
-    TestGradients,
     unMarkDynamoStrictTest,
 )
 
@@ -148,7 +147,7 @@ class TestComplexTensor(TestCase):
 
 
 @unMarkDynamoStrictTest
-class TestComplexBwdGradients(TestCase, TestGradients):
+class TestComplexBwdGradients(TestCase):
     _default_dtype_check_enabled = True
 
     @ops(
