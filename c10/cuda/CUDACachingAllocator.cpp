@@ -226,8 +226,7 @@ struct Block {
         requested_size(0),
         pool(pool),
         ptr(ptr) {
-          registration_counter_global++;
-          registration_counter = registration_counter_global;	  
+          registration_counter = ++registration_counter_global;
 	}
 
   // constructor for search key
