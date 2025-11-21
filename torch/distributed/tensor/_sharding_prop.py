@@ -345,6 +345,10 @@ class ShardingPropagator:
         )
 
     def propagate(self, op_info: OpInfo) -> None:
+        # NB: The logic here is duplicated in _propagate_op_sharding_dispatch_slow_path.
+        # Ideally, this function would be deleted, but there are a handful of
+        # one off call sites here that aren't cleaned up.
+
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
@@ -656,7 +660,7 @@ class ShardingPropagator:
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
         expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
-            out_tensor_meta.shape, spec.mesh, spec.placements
+            out_tensor_meta.shape, spec.mesh, spec.placements, skip_offset=True
         )
 
         # adjust the stride arg for aten.new_empty_strided.default
