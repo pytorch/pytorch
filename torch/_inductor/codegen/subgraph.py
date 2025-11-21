@@ -37,14 +37,7 @@ def inline_subgraph_to_ir_nodes(
     """
     from torch._inductor.lowering import process_subgraph_nodes
 
-    # Save the original module and temporarily set V.graph.module to this subgraph
-    # This allows get_attr operations within the subgraph to access subgraph attributes
-    original_module = V.graph.module
-    try:
-        V.graph.module = gm
-        return process_subgraph_nodes(gm, inputs)
-    finally:
-        V.graph.module = original_module
+    return process_subgraph_nodes(gm, inputs)
 
 
 class SubgraphChoiceCaller(ir.ChoiceCaller):
@@ -97,7 +90,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             extern_node_serializer=V.graph.extern_node_serializer,
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
-            # Sanitize name: replace '::' with '_' for valid Python identifier
             name=f"benchmark_{self.name.replace('::', '_')}",
         )
 
