@@ -20,6 +20,8 @@ constexpr int kStreamsPerPoolBits = 5;
 constexpr int kStreamsPerPool = 1 << kStreamsPerPoolBits;
 constexpr int kStreamTypeBits = 3;
 
+int max_stream_priorities;
+
 /*
  * The stream pools are lazily initialized when the first queue is requested
  * for a device. The device flags track the initialization of each device. When
@@ -29,11 +31,10 @@ constexpr int kStreamTypeBits = 3;
 std::deque<c10::once_flag> device_flags;
 std::vector<std::array<
     std::array<orStream_t, kStreamsPerPool>,
-    c10::openreg::max_compile_time_stream_priorities + 1>>
+    c10::openreg::max_compile_time_stream_priorities>>
     streams;
-std::vector<orStream_t> default_streams;
 std::deque<
-    std::array<std::atomic<uint32_t>, max_compile_time_stream_priorities + 1>>
+    std::array<std::atomic<uint32_t>, max_compile_time_stream_priorities>>
     priority_counters;
 
 thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
@@ -48,10 +49,11 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
  *                ignored for ext   ignored for ext
  *
  * StreamIdType:
- *  000 = normal stream
+ *  000-001 = OpenReg priority stream
  *  110 = default stream
  *  111 = external stream
- *
+ * Priorities 000-101 are reserved for the normal stream pool and can be extended as per practical requirements.
+ * OpenReg currently supports priorities 0 and 1.
  *
  * For external stream, StreamID is a orStream_t pointer. This means that last
  * bit will always be 0. So when constructing StreamId for a native stream we
@@ -94,8 +96,6 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
     default:
       return stream << "NORMAL" << static_cast<int>(s.getStreamType());
   }
-
-  return stream;
 }
 
 inline StreamIdType streamIdType(StreamId s) {
@@ -105,7 +105,7 @@ inline StreamIdType streamIdType(StreamId s) {
   int mask_for_type = (1 << kStreamTypeBits) - 1;
   auto st = (s >> 1) & mask_for_type;
   TORCH_CHECK(
-      st == StreamIdType::DEFAULT || (st >= 0 && st <= max_compile_time_stream_priorities),
+      st == StreamIdType::DEFAULT || (st >= 0 && st < max_stream_priorities),
       "invalid StreamIdType: ",
       st);
   return st;
@@ -125,8 +125,14 @@ void initGlobalStreamState() {
   num_devices = device_count();
   device_flags.resize(num_devices);
   streams.resize(num_devices);
-  default_streams.resize(num_devices);
   priority_counters.resize(num_devices);
+  int leastPriority = -1, greatestPriority = -1;
+  OPENREG_CHECK(
+      orDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority));
+  auto range = greatestPriority - leastPriority + 1;
+  max_stream_priorities = range >= c10::openreg::max_compile_time_stream_priorities
+      ? c10::openreg::max_compile_time_stream_priorities
+      : range;
 }
 
 void initSingleDeviceStream(int priority, DeviceIndex device_index, int i) {
@@ -135,17 +141,12 @@ void initSingleDeviceStream(int priority, DeviceIndex device_index, int i) {
   priority_counters[device_index][priority] = 0;
 }
 
-void initSingleDeviceDefaultStream(int priority, DeviceIndex device_index) {
-  auto& stream = default_streams[device_index];
-  OPENREG_CHECK(orStreamCreateWithPriority(&stream, 0, priority));
-}
 
 // Creates stream pools for the specified device. It should be call only once.
 void initDeviceStreamState(DeviceIndex device_index) {
   DeviceGuard device_guard{Device(DeviceType::PrivateUse1, device_index)};
-  initSingleDeviceDefaultStream(0 , device_index);
   for (const auto i : c10::irange(kStreamsPerPool)) {
-    for (const auto p : c10::irange(max_compile_time_stream_priorities + 1)) {
+    for (const auto p : c10::irange(max_stream_priorities)) {
       initSingleDeviceStream(p, device_index, i);
     }
   }
@@ -201,14 +202,16 @@ orStream_t OpenRegStream::stream() const {
   StreamId stream_id = stream_.id();
   StreamIdType st = streamIdType(stream_id);
   size_t si = streamIdIndex(stream_id);
+  // OpenReg does not support a default stream natively.
+  // Here, we designate stream 0 from the priority 0 stream pool to serve as the default stream.
   if(st.isDefault()){
-    return default_streams[device_index];
+    return streams[device_index][0][0];
   }else if(st.isExt()){
     return reinterpret_cast<orStream_t>(stream_id);
   }else{
     auto streamType = st.getStreamType();
     TORCH_CHECK(
-        streamType >= 0 && streamType <= max_compile_time_stream_priorities,
+        streamType >= 0 && streamType <= max_stream_priorities,
         "Unrecognized stream ",
         stream_,
         " (I didn't recognize the stream type, ",
@@ -228,7 +231,7 @@ OpenRegStream getStreamFromPool(const int priority, DeviceIndex device_index) {
   if (device_index == -1) {
     device_index = current_device();
   }
-  auto pri_idx = std::clamp(priority, 0, max_compile_time_stream_priorities);
+  auto pri_idx = std::clamp(priority, 0, max_stream_priorities - 1);
   const auto idx = get_idx(priority_counters[device_index][pri_idx]);
   auto id_type = static_cast<StreamIdType>(pri_idx);
   return OpenRegStreamForId(device_index, makeStreamId(id_type, idx));
@@ -236,7 +239,7 @@ OpenRegStream getStreamFromPool(const int priority, DeviceIndex device_index) {
 
 OpenRegStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   initOpenRegStreamsOnce();
-  int priority = 0;
+  int priority = isHighPriority ? 0 : max_stream_priorities - 1;
   return getStreamFromPool(priority, device);
 }
 
