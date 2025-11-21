@@ -14,6 +14,8 @@ from torch.utils._runtime_estimation import (
 )
 
 
+aten = torch.ops.aten
+
 Node: TypeAlias = torch.fx.Node
 Graph: TypeAlias = torch.fx.Graph
 
@@ -330,3 +332,11 @@ def sync_deallocations(gm: torch.fx.GraphModule) -> None:
                 handle_synced_deallocation(
                     gm.graph, stream_to_exec_trace, node, last_user
                 )
+
+
+def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
+    for epi_copy in gm.graph.find_nodes(op="call_function", target=aten.copy_.default):
+        arg_stream = get_stream(epi_copy.args[1])
+        copy_stream = get_stream(epi_copy)
+        if arg_stream != copy_stream:
+            set_stream(epi_copy, get_stream_or_current_stream(epi_copy.args[1]))

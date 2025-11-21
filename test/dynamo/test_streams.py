@@ -873,6 +873,38 @@ tangents_2: "f32[2, 2]", tangents_3: "f32[2, 2]"):
         )
 
     @requires_cuda
+    def test_epilogue_copy_streams(self):
+        def fn(x):
+            with torch.Stream(device="cuda:0"):
+                with torch.no_grad():
+                    x.add_(2)
+
+            return x
+
+        x = torch.ones(2, 2, requires_grad=True, device="cuda:0")
+
+        inp = (x,)
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, *inp)
+
+        actual.sum().backward()
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[2, 2]"):
+        # Annotation: {'stream': 0}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(arg0_1, 2)
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(arg0_1, add);  arg0_1 = add = None
+        return (copy_,)
+""",
+        )
+
+    @requires_cuda
     def test_inductor_lowering(self):
         with patch("torch._inductor.config.implicit_fallbacks", False):
 
