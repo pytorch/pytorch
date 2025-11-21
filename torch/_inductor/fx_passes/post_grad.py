@@ -699,6 +699,10 @@ def register_addmm_activation_fusions():
         if not inp.is_cuda:
             return False
 
+        # ROCm - no Lt with activation epilogue fusion when bias is 2D
+        if torch.version.hip and (inp.dim() == 2):
+            return False
+
         output = match.output_node()
         return not all(is_pointwise_use(use) for use in output.users)
 
