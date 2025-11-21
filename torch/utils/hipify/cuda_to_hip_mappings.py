@@ -9233,6 +9233,8 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ),
         ("cuda::CUDAEvent", ("hip::HIPEventMasqueradingAsCUDA", API_PYTORCH)),
         ("CUDAEvent", ("HIPEventMasqueradingAsCUDA", API_PYTORCH)),
+        ("cuda::CUDAEventPool", ("hip::HIPEventPoolMasqueradingAsCUDA", API_PYTORCH)),
+        ("CUDAEventPool", ("HIPEventPoolMasqueradingAsCUDA", API_PYTORCH)),
         ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         (

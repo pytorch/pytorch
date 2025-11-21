@@ -4,7 +4,8 @@
 
 // Use of c10::hip namespace here makes hipification easier, because
 // I don't have to also fix namespaces.  Sorry!
-namespace c10 { namespace hip {
+namespace c10 {
+namespace hip {
 
 // See Note [Masquerading as CUDA] for motivation
 
@@ -20,9 +21,12 @@ struct HIPEventMasqueradingAsCUDA {
   ~HIPEventMasqueradingAsCUDA() = default;
 
   HIPEventMasqueradingAsCUDA(const HIPEventMasqueradingAsCUDA&) = delete;
-  HIPEventMasqueradingAsCUDA& operator=(const HIPEventMasqueradingAsCUDA&) = delete;
-  HIPEventMasqueradingAsCUDA(HIPEventMasqueradingAsCUDA&& other) noexcept = default;
-  HIPEventMasqueradingAsCUDA& operator=(HIPEventMasqueradingAsCUDA&& other) noexcept = default;
+  HIPEventMasqueradingAsCUDA& operator=(const HIPEventMasqueradingAsCUDA&) =
+      delete;
+  HIPEventMasqueradingAsCUDA(HIPEventMasqueradingAsCUDA&& other) noexcept =
+      default;
+  HIPEventMasqueradingAsCUDA& operator=(
+      HIPEventMasqueradingAsCUDA&& other) noexcept = default;
 
   operator hipEvent_t() const {
     return event_.event();
@@ -79,66 +83,88 @@ struct HIPEventMasqueradingAsCUDA {
     event_.ipc_handle(handle);
   }
 
-<<<<<<< HEAD
   void create(DeviceIndex device_index) {
     event_.create(device_index);
   }
 
-=======
->>>>>>> 616593de8c3 (Move EventPool::Event to c10)
  private:
   HIPEvent event_;
 };
-
-<<<<<<< HEAD
-=======
 
 class HIPEventPoolMasqueradingAsCUDA {
  public:
   using Event = std::unique_ptr<
       HIPEventMasqueradingAsCUDA,
       std::function<void(HIPEventMasqueradingAsCUDA*)>>;
-  HIPEventPoolMasqueradingAsCUDA() = default;
+
+  HIPEventPoolMasqueradingAsCUDA(size_t init_num_events = 0)
+      : pools_(c10::hip::device_count()) {
+    if (init_num_events > 0) {
+      reserve_events_on_pools(init_num_events);
+    }
+  }
 
   Event get(DeviceIndex device) {
-    TORCH_INTERNAL_ASSERT(0 <= device);
-    TORCH_INTERNAL_ASSERT(device < static_cast<DeviceIndex>(pools_.size()));
+    if (device < 0 || device >= (DeviceIndex)pools_.size()) {
+      auto deleter = [](HIPEventMasqueradingAsCUDA* event) { delete event; };
+      return Event(
+          std::make_unique<HIPEventMasqueradingAsCUDA>().release(), deleter);
+    }
+
     auto& pool = pools_[device];
-    auto destructor = [&pool](HIPEventMasqueradingAsCUDA* event) {
-      std::lock_guard<std::mutex> g(pool.mutex_);
-      pool.event_pool_.push_back(std::unique_ptr<HIPEventMasqueradingAsCUDA>(event));
+
+    // Create a destructor that returns the event to the appropriate device pool
+    auto destructor = [&pool](HIPEventMasqueradingAsCUDA* event) noexcept {
+      if (event != nullptr) {
+        std::lock_guard<std::mutex> lock(pool.mutex_);
+        pool.event_pool_.emplace_back(event);
+      }
     };
 
-    // Try to acquire an event from the per-device pool.
     {
-      std::lock_guard<std::mutex> g(pool.mutex_);
+      std::lock_guard<std::mutex> lock(pool.mutex_);
       if (!pool.event_pool_.empty()) {
-        auto* event = pool.event_pool_.back().release();
+        auto event = std::move(pool.event_pool_.back());
         pool.event_pool_.pop_back();
-        return Event(event, destructor);
+        return Event(event.release(), destructor);
       }
     }
-    // otherwise, allocate a new event that will be returned to the pool on
-    // destruction.
+
+    // Pool is empty then create a new Event
     return Event(
         std::make_unique<HIPEventMasqueradingAsCUDA>().release(), destructor);
   }
 
   void empty_cache() {
     for (auto& pool : pools_) {
-      std::lock_guard<std::mutex> g(pool.mutex_);
+      std::lock_guard<std::mutex> lock(pool.mutex_);
       pool.event_pool_.clear();
     }
   }
 
  private:
-  struct PerDevicePool {
-    alignas(64) std::mutex mutex_;
+  void reserve_events_on_pools(size_t num_events) {
+    for (const auto device : c10::irange(pools_.size())) {
+      HIPGuardMasqueradingAsCUDA guard(device);
+      std::vector<Event> temp_events;
+      temp_events.reserve(num_events);
+      pools_[device].event_pool_.reserve(num_events);
+      for (auto const _ : c10::irange(num_events)) {
+        auto event = get(device);
+        event->create();
+        temp_events.emplace_back(std::move(event));
+      }
+      // Events will be returned to pool when temp_events is destroyed.
+    }
+  }
+
+  struct alignas(c10::hardware_destructive_interference_size) PerDevicePool {
+    alignas(c10::hardware_destructive_interference_size) std::mutex mutex_;
     std::vector<std::unique_ptr<HIPEventMasqueradingAsCUDA>> event_pool_;
   };
-  std::vector<PerDevicePool> pools_ =
-      std::vector<PerDevicePool>(c10::hip::device_count());
+
+  std::vector<PerDevicePool> pools_;
 };
 
->>>>>>> 616593de8c3 (Move EventPool::Event to c10)
-}} // namespace c10::hip
+} // namespace hip
+} // namespace c10
