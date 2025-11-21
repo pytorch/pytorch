@@ -72,6 +72,46 @@ class TestControlDeps(InductorTestCase):
             expected = fn(a, b)
             torch.testing.assert_close(result, expected)
 
+    def test_get_additional_mutation_deps(self):
+        def fn(x, y):
+            vx = x.view(-1)
+            vy = y.view(-1)
+
+            a = x + 1  # before mutation: no deps
+            vx.add_(10)  # mut1 on x
+            b = x + 2  # depends on add_
+            vx.mul_(5)  # mut2 on x, depends on add_
+            c = x + 3  # depends on add_ and mul_
+            d = y + 4  # no deps
+            vy.sub_(7)  # mut3 on y
+            e = x + y  # depends on add_, mul_, sub_
+            f = y + 5  # depends on sub_
+
+            return a, b, c, d, e, f
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+        gm = torch.fx.experimental.proxy_tensor.make_fx(fn, tracing_mode="fake")(x, y)
+        deps_map = (
+            torch._inductor.fx_passes.control_dependencies.get_additional_mutation_deps(
+                gm.graph
+            )
+        )
+
+        # readable format for assertion
+        deps_str = {n.name: [d.name for d in deps] for n, deps in deps_map.items()}
+
+        self.assertEqual(
+            deps_str,
+            {
+                "add_1": ["add_"],  # b depends on mut1
+                "mul_": ["add_"],  # mut2 depends on mut1 (reads mutated value!)
+                "add_2": ["add_", "mul_"],  # c depends on mut1, mut2 (ordered)
+                "add_4": ["add_", "mul_", "sub_"],  # e depends on all mutations
+                "add_5": ["sub_"],  # f depends on mut3
+            },
+        )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA_AND_TRITON:

@@ -8,6 +8,7 @@ operations (e.g., collective_start -> mm -> wait), this pass wraps operations
 with control_deps to make dependencies explicit.
 """
 
+from collections import defaultdict
 from typing import Any
 
 import torch.fx as fx
@@ -224,3 +225,99 @@ def _create_subgraph_for_node(graph: fx.Graph, node: fx.Node) -> fx.GraphModule:
         out.meta["val"] = result.meta["val"]
 
     return fx.GraphModule(owning_module, subgraph)
+
+
+def get_additional_mutation_deps(graph: fx.Graph) -> dict[fx.Node, OrderedSet[fx.Node]]:
+    """
+    This function detects nodes that depend on mutation ops.
+
+    The algorithm works in two phases:
+    1. Build a mapping from storage to all mutations affecting it
+    2. For each node, check if it reads from mutated storage and add
+    dependencies on mutations that occurred before it
+
+    Args:
+        graph: FX graph to analyze for mutation dependencies
+
+    Returns:
+        Dictionary mapping nodes to the mutation ops they depend on:
+        {dependent_node: OrderedSet([mutation_nodes_it_depends_on])}
+        dependencies are ordered by execution order.
+
+    Example:
+        >>> def fn(x):
+        ...     v = x.view(-1)
+        ...     v.add_(5)  # Mutates x's storage through view
+        ...     y = x + 10  # Reads from x's storage
+        ...     return y
+        >>> deps = get_additional_mutation_deps(traced_graph)
+        >>> # Returns: {add: OrderedSet([add_])}
+    """
+    from torch._higher_order_ops.auto_functionalize import (
+        get_mutable_args_from_schema,
+        normalize_args_kwargs_by_schema,
+    )
+    from torch._inductor.fx_passes.memory_estimator import GraphAliasTracker, StorageKey
+    from torch._inductor.pattern_matcher import is_mutation_op
+
+    result: dict[fx.Node, OrderedSet[fx.Node]] = {}
+    nodes = list(graph.nodes)
+
+    alias_info = GraphAliasTracker(nodes)
+    order = {n: i for i, n in enumerate(nodes)}
+
+    # Build storage -> [(mutation, order), ...] mapping
+    storage_mutations: defaultdict[StorageKey, list[tuple[fx.Node, int]]] = defaultdict(
+        list
+    )
+
+    for node in nodes:
+        if node.op != "call_function":
+            continue
+        if not is_mutation_op(node) or not hasattr(node.target, "_schema"):
+            continue
+
+        mutable_names, _ = get_mutable_args_from_schema(node.target._schema)
+        if not mutable_names:
+            continue
+
+        normalized = normalize_args_kwargs_by_schema(
+            node.target._schema, node.args, node.kwargs
+        )
+
+        node_order = order[node]
+
+        for name in mutable_names:
+            mutated_arg = normalized.get(name)
+            if isinstance(mutated_arg, fx.Node):
+                # Get all storages this mutated node produces
+                mutated_storages = alias_info.node_to_output_storages[mutated_arg]
+
+                # Record this mutation for all affected storages
+                for storage in mutated_storages:
+                    storage_mutations[storage].append((node, node_order))
+
+    # For each node, check if it reads from mutated storage
+    for node in nodes:
+        if node.op != "call_function":
+            continue
+
+        read_storages = alias_info.node_to_storage_uses[node]
+        if not read_storages:
+            continue
+
+        mutation_deps: OrderedSet[fx.Node] = OrderedSet()
+        node_order = order[node]
+
+        # storage lookup
+        for storage in read_storages:
+            if storage in storage_mutations:
+                # Add all mutations that happen before this node
+                for mut_node, mut_order in storage_mutations[storage]:
+                    if mut_order < node_order:
+                        mutation_deps.add(mut_node)
+
+        if mutation_deps:
+            result[node] = mutation_deps
+
+    return result
