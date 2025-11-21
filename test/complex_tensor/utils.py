@@ -211,12 +211,15 @@ class TestCase(PytorchTestCase):
                         )
 
                     # Do the actual gradcheck
-                    gradcheck(
-                        func,
-                        input_list,
-                        raise_exception=True,
-                        fast_mode=True,
-                        check_batched_grad=True,
+                    self.assertTrue(
+                        gradcheck(
+                            func,
+                            input_list,
+                            raise_exception=True,
+                            fast_mode=True,
+                            check_batched_grad=True,
+                            check_forward_ad=True,
+                        )
                     )
                 case _:
                     self.assertTrue(False, "Testcase not implemented for variant.")
