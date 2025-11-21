@@ -28,7 +28,7 @@ class Conv1dBenchmark(op_bench.TorchBenchmarkBase):
         # Run forward to get output shape
         with torch.no_grad():
             output = self.conv1d(input_tensor)
-        
+
         bytes_per_element = input_tensor.element_size()
         # Input: N × IC × L
         input_elements = input_tensor.numel()
@@ -36,7 +36,7 @@ class Conv1dBenchmark(op_bench.TorchBenchmarkBase):
         weight_elements = self.conv1d.weight.numel()
         # Output: N × OC × L_out
         output_elements = output.numel()
-        
+
         total_elements = input_elements + weight_elements + output_elements
         return total_elements * bytes_per_element
 
@@ -58,7 +58,7 @@ class ConvTranspose1dBenchmark(op_bench.TorchBenchmarkBase):
         # Run forward to get output shape
         with torch.no_grad():
             output = self.convtranspose1d(input_tensor)
-        
+
         bytes_per_element = input_tensor.element_size()
         # Input: N × IC × L
         input_elements = input_tensor.numel()
@@ -66,7 +66,7 @@ class ConvTranspose1dBenchmark(op_bench.TorchBenchmarkBase):
         weight_elements = self.convtranspose1d.weight.numel()
         # Output: N × OC × L_out
         output_elements = output.numel()
-        
+
         total_elements = input_elements + weight_elements + output_elements
         return total_elements * bytes_per_element
 
@@ -112,7 +112,7 @@ class Conv2dBenchmark(op_bench.TorchBenchmarkBase):
         # Run forward to get output shape
         with torch.no_grad():
             output = self.conv2d(input_tensor)
-        
+
         bytes_per_element = input_tensor.element_size()
         # Input: N × IC × H × W
         input_elements = input_tensor.numel()
@@ -120,7 +120,7 @@ class Conv2dBenchmark(op_bench.TorchBenchmarkBase):
         weight_elements = self.conv2d.weight.numel()
         # Output: N × OC × H_out × W_out
         output_elements = output.numel()
-        
+
         total_elements = input_elements + weight_elements + output_elements
         return total_elements * bytes_per_element
 
@@ -142,7 +142,7 @@ class ConvTranspose2dBenchmark(op_bench.TorchBenchmarkBase):
         # Run forward to get output shape
         with torch.no_grad():
             output = self.convtranspose2d(input_tensor)
-        
+
         bytes_per_element = input_tensor.element_size()
         # Input: N × IC × H × W
         input_elements = input_tensor.numel()
@@ -150,7 +150,7 @@ class ConvTranspose2dBenchmark(op_bench.TorchBenchmarkBase):
         weight_elements = self.convtranspose2d.weight.numel()
         # Output: N × OC × H_out × W_out
         output_elements = output.numel()
-        
+
         total_elements = input_elements + weight_elements + output_elements
         return total_elements * bytes_per_element
 
@@ -173,7 +173,7 @@ class Conv2dPointwiseBenchmark(op_bench.TorchBenchmarkBase):
         # Run forward to get output shape
         with torch.no_grad():
             output = self.conv2d(input_tensor)
-        
+
         bytes_per_element = input_tensor.element_size()
         # Input: N × IC × H × W
         input_elements = input_tensor.numel()
@@ -181,7 +181,7 @@ class Conv2dPointwiseBenchmark(op_bench.TorchBenchmarkBase):
         weight_elements = self.conv2d.weight.numel()
         # Output: N × OC × H_out × W_out
         output_elements = output.numel()
-        
+
         total_elements = input_elements + weight_elements + output_elements
         return total_elements * bytes_per_element
 
@@ -233,7 +233,7 @@ class Conv3dBenchmark(op_bench.TorchBenchmarkBase):
         # Run forward to get output shape
         with torch.no_grad():
             output = self.conv3d(input_tensor)
-        
+
         bytes_per_element = input_tensor.element_size()
         # Input: N × IC × D × H × W
         input_elements = input_tensor.numel()
@@ -241,7 +241,7 @@ class Conv3dBenchmark(op_bench.TorchBenchmarkBase):
         weight_elements = self.conv3d.weight.numel()
         # Output: N × OC × D_out × H_out × W_out
         output_elements = output.numel()
-        
+
         total_elements = input_elements + weight_elements + output_elements
         return total_elements * bytes_per_element
 
@@ -263,7 +263,7 @@ class ConvTranspose3dBenchmark(op_bench.TorchBenchmarkBase):
         # Run forward to get output shape
         with torch.no_grad():
             output = self.convtranspose3d(input_tensor)
-        
+
         bytes_per_element = input_tensor.element_size()
         # Input: N × IC × D × H × W
         input_elements = input_tensor.numel()
@@ -271,7 +271,7 @@ class ConvTranspose3dBenchmark(op_bench.TorchBenchmarkBase):
         weight_elements = self.convtranspose3d.weight.numel()
         # Output: N × OC × D_out × H_out × W_out
         output_elements = output.numel()
-        
+
         total_elements = input_elements + weight_elements + output_elements
         return total_elements * bytes_per_element
 

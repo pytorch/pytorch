@@ -140,7 +140,7 @@ class TorchBenchmarkBase(torch.nn.Module):
         Returns:
             int or None: Total bytes transferred (reads + writes), or None if not applicable
         """
-        if not hasattr(self, 'inputs') or not self.inputs:
+        if not hasattr(self, "inputs") or not self.inputs:
             return None
 
         input_tensors = [v for v in self.inputs.values() if isinstance(v, torch.Tensor)]
@@ -149,11 +149,11 @@ class TorchBenchmarkBase(torch.nn.Module):
 
         # Calculate total bytes read from all inputs
         bytes_read = sum(t.numel() * t.element_size() for t in input_tensors)
-        
+
         # Estimate output size as the largest input (common for pointwise ops)
         largest_input = max(input_tensors, key=lambda t: t.numel())
         bytes_written = largest_input.numel() * largest_input.element_size()
-        
+
         return bytes_read + bytes_written
 
 

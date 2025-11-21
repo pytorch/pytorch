@@ -28,7 +28,9 @@ optimizer_configs_long = op_bench.cross_product_configs(
 class OptimizerBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, op_func, device, shape):
         self.op_func = op_func
-        self.param = torch.randn(shape, device=device, requires_grad=True, dtype=torch.float32)
+        self.param = torch.randn(
+            shape, device=device, requires_grad=True, dtype=torch.float32
+        )
         self.param.grad = torch.randn(shape, device=device)
 
         kwargs = {"momentum": 0.9} if op_func == optim.SGD else {}
