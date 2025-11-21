@@ -525,7 +525,11 @@ class GraphModule(torch.nn.Module):
         mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
 
         # Annotation: {'stream': 0}
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = None
+
+        # No stacktrace found for following nodes
+        record_event_default = torch.ops.streams.record_event.default(2, 0);  record_event_default = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(2, 1, mul_3);  mul_3 = sync_dealloc_default = None
         return (add_3, add_2)
 """,
         )
@@ -590,7 +594,11 @@ class GraphModule(torch.nn.Module):
         wait_event_default = torch.ops.streams.wait_event.default(2, 0);  wait_event_default = None
 
         # Annotation: {'stream': 0}
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_1 = torch.ops.streams.record_event.default(3, 0);  record_event_default_1 = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(3, 1, mul_3);  mul_3 = sync_dealloc_default = None
         return (add_3, add_2)
 """,
         )
