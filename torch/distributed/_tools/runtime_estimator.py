@@ -10,7 +10,7 @@ from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.mod_tracker import ModTracker
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.flop_counter import (
+from torch.utils._runtime_estimation import (
     _IGNORE_OPS,
     _VIEW_OPS,
     get_compute_time,
