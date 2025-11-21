@@ -2475,6 +2475,9 @@ class GroupedSchedulerNode(BaseSchedulerNode):
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return self.snodes
 
+    def get_device(self) -> Optional[torch.device]:
+        return self.snodes[0].get_device() if self.snodes else None
+
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
         # GroupedSchedulerNode cannot be fused with another node
