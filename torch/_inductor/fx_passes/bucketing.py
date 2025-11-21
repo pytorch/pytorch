@@ -709,6 +709,7 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
     insert_before_node: torch.fx.Node,
     g_fn_inps: list[torch.fx.Node],
     g_fn_outs: list[torch.fx.Node],
+    post_process_gm: Callable[[torch.fx.GraphModule], None] = None,
 ) -> tuple[dict[torch.fx.Node, torch.fx.Node], list[torch.fx.Node]]:  # type: ignore[no-untyped-def]
     """
     Helper function that traces :attr:`fn_to_trace` with inputs
@@ -727,6 +728,9 @@ def _insert_fn_trace_before_node(  # type: ignore[no-untyped-def]
             fn_to_trace,
             inps,
         )
+        if post_process_gm is not None:
+            post_process_gm(fn_gm)
+
         fn_g = fn_gm.graph
         fn_g_ins = fn_g.find_nodes(op="placeholder")
         env = {fn_g_ins[idx]: g_fn_inps[idx] for idx in range(len(g_fn_inps))}

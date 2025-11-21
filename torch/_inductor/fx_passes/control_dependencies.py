@@ -61,6 +61,21 @@ def _(additional_deps, subgraph, *args, **kwargs):
     """Fake tensor implementation - execute the subgraph."""
     return subgraph(*args, **kwargs)
 
+class ControlDep(HigherOrderOperator):
+    def __init__(self) -> None:
+        super().__init__("control_dep")
+
+    def __call__(self, additional_deps, out):
+        return super().__call__(additional_deps, out)
+
+
+control_dep = ControlDep()
+
+
+@register_fake(control_dep)
+def _(additional_deps, out):
+    return out
+
 
 def get_subgraph_name(gm: fx.GraphModule, name):
     name = f"subgraph_{name}"
