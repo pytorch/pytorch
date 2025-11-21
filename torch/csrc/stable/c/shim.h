@@ -115,7 +115,7 @@ AOTI_TORCH_EXPORT AOTITorchError
 torch_string_length(StringHandle handle, size_t* length);
 
 AOTI_TORCH_EXPORT AOTITorchError
-torch_string_data(StringHandle handle, const char** data);
+torch_string_c_str(StringHandle handle, const char** data);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 

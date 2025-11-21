@@ -611,7 +611,7 @@ torch_string_length(StringHandle handle, size_t* length) {
 }
 
 AOTI_TORCH_EXPORT AOTITorchError
-torch_string_data(StringHandle handle, const char** data) {
+torch_string_c_str(StringHandle handle, const char** data) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     auto str_ptr = reinterpret_cast<std::string*>(handle);
     *data = str_ptr->c_str();

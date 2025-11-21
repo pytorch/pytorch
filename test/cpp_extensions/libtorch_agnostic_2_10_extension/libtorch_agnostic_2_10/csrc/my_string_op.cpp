@@ -19,7 +19,7 @@ std::tuple<std::vector<std::string>, int64_t> my_string_op(Tensor t, std::string
     STD_TORCH_CHECK(false, "Unsupported accessor value: ", std::string(accessor).c_str())
   }
 
-  auto vec = std::vector<std::string>({std::string(accessor), std::to_string(res)}); 
+  auto vec = std::vector<std::string>({std::string(accessor), std::to_string(res)});
   return std::make_tuple(vec, res);
 }
 

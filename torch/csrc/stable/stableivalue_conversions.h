@@ -403,9 +403,6 @@ struct FromImpl<std::string> {
       const std::string& val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    // auto str_ptr = std::make_unique<std::string>(val);  // is this..okay? or
-    // are we locking ourselves to this... StringHandle handle =
-    // reinterpret_cast<StringHandle>(str_ptr.release());
     StringHandle handle;
     TORCH_ERROR_CODE_CHECK(
         torch_new_string_handle(val.c_str(), val.length(), &handle))
@@ -736,17 +733,12 @@ struct ToImpl<std::string> {
     size_t length;
     TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
     const char* data;
-    TORCH_ERROR_CODE_CHECK(torch_string_data(handle, &data));
+    TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle, &data));
     auto strptr = std::make_unique<std::string>(data, length);
 
     // delete the old string before returning new string
     TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
     return std::move(*strptr);
-
-    // StringHandle handle = to<StringHandle>(val);
-    // std::unique_ptr<std::string>
-    // strptr(reinterpret_cast<std::string*>(handle)); return
-    // std::move(*strptr);
   }
 };
 
