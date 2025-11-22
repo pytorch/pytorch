@@ -21,6 +21,10 @@ from torch._dynamo.testing import (
     InductorAndRecordGraphs,
     normalize_gm,
 )
+from torch._higher_order_ops.invoke_subgraph import (
+    NestedCompileBackend,
+    NestedCompileRegionOptions,
+)
 from torch._higher_order_ops.schema import find_hop_schema
 from torch._inductor import config as inductor_config
 from torch._inductor.pattern_matcher import (
@@ -1555,6 +1559,101 @@ class GraphModule(torch.nn.Module):
         opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_unbacked_expr(self):
+        @nested_compile_region
+        def gn(x):
+            return x + 1
+
+        def fn(c):
+            d = torch.concat([c, c], dim=0)
+            d = gn(d)
+            return d
+
+        c = torch.randn((64, 32))
+        torch._dynamo.decorators.mark_unbacked(c, 0)
+
+        ref = fn(c)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        res = opt_fn(c)
+        self.assertEqual(ref, res)
+
+    def test_grad_accumulation(self):
+        mod1 = torch.nn.Linear(8, 8)
+        mod2 = torch.nn.Linear(8, 8)
+        mod3 = torch.nn.Linear(8, 8)
+
+        @nested_compile_region
+        def gn(x):
+            return mod1(x) - mod2(x)
+
+        def fn(c):
+            d = gn(c) - mod3(c)
+            return d * 2
+
+        c = torch.randn((8, 8), requires_grad=True)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        res = opt_fn(c)
+        res.sum().backward()
+
+        # fw_add_nodes = backend.fw_graphs[0].graph.find_nodes(op="call_function", target = torch.ops.aten.add.Tensor)
+        # The gradient addition node for mod3 is not in the subgraph.
+        bw_add_nodes = backend.bw_graphs[0].graph.find_nodes(
+            op="call_function", target=torch.ops.aten.add.Tensor
+        )
+        self.assertEqual(len(bw_add_nodes), 1)
+        subgraph_node = backend.bw_graphs[0].graph.find_nodes(op="get_attr")[0]
+        subgraph_name = subgraph_node.target
+        # The gradient addition node between mod1 and mode2 will be in the subgraph
+        bw_add_nodes = getattr(backend.bw_graphs[0], subgraph_name).graph.find_nodes(
+            op="call_function", target=torch.ops.aten.add.Tensor
+        )
+        self.assertEqual(len(bw_add_nodes), 1)
+
+    def test_backend_parameter(self):
+        backend = NestedCompileRegionOptions(NestedCompileBackend.INDUCTOR)
+
+        # Test that backend parameter is properly set in node.meta
+        @nested_compile_region(backend_options=backend)
+        def gn_with_backend(x):
+            return torch.sin(x)
+
+        @nested_compile_region
+        def gn_without_backend(x):
+            return torch.cos(x)
+
+        def fn(x):
+            return gn_with_backend(x) + gn_without_backend(x)
+
+        backend = EagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        x = torch.randn(8, 8, requires_grad=False)
+        opt_fn(x)
+
+        # Check that we captured the graph
+        self.assertEqual(len(backend.graphs), 1)
+        graph = backend.graphs[0]
+
+        # Find invoke_subgraph nodes and check their backend metadata
+        invoke_subgraph_nodes = [
+            node
+            for node in graph.graph.nodes
+            if node.op == "call_function"
+            and node.target == torch.ops.higher_order.invoke_subgraph
+        ]
+
+        # We should have 2 invoke_subgraph calls
+        self.assertEqual(len(invoke_subgraph_nodes), 2)
+
+        # First invoke_subgraph (gn_with_backend) should have backend
+        self.assertIn("custom", invoke_subgraph_nodes[0].meta)
+
+        # Second invoke_subgraph (gn_without_backend) should have custom=None or no custom
+        backend_value = invoke_subgraph_nodes[1].meta.get("custom", None)
+        self.assertIsNone(backend_value)
 
     def test_complex(self):
         # Observed in Wan2.1
