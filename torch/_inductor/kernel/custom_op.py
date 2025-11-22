@@ -21,6 +21,28 @@ from torch.utils._ordered_set import OrderedSet
 log = logging.getLogger(__name__)
 
 
+def _detect_collective_ops(choices: list) -> bool:
+    """
+    Detect if choices contain collective operations.
+    """
+    from torch._inductor.utils import is_collective_op
+
+    for choice in choices:
+        if not hasattr(choice, "gm") or choice.gm is None:
+            continue
+
+        for node in choice.gm.graph.nodes:
+            if node.op == "call_function" and node.target is not None:
+                op_name = str(node.target)
+
+                if is_collective_op(op_name) or is_collective_op(
+                    f"torch.ops.{op_name}"
+                ):
+                    return True
+
+    return False
+
+
 class CustomOpConfig:
     """Config for custom op autotuning.
 
@@ -321,6 +343,8 @@ def autotune_custom_op(
         )
         input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
+    is_collective = _detect_collective_ops(choices)
+
     # Run autotuning and get both result and winning choice
     selected_result, winning_choice = autotune_select_algorithm(
         name=name,
@@ -329,6 +353,7 @@ def autotune_custom_op(
         layout=choices[0].layout,
         input_gen_fns=input_gen_fns,
         return_choice=True,
+        is_collective=is_collective,
     )
 
     # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)

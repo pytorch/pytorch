@@ -2706,6 +2706,7 @@ class AlgorithmSelectorCache(PersistentCache):
         return_multi_template=False,
         best_config_future=None,
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
+        is_collective=False,
     ):
         from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
 
@@ -2816,6 +2817,7 @@ class AlgorithmSelectorCache(PersistentCache):
             choices,
             precompile_fn,
             best_config_future=best_config_future,
+            is_collective=is_collective,
         )
         # if timings is empty, we really have no choice but to return a semi-random
         # choice. returning the first `ExternKernelCaller` is probably the safest bet
@@ -2859,12 +2861,18 @@ class AlgorithmSelectorCache(PersistentCache):
         layout,
         input_gen_fns,
         hint_override: Optional[int] = None,
+        is_collective=False,
     ):
         counters["inductor"]["select_algorithm_autotune"] += 1
         # TODO(nmacchioni): remove this layer of abstraction
         # construct `benchmark_fn` which should pick between in-process and sub-process autotuning
         benchmark_fn = self.make_benchmark_fn(
-            choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+            choices,
+            input_nodes,
+            layout,
+            input_gen_fns,
+            hint_override=hint_override,
+            is_collective=is_collective,
         )
         # `benchmark_fn(choices)` will execute each choice, and return a dict[choice, timing] which
         # maps each choice to its runtime, calculated by the specified benchmarker, in milliseconds
@@ -2878,6 +2886,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_gen_fns,
         choices,
         hint_override: Optional[int] = None,
+        is_collective=False,
     ):
         log.debug("Starting autotuning")
 
@@ -2888,7 +2897,12 @@ class AlgorithmSelectorCache(PersistentCache):
             metadata=_autotune_metadata(input_nodes),
         ):
             benchmark_results = self.benchmark(
-                choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
+                choices,
+                input_nodes,
+                layout,
+                input_gen_fns,
+                hint_override=hint_override,
+                is_collective=is_collective,
             )
             if config.max_autotune_report_choices_stats:
                 _log_autotune_choices_stats(
@@ -2907,6 +2921,7 @@ class AlgorithmSelectorCache(PersistentCache):
         precompile_fn,
         hint_override: Optional[int] = None,
         best_config_future=None,
+        is_collective=False,
     ):
         """Execute the autotuning process for kernel algorithm selection.
 
@@ -3021,6 +3036,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 input_gen_fns,
                 choices,
                 hint_override=hint_override,
+                is_collective=is_collective,
             )
 
         timings = self.lookup(
@@ -3400,15 +3416,186 @@ class AlgorithmSelectorCache(PersistentCache):
         return result
 
     @classmethod
+    def benchmark_collective_choice(
+        cls,
+        choice: ChoiceCaller,
+        autotune_args: AutotuneArgs,
+    ) -> float:
+        """
+        Benchmark a choice for collective operations with cross-rank synchronization.
+        This method ensures all ranks synchronize before benchmarking
+        to get accurate measurements for distributed collective operations.
+        Timeout mechanism: If ANY rank times out locally, ALL ranks will fallback together
+        to avoid hang or deadlock.
+        """
+        from datetime import timedelta
+
+        import torch.distributed as dist
+
+        timeout_seconds = float(
+            os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_TIMEOUT", "30")
+        )
+
+        nruns = int(os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_NRUNS", "10"))
+
+        # Use default process group (None = all ranks)
+        process_group = None
+        rank = dist.get_rank(process_group)
+
+        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
+        inputs, output = benchmark_tensors.unpack()
+        output.zero_()
+
+        if not (hasattr(choice, "gm") and choice.gm is not None):
+            return cls.benchmark_choice(choice, autotune_args)
+
+        timeout = timedelta(seconds=timeout_seconds)
+
+        def sync_timeout_decision(local_timeout: bool) -> bool:
+            """
+            Synchronize timeout decision across all ranks to avoid deadlock.
+            Returns True if any rank timed out (all ranks should fallback).
+            """
+            try:
+                # Each rank reports its timeout status (1.0 = timeout, 0.0 = ok)
+                timeout_tensor = torch.tensor(
+                    [1.0 if local_timeout else 0.0],
+                    dtype=torch.float32,
+                    device=f"cuda:{rank}",
+                )
+                dist.all_reduce(
+                    timeout_tensor, op=dist.ReduceOp.MAX, group=process_group
+                )
+
+                # If any rank timed out(non zero), all ranks should know
+                any_rank_timed_out = timeout_tensor.item() > 0.5
+                return any_rank_timed_out
+            except Exception:
+                log.warning("[Rank %d] Failed to sync timeout decision", rank)
+                return True
+
+        try:
+            # Warmup barrier with timeout
+            work = dist.barrier(group=process_group, async_op=True)
+            local_timeout = not work.wait(timeout)
+
+            # Sync decision across all ranks
+            if sync_timeout_decision(local_timeout):
+                log.warning(
+                    "Warmup barrier timeout detected (timeout=%.1fs). "
+                    "All ranks falling back to regular benchmarking.",
+                    timeout_seconds,
+                )
+                return cls.benchmark_choice(choice, autotune_args)
+
+            torch.cuda.synchronize()
+
+            total_time = 0.0
+
+            for i in range(nruns):
+                log.debug("Benchmark run %d/%d", i + 1, nruns)
+
+                # Barrier with timeout before each run
+                work = dist.barrier(group=process_group, async_op=True)
+                local_timeout = not work.wait(timeout)
+
+                # Sync decision across all ranks
+                if sync_timeout_decision(local_timeout):
+                    log.warning(
+                        "Barrier timeout at run %d/%d (timeout=%.1fs). "
+                        "All ranks falling back to regular benchmarking.",
+                        i + 1,
+                        nruns,
+                        timeout_seconds,
+                    )
+                    return cls.benchmark_choice(choice, autotune_args)
+
+                torch.cuda.synchronize()
+
+                start_evt = torch.cuda.Event(enable_timing=True)
+                end_evt = torch.cuda.Event(enable_timing=True)
+
+                start_evt.record()
+                choice.benchmark(*inputs, out=output)
+                end_evt.record()
+                end_evt.synchronize()
+
+                total_time += start_evt.elapsed_time(end_evt)
+
+            avg_time = (total_time / nruns) * 1000.0
+
+            # All-reduce to get max time across ranks with timeout
+            time_tensor = torch.tensor(
+                [avg_time], dtype=torch.float32, device=f"cuda:{rank}"
+            )
+            work = dist.all_reduce(
+                time_tensor,
+                op=dist.ReduceOp.MAX,
+                group=process_group,
+                async_op=True,
+            )
+            local_timeout = not work.wait(timeout)
+
+            # Sync decision across all ranks
+            if sync_timeout_decision(local_timeout):
+                log.warning(
+                    "All-reduce timeout (timeout=%.1fs). "
+                    "All ranks falling back to regular benchmarking.",
+                    timeout_seconds,
+                )
+                return cls.benchmark_choice(choice, autotune_args)
+
+            timing = time_tensor.item()
+
+            log.info(
+                "Collective benchmark for %s: %.2f us",
+                choice.name,
+                timing,
+            )
+
+            return timing
+
+        except Exception:
+            log.warning(
+                "Collective benchmark exception. Falling back to regular benchmarking.",
+            )
+            return cls.benchmark_choice(choice, autotune_args)
+
+    @classmethod
     def benchmark_choices(
         cls,
         choices: Sequence[ChoiceCaller],
         autotune_args: AutotuneArgs,
+        is_collective: bool = False,
     ) -> dict[ChoiceCaller, float]:
+        """
+        Benchmark a list of choices and return timing dict.
+        """
+        if is_collective:
+            import torch.distributed as dist
+
+            if not dist.is_initialized():
+                log.warning(
+                    "Collective op detected but distributed not initialized. "
+                    "Falling back to regular benchmarking."
+                )
+                is_collective = False
+            else:
+                rank = dist.get_rank(None)  # Use default process group
+                log.debug(
+                    "Using collective benchmarking for %d choices on rank %d",
+                    len(choices),
+                    rank,
+                )
         timings = {}
         for choice in choices:
             try:
-                timing = cls.benchmark_choice(choice, autotune_args)
+                if is_collective:
+                    # Use collective benchmarking with timeout protection
+                    timing = cls.benchmark_collective_choice(choice, autotune_args)
+                else:
+                    # Regular benchmarking
+                    timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
                 from torch._inductor.codegen.cutlass.cuda_kernel import (
                     CUDATemplateCaller,
@@ -3476,11 +3663,16 @@ class AlgorithmSelectorCache(PersistentCache):
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
         hint_override: Optional[int] = None,
+        is_collective=False,
     ) -> dict[ChoiceCaller, float]:
         inputs = cls.get_inputs(
             choices, input_nodes, layout, input_gen_fns, hint_override=hint_override
         )
-        return cls.benchmark_choices(choices, inputs)
+        return cls.benchmark_choices(
+            choices,
+            inputs,
+            is_collective=is_collective,
+        )
 
     @classmethod
     def benchmark_in_sub_process(
@@ -3512,21 +3704,24 @@ class AlgorithmSelectorCache(PersistentCache):
         layout: ir.Layout,
         input_gen_fns: Optional[dict[int, Callable[[ir.Buffer], torch.Tensor]]],
         hint_override: Optional[int] = None,
+        is_collective=False,
     ):
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
-        if config.autotune_in_subproc:
+        # Collective ops must use current process
+        if is_collective or not config.autotune_in_subproc:
             return functools.partial(
-                cls.benchmark_in_sub_process,
+                cls.benchmark_in_current_process,
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
                 hint_override=hint_override,
+                is_collective=is_collective,
             )
         else:
             return functools.partial(
-                cls.benchmark_in_current_process,
+                cls.benchmark_in_sub_process,
                 input_nodes=input_nodes,
                 layout=layout,
                 input_gen_fns=input_gen_fns,
