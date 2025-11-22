@@ -2321,6 +2321,8 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             )
             for node in nodes:
                 device = node.get_device()
+                if device and device.type == "mps":
+                    continue
                 device_groups[device].append(node)
 
             # Chunk each device group separately
