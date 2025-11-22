@@ -12,8 +12,12 @@ import torch._inductor.utils
 from torch import _dynamo as torchdynamo
 from torch._inductor import config
 from torch.profiler import ProfilerActivity
-from torch.testing._internal.common_utils import TemporaryFileName
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, IS_BIG_GPU
+from torch.testing._internal.common_utils import skipIfXpu, TemporaryFileName
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU_AND_TRITON,
+    IS_BIG_GPU,
+)
 from torch.torch_version import TorchVersion
 from torch.utils._triton import has_triton
 
@@ -22,6 +26,10 @@ HAS_TRITON = has_triton()
 
 
 class DynamoProfilerTests(torch._inductor.test_case.TestCase):
+    @skipIfXpu(
+        msg="AssertionError: False is not true, "
+        "https://github.com/intel/torch-xpu-ops/issues/2335"
+    )
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_triton_launch(self):
         # Verify that we get some sort of CPU-side indication of triton kernel launches
@@ -31,7 +39,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def fn(x, y):
             return (x + y).sin().cos()
 
-        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
+        x, y = (torch.rand((4, 4), device=GPU_TYPE) for _ in range(2))
 
         with torch.profiler.profile() as prof:
             fn(x, y)
@@ -95,7 +103,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def fn(x, y):
             return (x + y).sin().cos()
 
-        args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+        args = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(2)]
 
         events = self._test_profiling_kernel_names(fn, args, "sin")
         event_found = False
@@ -120,7 +128,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             def fn(x, y):
                 return x @ y
 
-            args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+            args = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(2)]
 
             def check_fn():
                 # test_profiling_kernel_names will check this before asserting mm is in the trace.
@@ -153,8 +161,8 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             def fn(x, y):
                 return torch._foreach_add(x, y)
 
-            x = [torch.rand((4, 4), device="cuda") for _ in range(3)]
-            y = [torch.rand((4, 4), device="cuda") for _ in range(3)]
+            x = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
+            y = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
 
             args = (x, y)
 
@@ -206,8 +214,8 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def fn(x, y):
             return torch._foreach_add(x, y)
 
-        x = [torch.rand((4, 4), device="cuda") for _ in range(3)]
-        y = [torch.rand((4, 4), device="cuda") for _ in range(3)]
+        x = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
+        y = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
 
         args = (x, y)
         fn_opt = torch.compile(fn)
@@ -216,11 +224,14 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue(hooks_called["enter"])
         self.assertTrue(hooks_called["exit"])
 
+    @skipIfXpu(
+        msg="TypeError: list indices must be integers or slices, not str, https://github.com/intel/torch-xpu-ops/issues/2335"
+    )
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_pt2_triton_attributes(self):
         from torch._inductor.codecache import code_hash
 
-        device = "cuda"
+        device = GPU_TYPE
         debug = False  # set to True to get output file
 
         @torchdynamo.optimize("inductor")
@@ -295,7 +306,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_cupti_lazy_reinit(self):
-        x, y = (torch.randn(4, 4, device="cuda") for _ in range(2))
+        x, y = (torch.randn(4, 4, device=GPU_TYPE) for _ in range(2))
 
         def fn(x, y):
             return (x + y).sin()
@@ -314,5 +325,5 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CUDA_AND_TRITON:
+    if HAS_GPU_AND_TRITON:
         run_tests()
