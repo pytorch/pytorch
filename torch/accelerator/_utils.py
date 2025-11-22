@@ -1,8 +1,8 @@
 import torch
-from torch.types import Device as _device_t
+from torch.types import Device
 
 
-def _get_device_index(device: _device_t, optional: bool = False) -> int:
+def _get_device_index(device: Device, optional: bool = False) -> int:
     if isinstance(device, int):
         return device
     if isinstance(device, str):
