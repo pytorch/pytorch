@@ -1030,7 +1030,10 @@ def generate_FD_callable(
 
 
 def generate_attn_mask_linear_score_mod(
-    shape: tuple[int, ...], block_mask: BlockMask, score_mod: Callable, dtype: torch.dtype
+    shape: tuple[int, ...],
+    block_mask: BlockMask,
+    score_mod: Callable,
+    dtype: torch.dtype,
 ):
     B, Hq, M, N = shape
     if block_mask is None and score_mod is None:

@@ -574,7 +574,10 @@ class CommonTemplate:
         ],
     )
     def test_mixed_pointwise_reduction(
-        self, view_size: tuple[int, ...], num_block_pointers: int, num_triton_kernels: int
+        self,
+        view_size: tuple[int, ...],
+        num_block_pointers: int,
+        num_triton_kernels: int,
     ):
         """
         Tests mixing pointwise with reduction ops.
