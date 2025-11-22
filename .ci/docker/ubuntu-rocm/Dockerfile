@@ -52,6 +52,7 @@ ENV INSTALLED_VISION ${VISION}
 
 # Install rocm
 ARG ROCM_VERSION
+ENV ROCM_VERSION=${ROCM_VERSION}
 RUN mkdir ci_commit_pins
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./ci_commit_pins/rocm-composable-kernel.txt ci_commit_pins/rocm-composable-kernel.txt
@@ -60,10 +61,12 @@ RUN bash ./install_rocm.sh
 RUN rm install_rocm.sh common_utils.sh
 RUN rm -r ci_commit_pins
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
-RUN bash ./install_rocm_magma.sh ${ROCM_VERSION}
+RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_rocm_magma.sh ${ROCM_VERSION}; fi
 RUN rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
-RUN bash ./install_miopen.sh ${ROCM_VERSION} && rm install_miopen.sh
+RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
+
+# Set default ENV for traditional builds - will be overridden by entrypoint.sh for TheRock
 ENV ROCM_PATH /opt/rocm
 ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
@@ -139,6 +142,11 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 
 # Install LLVM dev version (Defined in the pytorch/builder github repository)
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
+
+# Copy and set entrypoint script to handle ROCm path detection
+COPY ./ubuntu-rocm/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
 
 USER jenkins
 CMD ["bash"]
