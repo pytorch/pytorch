@@ -661,8 +661,10 @@ class ForeachTests(TestCase):
         )
 
         self.check_model_gpu(fn, inputs)
-
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        if torch._inductor.config.combo_kernels:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        else:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu
     @torch._dynamo.config.patch("automatic_dynamic_shapes", False)
