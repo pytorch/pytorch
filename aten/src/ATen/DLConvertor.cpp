@@ -428,7 +428,7 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
   int64_t storage_offset = 0;
   if(dl_tensor.byte_offset > 0) {
     size_t element_size = c10::elementSize(stype);
-    TORCH_CHECK(
+    TORCH_CHECK_VALUE(
       dl_tensor.byte_offset % element_size == 0,
       "byte_offset (", dl_tensor.byte_offset, ") must be a multiple of element size (", element_size, ")");
     storage_offset = dl_tensor.byte_offset / element_size;
