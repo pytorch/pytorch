@@ -1152,6 +1152,30 @@ class TestFP8Matmul(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
+    @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
+    def test_rowwise_m_not_multiple_of_256_runs(self, device) -> None:
+        # Regress #133334: ensure no invalid memory access when M % 256 != 0
+        M, K, N = (257, 512, 512)
+        x = torch.randn((M, K), device=device, dtype=torch.bfloat16)
+        y = torch.randn((N, K), device=device, dtype=torch.bfloat16)
+        x_scales = tensor_to_scale(x, e4m3_type, dim=1).float()
+        y_scales = tensor_to_scale(y, e4m3_type, dim=0).float()
+        x_fp8 = to_fp8_saturated(x * x_scales, e4m3_type)
+        y_fp8 = to_fp8_saturated(y * y_scales, e4m3_type).t()
+        # Should not throw or hit invalid memory access
+        out = scaled_mm_wrap(
+            x_fp8,
+            y_fp8,
+            scale_a=x_scales.reciprocal(),
+            scale_b=y_scales.reciprocal(),
+            out_dtype=torch.bfloat16,
+            use_fast_accum=False,
+        )
+        self.assertEqual(out.shape, (M, N))
+        self.assertTrue(torch.isfinite(out).all())
+
+    @onlyCUDA
+    @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     def test_float8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
         fill_value = 0.5
