@@ -514,6 +514,96 @@ class RedistributeTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(4)
     @with_comms
+    def test_shard_to_replicate_uneven_contiguity(self):
+        """
+        Test that redistributing from Shard to Replicate with uneven sharding
+        produces a contiguous local tensor with correct stride.
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Test case: dimension 1 has 111 elements, not evenly divisible by world_size=4
+        # This requires padding during all_gather (to 112) and then unpadding
+        input_tensor = torch.randn(4, 111, 64, device=self.device_type)
+
+        # Verify the original tensor is contiguous and supports view
+        self.assertTrue(input_tensor.is_contiguous(), "Input should be contiguous")
+        viewed_original = input_tensor.view(-1, 64)
+        self.assertEqual(viewed_original.shape, (4 * 111, 64))
+
+        dt_replicate = distribute_tensor(input_tensor, device_mesh, [Replicate()])
+        dt_shard = dt_replicate.redistribute(device_mesh, [Shard(1)])
+        dt_replicate_back = dt_shard.redistribute(device_mesh, [Replicate()])
+
+        # Check that the local tensor is contiguous
+        self.assertTrue(
+            dt_replicate_back._local_tensor.is_contiguous(),
+            "Local tensor should be contiguous after Shard -> Replicate with uneven sharding",
+        )
+
+        # Check that the stride is correct for a contiguous tensor
+        expected_stride = (111 * 64, 64, 1)
+        self.assertEqual(
+            dt_replicate_back._local_tensor.stride(),
+            expected_stride,
+            f"Stride should be {expected_stride} for contiguous tensor of shape (4, 111, 64)",
+        )
+
+        # Check that view operations work
+        viewed = dt_replicate_back._local_tensor.view(-1, 64)
+        self.assertEqual(viewed.shape, (4 * 111, 64))
+
+        self.assertEqual(dt_replicate_back.to_local(), input_tensor)
+
+    @with_comms
+    def test_shard_to_replicate_noncontiguous_input(self):
+        """
+        Test that redistributing from Shard to Replicate with uneven sharding
+        produces a contiguous local tensor even when starting from non-contiguous input.
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Create a non-contiguous tensor via permute
+        # Shape (64, 4, 111) permuted to (4, 111, 64) is non-contiguous
+        base_tensor = torch.randn(64, 4, 111, device=self.device_type)
+        input_tensor = base_tensor.permute(1, 2, 0)  # Non-contiguous!
+        self.assertFalse(
+            input_tensor.is_contiguous(), "Input tensor should be non-contiguous"
+        )
+
+        # Verify the original non-contiguous tensor supports view
+        # This works because the stride pattern (111, 1, 444) allows collapsing dims 0 and 1
+        viewed_original = input_tensor.view(-1, 64)
+        self.assertEqual(viewed_original.shape, (4 * 111, 64))
+
+        # Create replicated DTensor from non-contiguous local tensor using from_local
+        # This preserves the non-contiguous layout unlike distribute_tensor
+        dt_replicate = DTensor.from_local(input_tensor, device_mesh, [Replicate()])
+        dt_shard = dt_replicate.redistribute(device_mesh, [Shard(1)])
+        dt_replicate_back = dt_shard.redistribute(device_mesh, [Replicate()])
+
+        # Check that the local tensor is contiguous after redistribution
+        self.assertTrue(
+            dt_replicate_back._local_tensor.is_contiguous(),
+            "Local tensor should be contiguous after Shard -> Replicate, even with non-contiguous input",
+        )
+
+        # Check that the stride is correct for a contiguous tensor
+        expected_stride = (111 * 64, 64, 1)
+        self.assertEqual(
+            dt_replicate_back._local_tensor.stride(),
+            expected_stride,
+            f"Stride should be {expected_stride} for contiguous tensor of shape (4, 111, 64)",
+        )
+
+        # Check that view operations work on the redistributed tensor
+        # The redistributed tensor should support view because it's contiguous
+        viewed = dt_replicate_back._local_tensor.view(-1, 64)
+        self.assertEqual(viewed.shape, (4 * 111, 64))
+
+        # Verify data correctness
+        self.assertEqual(dt_replicate_back.to_local(), input_tensor)
+
+    @with_comms
     @parametrize("dtype", [torch.float32, torch.cfloat])
     def test_redistribute_shard_dim_change(self, dtype):
         # test 1d device mesh
