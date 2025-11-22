@@ -2279,6 +2279,51 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         _ = [test_shape(S, backend) for S in test_shapes]
 
     @supported_platform
+    @skip_on_cpu
+    def test_mask_mod_handles_symint_addition(self, device):
+        dtype = torch.float16
+
+        def run(q, k, v):
+            ql = q.size(-2)
+            kl = k.size(-2)
+            frame = 32
+
+            def _opaque_mask(b, h, q_idx, kv_idx):
+                ref = ql // frame
+                mot = kl // frame
+                limit = (ref + mot) * frame
+                return q_idx < limit
+
+            block_mask = create_block_mask(
+                _opaque_mask,
+                B=q.size(0),
+                H=q.size(1),
+                Q_LEN=ql,
+                KV_LEN=kl,
+                device=device,
+            )
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        compiled_run = torch.compile(run, fullgraph=True, dynamic=True)
+
+        q = torch.randn(1, 2, 192, 32, device=device, dtype=dtype)
+        k = torch.randn(1, 2, 128, 32, device=device, dtype=dtype)
+        v = torch.randn(1, 2, 128, 32, device=device, dtype=dtype)
+
+        eager_out = run(q, k, v)
+        compiled_out = compiled_run(q, k, v)
+        torch.testing.assert_close(eager_out, compiled_out, atol=1e-3, rtol=1e-3)
+
+        # Exercise different dynamic shapes to ensure SymInt sums remain well-formed.
+        q2 = torch.randn(1, 2, 160, 32, device=device, dtype=dtype)
+        k2 = torch.randn(1, 2, 96, 32, device=device, dtype=dtype)
+        v2 = torch.randn(1, 2, 96, 32, device=device, dtype=dtype)
+
+        eager_out2 = run(q2, k2, v2)
+        compiled_out2 = compiled_run(q2, k2, v2)
+        torch.testing.assert_close(eager_out2, compiled_out2, atol=1e-3, rtol=1e-3)
+
+    @supported_platform
     def test_multiple_score_mod_calls(self, device):
         query = torch.randn((1, 8, 1024, 64), dtype=torch.float32, device=device)
         keys = [
