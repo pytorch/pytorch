@@ -1,0 +1,11 @@
+leak:PyMem_RawMalloc
+leak:PyObject_Malloc
+leak:unicodeobject
+leak:obmalloc
+leak:gcmodule
+leak:listobject
+leak:bytesobject
+leak:torch::jit::tensorexpr::TensorExprKernel::preAllocIntermediateBufs
+leak:optree
+leak:python
+leak:torch::tensors::initialize_aten_types
