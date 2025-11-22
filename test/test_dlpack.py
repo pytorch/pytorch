@@ -549,42 +549,42 @@ class TestTorchDlPack(TestCase):
     @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat, torch.chalf))
     def test_dlpack_byte_offset_handling(self, device, dtype):
         """Test that from_dlpack correctly converts byte_offset to storage_offset.
-        
+
         This test manually modifies a DLPack capsule to set byte_offset,
         then verifies that from_dlpack correctly converts it to storage_offset.
         This avoids modifying toDLPack, which might cause backward compatibility issues.
         """
         import ctypes
-        
+
         for offset_elements in [1, 2, 3, 5]:
             base = make_tensor((10,), dtype=dtype, device=device)
             element_size = base.element_size()
             base_data_ptr = base.storage().data_ptr()
             original_shape = base.shape[0]
-            
+
             expected_byte_offset = offset_elements * element_size
             expected_storage_offset = offset_elements
-            
+
             view = base[offset_elements:]
             expected_shape = view.shape
             expected_shape_size = expected_shape[0]
-            
+
             capsule = to_dlpack(base)
-            
+
             # Manually modify byte_offset in the capsule
             class DLDevice(ctypes.Structure):
                 _fields_ = [
                     ("device_type", ctypes.c_int32),
                     ("device_id", ctypes.c_int32),
                 ]
-            
+
             class DLDataType(ctypes.Structure):
                 _fields_ = [
                     ("code", ctypes.c_uint8),
                     ("bits", ctypes.c_uint8),
                     ("lanes", ctypes.c_uint16),
                 ]
-            
+
             class DLTensor(ctypes.Structure):
                 _fields_ = [
                     ("data", ctypes.c_void_p),
@@ -595,43 +595,45 @@ class TestTorchDlPack(TestCase):
                     ("strides", ctypes.POINTER(ctypes.c_int64)),
                     ("byte_offset", ctypes.c_uint64),
                 ]
-            
+
             class DLManagedTensor(ctypes.Structure):
                 _fields_ = [
                     ("dl_tensor", DLTensor),
                     ("manager_ctx", ctypes.c_void_p),
                     ("deleter", ctypes.c_void_p),
                 ]
-            
+
             capsule_name = "dltensor"
             pythonapi = ctypes.pythonapi
-            pythonapi.PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
+            pythonapi.PyCapsule_GetPointer.argtypes = [
+                ctypes.py_object,
+                ctypes.c_char_p,
+            ]
             pythonapi.PyCapsule_GetPointer.restype = ctypes.c_void_p
-            
+
             capsule_ptr = pythonapi.PyCapsule_GetPointer(
-                ctypes.py_object(capsule),
-                capsule_name.encode('utf-8')
+                ctypes.py_object(capsule), capsule_name.encode("utf-8")
             )
-            
+
             assert capsule_ptr is not None
-            
-            dl_tensor_ptr = ctypes.cast(
-                capsule_ptr,
-                ctypes.POINTER(DLManagedTensor)
-            )
-            
+
+            dl_tensor_ptr = ctypes.cast(capsule_ptr, ctypes.POINTER(DLManagedTensor))
+
             # Modify the DLPack tensor to set byte_offset
             dl_tensor_ptr.contents.dl_tensor.byte_offset = expected_byte_offset
-            
+
             result = from_dlpack(capsule)
-            
-            self.assertEqual(result[:-offset_elements], view, "Data values should match")
+
             self.assertEqual(
-                result.storage_offset(), 
+                result[:-offset_elements], view, "Data values should match"
+            )
+            self.assertEqual(
+                result.storage_offset(),
                 expected_storage_offset,
                 f"storage_offset should be {expected_storage_offset}, "
-                f"got {result.storage_offset()}"
+                f"got {result.storage_offset()}",
             )
+
 
 instantiate_device_type_tests(TestTorchDlPack, globals(), allow_mps=True)
 
