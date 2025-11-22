@@ -18,6 +18,7 @@
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_test_serialization_subcmul_native.h>
 #include <ATen/ops/_to_copy.h>
+#include <ATen/ops/abs.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/add_ops.h>
@@ -72,6 +73,7 @@
 #include <ATen/ops/less_native.h>
 #include <ATen/ops/linalg_cross_native.h>
 #include <ATen/ops/linalg_cross_ops.h>
+#include <ATen/ops/log2.h>
 #include <ATen/ops/logaddexp2_native.h>
 #include <ATen/ops/logaddexp_native.h>
 #include <ATen/ops/logical_and.h>
@@ -105,6 +107,7 @@
 #include <ATen/ops/rshift_native.h>
 #include <ATen/ops/rsub_native.h>
 #include <ATen/ops/sigmoid_backward_native.h>
+#include <ATen/ops/sign.h>
 #include <ATen/ops/special_chebyshev_polynomial_t.h>
 #include <ATen/ops/special_chebyshev_polynomial_t_native.h>
 #include <ATen/ops/special_chebyshev_polynomial_u.h>
@@ -1569,11 +1572,30 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto self_type = self.scalar_type();
+  auto other_type = other.scalar_type();
+  if ((isFloatingType(self_type) || isIntegralType(self_type, /*includeBool=*/false)) &&
+      (isFloatingType(other_type) || isIntegralType(other_type, /*includeBool=*/false))) {
+    auto log2_self_plus_other = at::log2(at::abs(self)).add(other);
+    auto pow2_result = _pow2(self, log2_self_plus_other);
+    auto sign_self = at::sign(self);
+    return at::mul_out(result, sign_self, pow2_result);
+  }
   return at::mul_out(result, self, _pow2(self, other));
 }
 
-
 Tensor ldexp(const Tensor& self, const Tensor& other) {
+  auto self_type = self.scalar_type();
+  auto other_type = other.scalar_type();
+  if ((isFloatingType(self_type) || isIntegralType(self_type, /*includeBool=*/false)) &&
+      (isFloatingType(other_type) || isIntegralType(other_type, /*includeBool=*/false))) {
+    // helps handle case when 2^other goes out of numerical limits (too large or too small),
+    // even if self*2^other is within the limits.
+    auto log2_self_plus_other = at::log2(at::abs(self)).add(other);
+    auto pow2_result = _pow2(self, log2_self_plus_other);
+    auto sign_self = at::sign(self);
+    return at::mul(sign_self, pow2_result);
+  }
   return at::mul(self, _pow2(self, other));
 }
 
