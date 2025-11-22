@@ -2023,9 +2023,9 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     from .virtualized import V
 
     gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
-    if gemm_size <= 0 or gemm_size < config.cuda.cutlass_backend_min_gemm_size:
+    if gemm_size <= 0 or gemm_size < config.cutlass.cutlass_backend_min_gemm_size:
         return False
-    from .codegen.cuda.cutlass_utils import try_import_cutlass
+    from .codegen.cutlass.utils import try_import_cutlass
 
     # Do not use cutlass template on ROCm
     if torch.version.hip:
@@ -2044,9 +2044,9 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
         if not try_import_cutlass():
             log.warning(
                 "Failed to import CUTLASS lib. Please check whether "
-                "_inductor.config.cuda.cutlass_dir %s is set correctly. "
+                "_inductor.config.cutlass.cutlass_dir %s is set correctly. "
                 "Skipping CUTLASS backend for now.",
-                config.cuda.cutlass_dir,
+                config.cutlass.cutlass_dir,
             )
             return False
     return res
@@ -2054,7 +2054,7 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
 
 def _use_cutlass_for_op(op_name: str) -> bool:
     """Check if CUTLASS should be used for the given operation."""
-    enabled_ops = config.cuda.cutlass_enabled_ops.upper()
+    enabled_ops = config.cutlass.cutlass_enabled_ops.upper()
     if enabled_ops == "ALL":
         return True
     return op_name.upper() in [x.strip() for x in enabled_ops.split(",")]
@@ -3294,6 +3294,10 @@ def expr_fits_within_32bit(e: sympy.Expr) -> bool:
     int_max = torch.iinfo(torch.int32).max
     size_hint = V.graph.sizevars.size_hint
     has_hint = V.graph.sizevars.shape_env.has_hint
+
+    if config.assume_32bit_indexing:
+        V.graph.sizevars.check_leq(e, int_max)  # type: ignore[arg-type]
+        return True
 
     # Allow for unhinted e as long as we can still statically prove
     # (e.g., via ValueRanges) that it is still in bounds

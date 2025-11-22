@@ -2692,6 +2692,30 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         )
 
 
+class PrintHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    def _call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: "list[VariableTracker]",
+        kwargs: "dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        args, kwargs = LazyVariableTracker.realize_all((args, kwargs))
+
+        args_proxy = [arg.as_proxy() for arg in args]
+        kwargs_proxy = {k: v.as_proxy() for k, v in kwargs.items()}
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=tuple(args_proxy),
+                kwargs=kwargs_proxy,
+            ),
+        )
+
+
 class ExecutorchCallDelegateHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def _call_function(
         self,
@@ -3889,7 +3913,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_fn, fwd_args = self.prepare_fn_vt(ctx, "forward", args)
 
         # autograd.Function forward does a few things like running in no_grad
-        # mode and also appying view_as for input tensors that are returned as
+        # mode and also applying view_as for input tensors that are returned as
         # outputs. Therefore, we wrap the original forward in a helper that have
         # those extra bits for Dynamo to trace.
         fwd_fn = _make_inlined(tx, autograd_function_trace_helper)(fwd_fn)
@@ -4706,6 +4730,7 @@ _hop_name_to_variable_class = {
     "associative_scan": AssociativeScanHigherOrderVariable,
     "scan": ScanHigherOrderVariable,
     "call_torchbind": CallTorchbindHigherOrderVariable,
+    "print": PrintHigherOrderVariable,
     "wrap_with_set_grad_enabled": WrapWithSetGradEnabledHigherOrderVariable,
     "wrap_with_autocast": WrapWithAutocastHigherOrderVariable,
     "dynamo_bypassing_wrapper": DynamoBypassingWrapperHigherOrderVariable,

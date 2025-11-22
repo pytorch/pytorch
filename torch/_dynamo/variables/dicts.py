@@ -806,7 +806,7 @@ class ConstDictVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         # dict not allow setting arbitrary attributes.  OrderedDict and
         # defaultdict allow arbitrary setattr, but not deletion of default attrs
         if any(
@@ -905,7 +905,7 @@ class MappingProxyVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         if self.python_type() is types.MappingProxyType:
             return ConstantVariable.create(name in types.MappingProxyType.__dict__)
         return super().call_obj_hasattr(tx, name)
@@ -1296,13 +1296,6 @@ class SetVariable(ConstDictVariable):
 
 
 class FrozensetVariable(SetVariable):
-    def __init__(
-        self,
-        items: list[VariableTracker],
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(items, **kwargs)
-
     def debug_repr(self) -> str:
         if not self.items:
             return "frozenset()"
@@ -1360,13 +1353,6 @@ class FrozensetVariable(SetVariable):
 
 
 class DictKeySetVariable(SetVariable):
-    def __init__(
-        self,
-        items: list[VariableTracker],
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(items, **kwargs)
-
     def debug_repr(self) -> str:
         if not self.items:
             return "dict_keys([])"
@@ -1446,7 +1432,7 @@ class DictViewVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         assert self.kv is not None
         if name in self.python_type().__dict__:
             return ConstantVariable.create(True)
