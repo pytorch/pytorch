@@ -3517,6 +3517,12 @@
   "GB0346": [
     {
       "Gb_type": "autograd.Function.apply: non-function or method forward",
+      "Context": "str(fn)",
+      "Explanation": "Expected {method_name} to be a function or method.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method forward",
       "Context": "str(self.fwd_graph)",
       "Explanation": "Expected forward function to be a function or method.",
       "Hints": []
@@ -3665,6 +3671,16 @@
       "Explanation": "Attribute/method access of OpaqueObjects is not supported.",
       "Hints": [
         "Use custom operators instead of direct attribute/method access."
+      ]
+    }
+  ],
+  "GB0363": [
+    {
+      "Gb_type": "Unsupported input type in backward graph of autograd.Function",
+      "Context": "Unsupported node type {type(example_value)}",
+      "Explanation": "Node {node} has example_value {example_value} which is not a Tensor/Symint/None",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ]
