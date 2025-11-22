@@ -158,11 +158,12 @@ class CppWrapperCpu(PythonWrapperCodegen):
         )
         new_args = []
         for idx, arg in enumerate(call_args):
-            if "*" in arg_types[idx]:
+            if isinstance(arg_types[idx], str) and "*" in arg_types[idx]:
                 new_args.append(f"({arg_types[idx]})({arg}.data_ptr())")
             else:
-                # arg is a scalar
-                new_args.append(arg)
+                # arg is a scalar - ensure it's a string for C++ codegen
+                # With Triton support, arg might be a SymPy expression or other type
+                new_args.append(str(arg) if not isinstance(arg, str) else arg)
         # debug printer related logic for cpp kernel type.
         debug_printer_manager = V.graph.wrapper_code.debug_printer
         debug_printer_manager.set_printer_args(
