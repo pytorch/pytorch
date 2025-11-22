@@ -653,7 +653,8 @@ class FakeTensor(Tensor):
     """
 
     fake_device: torch.device
-    fake_mode: FakeTensorMode
+    _fake_mode: Optional[FakeTensorMode]
+    _fake_mode_ref: Optional[weakref.ReferenceType[FakeTensorMode]]  # Store as weakref
     constant: Optional[Tensor]
     real_tensor: Optional[Tensor]
 
@@ -681,12 +682,41 @@ class FakeTensor(Tensor):
     _mode_key = torch._C._TorchDispatchModeKey.FAKE
 
     @property
+    def fake_mode(self) -> FakeTensorMode:
+        """Access the FakeTensorMode.
+        
+        In export mode, we use a strong reference to keep the mode alive.
+        In normal compilation, we use a weak reference to allow garbage collection
+        and prevent reference cycles (Python 3.14 issue).
+        """
+        # If we have a strong reference (export mode), use it
+        if self._fake_mode is not None:
+            return self._fake_mode
+        
+        # Otherwise, dereference the weak reference (normal mode)
+        assert self._fake_mode_ref is not None, "Neither strong nor weak ref set"
+        mode = self._fake_mode_ref()
+        if mode is None:
+            raise RuntimeError(
+                "FakeTensorMode has been garbage collected. "
+                "This usually means the FakeTensor outlived its FakeTensorMode, "
+                "which should not happen in normal operation."
+            )
+        return mode
+
+    @property
     # pyrefly: ignore [bad-override]
     def device(self) -> torch.device:
-        if self.fake_mode.in_kernel_invocation:
-            return torch.device("meta")
-        else:
-            return self.fake_device
+        # Handle the case where fake_mode has been GC'd (Python 3.14 with weakrefs)
+        # This can happen when a GraphModule with FakeTensors is passed to standalone_compile
+        # after the original compilation has finished.
+        try:
+            if self.fake_mode.in_kernel_invocation:
+                return torch.device("meta")
+        except RuntimeError:
+            # FakeTensorMode was garbage collected, just return fake_device
+            pass
+        return self.fake_device
 
     @device.setter
     def device(self, _: torch.device) -> None:
@@ -777,7 +807,18 @@ class FakeTensor(Tensor):
                 device = torch.device(f"{device.type}:0")
         # pyrefly: ignore [read-only]
         self.fake_device = device
-        self.fake_mode = fake_mode
+        
+        # Store fake_mode as strong ref or weak ref based on usage context
+        # Use STRONG reference when export=True (torch.export needs mode for serialization)
+        # Use WEAK reference for normal torch.compile to break reference cycles
+        # that prevent garbage collection in Python 3.14+ (PEP 649/667).
+        if fake_mode.fake_tensor_converter.export:
+            self._fake_mode = fake_mode  # Strong reference for export
+            self._fake_mode_ref = None
+        else:
+            self._fake_mode = None
+            self._fake_mode_ref = weakref.ref(fake_mode)  # Weak reference for normal mode
+        
         self.constant = constant
         self.pytype = pytype
         self.dispatch_keys = dispatch_keys

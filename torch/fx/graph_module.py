@@ -1002,7 +1002,11 @@ class {module_name}(torch.nn.Module):
     def __deepcopy__(self, memo):
         res = type(self).__new__(type(self))
         memo[id(self)] = res
-        fake_mod = _CodeOnlyModule(copy.deepcopy(self.__dict__, memo))
+        # Exclude _dynamo_fake_mode from deepcopy as it contains FakeTensors
+        # that can't be deep copied. We'll preserve it separately.
+        self_dict = self.__dict__.copy()
+        dynamo_fake_mode = self_dict.pop("_dynamo_fake_mode", None)
+        fake_mod = _CodeOnlyModule(copy.deepcopy(self_dict, memo))
         self._deepcopy_init()(res, fake_mod, fake_mod.__dict__["_graph"])
         # hooks are lost during `GraphModule.__init__`, so we need to copy over
         # them explicitly, note right now we are only copying state_dict related
@@ -1027,6 +1031,9 @@ class {module_name}(torch.nn.Module):
         if hasattr(self, "_deepcopy_hooks"):
             for hook in self._deepcopy_hooks:
                 hook(res)
+        # Preserve the FakeTensorMode reference without deep copying it
+        if dynamo_fake_mode is not None:
+            object.__setattr__(res, "_dynamo_fake_mode", dynamo_fake_mode)
         return res
 
     def __copy__(self):

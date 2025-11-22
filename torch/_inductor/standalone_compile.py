@@ -378,33 +378,13 @@ def standalone_compile(
         assert context.fake_mode is not None
         fake_mode = context.fake_mode
     elif dynamic_shapes == "from_graph":
-        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
-        # Strategy: find a FakeTensor in the graph output, grab its FakeTensorMode.
-        # The graph passed to standalone_compile must be an Inductor-approved graph,
-        # which means that there is at least one Tensor output and the output node
-        # contains a flat list of Tensors.
-        last_node = next(iter(reversed(gm.graph.nodes)))
-        assert last_node.op == "output"
-        assert len(last_node.args) == 1
-
-        def handle_node(node: torch.fx.Node) -> None:
-            nonlocal fake_mode
-            if "example_value" in node.meta:
-                maybe_tensor = node.meta["example_value"]
-                if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
-                    fake_mode = maybe_tensor.fake_mode
-
-        # If gm came from Dynamo, then last_node.args[0] is always a list,
-        # even in single-Tensor returns.
-        #
-        # It's possible to get into a situation where last_node.args[0]
-        # is a Node (and not a list!). This happens if you call split_module
-        # on the graph. We allow for this case since it is common.
-        if isinstance(last_node.args[0], torch.fx.Node):
-            handle_node(last_node.args[0])
-        else:
-            for node in last_node.args[0]:
-                handle_node(node)
+        # Strategy: Reuse the FakeTensorMode from the GraphModule if available.
+        # This preserves shape constraints from the original compilation.
+        # Fall back to creating a new mode with shape_env if the mode isn't stored.
+        fake_mode = getattr(gm, '_dynamo_fake_mode', None)
+        if fake_mode is None:
+            shape_env = getattr(gm, 'shape_env', None)
+            fake_mode = FakeTensorMode(shape_env=shape_env or ShapeEnv())
 
     else:
         raise ValueError(

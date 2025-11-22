@@ -2141,7 +2141,13 @@ class OutputGraph(OutputGraphCommon):
             self.real_value_cache.clear()
 
             gm = _make_graph_module(root, self.graph)
-
+            
+            # Store a strong reference to FakeTensorMode on the GraphModule to prevent GC in Python 3.14+
+            # This is needed for standalone_compile and other cases where the GraphModule
+            # outlives the normal compilation flow and needs to access FakeTensors later.
+            # We store it in a way that won't interfere with deepcopy operations.
+            object.__setattr__(gm, '_dynamo_fake_mode', self.tracing_context.fake_mode)
+            
             # Saved tensors hooks are not used by the graph.
             # GraphModule by default only copies used in the graph submodules.
             # Copying them into the result graph manually.
