@@ -1121,9 +1121,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
     def test_sparse_fp8fp8_mm(self, dense_input_shape, device):
         if torch.backends.cusparselt.version() < 602:
             self.skipTest("fp8 matmul requires cuSPARSELt v0.6.2+")
-        # CUDA 13 can correctly raise NotImplementedError so passing this test is expected
-        if IS_SM89 and _get_torch_cuda_version() < (13, 0):
-            raise unittest.SkipTest("expected failure on SM 8.9 with CUDA < 13.0")
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
         B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
 
@@ -1141,7 +1138,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
         not PLATFORM_SUPPORTS_FP8,
         "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
     )
-    @xfailIfSM89
     def test_sparse_semi_structured_scaled_mm_fp8(self, device) -> None:
         (k, l, m) = (32, 64, 32)
         x = rand_sparse_semi_structured_mask(k, l, dtype=torch.float8_e4m3fn, device=device)
@@ -1166,9 +1162,6 @@ class TestSparseSemiStructuredCUSPARSELT(TestCase):
     def test_sparse_semi_structured_scaled_mm(
         self, dense_input_shape, device, out_dtype
     ):
-        # CUDA 13 can handle FP8 → other variants so passing this test is expected
-        if IS_SM89 and _get_torch_cuda_version() < (13, 0):
-            raise unittest.SkipTest("expected failure on SM 8.9 with CUDA < 13.0")
         A = rand_sparse_semi_structured_mask(256, 128, dtype=torch.float16)
         B = torch.rand(dense_input_shape, device=device).to(torch.float16).t()
 
