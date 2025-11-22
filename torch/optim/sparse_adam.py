@@ -39,6 +39,39 @@ class SparseAdam(Optimizer):
         }
         super().__init__(params, defaults)
 
+    def load_state_dict(self, state_dict: dict) -> None:
+        r"""
+        Load the optimizer state.
+
+        Args:
+            state_dict (dict): optimizer state. Should be an object returned
+                from a call to :meth:`state_dict`.
+
+        .. warning::
+            Make sure this method is called **after** initializing
+            :class:`torch.optim.lr_scheduler.LRScheduler`, as calling it beforehand
+            will overwrite the loaded learning rates.
+
+        .. note::
+            The parameter names (if stored under the ``param_names`` key of each param group
+            in :meth:`state_dict`) will not affect the loading process.
+            To handle custom cases (for example, when the parameters in the loaded state
+            differ from those initialized in the optimizer), register a pre-hook with
+            :meth:`register_load_state_dict_pre_hook`.
+
+        Example:
+            >>> model = torch.nn.Embedding(10, 3, sparse=True)
+            >>> optim = torch.optim.SparseAdam(
+            ...     model.parameters(),
+            ...     lr=1e-3,
+            ...     betas=(0.9, 0.999),
+            ... )
+            >>> torch.save(optim.state_dict(), "sparse_adam.pt")
+            >>> optim.load_state_dict(torch.load("sparse_adam.pt"))
+            >>> print(optim)
+        """
+        return super().load_state_dict(state_dict)
+
         sparse_params = []
         complex_params = []
         for index, param_group in enumerate(self.param_groups):
@@ -188,3 +221,30 @@ SparseAdam.__doc__ = rf"""SparseAdam implements a masked version of the Adam alg
         https://arxiv.org/abs/1412.6980
 
     """
+# Explicitly override load_state_dict docstring for SparseAdam
+SparseAdam.load_state_dict.__doc__ = r"""
+Load the optimizer state.
+
+Args:
+    state_dict (dict): optimizer state. Should be an object returned
+        from a call to :meth:`state_dict`.
+
+.. warning::
+    Make sure this method is called **after** initializing
+    :class:`torch.optim.lr_scheduler.LRScheduler`, as calling it beforehand
+    will overwrite the loaded learning rates.
+
+.. note::
+    The parameter names (if stored under the ``param_names`` key of each param group
+    in :meth:`state_dict`) will not affect the loading process.
+    To handle custom cases (for example, when the parameters in the loaded state
+    differ from those initialized in the optimizer), register a pre-hook with
+    :meth:`register_load_state_dict_pre_hook`.
+
+Example:
+    >>> model = torch.nn.Embedding(10, 3, sparse=True)
+    >>> optim = torch.optim.SparseAdam(model.parameters(), lr=1e-3)
+    >>> torch.save(optim.state_dict(), "sparse_adam.pt")
+    >>> optim.load_state_dict(torch.load("sparse_adam.pt"))
+    >>> print(optim)
+"""

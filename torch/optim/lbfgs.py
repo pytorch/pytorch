@@ -272,6 +272,35 @@ class LBFGS(Optimizer):
         }
         super().__init__(params, defaults)
 
+    def load_state_dict(self, state_dict: dict) -> None:
+        r"""
+        Load the optimizer state.
+
+        Args:
+            state_dict (dict): optimizer state. Should be an object returned
+                from a call to :meth:`state_dict`.
+
+        .. warning::
+            Make sure this method is called **after** initializing
+            :class:`torch.optim.lr_scheduler.LRScheduler`, as calling it beforehand
+            will overwrite the loaded learning rates.
+
+        .. note::
+            The parameter names (if stored under the ``param_names`` key of each param group
+            in :meth:`state_dict`) will not affect the loading process.
+            To handle custom cases (for example, when the parameters in the loaded state
+            differ from those initialized in the optimizer), register a pre-hook with
+            :meth:`register_load_state_dict_pre_hook`.
+
+        Example:
+            >>> model = torch.nn.Linear(10, 10)
+            >>> optim = torch.optim.LBFGS(model.parameters())
+            >>> torch.save(optim.state_dict(), "lbfgs.pt")
+            >>> optim.load_state_dict(torch.load("lbfgs.pt"))
+            >>> print(optim)
+        """
+        return super().load_state_dict(state_dict)
+
         if len(self.param_groups) != 1:
             raise ValueError(
                 "LBFGS doesn't support per-parameter options (parameter groups)"
@@ -536,3 +565,32 @@ class LBFGS(Optimizer):
         state["prev_loss"] = prev_loss
 
         return orig_loss
+
+
+# Explicitly override load_state_dict docstring for LBFGS
+LBFGS.load_state_dict.__doc__ = r"""
+Load the optimizer state.
+
+Args:
+    state_dict (dict): optimizer state. Should be an object returned
+        from a call to :meth:`state_dict`.
+
+.. warning::
+    Make sure this method is called **after** initializing
+    :class:`torch.optim.lr_scheduler.LRScheduler`, as calling it beforehand
+    will overwrite the loaded learning rates.
+
+.. note::
+    The parameter names (if stored under the ``param_names`` key of each param group
+    in :meth:`state_dict`) will not affect the loading process.
+    To handle custom cases (for example, when the parameters in the loaded state
+    differ from those initialized in the optimizer), register a pre-hook with
+    :meth:`register_load_state_dict_pre_hook`.
+
+Example:
+    >>> model = torch.nn.Linear(10, 10)
+    >>> optim = torch.optim.LBFGS(model.parameters())
+    >>> torch.save(optim.state_dict(), "lbfgs.pt")
+    >>> optim.load_state_dict(torch.load("lbfgs.pt"))
+    >>> print(optim)
+"""
