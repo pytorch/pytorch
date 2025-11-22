@@ -215,7 +215,11 @@ class _FromTorchTensor(torch.autograd.Function):
             )
             local_tensor = grad_output._local_tensor
             output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, is_backward=True
+                local_tensor,
+                current_spec,
+                target_spec,
+                is_backward=True,
+                redistribute_tag="_FromTorchTensor.backward",
             )
             # TODO: return the redistributed local tensor directly without
             # differentiable backward. see if this make sense for all cases.

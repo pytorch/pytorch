@@ -26,10 +26,7 @@ from torch.distributed.tensor._tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
-from torch.distributed.tensor._utils import (
-    ExplicitRedistributionContext,
-    try_find_mesh_from_args,
-)
+from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._python_dispatch import return_and_correct_aliasing
@@ -459,20 +456,13 @@ class OpDispatcher:
                         if debug_mode is not None
                         else contextlib.nullcontext()
                     )
-                    if not ExplicitRedistributionContext.is_redistribute_allowed(
-                        arg_spec,
-                        # pyrefly: ignore [bad-argument-type]
-                        reshard_arg_spec,
-                    ):
-                        raise RuntimeError(
-                            f"Implicit redistribution occurred for {op_info.schema} while ExplicitRedistributionContext was active"
-                        )
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
                             local_tensor,
                             arg_spec,
                             # pyrefly: ignore [bad-argument-type]
                             reshard_arg_spec,
+                            redistribute_tag=str(op_info.schema),
                         )
                     new_local_args.append(resharded_local_tensor)
                 else:

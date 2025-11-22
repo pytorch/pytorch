@@ -20,6 +20,7 @@ from torch.distributed.tensor._dtensor_spec import (
     ShardOrderEntry,
     TensorMeta,
 )
+from torch.distributed.tensor._utils import ExplicitRedistributionContext
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -693,13 +694,23 @@ def redistribute_local_tensor(
     async_op: bool = False,
     is_backward: bool = False,
     use_graph_based_transform: Optional[bool] = None,
+    redistribute_tag: Optional[str] = None,
 ) -> torch.Tensor:
     """
     This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
     the target DTensorSpec, which involves the necessary collective calls to transform
     the local shard of the DTensor from its current spec to the target spec.
     """
-
+    if not ExplicitRedistributionContext.is_redistribute_allowed(
+        current_spec,
+        # pyrefly: ignore [bad-argument-type]
+        target_spec,
+    ):
+        if redistribute_tag is None:
+            redistribute_tag = "unknown redistribute"
+        raise RuntimeError(
+            f"Implicit redistribution occurred for {redistribute_tag} while ExplicitRedistributionContext was active"
+        )
     if current_spec.mesh != target_spec.mesh:
         # TODO: alltoall/permute reshuffling to change device_mesh if they are not the same
         raise NotImplementedError("Cross device mesh comm not supported yet!")
@@ -876,7 +887,11 @@ class Redistribute(torch.autograd.Function):
             )
 
             output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, async_op=async_op
+                local_tensor,
+                current_spec,
+                target_spec,
+                async_op=async_op,
+                redistribute_tag="Redistribute.forward",
             )
         else:
             # use the same local tensor if placements are the same.
@@ -924,6 +939,7 @@ class Redistribute(torch.autograd.Function):
             previous_spec,
             async_op=async_op,
             is_backward=True,
+            redistribute_tag="Redistribute.backward",
         )
 
         if output.dtype != ctx.original_dtype:
