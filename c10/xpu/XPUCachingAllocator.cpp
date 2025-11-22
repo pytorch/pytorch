@@ -797,8 +797,17 @@ class DeviceCachingAllocator {
      * guarantee that all kernels can access to the blocks have finished.
      */
     TORCH_INTERNAL_ASSERT(!block->expandable_segment);
-    sycl::free(block->ptr, xpu::get_device_context());
     auto* pool = block->pool;
+    if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
+      pool->owner_PrivatePool->allocator()->raw_delete(block->ptr);
+    } else {
+      sycl::free(block->ptr, xpu::get_device_context());
+    }
+
+    if (pool->owner_PrivatePool) {
+      TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->allocation_count > 0);
+      pool->owner_PrivatePool->allocation_count--;
+    }
     pool->blocks.erase(block);
 
     StatTypes stat_types = get_stat_types_for_pool(*pool);
@@ -1288,7 +1297,7 @@ class DeviceCachingAllocator {
 
 static void local_raw_delete(void* ptr);
 
-class XPUAllocator : public DeviceAllocator {
+class NativeCachingAllocator : public XPUAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
@@ -1323,7 +1332,7 @@ class XPUAllocator : public DeviceAllocator {
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocators;
 
-  void init(DeviceIndex device_count) {
+  void init(DeviceIndex device_count) override {
     const auto size = static_cast<DeviceIndex>(device_allocators.size());
     if (size < device_count) {
       device_allocators.resize(device_count);
@@ -1404,7 +1413,7 @@ class XPUAllocator : public DeviceAllocator {
     return &local_raw_delete;
   }
 
-  void* raw_alloc(size_t size) {
+  void* raw_alloc(size_t size) override {
     if (size == 0) {
       return nullptr;
     }
@@ -1414,7 +1423,7 @@ class XPUAllocator : public DeviceAllocator {
     return r;
   }
 
-  void* raw_alloc_with_stream(size_t size, XPUStream stream) {
+  void* raw_alloc_with_stream(size_t size, XPUStream stream) override {
     if (size == 0) {
       return nullptr;
     }
@@ -1424,7 +1433,7 @@ class XPUAllocator : public DeviceAllocator {
     return r;
   }
 
-  void raw_delete(void* ptr) {
+  void raw_delete(void* ptr) override {
     this->free(ptr);
   }
 
@@ -1508,7 +1517,7 @@ class XPUAllocator : public DeviceAllocator {
   }
 };
 
-static XPUAllocator allocator;
+static NativeCachingAllocator allocator;
 
 void local_raw_delete(void* ptr) {
   allocator.free(ptr);

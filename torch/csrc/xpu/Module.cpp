@@ -411,6 +411,36 @@ static void initXpuMethodBindings(PyObject* module) {
   m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
     c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
   });
+  m.def(
+      "_xpu_beginAllocateCurrentThreadToPool",
+      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
+        auto tid = std::this_thread::get_id();
+
+        c10::xpu::XPUCachingAllocator::beginAllocateToPool(
+            device, mempool_id, [=](sycl::queue*) {
+              auto current_tid = std::this_thread::get_id();
+              return current_tid == tid;
+            });
+      });
+  m.def(
+      "_xpu_endAllocateToPool",
+      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
+        c10::xpu::XPUCachingAllocator::endAllocateToPool(device, mempool_id);
+      });
+  m.def(
+      "_xpu_releasePool",
+      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
+        c10::xpu::XPUCachingAllocator::releasePool(device, mempool_id);
+      });
+}
+
+static void registerXpuAllocator(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+
+  py::class_<
+      c10::xpu::XPUCachingAllocator::XPUAllocator,
+      std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>>(
+      m, "_xpu_XPUAllocator");
 }
 
 // Callback for python part. Used for additional initialization of python
@@ -496,6 +526,7 @@ namespace torch::xpu {
 void initModule(PyObject* module) {
   registerXpuDeviceProperties(module);
   initXpuMethodBindings(module);
+  registerXpuAllocator(module);
 }
 
 } // namespace torch::xpu

@@ -529,9 +529,11 @@ from .memory import (
     memory_reserved,
     memory_stats,
     memory_stats_as_nested_dict,
+    MemPool,
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
     set_per_process_memory_fraction,
+    use_mem_pool,
 )
 from .random import (
     get_rng_state,
@@ -582,6 +584,8 @@ __all__ = [
     "memory_reserved",
     "memory_stats",
     "memory_stats_as_nested_dict",
+    "MemPool",
+    "use_mem_pool",
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
     "seed",
