@@ -85,6 +85,7 @@ register_op_strategy(
         aten.clone.default,
         aten.contiguous.default,
         aten.detach.default,
+        aten.detach_.default,
         aten.alias.default,
         aten.fill_.Scalar,
         aten.view.dtype,
