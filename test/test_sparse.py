@@ -1678,7 +1678,7 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, True, (1, 1))
 
     @coalescedonoff
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.float32)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_sparse_mm(self, device, dtype, coalesced):
@@ -1696,14 +1696,14 @@ class TestSparse(TestSparseBase):
             def fn(S, D):
                 return torch.sparse.mm(S, D)
 
-            kwargs = {"atol": 2e-5} if device == "mps:0" else {}
+            kwargs = {"atol": 2e-5} if dtype == torch.float32 else {}
             gradcheck(fn, (S, D), masked=True, **kwargs)
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
 
     @coalescedonoff
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.float32)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
@@ -1720,7 +1720,7 @@ class TestSparse(TestSparseBase):
             self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense())
             gradcheck(lambda x, y: (x * y).to_dense(), [a, b])
             # Issues with 0-dim indices/values
-            kwargs = {"eps": 3e-4, "atol": 5e-5} if device == "mps:0" else {}
+            kwargs = {"eps": 3e-4, "atol": 5e-5} if dtype == torch.float32 else {}
             gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True, **kwargs)
 
         test_shape(2, 3, [2, 3, 4, 5])
@@ -2234,7 +2234,7 @@ class TestSparse(TestSparseBase):
         self._test_sparse_mask_shape(0, 0, [10, 10, 10], [2, 0], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [2, 0], dtype, device, coalesced)
 
-    @dtypes(torch.double, torch.cdouble)
+    @dtypes(torch.double, torch.cdouble, torch.float32, torch.complex64)
     @dtypesIfMPS(torch.float32, torch.complex64)
     @skipIfCrossRef
     def test_sparse_mask_backward(self, device, dtype):
@@ -2264,7 +2264,7 @@ class TestSparse(TestSparseBase):
                 # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
                 # lhs.sparse_mask(lhs_mask) accomplishes that.
                 lhs_mask = lhs.detach().clone()
-                kwargs = {"eps": 3e-4, "atol": 5e-5} if device == "mps:0" else {}
+                kwargs = {"eps": 3e-4, "atol": 5e-5} if dtype in [torch.float32, torch.complex64] else {}
                 gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,),
                           masked=True, **kwargs)
                 gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False, **kwargs)

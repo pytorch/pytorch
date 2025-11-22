@@ -5183,8 +5183,16 @@ def gradcheck(fn, inputs, **kwargs):
 
     # set eps based on input dtype
     if kwargs.get("eps") is None:
-        input_dtype = inputs.dtype if isinstance(inputs, torch.Tensor) else inputs[0].dtype
-        if input_dtype in GRADCHECK_DTYPE_EPS_MAP:
+        input_dtype = None
+        if isinstance(inputs, torch.Tensor):
+            input_dtype = inputs.dtype
+        else:
+            # find the first tensor in the inputs sequence
+            for inp in inputs:
+                if isinstance(inp, torch.Tensor):
+                    input_dtype = inp.dtype
+                    break
+        if input_dtype is not None and input_dtype in GRADCHECK_DTYPE_EPS_MAP:
             default_values["eps"] = GRADCHECK_DTYPE_EPS_MAP[input_dtype]
 
     for key, value in default_values.items():
