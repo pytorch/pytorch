@@ -1224,6 +1224,9 @@ class InstructionTranslatorBase(
             raise AssertionError(f"Attempt to trace forbidden callable {inner_fn}")
         self.push(fn.call_function(self, args, kwargs))  # type: ignore[arg-type]
 
+        if not self.export and self.fake_mode is not None:
+            self.fake_mode.fake_tensor_converter.meta_converter.describer.lookup_tensor.clear()
+
     def inline_generator_function(
         self, fn: VariableTracker, args: Sequence[Any], kwargs: dict[str, Any]
     ) -> Any:
