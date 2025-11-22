@@ -2267,6 +2267,90 @@ class TestLinalg(TestCase):
         # check correctness using eigendecomposition identity
         self.assertEqual(a.to(v.dtype) @ v, w * v, atol=1e-3, rtol=1e-3)
 
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64)
+    def test_eig_cuda_complex_eigenvectors(self, device, dtype):
+        """Test CUDA eigenvector decoding with known ground truth, including batching."""
+
+        # Test 1: Rotation matrix (complex eigenvalues - conjugate pairs)
+        theta = math.pi / 4
+        A_complex = torch.tensor([
+            [math.cos(theta), -math.sin(theta)],
+            [math.sin(theta), math.cos(theta)]
+        ], dtype=dtype, device=device)
+
+        vals_complex, vecs_complex = torch.linalg.eig(A_complex)
+
+        # Verify eigenvalues are e^(±iθ) for rotation by θ
+        # For θ = π/4, eigenvalues are e^(±iπ/4)
+        expected_eigenvalue = complex(math.cos(theta), math.sin(theta))
+        # One eigenvalue should match, the other should be its conjugate
+        expected_val = torch.tensor(
+            expected_eigenvalue, dtype=vals_complex.dtype, device=device
+        )
+        expected_val_conj = torch.tensor(
+            expected_eigenvalue.conjugate(), dtype=vals_complex.dtype, device=device
+        )
+        self.assertTrue(
+            torch.allclose(vals_complex[0], expected_val, atol=1e-5, rtol=1e-5) or
+            torch.allclose(vals_complex[0], expected_val_conj, atol=1e-5, rtol=1e-5)
+        )
+
+        # Verify output is complex type
+        self.assertTrue(vals_complex.dtype in [torch.complex64, torch.complex128])
+        self.assertTrue(vecs_complex.dtype in [torch.complex64, torch.complex128])
+
+        # Verify Av = λv for both eigenpairs
+        for i in range(2):
+            lhs = A_complex.to(vecs_complex.dtype) @ vecs_complex[:, i]
+            rhs = vals_complex[i] * vecs_complex[:, i]
+            self.assertEqual(lhs, rhs, atol=1e-5, rtol=1e-5)
+
+        # Test 2: Diagonal matrix (all real eigenvalues)
+        A_real = torch.diag(torch.tensor([1.0, 2.0, 3.0], dtype=dtype, device=device))
+
+        vals_real, vecs_real = torch.linalg.eig(A_real)
+
+        # Output is still complex type, but imaginary parts should be ~zero
+        self.assertTrue(torch.allclose(vals_real.imag, torch.zeros_like(vals_real.imag), atol=1e-6))
+        # Real parts should match diagonal values
+        self.assertTrue(torch.allclose(
+            torch.sort(vals_real.real)[0],
+            torch.tensor([1., 2., 3.], dtype=dtype, device=device),
+            atol=1e-6, rtol=1e-6
+        ))
+
+        # Verify Av = λv for all eigenpairs
+        for i in range(3):
+            lhs = A_real.to(vecs_real.dtype) @ vecs_real[:, i]
+            rhs = vals_real[i] * vecs_real[:, i]
+            self.assertEqual(lhs, rhs, atol=1e-5, rtol=1e-5)
+
+        # Test 3: Batched - mix of real and complex eigenvalues
+        A_batch = torch.stack([
+            # Rotation (complex eigenvalues)
+            torch.tensor([
+                [math.cos(math.pi / 6), -math.sin(math.pi / 6)],
+                [math.sin(math.pi / 6), math.cos(math.pi / 6)]
+            ], dtype=dtype, device=device),
+            # Diagonal (real eigenvalues)
+            torch.diag(torch.tensor([4.0, 5.0], dtype=dtype, device=device)),
+            # Another rotation (complex eigenvalues)
+            torch.tensor([
+                [math.cos(math.pi / 3), -math.sin(math.pi / 3)],
+                [math.sin(math.pi / 3), math.cos(math.pi / 3)]
+            ], dtype=dtype, device=device),
+        ])
+
+        vals_batch, vecs_batch = torch.linalg.eig(A_batch)
+
+        # Verify Av = λv for each matrix in batch
+        for b in range(3):
+            for i in range(2):
+                lhs = A_batch[b].to(vecs_batch.dtype) @ vecs_batch[b, :, i]
+                rhs = vals_batch[b, i] * vecs_batch[b, :, i]
+                self.assertEqual(lhs, rhs, atol=1e-5, rtol=1e-5)
+
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
