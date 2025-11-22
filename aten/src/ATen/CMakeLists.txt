@@ -886,6 +886,11 @@ list(APPEND ATen_MOBILE_BENCHMARK_SRCS
 list(APPEND ATen_MOBILE_BENCHMARK_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/benchmarks/stateful_conv1d.cpp)
 
+
+list(APPEND ATen_CPU_SRCS
+  ${CMAKE_CURRENT_SOURCE_DIR}/native/Quantize.cpp
+)
+
 # Pass source, includes, and libs to parent
 set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
 set(ATen_CPU_SRCS ${ATen_CPU_SRCS} PARENT_SCOPE)
