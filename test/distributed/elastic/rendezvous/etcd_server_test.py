@@ -48,7 +48,7 @@ class EtcdServerTest(unittest.TestCase):
 
             rdzv = EtcdRendezvous(
                 client=client,
-                prefix="test",
+                prefix="/test",
                 run_id=1,
                 num_min_workers=1,
                 num_max_workers=1,
