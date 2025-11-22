@@ -48,6 +48,48 @@ class DistTensorOpsTest(DTensorTestBase):
         self.assertFalse(detached_mat is mat)
 
     @with_comms
+    def test_detach_(self):
+        """Test in-place detach operation on DTensor."""
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+
+        tensor_to_detach = torch.randn(12, 8, requires_grad=True)
+        mat = distribute_tensor(tensor_to_detach, device_mesh, shard_spec)
+
+        # Verify the tensor requires grad before detach
+        self.assertTrue(mat.requires_grad)
+
+        mat.detach_()
+
+        # Verify the tensor no longer requires grad
+        self.assertFalse(mat.requires_grad)
+        # Verify sharding is unchanged
+        self.assertEqual(mat.placements, shard_spec)
+
+    @with_comms
+    def test_detach_in_custom_op(self):
+        """
+        Test that detach_() works when DTensor.from_local() is called
+        from within a custom op.
+        """
+        device_mesh = self.build_device_mesh()
+
+        @torch.library.custom_op("dtensor_test::create_dtensor", mutates_args=())
+        def create_dtensor_op(x: torch.Tensor) -> torch.Tensor:
+            DTensor.from_local(x, device_mesh, placements=[Replicate()])
+            return x.new_empty([0])
+
+        @create_dtensor_op.register_fake
+        def _(x):
+            return x.new_empty([0])
+
+        x = torch.randn(8, 4, requires_grad=True, device=self.device_type)
+        result = torch.ops.dtensor_test.create_dtensor(x)
+
+        # Verify the op executed successfully
+        self.assertEqual(result.shape, torch.Size([0]))
+
+    @with_comms
     def test_clone(self):
         device_mesh = self.build_device_mesh()
         specs = [[Replicate()], [Shard(0)]]
