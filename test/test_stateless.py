@@ -186,7 +186,7 @@ class TestStatelessFunctionalAPI(TestCase):
         cur_rm = module.running_mean
         self.assertEqual(cur_rm, prev_rm)
         self.assertEqual(rm, torch.full((10,), 12.8))
-        # Now run functional without reparametrization and check that the module has
+        # Now run functional without reparameterization and check that the module has
         # been updated
         functional_call(module, {}, x)
         self.assertEqual(module.running_mean, torch.full((10,), 12.8))
@@ -210,7 +210,7 @@ class TestStatelessFunctionalAPI(TestCase):
         prev_buffer = module.buffer.clone()
         res = functional_call(module, parameters, x, tie_weights=False)
         self.assertEqual(x, res)
-        # check that the weights remain unmodified and were correctly accesed
+        # check that the weights remain unmodified and were correctly accessed
         cur_weight = module.l1.weight
         cur_buffer = module.buffer
         self.assertEqual(cur_weight, prev_weight)
@@ -753,7 +753,7 @@ class TestStatelessFunctionalAPI(TestCase):
         res = torch.func.functional_call(mod, (), x)
         self.assertEqual(res, mod(x))
 
-        # three dictonaries
+        # three dictionaries
         a = ({'l1.weight': torch.ones(1, 1)}, {'l1.bias': torch.ones(1)}, {'buffer': torch.zeros(1)})
         res = torch.func.functional_call(mod, a, x)
         self.assertEqual(res, x + 1)

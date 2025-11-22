@@ -72,4 +72,4 @@ aot_function(f, ts_compiler, ts_compiler)(torch.randn(3, requires_grad=True))
 * Min-cut [recomputation](https://dev-discuss.pytorch.org/t/min-cut-optimal-recomputation-i-e-activation-checkpointing-with-aotautograd/467) with AOT Autograd.
 
 ## Tutorials
-You can use this [tutorial](https://pytorch.org/functorch/nightly/notebooks/aot_autograd_optimizations.html) to play with AOT Autograd.
+You can use this [tutorial](https://pytorch.org/functorch/nightly/tutorials/aot_autograd_optimizations.html) to play with AOT Autograd.

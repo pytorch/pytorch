@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import copy
 import warnings
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
@@ -55,15 +56,17 @@ def _get_seq_len(src: Tensor, batch_first: bool) -> Optional[int]:
 
 
 class Transformer(Module):
-    r"""A transformer model.
+    r"""A basic transformer layer.
 
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
 
-    User is able to modify the attributes as needed. The architecture
-    is based on the paper `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    This Transformer layer implements the original Transformer architecture described
+    in the `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_ paper. The
+    intent of this layer is as a reference implementation for foundational understanding
+    and thus it contains only limited features relative to newer Transformer architectures.
+    Given the fast pace of innovation in transformer-like architectures, we recommend
+    exploring this `tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+    to build an efficient transformer layer from building blocks in core or using higher
+    level libraries from the `PyTorch Ecosystem <https://landscape.pytorch.org/>`_.
 
     Args:
         d_model: the number of expected features in the encoder/decoder inputs (default=512).
@@ -102,7 +105,7 @@ class Transformer(Module):
         num_decoder_layers: int = 6,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
         custom_encoder: Optional[Any] = None,
         custom_decoder: Optional[Any] = None,
         layer_norm_eps: float = 1e-5,
@@ -132,7 +135,11 @@ class Transformer(Module):
                 **factory_kwargs,
             )
             encoder_norm = LayerNorm(
-                d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs
+                d_model,
+                eps=layer_norm_eps,
+                bias=bias,
+                # pyrefly: ignore [bad-argument-type]
+                **factory_kwargs,
             )
             self.encoder = TransformerEncoder(
                 encoder_layer, num_encoder_layers, encoder_norm
@@ -154,7 +161,11 @@ class Transformer(Module):
                 **factory_kwargs,
             )
             decoder_norm = LayerNorm(
-                d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs
+                d_model,
+                eps=layer_norm_eps,
+                bias=bias,
+                # pyrefly: ignore [bad-argument-type]
+                **factory_kwargs,
             )
             self.decoder = TransformerDecoder(
                 decoder_layer, num_decoder_layers, decoder_norm
@@ -254,7 +265,9 @@ class Transformer(Module):
 
         Examples:
             >>> # xdoctest: +SKIP
-            >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
+            >>> output = transformer_model(
+            ...     src, tgt, src_mask=src_mask, tgt_mask=tgt_mask
+            ... )
         """
         is_batched = src.dim() == 3
         if not self.batch_first and src.size(1) != tgt.size(1) and is_batched:
@@ -297,7 +310,7 @@ class Transformer(Module):
         """
         return _generate_square_subsequent_mask(sz, dtype=dtype, device=device)
 
-    def _reset_parameters(self):
+    def _reset_parameters(self) -> None:
         r"""Initiate parameters in the transformer model."""
         for p in self.parameters():
             if p.dim() > 1:
@@ -307,12 +320,18 @@ class Transformer(Module):
 class TransformerEncoder(Module):
     r"""TransformerEncoder is a stack of N encoder layers.
 
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
+    This TransformerEncoder layer implements the original architecture described
+    in the `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_ paper. The
+    intent of this layer is as a reference implementation for foundational understanding
+    and thus it contains only limited features relative to newer Transformer architectures.
+    Given the fast pace of innovation in transformer-like architectures, we recommend
+    exploring this `tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+    to build efficient layers from building blocks in core or using higher
+    level libraries from the `PyTorch Ecosystem <https://landscape.pytorch.org/>`_.
 
-    Users can build the BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
+    .. warning::
+        All layers in the TransformerEncoder are initialized with the same parameters.
+        It is recommended to manually initialize the layers after creating the TransformerEncoder instance.
 
     Args:
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
@@ -371,7 +390,7 @@ class TransformerEncoder(Module):
             why_not_sparsity_fast_path = (
                 f"{enc_layer}.activation_relu_or_gelu was not True"
             )
-        elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps):
+        elif encoder_layer.norm1.eps != encoder_layer.norm2.eps:
             why_not_sparsity_fast_path = (
                 f"{enc_layer}.norm1.eps was not equal to {enc_layer}.norm2.eps"
             )
@@ -380,7 +399,8 @@ class TransformerEncoder(Module):
 
         if enable_nested_tensor and why_not_sparsity_fast_path:
             warnings.warn(
-                f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}"
+                f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}",
+                stacklevel=2,
             )
             self.use_nested_tensor = False
 
@@ -433,6 +453,7 @@ class TransformerEncoder(Module):
         str_first_layer = "self.layers[0]"
         batch_first = first_layer.self_attn.batch_first
         is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
+        do_mask_check = getattr(self, "mask_check", True)
 
         if not is_fastpath_enabled:
             why_not_sparsity_fast_path = (
@@ -446,15 +467,19 @@ class TransformerEncoder(Module):
             )
         elif first_layer.training:
             why_not_sparsity_fast_path = f"{str_first_layer} was in training mode"
-        elif not src.dim() == 3:
+        elif src.dim() != 3:
             why_not_sparsity_fast_path = (
                 f"input not batched; expected src.dim() of 3 but got {src.dim()}"
             )
         elif src_key_padding_mask is None:
             why_not_sparsity_fast_path = "src_key_padding_mask was None"
-        elif (
-            (not hasattr(self, "mask_check")) or self.mask_check
-        ) and not torch._nested_tensor_from_mask_left_aligned(
+        # This check avoids a call to torch._nested_tensor_from_mask_left_aligned() that
+        # breaks in torch.compile.
+        elif do_mask_check and torch.compiler.is_compiling():
+            why_not_sparsity_fast_path = (
+                "mask_check enabled with torch.compile or torch.export"
+            )
+        elif do_mask_check and not torch._nested_tensor_from_mask_left_aligned(
             src, src_key_padding_mask.logical_not()
         ):
             why_not_sparsity_fast_path = "mask_check enabled, and src and src_key_padding_mask was not left aligned"
@@ -530,10 +555,18 @@ class TransformerEncoder(Module):
 class TransformerDecoder(Module):
     r"""TransformerDecoder is a stack of N decoder layers.
 
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
+    This TransformerDecoder layer implements the original architecture described
+    in the `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_ paper. The
+    intent of this layer is as a reference implementation for foundational understanding
+    and thus it contains only limited features relative to newer Transformer architectures.
+    Given the fast pace of innovation in transformer-like architectures, we recommend
+    exploring this `tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+    to build efficient layers from building blocks in core or using higher
+    level libraries from the `PyTorch Ecosystem <https://landscape.pytorch.org/>`_.
+
+    .. warning::
+        All layers in the TransformerDecoder are initialized with the same parameters.
+        It is recommended to manually initialize the layers after creating the TransformerDecoder instance.
 
     Args:
         decoder_layer: an instance of the TransformerDecoderLayer() class (required).
@@ -627,13 +660,14 @@ class TransformerDecoder(Module):
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
 
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
-
-    This standard encoder layer is based on the paper `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
-    Users may modify or implement in a different way during application.
+    This TransformerEncoderLayer implements the original architecture described
+    in the `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_ paper. The
+    intent of this layer is as a reference implementation for foundational understanding
+    and thus it contains only limited features relative to newer Transformer architectures.
+    Given the fast pace of innovation in transformer-like architectures, we recommend
+    exploring this `tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+    to build efficient layers from building blocks in core or using higher
+    level libraries from the `PyTorch Ecosystem <https://landscape.pytorch.org/>`_.
 
     TransformerEncoderLayer can handle either traditional torch.tensor inputs,
     or Nested Tensor inputs.  Derived classes are expected to similarly accept
@@ -669,7 +703,9 @@ class TransformerEncoderLayer(Module):
         >>> out = encoder_layer(src)
 
     Alternatively, when ``batch_first`` is ``True``:
-        >>> encoder_layer = nn.TransformerEncoderLayer(d_model=512, nhead=8, batch_first=True)
+        >>> encoder_layer = nn.TransformerEncoderLayer(
+        ...     d_model=512, nhead=8, batch_first=True
+        ... )
         >>> src = torch.rand(32, 10, 512)
         >>> out = encoder_layer(src)
 
@@ -709,7 +745,7 @@ class TransformerEncoderLayer(Module):
         nhead: int,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
         layer_norm_eps: float = 1e-5,
         batch_first: bool = False,
         norm_first: bool = False,
@@ -733,7 +769,9 @@ class TransformerEncoderLayer(Module):
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
         self.norm_first = norm_first
+        # pyrefly: ignore [bad-argument-type]
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        # pyrefly: ignore [bad-argument-type]
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
@@ -805,7 +843,7 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = (
                 "torch.backends.mha.get_fastpath_enabled() was not True"
             )
-        elif not src.dim() == 3:
+        elif src.dim() != 3:
             why_not_sparsity_fast_path = (
                 f"input not batched; expected src.dim() of 3 but got {src.dim()}"
             )
@@ -819,7 +857,7 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "self_attn._qkv_same_embed_dim was not True"
         elif not self.activation_relu_or_gelu:
             why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
-        elif not (self.norm1.eps == self.norm2.eps):
+        elif self.norm1.eps != self.norm2.eps:
             why_not_sparsity_fast_path = "norm1.eps is not equal to norm2.eps"
         elif src.is_nested and (
             src_key_padding_mask is not None or src_mask is not None
@@ -945,13 +983,14 @@ class TransformerEncoderLayer(Module):
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
 
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
-
-    This standard decoder layer is based on the paper `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
-    Users may modify or implement in a different way during application.
+    This TransformerDecoderLayer implements the original architecture described
+    in the `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_ paper. The
+    intent of this layer is as a reference implementation for foundational understanding
+    and thus it contains only limited features relative to newer Transformer architectures.
+    Given the fast pace of innovation in transformer-like architectures, we recommend
+    exploring this `tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+    to build efficient layers from building blocks in core or using higher
+    level libraries from the `PyTorch Ecosystem <https://landscape.pytorch.org/>`_.
 
     Args:
         d_model: the number of expected features in the input (required).
@@ -976,7 +1015,9 @@ class TransformerDecoderLayer(Module):
         >>> out = decoder_layer(tgt, memory)
 
     Alternatively, when ``batch_first`` is ``True``:
-        >>> decoder_layer = nn.TransformerDecoderLayer(d_model=512, nhead=8, batch_first=True)
+        >>> decoder_layer = nn.TransformerDecoderLayer(
+        ...     d_model=512, nhead=8, batch_first=True
+        ... )
         >>> memory = torch.rand(32, 10, 512)
         >>> tgt = torch.rand(32, 20, 512)
         >>> out = decoder_layer(tgt, memory)
@@ -990,7 +1031,7 @@ class TransformerDecoderLayer(Module):
         nhead: int,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
         layer_norm_eps: float = 1e-5,
         batch_first: bool = False,
         norm_first: bool = False,
@@ -1022,8 +1063,11 @@ class TransformerDecoderLayer(Module):
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
         self.norm_first = norm_first
+        # pyrefly: ignore [bad-argument-type]
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        # pyrefly: ignore [bad-argument-type]
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
+        # pyrefly: ignore [bad-argument-type]
         self.norm3 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)

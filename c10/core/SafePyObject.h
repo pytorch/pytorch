@@ -44,7 +44,7 @@ struct C10_API SafePyObject {
       (*other.pyinterpreter_)->incref(other.data_);
     }
     if (data_ != nullptr) {
-      (*pyinterpreter_)->decref(data_, /*has_pyobj_slot*/ false);
+      (*pyinterpreter_)->decref(data_);
     }
     data_ = other.data_;
     pyinterpreter_ = other.pyinterpreter_;
@@ -53,14 +53,14 @@ struct C10_API SafePyObject {
 
   ~SafePyObject() {
     if (data_ != nullptr) {
-      (*pyinterpreter_)->decref(data_, /*has_pyobj_slot*/ false);
+      (*pyinterpreter_)->decref(data_);
     }
   }
 
   c10::impl::PyInterpreter& pyinterpreter() const {
     return *pyinterpreter_;
   }
-  PyObject* ptr(const c10::impl::PyInterpreter*) const;
+  PyObject* ptr(const c10::impl::PyInterpreter* /*interpreter*/) const;
 
   // stop tracking the current object, and return it
   PyObject* release() {
@@ -103,7 +103,7 @@ struct C10_API SafePyHandle {
   c10::impl::PyInterpreter& pyinterpreter() const {
     return *pyinterpreter_;
   }
-  PyObject* ptr(const c10::impl::PyInterpreter*) const;
+  PyObject* ptr(const c10::impl::PyInterpreter* /*interpreter*/) const;
   void reset() {
     data_ = nullptr;
     pyinterpreter_ = nullptr;

@@ -140,6 +140,7 @@ def sparse_semi_structured_from_dense_cutlass(dense):
 
     if dense.dtype != torch.float:
         sparse0 = dense_4.gather(-1, idxs0.unsqueeze(-1))  # type: ignore[possibly-undefined]
+        # pyrefly: ignore [unbound-name]
         sparse1 = dense_4.gather(-1, idxs1.unsqueeze(-1))
         sparse = torch.stack((sparse0, sparse1), dim=-1).view(m, k // 2)
     else:
@@ -172,6 +173,7 @@ def sparse_semi_structured_from_dense_cutlass(dense):
     meta_offsets = _calculate_meta_reordering_scatter_offsets(
         m, meta_ncols, meta_dtype, device
     )
+    # pyrefly: ignore [unbound-name]
     meta_reordered.scatter_(0, meta_offsets, meta.view(-1))
 
     return (sparse, meta_reordered.view(m, meta_ncols))
@@ -331,11 +333,11 @@ def _compute_compressed_swizzled_bitmask(dense):
     # we first need to split into the 8x8 tiles
     bitmask_8x8_chunks = int_bitmask.unfold(0, 8, 8).unfold(1, 8, 8)
 
-    # then we unfold again to get our indivdual 4x4 tiles
+    # then we unfold again to get our individual 4x4 tiles
     bitmask_4x4_chunks = bitmask_8x8_chunks.unfold(2, 4, 4).unfold(3, 4, 4)
 
     # Each 4x4 bitmask defines two 8-bit integers, which encode the sparsity pattern
-    # of that tile. Note that the least siginificant bit is stored first.
+    # of that tile. Note that the least significant bit is stored first.
     # [1 1 0 0]
     # [1 1 0 0]  ->  0011 0011 ->   51
     # [0 0 1 1]      1100 1100      204
@@ -346,7 +348,7 @@ def _compute_compressed_swizzled_bitmask(dense):
         *bitmask_4x4_chunks.shape[:2], 4, 2, 8
     )
 
-    # to convert from binary representaiton, we can do a matmul with powers of two
+    # to convert from binary representation, we can do a matmul with powers of two
     powers_of_two = 2 ** torch.arange(8, dtype=torch.float, device="cuda")
     # To run on GPU: cast to float to do matmul and then cast back
     compressed_swizzled_bitmask = (

@@ -21,6 +21,9 @@ ExperimentalConfig::ExperimentalConfig(
     bool disable_external_correlation,
     bool profile_all_threads,
     bool capture_overload_names,
+    bool record_python_gc_info,
+    bool expose_kineto_event_metadata,
+    std::string custom_profiler_config,
     bool adjust_timestamps)
     : profiler_metrics{std::move(profiler_metrics)},
       profiler_measure_per_kernel{profiler_measure_per_kernel},
@@ -31,6 +34,9 @@ ExperimentalConfig::ExperimentalConfig(
       disable_external_correlation{disable_external_correlation},
       profile_all_threads{profile_all_threads},
       capture_overload_names{capture_overload_names},
+      record_python_gc_info{record_python_gc_info},
+      expose_kineto_event_metadata{expose_kineto_event_metadata},
+      custom_profiler_config(std::move(custom_profiler_config)),
       adjust_timestamps{adjust_timestamps} {}
 
 /*explicit*/ ExperimentalConfig::operator bool() const {

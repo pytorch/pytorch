@@ -78,7 +78,7 @@ Graph print out is straight forward and you should look for `prim::CudaFusionGro
     return (%o.5)
 ```
 
-Note that one thing that could prevents fusion when you are running training is autodiff. Fusion pass only runs within `prim::DifferentiableGraph`, so the first thing you should check is to that targetted ops are within differentiable graph subgraphs.
+Note that one thing that could prevents fusion when you are running training is autodiff. Fusion pass only runs within `prim::DifferentiableGraph`, so the first thing you should check is to that targeted ops are within differentiable graph subgraphs.
 Graph dump could be quite confusing to look at, since it naively dumps all graphs executed by profiling executor and differentiable graphs are executed via a nested graph executor. So for each graph, you might see a few segmented `Optimized Graph` where each corresponds to a differentiable node in the original graph.
 
 #### 2. Cuda Fusion Graphs

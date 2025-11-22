@@ -37,7 +37,7 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     TwoLayerLinearModel
 )
-from torch.testing._internal.common_utils import skipIfTorchDynamo
+from torch.testing._internal.common_utils import raise_on_run_directly, skipIfTorchDynamo
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_dynamic_quant_module_mappings,
@@ -866,7 +866,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
     ):
         if qconfig_dict is None:
             qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping()
-        if prepare_fn == prepare_fx:
+        if prepare_fn is prepare_fx:
             m.eval()
         else:
             m.train()
@@ -929,7 +929,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
     ):
         if qconfig_dict is None:
             qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping()
-        if prepare_fn == prepare_fx:
+        if prepare_fn is prepare_fx:
             m.eval()
         else:
             m.train()
@@ -1082,7 +1082,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
         ).eval()
         qconfig_dict = None
-        if prepare_fn == prepare_qat_fx:
+        if prepare_fn is prepare_qat_fx:
             qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
         expected_occurrence = {
             ns.call_module(OutputLogger): 2,
@@ -1103,7 +1103,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def _test_match_activations_fun_impl(self, prepare_fn=prepare_fx):
         m = LinearReluLinearFunctional().eval()
         qconfig_dict = None
-        if prepare_fn == prepare_qat_fx:
+        if prepare_fn is prepare_qat_fx:
             qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
         expected_occurrence = {
             ns.call_module(OutputLogger): 2,
@@ -1165,7 +1165,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
         ).eval()
         qconfig_dict = None
-        if prepare_fn == prepare_qat_fx:
+        if prepare_fn is prepare_qat_fx:
             qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
         res = self._test_match_shadow_activations(
             m, (torch.randn(1, 1, 4, 4),), results_len=2,
@@ -1182,7 +1182,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def _test_add_shadow_loggers_fun_impl(self, prepare_fn=prepare_fx):
         m = LinearReluLinearFunctional()
         qconfig_dict = None
-        if prepare_fn == prepare_qat_fx:
+        if prepare_fn is prepare_qat_fx:
             qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
         res = self._test_match_shadow_activations(
             m, (torch.randn(4, 4),), results_len=2, prepare_fn=prepare_fn,
@@ -1787,7 +1787,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         # extract weights
         results = extract_weights('fp32', mp, 'int8', mq)
         mq_node_names = [node.name for node in mq.graph.nodes]
-        for layer_name in results.keys():
+        for layer_name in results:
             self.assertTrue(layer_name in mq_node_names)
 
         # match activations
@@ -1799,7 +1799,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         mq_ns(data)
         results = extract_logger_info(mp_ns, mq_ns, OutputLogger, 'int8')
         mq_node_names = [node.name for node in mq_ns.graph.nodes]
-        for layer_name in results.keys():
+        for layer_name in results:
             self.assertTrue(layer_name in mq_node_names)
 
         # match shadow activations
@@ -1810,7 +1810,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
         results = extract_shadow_logger_info(
             mp_shadows_mq, OutputLogger, 'int8')
         mq_node_names = [node.name for node in mp_shadows_mq.graph.nodes]
-        for layer_name in results.keys():
+        for layer_name in results:
             self.assertTrue(layer_name in mq_node_names)
 
     @skipIfNoFBGEMM
@@ -1834,11 +1834,11 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
 
         for layer_results in results.values():
             assert 'sqnr_int8_vs_fp32' in \
-                layer_results['weight']['int8'][0].keys()
+                layer_results['weight']['int8'][0]
             assert 'l2_error_int8_vs_fp32' in \
-                layer_results['weight']['int8'][0].keys()
+                layer_results['weight']['int8'][0]
             assert 'cosine_similarity_int8_vs_fp32' in \
-                layer_results['weight']['int8'][0].keys()
+                layer_results['weight']['int8'][0]
 
     @skipIfNoFBGEMM
     def test_int8_shadows_fp32_simple(self):
@@ -2252,7 +2252,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
             msp(*example_input)
 
         def _check_logger_count(model, exp_count_stats, exp_count_comparisons):
-            for name, mod in model.named_modules():
+            for mod in model.modules():
                 if isinstance(mod, OutputLogger):
                     self.assertTrue(
                         len(mod.stats) == exp_count_stats,
@@ -2915,3 +2915,6 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             m, (torch.randn(1, 3, 224, 224),),
             qconfig_dict=qconfig_dict,
             should_log_inputs=False)
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

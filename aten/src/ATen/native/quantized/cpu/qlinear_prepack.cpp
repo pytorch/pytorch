@@ -21,6 +21,8 @@
 #else
 #include <ATen/ops/_saturate_weight_to_fp16.h>
 #include <ATen/ops/_saturate_weight_to_fp16_native.h>
+#include <ATen/ops/_wrapped_linear_prepack_native.h>
+#include <ATen/ops/_wrapped_quantized_linear_prepacked_native.h>
 #include <ATen/ops/dequantize.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/quantize_per_tensor.h>
@@ -292,17 +294,40 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightsOnednn::prepack(
   return ret_ptr;
 }
 
-inline at::Tensor pack_weight_to_onednn_tensor(
+static inline at::Tensor pack_weight_to_onednn_tensor(
     const at::Tensor& weight,
     std::optional<torch::List<int64_t>>& input_shape) {
+  at::ScalarType weigh_dtype = weight.scalar_type();
+  TORCH_CHECK(
+    weigh_dtype == at::kChar || weigh_dtype == at::kFloat8_e4m3fn,
+    "Weight should be of type int8 or float8_e4m3fn");
+  bool is_fp8 = weigh_dtype == at::kFloat8_e4m3fn;
+#if defined(__powerpc__)
+  if (is_fp8){
+#else
+  if(is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
+#endif
+    // oneDNN's fp8 requires AMX support
+    // If AMX is not available, fall back to reference implementation
+    // Transpose weight to align with behavior in oneDNN
+    return weight.t();
+  }
   std::vector<int64_t> w_dims = weight.sizes().vec();
-  ideep::tensor wei = ideep::tensor({w_dims, dnnl::memory::data_type::s8}, weight.data_ptr());
+  auto w_data_type = is_fp8
+      ? dnnl::memory::data_type::f8_e4m3
+      : dnnl::memory::data_type::s8;
+  ideep::tensor wei = ideep::tensor({w_dims, w_data_type}, weight.data_ptr());
   wei.transpose_(0, 1); // oneDNN requires transposed weight
   ideep::dims input_dims = input_shape.has_value() ? input_shape.value().vec() : ideep::dims();
   ideep::attr_t op_attr;
-  op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
+  if (!is_fp8) {
+    op_attr.set_zero_points_mask(DNNL_ARG_SRC, 0);
+  }
+  auto x_data_type = is_fp8
+      ? dnnl::memory::data_type::f8_e4m3
+      : dnnl::memory::data_type::u8;
   auto w_desc = ideep::matmul_forward::expected_weights_desc(
-      wei.get_dims(), input_dims, dnnl::memory::data_type::s8, dnnl::memory::data_type::u8, op_attr);
+      wei.get_dims(), input_dims, w_data_type, x_data_type, op_attr);
   ideep::tensor expected_weight(w_desc);
   expected_weight.feed_from(wei);
   auto packed_weight = at::native::new_with_itensor_mkldnn(
@@ -312,7 +337,7 @@ inline at::Tensor pack_weight_to_onednn_tensor(
   return packed_weight;
 }
 
-inline at::Tensor pack_weight_to_fp16_onednn_tensor(
+static inline at::Tensor pack_weight_to_fp16_onednn_tensor(
     at::Tensor& weight,
     std::optional<torch::List<int64_t>>& input_shape) {
   TORCH_CHECK(weight.scalar_type() == at::kHalf || weight.scalar_type() == at::kFloat, "Weight should be of type float or float16");
@@ -342,12 +367,12 @@ at::Tensor _saturate_weight_to_fp16(const Tensor& weight) {
 }
 
 template <class... Inputs>
-inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
+static inline std::vector<c10::IValue> makeStack(Inputs&&... inputs) {
   return {std::forward<Inputs>(inputs)...};
 }
 
 template <class... Args>
-inline std::vector<c10::IValue> callOpByHandle(
+static inline std::vector<c10::IValue> callOpByHandle(
     const c10::OperatorHandle& op,
     Args... args) {
   auto stack = makeStack(std::forward<Args>(args)...);
@@ -356,7 +381,7 @@ inline std::vector<c10::IValue> callOpByHandle(
 }
 
 template <class... Args>
-inline std::vector<c10::IValue> callOpByName(
+static inline std::vector<c10::IValue> callOpByName(
     const char* func_name,
     const char* overload_name,
     Args... args) {
@@ -366,7 +391,7 @@ inline std::vector<c10::IValue> callOpByName(
   return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);
 }
 
-at::Tensor wrapped_quantized_linear(
+static at::Tensor wrapped_quantized_linear(
     at::Tensor input,
     const at::Tensor& input_scale,
     const at::Tensor& input_zero_point,
@@ -422,7 +447,7 @@ at::Tensor wrapped_quantized_linear(
 #endif // USE_FBGEMM
 }
 
-at::Tensor wrapped_quantized_linear_meta(
+static at::Tensor wrapped_quantized_linear_meta(
     at::Tensor input,
     [[maybe_unused]] const at::Tensor& input_scale,
     [[maybe_unused]] const at::Tensor& input_zero_point,
@@ -456,11 +481,6 @@ at::Tensor wrapped_quantized_linear_meta(
       false, "This PyTorch installation was not built with FBGEMM operators");
 #endif // USE_FBGEMM
 }
-
-at::Tensor _wrapped_linear_prepack(const at::Tensor& weight,
-    const at::Tensor& weight_scale,
-    const at::Tensor& weight_zero_point,
-    const at::Tensor& bias);
 
 at::Tensor _wrapped_linear_prepack(const at::Tensor& weight,
     const at::Tensor& weight_scale,
@@ -500,13 +520,6 @@ at::Tensor _wrapped_quantized_linear_prepacked(const at::Tensor& input, const at
     const at::Tensor& packed_weight,
     const at::Tensor& output_scale,
     const at::Tensor& output_zero_point,
-    [[maybe_unused]] const int64_t out_channel);
-
-at::Tensor _wrapped_quantized_linear_prepacked(const at::Tensor& input, const at::Tensor& input_scale,
-    const at::Tensor& input_zero_point,
-    const at::Tensor& packed_weight,
-    const at::Tensor& output_scale,
-    const at::Tensor& output_zero_point,
     [[maybe_unused]] const int64_t out_channel) {
   // This op is similar to wrapped_quantized_linear, but it takes the prepacked weight
 #ifdef USE_FBGEMM
@@ -528,12 +541,7 @@ at::Tensor _wrapped_quantized_linear_prepacked(const at::Tensor& input, const at
 #endif // USE_FBGEMM
 }
 
-at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
-    [[maybe_unused]] const at::Tensor& weight_scale,
-    [[maybe_unused]] const at::Tensor& weight_zero_point,
-    [[maybe_unused]] const at::Tensor& bias);
-
-at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
+static at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
     [[maybe_unused]] const at::Tensor& weight_scale,
     [[maybe_unused]] const at::Tensor& weight_zero_point,
     [[maybe_unused]] const at::Tensor& bias) {
@@ -551,15 +559,7 @@ at::Tensor _wrapped_linear_prepack_meta(const at::Tensor& weight,
 #endif // USE_FBGEMM
 }
 
-at::Tensor _wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
-    [[maybe_unused]] const at::Tensor& input_scale,
-    [[maybe_unused]] const at::Tensor& input_zero_point,
-    [[maybe_unused]] const at::Tensor& packed_weight,
-    [[maybe_unused]] const at::Tensor& output_scale,
-    [[maybe_unused]] const at::Tensor& output_zero_point,
-    const int64_t out_channel);
-
-at::Tensor _wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
+static at::Tensor _wrapped_quantized_linear_prepacked_meta(const at::Tensor& input,
     [[maybe_unused]] const at::Tensor& input_scale,
     [[maybe_unused]] const at::Tensor& input_zero_point,
     [[maybe_unused]] const at::Tensor& packed_weight,

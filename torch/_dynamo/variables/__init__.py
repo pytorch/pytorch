@@ -26,7 +26,10 @@ from .ctx_manager import (
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
+    DynamoConfigPatchVariable,
+    ErrorOnGraphBreakVariable,
     FSDPParamGroupUseTrainingStateVariable,
+    FxTracebackAnnotateVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
@@ -34,10 +37,9 @@ from .ctx_manager import (
     JvpIncrementNestingCtxManagerVariable,
     SDPAKernelVariable,
     SetFwdGradEnabledContextManager,
-    StreamContextVariable,
-    StreamVariable,
     TemporarilyPopInterpreterStackCtxManagerVariable,
     VmapIncrementNestingCtxManagerVariable,
+    WithEnterFunctionVariable,
     WithExitFunctionVariable,
 )
 from .dicts import (
@@ -53,7 +55,8 @@ from .distributed import BackwardHookVariable, DistributedVariable, PlacementVar
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
-    CreateTMADescriptorVariable,
+    CreateTMADescriptorExperimentalVariable,
+    CreateTMADescriptorStableVariable,
     FunctionDecoratedByContextlibContextManagerVariable,
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
@@ -61,23 +64,29 @@ from .functions import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    PyTreeGetNodeTypeFunctionVariable,
+    PyTreeTreeIsLeafFunctionVariable,
     SkipFunctionVariable,
-    TMADescriptorVariable,
+    TMADescriptorExperimentalVariable,
+    TMADescriptorStableVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    WrapperUserFunctionVariable,
+    WrapperUserMethodVariable,
 )
 from .higher_order_ops import (
     FunctionalCallVariable,
     FunctorchHigherOrderVariable,
+    ReparametrizeModuleCallVariable,
     TorchHigherOrderOperatorVariable,
 )
 from .iter import (
     CountIteratorVariable,
-    CycleIteratorVariable,
     FilterVariable,
     IteratorVariable,
     ItertoolsVariable,
     MapVariable,
+    ObjectIteratorVariable,
     RepeatIteratorVariable,
     ZipVariable,
 )
@@ -122,6 +131,7 @@ from .nn_module import (
 )
 from .optimizer import OptimizerVariable
 from .sdpa import SDPAParamsVariable
+from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
     DataPtrVariable,
     FakeItemVariable,
@@ -133,6 +143,7 @@ from .tensor import (
 )
 from .torch import TorchCtxManagerClassVariable, TorchInGraphFunctionVariable
 from .user_defined import (
+    FrozenDataClassVariable,
     MutableMappingVariable,
     RemovableHandleVariable,
     UserDefinedClassVariable,
@@ -141,6 +152,7 @@ from .user_defined import (
     UserDefinedExceptionObjectVariable,
     UserDefinedListVariable,
     UserDefinedObjectVariable,
+    UserDefinedSetVariable,
     UserDefinedTupleVariable,
 )
 
@@ -156,14 +168,15 @@ __all__ = [
     "ConstDictVariable",
     "ContextWrappingVariable",
     "CountIteratorVariable",
-    "CreateTMADescriptorVariable",
+    "CreateTMADescriptorExperimentalVariable",
+    "CreateTMADescriptorStableVariable",
     "CUDADeviceVariable",
-    "CycleIteratorVariable",
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
     "DictKeySetVariable",
+    "DynamoConfigPatchVariable",
     "EnumVariable",
     "FakeItemVariable",
     "GetAttrVariable",
@@ -190,13 +203,15 @@ __all__ = [
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",
+    "ErrorOnGraphBreakVariable",
     "SkipFunctionVariable",
     "SliceVariable",
     "StringFormatVariable",
     "SuperVariable",
     "TemporarilyPopInterpreterStackCtxManagerVariable",
     "TensorVariable",
-    "TMADescriptorVariable",
+    "TMADescriptorExperimentalVariable",
+    "TMADescriptorStableVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
     "TorchVersionVariable",
@@ -211,6 +226,7 @@ __all__ = [
     "UserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
+    "WithEnterFunctionVariable",
     "WithExitFunctionVariable",
     "MappingProxyVariable",
 ]

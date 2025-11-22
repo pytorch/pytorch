@@ -87,8 +87,6 @@ using caffe2::serialize::MemoryReadAdapter;
 using caffe2::serialize::PyTorchStreamReader;
 using caffe2::serialize::ReadAdapterInterface;
 
-OpCode parseOpCode(const char* str);
-
 TypePtr resolveTypeNameMobile(
     const c10::QualifiedName& qn,
     const std::shared_ptr<CompilationUnit>& compilation_unit) {
@@ -216,7 +214,7 @@ class BytecodeDeserializer final {
       mobile::Function* function);
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::unordered_set<std::string> imported_libs_;
-  std::unique_ptr<PyTorchStreamReader> reader_{};
+  std::unique_ptr<PyTorchStreamReader> reader_;
   std::optional<at::Device> device_;
   uint64_t module_load_options_;
   // From `version` or `.data/version` in model.ptl and it's compute
@@ -393,7 +391,7 @@ void BytecodeDeserializer::parseMethods(
         debug_handles_m_tuple,
         function.get());
 
-    // 3. If upgrader is needed, change change the OP instrunction to CALL
+    // 3. If upgrader is needed, change change the OP instruction to CALL
     // instruction (In next PR, use_upgrader will be parsed to parseInstruction
     // function and do the actual change)
     if (use_upgrader) {
@@ -647,7 +645,7 @@ mobile::Module _load_for_mobile(
     std::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     uint64_t module_load_options) {
-#ifdef TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT
+#if defined(TORCH_LIBRARY_THREAD_UNSAFE_LAZY_INIT) && defined(C10_MOBILE)
   torch::initialize_torch_libraries();
 #endif
   auto observer = torch::observerConfig().getModuleObserver();

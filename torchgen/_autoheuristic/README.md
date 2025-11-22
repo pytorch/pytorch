@@ -3,7 +3,7 @@ AutoHeuristic is a framework that allows one to use results from autotuning to l
 
 ## How to use AutoHeuristic
 In general, the following steps have to performed:
-- The AutoHeursitic constructor has to be called.
+- The AutoHeuristic constructor has to be called.
 - A script that runs benchmarks in order to collect training data has to be implemented.
 - The train_decision.py (if you want to learn a decision tree) or train_regression.py (if you want to learn a regression tree) script has to be run in order to learn the heuristic and generate it to code.
 
@@ -89,7 +89,7 @@ context = AHContext()
 context.add_feature("m", mat1.shape[0])
 context.add_feature("k", mat1.shape[1])
 
-# adding a categorical feture
+# adding a categorical feature
 context.add_feature("mat1_dtype", mat1.dtype, is_categorical=True)
 ```
 

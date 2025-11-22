@@ -367,7 +367,7 @@ class DeepSpeech(nn.Module):
         """
         seq_len = input_length
         for m in self.conv.modules():
-            if type(m) == nn.modules.conv.Conv2d:
+            if type(m) is nn.modules.conv.Conv2d:
                 seq_len = (
                     seq_len
                     + 2 * m.padding[1]
@@ -473,7 +473,7 @@ class TransformerModel(nn.Module):
         return F.log_softmax(output, dim=-1)
 
 
-# From https://github.com/pytorch/text/blob/master/torchtext/modules
+# From https://github.com/pytorch/text/tree/master/torchtext/nn/modules
 class MultiheadAttentionContainer(torch.nn.Module):
     def __init__(self, nhead, in_proj_container, attention_layer, out_proj):
         r"""A multi-head attention container

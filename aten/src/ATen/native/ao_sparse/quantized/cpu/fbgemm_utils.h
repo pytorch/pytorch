@@ -4,9 +4,11 @@
 #include <c10/core/QScheme.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
 #include <fbgemm/FbgemmSparse.h>
 #include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
+C10_DIAGNOSTIC_POP()
 
 
 namespace ao::sparse {

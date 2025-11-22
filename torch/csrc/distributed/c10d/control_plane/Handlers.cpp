@@ -1,10 +1,17 @@
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
+#include <torch/csrc/distributed/c10d/FlightRecorder.hpp>
+
 #include <fmt/format.h>
 #include <mutex>
 #include <shared_mutex>
 #include <stdexcept>
+#include <string>
+#include <unordered_map>
 #include <utility>
+#include <vector>
+
+#include <torch/csrc/distributed/c10d/control_plane/WaitCounterHandler.hpp>
 
 namespace c10d::control_plane {
 
@@ -46,8 +53,8 @@ class HandlerRegistry {
   }
 
  private:
-  std::shared_mutex handlersMutex_{};
-  std::unordered_map<std::string, HandlerFunc> handlers_{};
+  std::shared_mutex handlersMutex_;
+  std::unordered_map<std::string, HandlerFunc> handlers_;
 };
 
 HandlerRegistry& getHandlerRegistry() {
@@ -59,6 +66,30 @@ RegisterHandler pingHandler{"ping", [](const Request&, Response& res) {
                               res.setContent("pong", "text/plain");
                               res.setStatus(200);
                             }};
+
+RegisterHandler frTracehandler(
+    "fr_trace_json",
+    [](const Request&, Response& res) {
+      auto trace = ::c10d::dump_fr_trace_json(true, true);
+      res.setContent(std::move(trace), "application/json");
+      res.setStatus(200);
+    });
+
+RegisterHandler waitCounterHandler{
+    "wait_counter_values",
+    [](const Request&, Response& res) {
+      // Get all wait counter values from our tracking backend
+      res.setContent(getWaitCounterValuesJson(), "application/json");
+      res.setStatus(200);
+    }};
+
+#if !defined(FBCODE_CAFFE2)
+// Initialize the wait counter backend
+[[maybe_unused]] static bool init_backend = []() {
+  ensureWaitCounterBackendRegistered();
+  return true;
+}();
+#endif
 
 } // namespace
 

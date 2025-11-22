@@ -434,7 +434,7 @@ def powerSGD_hook(
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
         # by comparing this copy and the input tensor updated after decompression.
-        input_tensor_cp = torch.clone(input_tensor).detach()
+        input_tensor_cp = input_tensor.detach().clone()
 
     # Unflatten the input tensor into per-parameter tensors, for layer-wise compression.
     tensors = bucket.gradients()
@@ -631,6 +631,7 @@ def powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
+            assert input_tensor_cp is not None
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         if not state.warm_start:
             state.p_memory_dict.clear()
@@ -756,7 +757,7 @@ def batched_powerSGD_hook(
         # Keep a copy of the input tensor,
         # so that we can compute the local error caused by compression later,
         # by comparing this copy and the input tensor updated after decompression.
-        input_tensor_cp = torch.clone(input_tensor).detach()
+        input_tensor_cp = input_tensor.detach().clone()
     matrix = input_tensor.view(square_side_length, square_side_length)
 
     # Reuse P and Q from the previous iteration if possible.
@@ -843,6 +844,7 @@ def batched_powerSGD_hook(
 
         if state.use_error_feedback:
             # Memorize the local errors.
+            assert input_tensor_cp is not None
             state.error_dict[bucket_index] = input_tensor_cp - input_tensor
         # Removing this seemingly unnecessary sync somehow may cause failures.
         # See: https://github.com/pytorch/pytorch/pull/54838

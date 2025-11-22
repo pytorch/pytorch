@@ -1,20 +1,39 @@
-"Manages CMake."
+"""Manages CMake."""
 
 from __future__ import annotations
 
+import functools
+import json
 import multiprocessing
 import os
 import platform
+import shutil
 import sys
 import sysconfig
-from distutils.version import LooseVersion
 from pathlib import Path
-from subprocess import CalledProcessError, check_call, check_output
-from typing import Any, cast
+from subprocess import CalledProcessError, check_call, check_output, DEVNULL
+from typing import cast
 
-from . import which
 from .cmake_utils import CMakeValue, get_cmake_cache_variables_from_file
-from .env import BUILD_DIR, check_negative_env_flag, IS_64BIT, IS_DARWIN, IS_WINDOWS
+from .env import (
+    BUILD_DIR,
+    check_negative_env_flag,
+    CMAKE_MINIMUM_VERSION_STRING,
+    IS_64BIT,
+    IS_DARWIN,
+    IS_WINDOWS,
+)
+
+
+try:
+    from packaging.version import Version
+except ImportError:
+    try:
+        from setuptools.dist import Version  # type: ignore[attr-defined,no-redef]
+    except ImportError:
+        from distutils.version import (  # type: ignore[assignment,no-redef]
+            LooseVersion as Version,
+        )
 
 
 def _mkdir_p(d: str) -> None:
@@ -26,12 +45,19 @@ def _mkdir_p(d: str) -> None:
         ) from e
 
 
+# Print to stderr
+eprint = functools.partial(print, file=sys.stderr, flush=True)
+
+
 # Ninja
 # Use ninja if it is on the PATH. Previous version of PyTorch required the
 # ninja python package, but we no longer use it, so we do not have to import it
-USE_NINJA = not check_negative_env_flag("USE_NINJA") and which("ninja") is not None
+USE_NINJA = bool(not check_negative_env_flag("USE_NINJA") and shutil.which("ninja"))
 if "CMAKE_GENERATOR" in os.environ:
     USE_NINJA = os.environ["CMAKE_GENERATOR"].lower() == "ninja"
+
+
+CMAKE_MINIMUM_VERSION = Version(CMAKE_MINIMUM_VERSION_STRING)
 
 
 class CMake:
@@ -50,50 +76,71 @@ class CMake:
         """
         return os.path.join(self.build_dir, "CMakeCache.txt")
 
+    @property
+    def _ninja_build_file(self) -> str:
+        r"""Returns the path to build.ninja.
+
+        Returns:
+          string: The path to build.ninja.
+        """
+        return os.path.join(self.build_dir, "build.ninja")
+
     @staticmethod
     def _get_cmake_command() -> str:
-        "Returns cmake command."
+        """Returns cmake command."""
 
-        cmake_command = "cmake"
         if IS_WINDOWS:
-            return cmake_command
-        cmake3_version = CMake._get_version(which("cmake3"))
-        cmake_version = CMake._get_version(which("cmake"))
+            return "cmake"
 
-        _cmake_min_version = LooseVersion("3.18.0")
-        if all(
-            ver is None or ver < _cmake_min_version
-            for ver in [cmake_version, cmake3_version]
-        ):
-            raise RuntimeError("no cmake or cmake3 with version >= 3.18.0 found")
+        cmake_versions: list[str] = []
+        valid_cmake_versions: dict[str, Version] = {}
+        for cmd in ("cmake", "cmake3"):
+            command = shutil.which(cmd)
+            ver = CMake._get_version(command)
+            if ver is not None:
+                eprint(f"Found {cmd} ({command}) version: {ver}", end="")
+                cmake_versions.append(f"{cmd}=={ver}")
+                # pyrefly: ignore [unsupported-operation]
+                if ver >= CMAKE_MINIMUM_VERSION:
+                    eprint(f" (>={CMAKE_MINIMUM_VERSION})")
+                    valid_cmake_versions[cmd] = ver
+                else:
+                    eprint(f" (<{CMAKE_MINIMUM_VERSION})")
 
-        if cmake3_version is None:
-            cmake_command = "cmake"
-        elif cmake_version is None:
-            cmake_command = "cmake3"
-        else:
-            if cmake3_version >= cmake_version:
-                cmake_command = "cmake3"
-            else:
-                cmake_command = "cmake"
-        return cmake_command
+        if not valid_cmake_versions:
+            raise RuntimeError(
+                f"no cmake or cmake3 with version >= {CMAKE_MINIMUM_VERSION}, "
+                f"found: {cmake_versions}"
+            )
+        return max(valid_cmake_versions, key=valid_cmake_versions.get)  # type: ignore[arg-type]
 
     @staticmethod
-    def _get_version(cmd: str | None) -> Any:
-        "Returns cmake version."
+    def _get_version(cmd: str | None) -> Version | None:
+        """Returns cmake version."""
 
         if cmd is None:
             return None
-        for line in check_output([cmd, "--version"]).decode("utf-8").split("\n"):
-            if "version" in line:
-                return LooseVersion(line.strip().split(" ")[2])
-        raise RuntimeError("no version found")
+
+        try:
+            cmake_capabilities = json.loads(
+                check_output(
+                    [cmd, "-E", "capabilities"],
+                    stderr=DEVNULL,
+                    text=True,
+                ),
+            )
+        except (OSError, CalledProcessError, json.JSONDecodeError):
+            cmake_capabilities = {}
+        cmake_version = cmake_capabilities.get("version", {}).get("string")
+        if cmake_version is not None:
+            return Version(cmake_version)
+        raise RuntimeError(f"Failed to get CMake version from command: {cmd}")
 
     def run(self, args: list[str], env: dict[str, str]) -> None:
-        "Executes cmake with arguments and an environment."
+        """Executes cmake with arguments and an environment."""
 
         command = [self._cmake_command] + args
-        print(" ".join(command))
+        eprint(" ".join(command))
         try:
             check_call(command, cwd=self.build_dir, env=env)
         except (CalledProcessError, KeyboardInterrupt):
@@ -104,7 +151,7 @@ class CMake:
 
     @staticmethod
     def defines(args: list[str], **kwargs: CMakeValue) -> None:
-        "Adds definitions to a cmake argument list."
+        """Adds definitions to a cmake argument list."""
         for key, value in sorted(kwargs.items()):
             if value is not None:
                 args.append(f"-D{key}={value}")
@@ -126,14 +173,31 @@ class CMake:
         my_env: dict[str, str],
         rerun: bool,
     ) -> None:
-        "Runs cmake to generate native build files."
+        """Runs cmake to generate native build files."""
 
         if rerun and os.path.isfile(self._cmake_cache_file):
             os.remove(self._cmake_cache_file)
 
-        ninja_build_file = os.path.join(self.build_dir, "build.ninja")
-        if os.path.exists(self._cmake_cache_file) and not (
-            USE_NINJA and not os.path.exists(ninja_build_file)
+        cmake_cache_file_available = os.path.exists(self._cmake_cache_file)
+        if cmake_cache_file_available:
+            cmake_cache_variables = self.get_cmake_cache_variables()
+            make_program: str | None = cmake_cache_variables.get("CMAKE_MAKE_PROGRAM")  # type: ignore[assignment]
+            if make_program and not shutil.which(make_program):
+                # CMakeCache.txt exists, but the make program (e.g., ninja) does not.
+                # See also: https://github.com/astral-sh/uv/issues/14269
+                # This can happen if building with PEP-517 build isolation, where `ninja` was
+                # installed in the isolated environment of the previous build run, but it has been
+                # removed. The `ninja` executable with an old absolute path not available anymore.
+                eprint(
+                    "!!!WARNING!!!: CMakeCache.txt exists, "
+                    f"but CMAKE_MAKE_PROGRAM ({make_program!r}) does not exist. "
+                    "Clearing CMake cache."
+                )
+                self.clear_cache()
+                cmake_cache_file_available = False
+
+        if cmake_cache_file_available and (
+            not USE_NINJA or os.path.exists(self._ninja_build_file)
         ):
             # Everything's in place. Do not rerun.
             return
@@ -147,9 +211,9 @@ class CMake:
             generator = os.getenv("CMAKE_GENERATOR", "Visual Studio 16 2019")
             supported = ["Visual Studio 16 2019", "Visual Studio 17 2022"]
             if generator not in supported:
-                print("Unsupported `CMAKE_GENERATOR`: " + generator)
-                print("Please set it to one of the following values: ")
-                print("\n".join(supported))
+                eprint("Unsupported `CMAKE_GENERATOR`: " + generator)
+                eprint("Please set it to one of the following values: ")
+                eprint("\n".join(supported))
                 sys.exit(1)
             args.append("-G" + generator)
             toolset_dict = {}
@@ -158,7 +222,7 @@ class CMake:
                 toolset_dict["version"] = toolset_version
                 curr_toolset = os.getenv("VCToolsVersion")
                 if curr_toolset is None:
-                    print(
+                    eprint(
                         "When you specify `CMAKE_GENERATOR_TOOLSET_VERSION`, you must also "
                         "activate the vs environment of this version. Please read the notes "
                         "in the build steps carefully."
@@ -263,7 +327,7 @@ class CMake:
 
         # The default value cannot be easily obtained in CMakeLists.txt. We set it here.
         py_lib_path = sysconfig.get_path("purelib")
-        cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH", None)
+        cmake_prefix_path = build_options.get("CMAKE_PREFIX_PATH")
         if cmake_prefix_path:
             build_options["CMAKE_PREFIX_PATH"] = (
                 py_lib_path + ";" + cast(str, cmake_prefix_path)
@@ -275,6 +339,7 @@ class CMake:
         # future, as CMake can detect many of these libraries pretty comfortably. We have them here for now before CMake
         # integration is completed. They appear here not in the CMake.defines call below because they start with either
         # "BUILD_" or "USE_" and must be overwritten here.
+        use_numpy = not check_negative_env_flag("USE_NUMPY")
         build_options.update(
             {
                 # Note: Do not add new build options to this dict if it is directly read from environment variable -- you
@@ -284,9 +349,15 @@ class CMake:
                 "BUILD_TEST": build_test,
                 # Most library detection should go to CMake script, except this one, which Python can do a much better job
                 # due to NumPy's inherent Pythonic nature.
-                "USE_NUMPY": not check_negative_env_flag("USE_NUMPY"),
+                "USE_NUMPY": use_numpy,
             }
         )
+
+        # Detect build dependencies from python lib path (in order to set *_HOME variables)
+        # NVSHMEM
+        nvshmem_py_dir = py_lib_path + "/nvidia/nvshmem"
+        if os.path.exists(nvshmem_py_dir):
+            build_options["NVSHMEM_PY_DIR"] = nvshmem_py_dir
 
         # Options starting with CMAKE_
         cmake__options = {
@@ -297,12 +368,26 @@ class CMake:
         # error if the user also attempts to set these CMAKE options directly.
         specified_cmake__options = set(build_options).intersection(cmake__options)
         if len(specified_cmake__options) > 0:
-            print(
+            eprint(
                 ", ".join(specified_cmake__options)
                 + " should not be specified in the environment variable. They are directly set by PyTorch build script."
             )
             sys.exit(1)
         build_options.update(cmake__options)
+
+        if use_numpy:
+            try:
+                # This helps CMake find the correct include directory for NumPy
+                # This is especially useful in cross compiled environments
+                import numpy
+
+                Python_NumPy_INCLUDE_DIR = numpy.get_include()
+                build_options.update(
+                    dict(Python_NumPy_INCLUDE_DIR=Python_NumPy_INCLUDE_DIR)
+                )
+            except ImportError:
+                # use_numpy is just a hint.... so we can fail silently here
+                pass
 
         CMake.defines(
             args,
@@ -326,11 +411,8 @@ class CMake:
                     my_env[env_var_name] = str(my_env[env_var_name].encode("utf-8"))
                 except UnicodeDecodeError as e:
                     shex = ":".join(f"{ord(c):02x}" for c in my_env[env_var_name])
-                    print(
-                        f"Invalid ENV[{env_var_name}] = {shex}",
-                        file=sys.stderr,
-                    )
-                    print(e, file=sys.stderr)
+                    eprint(f"Invalid ENV[{env_var_name}] = {shex}")
+                    eprint(e)
         # According to the CMake manual, we should pass the arguments first,
         # and put the directory as the last element. Otherwise, these flags
         # may not be passed correctly.
@@ -341,7 +423,7 @@ class CMake:
         self.run(args, env=my_env)
 
     def build(self, my_env: dict[str, str]) -> None:
-        "Runs cmake to build binaries."
+        """Runs cmake to build binaries."""
 
         from .env import build_type
 
@@ -379,3 +461,10 @@ class CMake:
             # CMake 3.12 provides a '-j' option.
             build_args += ["-j", max_jobs]
         self.run(build_args, my_env)
+
+    def clear_cache(self) -> None:
+        """Clears the CMake cache."""
+        if os.path.isfile(self._cmake_cache_file):
+            os.remove(self._cmake_cache_file)
+        if os.path.isfile(self._ninja_build_file):
+            os.remove(self._ninja_build_file)

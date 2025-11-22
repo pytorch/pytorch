@@ -340,6 +340,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"NestedTensorCPU", c10::DispatchKey::NestedTensorCPU},
       {"NestedTensorCUDA", c10::DispatchKey::NestedTensorCUDA},
       {"NestedTensorXPU", c10::DispatchKey::NestedTensorXPU},
+      {"NestedTensorHPU", c10::DispatchKey::NestedTensorHPU},
       {"NestedTensorMeta", c10::DispatchKey::NestedTensorMeta},
       {"NestedTensorPrivateUse1", c10::DispatchKey::NestedTensorPrivateUse1},
       {"PrivateUse1", c10::DispatchKey::PrivateUse1},
@@ -353,6 +354,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
 
       {"SparseCPU", c10::DispatchKey::SparseCPU},
       {"SparseCUDA", c10::DispatchKey::SparseCUDA},
+      {"SparseMPS", c10::DispatchKey::SparseMPS},
+      {"SparseCsrMPS", c10::DispatchKey::SparseCsrMPS},
       {"SparseHIP", c10::DispatchKey::SparseHIP},
       {"SparseXPU", c10::DispatchKey::SparseXPU},
       {"SparseVE", c10::DispatchKey::SparseVE},

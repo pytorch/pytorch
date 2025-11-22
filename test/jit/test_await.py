@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 import torch
 from torch import Tensor
 from torch._awaits import _Await as Await
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
@@ -390,3 +391,7 @@ class TestAwait(JitTestCase):
         sm = torch.jit.load(iofile)
         script_out_load = sm(inp)
         self.assertTrue(torch.allclose(expected, script_out_load))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

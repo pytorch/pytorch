@@ -59,6 +59,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/native/ConvUtils.h>
+#include <ATen/native/RangeUtils.h>
 #include <ATen/native/ReduceOpsUtils.h>
 #include <ATen/native/TensorConversions.h>
 #include <c10/core/ScalarType.h>
@@ -72,7 +73,7 @@
 
 namespace torch::lazy {
 
-// Copied from ATen/native/utils/ParamUtils.h, which aparently I can't include
+// Copied from ATen/native/utils/ParamUtils.h, which apparently I can't include
 // from here?
 static std::vector<int64_t> expand_param_if_needed(
     at::IntArrayRef list_param,
@@ -84,7 +85,7 @@ static std::vector<int64_t> expand_param_if_needed(
     std::ostringstream ss;
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
-       << "dimensions, but got " << param_name << "=" << list_param;
+       << "dimensions, but got " << param_name << '=' << list_param;
     TORCH_CHECK(false, ss.str());
   } else {
     return list_param.vec();
@@ -106,9 +107,6 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
         // Note: acc_type further defines an accumulataion type depending on the
         // scalar_t and whether its on cuda vs cpu.
         using accscalar_t = at::acc_type<scalar_t, false>;
-        auto xstart = start.to<accscalar_t>();
-        auto xend = end.to<accscalar_t>();
-        auto xstep = step.to<accscalar_t>();
 
         // we use double precision for (start - end) / step
         // to compute size_d for consistency across devices.
@@ -129,18 +127,7 @@ TORCH_API std::vector<Shape> compute_shape_arange_out(
               step.to<double>());
         }
 
-        TORCH_CHECK(xstep > 0 || xstep < 0, "step must be nonzero");
-        TORCH_CHECK(
-            std::isfinite(static_cast<double>(xstart)) &&
-                std::isfinite(static_cast<double>(xend)),
-            "unsupported range: ",
-            xstart,
-            " -> ",
-            xend);
-        TORCH_CHECK(
-            ((xstep > 0) && (xend >= xstart)) ||
-                ((xstep < 0) && (xend <= xstart)),
-            "upper bound and larger bound inconsistent with step sign");
+        at::native::arange_check_bounds(start, end, step);
 
         TORCH_CHECK(
             size_d >= 0 &&
@@ -238,7 +225,7 @@ std::vector<Shape> compute_shape_constant_pad_nd(
     auto pad_idx = pad.size() - ((i + 1) * 2);
     auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
     TORCH_CHECK(
-        new_dim > 0,
+        new_dim >= 0,
         "The input size ",
         input_sizes[l_diff + i],
         ", plus negative padding ",
@@ -294,7 +281,7 @@ std::vector<Shape> compute_shape_convolution(
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
 
   // at::convolution performs parameter expansion before running kernels on
-  // expanded parameters we must do the same.  Shape formulae access differnent
+  // expanded parameters we must do the same.  Shape formulae access different
   // dimensions of e.g. output_padding, but output_padding may be passed in as a
   // scalar.  Sadly, accessing output_padding[1] in this case gives incorrect
   // results rather than indexing error
@@ -367,7 +354,7 @@ static std::vector<Shape> compute_shape_nonzero(
   for (auto dim_size : t.sizes()) {
     max_elements *= dim_size;
   }
-  return {Shape(at::kLong, {max_elements, (int64_t)t.sizes().size()})};
+  return {Shape(at::kLong, {max_elements, t.dim()})};
 }
 
 std::vector<Shape> compute_shape_nonzero(const at::Tensor& self) {
@@ -540,7 +527,7 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
 
   // A separate mean and var needs to be kept for each channel.
   TORCH_CHECK(
-      input.sizes().size() >= 2,
+      input.dim() >= 2,
       "Input tensor must have at least batch and channel dimensions!");
   int64_t num_features = input.size(1);
 
@@ -581,7 +568,7 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
 
   // A separate mean and var needs to be kept for each channel.
   TORCH_CHECK(
-      input.sizes().size() >= 2,
+      input.dim() >= 2,
       "Input tensor must have at least batch and channel dimensions!");
   int64_t num_features = input.size(1);
 

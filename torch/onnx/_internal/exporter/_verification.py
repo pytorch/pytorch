@@ -98,6 +98,28 @@ class VerificationInfo:
             actual_dtype=actual.dtype,
         )
 
+    def asdict(self) -> dict[str, Any]:
+        """Convert the VerificationInfo object to a dictionary.
+
+        Returns:
+            A dictionary representation of the VerificationInfo object.
+        """
+        return {
+            "name": self.name,
+            "max_abs_diff": self.max_abs_diff,
+            "max_rel_diff": self.max_rel_diff,
+            "abs_diff_hist": [
+                self.abs_diff_hist[0].tolist(),
+                self.abs_diff_hist[1].tolist(),
+            ],
+            "rel_diff_hist": [
+                self.rel_diff_hist[0].tolist(),
+                self.rel_diff_hist[1].tolist(),
+            ],
+            "expected_dtype": str(self.expected_dtype),
+            "actual_dtype": str(self.actual_dtype),
+        }
+
 
 def _compare_tensors(
     expected: torch.Tensor,
@@ -202,7 +224,7 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
     Returns:
         A dictionary mapping names to values.
     """
-    values = {}
+    values: dict[str, ir.Value] = {}
     values.update(graph.initializers)
     # The names of the values can be None or "", which we need to exclude
     for input in graph.inputs:
@@ -295,11 +317,9 @@ class _VerificationInterpreter(torch.fx.Interpreter):
             return result
         try:
             (onnx_result,) = self._onnx_program.compute_values([node_name], self._args)
-        except Exception as e:
+        except Exception:
             logger.warning(
-                "Failed to compute value for node %s: %s",
-                node_name,
-                e,
+                "Failed to compute value for node %s", node_name, exc_info=True
             )
             return result
         info = VerificationInfo.from_tensors(

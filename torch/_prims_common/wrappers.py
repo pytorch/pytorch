@@ -2,10 +2,10 @@
 import inspect
 import types
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import wraps
 from types import GenericAlias
-from typing import Callable, NamedTuple, Optional, overload, TypeVar
+from typing import NamedTuple, Optional, overload, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -28,16 +28,19 @@ _P = ParamSpec("_P")
 
 
 @overload
+# pyrefly: ignore [bad-return]
 def _maybe_convert_to_dtype(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     pass
 
 
 @overload
+# pyrefly: ignore [bad-return]
 def _maybe_convert_to_dtype(a: NumberType, dtype: torch.dtype) -> NumberType:
     pass
 
 
 @overload
+# pyrefly: ignore [bad-return]
 def _maybe_convert_to_dtype(a: Sequence, dtype: torch.dtype) -> Sequence:
     pass
 
@@ -94,7 +97,7 @@ class elementwise_type_promotion_wrapper:
 
     Takes two kwargs, type_promoting_args and type_promotion_kind.
 
-    type_promoting_args must be a string Sequence specifiying the argument names of all
+    type_promoting_args must be a string Sequence specifying the argument names of all
     arguments that participate in type promotion (and should be type promoted). If the
     arg specifies a Sequence-type then every element of the Sequence will participate in
     type promotion.
@@ -130,7 +133,7 @@ class elementwise_type_promotion_wrapper:
             type_promoting_args = tuple(
                 bound.arguments[x]
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
-                if x in bound.arguments.keys()
+                if x in bound.arguments
             )
 
             flattened_type_promoting_args = pytree.arg_tree_leaves(*type_promoting_args)
@@ -142,7 +145,7 @@ class elementwise_type_promotion_wrapper:
             promoted_args = {
                 x: _maybe_convert_to_dtype(bound.arguments[x], compute_dtype)
                 for x in self.type_promoting_arg_names  # type: ignore[union-attr]
-                if x in bound.arguments.keys()
+                if x in bound.arguments
             }
             bound.arguments.update(promoted_args)
 
@@ -177,7 +180,7 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
             "be resized unless they have zero elements. "
             "You can explicitly reuse an out tensor t by resizing it, inplace, to zero elements with t.resize_(0)."
         )
-        warnings.warn(msg)
+        warnings.warn(msg, stacklevel=2)
     return True
 
 
@@ -276,7 +279,9 @@ def out_wrapper(
             TensorLikeType
             if is_tensor
             else NamedTuple(
-                f"return_types_{fn.__name__}", [(o, TensorLikeType) for o in out_names]
+                f"return_types_{fn.__name__}",
+                # pyrefly: ignore [bad-argument-count]
+                [(o, TensorLikeType) for o in out_names],
             )
         )
 
@@ -285,7 +290,8 @@ def out_wrapper(
         is_factory_fn = all(p in sig.parameters for p in factory_kwargs)
 
         @wraps(fn)
-        def _fn(*args: _P.args, out=None, **kwargs: _P.kwargs):
+        def _fn(*args: _P.args, **kwargs: _P.kwargs):
+            out = kwargs.pop("out", None)
             if is_factory_fn and out is not None:
                 for k in factory_kwargs:
                     out_attr = getattr(out, k)
@@ -293,6 +299,7 @@ def out_wrapper(
                         kwargs[k] = out_attr
 
             def maybe_check_copy_devices(out):
+                # pyrefly: ignore [unsupported-operation]
                 if isinstance(out, TensorLike) and isinstance(args[0], TensorLike):
                     check_copy_devices(copy_from=args[0], copy_to=out)
 
@@ -306,6 +313,8 @@ def out_wrapper(
                 result = fn(*args, is_out=(out is not None), **kwargs)  # type: ignore[arg-type]
             else:
                 result = fn(*args, **kwargs)
+            if result is NotImplemented:
+                return NotImplemented
             assert (
                 (isinstance(result, TensorLike) and is_tensor)
                 or (
@@ -313,8 +322,7 @@ def out_wrapper(
                     and len(result) == len(out_names)  # type: ignore[arg-type]
                 )
                 or (
-                    fn.__name__ == "unbind"
-                    and isinstance(result, (list, tuple))  # type: ignore[arg-type]
+                    fn.__name__ == "unbind" and isinstance(result, (list, tuple))  # type: ignore[arg-type]
                 )
             )
             # unbind_copy is a special case: see https://github.com/pytorch/pytorch/issues/130829
@@ -322,7 +330,7 @@ def out_wrapper(
                 # Naively you might expect this assert to be true, but
                 # it's not:
                 #
-                #   assert type(out) == type(result)
+                #   assert type(out) is type(result)
                 #
                 # The reason is that functions under this wrapper can
                 # get registered to the Meta dispatch key, and that
@@ -339,9 +347,15 @@ def out_wrapper(
                     assert isinstance(out, TensorLike)
                     # These two operations are done in-place
                     _maybe_resize_out(
-                        out, result.shape, maybe_compute_memory_format(result)  # type: ignore[union-attr]
+                        out,
+                        result.shape,  # type: ignore[union-attr]
+                        maybe_compute_memory_format(result),
                     )
-                    _safe_copy_out(copy_from=result, copy_to=out, exact_dtype=exact_dtype)  # type: ignore[arg-type]
+                    _safe_copy_out(
+                        copy_from=result,  # type: ignore[arg-type]
+                        copy_to=out,
+                        exact_dtype=exact_dtype,
+                    )
                 else:
                     if fn.__name__ != "unbind":
                         assert isinstance(out, tuple)  # type: ignore[arg-type]
@@ -367,7 +381,9 @@ def out_wrapper(
             annotation=out_type,
         )
         # Mark that the function now returns a tuple
-        assert isinstance(sig.return_annotation, str) or sig.return_annotation in (
+        assert isinstance(
+            sig.return_annotation, (str, TypeVar)
+        ) or sig.return_annotation in (
             sig.empty,
             out_type,
             bc_out_type,
@@ -380,7 +396,8 @@ def out_wrapper(
         params = sorted(params, key=lambda p: p.kind)
 
         _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
-            parameters=params, return_annotation=return_type  # type: ignore[arg-type]
+            parameters=params,
+            return_annotation=return_type,  # type: ignore[arg-type]
         )
 
         _fn.__annotations__ = dict(getattr(fn, "__annotations__", {}))
@@ -395,7 +412,9 @@ def out_wrapper(
         # Add an indicator attribute that can be used in special cases
         # where having a function wrapped by `out_wrapper` is not desirable e.g.
         # jit
-        _fn._torch_decompositions_out_wrapper = f"This function is wrapped by {out_wrapper.__module__}.out_wrapper"  # type: ignore[attr-defined]
+        _fn._torch_decompositions_out_wrapper = (  # type: ignore[attr-defined]
+            f"This function is wrapped by {out_wrapper.__module__}.out_wrapper"
+        )
 
         return _fn
 
@@ -416,6 +435,7 @@ def backwards_not_supported(prim):
 
     class BackwardsNotSupported(torch.autograd.Function):
         @staticmethod
+        # pyrefly: ignore [bad-override]
         def forward(ctx, args_spec, *flat_args):
             args, kwargs = tree_unflatten(flat_args, args_spec)  # type: ignore[arg-type]
             return redispatch_prim(args, kwargs)
@@ -450,7 +470,9 @@ def backwards_not_supported(prim):
 # TODO: when tracing this will add torch tensors and not TensorMeta objects
 # to the trace -- we should fix this by adding a tracing context and NumberMeta classes
 # TODO: this wrapper is currently untested
-def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
+def elementwise_unary_scalar_wrapper(
+    fn: Callable[_P, _T],
+) -> Callable[_P, Union[_T, NumberType]]:
     """
     Allows unary operators that accept tensors to work with Python numbers.
     """
@@ -462,11 +484,14 @@ def elementwise_unary_scalar_wrapper(fn: Callable) -> Callable:
             dtype = utils.type_to_dtype(type(args[0]))
             args_ = list(args)
             args_[0] = torch.tensor(args[0], dtype=dtype)
+            # pyrefly: ignore [invalid-param-spec]
             result = fn(*args_, **kwargs)
             assert isinstance(result, torch.Tensor)
             return result.item()
 
+        # pyrefly: ignore [invalid-param-spec]
         return fn(*args, **kwargs)
 
     _fn.__signature__ = sig  # type: ignore[attr-defined]
+    # pyrefly: ignore [bad-return]
     return _fn

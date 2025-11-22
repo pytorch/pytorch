@@ -3,10 +3,11 @@ import copy
 import io
 import math
 import weakref
-from collections.abc import Mapping, MutableMapping
-from typing import Any, Callable, cast, NamedTuple, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Mapping, MutableMapping
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
+import torch.cuda._pin_memory_utils as pin_memory_utils
 import torch.distributed as dist
 import torch.nn.functional as F
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -183,16 +184,30 @@ def _iterate_state_dict(
 
             if companion_obj is not None:
                 if isinstance(companion_obj, DTensor):
-                    assert isinstance(ret, DTensor)
+                    if not isinstance(ret, DTensor):
+                        raise AssertionError(
+                            "ret must be a DTensor when companion_obj is a DTensor"
+                        )
                     companion_obj._local_tensor.copy_(
                         ret._local_tensor, non_blocking=non_blocking
                     )
+                elif isinstance(companion_obj, ShardedTensor):
+                    if not isinstance(ret, ShardedTensor):
+                        raise AssertionError(
+                            "ret must be a ShardedTensor when companion_obj is a ShardedTensor"
+                        )
+                    for idx, shard in enumerate(companion_obj.local_shards()):
+                        shard.tensor.copy_(
+                            ret.local_shards()[idx].tensor, non_blocking=non_blocking
+                        )
                 else:
+                    # pyrefly: ignore [missing-attribute]
                     companion_obj.copy_(ret, non_blocking=non_blocking)
                 ret = companion_obj
     else:
         ret = {} if isinstance(ret, dict) else None
 
+    # pyrefly: ignore [bad-return]
     return ret
 
 
@@ -402,28 +417,22 @@ def _create_cpu_state_dict(
         if len(obj.size()) == 0:
             return torch.tensor(0, dtype=obj.dtype)
 
+        # sometimes, a tensor might have non-zero size and 0 numel. In this case, pinning memory will fail
+        # so we take a best guess at how to replicate the tensor below to maintain symmetry in the returned
+        # state dict.
+        if obj.numel() == 0 or obj.data_ptr() == 0:
+            t = torch.zeros_like(obj, device="cpu")
+            if share_memory:
+                t = t.share_memory_()
+            return t
+
         if share_memory:
             t = torch.empty(*tuple(obj.size()), dtype=obj.dtype)
             t = t.share_memory_()
             if pin_memory:
+                pin_memory_utils.pin_memory(t.data_ptr(), t.numel() * t.element_size())
+                weakref.finalize(t, pin_memory_utils.unpin_memory, t.data_ptr())
 
-                def unpin_memory(t):
-                    succ = int(torch.cuda.cudart().cudaHostUnregister(t.data_ptr()))
-                    assert succ == 0, (
-                        f"Unpinning shared memory failed with error-code: {succ}"
-                    )
-
-                weakref.finalize(t, unpin_memory, t)
-                succ = int(
-                    torch.cuda.cudart().cudaHostRegister(
-                        t.data_ptr(),
-                        t.numel() * t.element_size(),
-                        1,  # lines up with 'cudaHostRegisterPortable'
-                    )
-                )
-                assert succ == 0, (
-                    f"Pinning shared memory failed with error-code: {succ}"
-                )
             return t
         elif pin_memory:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype).pin_memory()
@@ -446,9 +455,28 @@ def _create_cpu_state_dict(
         ret._local_tensor = tensor_func(ret._local_tensor, pg, device, None)
         return ret
 
+    def sharded_tensor_func(
+        obj: ShardedTensor,
+        pg: Optional[dist.ProcessGroup],
+        device: Optional[torch.device],
+        _: Any,
+    ) -> ShardedTensor:
+        if not obj.local_shards():
+            return obj
+
+        if obj.device != torch.device("cpu"):
+            ret = obj.to(device="cpu")
+        else:
+            ret = copy.deepcopy(obj)
+
+        for shards in ret.local_shards():
+            shards.tensor = tensor_func(shards.tensor, pg, device, None)
+
+        return ret
+
     ret = _iterate_state_dict(
         state_dict,
-        _identity_func,
+        sharded_tensor_func,
         dtensor_func,
         tensor_func,
         pg=None,
@@ -526,7 +554,8 @@ def _broadcast_tensors(
     for key in keys:
         if dist.get_rank() == 0:
             full_state = full_state_dict[key]
-            assert isinstance(full_state, torch.Tensor)
+            if not isinstance(full_state, torch.Tensor):
+                raise AssertionError("full_state must be a torch.Tensor")
             full_tensor = full_state.detach().to(pg_device)
         else:
             tensor_info = full_state_dict[key]
@@ -576,7 +605,7 @@ def _distribute_tensors(
     if pg is None:
         pg = dist.distributed_c10d._get_default_group()
     for key in keys:
-        _local_state = local_state_dict.get(key, None)
+        _local_state = local_state_dict.get(key)
         if _local_state is None or torch.is_tensor(_local_state):
             continue
 
@@ -592,7 +621,7 @@ def _distribute_tensors(
         ]
         if local_state.is_meta:
             # Use .clone() here rather than view to clone and return only the sliced portion, minimizing memory access and cost.
-            local_tensor = full_tensor[slices].detach().clone()
+            local_tensor = full_tensor[tuple(slices)].detach().clone()
             # TODO: currently, we cannot handle strided sharding if the dp dimension is not even. For example,
             # one of the case that is not yet supported is when placements = (Shard(0), _StridedShard(0, sf=2)).
             ret = DTensor.from_local(
@@ -605,7 +634,7 @@ def _distribute_tensors(
         else:
             ret = local_state
             # Copy full_tensor[slices] into local_state.to_local() to reduce memory footprint.
-            ret.to_local().copy_(full_tensor[slices])
+            ret.to_local().copy_(full_tensor[tuple(slices)])
         local_state_dict[key] = ret
 
 
@@ -685,8 +714,9 @@ def _distribute_state_dict(
         elif value.dim() == 0:
             local_state_dict[key] = value.cpu()
         else:
-            assert isinstance(value, torch.Tensor)
-            local_state = local_state_dict.get(key, None)
+            if not isinstance(value, torch.Tensor):
+                raise AssertionError("value must be a torch.Tensor")
+            local_state = local_state_dict.get(key)
             if local_state is None:
                 continue
             elif isinstance(local_state, DTensor):
@@ -770,20 +800,21 @@ def _set_element(root_dict: STATE_DICT_TYPE, path: OBJ_PATH, value: Any) -> None
     for i in range(1, len(path)):
         prev_key = path[i - 1]
         key = path[i]
-        def_val: Union[CONTAINER_TYPE, list[Any]] = {} if type(key) == str else []
+        def_val: Union[CONTAINER_TYPE, list[Any]] = {} if type(key) is str else []
 
         if isinstance(cur_container, Mapping):
             cur_container = cast(
                 CONTAINER_TYPE, cur_container.setdefault(prev_key, def_val)
             )
         else:
+            # pyrefly: ignore [bad-argument-type]
             extend_list(cur_container, prev_key)
             if cur_container[prev_key] is None:
                 cur_container[prev_key] = def_val
             cur_container = cur_container[prev_key]
 
     key = path[-1]
-    if type(key) == int:
+    if type(key) is int:
         extend_list(cast(list[Any], cur_container), key)
 
     cur_container[key] = value

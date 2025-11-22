@@ -63,7 +63,7 @@ class ModelReportVisualizer:
     1.) Initialize ModelReport object with reports of interest by passing in initialized detector objects
     2.) Prepare your model with prepare_fx
     3.) Call model_report.prepare_detailed_calibration on your model to add relevant observers
-    4.) Callibrate your model with data
+    4.) Calibrate your model with data
     5.) Call model_report.generate_report on your model to generate report and optionally remove added observers
     6.) Use output of model_report.generate_report to initialize ModelReportVisualizer instance
     7.) Use instance to view different views of data as desired, applying filters as needed
@@ -132,7 +132,7 @@ class ModelReportVisualizer:
                 # if we need plottable, ensure type of val is tensor
                 if (
                     not plottable_features_only
-                    or type(feature_dict[feature_name]) == torch.Tensor
+                    or type(feature_dict[feature_name]) is torch.Tensor
                 ):
                     unique_feature_names.add(feature_name)
 
@@ -223,6 +223,7 @@ class ModelReportVisualizer:
                         feature_val = feature_val.item()
 
                     # we add to our list of values
+                    # pyrefly: ignore [bad-argument-type]
                     tensor_table_row.append(feature_val)
 
                 tensor_table.append(tensor_table_row)
@@ -283,6 +284,7 @@ class ModelReportVisualizer:
                             feature_val = feature_val.item()
 
                         # add value to channel specific row
+                        # pyrefly: ignore [bad-argument-type]
                         new_channel_row.append(feature_val)
 
                     # add to table and increment row index counter
@@ -338,9 +340,8 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_filtered_tables(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
-            ... ) # generates table with per_channel_min info for all modules in block 1 of the model
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
+            ... )  # generates table with per_channel_min info for all modules in block 1 of the model
         """
         # first get the filtered data
         filtered_data: OrderedDict[str, Any] = self._get_filtered_data(
@@ -427,8 +428,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_table_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             >>> # prints out neatly formatted table with per_channel_min info
             >>> # for all modules in block 1 of the model
@@ -520,7 +520,7 @@ class ModelReportVisualizer:
                 # the index of the feature will the 0 + num non feature columns
                 tensor_feature_index = feature_column_offset
                 row_value = row[tensor_feature_index]
-                if not type(row_value) == str:
+                if type(row_value) is not str:
                     x_data.append(x_val_to_append)
                     y_data.append(row_value)
         elif is_valid_per_channel_plot:
@@ -543,7 +543,7 @@ class ModelReportVisualizer:
                 # the index of the feature will the 0 + num non feature columns
                 tensor_feature_index = feature_column_offset
                 row_value = row[tensor_feature_index]
-                if not type(row_value) == str:
+                if type(row_value) is not str:
                     # only append if new index we are appending
                     if len(x_data) == 0 or x_data[-1] != x_val_to_append:
                         x_data.append(x_val_to_append)
@@ -590,8 +590,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP("undefined variables")
             >>> mod_report_visualizer.generate_plot_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             >>> # outputs line plot of per_channel_min information for all
             >>> # modules in block1 of model each channel gets it's own line,
@@ -664,8 +663,7 @@ class ModelReportVisualizer:
         Example Use:
             >>> # xdoctest: +SKIP
             >>> mod_report_visualizer.generategenerate_histogram_visualization_plot_visualization(
-            ...     feature_filter = "per_channel_min",
-            ...     module_fqn_filter = "block1"
+            ...     feature_filter="per_channel_min", module_fqn_filter="block1"
             ... )
             # outputs histogram of per_channel_min information for all modules in block1 of model
                 information is gathered across all channels for all modules in block 1 for the

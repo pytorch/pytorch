@@ -10,11 +10,11 @@ API.  This API can roughly be divided into five parts:
 - **TorchScript**: An interface to the TorchScript JIT compiler and interpreter.
 - **C++ Extensions**: A means of extending the Python API with custom C++ and CUDA routines.
 
-Combining, these building blocks form a research and
+Combined, these building blocks form a research and
 production ready C++ library for tensor computation and dynamic neural
 networks with strong emphasis on GPU acceleration as well as fast CPU
 performance. It is currently in use at Facebook in research and
-production; we are looking forward to welcome more users of the PyTorch C++ API.
+production; we are looking forward to welcoming more users of the PyTorch C++ API.
 
 .. warning::
 
@@ -76,7 +76,7 @@ C++ Frontend
 ------------
 
 The PyTorch C++ frontend provides a high level, pure C++ modeling interface for
-neural network and general ML(Machine Learning) research and production use cases,
+neural networks and general ML (Machine Learning) research and production use cases,
 largely following the Python API in design and provided functionality. The C++
 frontend includes the following:
 
@@ -137,7 +137,7 @@ about this by following `this
 API concerns itself with scenarios in which you would like to extend
 TorchScript with custom operators, which can similarly be serialized and
 invoked from C++ during inference. Lastly, the `torch::jit::compile
-<https://pytorch.org/cppdocs/api/function_namespacetorch_1_1jit_1a176d99fd5bf0233119a5f49c07a1d01d.html#exhale-function-namespacetorch-1-1jit-1a176d99fd5bf0233119a5f49c07a1d01d>`_
+<https://pytorch.org/cppdocs/api/function_namespacetorch_1_1jit_1a8660dc13a6b82336aadac667e6dccba1.html>`_
 function may be used to access the TorchScript compiler directly from C++.
 
 C++ Extensions

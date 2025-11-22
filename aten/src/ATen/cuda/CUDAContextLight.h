@@ -2,6 +2,8 @@
 // Light-weight version of CUDAContext.h with fewer transitive includes
 
 #include <cstdint>
+#include <map>
+#include <shared_mutex>
 
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
@@ -87,6 +89,16 @@ TORCH_CUDA_CPP_API cublasHandle_t getCurrentCUDABlasHandle();
 TORCH_CUDA_CPP_API cublasLtHandle_t getCurrentCUDABlasLtHandle();
 
 TORCH_CUDA_CPP_API void clearCublasWorkspaces();
+struct WorkspaceMapWithMutex {
+  std::map<std::tuple<void*, void*>, at::DataPtr> map;
+  std::shared_mutex mutex;
+};
+
+TORCH_CUDA_CPP_API WorkspaceMapWithMutex& cublas_handle_stream_to_workspace();
+TORCH_CUDA_CPP_API WorkspaceMapWithMutex& cublaslt_handle_stream_to_workspace();
+TORCH_CUDA_CPP_API size_t getChosenWorkspaceSize();
+TORCH_CUDA_CPP_API size_t getCUDABlasLtWorkspaceSize();
+TORCH_CUDA_CPP_API void* getCUDABlasLtWorkspace();
 
 #if defined(CUDART_VERSION) || defined(USE_ROCM)
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();

@@ -8,7 +8,7 @@
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 #include <ATen/native/sparse/cuda/ComputeSparseTile.h>
 #include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
@@ -17,7 +17,7 @@
 
 namespace at::native {
 
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
 #else
 struct MetadataCuSparseLt {
   // Format used by cuSparseLt
@@ -280,7 +280,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
   std::string_view algorithm,
   bool use_cutlass)
 {
-#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#if defined(USE_ROCM) || defined(_MSC_VER)
   TORCH_CHECK(false, "_sparse_semi_structured_tile: not supported");
   return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{}, Tensor{});
 #else

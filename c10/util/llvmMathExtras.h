@@ -70,7 +70,7 @@ enum ZeroBehavior {
 namespace detail {
 template <typename T, std::size_t SizeOfT>
 struct TrailingZerosCounter {
-  static std::size_t count(T Val, ZeroBehavior) {
+  static std::size_t count(T Val, ZeroBehavior /*unused*/) {
     if (!Val)
       return std::numeric_limits<T>::digits;
     if (Val & 0x1)
@@ -147,7 +147,7 @@ std::size_t countTrailingZeros(T Val, ZeroBehavior ZB = ZB_Width) {
 namespace detail {
 template <typename T, std::size_t SizeOfT>
 struct LeadingZerosCounter {
-  static std::size_t count(T Val, ZeroBehavior) {
+  static std::size_t count(T Val, ZeroBehavior /*unused*/) {
     if (!Val)
       return std::numeric_limits<T>::digits;
 
@@ -370,7 +370,7 @@ constexpr inline bool isShiftedInt(int64_t x) {
 template <unsigned N>
 constexpr inline std::enable_if_t<(N < 64), bool> isUInt(uint64_t X) {
   static_assert(N > 0, "isUInt<0> doesn't make sense");
-  return X < (UINT64_C(1) << (N));
+  return X < (UINT64_C(1) << N);
 }
 template <unsigned N>
 constexpr inline std::enable_if_t<N >= 64, bool> isUInt(uint64_t /*X*/) {
@@ -610,8 +610,7 @@ inline uint64_t GreatestCommonDivisor64(uint64_t A, uint64_t B) {
 
 /// This function takes a 64-bit integer and returns the bit equivalent double.
 inline double BitsToDouble(uint64_t Bits) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  double D;
+  double D = 0;
   static_assert(sizeof(uint64_t) == sizeof(double), "Unexpected type sizes");
   memcpy(&D, &Bits, sizeof(Bits));
   return D;

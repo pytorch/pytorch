@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Quantized convolution modules."""
 
-from typing import ClassVar, Optional
+from typing import ClassVar, Literal, Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -247,9 +247,9 @@ class _ConvNd(WeightedQuantizedModule):
         if weight_post_process is None:
             weight_post_process = mod.qconfig.weight()
         weight_post_process(mod.weight)
-        assert (
-            weight_post_process.dtype == torch.qint8
-        ), "Weight observer must have a dtype of qint8"
+        assert weight_post_process.dtype == torch.qint8, (
+            "Weight observer must have a dtype of qint8"
+        )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         # the __init__ call used is the one from derived classes and not the one from _ConvNd
         qconv = cls(
@@ -278,9 +278,9 @@ class _ConvNd(WeightedQuantizedModule):
     @staticmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
         if hasattr(mod, "weight_fake_quant"):
-            # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__ + \
+            # assert type(mod) is cls.__QAT_MODULE, " nnq." + cls.__name__ + \
             # ".from_float only works for " + cls.__QAT_MODULE.__name__
-            if type(mod) == cls._NNIQAT_CONV_BN_MODULE:
+            if type(mod) is cls._NNIQAT_CONV_BN_MODULE:
                 mod.weight, mod.bias = fuse_conv_bn_weights(
                     mod.weight,
                     mod.bias,
@@ -290,13 +290,13 @@ class _ConvNd(WeightedQuantizedModule):
                     mod.bn.weight,
                     mod.bn.bias,
                 )
-            assert hasattr(
-                mod, "activation_post_process"
-            ), "Input QAT module must have observer attached"
+            assert hasattr(mod, "activation_post_process"), (
+                "Input QAT module must have observer attached"
+            )
             weight_post_process = mod.weight_fake_quant
             activation_post_process = mod.activation_post_process
         else:
-            assert type(mod) == cls._FLOAT_MODULE, (
+            assert type(mod) is cls._FLOAT_MODULE, (
                 " nnq."
                 + cls.__name__
                 + ".from_float only works for "
@@ -304,9 +304,9 @@ class _ConvNd(WeightedQuantizedModule):
                 + " but got:"
                 + str(type(mod))
             )
-            assert hasattr(
-                mod, "qconfig"
-            ), "Input float module must have qconfig defined."
+            assert hasattr(mod, "qconfig"), (
+                "Input float module must have qconfig defined."
+            )
             activation_post_process = (
                 None
                 if not hasattr(mod, "activation_post_process")
@@ -401,13 +401,14 @@ class Conv1d(_ConvNd):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
     ):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _single(kernel_size)
         stride = _single(stride)
+        # pyrefly: ignore [bad-assignment]
         padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
 
@@ -467,7 +468,7 @@ class Conv1d(_ConvNd):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
@@ -517,6 +518,7 @@ class Conv2d(_ConvNd):
         >>> output = m(q_input)
 
     """
+
     _FLOAT_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
     _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nniqat.ConvBn2d
     _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU2d
@@ -596,7 +598,7 @@ class Conv2d(_ConvNd):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
@@ -646,6 +648,7 @@ class Conv3d(_ConvNd):
         >>> output = m(q_input)
 
     """
+
     _FLOAT_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
     _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nniqat.ConvBn3d
     _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU3d
@@ -726,7 +729,7 @@ class Conv3d(_ConvNd):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
@@ -792,7 +795,7 @@ class _ConvTransposeNd(_ConvNd):
         return res
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module or qparams_dict.
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
@@ -805,13 +808,13 @@ class _ConvTransposeNd(_ConvNd):
             + ".from_float only works for "
             + cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
         )
-        assert type(mod) == cls._FLOAT_MODULE, msg
+        assert type(mod) is cls._FLOAT_MODULE, msg
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined."
         weight_post_process = mod.qconfig.weight()  # type: ignore[operator, union-attr]
         weight_post_process(mod.weight)
-        assert (
-            weight_post_process.dtype == torch.qint8
-        ), "Weight observer must have a dtype of qint8"
+        assert weight_post_process.dtype == torch.qint8, (
+            "Weight observer must have a dtype of qint8"
+        )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         # the __init__ call used is the one from derived classes and not the one from _ConvTransposeNd
         qconv = cls(
@@ -839,7 +842,7 @@ class _ConvTransposeNd(_ConvNd):
             return qconv
 
     @staticmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module
         Args:
             ref_qconvt (Module): a reference quantized  module, either produced by torch.ao.quantization
@@ -987,7 +990,7 @@ class ConvTranspose1d(_ConvTransposeNd):
         )
 
     @classmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         return _ConvTransposeNd.from_reference(
             cls, ref_qconvt, output_scale, output_zero_point
         )
@@ -1110,7 +1113,7 @@ class ConvTranspose2d(_ConvTransposeNd):
         )
 
     @classmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         return _ConvTransposeNd.from_reference(
             cls, ref_qconvt, output_scale, output_zero_point
         )
@@ -1235,7 +1238,7 @@ class ConvTranspose3d(_ConvTransposeNd):
         )
 
     @classmethod
-    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):
+    def from_reference(cls, ref_qconvt, output_scale, output_zero_point):  # type: ignore[override]
         return _ConvTransposeNd.from_reference(
             cls, ref_qconvt, output_scale, output_zero_point
         )

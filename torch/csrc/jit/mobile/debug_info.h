@@ -14,7 +14,7 @@ namespace torch::jit {
  * exception of BackendRuntimeException should raised using debug handles.
  * getSourceDebugString method is responsible for translating debug
  * handles to correspond debug information.
- * This debug informatin includes stack trace of model level source code and
+ * This debug information includes stack trace of model level source code and
  * module hierarchy where the exception occurred.
  */
 class MobileDebugTable {

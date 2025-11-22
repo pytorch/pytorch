@@ -74,8 +74,6 @@ struct TORCH_API ChannelRegistration {
 
 TORCH_DECLARE_REGISTRY(TensorPipeChannelRegistry, ChannelRegistration);
 
-constexpr auto kDefaultNumWorkerThreads = 16;
-
 struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
   TensorPipeRpcBackendOptions(
       int numWorkerThreads,
@@ -121,8 +119,8 @@ struct TORCH_API TensorPipeRpcBackendOptions : public RpcBackendOptions {
       deviceMaps[workerName] = deviceMap;
     } else {
       for (auto& entry : deviceMap) {
-        // c10::Device has no default constructor, hence map[device] dosn't work
-        // In C++-17 we can use insert_or_assign.
+        // c10::Device has no default constructor, hence map[device] doesn't
+        // work In C++-17 we can use insert_or_assign.
         auto entryIter = iter->second.find(entry.first);
         if (entryIter == iter->second.end()) {
           iter->second.emplace(entry.first, entry.second);
@@ -234,11 +232,11 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // messages by server, and write request messages by client. This
   // is a protected method since it is overwritten by FaultyTensorPipeAgent
   virtual void pipeWrite(
-      const std::shared_ptr<tensorpipe::Pipe>&,
+      const std::shared_ptr<tensorpipe::Pipe>& /*pipe*/,
       const c10::intrusive_ptr<Message>& message,
       std::vector<c10::Device>&& devices,
       std::vector<c10::Stream> streams,
-      std::function<void(const tensorpipe::Error&)>) noexcept;
+      std::function<void(const tensorpipe::Error&)> /*fn*/) noexcept;
 
  private:
   // Removes the given messageId with the given expirationTime from the
@@ -259,11 +257,11 @@ class TORCH_API TensorPipeAgent : public RpcAgent {
   // TensorPipe read function that could be used to read response messages
   // by client, and read request messages by server.
   void pipeRead(
-      const std::shared_ptr<tensorpipe::Pipe>&,
+      const std::shared_ptr<tensorpipe::Pipe>& /*pipe*/,
       std::function<void(
           const tensorpipe::Error&,
           c10::intrusive_ptr<Message>,
-          std::vector<c10::Stream>)>) noexcept;
+          std::vector<c10::Stream>)> /*fn*/) noexcept;
 
   // Callback of listener accept()
   void onListenerAccepted(

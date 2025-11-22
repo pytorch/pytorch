@@ -18,8 +18,8 @@ import logging
 import math
 import operator
 import types
-from typing import Callable, Literal, Union
-from typing_extensions import TypeAlias
+from collections.abc import Callable
+from typing import Literal, TypeAlias, Union
 
 import torch
 import torch._ops
@@ -42,6 +42,9 @@ class OnnxDecompMeta:
     signature: The ONNX signature of the function. When None, the signature is inferred.
     is_custom: Whether the function is a custom function.
     is_complex: Whether the function is a function that handles complex valued inputs.
+    opset_introduced:
+        The ONNX opset version in which the function was introduced.
+        Its specifies the minimum ONNX opset version required to use the function.
     device: The device the function is registered to. If None, it is registered to all devices.
     skip_signature_inference: Whether to skip signature inference for the function.
     """
@@ -51,6 +54,7 @@ class OnnxDecompMeta:
     signature: _schemas.OpSignature | None
     is_custom: bool = False
     is_complex: bool = False
+    opset_introduced: int = 18
     device: Literal["cuda", "cpu"] | str | None = None  # noqa: PYI051
     skip_signature_inference: bool = False
 
@@ -60,8 +64,11 @@ class OnnxDecompMeta:
                 if isinstance(self.onnx_function, onnxscript.OnnxFunction):
                     signature = _schemas.OpSignature.from_function(  # type: ignore[attr-defined]
                         self.onnx_function,
+                        # pyrefly: ignore [missing-attribute]
                         self.onnx_function.function_ir.domain,
+                        # pyrefly: ignore [missing-attribute]
                         self.onnx_function.name,
+                        # pyrefly: ignore [missing-attribute]
                         opset_version=self.onnx_function.opset.version,
                     )
                 else:
@@ -76,7 +83,7 @@ class OnnxDecompMeta:
                     # When the function is targeting an HOP, for example, it will accept
                     # functions as arguments and fail to generate an ONNX signature.
                     # In this case we set signature to None and dispatch to this function always.
-                    logger.warning(
+                    logger.warning(  # noqa: G200
                         "Failed to infer the signature for function '%s' because '%s'"
                         "All nodes targeting `%s` will be dispatched to this function",
                         self.onnx_function,
@@ -150,13 +157,14 @@ class ONNXRegistry:
         return self._opset_version
 
     @classmethod
-    def from_torchlib(cls) -> ONNXRegistry:
+    def from_torchlib(cls, opset_version=_constants.TORCHLIB_OPSET) -> ONNXRegistry:
         """Populates the registry with ATen functions from torchlib.
 
         Args:
             torchlib_registry: The torchlib registry to use for populating the registry.
         """
         registry = cls()
+        registry._opset_version = opset_version
         for meta in _torchlib_registry.get_torchlib_ops():
             registry._register(meta.fx_target, meta)
 
@@ -185,6 +193,7 @@ class ONNXRegistry:
                 logger.exception("Failed to register '%s'. Skipped", qualified_name)
                 continue
 
+        registry._cleanup_registry_based_on_opset_version()
         return registry
 
     def _register(
@@ -273,6 +282,25 @@ class ONNXRegistry:
             True if the given op is registered, otherwise False.
         """
         return bool(self.get_decomps(target))
+
+    def _cleanup_registry_based_on_opset_version(self) -> None:
+        """Pick the implementation with the highest opset version valid until the current opset version."""
+        cleaned_functions = {}
+        for target_or_name, decomps in self.functions.items():
+            # Filter decompositions to only include those with opset_introduced <= opset_version
+            decomps = [d for d in decomps if d.opset_introduced <= self.opset_version]
+
+            # Keep only the decomposition with the highest opset_introduced
+            if decomps:
+                # Find the maximum opset_introduced
+                max_opset = max(d.opset_introduced for d in decomps)
+
+                # Keep all decompositions with the maximum opset_introduced
+                cleaned_functions[target_or_name] = [
+                    d for d in decomps if d.opset_introduced == max_opset
+                ]
+
+        self.functions = cleaned_functions
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(functions={self.functions})"

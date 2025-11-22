@@ -58,7 +58,7 @@ def backend_registered(backend_name):
         True if the backend has been registered with ``register_backend``, else
         False.
     """
-    return backend_name in BackendType.__members__.keys()
+    return backend_name in BackendType.__members__
 
 
 def register_backend(
@@ -95,6 +95,7 @@ def register_backend(
     BackendType.__repr__ = _backend_type_repr  # type: ignore[assignment]
     if BackendType.__doc__:
         BackendType.__doc__ = _backend_type_doc
+    # pyrefly: ignore [unsupported-operation]
     return BackendType[backend_name]
 
 
@@ -350,7 +351,7 @@ def _tensorpipe_init_backend_handler(
 
     device_count = torch.cuda.device_count()
 
-    is_static_group = True if world_size else False
+    is_static_group = bool(world_size)
     # world_size is specified so this is a static group (ranks cannot join and leave)
     if is_static_group:
         # The agent's join method is required to behave like a barrier and perform

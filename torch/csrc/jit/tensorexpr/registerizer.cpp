@@ -131,17 +131,17 @@ std::shared_ptr<AccessInfo> AccessInfo::cloneWithHiddenInfo(
 }
 
 void AccessInfo::print() const {
-  std::cout << "Access: " << *buf_ << "{";
+  std::cout << "Access: " << *buf_ << '{';
   for (const auto& i : indices_) {
-    std::cout << *i << " ";
+    std::cout << *i << ' ';
   }
   std::cout << "} stores: " << stores_.size() << " (" << *store_cost_ << ") -";
-  std::cout << " loads: " << loads_.size() << " (" << *load_cost_ << ")";
+  std::cout << " loads: " << loads_.size() << " (" << *load_cost_ << ')';
   if (conditionId_) {
     std::cout << " cond: " << conditionId_;
   }
 
-  std::cout << "\n";
+  std::cout << '\n';
 }
 
 // Scope
@@ -225,7 +225,7 @@ void RegisterizerAnalysis::visit(const ForPtr& v) {
       // possible that an access at a higher scope could "unhide" the
       // conditional access, in which case we need to hoist. If there is no
       // access to this element at a higher scope then we cannot safely hoist.
-      // We cannot know at this level whether that will or wont occur.
+      // We cannot know at this level whether that will or won't occur.
       //
       // The solution we take here is to split the space-time continuum, and
       // keep both versions of the access handy. If the hoisted access is not
@@ -542,7 +542,7 @@ void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
         closeAccessIntoScope(pCandidate, parent);
         parentAccesses.erase(parentIt);
 
-        // the childs access inserted into the parent scope.
+        // the children access inserted into the parent scope.
         closeAccessIntoScope(candidate, parent);
         continue;
       }
@@ -567,7 +567,7 @@ void RegisterizerAnalysis::mergeCurrentScopeIntoParent() {
       ++it;
     }
 
-    // Insert the childs closed access into the parent scope.
+    // Insert the children closed access into the parent scope.
     closeAccessIntoScope(candidate, parent);
   }
 

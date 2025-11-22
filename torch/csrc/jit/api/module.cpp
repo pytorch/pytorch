@@ -148,7 +148,7 @@ Module::Module(
 // as we bring up the system since it will degrade performance
 // and may introduce bugs. test_jit.py provides context managers
 // that enable it for specific tests.
-thread_local bool inline_everything = false;
+static thread_local bool inline_everything = false;
 bool& getInlineEverythingMode() {
   return inline_everything;
 }
@@ -615,7 +615,7 @@ std::string Module::dump_to_str(
             print_method_bodies, print_attr_values, print_param_values));
   }
   ss << "  }" << '\n';
-  ss << "}" << '\n';
+  ss << '}' << '\n';
 
   return ss.str();
 }

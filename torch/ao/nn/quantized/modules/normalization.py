@@ -37,11 +37,14 @@ class LayerNorm(torch.nn.LayerNorm):
             normalized_shape,
             eps=eps,
             elementwise_affine=elementwise_affine,
+            # pyrefly: ignore [bad-argument-type]
             **factory_kwargs,
         )
         self.weight = weight
         self.bias = bias
+        # pyrefly: ignore [bad-argument-type]
         self.register_buffer("scale", torch.tensor(scale, **factory_kwargs))
+        # pyrefly: ignore [bad-argument-type]
         self.register_buffer("zero_point", torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
@@ -93,6 +96,7 @@ class GroupNorm(torch.nn.GroupNorm):
         * **zero_point** - quantization zero point of the output, type: long.
 
     """
+
     __constants__ = ["num_groups", "num_channels", "eps", "affine"]
 
     def __init__(
@@ -112,7 +116,9 @@ class GroupNorm(torch.nn.GroupNorm):
         super().__init__(num_groups, num_channels, eps, affine, **factory_kwargs)
         self.weight = weight
         self.bias = bias
+        # pyrefly: ignore [bad-argument-type]
         self.register_buffer("scale", torch.tensor(scale, **factory_kwargs))
+        # pyrefly: ignore [bad-argument-type]
         self.register_buffer("zero_point", torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
@@ -174,7 +180,9 @@ class InstanceNorm1d(torch.nn.InstanceNorm1d):
         )
         self.weight = weight
         self.bias = bias
+        # pyrefly: ignore [bad-argument-type]
         self.register_buffer("scale", torch.tensor(scale, **factory_kwargs))
+        # pyrefly: ignore [bad-argument-type]
         self.register_buffer("zero_point", torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
@@ -241,7 +249,9 @@ class InstanceNorm2d(torch.nn.InstanceNorm2d):
         )
         self.weight = weight
         self.bias = bias
+        # pyrefly: ignore [bad-argument-type]
         self.register_buffer("scale", torch.tensor(scale, **factory_kwargs))
+        # pyrefly: ignore [bad-argument-type]
         self.register_buffer("zero_point", torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):
@@ -308,7 +318,9 @@ class InstanceNorm3d(torch.nn.InstanceNorm3d):
         )
         self.weight = weight
         self.bias = bias
+        # pyrefly: ignore [bad-argument-type]
         self.register_buffer("scale", torch.tensor(scale, **factory_kwargs))
+        # pyrefly: ignore [bad-argument-type]
         self.register_buffer("zero_point", torch.tensor(zero_point, **factory_kwargs))
 
     def forward(self, input):

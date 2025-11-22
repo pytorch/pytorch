@@ -53,7 +53,7 @@ class TestGenUnboxing(unittest.TestCase):
         temp_file.seek(0)
         args = [
             "--op-registration-allowlist=op1",
-            "--TEST-ONLY-op-registration-allowlist-yaml-path={temp_file.name}",
+            f"--TEST-ONLY-op-registration-allowlist-yaml-path={temp_file.name}",
             "--op-selection-yaml-path=path2",
         ]
         gen_unboxing.main(args)

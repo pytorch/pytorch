@@ -1,6 +1,4 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch.ao.nn.quantized.modules.utils import (
@@ -34,9 +32,9 @@ class LinearPackedParams(torch.nn.Module):
     def set_weight_bias(
         self,
         weight: torch.Tensor,
-        bias: Optional[torch.Tensor],
-        row_block_size: Optional[int],
-        col_block_size: Optional[int],
+        bias: torch.Tensor | None,
+        row_block_size: int | None,
+        col_block_size: int | None,
     ) -> None:
         assert row_block_size is not None and col_block_size is not None
         self._packed_params = torch.ops.sparse.qlinear_prepack(
@@ -104,6 +102,7 @@ class Linear(torch.nn.Module):
     r"""
     A quantized sparse linear module with quantized tensor as inputs and outputs.
     """
+
     _version = 1
     _FLOAT_MODULE = torch.nn.Linear
 
@@ -209,9 +208,9 @@ class Linear(torch.nn.Module):
     def set_weight_bias(
         self,
         w: torch.Tensor,
-        b: Optional[torch.Tensor],
-        row_block_size: Optional[int],
-        col_block_size: Optional[int],
+        b: torch.Tensor | None,
+        row_block_size: int | None,
+        col_block_size: int | None,
     ) -> None:
         assert row_block_size is not None and col_block_size is not None
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)
@@ -224,7 +223,7 @@ class Linear(torch.nn.Module):
 
         TODO(zaf): Need to add the sparse params to the qconfig
         """
-        assert type(mod) == cls._FLOAT_MODULE, (
+        assert type(mod) is cls._FLOAT_MODULE, (
             cls._get_name() + ".from_float only works for " + cls._FLOAT_MODULE.__name__
         )
         assert hasattr(mod, "sparse_params"), (
@@ -265,7 +264,10 @@ class Linear(torch.nn.Module):
             dtype=dtype,
         )
         qlinear.set_weight_bias(
-            qweight, mod.bias, row_block_size, col_block_size  # type: ignore[arg-type]
+            qweight,
+            mod.bias,
+            row_block_size,  # type: ignore[arg-type]
+            col_block_size,  # type: ignore[arg-type]
         )
         qlinear.scale = float(act_scale)
         qlinear.zero_point = int(act_zp)

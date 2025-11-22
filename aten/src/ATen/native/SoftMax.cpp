@@ -176,7 +176,7 @@ void host_softmax(
   scalar_t* input_data_base = input.data_ptr<scalar_t>();
   scalar_t* output_data_base = output.data_ptr<scalar_t>();
   bool* mask_data_base = mask;
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
+  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, static_cast<int64_t>(1));
   parallel_for(
       0, outer_size * inner_size, grain_size,
       [&](int64_t begin, int64_t end) {
@@ -265,7 +265,7 @@ void host_softmax_backward(
   scalar_t* output_data_base = output.data_ptr<scalar_t>();
   scalar_t* gradOutput_data_base = grad.data_ptr<scalar_t>();
   bool* mask_data_base = mask;
-  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
+  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, static_cast<int64_t>(1));
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
         for (const auto i : c10::irange(begin, end)) {
@@ -559,7 +559,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::
       TORCH_CHECK((input_.sizes()[0] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
                   "For mask_type == 1 mask shape should be (B, L)");
       if (dim_ != input_.dim() - 1) {
-            // We only process padding mask in the optimized way if softmax is applied along the last dimesion,
+            // We only process padding mask in the optimized way if softmax is applied along the last dimension,
             // otherwise we need to expand the mask into a generic 4D one
             mask = mask_.view({input_.sizes()[0], 1, 1, input_.sizes()[2]});
             mask = mask.expand(input_.sizes()).contiguous();
@@ -570,7 +570,7 @@ Tensor masked_softmax_cpu(const Tensor& input_, const Tensor& mask_, const std::
       TORCH_CHECK((mask.dim() == 2) && (input_.sizes()[2] == mask.sizes()[0]) && (input_.sizes()[2] == mask.sizes()[1]),
                   "For mask_type == 0 mask shape should be (L, L)");
       if (dim_ != input_.dim() - 1) {
-            // We only process attention mask in a optimized way if softmax is applied along the last dimesion,
+            // We only process attention mask in a optimized way if softmax is applied along the last dimension,
             // otherwise we need to expand the mask into a generic 4D one
             mask = mask.view({1, 1, input_.sizes()[2], input_.sizes()[2]});
             mask = mask.expand(input_.sizes()).contiguous();

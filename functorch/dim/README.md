@@ -5,7 +5,7 @@ Named Tensors using First-class Dimensions in PyTorch
 
 _An implementation of [named tensors](https://namedtensor.github.io) with the functionality of [einsum](http://einops.rocks]http://einops.rocks) , batching ([vmap](https://jax.readthedocs.io/en/latest/jax.html#vectorization-vmap), [xmap](https://jax.readthedocs.io/en/latest/notebooks/xmap_tutorial.html)), and tensor indexing by adding dimension objects to PyTorch_.
 
-The tensor input to a resnet might have the shape [8, 3, 224, 224] but informally we think of those dimensions as 'batch', 'channel', 'width', and 'height'. Eventhough 'width' and 'height' have the same _size_ we still think of them as separate dimensions, and if we have two _different_ images, we think of both as sharing the _same_ 'channel' dimension.
+The tensor input to a resnet might have the shape [8, 3, 224, 224] but informally we think of those dimensions as 'batch', 'channel', 'width', and 'height'. Even though 'width' and 'height' have the same _size_ we still think of them as separate dimensions, and if we have two _different_ images, we think of both as sharing the _same_ 'channel' dimension.
 
 Named tensors gives these dimensions names. [PyTorch's current implementation](https://pytorch.org/docs/stable/named_tensor.html) uses strings to name dimensions. Instead, this library introduces a Python object, a `Dim`, to represent the concept. By expanding the semantics of tensors with dim objects, in addition to naming dimensions, we can get behavior equivalent to batching transforms (xmap, vmap), einops-style rearrangement, and loop-style tensor indexing.
 
@@ -51,19 +51,18 @@ We may eventually upstream them into PyTorch itself along with `functorch`.
 We have to install a nightly build of PyTorch so first set up an environment:
 
 ```sh
-conda create --name dim
-conda activate dim
+python -m venv dim
+source dim/bin/activate  # or `& .\dim\Scripts\Activate.ps1` on Windows
 ```
 
 First-class dims requires a fairly recent nightly build of PyTorch so that functorch will work. You can install it using one of these commands:
 
 ```sh
-# For CUDA 10.2
-conda install pytorch torchvision torchaudio cudatoolkit=10.2 -c pytorch-nightly
-# For CUDA 11.3
-conda install pytorch torchvision torchaudio cudatoolkit=11.3 -c pytorch-nightly
+# For CUDA
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu116
+
 # For CPU-only build
-conda install pytorch torchvision torchaudio cpuonly -c pytorch-nightly
+pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 ```
 
 Install dim. You will be asked for github credentials to access the fairinternal organization.
@@ -747,12 +746,14 @@ These compilers and language have syntax and semantics that resemble the loop-le
 
 Dimension objects are just an extension of the existing PyTorch tensors and eager semantics, so there is no friction switching between normal Python code and code that uses them. However, since loops over the dimensions are defined implicitly, they can still execute in Python with good performance compared to explicit loops. Furthermore, with dimension objects, a tensors containing dimensions can compute through code that is oblivious to the dimension such as batching examples. There is no need to separate code into 'compiled' vs 'eager'.
 
-In this way, first-class dims are a way of adapting the nicer syntax of these array compilers and languages to eager numpy-style libraries.
+In this way, first-class dims are a way of adapting the nicer syntax of these array compilers and languages to eager numpy-style libraries.  Note, however, that first class dimensions are not natively compiled, so if you write code that performs many outer products with the expectation of it being fused, you will generally not get good performance or memory use (except for matrix-multiply-like patterns specifically.)
 
 
 Performance Expectations
 ========================
-First-class dimensions are not a compiler. They provide syntax for existing PyTorch operations such as advanced indexing that is easier to read and write. For large sized tensors, the performance of any statements including them will be the same as using the already existing operations. An important exception is the pattern matching of products and summation, where performance will be improved by issuing to a matrix-multiply kernel. The C++ implementation of dimensions adds a small overhead of around 2us on top of PyTorch's normal overhead of 8us to each function that uses them. In the future, the implementation can encorporate more fusion optimization to further improve performance of this style of code.
+First-class dimensions are not a compiler. They provide syntax for existing PyTorch operations such as advanced indexing that is easier to read and write. For large sized tensors, the performance of any statements including them will be the same as using the already existing operations. An important exception is the pattern matching of products and summation, where performance will be improved by issuing to a matrix-multiply kernel.
+
+Originally, there was a C++ implementation of dimensions adds a small overhead of around 2us on top of PyTorch's normal overhead of 8us to each function that uses them.  However, this implementation had some manual memory managemetn bugs and was not kept up to date with CPython updates.  The latest Python implementation is two orders of magnitude slower due to CPU overhead; for overhead sensitive applications you should compile the code to eliminate this overhead.
 
 
 ## License

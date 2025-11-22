@@ -10,8 +10,8 @@ import re
 import tempfile
 import threading
 import unittest
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch._dynamo
@@ -490,13 +490,13 @@ class OpCheckMode(TorchFunctionMode):
         # Location of the failures dict. Makes it so that the error message is better.
         self.failures_dict_path = failures_dict_path
 
-        # OpCheckMode surpresses errors, collects them here, and then raises them on exit.
+        # OpCheckMode suppresses errors, collects them here, and then raises them on exit.
         # Maps qualname -> List[(Exception, func, maybe args, maybe kwargs)]
         self.seen_ops_to_errors = {}
 
     def maybe_raise_errors_on_exit(self) -> None:
         # Check expected failures first
-        for qualname in self.seen_ops_to_errors.keys():
+        for qualname in self.seen_ops_to_errors:
             option = self.failures_dict.get_status(qualname, self.test_name)
             if len(self.seen_ops_to_errors[qualname]) == 0:
                 if should_update_failures_dict():
@@ -518,7 +518,7 @@ class OpCheckMode(TorchFunctionMode):
                         )
                 continue
         failed_ops = []
-        for qualname in self.seen_ops_to_errors.keys():
+        for qualname in self.seen_ops_to_errors:
             option = self.failures_dict.get_status(qualname, self.test_name)
             if option != "xsuccess":
                 continue
@@ -605,7 +605,7 @@ class OpCheckMode(TorchFunctionMode):
 
         option = self.failures_dict.get_status(qualname, self.test_name)
         if option == "xsuccess" or option == "xfail":
-            # Surpress all errors during execution. Raise them during __exit__.
+            # Suppress all errors during execution. Raise them during __exit__.
             try:
                 if qualname not in self.seen_ops_to_errors:
                     self.seen_ops_to_errors[qualname] = []

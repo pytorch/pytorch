@@ -9,6 +9,7 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/DeviceType.h>
+#include <c10/core/alignment.h>
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
@@ -17,6 +18,17 @@
 #include <c10/util/irange.h>
 
 namespace c10 {
+
+using CaptureId_t = unsigned long long;
+// first is set if the instance is created by CUDAGraph::capture_begin.
+// second is set if the instance is created by at::cuda::graph_pool_handle.
+using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
+
+struct MempoolIdHash {
+  std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
+    return mempool_id.first != 0 ? mempool_id.first : mempool_id.second;
+  }
+};
 
 // A DataPtr is a unique pointer (with an attached deleter and some
 // context for the deleter) to some memory, which also records what
@@ -39,6 +51,10 @@ class C10_API DataPtr {
       : ptr_(data, ctx, ctx_deleter), device_(device) {}
   void* operator->() const {
     return ptr_.get();
+  }
+  C10_ALWAYS_INLINE bool /* success */ unsafe_reset_data_and_ctx(
+      void* new_data_and_ctx) {
+    return ptr_.unsafe_reset_data_and_ctx(new_data_and_ctx);
   }
   void clear() {
     ptr_.clear();

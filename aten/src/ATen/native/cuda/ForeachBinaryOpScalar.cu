@@ -45,7 +45,7 @@ std::vector<Tensor> foreach_binary_op(
           /* res_arg_index */ 1>(),
       Op<opmath_t>(),
       scalar.to<opmath_t>());
-  return tensor_lists[1];
+  return std::move(tensor_lists[1]);
 }
 
 template <typename T, template <class> class Op>

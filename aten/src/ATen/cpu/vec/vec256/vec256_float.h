@@ -1,5 +1,4 @@
 #pragma once
-
 // DO NOT DEFINE STATIC DATA IN THIS HEADER!
 // See Note [Do not compile initializers with AVX]
 
@@ -17,45 +16,81 @@ inline namespace CPU_CAPABILITY {
 
 #if defined(CPU_CAPABILITY_AVX2)
 
-template <> class Vectorized<float> {
-private:
+template <>
+struct is_vec_specialized_for<float> : std::bool_constant<true> {};
+
+template <>
+class Vectorized<float> {
+ private:
   __m256 values;
-public:
+
+ public:
   using value_type = float;
   using size_type = int;
   static constexpr size_type size() {
     return 8;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = _mm256_setzero_ps();
+  }
   Vectorized(__m256 v) : values(v) {}
   Vectorized(float val) {
     values = _mm256_set1_ps(val);
   }
-  Vectorized(float val1, float val2, float val3, float val4,
-         float val5, float val6, float val7, float val8) {
+  Vectorized(
+      float val1,
+      float val2,
+      float val3,
+      float val4,
+      float val5,
+      float val6,
+      float val7,
+      float val8) {
     values = _mm256_setr_ps(val1, val2, val3, val4, val5, val6, val7, val8);
   }
   Vectorized(const float (&arr)[8])
-      : Vectorized(arr[0], arr[1], arr[2], arr[3], arr[4], arr[5], arr[6], arr[7]) {}
+      : Vectorized(
+            arr[0],
+            arr[1],
+            arr[2],
+            arr[3],
+            arr[4],
+            arr[5],
+            arr[6],
+            arr[7]) {}
   operator __m256() const {
     return values;
   }
   template <int64_t mask>
-  static Vectorized<float> blend(const Vectorized<float>& a, const Vectorized<float>& b) {
+  static Vectorized<float> blend(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b) {
     return _mm256_blend_ps(a.values, b.values, mask);
   }
-  static Vectorized<float> blendv(const Vectorized<float>& a, const Vectorized<float>& b,
-                              const Vectorized<float>& mask) {
+  static Vectorized<float> blendv(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b,
+      const Vectorized<float>& mask) {
     return _mm256_blendv_ps(a.values, b.values, mask.values);
   }
-  template<typename step_t>
-  static Vectorized<float> arange(float base = 0.f, step_t step = static_cast<step_t>(1)) {
+  template <typename step_t>
+  static Vectorized<float> arange(
+      float base = 0.f,
+      step_t step = static_cast<step_t>(1)) {
     return Vectorized<float>(
-      base,            base +     step, base + 2 * step, base + 3 * step,
-      base + 4 * step, base + 5 * step, base + 6 * step, base + 7 * step);
+        base,
+        base + step,
+        base + 2 * step,
+        base + 3 * step,
+        base + 4 * step,
+        base + 5 * step,
+        base + 6 * step,
+        base + 7 * step);
   }
-  static Vectorized<float> set(const Vectorized<float>& a, const Vectorized<float>& b,
-                           int64_t count = size()) {
+  static Vectorized<float> set(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b,
+      int64_t count = size()) {
     switch (count) {
       case 0:
         return a;
@@ -80,9 +115,10 @@ public:
     if (count == size())
       return _mm256_loadu_ps(reinterpret_cast<const float*>(ptr));
     __at_align__ float tmp_values[size()];
-    // Ensure uninitialized memory does not change the output value See https://github.com/pytorch/pytorch/issues/32502
-    // for more details. We do not initialize arrays to zero using "={0}" because gcc would compile it to two
-    // instructions while a loop would be compiled to one instruction.
+    // Ensure uninitialized memory does not change the output value See
+    // https://github.com/pytorch/pytorch/issues/32502 for more details. We do
+    // not initialize arrays to zero using "={0}" because gcc would compile it
+    // to two instructions while a loop would be compiled to one instruction.
     for (const auto i : c10::irange(size())) {
       tmp_values[i] = 0.0;
     }
@@ -99,10 +135,11 @@ public:
       std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
   }
-  const float& operator[](int idx) const  = delete;
+  const float& operator[](int idx) const = delete;
   float& operator[](int idx) = delete;
   int zero_mask() const {
-    // returns an integer mask where all zero elements are translated to 1-bit and others are translated to 0-bit
+    // returns an integer mask where all zero elements are translated to 1-bit
+    // and others are translated to 0-bit
     __m256 cmp = _mm256_cmp_ps(values, _mm256_set1_ps(0.0f), _CMP_EQ_OQ);
     return _mm256_movemask_ps(cmp);
   }
@@ -111,8 +148,9 @@ public:
   }
 
   bool has_inf_nan() const {
-    __m256 self_sub  = _mm256_sub_ps(values, values);
-    return (_mm256_movemask_epi8(_mm256_castps_si256(self_sub)) & 0x77777777) != 0;
+    __m256 self_sub = _mm256_sub_ps(values, values);
+    return (_mm256_movemask_epi8(_mm256_castps_si256(self_sub)) & 0x77777777) !=
+        0;
   }
 
   Vectorized<float> map(float (*const f)(float)) const {
@@ -166,10 +204,10 @@ public:
   Vectorized<float> atanh() const {
     return Vectorized<float>(Sleef_atanhf8_u10(values));
   }
-  Vectorized<float> atan2(const Vectorized<float> &b) const {
+  Vectorized<float> atan2(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_atan2f8_u10(values, b));
   }
-  Vectorized<float> copysign(const Vectorized<float> &sign) const {
+  Vectorized<float> copysign(const Vectorized<float>& sign) const {
     return Vectorized<float>(Sleef_copysignf8(values, sign));
   }
   Vectorized<float> erf() const {
@@ -219,6 +257,63 @@ public:
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f8_u10(values));
   }
+  Vectorized<float> fexp_u20() const {
+    const __m256 vec_c0 = _mm256_set1_ps(0.00010703434948458272f);
+    const __m256 vec_c1 = _mm256_set1_ps(0.30354260500649682f);
+    const __m256 vec_c2 = _mm256_set1_ps(-0.22433836478672356);
+    const __m256 vec_c3 = _mm256_set1_ps(-0.079204240219773236);
+
+    const __m256 vec_exp_log2ef =
+        _mm256_castsi256_ps(_mm256_set1_epi32(0x3fb8aa3b)); // log2(e)
+
+    const __m256 vec_a = _mm256_set1_ps(std::pow(2, 23) / std::log2(2));
+    const __m256 vec_b = _mm256_set1_ps(std::pow(2, 23) * 127.f);
+
+    const __m256 vec_ln_flt_min =
+        _mm256_castsi256_ps(_mm256_set1_epi32(0xc2aeac50));
+    const __m256 vec_ln_flt_max =
+        _mm256_castsi256_ps(_mm256_set1_epi32(0x42b17218));
+    const __m256 vec_inf = _mm256_set1_ps(INFINITY);
+    const __m256 zero = _mm256_setzero_ps();
+
+    // exp(x) = 2**(x * log2(e))
+    //        = 2**xi * 2**xf   - TIPS we are using  the EEEE floating point
+    //        representation with identification to the exponent and the
+    //        mentissa
+    //  2**xf will be approximated to a polynomial of degree 3 computed with
+    //  Horner method
+    // compute the min/max for the mask
+    // Masks
+    __m256 mask_too_small =
+        _mm256_cmp_ps(values, vec_ln_flt_min, _CMP_LT_OS); // x < min
+    __m256 mask_too_large =
+        _mm256_cmp_ps(values, vec_ln_flt_max, _CMP_GT_OS); // x > max
+
+    // transformation with log2(e)
+    auto vec_src = _mm256_mul_ps(values, vec_exp_log2ef);
+    auto vec_fractional = _mm256_sub_ps(vec_src, _mm256_floor_ps(vec_src));
+
+    // compute polynomial using Horner Scheme
+    auto vec_res = _mm256_fmadd_ps(vec_fractional, vec_c3, vec_c2);
+    vec_res = _mm256_fmadd_ps(vec_fractional, vec_res, vec_c1);
+    vec_res = _mm256_fmadd_ps(vec_fractional, vec_res, vec_c0);
+
+    vec_src = _mm256_sub_ps(vec_src, vec_res);
+    // // the tips is here, headache in perspective
+    auto tmp = _mm256_fmadd_ps(vec_a, vec_src, vec_b);
+    // headache bis
+    __m256i casted_integer = _mm256_cvttps_epi32(tmp);
+    // bitwise to float for the final transformation
+    auto result = _mm256_castsi256_ps(casted_integer);
+    // boundary condition
+    // Set to 0 where x < ln(FLT_MIN)
+    result = _mm256_blendv_ps(result, zero, mask_too_small);
+    // Set to +inf where x > ln(FLT_MAX)
+    result = _mm256_blendv_ps(result, vec_inf, mask_too_large);
+    // final interpretation to float
+    return result;
+  }
+
   Vectorized<float> exp_u20() const {
     // A faster version of exp with ULP=20
     const __m256 vec_factorial_1 =
@@ -237,9 +332,12 @@ public:
     const __m256 vec_one = _mm256_set1_ps(1.f);
     const __m256 vec_zero = _mm256_set1_ps(0.f);
     const __m256 vec_two = _mm256_set1_ps(2.f);
-    const __m256 vec_ln2f = _mm256_castsi256_ps(_mm256_set1_epi32(0x3f317218)); // ln(2)
-    const __m256 vec_ln_flt_min = _mm256_castsi256_ps(_mm256_set1_epi32(0xc2aeac50));
-    const __m256 vec_ln_flt_max = _mm256_castsi256_ps(_mm256_set1_epi32(0x42b17218));
+    const __m256 vec_ln2f =
+        _mm256_castsi256_ps(_mm256_set1_epi32(0x3f317218)); // ln(2)
+    const __m256 vec_ln_flt_min =
+        _mm256_castsi256_ps(_mm256_set1_epi32(0xc2aeac50));
+    const __m256 vec_ln_flt_max =
+        _mm256_castsi256_ps(_mm256_set1_epi32(0x42b17218));
     const __m256i vec_127 = _mm256_set1_epi32(0x0000007f);
     const int n_mantissa_bits = 23;
 
@@ -315,7 +413,7 @@ public:
   Vectorized<float> floor() const {
     return _mm256_floor_ps(values);
   }
-  Vectorized<float> hypot(const Vectorized<float> &b) const {
+  Vectorized<float> hypot(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_hypotf8_u05(values, b));
   }
   Vectorized<float> i0() const {
@@ -327,7 +425,7 @@ public:
   Vectorized<float> digamma() const {
     return map(calc_digamma);
   }
-  Vectorized<float> igamma(const Vectorized<float> &x) const {
+  Vectorized<float> igamma(const Vectorized<float>& x) const {
     __at_align__ float tmp[size()];
     __at_align__ float tmp_x[size()];
     store(tmp);
@@ -337,7 +435,7 @@ public:
     }
     return loadu(tmp);
   }
-  Vectorized<float> igammac(const Vectorized<float> &x) const {
+  Vectorized<float> igammac(const Vectorized<float>& x) const {
     __at_align__ float tmp[size()];
     __at_align__ float tmp_x[size()];
     store(tmp);
@@ -350,11 +448,12 @@ public:
   Vectorized<float> neg() const {
     return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
   }
-  Vectorized<float> nextafter(const Vectorized<float> &b) const {
+  Vectorized<float> nextafter(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_nextafterf8(values, b));
   }
   Vectorized<float> round() const {
-    return _mm256_round_ps(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+    return _mm256_round_ps(
+        values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
   Vectorized<float> tan() const {
     return Vectorized<float>(Sleef_tanf8_u10(values));
@@ -377,7 +476,7 @@ public:
   Vectorized<float> rsqrt() const {
     return _mm256_div_ps(_mm256_set1_ps(1), _mm256_sqrt_ps(values));
   }
-  Vectorized<float> pow(const Vectorized<float> &b) const {
+  Vectorized<float> pow(const Vectorized<float>& b) const {
     return Vectorized<float>(Sleef_powf8_u10(values, b));
   }
   float reduce_add() const {
@@ -442,22 +541,30 @@ public:
 };
 
 template <>
-Vectorized<float> inline operator+(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator+(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm256_add_ps(a, b);
 }
 
 template <>
-Vectorized<float> inline operator-(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator-(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm256_sub_ps(a, b);
 }
 
 template <>
-Vectorized<float> inline operator*(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator*(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm256_mul_ps(a, b);
 }
 
 template <>
-Vectorized<float> inline operator/(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator/(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm256_div_ps(a, b);
 }
 
@@ -469,7 +576,9 @@ inline Vectorized<float> Vectorized<float>::frac() const {
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline maximum(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   Vectorized<float> max = _mm256_max_ps(a, b);
   Vectorized<float> isnan = _mm256_cmp_ps(a, b, _CMP_UNORD_Q);
   // Exploit the fact that all-ones is a NaN.
@@ -479,7 +588,9 @@ Vectorized<float> inline maximum(const Vectorized<float>& a, const Vectorized<fl
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <>
-Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline minimum(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   Vectorized<float> min = _mm256_min_ps(a, b);
   Vectorized<float> isnan = _mm256_cmp_ps(a, b, _CMP_UNORD_Q);
   // Exploit the fact that all-ones is a NaN.
@@ -487,56 +598,75 @@ Vectorized<float> inline minimum(const Vectorized<float>& a, const Vectorized<fl
 }
 
 template <>
-Vectorized<float> inline clamp(const Vectorized<float>& a, const Vectorized<float>& min, const Vectorized<float>& max) {
+Vectorized<float> inline clamp(
+    const Vectorized<float>& a,
+    const Vectorized<float>& min,
+    const Vectorized<float>& max) {
   return _mm256_min_ps(max, _mm256_max_ps(min, a));
 }
 
 template <>
-Vectorized<float> inline clamp_max(const Vectorized<float>& a, const Vectorized<float>& max) {
+Vectorized<float> inline clamp_max(
+    const Vectorized<float>& a,
+    const Vectorized<float>& max) {
   return _mm256_min_ps(max, a);
 }
 
 template <>
-Vectorized<float> inline clamp_min(const Vectorized<float>& a, const Vectorized<float>& min) {
+Vectorized<float> inline clamp_min(
+    const Vectorized<float>& a,
+    const Vectorized<float>& min) {
   return _mm256_max_ps(min, a);
 }
 
 template <>
-Vectorized<float> inline operator&(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator&(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm256_and_ps(a, b);
 }
 
 template <>
-Vectorized<float> inline operator|(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator|(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm256_or_ps(a, b);
 }
 
 template <>
-Vectorized<float> inline operator^(const Vectorized<float>& a, const Vectorized<float>& b) {
+Vectorized<float> inline operator^(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   return _mm256_xor_ps(a, b);
 }
 
-inline Vectorized<float> Vectorized<float>::eq(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::eq(
+    const Vectorized<float>& other) const {
   return (*this == other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::ne(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ne(
+    const Vectorized<float>& other) const {
   return (*this != other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::gt(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::gt(
+    const Vectorized<float>& other) const {
   return (*this > other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::ge(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::ge(
+    const Vectorized<float>& other) const {
   return (*this >= other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::lt(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::lt(
+    const Vectorized<float>& other) const {
   return (*this < other) & Vectorized<float>(1.0f);
 }
 
-inline Vectorized<float> Vectorized<float>::le(const Vectorized<float>& other) const {
+inline Vectorized<float> Vectorized<float>::le(
+    const Vectorized<float>& other) const {
   return (*this <= other) & Vectorized<float>(1.0f);
 }
 
@@ -546,7 +676,8 @@ inline void convert(const float* src, float* dst, int64_t n) {
 #ifndef __msvc_cl__
 #pragma unroll
 #endif
-  for (i = 0; i <= (n - Vectorized<float>::size()); i += Vectorized<float>::size()) {
+  for (i = 0; i <= (n - Vectorized<float>::size());
+       i += Vectorized<float>::size()) {
     _mm256_storeu_ps(dst + i, _mm256_loadu_ps(src + i));
   }
 #ifndef __msvc_cl__
@@ -557,20 +688,41 @@ inline void convert(const float* src, float* dst, int64_t n) {
   }
 }
 
-
 template <>
-Vectorized<float> inline fmadd(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
+Vectorized<float> inline fmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
   return _mm256_fmadd_ps(a, b, c);
 }
 
 template <>
-Vectorized<float> inline fmsub(const Vectorized<float>& a, const Vectorized<float>& b, const Vectorized<float>& c) {
+Vectorized<float> inline fnmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return _mm256_fnmadd_ps(a, b, c);
+}
+
+template <>
+Vectorized<float> inline fmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
   return _mm256_fmsub_ps(a, b, c);
+}
+
+template <>
+Vectorized<float> inline fnmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return _mm256_fnmsub_ps(a, b, c);
 }
 
 // TODO: rewrite with ATEN vectorized (need to add unpack and shuffle)
 // Used by Inductor CPP codegen for micro gemm
-inline void transpose_block(at::vec::VectorizedN<float, 8> &input) {
+inline void transpose_block(at::vec::VectorizedN<float, 8>& input) {
   __m256 temp0[8];
   // unpacking and interleaving 32-bit elements
   // a0  b0  a1  b1  a4  b4  a5  b5
@@ -600,22 +752,22 @@ inline void transpose_block(at::vec::VectorizedN<float, 8> &input) {
   //  e1  f1  g1  h1 ...
   //  e2  f2  g2  h2 ...
   //  e3  f3  g3  h3 ...
-  temp1[0] = _mm256_castpd_ps(
-      _mm256_unpacklo_pd(_mm256_castps_pd(temp0[0]), _mm256_castps_pd(temp0[2])));
-  temp1[1] = _mm256_castpd_ps(
-      _mm256_unpackhi_pd(_mm256_castps_pd(temp0[0]), _mm256_castps_pd(temp0[2])));
-  temp1[2] = _mm256_castpd_ps(
-      _mm256_unpacklo_pd(_mm256_castps_pd(temp0[1]), _mm256_castps_pd(temp0[3])));
-  temp1[3] = _mm256_castpd_ps(
-      _mm256_unpackhi_pd(_mm256_castps_pd(temp0[1]), _mm256_castps_pd(temp0[3])));
-  temp1[4] = _mm256_castpd_ps(
-      _mm256_unpacklo_pd(_mm256_castps_pd(temp0[4]), _mm256_castps_pd(temp0[6])));
-  temp1[5] = _mm256_castpd_ps(
-      _mm256_unpackhi_pd(_mm256_castps_pd(temp0[4]), _mm256_castps_pd(temp0[6])));
-  temp1[6] = _mm256_castpd_ps(
-      _mm256_unpacklo_pd(_mm256_castps_pd(temp0[5]), _mm256_castps_pd(temp0[7])));
-  temp1[7] = _mm256_castpd_ps(
-      _mm256_unpackhi_pd(_mm256_castps_pd(temp0[5]), _mm256_castps_pd(temp0[7])));
+  temp1[0] = _mm256_castpd_ps(_mm256_unpacklo_pd(
+      _mm256_castps_pd(temp0[0]), _mm256_castps_pd(temp0[2])));
+  temp1[1] = _mm256_castpd_ps(_mm256_unpackhi_pd(
+      _mm256_castps_pd(temp0[0]), _mm256_castps_pd(temp0[2])));
+  temp1[2] = _mm256_castpd_ps(_mm256_unpacklo_pd(
+      _mm256_castps_pd(temp0[1]), _mm256_castps_pd(temp0[3])));
+  temp1[3] = _mm256_castpd_ps(_mm256_unpackhi_pd(
+      _mm256_castps_pd(temp0[1]), _mm256_castps_pd(temp0[3])));
+  temp1[4] = _mm256_castpd_ps(_mm256_unpacklo_pd(
+      _mm256_castps_pd(temp0[4]), _mm256_castps_pd(temp0[6])));
+  temp1[5] = _mm256_castpd_ps(_mm256_unpackhi_pd(
+      _mm256_castps_pd(temp0[4]), _mm256_castps_pd(temp0[6])));
+  temp1[6] = _mm256_castpd_ps(_mm256_unpacklo_pd(
+      _mm256_castps_pd(temp0[5]), _mm256_castps_pd(temp0[7])));
+  temp1[7] = _mm256_castpd_ps(_mm256_unpackhi_pd(
+      _mm256_castps_pd(temp0[5]), _mm256_castps_pd(temp0[7])));
 
   //  shuffle 128-bits (composed of 4 32-bit elements)
   //  a0  b0  c0  d0  e0  f0  g0  h0
@@ -637,7 +789,7 @@ inline void transpose_block(at::vec::VectorizedN<float, 8> &input) {
 }
 
 // Used by Inductor CPP codegen
-template<>
+template <>
 inline void transpose_mxn<float, 8, 8>(
     const float* src,
     int64_t ld_src,
@@ -672,21 +824,19 @@ inline void transpose_mxn<float, 8, 8>(
   }
 }
 
-template<>
+template <>
 inline void transpose_mxn<float, 16, 16>(
     const float* src,
     int64_t ld_src,
     float* dst,
     int64_t ld_dst) {
+  transpose_mxn<float, 8, 8>(src, ld_src, dst, ld_dst);
+  transpose_mxn<float, 8, 8>(src + 8, ld_src, dst + 8 * ld_dst, ld_dst);
+  transpose_mxn<float, 8, 8>(src + 8 * ld_src, ld_src, dst + 8, ld_dst);
   transpose_mxn<float, 8, 8>(
-          src , ld_src, dst, ld_dst);
-  transpose_mxn<float, 8, 8>(
-          src + 8, ld_src, dst + 8 * ld_dst, ld_dst);
-  transpose_mxn<float, 8, 8>(
-          src + 8 * ld_src, ld_src, dst + 8, ld_dst);
-  transpose_mxn<float, 8, 8>(
-          src + 8 * ld_src + 8, ld_src, dst + 8 * ld_dst + 8, ld_dst);
+      src + 8 * ld_src + 8, ld_src, dst + 8 * ld_dst + 8, ld_dst);
 }
 #endif
 
-}} // namespace at::vec::CPU_CAPABILITY
+} // namespace CPU_CAPABILITY
+} // namespace at::vec

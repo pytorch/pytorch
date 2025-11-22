@@ -13,6 +13,9 @@ from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
+# set so that metrics appear
+torch._logging.set_logs(inductor_metrics=True)
+
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 
 
@@ -177,9 +180,9 @@ class TestScatterOpt(TestCase):
         ref_grad = ref_model.weight.grad
         opt_f(opt_model, x, label)
         act_grad = opt_model.weight.grad
-        assert torch.allclose(
-            ref_grad, act_grad, atol=1e-3, rtol=1e-3
-        ), f"{ref_grad=}\n{act_grad=}"
+        assert torch.allclose(ref_grad, act_grad, atol=1e-3, rtol=1e-3), (
+            f"{ref_grad=}\n{act_grad=}"
+        )
 
         self.check_metric()
 

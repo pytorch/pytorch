@@ -3,7 +3,9 @@
 Collection of conversion functions for linear / conv2d structured pruning
 Also contains utilities for bias propagation
 """
-from typing import Callable, cast, Optional
+
+from collections.abc import Callable
+from typing import cast
 
 import torch
 from torch import nn, Tensor
@@ -87,7 +89,7 @@ def _prune_module_bias(module: nn.Module, mask: Tensor) -> None:
         delattr(module, "_bias")
 
 
-def _propagate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
+def _propagate_module_bias(module: nn.Module, mask: Tensor) -> Tensor | None:
     r"""
     In the case that we need to propagate biases, this function will return the biases we need
     """
@@ -95,6 +97,7 @@ def _propagate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
     if module.bias is not None:
         module.bias = nn.Parameter(cast(Tensor, module.bias)[mask])
     elif getattr(module, "_bias", None) is not None:
+        # pyrefly: ignore [bad-assignment]
         module.bias = nn.Parameter(cast(Tensor, module._bias)[mask])
 
     # get pruned biases to propagate to subsequent layer
@@ -124,6 +127,7 @@ def _prune_linear_helper(linear: nn.Linear) -> Tensor:
     linear.out_features = linear.weight.shape[0]
     _remove_bias_handles(linear)
 
+    # pyrefly: ignore [unbound-name]
     return mask
 
 
@@ -139,7 +143,7 @@ def prune_linear_linear(linear1: nn.Linear, linear2: nn.Linear) -> None:
 
 def prune_linear_activation_linear(
     linear1: nn.Linear,
-    activation: Optional[Callable[[Tensor], Tensor]],
+    activation: Callable[[Tensor], Tensor] | None,
     linear2: nn.Linear,
 ):
     mask = _prune_linear_helper(linear1)
@@ -182,6 +186,7 @@ def _prune_conv2d_helper(conv2d: nn.Conv2d) -> Tensor:
     conv2d.out_channels = conv2d.weight.shape[0]
 
     _remove_bias_handles(conv2d)
+    # pyrefly: ignore [unbound-name]
     return mask
 
 
@@ -202,6 +207,7 @@ def prune_conv2d_padded(conv2d_1: nn.Conv2d) -> None:
             new_bias = torch.zeros(conv2d_1.bias.shape)
             new_bias[mask] = conv2d_1.bias[mask]  # type: ignore[possibly-undefined]
             # adjusted bias that to keep in conv2d_1
+            # pyrefly: ignore [unbound-name]
             new_bias[~mask] = cast(Tensor, conv2d_1._bias)[~mask]
             # pruned biases that are kept instead of propagated
             conv2d_1.bias = nn.Parameter(new_bias)
@@ -230,7 +236,7 @@ def prune_conv2d_conv2d(conv2d_1: nn.Conv2d, conv2d_2: nn.Conv2d) -> None:
 
 def prune_conv2d_activation_conv2d(
     conv2d_1: nn.Conv2d,
-    activation: Optional[Callable[[Tensor], Tensor]],
+    activation: Callable[[Tensor], Tensor] | None,
     conv2d_2: nn.Conv2d,
 ):
     r"""
@@ -289,7 +295,7 @@ def prune_conv2d_activation_conv2d(
 def prune_conv2d_pool_activation_conv2d(
     c1: nn.Conv2d,
     pool: nn.Module,
-    activation: Optional[Callable[[Tensor], Tensor]],
+    activation: Callable[[Tensor], Tensor] | None,
     c2: nn.Conv2d,
 ) -> None:
     prune_conv2d_activation_conv2d(c1, activation, c2)
@@ -297,7 +303,7 @@ def prune_conv2d_pool_activation_conv2d(
 
 def prune_conv2d_activation_pool_conv2d(
     c1: nn.Conv2d,
-    activation: Optional[Callable[[Tensor], Tensor]],
+    activation: Callable[[Tensor], Tensor] | None,
     pool: nn.Module,
     c2: nn.Conv2d,
 ) -> None:
@@ -307,7 +313,7 @@ def prune_conv2d_activation_pool_conv2d(
 def prune_conv2d_pool_flatten_linear(
     conv2d: nn.Conv2d,
     pool: nn.Module,
-    flatten: Optional[Callable[[Tensor], Tensor]],
+    flatten: Callable[[Tensor], Tensor] | None,
     linear: nn.Linear,
 ) -> None:
     mask = _prune_conv2d_helper(conv2d)
@@ -326,9 +332,10 @@ def prune_conv2d_pool_flatten_linear(
         linear_ic = linear.weight.shape[1]
 
     conv2d_oc = len(mask)
-    assert (
-        linear_ic % conv2d_oc == 0
-    ), f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
+    if linear_ic % conv2d_oc != 0:
+        raise AssertionError(
+            f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
+        )
 
     flatten_scale = linear_ic // conv2d_oc
     flattened_mask = torch.tensor(
@@ -370,7 +377,7 @@ def prune_lstm_output_linear(
 def prune_lstm_output_layernorm_linear(
     lstm: nn.LSTM,
     getitem: Callable,
-    layernorm: Optional[nn.LayerNorm],
+    layernorm: nn.LayerNorm | None,
     linear: nn.Linear,
 ) -> None:
     for i in range(lstm.num_layers):

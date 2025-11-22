@@ -17,7 +17,7 @@ __all__: list[str] = []
 
 
 class _Checkpointer:
-    """This base class specefies a high level API for saving and loading
+    """This base class specifies a high level API for saving and loading
     distributed `state_dict` 's. It provides an abstraction over the low-level APIs
     provided by :py:mod:`torch.distributed.checkpoint.storage`, essentially calling
     :py:meth: `torch.distributed.state_dict_saver.save` and
@@ -83,12 +83,15 @@ class _Checkpointer:
         Returns:
             Future: A future holding the resultant Metadata object from `save`.
         """
-        return saver.async_save(
+        response = saver.async_save(
             state_dict,
             storage_writer=self.storage_writer,
             process_group=self.process_group,
             planner=self.save_planner,
         )
+        if not isinstance(response, Future):
+            raise AssertionError("response should be a Future instance")
+        return response
 
     def load(self, state_dict: dict[str, Any]) -> None:
         """Calls :py:meth: `torch.distributed.state_dict_loader.load`. Utilizing values passed during initialization."""

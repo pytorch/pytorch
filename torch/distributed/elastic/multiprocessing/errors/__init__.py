@@ -54,11 +54,13 @@ import os
 import signal
 import socket
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from functools import wraps
 from string import Template
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.utils.logging import get_logger
 
@@ -77,12 +79,13 @@ __all__ = [
 logger = get_logger(__name__)
 
 
-JSON = dict
+JSON = dict[str, Any]
 
-_EMPTY_ERROR_DATA = {"message": "<NONE>"}
+_EMPTY_ERROR_DATA: dict[str, Any] = {"message": "<NONE>"}
 _NOT_AVAILABLE = "<N/A>"
 
-T = TypeVar("T")
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
 
 
 @dataclass
@@ -140,6 +143,10 @@ class ProcessFailure:
                     f" received by PID {self.pid}"
                 )
             else:
+                self.error_file_data["errorTraits"] = {
+                    "category": "system_terminated_error",
+                    "retryability": "False",
+                }
                 self.message = "To enable traceback see: https://pytorch.org/docs/stable/elastic/errors.html"
 
     def _get_error_data(self, error_file_data: dict[str, Any]) -> tuple[str, int]:
@@ -305,8 +312,8 @@ class ChildFailedError(Exception):
 
 
 def record(
-    fn: Callable[..., T], error_handler: Optional[ErrorHandler] = None
-) -> Callable[..., T]:
+    fn: Callable[_P, _R], error_handler: Optional[ErrorHandler] = None
+) -> Callable[_P, Union[_R, None]]:
     """
     Syntactic sugar to record errors/exceptions that happened in the decorated
     function using the provided ``error_handler``.
@@ -346,9 +353,9 @@ def record(
     if not error_handler:
         error_handler = get_error_handler()
 
-    def wrap(f):
+    def wrap(f: Callable[_P, _R]) -> Callable[_P, Union[_R, None]]:
         @wraps(f)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: _P.args, **kwargs: _P.kwargs):
             assert error_handler is not None  # assertion for mypy type checker
             error_handler.initialize()
             try:

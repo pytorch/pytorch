@@ -22,9 +22,10 @@ import platform
 import sys
 import textwrap
 import threading
+import warnings
+from collections.abc import Callable as _Callable
 from typing import (
     Any as _Any,
-    Callable as _Callable,
     get_origin as _get_origin,
     Optional as _Optional,
     overload as _overload,
@@ -32,18 +33,14 @@ from typing import (
     TypeVar as _TypeVar,
     Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec
+from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
 
 
-if TYPE_CHECKING:
-    from .types import IntLikeType
-
-
-# multipy/deploy is setting this import before importing torch, this is the most
-# reliable way we have to detect if we're running within deploy.
-# https://github.com/pytorch/multipy/blob/d60f34ad38c371e441fe7ffdb77a3c3dda5a5d19/multipy/runtime/interpreter/interpreter_impl.cpp#L134-L137
+# As a bunch of torch.packages internally still have this check
+# we need to keep this. @todo: Remove tests that rely on this check as
+# they are likely stale.
 def _running_with_deploy() -> builtins.bool:
-    return sys.modules.get("torch._meta_registrations", None) is object
+    return False
 
 
 from torch._utils import (
@@ -54,24 +51,16 @@ from torch._utils import (
 from torch._utils_internal import (
     get_file_path,
     prepare_multiprocessing_environment,
+    profiler_allow_cudagraph_cupti_lazy_reinit_cuda12,
     USE_GLOBAL_DEPS,
     USE_RTLD_GLOBAL_WITH_LIBTORCH,
 )
+from torch.torch_version import __version__ as __version__
 
 
-# TODO(torch_deploy) figure out how to freeze version.py in fbcode build
-if _running_with_deploy():
-    __version__ = "torch-deploy-1.8"
-    # TODO: Remove this ugly hack when deploy typing extensions are updated to 4.10+
-    if not TYPE_CHECKING:
-        import typing_extensions
+if TYPE_CHECKING:
+    from torch.types import Device, IntLikeType
 
-        _TypeIs = typing_extensions.TypeGuard
-        typing_extensions.TypeIs = _TypeIs
-else:
-    from typing_extensions import TypeIs as _TypeIs
-
-    from torch.torch_version import __version__ as __version__
 
 __all__ = [
     "BoolStorage",
@@ -153,6 +142,21 @@ assert __all__ == sorted(__all__)
 ################################################################################
 # Load the extension module
 ################################################################################
+
+# If PyTorch was built against the ROCm runtime wheels, then there will be
+# a _rocm_init module and it will define an initialize() function which can
+# prepare ROCm for use. See general documentation on ROCm runtime wheels:
+# https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md
+# Since this module is only ever added to the wheel if built for such a
+# deployment, it is always safe to attempt.
+try:
+    from . import _rocm_init  # type: ignore[attr-defined]
+except ImportError:
+    pass
+else:
+    _rocm_init.initialize()
+    del _rocm_init
+
 
 if sys.platform == "win32":
 
@@ -241,7 +245,7 @@ if sys.platform == "win32":
                 textwrap.dedent(
                     """
                     Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
-                    It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe
+                    It can be downloaded at https://aka.ms/vs/17/release/vc_redist.x64.exe
                     """
                 ).strip()
             )
@@ -280,17 +284,27 @@ if sys.platform == "win32":
 
 
 def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
-    # Libraries can either be in path/nvidia/lib_folder/lib or path/lib_folder/lib
+    # Libraries can either be in
+    # path/nvidia/lib_folder/lib or
+    # path/nvidia/cuXX/lib (since CUDA 13.0) or
+    # path/lib_folder/lib
+    from torch.version import cuda as cuda_version
+
     nvidia_lib_paths = glob.glob(
         os.path.join(path, "nvidia", lib_folder, "lib", lib_name)
     )
+    if cuda_version is not None:
+        maj_cuda_version = cuda_version.split(".")[0]
+        nvidia_lib_paths += glob.glob(
+            os.path.join(path, "nvidia", f"cu{maj_cuda_version}", "lib", lib_name)
+        )
     lib_paths = glob.glob(os.path.join(path, lib_folder, "lib", lib_name))
 
     return nvidia_lib_paths + lib_paths
 
 
-def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
-    """Preloads cuda deps if they could not be found otherwise."""
+def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> None:  # type: ignore[valid-type]
+    """Preloads cuda library if it could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == "Linux", "Should only be called on Linux"
 
@@ -300,14 +314,48 @@ def _preload_cuda_deps(lib_folder: str, lib_name: str) -> None:
         if candidate_lib_paths:
             lib_path = candidate_lib_paths[0]
             break
-    if not lib_path:
+    if not lib_path and required:
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
-    ctypes.CDLL(lib_path)
+    if lib_path:
+        ctypes.CDLL(lib_path)
+
+
+def _preload_cuda_deps(err: _Optional[OSError] = None) -> None:
+    cuda_libs: list[tuple[str, str]] = [
+        ("cublas", "libcublas.so.*[0-9]"),
+        ("cudnn", "libcudnn.so.*[0-9]"),
+        ("cuda_nvrtc", "libnvrtc.so.*[0-9]"),
+        ("cuda_nvrtc", "libnvrtc-builtins.so.*[0-9]"),
+        ("cuda_runtime", "libcudart.so.*[0-9]"),
+        ("cuda_cupti", "libcupti.so.*[0-9]"),
+        ("cufft", "libcufft.so.*[0-9]"),
+        ("curand", "libcurand.so.*[0-9]"),
+        ("nvjitlink", "libnvJitLink.so.*[0-9]"),
+        ("cusparse", "libcusparse.so.*[0-9]"),
+        ("cusparselt", "libcusparseLt.so.*[0-9]"),
+        ("cusolver", "libcusolver.so.*[0-9]"),
+        ("nccl", "libnccl.so.*[0-9]"),
+        ("nvshmem", "libnvshmem_host.so.*[0-9]"),
+        ("cufile", "libcufile.so.*[0-9]"),
+    ]
+    # If error is passed, re-raise it if it's not about one of the abovementioned
+    # libraries
+    if err is not None and [
+        lib for _, lib in cuda_libs if lib.split(".", 1)[0] in err.args[0]
+    ]:
+        raise err
+
+    # Otherwise, try to preload dependencies from site-packages
+    for lib_folder, lib_name in cuda_libs:
+        _preload_cuda_lib(lib_folder, lib_name)
+
+    # libnvToolsExt is Optional Dependency
+    _preload_cuda_lib("nvtx", "libnvToolsExt.so.*[0-9]", required=False)
 
 
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
-    if _running_with_deploy() or platform.system() == "Windows":
+    if platform.system() == "Windows":
         return
 
     # Determine the file extension based on the platform
@@ -327,56 +375,24 @@ def _load_global_deps() -> None:
         try:
             with open("/proc/self/maps") as f:
                 _maps = f.read()
-            # libtorch_global_deps.so always depends in cudart, check if its installed via wheel
-            if "nvidia/cuda_runtime/lib/libcudart.so" not in _maps:
+
+            # libtorch_global_deps.so always depends in cudart, check if its installed and loaded
+            if "libcudart.so" not in _maps:
                 return
-            # If all above-mentioned conditions are met, preload nvrtc and nvjitlink
-            # Please note that order are important for CUDA-11.8 , as nvjitlink does not exist there
-            _preload_cuda_deps("cuda_nvrtc", "libnvrtc.so.*[0-9]")
-            _preload_cuda_deps("nvjitlink", "libnvJitLink.so.*[0-9]")
+            # If all above-mentioned conditions are met, preload CUDA dependencies
+            _preload_cuda_deps()
         except Exception:
             pass
 
     except OSError as err:
-        # Can only happen for wheel with cuda libs as PYPI deps
+        # Can happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
-        from torch.version import cuda as cuda_version
-
-        cuda_libs: dict[str, str] = {
-            "cublas": "libcublas.so.*[0-9]",
-            "cudnn": "libcudnn.so.*[0-9]",
-            "cuda_nvrtc": "libnvrtc.so.*[0-9]",
-            "cuda_runtime": "libcudart.so.*[0-9]",
-            "cuda_cupti": "libcupti.so.*[0-9]",
-            "cufft": "libcufft.so.*[0-9]",
-            "curand": "libcurand.so.*[0-9]",
-            "nvjitlink": "libnvJitLink.so.*[0-9]",
-            "cusparse": "libcusparse.so.*[0-9]",
-            "cusparselt": "libcusparseLt.so.*[0-9]",
-            "cusolver": "libcusolver.so.*[0-9]",
-            "nccl": "libnccl.so.*[0-9]",
-            "nvtx": "libnvToolsExt.so.*[0-9]",
-        }
-        # cufiile is only available on cuda 12+
-        # TODO: Remove once CUDA 11.8 binaries are deprecated
-        if cuda_version is not None:
-            t_version = cuda_version.split(".")
-            t_major = int(t_version[0])  # type: ignore[operator]
-            if t_major >= 12:
-                cuda_libs["cufile"] = "libcufile.so.*[0-9]"
-
-        is_cuda_lib_err = [
-            lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
-        ]
-        if not is_cuda_lib_err:
-            raise err
-        for lib_folder, lib_name in cuda_libs.items():
-            _preload_cuda_deps(lib_folder, lib_name)
+        _preload_cuda_deps(err)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
-    _running_with_deploy() or platform.system() != "Windows"
+    platform.system() != "Windows"
 ):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
@@ -616,7 +632,7 @@ class SymInt:
 
 class SymFloat:
     """
-    Like an float (including magic methods), but redirects all operations on the
+    Like a float (including magic methods), but redirects all operations on the
     wrapped node. This is used in particular to symbolically record operations
     in the symbolic shape workflow.
     """
@@ -651,6 +667,9 @@ class SymFloat:
 
     def __float__(self):
         return self.node.guard_float("", 0)
+
+    def __int__(self):
+        return self.__trunc__().__int__()
 
     # Symbolic power does NOT work with negative base, this is to avoid
     # potential complex outputs
@@ -735,7 +754,7 @@ class SymFloat:
 
 class SymBool:
     """
-    Like an bool (including magic methods), but redirects all operations on the
+    Like a bool (including magic methods), but redirects all operations on the
     wrapped node. This is used in particular to symbolically record operations
     in the symbolic shape workflow.
 
@@ -799,6 +818,15 @@ class SymBool:
         else:
             # Force specialization
             return hash(builtins.bool(self))
+
+    def __sym_float__(self):
+        """
+        Provides a SymFloat representation (0.0 or 1.0) for this SymBool.
+        Called by torch.sym_float() when casting SymBool to float.
+        """
+        from torch.fx.experimental.sym_node import wrap_node
+
+        return wrap_node(self.node.sym_float())
 
 
 def sym_not(a):
@@ -976,9 +1004,10 @@ __all__.append("sym_sqrt")
 
 
 def sym_ite(b, t, f):
+    """SymInt-aware utility for ternary operator (``t if b else f``.)"""
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
-    assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
+    assert isinstance(b, (SymBool, builtins.bool)) and type(t) is type(f)
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
@@ -997,7 +1026,6 @@ try:
 except ImportError:
     import torch._C as _C_for_compiled_check
 
-    # The __file__ check only works for Python 3.7 and above.
     if _C_for_compiled_check.__file__ is None:
         raise ImportError(
             textwrap.dedent(
@@ -1007,10 +1035,10 @@ except ImportError:
                     of the PyTorch repository rather than the C extensions which
                     are expected in the `torch._C` namespace. This can occur when
                     using the `install` workflow. e.g.
-                        $ python setup.py install && python -c "import torch"
+                        $ python -m pip install --no-build-isolation -v . && python -c "import torch"
 
                     This error can generally be solved using the `develop` workflow
-                        $ python setup.py develop && python -c "import torch"  # This should succeed
+                        $ python -m pip install --no-build-isolation -v -e . && python -c "import torch"  # This should succeed
                     or by running Python from a different directory.
                 """
             ).strip()
@@ -1108,11 +1136,6 @@ def typename(obj: _Any, /) -> str:
 def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     r"""Returns True if `obj` is a PyTorch tensor.
 
-    Note that this function is simply doing ``isinstance(obj, Tensor)``.
-    Using that ``isinstance`` check is better for typechecking with mypy,
-    and more explicit - so it's recommended to use that instead of
-    ``is_tensor``.
-
     Args:
         obj (object): Object to test
     Example::
@@ -1125,11 +1148,32 @@ def is_tensor(obj: _Any, /) -> _TypeIs["torch.Tensor"]:
     return isinstance(obj, torch.Tensor)
 
 
-def is_storage(obj: _Any, /) -> _TypeIs[_Union["TypedStorage", "UntypedStorage"]]:
+def is_storage(obj: _Any, /) -> builtins.bool:
     r"""Returns True if `obj` is a PyTorch storage object.
 
     Args:
         obj (Object): Object to test
+    Example::
+
+        >>> import torch
+        >>> # UntypedStorage (recommended)
+        >>> tensor = torch.tensor([1, 2, 3])
+        >>> storage = tensor.untyped_storage()
+        >>> torch.is_storage(storage)
+        True
+        >>>
+        >>> # TypedStorage (legacy)
+        >>> typed_storage = torch.TypedStorage(5, dtype=torch.float32)
+        >>> torch.is_storage(typed_storage)
+        True
+        >>>
+        >>> # regular tensor (should return False)
+        >>> torch.is_storage(tensor)
+        False
+        >>>
+        >>> # non-storage object
+        >>> torch.is_storage([1, 2, 3])
+        False
     """
     return type(obj) in _storage_classes
 
@@ -1141,21 +1185,37 @@ def get_default_device() -> "torch.device":
     r"""Gets the default ``torch.Tensor`` to be allocated on ``device``"""
     global _GLOBAL_DEVICE_CONTEXT
 
-    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
-        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+    from torch.overrides import _get_current_function_mode_stack
+    from torch.utils._device import DeviceContext
+
+    def _get_device_with_index(device):
         if device.index is not None:
             return device
         else:
             # TODO: Call like get_device_index() method corresponding to
             # each device type
             return torch.tensor([]).device
+
+    # Get device from any active DeviceContext.
+    device_mode = next(
+        filter(
+            lambda mode: isinstance(mode, DeviceContext),
+            reversed(_get_current_function_mode_stack()),
+        ),
+        None,
+    )
+    if device_mode:
+        device = device_mode.device
+        return _get_device_with_index(device)
+
+    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
+        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
+        return _get_device_with_index(device)
     else:
         return torch.device("cpu")
 
 
-def set_default_device(
-    device: _Optional[_Union["torch.device", str, builtins.int]],
-) -> None:
+def set_default_device(device: "Device") -> None:
     """Sets the default ``torch.Tensor`` to be allocated on ``device``.  This
     does not affect factory function calls which are called with an explicit
     ``device`` argument.  Factory calls will be performed as if they
@@ -1381,7 +1441,6 @@ def use_deterministic_algorithms(
         * :func:`torch.histc` when called on a CUDA tensor
         * :func:`torch.bincount` when called on a CUDA tensor and ``weights``
           tensor is given
-        * :func:`torch.kthvalue` with called on a CUDA tensor
         * :func:`torch.median` with indices output when called on a CUDA tensor
         * :func:`torch.nn.functional.grid_sample` when attempting to differentiate a CUDA tensor
         * :func:`torch.cumsum` when called on a CUDA tensor when dtype is floating point or complex
@@ -1393,19 +1452,29 @@ def use_deterministic_algorithms(
     :attr:`torch.utils.deterministic.fill_uninitialized_memory` is turned on.
     See the documentation for that attribute for more information.
 
-    A handful of CUDA operations are nondeterministic if the CUDA version is
-    10.2 or greater, unless the environment variable ``CUBLAS_WORKSPACE_CONFIG=:4096:8``
-    or ``CUBLAS_WORKSPACE_CONFIG=:16:8`` is set. See the CUDA documentation for more
-    details: `<https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility>`_
-    If one of these environment variable configurations is not set, a :class:`RuntimeError`
-    will be raised from these operations when called with CUDA tensors:
-
-        * :func:`torch.mm`
-        * :func:`torch.mv`
-        * :func:`torch.bmm`
-
     Note that deterministic operations tend to have worse performance than
     nondeterministic operations.
+
+
+    When this setting is turned on, the Inductor deterministic mode is also tuned on
+    automatically. In deterministic mode, Inductor would avoid doing on device benchmarking
+    that affect numerics. This includes:
+
+      - don't pad matmul input shapes. Without enabling deterministic mode, Inductor would do
+        benchmarking to check if padding matmul shape is beneficial.
+      - don't autotune templates. Inductor has templates for kernels like matmul/conv/attention.
+        Without enabling deterministic mode, Inductor would do autotuning to
+        pick the best configs for those templates and adopt it if it's faster
+        than the kernel in eager mode. In deterministic mode, we pick the eager kernel.
+      - don't autotune triton configs for reduction. Reduction numerics are
+        very sensitive to triton configs. In deterministic mode, Inductor
+        will use some heuristics to pick the most promising configs rather
+        than do autotuning.
+      - Skip autotuning for reduction in coordinate descent tuning.
+      - Don't benchmarking for the computation/communication reordering pass
+      - Disable the feature that dynamically scale down RBLOCK triton config for higher
+        occupancy.
+
 
     .. note::
 
@@ -1430,16 +1499,14 @@ def use_deterministic_algorithms(
         >>> # xdoctest: +SKIP
         >>> torch.use_deterministic_algorithms(True)
 
-        # Forward mode nondeterministic error
-        >>> torch.randn(10, device='cuda').kthvalue(1)
-        ...
-        RuntimeError: kthvalue CUDA does not have a deterministic implementation...
-
         # Backward mode nondeterministic error
         >>> torch.nn.AvgPool3d(1)(torch.randn(3, 4, 5, 6, requires_grad=True).cuda()).sum().backward()
         ...
         RuntimeError: avg_pool3d_backward_cuda does not have a deterministic implementation...
     """
+    import torch._inductor.config as inductor_config
+
+    inductor_config.deterministic = mode
     _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
 
@@ -1665,9 +1732,10 @@ def _check(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(RuntimeError, cond, message)
+    _check_with(RuntimeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
+# TODO add deprecation annotation
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
@@ -1714,7 +1782,7 @@ def _check_index(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(IndexError, cond, message)
+    _check_with(IndexError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_value(cond, message=None):  # noqa: F811
@@ -1732,7 +1800,7 @@ def _check_value(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(ValueError, cond, message)
+    _check_with(ValueError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_type(cond, message=None):  # noqa: F811
@@ -1750,7 +1818,7 @@ def _check_type(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(TypeError, cond, message)
+    _check_with(TypeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
 def _check_not_implemented(cond, message=None):  # noqa: F811
@@ -1768,7 +1836,12 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
             an object that has a ``__str__()`` method to be used as the error
             message. Default: ``None``
     """
-    _check_with(NotImplementedError, cond, message)
+    _check_with(
+        NotImplementedError,
+        cond,
+        # pyrefly: ignore [bad-argument-type]
+        message,
+    )
 
 
 def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
@@ -2060,7 +2133,7 @@ from torch.serialization import load, save
 
 # Shared memory manager needs to know the exact location of manager executable
 def _manager_path():
-    if _running_with_deploy() or platform.system() == "Windows":
+    if platform.system() == "Windows":
         return b""
     path = get_file_path("torch", "bin", "torch_shm_manager")
     prepare_multiprocessing_environment(get_file_path("torch"))
@@ -2099,7 +2172,7 @@ for __name in dir(_C._VariableFunctions):
     __obj.__module__ = __name__  # "torch"
     # Hide some APIs that should not be public
     if __name == "segment_reduce":
-        # TODO: Once the undocumented FC window is passed, remove the line bellow
+        # TODO: Once the undocumented FC window is passed, remove the line below
         globals()[__name] = __obj
         __name = "_" + __name
     globals()[__name] = __obj
@@ -2120,7 +2193,7 @@ __all__.extend(
 )
 
 ################################################################################
-# Import TorchDynamo's lazy APIs to avoid circular dependenices
+# Import TorchDynamo's lazy APIs to avoid circular dependencies
 ################################################################################
 
 # needs to be before from torch.functional import * to avoid circular dependencies
@@ -2203,6 +2276,7 @@ from torch import (
     testing as testing,
     types as types,
     utils as utils,
+    version as version,
     xpu as xpu,
 )
 from torch.signal import windows as windows
@@ -2301,7 +2375,16 @@ class _TorchCompileInductorWrapper:
         self.apply_options(options)
         self.apply_options(CompilerBisector.get_config_change("inductor"))
 
-        if self.config.get("triton.cudagraphs", False):
+        cuda_version = None
+        if hasattr(torch, "version"):
+            from torch.torch_version import TorchVersion
+
+            cuda_version = TorchVersion(getattr(torch.version, "cuda", "0.0"))
+
+        if self.config.get("triton.cudagraphs", False) and (
+            (cuda_version and cuda_version < "12.6")
+            or not profiler_allow_cudagraph_cupti_lazy_reinit_cuda12()
+        ):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
             # FIXME: CUDA Graph does not work well with CUPTI teardown.
             #   1) crashes on 1st lazy CUPTI re-init after teardown (CUDA 11)
@@ -2369,6 +2452,35 @@ class _TorchCompileInductorWrapper:
                 reset_cudagraph_trees()
 
 
+class _TorchCompileAOTInductorWrapper(_TorchCompileInductorWrapper):
+    compiler_name = "aotinductor"
+
+    def __init__(self, mode, options, dynamic):
+        super().__init__(mode, options, dynamic)
+        self.apply_options({"cpp_wrapper": True})
+        self.apply_options({"aot_inductor.package": True})
+
+    def __call__(self, model_, inputs_):
+        from contextlib import nullcontext
+        from unittest import mock
+
+        from torch._guards import detect_fake_mode
+        from torch._inductor.virtualized import V
+
+        fake_mode = detect_fake_mode(inputs_)
+        ctx = (
+            mock.patch.object(fake_mode, "allow_non_fake_inputs", True)
+            if fake_mode
+            else nullcontext()
+        )
+        with (
+            V.set_aot_compilation(True),
+            ctx,
+            torch._inductor.config.patch("enable_autograd_for_aot", True),
+        ):
+            return super().__call__(model_, inputs_)
+
+
 class _TorchCompileWrapper:
     def __init__(self, backend, mode, options, dynamic):
         from torch._dynamo.backends.registry import lookup_backend
@@ -2416,7 +2528,9 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[
+        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+    ] = None,
     disable: builtins.bool = False,
 ) -> _Callable[_InputT, _RetT]: ...
 
@@ -2429,19 +2543,23 @@ def compile(
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[
+        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+    ] = None,
     disable: builtins.bool = False,
 ) -> _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]]: ...
 
 
 def compile(
-    model: _Optional[_Callable] = None,
+    model: _Optional[_Callable[_InputT, _RetT]] = None,
     *,
     fullgraph: builtins.bool = False,
     dynamic: _Optional[builtins.bool] = None,
     backend: _Union[str, _Callable] = "inductor",
     mode: _Union[str, None] = None,
-    options: _Optional[dict[str, _Union[str, builtins.int, builtins.bool]]] = None,
+    options: _Optional[
+        dict[str, _Union[str, builtins.int, builtins.bool, _Callable]]
+    ] = None,
     disable: builtins.bool = False,
 ) -> _Union[
     _Callable[[_Callable[_InputT, _RetT]], _Callable[_InputT, _RetT]],
@@ -2456,7 +2574,7 @@ def compile(
     to compile it and cache the compiled result on the code object for future
     use.  A single frame may be compiled multiple times if previous compiled
     results are not applicable for subsequent calls (this is called a "guard
-    failure), you can use TORCH_LOGS=guards to debug these situations.
+    failure"), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
     ``torch._dynamo.config.recompile_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
@@ -2464,11 +2582,12 @@ def compile(
     function, they will all share the same code cache.
 
     Args:
-       model (Callable): Module/function to optimize
-       fullgraph (bool): If False (default), torch.compile attempts to discover compileable regions
+       model (Callable or None): Module/function to optimize
+       fullgraph (bool): If False (default), torch.compile attempts to discover compilable regions
         in the function that it will optimize. If True, then we require that the entire function be
         capturable into a single graph. If this is not possible (that is, if there are graph breaks),
-        then this will raise an error.
+        then this will raise an error. This also opts into unbacked semantics, notably it will turn on
+        capture_scalar_outputs and capture_dynamic_output_shape_ops on by default.
        dynamic (bool or None): Use dynamic shape tracing.  When this is True, we will up-front attempt
         to generate a kernel that is as dynamic as possible to avoid recompilations when
         sizes change.  This may not always work as some operations/optimizations will
@@ -2522,6 +2641,14 @@ def compile(
 
         - `trace.graph_diagram` which will show you a picture of your graph after fusion
 
+        - `guard_filter_fn` that controls which dynamo guards are saved with compilations.
+          This is an unsafe feature and there is no backward compatibility guarantee provided
+          for dynamo guards as data types.
+          For stable helper functions to use, see the documentations in `torch.compiler`, for example:
+          - `torch.compiler.skip_guard_on_inbuilt_nn_modules_unsafe`
+          - `torch.compiler.skip_guard_on_all_nn_modules_unsafe`
+          - `torch.compiler.keep_tensor_guards_unsafe`
+
         - For inductor you can see the full list of configs that it supports by calling `torch._inductor.list_options()`
        disable (bool): Turn torch.compile() into a no-op for testing
 
@@ -2535,8 +2662,8 @@ def compile(
     import sysconfig
 
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("torch.compile is not supported on Python 3.14+")
+    if sys.version_info >= (3, 15):
+        raise RuntimeError("torch.compile is not supported on Python 3.15+")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -2553,7 +2680,7 @@ def compile(
         def fn(model: _Callable[_InputT, _RetT]) -> _Callable[_InputT, _RetT]:
             if model is None:
                 raise RuntimeError("Model can't be None")
-            return compile(
+            return compile(  # pyrefly: ignore  # no-matching-overload
                 model,
                 fullgraph=fullgraph,
                 dynamic=dynamic,
@@ -2575,10 +2702,52 @@ def compile(
     from torch._inductor.compiler_bisector import CompilerBisector
 
     if bisect_backend := CompilerBisector.get_backend():
-        backend = bisect_backend
+        import torch._inductor.config as inductor_config
+
+        # don't override the backend for use cases like vllm
+        # which leverages their custom backend.
+        if not (
+            inductor_config.test_configs.bisect_keep_custom_backend_for_inductor
+            and bisect_backend == "inductor"
+            and not isinstance(backend, str)
+        ):
+            backend = bisect_backend
+
+    guard_filter_fn = None
+    use_aoti = False
+    if options and isinstance(options, dict):
+        guard_filter_fn = options.pop("guard_filter_fn", None)
+        use_aoti = options.pop("use_aoti", False)
+
+    if torch.compiler.is_exporting():
+        warnings.warn(
+            "You are calling torch.compile inside torch.export region. "
+            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)",
+            stacklevel=2,
+        )
+        from torch._higher_order_ops.utils import setup_compilation_env
+
+        # Create wrapper that always uses eager backend during export
+        def export_wrapped_fn(*args, **kwargs):
+            with setup_compilation_env() as backend:  # type: ignore[attr-defined]
+                # Force eager backend regardless of original backend
+                backend_wrapper = _TorchCompileWrapper(backend, mode, options, dynamic)
+                return torch._dynamo.optimize(
+                    backend=backend_wrapper,
+                    nopython=fullgraph,
+                    dynamic=dynamic,
+                    disable=disable,
+                    guard_filter_fn=guard_filter_fn,
+                    # pyrefly: ignore [bad-argument-type]
+                )(model)(*args, **kwargs)
+
+        return export_wrapped_fn
 
     if backend == "inductor":
-        backend = _TorchCompileInductorWrapper(mode, options, dynamic)
+        if use_aoti:
+            backend = _TorchCompileAOTInductorWrapper(mode, options, dynamic)
+        else:
+            backend = _TorchCompileInductorWrapper(mode, options, dynamic)
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
@@ -2587,6 +2756,7 @@ def compile(
         nopython=fullgraph,
         dynamic=dynamic,
         disable=disable,
+        guard_filter_fn=guard_filter_fn,
     )(model)  # type: ignore[return-value]
 
 
@@ -2637,21 +2807,21 @@ from torch import fx as fx
 # Register MPS specific decomps
 torch.backends.mps._init()
 
-if not _running_with_deploy():
-    from torch import compiler as compiler
+from torch import compiler as compiler
 
-    class _TritonLibrary:
-        lib = torch.library.Library("triton", "DEF")
-        ops_table: dict[tuple[str, str], _Callable] = {}
 
-        @classmethod
-        def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):
-            if (op_key, dispatch_key) not in cls.ops_table:
-                cls.lib.define(full_schema)
-                cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
-                cls.ops_table[(op_key, dispatch_key)] = op_impl
+class _TritonLibrary:
+    lib = torch.library.Library("triton", "DEF")
+    ops_table: dict[tuple[str, str], _Callable] = {}
 
-            return cls.ops_table[(op_key, dispatch_key)]
+    @classmethod
+    def registerOp(cls, op_key, full_schema, op_impl, dispatch_key):
+        if (op_key, dispatch_key) not in cls.ops_table:
+            cls.lib.define(full_schema)
+            cls.lib.impl("triton::" + op_key, op_impl, dispatch_key)
+            cls.ops_table[(op_key, dispatch_key)] = op_impl
+
+        return cls.ops_table[(op_key, dispatch_key)]
 
 
 # Deprecated attributes
@@ -2766,10 +2936,7 @@ def _import_device_backends():
     from importlib.metadata import entry_points
 
     group_name = "torch.backends"
-    if sys.version_info < (3, 10):
-        backend_extensions = entry_points().get(group_name, ())
-    else:
-        backend_extensions = entry_points(group=group_name)
+    backend_extensions = entry_points(group=group_name)
 
     for backend_extension in backend_extensions:
         try:

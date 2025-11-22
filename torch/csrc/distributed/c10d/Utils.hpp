@@ -48,14 +48,14 @@ TORCH_API std::vector<at::Tensor> getTensorShapes(
 // Turns at::IntArrayRef into "(1, 2, 3, 4)".
 inline std::string toString(at::IntArrayRef l) {
   std::stringstream ss;
-  ss << "(";
+  ss << '(';
   for (const auto i : c10::irange(l.size())) {
     if (i > 0) {
       ss << ", ";
     }
     ss << l[i];
   }
-  ss << ")";
+  ss << ')';
   return ss.str();
 }
 
@@ -130,15 +130,15 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
    * versions of a variable get higher priority than the latter
    * versions of the same variable */
   for (ssize_t i = static_cast<ssize_t>(env.size()) - 1; i >= 0; i--) {
-    char* val = std::getenv(env[i].c_str());
-    if (val == nullptr) {
+    const auto val = c10::utils::get_env(env[i].c_str());
+    if (!val.has_value()) {
       continue;
     } else if (i) {
       WARN_ENV_VAR_ONCE(env[i], env[0]);
     }
 
     try {
-      ret = std::stoi(val);
+      ret = std::stoi(val.value());
     } catch (std::exception&) {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }
@@ -437,7 +437,7 @@ inline at::Tensor newLikeFlat(
   }
   at::DeviceGuard gpuGuard(device);
   std::vector<int64_t> sizes{static_cast<int64_t>(tensors[deviceIdx].size())};
-  std::vector<int64_t> strides{static_cast<int64_t>(t.numel())};
+  std::vector<int64_t> strides{t.numel()};
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
   return at::empty_strided(
@@ -573,9 +573,9 @@ using SizeType = uint64_t;
 // (https://stackoverflow.com/a/20295079), and thus `errno` should really only
 // be inspected if an error occurred.
 //
-// `success_cond` is an expression used to check if an error has happend. So for
-// `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function output
-// is stored in variable `__output` and may be used in `success_cond`.
+// `success_cond` is an expression used to check if an error has happened. So
+// for `fork()`, we can use `SYSCHECK(pid = fork(), pid != -1)`. The function
+// output is stored in variable `__output` and may be used in `success_cond`.
 #ifdef _WIN32
 #define SYSCHECK(expr, success_cond)                                           \
   while (true) {                                                               \
@@ -653,7 +653,11 @@ void sendBytes(
     SYSCHECK_ERR_RETURN_NEG1(
         bytesSent = ::send(socket, currentBytes, bytesToSend, flags))
     if (bytesSent == 0) {
-      C10_THROW_ERROR(DistNetworkError, "failed to send, sent 0 bytes");
+      C10_THROW_ERROR(
+          DistNetworkError,
+          "Failed to send, sent 0 bytes. "
+          "Connection was likely closed. "
+          "Did the remote server shutdown or crash?");
     }
 
     bytesToSend -= bytesSent;
@@ -675,7 +679,11 @@ void recvBytes(int socket, T* buffer, size_t length) {
     SYSCHECK_ERR_RETURN_NEG1(
         bytesReceived = recv(socket, currentBytes, bytesToReceive, 0))
     if (bytesReceived == 0) {
-      C10_THROW_ERROR(DistNetworkError, "failed to recv, got 0 bytes");
+      C10_THROW_ERROR(
+          DistNetworkError,
+          "Failed to recv, got 0 bytes. "
+          "Connection was likely closed. "
+          "Did the remote server shutdown or crash?");
     }
 
     bytesToReceive -= bytesReceived;

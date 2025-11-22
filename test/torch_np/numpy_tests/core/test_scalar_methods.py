@@ -3,9 +3,9 @@
 """
 Test the scalar constructors, which also do type-coercion
 """
+
 import fractions
 import functools
-import sys
 import types
 from typing import Any
 from unittest import skipIf as skipif, SkipTest
@@ -222,15 +222,6 @@ class TestClassGetItem(TestCase):
         assert np.number[Any]
 
 
-@instantiate_parametrized_tests
-class TestClassGetitemMisc(TestCase):
-    @skipif(sys.version_info >= (3, 9), reason="Requires python 3.8")
-    @parametrize("cls", [np.number, np.complexfloating, np.int64])
-    def test_class_getitem_38(self, cls: type[np.number]) -> None:
-        with pytest.raises(TypeError):
-            cls[Any]
-
-
 @skip(reason="scalartype(...).bit_count() not implemented")
 @instantiate_parametrized_tests
 class TestBitCount(TestCase):
@@ -244,7 +235,7 @@ class TestBitCount(TestCase):
     def test_small(self, itype):
         for a in range(max(np.iinfo(itype).min, 0), 128):
             msg = f"Smoke test for {itype}({a}).bit_count()"
-            assert itype(a).bit_count() == bin(a).count("1"), msg
+            assert itype(a).bit_count() == a.bit_count(), msg
 
     def test_bit_count(self):
         for exp in [10, 17, 63]:

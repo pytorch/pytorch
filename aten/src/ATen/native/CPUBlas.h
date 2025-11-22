@@ -29,6 +29,18 @@ using gemm_fn = void(*)(
 
 DECLARE_DISPATCH(gemm_fn, gemm_stub)
 
+using gemm_no_downcast_fn = void(*)(
+    at::ScalarType type,
+    TransposeType transa, TransposeType transb,
+    int64_t m, int64_t n, int64_t k,
+    const Scalar& alpha,
+    const void *a, int64_t lda,
+    const void *b, int64_t ldb,
+    const Scalar& beta,
+    void *c, int64_t ldc);
+
+DECLARE_DISPATCH(gemm_no_downcast_fn, gemm_no_downcast_stub)
+
 template <typename scalar_t>
 void gemm(
     TransposeType transa, TransposeType transb,
@@ -194,6 +206,16 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 // B Base pointer to a tensor B.
 // C Pointer to a tensor C (accumulation buffer).
 // Note only batch size 1 is used currently
+
+// Define macros for available brgemm APIs
+// so that callers can determine which APIs are available
+#define CPUBLAS_BRGEMM_F16F16F32 // half * half -> float
+#define CPUBLAS_BRGEMM_BF16BF16F32 // bfloat16 * bfloat16 -> float
+#define CPUBLAS_BRGEMM_F32F32F32 // float * float -> float
+#define CPUBLAS_BRGEMM_U8U8I32 // unsigned char * unsigned char -> int32
+#define CPUBLAS_BRGEMM_U8I8I32 // unsigned char * signed char -> int32
+#define CPUBLAS_BRGEMM_I8I8I32 // signed char * signed char -> int32
+
 TORCH_API void brgemm(
     int64_t M,
     int64_t N,
@@ -255,6 +277,19 @@ TORCH_API void brgemm(
     int64_t ld_c,
     const bool add_C,
     const unsigned char* A,
+    const signed char* B,
+    int32_t* C,
+    bool is_vnni = true);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const signed char* A,
     const signed char* B,
     int32_t* C,
     bool is_vnni = true);

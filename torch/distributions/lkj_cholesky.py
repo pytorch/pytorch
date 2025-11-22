@@ -60,6 +60,7 @@ class LKJCholesky(Distribution):
     Journal of Multivariate Analysis. 100. 10.1016/j.jmva.2009.04.008
     """
 
+    # pyrefly: ignore [bad-override]
     arg_constraints = {"concentration": constraints.positive}
     support = constraints.corr_cholesky
 
@@ -130,7 +131,7 @@ class LKJCholesky(Distribution):
         # Additionally, the Jacobian of the transformation from Cholesky factor to
         # correlation matrix is:
         #   prod(L_ii ^ (D - i))
-        # So the probability of a Cholesky factor is propotional to
+        # So the probability of a Cholesky factor is proportional to
         #   prod(L_ii ^ (2 * concentration - 2 + D - i)) = prod(L_ii ^ order_i)
         # with order_i = 2 * concentration - 2 + D - i
         if self._validate_args:

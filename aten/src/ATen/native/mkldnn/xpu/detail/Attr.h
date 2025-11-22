@@ -131,7 +131,7 @@ struct PostOpParam {
 
 class Attr {
  public:
-  Attr() : q_scale_(1.f), q_zero_point_(0) {}
+  Attr() : q_scale_(1.f) {}
   Attr(float q_scale, int64_t zp = 0) : q_scale_(q_scale), q_zero_point_(zp) {}
 
   /***** eltwise *****/
@@ -345,7 +345,7 @@ class Attr {
         dnnl::memory binary_m;
         auto binary = ops_params_[i].binary_;
         auto md = ops_params_[i].meta_;
-        // qeury expected_md to achieve peak performance
+        // query expected_md to achieve peak performance
         auto expected_md = pd.query_md(
             dnnl::query::exec_arg_md,
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);

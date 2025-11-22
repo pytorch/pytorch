@@ -13,7 +13,8 @@ ensuring type safety and clear contracts between different components of the sys
 
 import dataclasses
 import types
-from typing import Any, Callable, NamedTuple, Optional, Protocol, Union
+from collections.abc import Callable
+from typing import Any, NamedTuple, Optional, Protocol, Union
 
 # CacheEntry has a `guard_manager` field for the guard, and a `code` field for the code object.
 from torch._C._dynamo.eval_frame import (
@@ -23,7 +24,7 @@ from torch._C._dynamo.eval_frame import (
     _FrameExecStrategy as FrameExecStrategy,
     _PyInterpreterFrame as DynamoFrameType,
 )
-from torch._guards import CompileId
+from torch._guards import CompileId, Guard
 
 
 # We use a dict to store additional data per frame.
@@ -35,6 +36,17 @@ class GuardFail(NamedTuple):
     reason: str
     # A code object where we failed a guard
     orig_code: types.CodeType
+
+
+@dataclasses.dataclass(frozen=True)
+class GuardFilterEntry:
+    name: str
+    has_value: bool
+    value: object
+    guard_type: str
+    derived_guard_types: tuple[str, ...]
+    is_global: bool
+    orig_guard: Guard
 
 
 class GuardFn(Protocol):
@@ -64,7 +76,7 @@ class ConvertFrameReturn:
     # default return is no compiled code (i.e. `return None`):
     # strategy is to skip non-recursively, for all future intercepted frames too
 
-    # eval fram execution strategy for this frame
+    # eval frame execution strategy for this frame
     frame_exec_strategy: FrameExecStrategy = dataclasses.field(
         default_factory=lambda: FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
     )
@@ -101,6 +113,13 @@ class DynamoGuardHook(Protocol):
         index: int,
         last: bool,
     ) -> None: ...
+
+
+class DynamoGuardCompleteHook(Protocol):
+    def __call__(
+        self,
+        cache_hit: bool,
+    ) -> bool: ...
 
 
 class ProfilerStartHook(Protocol):

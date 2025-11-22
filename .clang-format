@@ -120,6 +120,7 @@ UseTab:          Never
 Language: ObjC
 ColumnLimit: 120
 AlignAfterOpenBracket: Align
+IndentWidth: 2
 ObjCBlockIndentWidth: 2
 ObjCSpaceAfterProperty: false
 ObjCSpaceBeforeProtocolList: false

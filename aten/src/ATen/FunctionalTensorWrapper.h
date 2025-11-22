@@ -56,7 +56,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   explicit FunctionalTensorWrapper(
       const Tensor& view_value,
       const FunctionalTensorWrapper* base,
-      const functionalization::ViewMeta& meta);
+      const std::shared_ptr<functionalization::ViewMeta>& meta);
 
   // Get the underlying, actual tensor, that doesn't know anything about
   // functionalization.
@@ -74,7 +74,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool has_metadata_mutation() const {
     return has_metadata_mutation_;
   }
-
+  uint64_t mutation_counter() const {
+    return functional_storage_impl()->mutation_counter();
+  }
   void mark_mutation() {
     functional_storage_impl()->mark_mutation();
   }
@@ -97,17 +99,17 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
         ->are_all_mutations_under_no_grad_or_inference_mode();
   }
 
-  void maybe_mark_symbolic(const functionalization::ViewMeta& meta) {
-    is_symbolic_ = is_symbolic_ | meta.has_symbolic_inputs;
+  void maybe_mark_symbolic(functionalization::ViewMeta* meta) {
+    is_symbolic_ = is_symbolic_ | meta->has_symbolic_inputs;
   }
 
   bool is_symbolic() const {
     return is_symbolic_;
   }
 
-  // Runs the forward_fn of every ViewMeta collected in the current instance
-  // to some other base.
-  Tensor apply_view_metas(const Tensor& base);
+  // Retrieves the ViewMeta sequence of this tensor.
+  const std::vector<std::shared_ptr<functionalization::ViewMeta>>& view_metas()
+      const;
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
   // involves two steps: 1) Apply any pending updates/mutations to the alias 2)
@@ -144,7 +146,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // from the base tensor. This method is used by inplace-view ops like
   // transpose_. It appends a ViewMeta to the existing stack, and refreshes the
   // tensor by replaying the views off of the alias.
-  void mutate_view_meta(const at::functionalization::ViewMeta& meta);
+  void mutate_view_meta(
+      const std::shared_ptr<at::functionalization::ViewMeta>& meta);
 
   // Custom implementation of self.set_(src)
   void set__impl(const FunctionalTensorWrapper* other);
@@ -161,8 +164,13 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return was_storage_changed_;
   }
 
-  void set_storage_changed() {
+  void mark_storage_changed() {
     was_storage_changed_ = true;
+    storage_changed_counter_++;
+  }
+
+  uint64_t storage_changed_counter() {
+    return storage_changed_counter_;
   }
 
   // A FunctionalTensor is considered a base if its not a view of another
@@ -181,6 +189,9 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return functional_storage_impl()->was_inductor_storage_resized();
   }
 
+  bool inductor_storage_resized_counter() {
+    return functional_storage_impl()->inductor_storage_resized_counter();
+  }
   // The functionalization pass can be used to remove mutations.
   // It does so by replacing any mutation op with it's corresponding
   // out-of-place op, followed by a call to replace_(). e.g:
@@ -226,7 +237,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   at::IntArrayRef strides_custom() const override;
   int64_t dim_custom() const override;
   int64_t numel_custom() const override;
-  bool is_contiguous_custom(at::MemoryFormat memory_format) const override;
+  c10::SymBool sym_is_contiguous_custom(
+      at::MemoryFormat memory_format) const override;
   c10::SymIntArrayRef sym_sizes_custom() const override;
   c10::SymInt sym_size_custom(int64_t d) const override;
   c10::SymIntArrayRef sym_strides_custom() const override;
@@ -269,11 +281,12 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool is_multi_output_view_ = false;
   // Did the tensor experience a set_() call.
   bool was_storage_changed_ = false;
+  uint64_t storage_changed_counter_ = 0;
   // Did the tensor experience any view operation with symbolic int.
   bool is_symbolic_ = false;
 
   size_t generation_ = 0;
-  std::vector<at::functionalization::ViewMeta> view_metas_;
+  std::vector<std::shared_ptr<at::functionalization::ViewMeta>> view_metas_;
 
  protected:
   static void copy_tensor_metadata(
@@ -288,7 +301,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
 namespace functionalization {
 namespace impl {
 
-TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
+inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
     const Tensor& tensor) {
   auto functional_impl =
       static_cast<FunctionalTensorWrapper*>(tensor.unsafeGetTensorImpl());
@@ -365,16 +378,20 @@ TORCH_API void propagate_xla_data_direct(
 Tensor create_functional_tensor_with_view_meta(
     const Tensor& view_to_wrap,
     const Tensor& base,
-    functionalization::ViewMeta meta,
+    const std::shared_ptr<functionalization::ViewMeta>& meta,
     int64_t out_idx = 0);
 std::vector<Tensor> create_functional_tensor_with_view_meta(
     ITensorListRef view_to_wrap,
     const Tensor& base,
-    const functionalization::ViewMeta& meta);
+    const std::shared_ptr<functionalization::ViewMeta>& meta);
 
 void mutate_view_meta(
     const Tensor& self,
-    const functionalization::ViewMeta& meta);
+    const std::shared_ptr<functionalization::ViewMeta>& meta);
+
+TORCH_API Tensor apply_view_meta_sequence(
+    const Tensor& base,
+    const std::vector<std::shared_ptr<functionalization::ViewMeta>>& sequence);
 
 void set_sizes_strides_offset(const Tensor& out, const Tensor& meta_out);
 void set_sizes_strides_offset(

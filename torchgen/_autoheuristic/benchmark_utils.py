@@ -18,7 +18,7 @@ def transpose_tensors(p_transpose_both: float = 0.05) -> tuple[bool, bool]:
 
 def fits_in_memory(dtype: Any, m: int, k: int, n: int) -> Any:
     threshold_memory = torch.cuda.get_device_properties(0).total_memory / 4
-    # dividing by 4 beause we otherwise sometimes run out of memory, I assume because
+    # dividing by 4 because we otherwise sometimes run out of memory, I assume because
     # inductor creates copies of tensors for benchmarking?
     return dtype.itemsize * (m * k + k * n + m * n) < threshold_memory
 

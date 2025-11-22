@@ -27,11 +27,16 @@ class LambdaPostHook : public torch::autograd::FunctionPostHook {
     return fn_(outputs, inputs);
   }
 
-  void compiled_args(CompiledNodeArgs& args) const override {}
+  void compiled_args(CompiledNodeArgs& args) const override {
+    if (compiled_fn_ != nullptr) {
+      return compiled_fn_(args);
+    }
+    return FunctionPostHook::compiled_args(args);
+  }
 
  protected:
   std::function<variable_list(const variable_list&, const variable_list&)> fn_;
-  compiled_fn_type compiled_fn_{};
+  compiled_fn_type compiled_fn_;
 };
 
 } // namespace torch::autograd::utils

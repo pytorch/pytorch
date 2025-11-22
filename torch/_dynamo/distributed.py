@@ -22,6 +22,7 @@ from . import config
 
 
 _COMPILE_PG: Optional[dist.ProcessGroup] = None
+_GUARD_PG: Optional[dist.ProcessGroup] = None
 
 
 def get_compile_pg() -> Optional[dist.ProcessGroup]:
@@ -37,5 +38,17 @@ def get_compile_pg() -> Optional[dist.ProcessGroup]:
                 pg_tag="pt2_compile_pg"
             )
         return _COMPILE_PG
+
+    return None
+
+
+# NB: Unlike get_compile_pg, this is only called when guard collectives were
+# explicitly requested
+def get_guard_pg() -> Optional[dist.ProcessGroup]:
+    if dist.is_available() and dist.is_initialized():
+        global _GUARD_PG
+        if _GUARD_PG is None:
+            _GUARD_PG = dist.distributed_c10d._new_group_with_tag(pg_tag="pt2_guard_pg")
+        return _GUARD_PG
 
     return None

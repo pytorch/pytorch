@@ -20,12 +20,9 @@
 
 namespace at::native {
 
-template<typename scalar_t>
-void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, scalar_t *a, int64_t lda, scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy);
-
 namespace {
 
-static inline void slow_conv_transpose3d_shape_check(
+inline void slow_conv_transpose3d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -251,8 +248,8 @@ void slow_conv_transpose3d_out_cpu_template(
   Tensor weight = weight_.contiguous();
   Tensor bias = bias_.defined() ? bias_.contiguous() : bias_;
 
-  const int n_input_plane = (int)weight.size(0);
-  const int n_output_plane = (int)weight.size(1);
+  const auto n_input_plane = weight.size(0);
+  const auto n_output_plane = weight.size(1);
 
   bool is_batch = false;
   if (input.dim() == 4) {
@@ -299,7 +296,7 @@ void slow_conv_transpose3d_out_cpu_template(
         int64_t elt;
         // For each elt in batch, do:
         for (elt = 0; elt < batch_size; ++elt) {
-          // Matrix mulitply per output:
+          // Matrix multiply per output:
           input_n = input.select(0, elt);
           output_n = output.select(0, elt);
 
@@ -523,7 +520,7 @@ void slow_conv_transpose3d_backward_out_cpu_template(
         int64_t elt;
         // For each elt in batch, do:
         for (elt = 0; elt < batch_size; ++elt) {
-          // Matrix mulitply per sample:
+          // Matrix multiply per sample:
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
@@ -739,12 +736,12 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
         int64_t elt;
         // For each elt in batch, do:
         for (elt = 0; elt < batch_size; ++elt) {
-          // Matrix mulitply per output:
+          // Matrix multiply per output:
           grad_output_n = grad_output.select(0, elt);
 
           // Do Weight:
           if (grad_weight.defined()) {
-            // Matrix mulitply per output:
+            // Matrix multiply per output:
             input_n = input.select(0, elt);
 
             if (need_columns) {

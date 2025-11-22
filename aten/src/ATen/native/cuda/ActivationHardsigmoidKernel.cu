@@ -36,7 +36,7 @@ void hardsigmoid_kernel(TensorIteratorBase& iter) {
             [zero, one_sixth, three, six] GPU_LAMBDA(
                 scalar_t self_val) -> scalar_t {
               opmath_t x = static_cast<opmath_t>(self_val);
-              return std::min(std::max(x + three, zero), six) * one_sixth;
+              return std::min<opmath_t>(std::max<opmath_t>(x + three, zero), six) * one_sixth;
             });
       });
 }

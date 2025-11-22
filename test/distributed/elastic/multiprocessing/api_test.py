@@ -15,8 +15,9 @@ import signal
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from itertools import product
-from typing import Callable, Union
+from typing import Union
 from unittest import mock
 
 import torch
@@ -126,8 +127,9 @@ def echo1(msg: str, exitcode: int = 0) -> str:
         print(f"exit {exitcode} from {rank}", file=sys.stderr)
         sys.exit(exitcode)
     else:
-        print(f"{msg} stdout from {rank}")
-        print(f"{msg} stderr from {rank}", file=sys.stderr)
+        for m in msg.split(","):
+            print(f"{m} stdout from {rank}")
+            print(f"{m} stderr from {rank}", file=sys.stderr)
         return f"{msg}_{rank}"
 
 
@@ -145,7 +147,7 @@ def echo_large(size: int) -> dict[int, str]:
     returns a large output ({0: test0", 1: "test1", ..., (size-1):f"test{size-1}"})
     """
     out = {}
-    for idx in range(0, size):
+    for idx in range(size):
         out[idx] = f"test{idx}"
     return out
 
@@ -245,6 +247,13 @@ class _StartProcessesTest(TestCase):
             actual = fp.readlines()
             for line in expected:
                 self.assertIn(line, actual)
+
+    def assert_not_in_file(self, lines: list[str], filename: str) -> None:
+        lines = [f"{line.rstrip()}\n" for line in lines]
+        with open(filename) as fp:
+            actual = fp.readlines()
+            for line in lines:
+                self.assertNotIn(line, actual)
 
     def assert_pids_noexist(self, pids: dict[int, int]):
         for local_rank, pid in pids.items():
@@ -359,8 +368,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
 
             self.assertIsNone(pc.wait(timeout=0.1, period=0.01))
             self.assertIsNotNone(pc.wait(period=0.1))
-            self.assertTrue(pc._stderr_tail.stopped())
-            self.assertTrue(pc._stdout_tail.stopped())
+            for tail_log in pc._tail_logs:
+                self.assertTrue(tail_log.stopped())
 
         def test_pcontext_wait_on_a_child_thread(self):
             asyncio.run(asyncio.to_thread(self.test_pcontext_wait))
@@ -378,8 +387,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             pids = pc.pids()
             pc.close()
             self.assert_pids_noexist(pids)
-            self.assertTrue(pc._stderr_tail.stopped())
-            self.assertTrue(pc._stdout_tail.stopped())
+            for tail_log in pc._tail_logs:
+                self.assertTrue(tail_log.stopped())
 
         def test_function_with_tensor(self):
             for start_method in self._start_methods:
@@ -481,8 +490,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                         int(error_file_data["message"]["extraInfo"]["timestamp"]),
                         int(failure.timestamp),
                     )
-                    self.assertTrue(pc._stderr_tail.stopped())
-                    self.assertTrue(pc._stdout_tail.stopped())
+                    for tail_log in pc._tail_logs:
+                        self.assertTrue(tail_log.stopped())
 
         def test_wait_for_all_child_procs_to_exit(self):
             """
@@ -500,11 +509,13 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 logs_specs=DefaultLogsSpecs(log_dir=self.log_dir()),
             )
 
-            with mock.patch.object(
-                mpc, "_is_done", return_value=True
-            ), mock.patch.object(mpc, "_pc"), mock.patch.object(
-                mpc._pc, "join", side_effect=[True, False, False, True]
-            ) as mock_join:
+            with (
+                mock.patch.object(mpc, "_is_done", return_value=True),
+                mock.patch.object(mpc, "_pc"),
+                mock.patch.object(
+                    mpc._pc, "join", side_effect=[True, False, False, True]
+                ) as mock_join,
+            ):
                 mpc._poll()
                 self.assertEqual(4, mock_join.call_count)
 
@@ -556,7 +567,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             FAIL = 138
             pc = start_processes(
                 name="echo",
-                entrypoint=bin("echo1.py"),
+                entrypoint=bin("echo4.py"),
                 args={0: ("--exitcode", FAIL, "foo"), 1: ("--exitcode", 0, "bar")},
                 envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
                 logs_specs=DefaultLogsSpecs(
@@ -566,9 +577,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             )
 
             results = pc.wait(period=0.1)
-
             self.assertTrue(results.is_failed())
-            self.assertEqual(1, len(results.failures))
+            self.assertEqual(2, len(results.failures))
 
             failure = results.failures[0]
             self.assertEqual(138, failure.exitcode)
@@ -578,8 +588,15 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             self.assert_in_file([], results.stdouts[0])
             self.assertFalse(results.stderrs[1])
             self.assertFalse(results.stdouts[1])
-            self.assertTrue(pc._stderr_tail.stopped())
-            self.assertTrue(pc._stdout_tail.stopped())
+            for tail_log in pc._tail_logs:
+                self.assertTrue(tail_log.stopped())
+
+            failure = results.failures[1]
+            self.assertEqual(-15, failure.exitcode)
+            self.assertEqual("SIGTERM", failure.signal_name())
+            self.assertEqual("<NONE>", failure.error_file_data["message"])
+            # Assert that the failure message contains expected substrings
+            self.assertIn("Signal 15 (SIGTERM) received by PID", failure.message)
 
         def test_binary_raises(self):
             pc = start_processes(
@@ -722,8 +739,46 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
             self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
             self.assertFalse(pc.stdouts[1])
-            self.assertTrue(pc._stderr_tail.stopped())
-            self.assertTrue(pc._stdout_tail.stopped())
+            for tail_log in pc._tail_logs:
+                self.assertTrue(tail_log.stopped())
+
+        def test_binary_duplicate_log_filters(self):
+            envs = {0: {"RANK": "0"}, 1: {"RANK": "1"}}
+            logs_specs = DefaultLogsSpecs(
+                log_dir=self.log_dir(),
+                redirects={0: Std.ERR, 1: Std.NONE},
+                tee={0: Std.OUT, 1: Std.ERR},
+            )
+            logs_dest = logs_specs.reify(envs)
+            pc = start_processes(
+                name="trainer",
+                entrypoint=bin("echo1.py"),
+                args={0: ("helloA,helloB",), 1: ("worldA,worldB",)},
+                envs=envs,
+                logs_specs=logs_specs,
+                log_line_prefixes={0: "[rank0]:", 1: "[rank1]:"},
+                duplicate_stdout_filters=["helloA"],
+                duplicate_stderr_filters=["worldA", "B"],
+                start_method="spawn",
+            )
+
+            result = pc.wait()
+
+            self.assertFalse(result.is_failed())
+            self.assert_in_file(
+                ["[rank0]:helloA stdout from 0"], logs_dest.filtered_stdout
+            )
+            self.assert_not_in_file(
+                ["[rank0]:helloB stdout from 0"], logs_dest.filtered_stdout
+            )
+            self.assert_in_file(
+                ["[rank1]:worldA stderr from 1"], logs_dest.filtered_stderr
+            )
+            self.assert_in_file(
+                ["[rank1]:worldB stderr from 1"], logs_dest.filtered_stderr
+            )
+            for tail_log in pc._tail_logs:
+                self.assertTrue(tail_log.stopped())
 
 
 # tests incompatible with tsan or asan, the redirect functionality does not work on macos or windows
@@ -754,6 +809,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                     stderr_redirects={0: stderr_redir},
                     ret_vals={0: queue},
                     queue_finished_reading_event=worker_finished_event_mock,
+                    numa_options=None,
                 )
                 self.assertEqual("hello_0", queue.get())
                 if stdout_redir:
@@ -785,8 +841,47 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                     self.assert_in_file(["hello stderr from 0"], pc.stderrs[0])
                     self.assert_in_file(["world stderr from 1"], pc.stderrs[1])
                     self.assertFalse(pc.stdouts[1])
-                    self.assertTrue(pc._stderr_tail.stopped())
-                    self.assertTrue(pc._stdout_tail.stopped())
+                    for tail_log in pc._tail_logs:
+                        self.assertTrue(tail_log.stopped())
+
+        def test_function_duplicate_log_filters(self):
+            for start_method in self._start_methods:
+                with self.subTest(start_method=start_method):
+                    envs = {0: {"RANK": "0"}, 1: {"RANK": "1"}}
+                    logs_specs = DefaultLogsSpecs(
+                        log_dir=self.log_dir(),
+                        redirects={0: Std.ERR, 1: Std.NONE},
+                        tee={0: Std.OUT, 1: Std.ERR},
+                    )
+                    logs_dest = logs_specs.reify(envs)
+                    pc = start_processes(
+                        name="trainer",
+                        entrypoint=echo1,
+                        args={0: ("helloA,helloB",), 1: ("worldA,worldB",)},
+                        envs=envs,
+                        logs_specs=logs_specs,
+                        duplicate_stdout_filters=["helloA"],
+                        duplicate_stderr_filters=["worldA", "B"],
+                        start_method="spawn",
+                    )
+
+                    result = pc.wait()
+
+                    self.assertFalse(result.is_failed())
+                    self.assert_in_file(
+                        ["[trainer0]:helloA stdout from 0"], logs_dest.filtered_stdout
+                    )
+                    self.assert_not_in_file(
+                        ["[trainer0]:helloB stdout from 0"], logs_dest.filtered_stdout
+                    )
+                    self.assert_in_file(
+                        ["[trainer1]:worldA stderr from 1"], logs_dest.filtered_stderr
+                    )
+                    self.assert_in_file(
+                        ["[trainer1]:worldB stderr from 1"], logs_dest.filtered_stderr
+                    )
+                    for tail_log in pc._tail_logs:
+                        self.assertTrue(tail_log.stopped())
 
         def test_function(self):
             for start_method, redirs in product(self._start_methods, redirects_all()):
@@ -871,8 +966,8 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                     self.assertFalse(results.stdouts[0])
                     self.assertFalse(results.stderrs[1])
                     self.assertFalse(results.stdouts[1])
-                    self.assertTrue(pc._stderr_tail.stopped())
-                    self.assertTrue(pc._stdout_tail.stopped())
+                    for tail_log in pc._tail_logs:
+                        self.assertTrue(tail_log.stopped())
 
         def test_no_zombie_process_function(self):
             signals = [signal.SIGTERM, signal.SIGINT, signal.SIGHUP, signal.SIGQUIT]

@@ -80,7 +80,7 @@ def unserializable_hook(f):
     return f
 
 
-def warn_if_has_hooks(tensor):
+def warn_if_has_hooks(tensor) -> None:
     if tensor._backward_hooks:
         for k in tensor._backward_hooks:
             hook = tensor._backward_hooks[k]
@@ -88,7 +88,7 @@ def warn_if_has_hooks(tensor):
                 warnings.warn(f"backward hook {repr(hook)} on tensor will not be "
                               "serialized.  If this is expected, you can "
                               "decorate the function with @torch.utils.hooks.unserializable_hook "
-                              "to suppress this warning")
+                              "to suppress this warning", stacklevel=2)
 
 class BackwardHook:
     """
@@ -101,7 +101,7 @@ class BackwardHook:
       - Calling the user hook once both output and input gradients are available
     """
 
-    def __init__(self, module, user_hooks, user_pre_hooks):
+    def __init__(self, module, user_hooks, user_pre_hooks) -> None:
         self.user_hooks = user_hooks
         self.user_pre_hooks = user_pre_hooks
         self.module = module
@@ -114,7 +114,7 @@ class BackwardHook:
 
     def _pack_with_none(self, indices, values, size):
         res = [None] * size
-        for idx, val in zip(indices, values):
+        for idx, val in zip(indices, values, strict=True):
             res[idx] = val
 
         return tuple(res)
@@ -124,7 +124,7 @@ class BackwardHook:
 
         return tuple(res)
 
-    def _set_user_hook(self, grad_fn):
+    def _set_user_hook(self, grad_fn) -> None:
         def hook(grad_input, _):
             if self.grad_outputs is None:
                 # This happens because the gradient in your nn.Module flows to
@@ -145,6 +145,7 @@ class BackwardHook:
 
                 res = out
 
+            # pyrefly: ignore [bad-assignment]
             self.grad_outputs = None
 
             return self._unpack_none(self.input_tensors_index, res)
@@ -179,7 +180,7 @@ class BackwardHook:
         fn(grad_fns[0])
 
         arg_list = list(args)
-        for idx, val in zip(tensors_idx, new_tensors):
+        for idx, val in zip(tensors_idx, new_tensors, strict=True):
             arg_list[idx] = val
 
         if type(args) is tuple:
@@ -189,7 +190,7 @@ class BackwardHook:
         return out, tensors_idx
 
     def setup_input_hook(self, args):
-        def fn(grad_fn):
+        def fn(grad_fn) -> None:
             self._set_user_hook(grad_fn)
 
         res, input_idx = self._apply_on_tensors(fn, args)
@@ -198,7 +199,7 @@ class BackwardHook:
         return res
 
     def setup_output_hook(self, args):
-        def fn(grad_fn):
+        def fn(grad_fn) -> None:
             def hook(_, grad_output):
                 self.grad_outputs = self._pack_with_none(self.output_tensors_index,
                                                          grad_output,
@@ -223,6 +224,11 @@ class BackwardHook:
                 # Special case if no input required gradients, this hook should call the user
                 # hook directly
                 if self.input_tensors_index is None:
+                    warnings.warn("Full backward hook is firing when gradients are computed "
+                                  "with respect to module outputs since no inputs require gradients. See "
+                                  "https://docs.pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_full_backward_hook "  # noqa: B950
+                                  "for more details.",
+                                  stacklevel=5)
                     grad_inputs = self._pack_with_none([], [], self.n_inputs)
                     for user_hook in self.user_hooks:
                         res = user_hook(self.module, grad_inputs, self.grad_outputs)
@@ -232,7 +238,8 @@ class BackwardHook:
                     self.grad_outputs = None
 
                 if local_grad_outputs is not None:
-                    assert self.output_tensors_index is not None  # mypy
+                    if self.output_tensors_index is None:
+                        raise AssertionError("output_tensors_index should not be None when grad_outputs is not None")
                     return tuple(local_grad_outputs[i] for i in self.output_tensors_index)
 
             grad_fn.register_hook(hook)

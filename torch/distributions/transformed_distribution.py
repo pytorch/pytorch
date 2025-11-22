@@ -123,6 +123,7 @@ class TransformedDistribution(Distribution):
         return new
 
     @constraints.dependent_property(is_discrete=False)
+    # pyrefly: ignore [bad-override]
     def support(self):
         if not self.transforms:
             return self.base_dist.support
@@ -170,7 +171,7 @@ class TransformedDistribution(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         event_dim = len(self.event_shape)
-        log_prob = 0.0
+        log_prob: Union[Tensor, float] = 0.0
         y = value
         for transform in reversed(self.transforms):
             x = transform.inv(y)

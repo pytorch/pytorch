@@ -8,6 +8,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/native/cuda/jit_utils.h>
 #include <c10/cuda/CUDAGuard.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/resource_guard.h>
 
 #include <cuda_runtime.h>
@@ -125,7 +126,7 @@ FusedKernelCUDA::FusedKernelCUDA(
   args.push_back("-hip-pch");
 #else
   const std::string compute = std::string("--gpu-architecture=") +
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+#if !defined(USE_ROCM)
       // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
       // which gives better backwards compatibility to work on older driver,
       // (since older driver doesn't necessrily recognize PTX emitted by new
@@ -148,15 +149,13 @@ FusedKernelCUDA::FusedKernelCUDA(
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLogSize(program, &logsize));
     std::vector<char> log(logsize);
     AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcGetProgramLog(program, log.data()));
-    std::stringstream cu;
-    cu << log.data();
-    throw std::runtime_error(cu.str());
+    TORCH_CHECK(false, std::string(log.data(), log.size()));
   }
   ResourceGuard holdProgram(
       [&] { AT_CUDA_NVRTC_CHECK(nvrtc().nvrtcDestroyProgram(&program)); });
   AT_CUDA_NVRTC_CHECK(result);
   size_t ptx_size = 0;
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+#if !defined(USE_ROCM)
   // compile_to_sass determines whether we are generating SASS or PTX, hence
   // the different API.
   const auto getSize = compile_to_sass

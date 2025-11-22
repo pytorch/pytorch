@@ -1,10 +1,14 @@
 # mypy: allow-untyped-defs
 import importlib
+import logging
+import sys
 from abc import ABC, abstractmethod
+
+# pyrefly: ignore [missing-module-attribute]
 from pickle import (  # type: ignore[attr-defined]
     _getattribute,
     _Pickler,
-    whichmodule as _pickle_whichmodule,
+    whichmodule as _pickle_whichmodule,  # pyrefly: ignore  # missing-module-attribute
 )
 from types import ModuleType
 from typing import Any, Optional
@@ -13,6 +17,7 @@ from ._mangling import demangle, get_mangle_prefix, is_mangled
 
 
 __all__ = ["ObjNotFoundError", "ObjMismatchError", "Importer", "OrderedImporter"]
+log = logging.getLogger(__name__)
 
 
 class ObjNotFoundError(Exception):
@@ -98,7 +103,12 @@ class Importer(ABC):
         # Check that this name will indeed return the correct object
         try:
             module = self.import_module(module_name)
-            obj2, _ = _getattribute(module, name)
+            if sys.version_info >= (3, 14):
+                # pickle._getatribute signature changes in 3.14
+                # to take iterable and return just one object
+                obj2 = _getattribute(module, name.split("."))
+            else:
+                obj2, _ = _getattribute(module, name)
         except (ImportError, KeyError, AttributeError):
             raise ObjNotFoundError(
                 f"{obj} was not found as {module_name}.{name}"
@@ -171,6 +181,12 @@ class _SysImporter(Importer):
         return importlib.import_module(module_name)
 
     def whichmodule(self, obj: Any, name: str) -> str:
+        # In Python 3.14+, pickle.whichmodule tries to import the module,
+        # which fails for mangled package names like '<torch_package_0>'.
+        # Check __module__ first before calling pickle.whichmodule.
+        module_name = getattr(obj, "__module__", None)
+        if module_name is not None:
+            return module_name
         return _pickle_whichmodule(obj, name)
 
 
@@ -203,6 +219,20 @@ class OrderedImporter(Importer):
         if not hasattr(module, "__file__"):
             return True
         return module.__file__ is None
+
+    def get_name(self, obj: Any, name: Optional[str] = None) -> tuple[str, str]:
+        for importer in self._importers:
+            try:
+                return importer.get_name(obj, name)
+            except (ObjNotFoundError, ObjMismatchError) as e:
+                warning_message = (
+                    f"Tried to call get_name with obj {obj}, "
+                    f"and name {name} on {importer} and got {e}"
+                )
+                log.warning(warning_message)
+        raise ObjNotFoundError(
+            f"Could not find obj {obj} and name {name} in any of the importers {self._importers}"
+        )
 
     def import_module(self, module_name: str) -> ModuleType:
         last_err = None

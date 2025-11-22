@@ -8,12 +8,12 @@ import pickletools
 import platform
 import types
 from collections import defaultdict, OrderedDict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import Enum
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from typing import Any, Callable, cast, IO, Optional, Union
+from typing import Any, cast, IO, Optional, Union
 
 import torch
 from torch.serialization import location_tag, normalize_storage_type
@@ -605,9 +605,9 @@ class PackageExporter:
             dependencies (bool, optional): If ``True``, we scan the source for dependencies.
         """
 
-        assert (pickle_protocol == 4) or (
-            pickle_protocol == 3
-        ), "torch.package only supports pickle protocols 3 and 4"
+        assert (pickle_protocol == 4) or (pickle_protocol == 3), (
+            "torch.package only supports pickle protocols 3 and 4"
+        )
 
         filename = self._filename(package, resource)
         # Write the pickle data for `obj`
@@ -652,6 +652,7 @@ class PackageExporter:
             memo: defaultdict[int, str] = defaultdict(None)
             memo_count = 0
             # pickletools.dis(data_value)
+            # pyrefly: ignore [bad-assignment]
             for opcode, arg, _pos in pickletools.genops(data_value):
                 if pickle_protocol == 4:
                     if (
@@ -675,7 +676,7 @@ class PackageExporter:
                         memo_count += 1
                     elif opcode.name == "STACK_GLOBAL":
                         if module is None:
-                            # If not module was passed on in the entries preceeding this one, continue.
+                            # If not module was passed on in the entries preceding this one, continue.
                             continue
                         assert isinstance(module, str)
                         if module not in all_dependencies:
@@ -1156,7 +1157,7 @@ class PackageExporter:
         Returns:
             A list containing the names of modules which depend on ``module_name``.
         """
-        if module_name in self.dependency_graph._pred.keys():
+        if module_name in self.dependency_graph._pred:
             return list(self.dependency_graph._pred[module_name].keys())
         else:
             return []

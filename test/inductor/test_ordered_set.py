@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 # ruff: noqa: F841
-# flake8: noqa
 import collections
 import collections.abc
 import copy
@@ -58,6 +57,7 @@ class TestJointOps(TestCase):
     basetype = OrderedSet
 
     def setUp(self):
+        super().setUp()
         self.word = word = "simsalabim"
         self.otherword = "madagascar"
         self.letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -157,8 +157,8 @@ class TestJointOps(TestCase):
             "Pure python equivalent of isdisjoint()"
             return not OrderedSet(s1).intersection(s2)
 
-        for larg in "", "a", "ab", "abc", "ababac", "cdc", "cc", "efgfe", "ccb", "ef":
-            s1 = self.thetype(larg)
+        for large in "", "a", "ab", "abc", "ababac", "cdc", "cc", "efgfe", "ccb", "ef":
+            s1 = self.thetype(large)
             for rarg in (
                 "",
                 "a",
@@ -236,7 +236,8 @@ class TestJointOps(TestCase):
         self.assertRaises(TypeError, self.s.symmetric_difference, [[]])
         for C in OrderedSet, frozenset, dict.fromkeys, str, list, tuple:
             self.assertEqual(
-                self.thetype("abcba").symmetric_difference(C("cdc")), OrderedSet("abd")
+                self.thetype("abcba").symmetric_difference(C("cdc")),
+                OrderedSet("abd"),  # codespell:ignore
             )
             self.assertEqual(
                 self.thetype("abcba").symmetric_difference(C("efgfe")),
@@ -296,7 +297,7 @@ class TestJointOps(TestCase):
                 self.s.z = ["z"]
             p = pickle.dumps(self.s, i)
             dup = pickle.loads(p)
-            self.assertEqual(self.s, dup, "%s != %s" % (self.s, dup))
+            self.assertEqual(self.s, dup, "%s != %s" % (self.s, dup))  # noqa: UP031
             if type(self.s) not in (OrderedSet, frozenset):
                 self.assertEqual(self.s.x, dup.x)
                 self.assertEqual(self.s.z, dup.z)
@@ -390,7 +391,7 @@ class TestJointOps(TestCase):
             self.assertEqual(repr(s), "{OrderedSet(...)}")
         else:
             name = repr(s).partition("(")[0]  # strip class name
-            self.assertEqual(repr(s), "%s({%s(...)})" % (name, name))
+            self.assertEqual(repr(s), "%s({%s(...)})" % (name, name))  # noqa: UP031
 
     @unittest.skip("Different hashing")
     def test_do_not_rehash_dict_keys(self):
@@ -454,7 +455,7 @@ class TestSet(TestJointOps, TestCase):
 
     def test_set_literal_insertion_order(self):
         # SF Issue #26020 -- Expect left to right insertion
-        s = {1, 1.0, True}
+        s = {1, 1.0, True}  # noqa: B033
         self.assertEqual(len(s), 1)
         stored_value = s.pop()
         self.assertEqual(type(stored_value), int)
@@ -539,7 +540,7 @@ class TestSet(TestJointOps, TestCase):
         # s.discard(self.thetype(self.word))
 
     def test_pop(self):
-        for i in range(len(self.s)):
+        for _ in range(len(self.s)):
             elem = self.s.pop()
             self.assertNotIn(elem, self.s)
         self.assertRaises(KeyError, self.s.pop)
@@ -652,7 +653,7 @@ class TestSet(TestJointOps, TestCase):
         )
         self.assertRaises(TypeError, self.s.symmetric_difference_update, [[]])
         for p, q in (
-            ("cdc", "abd"),
+            ("cdc", "abd"),  # codespell:ignore
             ("efgfe", "abcefg"),
             ("ccb", "a"),
             ("ef", "abcef"),
@@ -715,19 +716,19 @@ class TestSet(TestJointOps, TestCase):
         myset = {1, 2, 3}
 
         myobj = TestRichSetCompare()
-        myset < myobj
+        myset < myobj  # noqa: B015
         self.assertTrue(myobj.gt_called)
 
         myobj = TestRichSetCompare()
-        myset > myobj
+        myset > myobj  # noqa: B015
         self.assertTrue(myobj.lt_called)
 
         myobj = TestRichSetCompare()
-        myset <= myobj
+        myset <= myobj  # noqa: B015
         self.assertTrue(myobj.ge_called)
 
         myobj = TestRichSetCompare()
-        myset >= myobj
+        myset >= myobj  # noqa: B015
         self.assertTrue(myobj.le_called)
 
 
@@ -834,7 +835,9 @@ class TestBasicOps(TestCase):
             p = pickle.dumps(self.OrderedSet, proto)
             copy = pickle.loads(p)
             self.assertEqual(
-                self.OrderedSet, copy, "%s != %s" % (self.OrderedSet, copy)
+                self.OrderedSet,
+                copy,
+                "%s != %s" % (self.OrderedSet, copy),  # noqa: UP031
             )
 
     def test_issue_37219(self):
@@ -849,6 +852,7 @@ class TestBasicOps(TestCase):
 
 class TestBasicOpsEmpty(TestBasicOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.case = "empty OrderedSet"
         self.values = []
         self.OrderedSet = OrderedSet(self.values)
@@ -862,6 +866,7 @@ class TestBasicOpsEmpty(TestBasicOps, TestCase):
 
 class TestBasicOpsSingleton(TestBasicOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.case = "unit OrderedSet (number)"
         self.values = [3]
         self.OrderedSet = OrderedSet(self.values)
@@ -881,6 +886,7 @@ class TestBasicOpsSingleton(TestBasicOps, TestCase):
 
 class TestBasicOpsTuple(TestBasicOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.case = "unit OrderedSet (tuple)"
         self.values = [(0, "zero")]
         self.OrderedSet = OrderedSet(self.values)
@@ -900,6 +906,7 @@ class TestBasicOpsTuple(TestBasicOps, TestCase):
 
 class TestBasicOpsTriple(TestBasicOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.case = "triple OrderedSet"
         self.values = [0, "zero", operator.add]
         self.OrderedSet = OrderedSet(self.values)
@@ -913,6 +920,7 @@ class TestBasicOpsTriple(TestBasicOps, TestCase):
 
 class TestBasicOpsString(TestBasicOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.case = "string OrderedSet"
         self.values = ["a", "b", "c"]
         self.OrderedSet = OrderedSet(self.values)
@@ -929,6 +937,7 @@ class TestBasicOpsString(TestBasicOps, TestCase):
 
 class TestBasicOpsBytes(TestBasicOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.case = "bytes OrderedSet"
         self.values = [b"a", b"b", b"c"]
         self.OrderedSet = OrderedSet(self.values)
@@ -945,6 +954,7 @@ class TestBasicOpsBytes(TestBasicOps, TestCase):
 
 class TestBasicOpsMixedStringBytes(TestBasicOps, TestCase):
     def setUp(self):
+        super().setUp()
         warnings.simplefilter("ignore", BytesWarning)
         self.case = "string and bytes OrderedSet"
         self.values = ["a", "b", b"a", b"b"]
@@ -988,8 +998,8 @@ class TestExceptionPropagation(TestCase):
     def test_changingSizeWhileIterating(self):
         s = OrderedSet([1, 2, 3])
         try:
-            for i in s:
-                s.update([4])
+            for _ in s:
+                s.update([4])  # noqa: B909
         except RuntimeError:
             pass
         else:
@@ -1016,6 +1026,7 @@ class TestSetOfSets(TestCase):
 
 class TestBinaryOps(TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet((2, 4, 6))
 
     def test_eq(self):  # SF bug 643115
@@ -1091,6 +1102,7 @@ class TestBinaryOps(TestCase):
 
 class TestUpdateOps(TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet((2, 4, 6))
 
     def test_union_subset(self):
@@ -1179,6 +1191,7 @@ class TestUpdateOps(TestCase):
 
 class TestMutate(TestCase):
     def setUp(self):
+        super().setUp()
         self.values = ["a", "b", "c"]
         self.OrderedSet = OrderedSet(self.values)
 
@@ -1195,7 +1208,7 @@ class TestMutate(TestCase):
         expected_len = 0
         for v in self.values:
             tmp.add(v)
-            expected_len += 1
+            expected_len += 1  # noqa: SIM113
             self.assertEqual(len(tmp), expected_len)
         self.assertEqual(tmp, self.OrderedSet)
 
@@ -1467,6 +1480,7 @@ class TestOnlySetsInBinaryOps(TestCase):
 
 class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet((1, 2, 3))
         self.other = 19
         self.otherIsIterable = False
@@ -1477,6 +1491,7 @@ class TestOnlySetsNumeric(TestOnlySetsInBinaryOps, TestCase):
 
 class TestOnlySetsDict(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet((1, 2, 3))
         self.other = {1: 2, 3: 4}
         self.otherIsIterable = True
@@ -1487,6 +1502,7 @@ class TestOnlySetsDict(TestOnlySetsInBinaryOps, TestCase):
 
 class TestOnlySetsOperator(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet((1, 2, 3))
         self.other = operator.add
         self.otherIsIterable = False
@@ -1497,6 +1513,7 @@ class TestOnlySetsOperator(TestOnlySetsInBinaryOps, TestCase):
 
 class TestOnlySetsTuple(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet((1, 2, 3))
         self.other = (2, 4, 6)
         self.otherIsIterable = True
@@ -1507,6 +1524,7 @@ class TestOnlySetsTuple(TestOnlySetsInBinaryOps, TestCase):
 
 class TestOnlySetsString(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet((1, 2, 3))
         self.other = "abc"
         self.otherIsIterable = True
@@ -1517,8 +1535,10 @@ class TestOnlySetsString(TestOnlySetsInBinaryOps, TestCase):
 
 class TestOnlySetsGenerator(TestOnlySetsInBinaryOps, TestCase):
     def setUp(self):
+        super().setUp()
+
         def gen():
-            for i in range(0, 10, 2):
+            for i in range(0, 10, 2):  # noqa: UP028
                 yield i
 
         self.OrderedSet = OrderedSet((1, 2, 3))
@@ -1541,7 +1561,7 @@ class TestCopying:
 
     def test_deep_copy(self):
         dup = copy.deepcopy(self.OrderedSet)
-        ##print type(dup), repr(dup)
+        # print type(dup), repr(dup)
         dup_list = sorted(dup, key=repr)
         set_list = sorted(self.OrderedSet, key=repr)
         self.assertEqual(len(dup_list), len(set_list))
@@ -1554,6 +1574,7 @@ class TestCopying:
 
 class TestCopyingEmpty(TestCopying, TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet()
 
 
@@ -1562,6 +1583,7 @@ class TestCopyingEmpty(TestCopying, TestCase):
 
 class TestCopyingSingleton(TestCopying, TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet(["hello"])
 
 
@@ -1570,6 +1592,7 @@ class TestCopyingSingleton(TestCopying, TestCase):
 
 class TestCopyingTriple(TestCopying, TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet(["zero", 0, None])
 
 
@@ -1578,6 +1601,7 @@ class TestCopyingTriple(TestCopying, TestCase):
 
 class TestCopyingTuple(TestCopying, TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet([(1, 2)])
 
 
@@ -1586,6 +1610,7 @@ class TestCopyingTuple(TestCopying, TestCase):
 
 class TestCopyingNested(TestCopying, TestCase):
     def setUp(self):
+        super().setUp()
         self.OrderedSet = OrderedSet([((1, 2), (3, 4))])
 
 
@@ -1596,6 +1621,7 @@ del TestCopying
 
 class TestIdentities(TestCase):
     def setUp(self):
+        super().setUp()
         self.a = OrderedSet("abracadabra")
         self.b = OrderedSet("alacazam")
 
@@ -1641,7 +1667,7 @@ class TestIdentities(TestCase):
 
 def R(seqn):
     "Regular generator"
-    for i in seqn:
+    for i in seqn:  # noqa: UP028
         yield i
 
 
@@ -1655,7 +1681,7 @@ class G:
         return self.seqn[i]
 
 
-class I:
+class I:  # noqa: E742
     "Sequence using iterator protocol"
 
     def __init__(self, seqn):
@@ -1681,7 +1707,7 @@ class Ig:
         self.i = 0
 
     def __iter__(self):
-        for val in self.seqn:
+        for val in self.seqn:  # noqa: UP028
             yield val
 
 
@@ -1743,7 +1769,7 @@ from itertools import chain
 
 def L(seqn):
     "Test multiple tiers of iterators"
-    return chain(map(lambda x: x, R(Ig(G(seqn)))))
+    return chain(map(lambda x: x, R(Ig(G(seqn)))))  # noqa: C417
 
 
 class TestVariousIteratorArgs(TestCase):
@@ -1909,7 +1935,7 @@ def powerset(U):
 def cube(n):
     """Graph of n-dimensional hypercube."""
     singletons = [frozenset([x]) for x in range(n)]
-    return dict(
+    return dict(  # noqa: C404
         [(x, frozenset([x ^ s for s in singletons])) for x in powerset(range(n))]
     )
 
@@ -1946,7 +1972,7 @@ def faces(G):
                             f.add(frozenset([v1, v2, v3, v4]))
                         else:
                             for v5 in G[v4]:
-                                if v5 == v3 or v5 == v2:
+                                if v5 == v3 or v5 == v2:  # noqa: SIM109
                                     continue
                                 if v1 in G[v5]:
                                     f.add(frozenset([v1, v2, v3, v4, v5]))

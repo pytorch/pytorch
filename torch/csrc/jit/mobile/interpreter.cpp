@@ -12,12 +12,12 @@
 #include <torch/csrc/jit/mobile/function.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
+#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch::jit {
-char const* toString(OpCode op);
-std::ostream& operator<<(std::ostream& out, Instruction inst);
+
 namespace mobile {
 InterpreterState::InterpreterState(const Code& code) {
   enterFrame(code);
@@ -95,11 +95,11 @@ bool InterpreterState::run(Stack& stack) {
         debug_handle = *handle;
       }
 
-      // std::cout << "RUNNING " << pc << " " << code.instructions_[pc];
+      // std::cout << "RUNNING " << pc << ' ' << code.instructions_[pc];
       // if (inst.op == OP) {
       //   std::cout << ", " << code.op_names_[inst.X].name;
       //   if (!code.op_names_[inst.X].overload_name.empty()) {
-      //     std::cout << "." << code.op_names_[inst.X].overload_name;
+      //     std::cout << '.' << code.op_names_[inst.X].overload_name;
       //   }
       // }
       // std::cout << std::endl;

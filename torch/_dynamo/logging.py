@@ -11,7 +11,8 @@ logging output for debugging and monitoring.
 
 import itertools
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from torch.hub import _Faketqdm, tqdm
 
@@ -33,7 +34,7 @@ def get_loggers() -> list[logging.Logger]:
 # get_step_logger should be lazily called (i.e. at runtime, not at module-load time)
 # so that step numbers are initialized properly. e.g.:
 
-# @functools.lru_cache(None)
+# @functools.cache
 # def _step_logger():
 #     return get_step_logger(logging.getLogger(...))
 

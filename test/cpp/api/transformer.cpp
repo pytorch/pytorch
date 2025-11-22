@@ -73,7 +73,7 @@ void transformer_encoder_layer_test_helper(
   ASSERT_TRUE(
       torch::allclose(result, ref_output, 1e-7, 1e-5, /*equal_nan=*/true));
 
-  // all 0 values are NOT masked. This should't mask anything
+  // all 0 values are NOT masked. This shouldn't mask anything
   torch::Tensor mask = torch::tensor({{0}}, tensor_options) == 1;
   result = model(
                encoder_input,

@@ -68,7 +68,7 @@ from torch._ops import OpOverloadPacket
 
 
 class Module:
-    def __init__(self, name, members):
+    def __init__(self, name, members) -> None:
         self.name = name
         self.members = members
 
@@ -95,9 +95,10 @@ class EvalEnv:
         "Await": _Await,
     }
 
-    def __init__(self, rcb):
+    def __init__(self, rcb) -> None:
         self.rcb = rcb
         if torch.distributed.rpc.is_available():
+            # pyrefly: ignore [unsupported-operation]
             self.env["RRef"] = RRef
 
     def __getitem__(self, name):
@@ -177,7 +178,7 @@ def get_param_names(fn, n_args):
         return [str(i) for i in range(n_args)]
 
 
-def check_fn(fn, loc):
+def check_fn(fn, loc) -> None:
     # Make sure the function definition is not a class instantiation
     try:
         source = dedent("".join(get_source_lines_and_file(fn)[0]))
@@ -331,7 +332,7 @@ def try_real_annotations(fn, loc):
     try:
         # Note: anything annotated as `Optional[T]` will automatically
         # be returned as `Union[T, None]` per
-        # https://github.com/python/typing/blob/master/src/typing.py#L850
+        # https://github.com/python/cpython/blob/main/Lib/typing.py#L732
         sig = inspect.signature(fn)
     except ValueError:
         return None
@@ -367,7 +368,7 @@ def get_enum_value_type(e: type[enum.Enum], loc):
     return res
 
 
-def is_tensor(ann):
+def is_tensor(ann) -> bool:
     if issubclass(ann, torch.Tensor):
         return True
 
@@ -388,14 +389,15 @@ def is_tensor(ann):
         warnings.warn(
             "TorchScript will treat type annotations of Tensor "
             "dtype-specific subtypes as if they are normal Tensors. "
-            "dtype constraints are not enforced in compilation either."
+            "dtype constraints are not enforced in compilation either.",
+            stacklevel=2,
         )
         return True
 
     return False
 
 
-def _fake_rcb(inp):
+def _fake_rcb(inp) -> None:
     return None
 
 
@@ -486,6 +488,9 @@ def try_ann_to_type(ann, loc, rcb=None):
         return StreamObjType.get()
     if ann is torch.dtype:
         return IntType.get()  # dtype not yet bound in as its own type
+    if ann is torch.qscheme:
+        return IntType.get()  # qscheme not yet bound in as its own type
+
     if inspect.isclass(ann) and issubclass(ann, enum.Enum):
         if _get_script_class(ann) is None:
             scripted_class = torch.jit._script._recursive_compile_class(ann, loc)

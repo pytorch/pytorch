@@ -4,7 +4,7 @@ from __future__ import annotations
 import functools
 import logging
 from ctypes import byref, c_int, c_size_t, c_void_p
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._inductor import config
@@ -17,7 +17,7 @@ from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 
 log = logging.getLogger(__name__)
@@ -55,14 +55,11 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
         log.debug("Done precompiling %s", self)
 
     def make_run_fn(
-        self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
+        self, *input_tensors: torch.Tensor, out: torch.Tensor
     ) -> Callable[[], None]:
         self.ensure_dll_loaded()
         self.update_workspace_size()
-        args = [
-            c_void_p(tensor.data_ptr())
-            for tensor in list(input_tensors) + [output_tensor]
-        ]
+        args = [c_void_p(tensor.data_ptr()) for tensor in list(input_tensors) + [out]]
         size_args = [c_int(arg) for arg in self.extra_args]
         log.debug(
             "make_run_fn: self.kernel_name=%s, self.source_file=%s, self.hash_key=%s, self.DLL=%s, args=%s, self.extra_args=%s",
@@ -80,7 +77,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             self.workspace = torch.zeros(
                 (self.workspace_size + 7) // 8,
                 dtype=torch.float64,
-                device=output_tensor.device,
+                device=out.device,
             )
             workspace_ptr = c_void_p(self.workspace.data_ptr())
 
@@ -99,7 +96,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             return
         self.ensure_dll_loaded()
         unique_input_count = len(
-            {meta.name for meta in self.input_tensor_meta}  # noqa: set_linter
+            dict.fromkeys(meta.name for meta in self.input_tensor_meta)
         )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)

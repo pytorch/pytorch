@@ -51,11 +51,12 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 } // namespace mps
 
 Tensor dot_mps(const Tensor& self, const Tensor& other) {
-  TORCH_CHECK(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) || self.scalar_type() != ScalarType::Long,
-              "MPS: dot op doesn't support int64 input on MacOS13")
-
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
+
+  if (self.numel() == 0 & other.numel() == 0) {
+    return zeros({}, self.options());
+  }
 
   dot_check(self, other);
 
@@ -64,7 +65,7 @@ Tensor dot_mps(const Tensor& self, const Tensor& other) {
   MPSStream* stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "dot_mps" + getTensorsStringKey({self, other});
+    std::string key = "dot_mps" + getTensorsStringKey({self, other});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
@@ -140,10 +141,13 @@ static Tensor& addmv_out_mps_impl(const Tensor& self,
   };
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
+  if (result.numel() == 0) {
+    return result;
+  }
   Tensor matMulVec = at::mm(mat, vec.unsqueeze(1)).squeeze(1);
 
   @autoreleasepool {
-    string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" +
+    std::string key = "addmv_out_mps_impl" + getTensorsStringKey({self, matMulVec}) + ":" +
         std::to_string(beta_.toDouble()) + ":" + std::to_string(alpha_.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* matMulVecTensor = mpsGraphRankedPlaceHolder(mpsGraph, matMulVec);

@@ -128,9 +128,17 @@ class TCPClient {
   }
   template <typename T>
   std::optional<T> receiveValueWithTimeout(std::chrono::milliseconds timeout) {
-    if (!socket_.waitForInput(timeout))
+    if (!socket_.waitForInput(timeout)) {
       return {};
-    return tcputil::recvValue<T>(socket_.handle());
+    }
+
+    try {
+      return tcputil::recvValue<T>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING(
+          "recvValueWithTimeout failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
   void setTimeout(std::chrono::milliseconds value);
 
@@ -199,7 +207,7 @@ class SendBuffer {
   SendBuffer(detail::TCPClient& client, detail::QueryType cmd)
       : client(client) {
     buffer.reserve(32); // enough for most commands
-    buffer.push_back((uint8_t)cmd);
+    buffer.push_back(static_cast<uint8_t>(cmd));
   }
 
   void appendString(const std::string& str) {
@@ -216,7 +224,7 @@ class SendBuffer {
 
   template <typename T>
   void appendValue(T value) {
-    uint8_t* begin = (uint8_t*)&value;
+    uint8_t* begin = reinterpret_cast<uint8_t*>(&value);
     buffer.insert(buffer.end(), begin, begin + sizeof(T));
     maybeFlush();
   }
@@ -262,7 +270,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
       // server successfully started
       C10D_DEBUG("The server has started on port = {}.", server_->port());
       addr_.port = server_->port();
-    } catch (const SocketError& e) {
+    } catch (const SocketError&) {
       bool useAgentStore = getCvarBool({"TORCHELASTIC_USE_AGENT_STORE"}, false);
       int masterPort = getCvarInt({"MASTER_PORT"}, 0);
       if (useAgentStore && masterPort == opts.port) {
@@ -350,6 +358,17 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
 
 TCPStore::~TCPStore() = default;
 
+c10::intrusive_ptr<Store> TCPStore::clone() {
+  TCPStoreOptions opts;
+  opts.port = addr_.port;
+  opts.isServer = false;
+  opts.waitWorkers = false;
+  opts.timeout = timeout_;
+  opts.useLibUV = usingLibUv_;
+
+  return c10::make_intrusive<TCPStore>(addr_.host, opts);
+}
+
 void TCPStore::waitForWorkers() {
   STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__waitForWorkers);
   if (!numWorkers_.has_value()) {
@@ -404,8 +423,14 @@ void TCPStore::ping() {
   buffer.flush();
 
   uint32_t returnedNonce = client_->receiveValue<std::uint32_t>();
-  TORCH_INTERNAL_ASSERT(
-      nonce == returnedNonce, "Ping failed, invalid nonce returned");
+  if (nonce != returnedNonce) {
+    C10_THROW_ERROR(
+        DistNetworkError,
+        fmt::format(
+            "Ping failed, invalid value returned from server. Expected: {}, Got: {}",
+            nonce,
+            returnedNonce));
+  }
 }
 
 void TCPStore::_splitSet(
@@ -637,6 +662,89 @@ void TCPStore::multiSet(
     buffer.appendBytes(values[i]);
   }
   buffer.flush();
+}
+
+void TCPStore::queuePush(
+    const std::string& key,
+    const std::vector<uint8_t>& data) {
+  TORCH_CHECK_WITH(
+      NotImplementedError,
+      usingLibUv_,
+      "queues not implemented on legacy TCPStore backend");
+
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queuePush);
+
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_PUSH);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.appendBytes(data);
+  buffer.flush();
+}
+
+std::vector<uint8_t> TCPStore::queuePop(const std::string& key, bool block) {
+  TORCH_CHECK_WITH(
+      NotImplementedError,
+      usingLibUv_,
+      "queues not implemented on legacy TCPStore backend");
+
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queuePop);
+
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  if (block) {
+    doWait(keyPrefix_ + key, timeout_);
+  }
+
+  detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_POP);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.flush();
+
+  auto keys = client_->receiveValue<int64_t>();
+  TORCH_CHECK_WITH(DistQueueEmptyError, keys > 0, "queue is empty");
+
+  return client_->receiveBits();
+}
+
+int64_t TCPStore::queueLen(const std::string& key) {
+  TORCH_CHECK_WITH(
+      NotImplementedError,
+      usingLibUv_,
+      "queues not implemented on legacy TCPStore backend");
+
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__queueLen);
+
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  detail::SendBuffer buffer(*client_, detail::QueryType::QUEUE_LEN);
+  buffer.appendString(keyPrefix_ + key);
+  buffer.flush();
+
+  return client_->receiveValue<int64_t>();
+}
+
+std::vector<std::string> TCPStore::listKeys() {
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__list);
+
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  detail::SendBuffer buffer(*client_, detail::QueryType::LIST_KEYS);
+  buffer.flush();
+
+  auto numKeys = client_->receiveValue<int64_t>();
+  std::vector<std::string> keys;
+  keys.reserve(numKeys);
+  for (auto i = 0; i < numKeys; ++i) {
+    auto bits = client_->receiveBits();
+    std::string str(bits.begin(), bits.end());
+    if (str.find(keyPrefix_) == 0) {
+      str = str.substr(keyPrefix_.size());
+    } else {
+      continue;
+    }
+    keys.emplace_back(str);
+  }
+  return keys;
 }
 
 bool TCPStore::hasExtendedApi() const {

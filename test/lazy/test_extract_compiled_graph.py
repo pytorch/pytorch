@@ -195,7 +195,7 @@ def maketest(module_cls, exception_msg_pattern=None, ctxmgr=None):
 class OptimizeTest(unittest.TestCase):
     test_sub = maketest(ModuleSub)
     # Same as test_sub but force aten::sub to fallback
-    # We expect an exception caught because of LTC fallabck.
+    # We expect an exception caught because of LTC fallback.
     test_ltc_fallback = maketest(
         ModuleSub,
         exception_msg_pattern="fallback.*aten::sub",
@@ -206,3 +206,10 @@ class OptimizeTest(unittest.TestCase):
     test_return_multi = maketest(ModuleReturnMulti)
     test_return_dup_tensor = maketest(ModuleReturnDupTensor)
     test_inplace_update = maketest(ModuleInplaceUpdate)
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

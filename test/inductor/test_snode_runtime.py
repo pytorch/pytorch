@@ -32,6 +32,7 @@ def calculate_runtime(f, *args) -> float:
     Assumes all inputs are fp32
     """
     metrics.reset()
+    torch._logging.set_logs(inductor_metrics=True)
     torch.compile(f, backend=compile_but_use_eager)(*args)
     print(metrics.node_runtimes)
 
@@ -39,6 +40,7 @@ def calculate_runtime(f, *args) -> float:
     for pair in metrics.node_runtimes:
         ret += pair[1]
 
+    torch._logging.set_logs()
     return ret
 
 
@@ -54,7 +56,7 @@ class TestCase(InductorTestCase):
 
     """
     Helper methods to compare runtime estimate against 0. Since this estimate is hardware dependent,
-    stronger comparisons may fail dependending on the host's specs.
+    stronger comparisons may fail depending on the host's specs.
 
     atol/rtol must be provided explicitly with each call, since precision/rel_tol overrides are not always utilized
     """
@@ -235,6 +237,7 @@ class TestCommAnalysis(TestCase):
         )
         try:
             metrics.reset()
+            torch._logging.set_logs(inductor_metrics=True)
             torch.compile(fn)(*inps)
             found_collective = False
             for snode, runtime in metrics.node_runtimes:
@@ -251,11 +254,10 @@ class TestCommAnalysis(TestCase):
                 self.assertNotZero(runtime)
             # Make sure a collective kernel is found in graph
             self.assertTrue(found_collective)
+            torch._logging.set_logs()
         finally:
             dist.destroy_process_group()
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_legacy_all_reduce(self):
         def fn(x):
             r = c10d.all_reduce(x, "sum", "", self.RANKS, self.WORLD_SIZE)
@@ -264,8 +266,6 @@ class TestCommAnalysis(TestCase):
         inp = T(10, 10)
         self._verify_runtime_estimation(fn, (inp,))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_legacy_all_reduce_coalesced(self):
         def fn(x):
             rs = c10d.all_reduce_coalesced(x, "sum", "", self.RANKS, self.WORLD_SIZE)
@@ -274,8 +274,6 @@ class TestCommAnalysis(TestCase):
         inp = [T(10, 10), T(15, 15)]
         self._verify_runtime_estimation(fn, (inp,))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_legacy_all_gather_into_tensor_coalesced(self):
         def fn(x):
             rs = c10d.all_gather_into_tensor_coalesced(
@@ -289,8 +287,6 @@ class TestCommAnalysis(TestCase):
         inp = [T(10, 10), T(15, 15)]
         self._verify_runtime_estimation(fn, (inp,))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_all_reduce(self):
         def fn(x):
             r = _c10d.all_reduce(x, "sum", "0")
@@ -299,8 +295,6 @@ class TestCommAnalysis(TestCase):
         inp = T(10, 10)
         self._verify_runtime_estimation(fn, (inp,))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_all_reduce_coalesced(self):
         def fn(x):
             rs = _c10d.all_reduce_coalesced(x, "sum", "0")
@@ -309,8 +303,6 @@ class TestCommAnalysis(TestCase):
         inp = [T(10, 10), T(15, 15)]
         self._verify_runtime_estimation(fn, (inp,))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_all_gather_into_tensor(self):
         def fn(x):
             rs = _c10d.all_gather_into_tensor(
@@ -323,8 +315,6 @@ class TestCommAnalysis(TestCase):
         inp = T(10, 10)
         self._verify_runtime_estimation(fn, (inp,))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_all_gather_into_tensor_coalesced(self):
         def fn(x):
             rs = _c10d.all_gather_into_tensor_coalesced(
@@ -337,8 +327,6 @@ class TestCommAnalysis(TestCase):
         inp = [T(10, 10), T(15, 15)]
         self._verify_runtime_estimation(fn, (inp,))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_reduce_scatter_tensor(self):
         def fn(x):
             rs = _c10d.reduce_scatter_tensor(
@@ -352,8 +340,6 @@ class TestCommAnalysis(TestCase):
         inp = T(self.WORLD_SIZE, 10)
         self._verify_runtime_estimation(fn, (inp,))
 
-    # lack of profiler on XPU
-    @expectedFailureXPU
     def test_reduce_scatter_tensor_coalesced(self):
         def fn(x):
             rs = _c10d.reduce_scatter_tensor_coalesced(

@@ -65,7 +65,7 @@ struct default_constructible
 
 namespace impl {
   template <typename T>
-  constexpr bool supports_default_construction(const ::strong::default_constructible::modifier<T>*)
+  constexpr bool supports_default_construction(const ::strong::default_constructible::modifier<T>* /*unused*/)
   {
     return true;
   }
@@ -76,7 +76,7 @@ class type : public modifier<M, type<T, Tag, M...>>...
 {
 public:
   template <typename TT = T, typename = std::enable_if_t<std::is_trivially_constructible<TT>{}>>
-  explicit type(uninitialized_t)
+  explicit type(uninitialized_t /*unused*/)
     noexcept
   {
   }
@@ -138,7 +138,7 @@ private:
 
 namespace impl {
   template <typename T, typename Tag, typename ... Ms>
-  constexpr bool is_strong_type_func(const strong::type<T, Tag, Ms...>*) { return true;}
+  constexpr bool is_strong_type_func(const strong::type<T, Tag, Ms...>* /*unused*/) { return true;}
   constexpr bool is_strong_type_func(...) { return false;}
   template <typename T, typename Tag, typename ... Ms>
   constexpr T underlying_type(strong::type<T, Tag, Ms...>*);
@@ -1603,12 +1603,6 @@ struct hash<::strong::type<T, Tag, M...>>
     auto& tt = static_cast<const type&>(t);
     return hash<T>::operator()(value_of(tt));
   }
-};
-template <typename T, typename Tag, typename ... M>
-struct is_arithmetic<::strong::type<T, Tag, M...>>
-  : is_base_of<::strong::arithmetic::modifier<::strong::type<T, Tag, M...>>,
-               ::strong::type<T, Tag, M...>>
-{
 };
 
 #if STRONG_HAS_STD_FORMAT

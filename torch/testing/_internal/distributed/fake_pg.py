@@ -1,10 +1,7 @@
 # mypy: allow-untyped-defs
 
 import torch.distributed as dist
-
-from torch._C._distributed_c10d import (
-    FakeProcessGroup,
-)
+from torch._C._distributed_c10d import FakeProcessGroup
 
 
 class FakeStore(dist.Store):
@@ -14,7 +11,7 @@ class FakeStore(dist.Store):
     """
 
 
-def _create_fake_pg(prefix_store, rank, world_size, timeout):
+def _create_fake_pg(common_opts, backend_opts):
     """
     A fake process group (not related to FakeTensor) is a process group which
     doesn't actually do any communication, it just hallucinates some
@@ -22,10 +19,14 @@ def _create_fake_pg(prefix_store, rank, world_size, timeout):
     without needing multiple processes (simulates per-rank behavior)
 
     NOTE: This is not a real process group, and it would produce wrong results
-    for every collective. It should be used as a convinient tool when playing
+    for every collective. It should be used as a convenient tool when playing
     with distributed but don't care about the actual data.
     """
-    return FakeProcessGroup(rank, world_size)
+    return FakeProcessGroup._create_internal(
+        common_opts.group_rank, common_opts.group_size, backend_opts
+    )
 
 
-dist.Backend.register_backend("fake", _create_fake_pg, devices=['cpu', 'cuda'])
+dist.Backend.register_backend(
+    "fake", _create_fake_pg, extended_api=True, devices=["cpu", "cuda", "hpu", "xpu"]
+)

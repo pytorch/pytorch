@@ -6,7 +6,8 @@ from torch import Tensor
 aten = torch.ops.aten
 import inspect
 import warnings
-from typing import Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Optional, TypeVar
 from typing_extensions import ParamSpec
 
 from torch.types import Number
@@ -19,17 +20,17 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
-def check_decomposition_has_type_annotations(f):
+def check_decomposition_has_type_annotations(f) -> None:
     inspect_empty = inspect._empty  # type: ignore[attr-defined]
     sig = inspect.signature(f)
     for param in sig.parameters.values():
-        assert (
-            param.annotation != inspect_empty
-        ), f"No signature on param {param.name} for function {f.name}"
+        assert param.annotation != inspect_empty, (
+            f"No signature on param {param.name} for function {f.name}"
+        )
 
-    assert (
-        sig.return_annotation != inspect_empty
-    ), f"No return annotation for function {f.name}"
+    assert sig.return_annotation != inspect_empty, (
+        f"No return annotation for function {f.name}"
+    )
 
 
 def signatures_match(decomposition_sig, torch_op_sig):
@@ -40,14 +41,16 @@ def signatures_match(decomposition_sig, torch_op_sig):
         return False
 
     for decomp_param, op_param in zip(decomp_params.values(), op_params.values()):
-        # can't check full equality yet because not all fields are correcly deduced
+        # can't check full equality yet because not all fields are correctly deduced
         # in the torch_op_sig - like default value
         # can't check 'kind' bc
         # kwarg-only values with defaults not yet supported in TS
         inspect_empty = inspect._empty  # type: ignore[attr-defined]
         for field in ["name", "annotation"]:
             if field == "name" and decomp_param.name == "self":
-                warnings.warn("PyTorch uses 'input' instead of 'self' on public api")
+                warnings.warn(
+                    "PyTorch uses 'input' instead of 'self' on public api", stacklevel=2
+                )
 
             if getattr(decomp_param, field) != getattr(op_param, field):
                 return False
@@ -75,9 +78,9 @@ def register_decomposition(
         assert isinstance(aten_op, torch._ops.OpOverload)
 
         # Need unique name for jit function serialization
-        assert (
-            f.__name__ not in function_name_set
-        ), f"Duplicated function name {f.__name__}"
+        assert f.__name__ not in function_name_set, (
+            f"Duplicated function name {f.__name__}"
+        )
         function_name_set.add(f.__name__)
 
         scripted_func = torch.jit.script(f)
@@ -129,6 +132,7 @@ def var_decomposition(
         else:
             raise RuntimeError("correction must be int or float")
 
+    # pyrefly: ignore [no-matching-overload]
     return sum / max(0, denom)
 
 

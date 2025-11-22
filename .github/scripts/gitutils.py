@@ -4,10 +4,10 @@ import os
 import re
 import tempfile
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from functools import wraps
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, cast, Optional, TypeVar, Union
 
 
 T = TypeVar("T")
@@ -211,7 +211,7 @@ class GitRepo:
         self, from_branch: str, to_branch: str
     ) -> tuple[list[str], list[str]]:
         """
-        Returns list of commmits that are missing in each other branch since their merge base
+        Returns list of commits that are missing in each other branch since their merge base
         Might be slow if merge base is between two branches is pretty far off
         """
         from_ref = self.rev_parse(from_branch)

@@ -6,6 +6,10 @@ namespace c10d {
 PrefixStore::PrefixStore(std::string prefix, c10::intrusive_ptr<Store> store)
     : prefix_(std::move(prefix)), store_(std::move(store)) {}
 
+c10::intrusive_ptr<Store> PrefixStore::clone() {
+  return c10::make_intrusive<PrefixStore>(prefix_, store_->clone());
+}
+
 std::string PrefixStore::joinKey(const std::string& key) {
   return prefix_ + "/" + key;
 }
@@ -106,6 +110,20 @@ bool PrefixStore::hasExtendedApi() const {
   return store_->hasExtendedApi();
 }
 
+void PrefixStore::queuePush(
+    const std::string& key,
+    const std::vector<uint8_t>& value) {
+  store_->queuePush(joinKey(key), value);
+}
+
+std::vector<uint8_t> PrefixStore::queuePop(const std::string& key, bool block) {
+  return store_->queuePop(joinKey(key), block);
+}
+
+int64_t PrefixStore::queueLen(const std::string& key) {
+  return store_->queueLen(joinKey(key));
+}
+
 c10::intrusive_ptr<Store> PrefixStore::getUnderlyingStore() {
   return store_;
 }
@@ -126,6 +144,20 @@ c10::intrusive_ptr<Store> PrefixStore::getUnderlyingNonPrefixStore() {
   TORCH_CHECK(
       store != nullptr, "Underlying Non-PrefixStore shouldn't be null.");
   return store;
+}
+
+std::vector<std::string> PrefixStore::listKeys() {
+  auto keys = store_->listKeys();
+  std::vector<std::string> filteredKeys;
+  filteredKeys.reserve(keys.size());
+
+  for (auto& key : keys) {
+    if (key.find(prefix_) == 0) {
+      key = key.substr(prefix_.size() + 1);
+      filteredKeys.push_back(std::move(key));
+    }
+  }
+  return filteredKeys;
 }
 
 } // namespace c10d

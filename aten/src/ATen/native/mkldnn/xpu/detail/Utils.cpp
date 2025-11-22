@@ -78,6 +78,10 @@ dnnl::memory::data_type get_onednn_dtype(
       return dnnl::memory::data_type::f32;
     case at::ScalarType::BFloat16:
       return dnnl::memory::data_type::bf16;
+    case at::ScalarType::Float8_e4m3fn:
+      return dnnl::memory::data_type::f8_e4m3;
+    case at::ScalarType::Float8_e5m2:
+      return dnnl::memory::data_type::f8_e5m2;
     default:
       if (!allow_undef) {
         TORCH_CHECK(
@@ -157,10 +161,10 @@ bool onednn_strides_check(const Tensor& src) {
     return true;
 
   dnnl_dims_t blocks = {0};
-  int perm[DNNL_MAX_NDIMS] = {0};
+  std::array<int, DNNL_MAX_NDIMS> perm = {0};
   for (int d = 0; d < md_ndims; ++d) {
     // no strides check needed for empty tensor
-    if (md_padded_dims[d] == nullptr)
+    if ((*md_padded_dims)[d] == 0)
       return true;
 
     // no strides verification for runtime dims
@@ -178,14 +182,15 @@ bool onednn_strides_check(const Tensor& src) {
 
   // A custom comparator to yield linear order on perm
   auto idx_sorter = [&](const int a, const int b) -> bool {
-    if (strides[a] == strides[b] && md_padded_dims[a] == md_padded_dims[b])
+    if (strides[a] == strides[b] &&
+        (*md_padded_dims)[a] == (*md_padded_dims)[b])
       return a < b;
     else if (strides[a] == strides[b])
-      return md_padded_dims[a] < md_padded_dims[b];
+      return (*md_padded_dims)[a] < (*md_padded_dims)[b];
     else
       return strides[a] < strides[b];
   };
-  std::sort(perm, perm + md_ndims, idx_sorter);
+  std::sort(perm.begin(), perm.begin() + md_ndims, idx_sorter);
 
   auto min_stride = block_size;
   for (int idx = 0; idx < md_ndims; ++idx) {
@@ -199,9 +204,10 @@ bool onednn_strides_check(const Tensor& src) {
       return false;
 
     // update min_stride for next iteration
-    const auto padded_dim = *md_padded_dims[d];
+    const auto padded_dim = (*md_padded_dims)[d];
     min_stride = block_size * strides[d] * (padded_dim / blocks[d]);
   }
+
   return true;
 }
 
@@ -294,7 +300,14 @@ bool is_onednn_matmul_strides(const at::Tensor& tensor) {
   if (tensor.is_contiguous())
     return true;
 
-  // the overlaped cases are not supported
+  if (tensor.storage_offset() > 0) {
+    // currently onednn asks 64 byte alignment
+    constexpr int alignment_byte = 64;
+    if (reinterpret_cast<uintptr_t>(tensor.data_ptr()) % alignment_byte > 0)
+      return false;
+  }
+
+  // the overlapped cases are not supported
   dnnl::memory::dims strides = get_onednn_strides(tensor);
   int64_t storage_size = 1;
   for (size_t dim = 0; dim < tensor_dim; ++dim)

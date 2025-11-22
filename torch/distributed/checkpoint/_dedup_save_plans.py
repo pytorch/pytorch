@@ -54,7 +54,8 @@ def dedup_save_plans(
         for plan_idx in plan_indices - {select_plan_idx}:
             plan_to_item_indices[plan_idx].discard(write_item_idx)
     # Sanity check
-    assert len(all_plans) == len(plan_to_item_indices)
+    if len(all_plans) != len(plan_to_item_indices):
+        raise AssertionError("len(all_plans) != len(plan_to_item_indices)")
     # Create new plans with the updated write items post deduplication
     return [
         dataclasses.replace(
@@ -62,25 +63,3 @@ def dedup_save_plans(
         )
         for plan, item_indexes in zip(all_plans, plan_to_item_indices)
     ]
-
-
-def dedup_save_plans_with_fqn_to_index_mapping(
-    all_plans: list[SavePlan], fqn_to_index_mapping: dict[str, int]
-) -> list[SavePlan]:
-    num_plans = len(all_plans)
-
-    to_remove: list[set] = [set() for _ in range(len(all_plans))]
-    for plan_idx, plan in enumerate(all_plans):
-        for item_idx, item in enumerate(plan.items):
-            if (fqn_to_index_mapping[item.index.fqn] - 1) % num_plans != plan_idx:
-                to_remove[plan_idx].add(item_idx)
-
-    for plan_idx, remove_set in enumerate(to_remove):
-        new_items = [
-            write_item
-            for item_idx, write_item in enumerate(all_plans[plan_idx].items)
-            if item_idx not in remove_set
-        ]
-        all_plans[plan_idx] = dataclasses.replace(all_plans[plan_idx], items=new_items)
-
-    return all_plans

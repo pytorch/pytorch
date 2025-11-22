@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/dynamo/utils.h>
 
@@ -6,6 +7,7 @@
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/eval_frame.h>
+#include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
@@ -20,17 +22,7 @@ PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>)
 
 namespace torch::dynamo {
 
-#if IS_PYTHON_3_11_PLUS
-
-std::vector<uint8_t> _PyOpcode_Caches_vec(
-    THP_PyOpcode_Caches,
-    THP_PyOpcode_Caches + THP_PyOpcode_Caches_size);
-
-#else
-
 std::vector<uint8_t> _PyOpcode_Caches_vec;
-
-#endif
 
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
@@ -111,7 +103,7 @@ THPObjectPtr _unicode_dispatch(PyObject* str) {
       return F::apply(str, PyUnicode_4BYTE_DATA(str), length);
     default:
       // This should be impossible - throw to make the compiler happy.
-      throw std::runtime_error("unreachable");
+      TORCH_CHECK(false, "unreachable");
   }
 }
 
@@ -233,10 +225,14 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("code", &CacheEntry::code)
       .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
+      .def_readonly("backend", &CacheEntry::backend)
       .def_property_readonly("next", &CacheEntry::next)
       .def(
           "update_diff_guard_root_manager",
           &CacheEntry::update_diff_guard_root_manager);
+
+  py::class_<PrecompileEntry>(m, "_PrecompileEntry")
+      .def_readonly("guard_manager", &PrecompileEntry::guard_manager);
 
   py::class_<ExtraState>(m, "_ExtraState")
       .def("invalidate", &ExtraState::invalidate);
@@ -256,8 +252,22 @@ void initDynamoBindings(PyObject* torch) {
       .def_readwrite("cur_action", &FrameExecStrategy::cur_action)
       .def_readwrite("recursive_action", &FrameExecStrategy::recursive_action);
 
+  m.def("set_c_recursion_limit", &dynamo_set_c_recursion_limit);
+  m.def("get_c_recursion_limit", &dynamo_get_c_recursion_limit);
+
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
+  m.def("_reset_precompile_entries", &_reset_precompile_entries);
+  m.def("_load_precompile_entry", &_load_precompile_entry);
+  m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
+  m.def("_set_lru_cache", &_set_lru_cache);
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
+  init_THPCaches();
+  if (THP_PyOpcode_Caches != nullptr) {
+    _PyOpcode_Caches_vec.insert(
+        _PyOpcode_Caches_vec.end(),
+        THP_PyOpcode_Caches,
+        THP_PyOpcode_Caches + THP_PyOpcode_Caches_size);
+  }
   m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
   m.def("code_framelocals_names", &code_framelocals_names);
   _register_functions(dynamo);

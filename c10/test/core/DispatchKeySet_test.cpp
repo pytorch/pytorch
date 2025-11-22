@@ -435,11 +435,21 @@ TEST(DispatchKeySet, TestFunctionalityDispatchKeyToString) {
     if (i > 0) {
       ASSERT_TRUE(res.find("Unknown") == std::string::npos)
           << i << " (before is " << toString(static_cast<DispatchKey>(i - 1))
-          << ")";
+          << ')';
     } else {
       ASSERT_TRUE(res.find("Unknown") == std::string::npos) << i;
     }
     ASSERT_TRUE(seen_strings.count(res) == 0);
     seen_strings.insert(res);
+  }
+}
+
+TEST(DispatchKeySet, TestGetRuntimeDispatchKeySet) {
+  // Check if getRuntimeDispatchKeySet and runtimeDispatchKeySetHas agree.
+  for (auto dk1 : DispatchKeySet(DispatchKeySet::FULL)) {
+    auto dks = getRuntimeDispatchKeySet(dk1);
+    for (auto dk2 : DispatchKeySet(DispatchKeySet::FULL)) {
+      ASSERT_EQ(dks.has(dk2), runtimeDispatchKeySetHas(dk1, dk2));
+    }
   }
 }

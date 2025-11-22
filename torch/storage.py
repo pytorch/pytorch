@@ -155,6 +155,10 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
+    def _release_ipc_counter(cls, *args, device=None, **kwargs):
+        return cls._release_ipc_counter_cuda(*args, **kwargs)
+
+    @classmethod
     def _release_ipc_counter_cuda(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
@@ -614,7 +618,7 @@ def _get_storage_from_sequence(sequence, dtype, device):
 
 def _isint(x):
     if HAS_NUMPY:
-        return isinstance(x, (int, np.integer))
+        return isinstance(x, (int, np.integer))  # pyrefly: ignore [missing-attribute]
     else:
         return isinstance(x, int)
 
@@ -885,9 +889,9 @@ class TypedStorage:
         return self._untyped_storage
 
     def _new_wrapped_storage(self, untyped_storage) -> Self:
-        assert type(untyped_storage) == torch.UntypedStorage
+        assert type(untyped_storage) is torch.UntypedStorage
 
-        if type(self) == TypedStorage:
+        if type(self) is TypedStorage:
             return cast(
                 Self,
                 TypedStorage(
@@ -909,7 +913,7 @@ class TypedStorage:
                 return 0
 
         else:
-            if type(idx) != int:
+            if type(idx) is not int:
                 raise TypeError(f"can't index a {type(self)} with {type(idx)}")
             if is_stop:
                 if (idx > self._size()) or (idx < -self._size()):
@@ -1509,7 +1513,7 @@ class _LegacyStorageMeta(type):
     dtype: torch.dtype
 
     def __instancecheck__(cls, instance):
-        if type(instance) == TypedStorage:
+        if type(instance) is TypedStorage:
             cls_device = _get_device_from_module(cls.__module__)
             return (cls_device == instance.device.type) and (
                 cls.dtype == instance.dtype
@@ -1519,7 +1523,7 @@ class _LegacyStorageMeta(type):
 
 class _LegacyStorage(TypedStorage, metaclass=_LegacyStorageMeta):
     @classmethod
-    def _new_shared(cls, size):
+    def _new_shared(cls, size):  # type: ignore[override]
         """Create a new storage in shared memory with the same data type."""
         untyped_storage = torch.UntypedStorage._new_shared(size * cls()._element_size())
         return cls(wrap_storage=untyped_storage)

@@ -1,4 +1,4 @@
-from typing import Any, Optional, Union
+from typing import Any
 
 from torchgen.model import (
     Annotation,
@@ -29,7 +29,7 @@ class TypeGen:
     }
 
     @staticmethod
-    def from_example(obj: Any) -> Union[BaseType, ListType, CustomClassType]:
+    def from_example(obj: Any) -> BaseType | ListType | CustomClassType:
         import torch
 
         if isinstance(obj, torch.fx.GraphModule):
@@ -47,7 +47,7 @@ class TypeGen:
             all_base_tys = [TypeGen.from_example(x) for x in obj]
             if len(set(all_base_tys)) > 1:
                 raise RuntimeError(
-                    f"Cannot generate schema for a seqeunce of args of heterogeneous types: {all_base_tys}. "
+                    f"Cannot generate schema for a sequence of args of heterogeneous types: {all_base_tys}. "
                     "Consider unpacking the argument and give proper names to them if possible "
                     "instead of using *args."
                 )
@@ -61,7 +61,7 @@ class TypeGen:
 class ReturnGen:
     @staticmethod
     def from_example(
-        name: Optional[str], obj: Any, annotation: Optional[Annotation]
+        name: str | None, obj: Any, annotation: Annotation | None
     ) -> Return:
         return Return(name, TypeGen.from_example(obj), annotation)
 
@@ -69,7 +69,7 @@ class ReturnGen:
 class ArgumentGen:
     @staticmethod
     def from_example(
-        name: str, obj: Any, default: Optional[str], annotation: Optional[Annotation]
+        name: str, obj: Any, default: str | None, annotation: Annotation | None
     ) -> Argument:
         return Argument(
             name, TypeGen.from_example(obj), default=default, annotation=annotation

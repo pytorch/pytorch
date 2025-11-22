@@ -109,7 +109,7 @@ class TritonBundler:
     _static_autotuners: Optional[list[StaticallyLaunchedAutotuner]] = None
 
     # __grp__kernel_name.json contains metadata with source code paths
-    # we use this as sentinal value for search and replace
+    # we use this as sentinel value for search and replace
     _REPLACE_BYTES: bytes = b"[REPLACE]"
 
     @staticmethod
@@ -173,7 +173,9 @@ class TritonBundler:
             # for FXGraphCache
             old_values = kernel.prepare_for_pickle()
             new_kernel = copy.deepcopy(kernel)
+            new_kernel.prepare_for_caching()
             new_kernel._reload_kernel = None
+
             entries.append(
                 StaticallyLaunchedAutotuner(
                     key,
@@ -181,14 +183,9 @@ class TritonBundler:
                     new_kernel,
                 )
             )
+
             # Put the values back since we need it to use now
-            (
-                kernel.fn.fn,
-                kernel.fn.__globals__,
-                kernel.fn.used_global_vals,
-                kernel.fn.repr,
-                kernel.launchers,
-            ) = old_values
+            kernel.restore_after_unpickle(old_values)
 
     @classmethod
     def collect_static_autotuners(
@@ -223,6 +220,17 @@ class TritonBundler:
         kernel_names = []
         with dynamo_timed("TritonBundler.load_cached_static_autotuners"):
             for result in static_autotuners:
+                try:
+                    # Make sure the cubin path exists and is valid
+                    for compile_result in result.kernel.compile_results:
+                        compile_result.reload_cubin_path()
+                except RuntimeError:
+                    log.warning(
+                        "Failed to reload cubin file statically launchable autotuner %s",
+                        result.kernel_name,
+                        exc_info=True,
+                    )
+                    continue
                 # We make a future instead of returning the kernel here so that
                 # kernels that are not statically launchable (i.e. cache miss)
                 # can launch a worker without waiting on the blocking step of
@@ -382,7 +390,10 @@ class TritonBundler:
                         os.replace(tmp_dir, directory)
                 else:
                     # Atomic on POSIX systems
-                    os.replace(tmp_dir, directory)
+                    try:
+                        os.replace(tmp_dir, directory)
+                    except OSError:
+                        log.warning("Directory %s is not empty - skipping!", tmp_dir)
 
             if config.use_static_cuda_launcher:
                 static_kernel_names = TritonBundler.load_autotuners(

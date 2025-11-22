@@ -17,7 +17,7 @@ from torch.fx.experimental.rewriter import RewritingTracer
 from torch.fx.experimental.unify_refinements import infer_symbolic_types
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.fx.tensor_type import Dyn, is_consistent, is_more_precise, TensorType
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 try:
@@ -1168,4 +1168,4 @@ class TypeCheckerTest(TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    raise_on_run_directly("test/test_fx.py")

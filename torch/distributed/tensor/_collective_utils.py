@@ -9,6 +9,11 @@ import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dtensor_spec as dtensor_spec
 from torch._C._distributed_c10d import _resolve_process_group
+from torch._logging import warning_once
+from torch.distributed._local_tensor import (
+    local_tensor_mode,
+    maybe_run_for_local_tensor,
+)
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
     _get_group_size_by_name,
@@ -24,36 +29,26 @@ from torch.distributed.distributed_c10d import (
 logger = logging.getLogger(__name__)
 
 
-if not torch._running_with_deploy():
+@torch.library.register_fake("_dtensor::shard_dim_alltoall")
+def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
+    group_size = _get_group_size_by_name(group_name)
+    stacked_list = [torch.empty_like(input) for _ in range(group_size)]
+    group = _resolve_process_group(group_name)
+    group_rank = get_group_rank(group, get_rank())
 
-    @torch.library.register_fake("_dtensor::shard_dim_alltoall")
-    def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
-        group_size = _get_group_size_by_name(group_name)
-        stacked_list = [torch.empty_like(input) for _ in range(group_size)]
-        group = _resolve_process_group(group_name)
-        group_rank = get_group_rank(group, get_rank())
-
-        return (
-            torch.cat(stacked_list, dim=gather_dim)
-            .chunk(group_size, dim=shard_dim)[group_rank]
-            .contiguous()
-        )
-
-else:
-    import warnings
-
-    warnings.warn(
-        "PyTorch Distributed functional collectives do not work with torch::deploy."
+    return (
+        torch.cat(stacked_list, dim=gather_dim)
+        .chunk(group_size, dim=shard_dim)[group_rank]
+        .contiguous()
     )
 
 
 def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
-    if mesh.device_type == "cpu":
+    if mesh.device_type == "cpu" and local_tensor_mode() is None:
         # Gloo does not support alltoall, so falling back to allgather + chunk
-
-        # TODO: This logs way too much
-        logger.warning(
-            "CPU process group does not support alltoall yet, falling back with allgather + chunk!"
+        warning_once(
+            logger,
+            "CPU process group does not support alltoall yet, falling back with allgather + chunk!",
         )
         out = funcol.all_gather_tensor(input, gather_dim, (mesh, mesh_dim))
         if isinstance(out, funcol.AsyncCollectiveTensor):
@@ -176,6 +171,7 @@ def mesh_broadcast(
     return broadcast(tensor, group=dim_group, async_op=async_op, group_src=group_src)
 
 
+@maybe_run_for_local_tensor
 def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
     if pad_size == 0:
         return tensor
@@ -184,6 +180,7 @@ def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tenso
     return torch.nn.functional.pad(tensor, pad)
 
 
+@maybe_run_for_local_tensor
 def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
     if pad_size == 0:
         return tensor
@@ -200,9 +197,7 @@ def fill_empty_tensor_to_shards(
     if num_empty_tensors == 0:
         return shards
     tensor_size = list(shards[0].size())
-    tensor_size = [
-        size if idx != shard_dim else 0 for idx, size in enumerate(tensor_size)
-    ]
+    tensor_size[shard_dim] = 0
     tensor = shards[0].new_zeros(tensor_size)
     shards.extend(tensor for _ in range(num_empty_tensors))
     return shards
@@ -232,6 +227,7 @@ def check_tensor_meta(
     return None
 
 
+# TODO: autoparallel depends on this function, we will keep it until we update autoparallel redistribute_cost
 def spec_to_bytes(spec: "dtensor_spec.DTensorSpec") -> int:
     assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
@@ -327,7 +323,7 @@ def redistribute_cost(
 
     NOTE:
     1. Only consider communication cost here, since computation costs for redistribute
-       are quite trival (i.e. we only need to narrow or simple division)
+       are quite trivial (i.e. we only need to narrow or simple division)
     2. Only consider redistribute cost on same mesh, cross mesh communication cost is
        not quite needed for operator strategy estimation/selection.
     """
@@ -343,39 +339,61 @@ def redistribute_cost(
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     cost = 0.0
-    comm_bytes_gb = (
-        spec_to_bytes(current_spec) / current_spec.num_shards / 1024 / 1024 / 1024
-    )
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
-    for i, (current, target) in enumerate(
-        zip(current_spec.placements, target_spec.placements)
-    ):
+    from torch.distributed._functional_collectives import _are_we_tracing
+    from torch.distributed.tensor._redistribute import (
+        _gen_transform_infos,
+        _gen_transform_infos_non_cached,
+    )
+
+    # No redistribution needed when placements are already identical.
+    # This also prevents potential failures in _gen_transform_infos for certain configurations
+    # (e.g., sub-meshes) where finding a transform path between identical states may error out.
+    # TODO(zpcore): test placements with _StridedShard.
+    if current_spec.placements == target_spec.placements:
+        return cost
+    if _are_we_tracing():
+        transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
+    else:
+        transform_infos = _gen_transform_infos(current_spec, target_spec)
+    for transform_info in transform_infos:
+        assert current_spec.tensor_meta is not None, (
+            "spec should have tensor meta defined!"
+        )
+        comm_bytes_gb = (
+            current_spec.tensor_meta.dtype.itemsize
+            * math.prod(transform_info.logical_shape)
+            / 1024
+            / 1024
+            / 1024
+        )
+        current = transform_info.src_dst_placements[0]
+        target = transform_info.src_dst_placements[1]
         if current == target:
             continue
-
-        num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[i]
+        mesh_dim = transform_info.mesh_dim
+        num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
         if current.is_shard() and target.is_replicate():
-            # allgather gives larger comm bytes
-            comm_bytes_gb *= num_devices_on_mesh_dim
             # add up allgather comm cost
-            cost += allgather_cost(comm_bytes_gb, mesh_topo, i)
+            cost += allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         elif current.is_shard() and target.is_shard():
-            # should be alltoall comm, since we haven't implement it yet, add penalty
+            # should be alltoall comm, since we haven't implement it yet, add 1.0 as penalty
             # to favor allgather instead
-            cost += allgather_cost(comm_bytes_gb, mesh_topo, i) + 1.0
+            # TODO: add alltoall_cost
+            comm_bytes_gb /= num_devices_on_mesh_dim
+            cost += allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim) + 1.0
         elif current.is_partial() and target.is_replicate():
             # add up allreduce comm cost
-            cost += allreduce_cost(comm_bytes_gb, mesh_topo, i)
+            cost += allreduce_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         elif current.is_partial() and target.is_shard():
             # add up reduce_scatter comm cost
-            cost += reduce_scatter_cost(comm_bytes_gb, mesh_topo, i)
+            cost += reduce_scatter_cost(comm_bytes_gb, mesh_topo, mesh_dim)
             # after reduce_scatter the comm bytes for further collectives halved.
             comm_bytes_gb /= num_devices_on_mesh_dim
         elif current.is_shard() and target.is_partial():
             # ban shard -> partial as it does not make sense to perform
             # this redistribute
             return float("inf")
-
     return cost

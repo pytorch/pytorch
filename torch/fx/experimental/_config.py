@@ -2,6 +2,8 @@ import os
 import sys
 from typing import Optional
 
+from torch.utils._config_module import Config, install_config_module
+
 
 # [@compile_ignored: debug] Fails hard instead of graph breaking on guard on data dependent errors.
 no_data_dependent_graph_break = (
@@ -97,7 +99,14 @@ meta_nonzero_assume_all_nonzero = False
 # Currently an experimental option for export.
 backed_size_oblivious = False
 
-from torch.utils._config_module import install_config_module
+# Skip dtype check in meta registrations. Only used for systems that does its own dtype checking.
+skip_dtype_check_in_meta_registrations = False
+
+# Experimental: If True, graph module will register fx metadata during recompile()
+enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
+    default=False,
+    env_name_default="TORCH_ENRICH_RPOFILER_STACK_TRACE",
+)
 
 
 install_config_module(sys.modules[__name__])

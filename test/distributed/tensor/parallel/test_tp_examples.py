@@ -8,16 +8,16 @@ from typing import NamedTuple, Optional
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
-from torch.distributed._tensor import (
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
+    checkpoint_wrapper,
+    CheckpointImpl,
+)
+from torch.distributed.tensor import (
     DeviceMesh,
     distribute_tensor,
     DTensor,
     Replicate,
     Shard,
-)
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper,
-    CheckpointImpl,
 )
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
@@ -27,6 +27,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
 )
 from torch.distributed.tensor.parallel.input_reshard import input_reshard
+from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -259,7 +260,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         check_comms=True,
     ):
         optim.step()  # Ensure model weights are still the same after update.
-        from torch.distributed._tensor.experimental import implicit_replication
+        from torch.distributed.tensor.experimental import implicit_replication
 
         with implicit_replication():
             with CommDebugMode() as comm_mode:
@@ -281,6 +282,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
     @skip_unless_torch_gpu
     @parametrize("is_seq_parallel", [True, False])
     @parametrize("dtype", [torch.float64, torch.float32])
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1555")
     def test_transformer_training(self, is_seq_parallel, dtype: torch.dtype):
         EXP_BASE_CC = ExpCommCounts(
             fwd={all_reduce: 6, all_gather: 1}, bwd={all_reduce: 9}
@@ -412,6 +414,7 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         + f"{str(dtype).split('.')[-1]}_"
         + f"thaw_{'__'.join(sorted({n.rpartition('.')[0].replace('.', '_') for n in thaw})) if thaw else 'all'}",
     )
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1555")
     def test_transformer_req_grad(self, thaw_params, is_seq_parallel, dtype, exp_cnts):
         # Sample a subset of `requires_grad` patterns
 

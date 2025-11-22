@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Optional
+from typing import cast, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -29,6 +29,7 @@ def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
     rngprim_def = torch.library.custom_op(
         "rngprims::" + name, impl_aten, mutates_args=(), schema=schema
     )
+    # pyrefly: ignore [missing-attribute]
     rngprim_def.register_fake(impl_meta)
 
     prim_packet = getattr(torch._ops.ops.rngprims, name)
@@ -69,12 +70,10 @@ def philox_rand_offset(
     curand4_engine_calls = 4
     device_property = torch.cuda.get_device_properties(torch.cuda.current_device())
     blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
-    grid_size = (numel + block_size - 1) // block_size
+    num = cast(int, numel)
+    grid_size = (num + block_size - 1) // block_size
     grid_size = min(grid_size, device_property.multi_processor_count * blocks_per_sm)
-    offset = (
-        (numel - 1) // (block_size * grid_size * unroll) + 1
-    ) * curand4_engine_calls
-    return offset
+    return ((num - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
 
 
 def register_philox_rand():
@@ -331,9 +330,11 @@ def register_graphsafe_run_with_rng_state_op():
 
     @graphsafe_run_with_rng_state.py_impl(DispatchKey.CUDA)
     def impl_cuda(op, *args, rng_state=None, **kwargs):
+        # pyrefly: ignore [missing-attribute]
         device_idx = rng_state.device.index
         generator = torch.cuda.default_generators[device_idx]
         current_state = generator.graphsafe_get_state()
+        # pyrefly: ignore [bad-argument-type]
         generator.graphsafe_set_state(rng_state)
         out = op(*args, **kwargs)
         generator.graphsafe_set_state(current_state)
@@ -342,9 +343,9 @@ def register_graphsafe_run_with_rng_state_op():
     @graphsafe_run_with_rng_state.py_impl(DispatchKey.BackendSelect)
     def impl_backend_select(op, *args, rng_state=None, **kwargs):
         device = get_device(args, kwargs)
-        assert (
-            device == "cuda"
-        ), f"GraphSafe RNG operations only supported for CUDA, got {device}"
+        assert device == "cuda", (
+            f"GraphSafe RNG operations only supported for CUDA, got {device}"
+        )
         return impl_cuda(op, *args, rng_state=rng_state, **kwargs)
 
     @graphsafe_run_with_rng_state.py_impl(FakeTensorMode)

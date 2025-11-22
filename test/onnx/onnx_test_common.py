@@ -7,8 +7,8 @@ import dataclasses
 import io
 import os
 import unittest
-from collections.abc import Collection, Iterable, Mapping, Sequence
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
+from typing import Any, Optional, Union
 
 import numpy as np
 import onnxruntime
@@ -17,7 +17,8 @@ import pytorch_test_common
 
 import torch
 from torch import export as torch_export
-from torch.onnx import _constants, verification
+from torch.onnx import _constants
+from torch.onnx._internal.torchscript_exporter import verification
 from torch.testing._internal import common_utils
 from torch.testing._internal.opinfo import core as opinfo_core
 from torch.types import Number
@@ -63,36 +64,6 @@ def run_model_test(test_suite: _TestONNXRuntime, *args, **kwargs):
         kwargs.pop(k)
 
     return verification.verify(*args, options=options, **kwargs)
-
-
-def assert_dynamic_shapes(onnx_program: torch.onnx.ONNXProgram, dynamic_shapes: bool):
-    """Assert whether the exported model has dynamic shapes or not.
-
-    Args:
-        onnx_program (torch.onnx.ONNXProgram): The output of torch.onnx.dynamo_export.
-        dynamic_shapes (bool): Whether the exported model has dynamic shapes or not.
-            When True, raises if graph inputs don't have at least one dynamic dimension
-            When False, raises if graph inputs have at least one dynamic dimension.
-
-    Raises:
-        AssertionError: If the exported model has dynamic shapes and dynamic_shapes is False and vice-versa.
-    """
-
-    if dynamic_shapes is None:
-        return
-
-    model_proto = onnx_program.model_proto
-    # Process graph inputs
-    dynamic_inputs = []
-    for inp in model_proto.graph.input:
-        dynamic_inputs += [
-            dim
-            for dim in inp.type.tensor_type.shape.dim
-            if dim.dim_value == 0 and dim.dim_param != ""
-        ]
-    assert dynamic_shapes == (len(dynamic_inputs) > 0), (
-        "Dynamic shape check failed for graph inputs"
-    )
 
 
 def parameterize_class_name(cls: type, idx: int, input_dicts: Mapping[Any, Any]):
@@ -235,12 +206,6 @@ MIN_ONNX_OPSET_VERSION = 9
 # The max onnx opset version to test for
 MAX_ONNX_OPSET_VERSION = _constants.ONNX_TORCHSCRIPT_EXPORTER_MAX_OPSET
 TESTED_OPSETS = range(MIN_ONNX_OPSET_VERSION, MAX_ONNX_OPSET_VERSION + 1)
-
-# The min onnx opset version to test for
-FX_MIN_ONNX_OPSET_VERSION = 18
-# The max onnx opset version to test for
-FX_MAX_ONNX_OPSET_VERSION = 18
-FX_TESTED_OPSETS = range(FX_MIN_ONNX_OPSET_VERSION, FX_MAX_ONNX_OPSET_VERSION + 1)
 
 BOOL_TYPES = (torch.bool,)
 

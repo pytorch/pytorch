@@ -36,14 +36,14 @@ Other callbacks don't provide exception safety so avoid there.
 // backlog. This should be at least world size to avoid issues on init. We set
 // it to -1 to use the host max value which is controlled by `soconnmax`.
 auto constexpr DEFAULT_BACKLOG = -1;
-auto constexpr MAX_KEY_COUNT = size_t(128 * 1024);
+auto constexpr MAX_KEY_COUNT = static_cast<size_t>(128 * 1024);
 auto constexpr MAX_STRING_LEN = 8 * 1024;
 auto constexpr MAX_PAYLOAD_LEN = 8 * 1024 * 1024;
 
 // This controls the preferred size for buffers.
 // Too small and we'll need multiple buffers for one request
 // Too big and we might taxing malloc
-auto constexpr ALLOC_BUFFER_SIZE = size_t(4096);
+auto constexpr ALLOC_BUFFER_SIZE = static_cast<size_t>(4096);
 class UvHandle : public c10::intrusive_ptr_target {
  public:
   ~UvHandle() override = default;
@@ -78,7 +78,7 @@ class UvHandle : public c10::intrusive_ptr_target {
 
  private:
   static c10::intrusive_ptr<UvHandle> reclaim(uv_handle_t* handle) {
-    auto h = (UvHandle*)uv_handle_get_data(handle);
+    auto h = static_cast<UvHandle*>(uv_handle_get_data(handle));
     return c10::intrusive_ptr<UvHandle>::reclaim(h);
   }
 
@@ -97,7 +97,8 @@ class UvTcpSocket : public UvHandle {
   }
 
   static c10::intrusive_ptr<UvTcpSocket> borrow(uv_stream_t* handle) {
-    auto h = (UvTcpSocket*)uv_handle_get_data((uv_handle_t*)handle);
+    auto h = static_cast<UvTcpSocket*>(
+        uv_handle_get_data(reinterpret_cast<uv_handle_t*>(handle)));
     return h->iptr();
   }
 
@@ -107,7 +108,7 @@ class UvTcpSocket : public UvHandle {
       uv_buf_t* buf) {
     suggested_size = std::min(suggested_size, ALLOC_BUFFER_SIZE);
     // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-    buf->base = (char*)malloc(suggested_size);
+    buf->base = static_cast<char*>(malloc(suggested_size));
     buf->len = suggested_size;
   }
 
@@ -120,25 +121,24 @@ class UvTcpSocket : public UvHandle {
     if (nread > 0) {
       try {
         uv_socket->processBuf(buf, nread);
+        return; // We do free inside processBuf.
       } catch (std::exception& ex) {
         C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
-    } else {
-      // Handle error and EOF cases
-      if (nread < 0) {
-        C10D_DEBUG(
-            "Read callback failed. code:{} name:{} desc:{}",
-            nread,
-            uv_err_name(nread),
-            uv_strerror(nread));
-      } else {
-        C10D_DEBUG("Remote peer closed the connection.");
-      }
+    } else if (nread == UV_EOF) { // Handle EOF cases
+      C10D_DEBUG("Remote peer closed the connection.");
       uv_socket->close();
-      // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-      free(buf->base);
+    } else if (nread < 0) { // Handle error and EOF cases
+      C10D_DEBUG(
+          "Read callback failed. code:{} name:{} desc:{}",
+          nread,
+          uv_err_name(nread),
+          uv_strerror(nread));
+      uv_socket->close();
     }
+    // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
+    free(buf->base);
   }
 
  public:
@@ -156,7 +156,7 @@ class UvTcpSocket : public UvHandle {
   }
 
   void startRead() {
-    struct ::sockaddr_storage addr {};
+    struct ::sockaddr_storage addr{};
     int addrLen{sizeof(struct ::sockaddr_storage)};
 
     if (int err = uv_tcp_getpeername(
@@ -169,7 +169,8 @@ class UvTcpSocket : public UvHandle {
           formatSockAddr(reinterpret_cast<struct ::sockaddr*>(&addr), addrLen);
     }
 
-    int res = uv_read_start((uv_stream_t*)&client, alloc_buffer, read_callback);
+    int res = uv_read_start(
+        reinterpret_cast<uv_stream_t*>(&client), alloc_buffer, read_callback);
     if (res) {
       C10D_WARNING(
           "Failed to setup read callback. client:{} code:{} name:{} desc:{}.",
@@ -182,12 +183,12 @@ class UvTcpSocket : public UvHandle {
   }
 
   uv_handle_t* unsafeGetHandle() override {
-    return (uv_handle_t*)&client;
+    return reinterpret_cast<uv_handle_t*>(&client);
   }
 
  protected:
   uv_stream_t* unsafeGetStream() {
-    return (uv_stream_t*)&client;
+    return reinterpret_cast<uv_stream_t*>(&client);
   }
 
   uv_tcp_t* unsafeGetSocket() {
@@ -218,7 +219,7 @@ class UvTcpServer : public UvTcpSocket {
     auto res = c10::make_intrusive<UvTcpServer>(loop);
     res->handleReady();
     try {
-      int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
+      int uv_res = uv_tcp_open(res->unsafeGetSocket(), socket);
       C10D_CHECK_WITH(
           SocketError,
           uv_res == 0,
@@ -245,7 +246,7 @@ class UvTcpServer : public UvTcpSocket {
               uv_err_name(uv_res),
               uv_strerror(uv_res)));
       res->cacheSocketPort();
-    } catch (std::exception& ex) {
+    } catch (std::exception&) {
       res->close();
       throw;
     }
@@ -264,12 +265,14 @@ class UvTcpServer : public UvTcpSocket {
     auto res = c10::make_intrusive<UvTcpServer>(loop);
     res->handleReady();
     try {
-      struct sockaddr_storage addr {};
+      struct sockaddr_storage addr{};
       int uv_res = 0;
       if (useIpv6) {
-        uv_res = uv_ip6_addr("::", port, (struct sockaddr_in6*)&addr);
+        uv_res = uv_ip6_addr(
+            "::", port, reinterpret_cast<struct sockaddr_in6*>(&addr));
       } else {
-        uv_res = uv_ip4_addr("0.0.0.0", port, (struct sockaddr_in*)&addr);
+        uv_res = uv_ip4_addr(
+            "0.0.0.0", port, reinterpret_cast<struct sockaddr_in*>(&addr));
       }
       TORCH_CHECK_WITH(
           DistStoreError,
@@ -287,7 +290,9 @@ class UvTcpServer : public UvTcpSocket {
           uv_strerror(uv_res));
 
       uv_res = uv_tcp_bind(
-          res->unsafeGetSocket(), (const struct ::sockaddr*)&addr, 0);
+          res->unsafeGetSocket(),
+          reinterpret_cast<const struct ::sockaddr*>(&addr),
+          0);
       C10D_CHECK_WITH(
           SocketError,
           uv_res == 0,
@@ -317,7 +322,7 @@ class UvTcpServer : public UvTcpSocket {
               uv_err_name(uv_res),
               uv_strerror(uv_res)));
       res->cacheSocketPort();
-    } catch (std::exception& ex) {
+    } catch (std::exception&) {
       res->close();
       throw;
     }
@@ -330,8 +335,9 @@ class UvTcpServer : public UvTcpSocket {
   }
 
   void accept(const c10::intrusive_ptr<UvTcpSocket>& socket) {
-    int res =
-        uv_accept(unsafeGetStream(), (uv_stream_t*)socket->unsafeGetHandle());
+    int res = uv_accept(
+        unsafeGetStream(),
+        reinterpret_cast<uv_stream_t*>(socket->unsafeGetHandle()));
     C10D_CHECK_WITH(
         SocketError,
         res == 0,
@@ -353,7 +359,8 @@ class UvTcpServer : public UvTcpSocket {
   }
 
   static c10::intrusive_ptr<UvTcpServer> borrow(uv_stream_t* handle) {
-    auto h = (UvTcpServer*)uv_handle_get_data((uv_handle_t*)handle);
+    auto h = static_cast<UvTcpServer*>(
+        uv_handle_get_data(reinterpret_cast<uv_handle_t*>(handle)));
     return h->iptr();
   }
 
@@ -362,13 +369,12 @@ class UvTcpServer : public UvTcpSocket {
 
     int addr_len = sizeof(addr_s);
 
-    if (uv_tcp_getsockname(
+    TORCH_CHECK(
+        uv_tcp_getsockname(
             (uv_tcp_t*)unsafeGetStream(),
             reinterpret_cast<::sockaddr*>(&addr_s),
-            &addr_len) != 0) {
-      throw std::runtime_error(
-          "The port number of the socket cannot be retrieved.");
-    }
+            &addr_len) == 0,
+        "The port number of the socket cannot be retrieved.");
 
     if (addr_s.ss_family == AF_INET) {
       portNum_ = ntohs(reinterpret_cast<sockaddr_in*>(&addr_s)->sin_port);
@@ -391,14 +397,15 @@ class WriterPayload : public c10::intrusive_ptr_target {
   static c10::intrusive_ptr<WriterPayload> reclaim(uv_write_t* request) {
     /* This method returns a intrusive_ptr that does not increase the refcount.
      */
-    auto h = (WriterPayload*)uv_req_get_data((uv_req_t*)request);
+    auto h = static_cast<WriterPayload*>(
+        uv_req_get_data(reinterpret_cast<uv_req_t*>(request)));
     return c10::intrusive_ptr<WriterPayload>::reclaim(h);
   }
 
   void registeredInLoop() {
     /*
     This refcount increment must be matched by a reclaim call.
-    Call this method after sucessfully scheduling this handle with a loop.
+    Call this method after successfully scheduling this handle with a loop.
     */
     at::raw::intrusive_ptr::incref(this);
   }
@@ -429,15 +436,19 @@ class WriterPayload : public c10::intrusive_ptr_target {
       std::vector<uint8_t>&& in_data,
       c10::intrusive_ptr<UvHandle> handle)
       : data(std::move(in_data)), handle(std::move(handle)) {
-    uv_req_set_data((uv_req_t*)&req, this);
+    uv_req_set_data(reinterpret_cast<uv_req_t*>(&req), this);
   }
 
   ~WriterPayload() override = default;
 
   void send() {
-    buf = uv_buf_init((char*)data.data(), data.size());
+    buf = uv_buf_init(reinterpret_cast<char*>(data.data()), data.size());
     int res = uv_write(
-        &req, (uv_stream_t*)handle->unsafeGetHandle(), &buf, 1, write_done);
+        &req,
+        reinterpret_cast<uv_stream_t*>(handle->unsafeGetHandle()),
+        &buf,
+        1,
+        write_done);
 
     if (res) {
       C10D_WARNING(
@@ -586,7 +597,7 @@ class ChunkedStream {
     if (available() < size)
       return false;
     str.resize(size);
-    return read_many((char*)str.data(), size);
+    return read_many(str.data(), size);
   }
 
   bool read_payload(std::vector<uint8_t>& data) {
@@ -606,7 +617,7 @@ class ChunkedStream {
     if (available() < size_in_bytes)
       return false;
     data.resize(size);
-    return read_many((char*)data.data(), size_in_bytes);
+    return read_many(reinterpret_cast<char*>(data.data()), size_in_bytes);
   }
 
   size_t available() {
@@ -667,6 +678,13 @@ class LibUVStoreDaemon : public BackgroundThread {
   int64_t deleteKey(const std::string& key);
   void append(const std::string& key, const std::vector<uint8_t>& value);
 
+  void queuePush(const std::string& queueName, const std::vector<uint8_t>& val);
+  void queuePop(
+      const std::string& queueName,
+      const c10::intrusive_ptr<UvHandle>& client);
+  int64_t queueLen(const std::string& queueName);
+  std::vector<std::string> listKeys();
+
   void registerClient(const c10::intrusive_ptr<UvHandle>& client);
   void unregisterClient(const c10::intrusive_ptr<UvHandle>& client);
   void clearClientWaitState(const c10::intrusive_ptr<UvHandle>& client);
@@ -692,23 +710,28 @@ class LibUVStoreDaemon : public BackgroundThread {
   std::unordered_map<c10::intrusive_ptr<UvHandle>, size_t> keysAwaited_;
   std::unordered_set<c10::intrusive_ptr<UvHandle>> clients_;
   std::unordered_set<c10::intrusive_ptr<UvHandle>> miscellaneousClients_;
+
+  // Queues
+  std::unordered_map<std::string, std::deque<std::vector<uint8_t>>> queues_;
+
   int port_;
 
   static LibUVStoreDaemon& from_uv(uv_handle_t* stream) {
-    return *(LibUVStoreDaemon*)uv_handle_get_data(stream);
+    return *static_cast<LibUVStoreDaemon*>(uv_handle_get_data(stream));
   }
 
   static void on_new_connection(uv_stream_t* server, int status) {
-    from_uv((uv_handle_t*)server).onConnect(status);
+    from_uv(reinterpret_cast<uv_handle_t*>(server)).onConnect(status);
   }
 
   static void on_exit_request(uv_async_t* handle) {
-    from_uv((uv_handle_t*)handle).onExitRequest();
+    from_uv(reinterpret_cast<uv_handle_t*>(handle)).onExitRequest();
   }
 
   void onConnect(int status);
   void onExitRequest();
   void wakeupWaitingClients(const std::string& key);
+  void wakeupOneWaitingClient(const std::string& key);
   // bool tryListen(bool use_ipv6);
 
   static void print_active_handles(uv_handle_t* handle, void* arg);
@@ -730,12 +753,12 @@ class UvClient : public UvTcpSocket {
       if (!stream.read1(command))
         break;
       if (store->isMiscellaneousClient(iptr())) {
-        if ((QueryType)command != QueryType::VALIDATE)
+        if (static_cast<QueryType>(command) != QueryType::VALIDATE)
           return;
         if (!parse_validate_command())
           return;
       } else {
-        switch ((QueryType)command) {
+        switch (static_cast<QueryType>(command)) {
           case QueryType::PING:
             if (!parse_ping_command())
               return;
@@ -786,6 +809,22 @@ class UvClient : public UvTcpSocket {
             break;
           case QueryType::CANCEL_WAIT:
             if (!parse_cancel_wait_command())
+              return;
+            break;
+          case QueryType::QUEUE_PUSH:
+            if (!parse_queue_push_command())
+              return;
+            break;
+          case QueryType::QUEUE_POP:
+            if (!parse_queue_pop_command())
+              return;
+            break;
+          case QueryType::QUEUE_LEN:
+            if (!parse_queue_len_command())
+              return;
+            break;
+          case QueryType::LIST_KEYS:
+            if (!parse_list_keys_command())
               return;
             break;
           default:
@@ -917,7 +956,11 @@ class UvClient : public UvTcpSocket {
         return false;
     }
 
-    C10D_TRACE("check key_count:{} address:{}", key_count, this->address());
+    C10D_TRACE(
+        "check key_count:{} keys[0]:{} address:{}",
+        key_count,
+        keys[0],
+        this->address());
 
     // Now we have received all the keys
     StreamWriter sw(iptr());
@@ -950,11 +993,15 @@ class UvClient : public UvTcpSocket {
         return false;
     }
 
-    C10D_TRACE("wait key_count:{} address:{}", key_count, this->address());
+    C10D_TRACE(
+        "wait key_count:{} keys[0]:{} address:{}",
+        key_count,
+        keys[0],
+        this->address());
 
     if (store->waitKeys(keys, iptr())) {
       StreamWriter sw(iptr());
-      sw.write1((uint8_t)WaitResponseType::STOP_WAITING);
+      sw.write1(static_cast<uint8_t>(WaitResponseType::STOP_WAITING));
       sw.send();
     }
 
@@ -1070,12 +1117,68 @@ class UvClient : public UvTcpSocket {
   bool parse_cancel_wait_command() {
     store->clearClientWaitState(iptr());
 
-    C10D_TRACE("cancel_wait key_count:{} address:{}", this->address());
+    C10D_TRACE("cancel_wait address:{}", this->address());
 
     StreamWriter sw(iptr());
-    sw.write1((uint8_t)WaitResponseType::WAIT_CANCELED);
+    sw.write1(static_cast<uint8_t>(WaitResponseType::WAIT_CANCELED));
     sw.send();
 
+    return true;
+  }
+
+  bool parse_queue_push_command() {
+    std::string key;
+    if (!stream.read_key(key)) {
+      return false;
+    }
+
+    std::vector<uint8_t> data;
+    if (!stream.read_payload(data)) {
+      return false;
+    }
+
+    C10D_TRACE("queue_push key:{} address:{}", key, this->address());
+
+    store->queuePush(key, data);
+    return true;
+  }
+
+  bool parse_queue_pop_command() {
+    std::string key;
+    if (!stream.read_key(key)) {
+      return false;
+    }
+
+    C10D_TRACE("queue_pop key:{} address:{}", key, this->address());
+
+    store->queuePop(key, iptr());
+    return true;
+  }
+
+  bool parse_queue_len_command() {
+    std::string key;
+    if (!stream.read_key(key)) {
+      return false;
+    }
+
+    C10D_TRACE("queue_len key:{} address:{}", key, this->address());
+
+    StreamWriter sw(iptr());
+    sw.write_value<int64_t>(store->queueLen(key));
+    sw.send();
+    return true;
+  }
+
+  bool parse_list_keys_command() {
+    C10D_TRACE("list_keys address:{}", this->address());
+
+    auto keys = store->listKeys();
+    StreamWriter sw(iptr());
+    sw.write_value<int64_t>(static_cast<int64_t>(keys.size()));
+    for (const auto& key : keys) {
+      sw.write_string(key);
+    }
+    sw.send();
     return true;
   }
 
@@ -1115,7 +1218,7 @@ void LibUVStoreDaemon::onConnect(int status) {
 
 void LibUVStoreDaemon::onExitRequest() {
   C10D_DEBUG("Store exit requested\n");
-  uv_close((uv_handle_t*)&exit_handle_, nullptr);
+  uv_close(reinterpret_cast<uv_handle_t*>(&exit_handle_), nullptr);
   uv_stop(&loop_);
 }
 
@@ -1156,12 +1259,12 @@ LibUVStoreDaemon::LibUVStoreDaemon(int port) : port_(port) {
       uv_async_init(&loop_, &exit_handle_, LibUVStoreDaemon::on_exit_request) ==
           0,
       "Failed to init uv async event");
-  uv_handle_set_data((uv_handle_t*)&exit_handle_, this);
+  uv_handle_set_data(reinterpret_cast<uv_handle_t*>(&exit_handle_), this);
 }
 
 LibUVStoreDaemon::~LibUVStoreDaemon() {
   if (!is_running()) {
-    uv_close((uv_handle_t*)&exit_handle_, nullptr);
+    uv_close(reinterpret_cast<uv_handle_t*>(&exit_handle_), nullptr);
     uv_run(&loop_, UV_RUN_NOWAIT);
     if (uv_loop_close(&loop_) != 0) {
       C10D_ERROR("loop cleanup didn't work");
@@ -1348,7 +1451,13 @@ int64_t LibUVStoreDaemon::add(const std::string& key, int64_t addVal) {
 
 bool LibUVStoreDaemon::checkKeys(const std::vector<std::string>& keys) {
   return std::all_of(keys.begin(), keys.end(), [&](const std::string& s) {
-    return tcpStore_.count(s) > 0;
+    if (tcpStore_.count(s) > 0) {
+      return true;
+    }
+    if (auto it = queues_.find(s); it != queues_.end() && !it->second.empty()) {
+      return true;
+    }
+    return false;
   });
 }
 
@@ -1399,12 +1508,66 @@ void LibUVStoreDaemon::wakeupWaitingClients(const std::string& key) {
     for (const auto& client : socketsToWait->second) {
       if (--keysAwaited_[client] == 0) {
         StreamWriter sw(client->iptr());
-        sw.write1((uint8_t)WaitResponseType::STOP_WAITING);
+        sw.write1(static_cast<uint8_t>(WaitResponseType::STOP_WAITING));
         sw.send();
       }
     }
     waitingSockets_.erase(socketsToWait);
   }
+}
+
+void LibUVStoreDaemon::wakeupOneWaitingClient(const std::string& key) {
+  auto socketsToWait = waitingSockets_.find(key);
+  if (socketsToWait != waitingSockets_.end()) {
+    for (const auto& client : socketsToWait->second) {
+      if (--keysAwaited_[client] == 0) {
+        StreamWriter sw(client->iptr());
+        sw.write1(static_cast<uint8_t>(WaitResponseType::STOP_WAITING));
+        sw.send();
+        return;
+      }
+    }
+  }
+}
+
+void LibUVStoreDaemon::queuePush(
+    const std::string& key,
+    const std::vector<uint8_t>& value) {
+  queues_[key].push_back(value);
+  wakeupOneWaitingClient(key);
+}
+
+void LibUVStoreDaemon::queuePop(
+    const std::string& key,
+    const c10::intrusive_ptr<UvHandle>& client) {
+  auto& queue = queues_[key];
+
+  StreamWriter sw(client->iptr());
+  sw.write_value<int64_t>(queue.size());
+
+  if (!queue.empty()) {
+    auto value = queue.front();
+    queue.pop_front();
+    sw.write_vector(value);
+  }
+
+  sw.send();
+}
+int64_t LibUVStoreDaemon::queueLen(const std::string& key) {
+  auto it = queues_.find(key);
+  if (it == queues_.end()) {
+    return 0;
+  }
+  return static_cast<int64_t>(it->second.size());
+}
+
+std::vector<std::string> LibUVStoreDaemon::listKeys() {
+  std::vector<std::string> keys;
+  keys.reserve(tcpStore_.size());
+  for (const auto& kv : tcpStore_) {
+    keys.push_back(kv.first);
+  }
+  return keys;
 }
 
 #endif

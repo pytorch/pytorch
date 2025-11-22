@@ -1,10 +1,10 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 
 import warnings
 
 from torch import nn
 from torch.ao.pruning import BaseScheduler, CubicSL, LambdaSL, WeightNormSparsifier
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 class ImplementedScheduler(BaseScheduler):
@@ -75,6 +75,7 @@ class TestScheduler(TestCase):
 
 class TestCubicScheduler(TestCase):
     def setUp(self):
+        super().setUp()
         self.model_sparse_config = [
             {"tensor_fqn": "0.weight", "sparsity_level": 0.8},
             {"tensor_fqn": "2.weight", "sparsity_level": 0.4},
@@ -188,5 +189,9 @@ class TestCubicScheduler(TestCase):
         self.assertEqual(
             self._get_sparsity_levels(sparsifier),
             self.sorted_sparse_levels,
-            msg="Sparsity level is not reaching the target level afer delta_t * n steps ",
+            msg="Sparsity level is not reaching the target level after delta_t * n steps ",
         )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

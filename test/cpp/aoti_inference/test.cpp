@@ -2,7 +2,9 @@
 #include <gtest/gtest.h>
 #include <atomic>
 #include <condition_variable>
+#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <mutex>
 #include <queue>
@@ -14,6 +16,7 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #if defined(USE_CUDA)
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <cuda_runtime.h>
 #endif
 #if defined(USE_CUDA) || defined(USE_ROCM)
@@ -26,6 +29,64 @@
 #define STRINGIZE(x) STR_VALUE(x)
 
 namespace {
+
+// Function to check if test data files exist and are valid
+bool testDataFilesExist() {
+  std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
+  std::array<std::string, 4> required_files = {
+      "data.pt",
+      "script_data.pt",
+      "script_model_cpu.pt",
+      "script_model_cuda.pt"};
+
+  for (const auto& filename : required_files) {
+    std::string filepath = bindir + "/" + filename;
+    std::ifstream file(filepath);
+    if (!file.good()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Function to ensure test data files are generated at runtime
+void ensureTestDataGenerated() {
+  static std::once_flag generated_flag;
+  std::call_once(generated_flag, []() {
+    // Only generate if files don't exist or are placeholders
+    if (testDataFilesExist()) {
+      return;
+    }
+
+    std::string bindir = STRINGIZE(CMAKE_CURRENT_BINARY_DIR);
+
+    // Calculate path to source directory: build/test_aoti_inference -> build ->
+    // pytorch
+    std::string pytorch_root = bindir.substr(0, bindir.find_last_of("/"));
+    pytorch_root = pytorch_root.substr(0, pytorch_root.find_last_of("/"));
+    std::string source_dir = pytorch_root + "/test/cpp/aoti_inference";
+
+    // Generate test data files (data.pt, etc.) by running test.py directly
+    std::string test_script = source_dir + "/test.py";
+    std::string test_data_cmd = "cd " + bindir + " && python " + test_script;
+    std::cout << "Generating test data: " << test_data_cmd << std::endl;
+    int result1 = std::system(test_data_cmd.c_str());
+    if (result1 != 0) {
+      std::cerr << "Warning: Test data generation failed with code " << result1
+                << std::endl;
+    }
+
+    // Generate model files (script_*.pt) by running compile_model.py directly
+    std::string compile_script = source_dir + "/compile_model.py";
+    std::string models_cmd = "cd " + bindir + " && python " + compile_script;
+    std::cout << "Generating model files: " << models_cmd << std::endl;
+    int result2 = std::system(models_cmd.c_str());
+    if (result2 != 0) {
+      std::cerr << "Warning: Model generation failed with code " << result2
+                << std::endl;
+    }
+  });
+}
 
 const std::unordered_map<std::string, at::Tensor> derefTensorConstantMap(
     torch::inductor::TensorConstantMap tensor_constant_map) {
@@ -139,6 +200,47 @@ void test_aoti_package_loader(
   ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 }
 
+void test_aoti_package_loader_multi_gpu(
+    const std::string& device,
+    bool use_runtime_constant_folding) {
+  torch::NoGradGuard no_grad;
+  // Ensure that this test will reset the default CUDA device on exit.
+  torch::DeviceGuard device_guard(c10::Device("cuda"));
+
+  std::string data_path =
+      (std::filesystem::path(STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string suffix = use_runtime_constant_folding
+      ? device + "_use_runtime_constant_folding"
+      : device;
+  std::string path_attr = "pt2_package_path_" + suffix;
+  std::string inputs_attr = "inputs_" + suffix;
+  std::string outputs_attr = "outputs_" + suffix;
+  const auto& pt2_package_path =
+      data_loader.attr(path_attr.c_str()).toStringRef();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  // For all available CUDA devices: Load PT2 package on this device, run
+  // inference, and validate results
+  auto input_tensors =
+      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+  for (int i = 0; i < torch::cuda::device_count(); i++) {
+    auto options = torch::TensorOptions().device(torch::kCUDA, i);
+    torch::inductor::AOTIModelPackageLoader runner(
+        pt2_package_path, "model", false, 1, i);
+    std::vector<torch::Tensor> input_tensors_on_device;
+    for (auto input_tensor : input_tensors) {
+      input_tensors_on_device.push_back(input_tensor.clone().to(options));
+    }
+    // Run loaded PT2 package on device
+    auto actual_output_tensors = runner.run(input_tensors_on_device);
+    ASSERT_TRUE(torch::allclose(
+        ref_output_tensors[0].cpu(), actual_output_tensors[0].cpu()));
+  }
+}
+
 void test_aoti_constants_update(
     const std::string& device,
     bool use_runtime_constant_folding) {
@@ -202,14 +304,6 @@ void test_aoti_constants_update(
   // Update random weight to buffer #1.
   runner->update_constant_buffer(missing_map, false, false);
   actual_output_tensors = runner->run(input_tensors);
-  if (use_runtime_constant_folding) {
-    // At this moment, this update is applied on the original weight.
-    // The weight being consumed is "folded", so will have no affect.
-    ASSERT_TRUE(
-        torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
-    runner->run_const_fold(/* use_inactive = */ false);
-    actual_output_tensors = runner->run(input_tensors);
-  }
   ASSERT_FALSE(
       torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
 
@@ -458,6 +552,181 @@ void test_aoti_double_buffering_with_tensor_constants() {
   }
 }
 
+void test_aoti_user_managed_buffer() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(
+           STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "large_data.pt")
+           .string();
+
+  // Memory information variable
+  size_t DATASIZE = 128 * 1024 * 1024; // We have 128MB of weight data.
+
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string path_attr = "model_so_path";
+  std::string inputs_attr = "inputs";
+  std::string outputs_attr = "outputs";
+  std::string weights_attr = "w_pre";
+  std::string add_attr = "w_add";
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  auto input_tensors =
+      data_loader.attr(inputs_attr.c_str()).toTensorList().vec();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  const auto& weight_tensors =
+      data_loader.attr(weights_attr.c_str()).toTensor();
+  const auto& add_tensors = data_loader.attr(add_attr.c_str()).toTensor();
+
+  torch::inductor::TensorConstantMap rand_map, real_map;
+  at::Tensor rand_pre, rand_add;
+  at::Tensor w_pre, w_add;
+  rand_pre = at::randn({4096, 4096}).contiguous().to(at::kCUDA);
+  rand_add = at::randn({4096, 4096}).contiguous().to(at::kCUDA);
+  w_pre = at::Tensor(weight_tensors).contiguous().to(at::kCUDA);
+  w_add = at::Tensor(add_tensors).contiguous().to(at::kCUDA);
+
+  rand_map.emplace("L__self___w_pre", &rand_pre);
+  rand_map.emplace("L__self___w_add", &rand_add);
+  real_map.emplace("L__self___w_pre", &w_pre);
+  real_map.emplace("L__self___w_add", &w_add);
+
+  std::unique_ptr<torch::inductor::AOTIModelContainerRunner> runner;
+  runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+
+  // We extract the memory information starting from here.
+  int device_idx = -1;
+  cudaError_t cudaStatus;
+  cudaStatus = cudaGetDevice(&device_idx);
+  c10::cuda::CUDACachingAllocator::DeviceStats stats =
+      c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  size_t initTorchReserved = stats.reserved_bytes[0].current;
+  size_t torchReserved = stats.reserved_bytes[0].current;
+  if (cudaStatus != cudaSuccess || device_idx == -1) {
+    throw std::runtime_error("cudaGetDevice failed!");
+  }
+  // This should contain one set of weight (128MB) loaded from .so
+  size_t initMemory = 0;
+  size_t totalMemory = 0;
+  size_t preFreeMemory = 0;
+  cudaStatus = cudaMemGetInfo(&preFreeMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  // At this point, no memory should be consumed since we freed them all.
+  runner->swap_constant_buffer();
+  runner->free_inactive_constant_buffer();
+  runner->swap_constant_buffer();
+  cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory - DATASIZE, preFreeMemory);
+
+  // We update the active buffer, but with user_managed = True. This shouldn't
+  // add any memory consumption.
+  runner->update_constant_buffer(
+      real_map,
+      /*use_inactive = */ false,
+      /*validate_full_updates = */ true,
+      /*user_managed = */ true);
+  size_t updateMemory = 0;
+  cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory, updateMemory);
+
+  // Make sure the output is correct with user managed buffer.
+  auto actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  // Update with rand_map and extract the output of rand_map.
+  // We let user_managed = false for rand_map, this should increase memory
+  // consumption.
+  cudaStatus = cudaMemGetInfo(&initMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  runner->update_constant_buffer(
+      rand_map,
+      /*use_inactive = */ true,
+      /*validate_full_updates = */ true,
+      /*user_managed = */ false);
+  cudaStatus = cudaMemGetInfo(&updateMemory, &totalMemory);
+  if (cudaStatus != cudaSuccess) {
+    throw std::runtime_error("cudaMemGetInfo failed!");
+  }
+  ASSERT_EQ(initMemory - DATASIZE, updateMemory);
+
+  runner->swap_constant_buffer();
+  auto ref_rand_output_tensors = runner->run(input_tensors);
+  ASSERT_FALSE(
+      torch::allclose(ref_output_tensors[0], ref_rand_output_tensors[0]));
+
+  // Free everything.
+  runner->free_inactive_constant_buffer();
+  runner->swap_constant_buffer();
+  runner->free_inactive_constant_buffer();
+
+  // Set buffer #1 user_managed, and #2 not user managed, and compare the
+  // underlying data
+  runner->update_constant_buffer(
+      real_map,
+      /*use_inactive = */ false,
+      /*validate_full_updates = */ true,
+      /*user_managed = */ false);
+  runner->update_constant_buffer(
+      real_map,
+      /*use_inactive = */ true,
+      /*validate_full_updates = */ true,
+      /*user_managed = */ true);
+
+  auto extracted_active_weight =
+      runner->extract_constants_map(/* use_inactive = */ false);
+  auto extracted_inactive_weight =
+      runner->extract_constants_map(/* use_inactive = */ true);
+  auto cmp_real_map = derefTensorConstantMap(real_map);
+  // Value-wise all weights are equal
+  ASSERT_TRUE(compareConstantMap(extracted_active_weight, cmp_real_map));
+  ASSERT_TRUE(compareConstantMap(extracted_inactive_weight, cmp_real_map));
+  // Only when user_managed has the same underlying if set to true.
+  ASSERT_FALSE(
+      extracted_active_weight["L__self___w_pre"].data_ptr() ==
+      cmp_real_map["L__self___w_pre"].data_ptr());
+  ASSERT_TRUE(
+      extracted_inactive_weight["L__self___w_pre"].data_ptr() ==
+      cmp_real_map["L__self___w_pre"].data_ptr());
+
+  // From non user_managed
+  actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  // From user_managed
+  runner->swap_constant_buffer();
+  actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+
+  // We modify the buffer by the data's pointer outside of container.
+  cudaMemcpy(
+      real_map["L__self___w_add"]->data_ptr(),
+      rand_map["L__self___w_add"]->data_ptr(),
+      4096 * 4096 * sizeof(float),
+      cudaMemcpyDeviceToDevice);
+  cudaMemcpy(
+      real_map["L__self___w_pre"]->data_ptr(),
+      rand_map["L__self___w_pre"]->data_ptr(),
+      4096 * 4096 * sizeof(float),
+      cudaMemcpyDeviceToDevice);
+
+  // We should get the result of the rand output.
+  actual_output_tensors = runner->run(input_tensors);
+  ASSERT_TRUE(
+      torch::allclose(ref_rand_output_tensors[0], actual_output_tensors[0]));
+}
+
 void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   torch::NoGradGuard no_grad;
 
@@ -646,6 +915,47 @@ void test_aoti_free_buffer(bool use_runtime_constant_folding) {
   }
 }
 
+void test_cuda_alloc_test() {
+  torch::NoGradGuard no_grad;
+
+  std::string data_path =
+      (std::filesystem::path(
+           STRINGIZE(CMAKE_CURRENT_BINARY_DIR)) / "cuda_alloc_data.pt")
+           .string();
+  torch::jit::script::Module data_loader = torch::jit::load(data_path);
+  std::string path_attr = "model_so_path";
+  std::string inputs_attr = "inputs";
+  std::string outputs_attr = "outputs";
+  const auto& model_so_path = data_loader.attr(path_attr.c_str()).toStringRef();
+  const auto& ref_output_tensors =
+      data_loader.attr(outputs_attr.c_str()).toTensorList().vec();
+
+  size_t DATASIZE = 128 * 1024 * 1024; // We have 128MB of weight data.
+
+  int device_idx = -1;
+  cudaError_t cudaStatus;
+  cudaStatus = cudaGetDevice(&device_idx);
+  if (cudaStatus != cudaSuccess || device_idx == -1) {
+    throw std::runtime_error("cudaGetDevice failed!");
+  }
+
+  c10::cuda::CUDACachingAllocator::emptyCache();
+  c10::cuda::CUDACachingAllocator::DeviceStats stats =
+      c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  size_t initTorchActive = stats.allocated_bytes[0].current;
+  auto runner = std::make_unique<torch::inductor::AOTIModelContainerRunnerCuda>(
+      model_so_path);
+  stats = c10::cuda::CUDACachingAllocator::getDeviceStats(device_idx);
+  size_t torchActive = stats.allocated_bytes[0].current;
+
+  ASSERT_EQ(initTorchActive + DATASIZE, torchActive);
+
+  auto actual_output_tensors =
+      runner->run(data_loader.attr(inputs_attr.c_str()).toTensorList().vec());
+  ASSERT_TRUE(torch::allclose(ref_output_tensors[0], actual_output_tensors[0]));
+}
+
+#ifdef USE_CUDA
 class ThreadPool {
  private:
   struct Task {
@@ -786,75 +1096,97 @@ void test_multi_cuda_streams(const std::string& device) {
     ASSERT_TRUE(torch::allclose(ref_output_tensors[0], all_outputs[i][0]));
   }
 }
-#endif
+#endif // USE_CUDA
+#endif // USE_CUDA || USE_ROCM
 } // namespace
 
 namespace torch::aot_inductor {
 
-TEST(AotInductorTest, BasicTestCpu) {
+// Test fixture that ensures test data is generated once for all tests
+class AotInductorTest : public ::testing::Test {
+ public:
+  // This runs once before all tests in this test suite
+  static void SetUpTestSuite() {
+    ensureTestDataGenerated();
+  }
+};
+
+TEST_F(AotInductorTest, BasicTestCpu) {
   test_aoti("cpu", false);
 }
 
-TEST(AotInductorTest, BasicScriptTestCpu) {
+TEST_F(AotInductorTest, BasicScriptTestCpu) {
   test_aoti_script("cpu");
 }
 
-TEST(AotInductorTest, BasicPackageLoaderTestCpu) {
+TEST_F(AotInductorTest, BasicPackageLoaderTestCpu) {
   test_aoti_package_loader("cpu", false);
 }
 
-TEST(AotInductorTest, ExtractConstantsMapCpu) {
+TEST_F(AotInductorTest, ExtractConstantsMapCpu) {
   test_aoti_extract_constants_map("cpu");
 }
 
 #ifdef USE_CUDA
-TEST(AotInductorTest, BasicTestCuda) {
+TEST_F(AotInductorTest, BasicTestCuda) {
   test_aoti("cuda", true);
   test_aoti("cuda", false);
 }
 
-TEST(AotInductorTest, BasicScriptTestCuda) {
+TEST_F(AotInductorTest, BasicScriptTestCuda) {
   test_aoti_script("cuda");
 }
 
-TEST(AotInductorTest, BasicPackageLoaderTestCuda) {
+TEST_F(AotInductorTest, BasicPackageLoaderTestCuda) {
   test_aoti_package_loader("cuda", false);
 }
 
-TEST(AotInductorTest, RuntimeUpdateConstantsCuda) {
+TEST_F(AotInductorTest, BasicPackageLoaderTestMultiGpuCuda) {
+  test_aoti_package_loader_multi_gpu("cuda", false);
+}
+
+TEST_F(AotInductorTest, UpdateUserManagedConstantsCuda) {
+  test_aoti_user_managed_buffer();
+}
+
+TEST_F(AotInductorTest, RuntimeUpdateConstantsCuda) {
   test_aoti_constants_update("cuda", true);
 }
 
-TEST(AotInductorTest, UpdateConstantsCuda) {
+TEST_F(AotInductorTest, UpdateConstantsCuda) {
   test_aoti_constants_update("cuda", false);
 }
 
-TEST(AotInductorTest, ExtractConstantsMapCuda) {
+TEST_F(AotInductorTest, ExtractConstantsMapCuda) {
   test_aoti_extract_constants_map("cuda");
 }
 
-TEST(AotInductorTest, RuntimeUpdateInactiveConstantsCuda) {
+TEST_F(AotInductorTest, RuntimeUpdateInactiveConstantsCuda) {
   test_aoti_double_buffering("cuda", true);
 }
 
-TEST(AotInductorTest, UpdateInactiveConstantsCuda) {
+TEST_F(AotInductorTest, UpdateInactiveConstantsCuda) {
   test_aoti_double_buffering("cuda", false);
 }
 
-TEST(AotInductorTest, UpdateInactiveConstantsWithTensorConstantsCuda) {
+TEST_F(AotInductorTest, UpdateInactiveConstantsWithTensorConstantsCuda) {
   test_aoti_double_buffering_with_tensor_constants();
 }
 
-TEST(AotInductorTest, FreeInactiveConstantBufferCuda) {
+TEST_F(AotInductorTest, FreeInactiveConstantBufferCuda) {
   test_aoti_free_buffer(false);
 }
 
-TEST(AotInductorTest, FreeInactiveConstantBufferRuntimeConstantFoldingCuda) {
+TEST_F(AotInductorTest, FreeInactiveConstantBufferRuntimeConstantFoldingCuda) {
   test_aoti_free_buffer(true);
 }
 
-TEST(AotInductorTest, MultiStreamTestCuda) {
+TEST_F(AotInductorTest, MultiStreamTestCuda) {
   test_multi_cuda_streams("cuda");
+}
+
+TEST_F(AotInductorTest, CudaAllocTestCuda) {
+  test_cuda_alloc_test();
 }
 #endif
 

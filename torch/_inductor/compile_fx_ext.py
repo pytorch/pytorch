@@ -10,8 +10,8 @@ import sys
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union
-from typing_extensions import final, override, Self, TypeGuard
+from typing import Any, Optional, TYPE_CHECKING, TypeGuard, Union
+from typing_extensions import final, override, Self
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
@@ -30,7 +30,7 @@ from . import config
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
 from .graph import GraphLowering
-from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
+from .output_code import complex_memory_overlap  # noqa: F401
 from .virtualized import V
 
 
@@ -167,6 +167,7 @@ class _FakeTensorModeSerializer:
 
     def __init__(self, fake_mode: FakeTensorMode) -> None:
         self.allow_non_fake_inputs = fake_mode.allow_non_fake_inputs
+        self.shape_env = fake_mode.shape_env
 
     @contextlib.contextmanager
     def patch(self, fake_mode: FakeTensorMode) -> Generator[None, None, None]:
@@ -247,6 +248,7 @@ class _WireProtocolOutput:
     metrics: CachedMetricsDeltas
     logs: list[logging.LogRecord]
     warning_replay: Optional[list[warnings.WarningMessage]]
+    shape_env: Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv]
 
     def serialize(self) -> _WireProtocolPickledOutput:
         """
@@ -443,7 +445,7 @@ class _SerializedFxCompile(FxCompile):
             # we can't cache (or serialize)
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
-            log.debug("Skipping %s compile: %s", type(self), e)
+            log.debug("Skipping %s compile: %s", type(self), e)  # noqa: G200
             return None
 
         context = torch._guards.TracingContext.try_get()
@@ -466,6 +468,8 @@ class _SerializedFxCompile(FxCompile):
         fake_mode = _current_fake_mode()
         fake_tensor_mode = _FakeTensorModeSerializer(fake_mode)
 
+        from pickle import PicklingError
+
         try:
             input = _WireProtocolInput(
                 gm,
@@ -481,12 +485,12 @@ class _SerializedFxCompile(FxCompile):
                 fake_tensor_mode,
             ).serialize()
             return (input, constants)
-        except (AttributeError, BypassFxGraphCache):
+        except (AttributeError, BypassFxGraphCache, PicklingError):
             # For example: AttributeError: Can't pickle local object
             # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
 
             # TODO: scuba record about not being able to do this?
-            log.debug("Unable to pickle input graph or example inputs", exc_info=True)
+            log.warning("Unable to pickle input graph or example inputs", exc_info=True)
 
             return None
 
@@ -546,7 +550,11 @@ class _SerializedFxCompile(FxCompile):
         logs = captured_logs.finish()
 
         return _WireProtocolOutput(
-            output_graph, metrics.get_deltas(), logs, warning_replay
+            output_graph,
+            metrics.get_deltas(),
+            logs,
+            warning_replay,
+            fake_mode.shape_env,
         ).serialize()
 
 
@@ -608,7 +616,7 @@ class _OutOfProcessFxCompile(_SerializedFxCompile):
 
         # And forward our collected logs. The cache is cleared when the outer
         # function exits.
-        @functools.lru_cache(None)
+        @functools.cache
         def getLogger(name: str) -> logging.Logger:
             return logging.getLogger(name)
 

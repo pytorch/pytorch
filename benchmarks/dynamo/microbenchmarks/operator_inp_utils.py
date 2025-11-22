@@ -135,7 +135,7 @@ def contains_tensor_types(type):
     )
 
 
-@functools.lru_cache(None)
+@functools.cache
 def non_compute_operator(op):
     schema = op._schema
 
@@ -274,7 +274,7 @@ class OperatorInputsLoader:
             yield
             return
 
-        # line[1] represents number of times these inputs occured, ignored for now
+        # line[1] represents number of times these inputs occurred, ignored for now
         for line in self.operator_db[str(operator)].items():
             inps = line[0]
 
@@ -296,8 +296,8 @@ class OperatorInputsLoader:
         for key in self.operator_db.keys():
             try:
                 op = eval(key)
-            except AttributeError as ae:
-                log.warning("Evaluating an op name into an OpOverload: %s", ae)
+            except AttributeError:
+                log.warning("Evaluating an op name into an OpOverload", exc_info=True)
                 continue
             yield op
 

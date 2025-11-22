@@ -6,11 +6,15 @@ import json
 import os
 import time
 import urllib.parse
-from typing import Any, Callable, cast
+from typing import Any, cast, TYPE_CHECKING
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from tools.stats.upload_stats_lib import upload_to_s3
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 FILTER_OUT_USERS = {
@@ -81,7 +85,7 @@ def get_external_pr_data(
             response = cast(
                 dict[str, Any],
                 fetch_json(
-                    "https://api.github.com/search/issues",
+                    "https://api.github.com/search/issues",  # @lint-ignore
                     params={
                         "q": f'repo:pytorch/pytorch is:pr is:closed \
                             label:"open source" label:Merged -label:Reverted closed:{period_begin_date}..{period_end_date}',

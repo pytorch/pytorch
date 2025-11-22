@@ -58,9 +58,9 @@ if __name__ == "__main__":
     assert dims in ("2", "3")
     shape_x = [3, 2, 4] if dims == "3" else [3, 2]
     if one_size:
-        assert (
-            fn_name == "first_arg"
-        ), "only first_arg can be tested for a special case of 1-size tensor"
+        assert fn_name == "first_arg", (
+            "only first_arg can be tested for a special case of 1-size tensor"
+        )
         shape_x[0] = 1
     assert dyn_shape in ("True", "False")
     dynamic_shapes = dyn_shape == "True"
@@ -73,7 +73,10 @@ if __name__ == "__main__":
         shape = (y.numel(),) + x.shape[2:]
         z = torch.randn(shape, device=GPU_TYPE)
         fn(x, y, z)
+        # On Windows, Python will optimize away a function call if its updated value is not used.
+        # Touch the memory of x so that the fn(x, y, z) will not be optimized away
+        print(x)
     elif fn_name in ("upper1", "upper2", "lower1", "lower2"):
-        fn(x)
+        print(fn(x))
     else:
-        fn(x, y)
+        print(fn(x, y))

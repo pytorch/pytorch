@@ -60,9 +60,9 @@ class UnflattenTests(TestCase):
         for stage_idx in range(pipe.num_stages):
             stage_mod = pipe.get_stage_module(stage_idx)
             for param_name, _ in stage_mod.named_parameters():
-                assert (
-                    param_name in orig_state_dict
-                ), f"{param_name} not in original state dict"
+                assert param_name in orig_state_dict, (
+                    f"{param_name} not in original state dict"
+                )
         print("Param qualname test passed")
 
         # Check equivalence
@@ -73,7 +73,9 @@ class UnflattenTests(TestCase):
 
 
 devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(UnflattenTests, globals(), only_for=devices)
+instantiate_device_type_tests(
+    UnflattenTests, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

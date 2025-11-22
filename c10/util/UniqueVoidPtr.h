@@ -13,7 +13,7 @@ using DeleterFnPtr = void (*)(void*);
 namespace detail {
 
 // Does not delete anything
-C10_API void deleteNothing(void*);
+C10_API void deleteNothing(void* /*unused*/);
 
 // A detail::UniqueVoidPtr is an owning smart pointer like unique_ptr, but
 // with three major differences:
@@ -60,6 +60,19 @@ class UniqueVoidPtr {
   void* get() const {
     return data_;
   }
+
+  bool /* success */ unsafe_reset_data_and_ctx(void* new_data_and_ctx) {
+    if (C10_UNLIKELY(ctx_.get_deleter() != &deleteNothing)) {
+      return false;
+    }
+    // seems quicker than calling the no-op deleter when we reset
+    // NOLINTNEXTLINE(bugprone-unused-return-value)
+    ctx_.release();
+    ctx_.reset(new_data_and_ctx);
+    data_ = new_data_and_ctx;
+    return true;
+  }
+
   void* get_context() const {
     return ctx_.get();
   }

@@ -6,6 +6,7 @@ If you are adding a new entry/functionality, please, add it to the
 `torch/ao/quantization/quantization_mappings.py`, while adding an import statement
 here.
 """
+
 from torch.ao.quantization.quantization_mappings import (
     _get_special_act_post_process,
     _has_special_act_post_process,

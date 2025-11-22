@@ -32,13 +32,13 @@ class EventHandlers {
   }
 
   static EventHandlers& get() noexcept {
-    static auto ehsPtr = new EventHandlers();
-    return *ehsPtr;
+    static auto ehs = EventHandlers();
+    return ehs;
   }
 
  private:
-  std::mutex mu_{};
-  std::vector<std::shared_ptr<EventHandler>> handlers_{};
+  std::mutex mu_;
+  std::vector<std::shared_ptr<EventHandler>> handlers_;
 };
 } // namespace
 

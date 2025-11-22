@@ -13,17 +13,19 @@ import time
 from enum import Enum
 from pathlib import Path
 from sysconfig import get_paths as gp
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 
 # PyTorch directory root
 def scm_root() -> str:
     path = os.path.abspath(os.getcwd())
+    # pyrefly: ignore [bad-assignment]
     while True:
         if os.path.exists(os.path.join(path, ".git")):
             return path
         if os.path.isdir(os.path.join(path, ".hg")):
             return path
+        # pyrefly: ignore [bad-argument-type]
         n = len(path)
         path = os.path.dirname(path)
         if len(path) == n:
@@ -31,16 +33,11 @@ def scm_root() -> str:
 
 
 PYTORCH_ROOT = scm_root()
-IS_WINDOWS: bool = os.name == "nt"
 
 
 # Returns '/usr/local/include/python<version number>'
 def get_python_include_dir() -> str:
     return gp()["include"]
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, Enum):
@@ -60,10 +57,6 @@ class LintMessage(NamedTuple):
     original: str | None
     replacement: str | None
     description: str | None
-
-
-def as_posix(name: str) -> str:
-    return name.replace("\\", "/") if IS_WINDOWS else name
 
 
 # c10/core/DispatchKey.cpp:281:26: error: 'k' used after it was moved [bugprone-use-after-move]
@@ -183,6 +176,8 @@ def check_file(
         for match in RESULTS_RE.finditer(proc.stdout.decode()):
             # Convert the reported path to an absolute path.
             abs_path = str(Path(match["file"]).resolve())
+            if not abs_path.startswith(PYTORCH_ROOT):
+                continue
             message = LintMessage(
                 path=abs_path,
                 name=match["code"],

@@ -3,7 +3,6 @@
 import functools
 import operator
 import pickle
-import sys
 import types
 from itertools import permutations
 from typing import Any
@@ -88,7 +87,7 @@ class TestBuiltin(TestCase):
             assert_raises(TypeError, np.dtype, "l8")
             assert_raises(TypeError, np.dtype, "L8")
 
-    # XXX: what is 'q'? on my 64-bit ubuntu maching it's int64, same as 'l'
+    # XXX: what is 'q'? on my 64-bit ubuntu matching it's int64, same as 'l'
     #       if np.dtype('q').itemsize == 8:
     #           assert_raises(TypeError, np.dtype, 'q4')
     #           assert_raises(TypeError, np.dtype, 'Q4')
@@ -101,7 +100,7 @@ class TestBuiltin(TestCase):
         # dtypes results in False/True when compared to valid dtypes.
         # Here 7 cannot be converted to dtype. No exceptions should be raised
 
-        assert not np.dtype(np.int32) == 7, "dtype richcompare failed for =="
+        assert np.dtype(np.int32) != 7, "dtype richcompare failed for =="
         assert np.dtype(np.int32) != 7, "dtype richcompare failed for !="
 
     @parametrize("operation", [operator.le, operator.lt, operator.ge, operator.gt])
@@ -308,7 +307,7 @@ class TestPromotion(TestCase):
     )
     def test_permutations_do_not_influence_result(self, dtypes, expected):
         # Tests that most permutations do not influence the result.  In the
-        # above some uint and int combintations promote to a larger integer
+        # above some uint and int combinations promote to a larger integer
         # type, which would then promote to a larger than necessary float.
         for perm in permutations(dtypes):
             assert np.result_type(*perm) == expected
@@ -324,11 +323,6 @@ class TestMisc(TestCase):
     def test_keyword_argument(self):
         # test for https://github.com/numpy/numpy/pull/16574#issuecomment-642660971
         assert np.dtype(dtype=np.float64) == np.dtype(np.float64)
-
-    @skipif(sys.version_info >= (3, 9), reason="Requires python 3.9")
-    def test_class_getitem_38(self) -> None:
-        with pytest.raises(TypeError):
-            np.dtype[Any]
 
 
 class TestFromDTypeAttribute(TestCase):

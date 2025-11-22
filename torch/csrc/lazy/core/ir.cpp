@@ -6,7 +6,6 @@
 #include <torch/csrc/lazy/core/ir_metadata.h>
 
 // Enables caching on for dynamic shapes (aka disable hash on shapes)
-// NOLINTNEXTLINE(misc-use-internal-linkage)
 // clang-format off
 C10_DEFINE_bool(
     ltc_enable_dynamic_shapes,
@@ -144,7 +143,7 @@ const Output& Node::nullable_operand(size_t i) const {
 
 std::string Node::ToString() const {
   std::stringstream ss;
-  ss << shapes() << " " << op();
+  ss << shapes() << ' ' << op();
   if (num_outputs() > 1) {
     ss << ", num_outputs=" << num_outputs();
   }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/BlasBackend.h>
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
@@ -89,6 +90,15 @@ TORCH_API sycl::event deconvolution_backward_weights(
     int64_t groups,
     const std::vector<sycl::event>& deps = {});
 
+TORCH_API void woq_matmul_int4(
+    at::Tensor& result, // dst, [M, N]
+    const at::Tensor& mat1_, // src, [M, K]
+    const at::Tensor& mat2_, // quantized weight, [K/8, N]
+    const at::Tensor& scale, // [K/group_size, N]
+    const at::Tensor& zp, // [k/group_size, N]
+    int64_t group_size,
+    bool pri_cache = true);
+
 dnnl::memory::dims conv_dst_size(
     int64_t ndim,
     IntArrayRef src_tz,
@@ -148,20 +158,20 @@ void quantized_matmul(
     std::optional<at::Tensor> other, // extra input for binary-post-op
     double other_scale,
     int64_t other_zero_point,
-    const c10::string_view& binary_post_op,
+    const std::string_view& binary_post_op,
     double binary_alpha,
-    const c10::string_view& unary_post_op,
+    const std::string_view& unary_post_op,
     torch::List<std::optional<at::Scalar>>& unary_post_op_args,
-    c10::string_view unary_post_op_algorithm,
+    std::string_view unary_post_op_algorithm,
     bool m2_trnas);
 
-void gpu_float_sdpa(
+void sdpa(
     int batch_size,
     int seq_len_q,
-    int seq_len_k,
-    int num_head,
+    int seq_len_kv,
+    int num_head_q,
     int num_head_kv,
-    int head_dim,
+    int head_dim_qk,
     int head_dim_v,
     const Tensor& query,
     const Tensor& key,
@@ -169,5 +179,40 @@ void gpu_float_sdpa(
     std::optional<at::Tensor> attn_mask,
     bool is_causal,
     float softmax_scale,
-    const Tensor& output);
+    const Tensor& attention,
+    bool compute_logsumexp,
+    const Tensor& logsumexp);
+
+void sdpa_backward(
+    int batch_size,
+    int num_head_q,
+    int num_head_kv,
+    int seq_len_q,
+    int seq_len_kv,
+    int head_dim_qk,
+    int head_dim_v,
+    const Tensor& grad_out,
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const Tensor& out,
+    const Tensor& logsumexp,
+    std::optional<at::Tensor> attn_mask,
+    bool is_causal,
+    double scale,
+    Tensor& grad_query,
+    Tensor& grad_key,
+    Tensor& grad_value);
+
+sycl::event scaled_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    Tensor& result,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    at::blas::ScalingType scaling_choice_a,
+    at::blas::ScalingType scaling_choice_b,
+    const std::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& scale_result,
+    bool use_fast_accum);
 } // namespace at::native::onednn

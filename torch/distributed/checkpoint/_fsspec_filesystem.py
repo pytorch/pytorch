@@ -37,7 +37,8 @@ class FileSystem(FileSystemBase):
     def create_stream(
         self, path: Union[str, os.PathLike], mode: str
     ) -> Generator[io.IOBase, None, None]:
-        assert self.fs is not None
+        if self.fs is None:
+            raise AssertionError("fs should not be None")
         path = os.fspath(path)
 
         # fsspec does not support concurrent transactions, and not all
@@ -92,7 +93,9 @@ class FileSystem(FileSystemBase):
         self.fs.rm(path)
 
     def ls(self, path: Union[str, os.PathLike]) -> list[str]:
-        return self.fs.ls(path)
+        # setting detail to False explicitly to keep the list[str] return type,
+        # instead of the list[Dict] return type when detail=True
+        return self.fs.ls(path, detail=False)
 
 
 # TODO: add the dcp.async_save mixin

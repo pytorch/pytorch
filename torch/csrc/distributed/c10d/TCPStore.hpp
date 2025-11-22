@@ -41,7 +41,7 @@ class TCPServer;
 class TCPClient;
 
 struct SocketAddress {
-  std::string host{};
+  std::string host;
   std::uint16_t port{};
 };
 
@@ -77,6 +77,8 @@ class TORCH_API TCPStore : public Store {
 
   ~TCPStore() override;
 
+  c10::intrusive_ptr<Store> clone() override;
+
   void set(const std::string& key, const std::vector<uint8_t>& value) override;
 
   std::vector<uint8_t> compareSet(
@@ -111,6 +113,15 @@ class TORCH_API TCPStore : public Store {
       const std::vector<std::vector<uint8_t>>& values) override;
 
   bool hasExtendedApi() const override;
+
+  void queuePush(const std::string& key, const std::vector<uint8_t>& value)
+      override;
+
+  std::vector<uint8_t> queuePop(const std::string& key, bool block) override;
+
+  int64_t queueLen(const std::string& key) override;
+
+  std::vector<std::string> listKeys() override;
 
   // Waits for all workers to join.
   void waitForWorkers();

@@ -9,14 +9,10 @@ import subprocess
 import sys
 import time
 from enum import Enum
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 
 IS_WINDOWS: bool = os.name == "nt"
-
-
-def eprint(*args: Any, **kwargs: Any) -> None:
-    print(*args, file=sys.stderr, flush=True, **kwargs)
 
 
 class LintSeverity(str, Enum):
@@ -176,7 +172,7 @@ def run_command(
             ):
                 raise err
             remaining_retries -= 1
-            logging.warning(
+            logging.warning(  # noqa: G200
                 "(%s/%s) Retrying because command failed with: %r",
                 retries - remaining_retries,
                 retries,

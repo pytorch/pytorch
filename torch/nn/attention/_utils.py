@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """Defines utilities for interacting with scaled_dot_product_attention"""
+
 import math
-from typing import Optional
 
 import torch
 
@@ -21,7 +21,7 @@ def _postprocess_flash_output(inpt_tensor: torch.Tensor, og_size: int) -> torch.
     return inpt_tensor
 
 
-def _calculate_scale(head_dim_size: int, scale: Optional[float]) -> float:
+def _calculate_scale(head_dim_size: int, scale: float | None) -> float:
     """
     For FlashAttention we pad the head dimension to be a multiple of 8 so we need to scale the output
     by the original head size and not the padded.
@@ -35,11 +35,11 @@ def _validate_sdpa_input(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
     dropout_p=0.0,
     is_causal=False,
     scale=None,
-):
+) -> None:
     if query.dtype != key.dtype or query.dtype != value.dtype:
         raise ValueError(
             f"Expected query, key, and value to have the same dtype, "

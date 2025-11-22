@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch.ao.quantization.experimental.adaround_fake_quantize import (
@@ -16,12 +17,12 @@ from torch.utils.data import DataLoader, TensorDataset
 class AdaptiveRoundingOptimizer:
     def __init__(
         self,
-        model: Union[torch.nn.Module, torch.nn.DataParallel],
+        model: torch.nn.Module | torch.nn.DataParallel,
         callback: Callable[
             [
-                Union[torch.nn.Module, torch.nn.DataParallel],
+                torch.nn.Module | torch.nn.DataParallel,
                 Any,
-                Optional[torch.nn.Module],
+                torch.nn.Module | None,
             ],
             None,
         ],
@@ -34,7 +35,7 @@ class AdaptiveRoundingOptimizer:
         quant_max=127,
         qscheme: torch.qscheme = torch.per_tensor_symmetric,
         batch_size: int = 256,
-        feed_forward_wrapper: Optional[torch.nn.Module] = None,
+        feed_forward_wrapper: torch.nn.Module | None = None,
     ):
         if torch.cuda.is_available():
             self.model = model.cuda()
@@ -107,7 +108,7 @@ class AdaptiveRoundingOptimizer:
         )
         if torch.cuda.is_available():
             # Somehow, we need to move the model continuously
-            # Otherwise, the model will be lowered to CPU misteriously
+            # Otherwise, the model will be lowered to CPU mysteriously
             self.model = self.model.cuda()
             self.q_model = self.q_model.cuda()
         for data_ in data:
@@ -168,7 +169,7 @@ class AdaptiveRoundingOptimizer:
         self,
         module: torch.nn.Module,
         q_module: torch.nn.Module,
-        activation: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+        activation: Callable[[torch.Tensor], torch.Tensor] | None = None,
     ) -> None:
         ada_quantizer = AdaroundFakeQuantizer(
             dtype=self.dtype,
@@ -186,9 +187,10 @@ class AdaptiveRoundingOptimizer:
         inp, out, fp_in = self.get_data_inp_out(module, q_module, self.data)
 
         print("==================== Before adaround ====================")
-        assert (
-            torch.abs(out[0] - module(fp_in[0])).sum().item() == 0
-        ), "In-placed activation is detected, please do not use activation in-placed"
+        if torch.abs(out[0] - module(fp_in[0])).sum().item() != 0:
+            raise AssertionError(
+                "In-placed activation is detected, please do not use activation in-placed"
+            )
         # Stack the tensors in each list into a single tensor
         # Assuming inp and out are your lists of tensors
         inp_tensor = torch.vstack(inp)

@@ -6,6 +6,7 @@ import os
 import pickle
 import socket
 import tempfile
+import unittest
 from contextlib import contextmanager
 
 from urllib3.connection import HTTPConnection
@@ -15,7 +16,13 @@ from torch.distributed.elastic.control_plane import (
     TORCH_WORKER_SERVER_SOCKET,
     worker_main,
 )
-from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
+from torch.monitor import _WaitCounter
+from torch.testing._internal.common_utils import (
+    IS_FBCODE,
+    requires_cuda,
+    run_tests,
+    TestCase,
+)
 
 
 class UnixHTTPConnection(HTTPConnection):
@@ -57,9 +64,10 @@ class WorkerServerTest(TestCase):
             self.assertEqual(resp.status, 200)
             self.assertEqual(
                 resp.data,
-                b"""<h1>torch.distributed.WorkerServer</h1>
-<a href="/handler/">Handler names</a>
-""",
+                b"<h1>torch.distributed.WorkerServer</h1>\n"
+                b'<a href="'
+                b"/handler/"
+                b'">Handler names</a>\n',
             )
 
             resp = pool.request("POST", "/handler/ping")
@@ -70,9 +78,9 @@ class WorkerServerTest(TestCase):
             self.assertEqual(resp.status, 200)
             self.assertIn("ping", json.loads(resp.data))
 
-            resp = pool.request("POST", "/handler/nonexistant")
+            resp = pool.request("POST", "/handler/nonexistent")
             self.assertEqual(resp.status, 404)
-            self.assertIn(b"Handler nonexistant not found:", resp.data)
+            self.assertIn(b"Handler nonexistent not found:", resp.data)
 
     @requires_cuda
     def test_dump_nccl_trace_pickle(self) -> None:
@@ -206,14 +214,76 @@ class WorkerServerTest(TestCase):
     def test_get_handler_nonexistant(self) -> None:
         from torch._C._distributed_c10d import _get_handler
 
-        with self.assertRaisesRegex(ValueError, "Failed to find handler nonexistant"):
-            _get_handler("nonexistant")
+        with self.assertRaisesRegex(ValueError, "Failed to find handler nonexistent"):
+            _get_handler("nonexistent")
 
     def test_get_handler_names(self) -> None:
         from torch._C._distributed_c10d import _get_handler_names
 
         names = _get_handler_names()
         self.assertIn("ping", names)
+
+    @unittest.skipIf(IS_FBCODE, "disabled in FBCODE")
+    def test_wait_counter_values(self) -> None:
+        """
+        Test that WaitCounter values are properly tracked and returned by the handler.
+
+        Note: This test may trigger an ASAN heap-use-after-free error during process
+        shutdown due to static destruction order issues with boost regex in the logging
+        framework. The test assertions pass successfully before this shutdown error occurs.
+        """
+        with local_worker_server() as pool:
+            # Create and use a WaitCounter with a specific name
+            counter_name = "test_counter"
+            counter = _WaitCounter(counter_name)
+
+            # Use the counter multiple times to generate metrics
+            # Note: Using minimal/no sleep to avoid timing issues
+            for i in range(3):
+                with counter.guard():
+                    pass  # Minimal work
+
+            # Query the wait counter values
+            resp = pool.request("POST", "/handler/wait_counter_values")
+            self.assertEqual(resp.status, 200)
+
+            # Parse the JSON response
+            data = json.loads(resp.data)
+            # Should be a dictionary
+            self.assertIsInstance(data, dict)
+
+            # Verify our test counter appears in the response
+            self.assertIn(
+                counter_name,
+                data,
+                f"Counter '{counter_name}' not found in response. Available counters: {list(data.keys())}",
+            )
+
+            # Verify the counter has expected metrics
+            counter_data = data[counter_name]
+            self.assertIn("active_count", counter_data)
+            self.assertIn("total_calls", counter_data)
+            self.assertIn("total_time_us", counter_data)
+            self.assertIn("max_time_us", counter_data)
+
+            # Verify the counter was called 3 times
+            self.assertEqual(
+                counter_data["total_calls"],
+                3,
+                f"Expected 3 calls, got {counter_data['total_calls']}",
+            )
+
+            # Verify active_count is 0 (no active waiters)
+            self.assertEqual(
+                counter_data["active_count"],
+                0,
+                f"Expected 0 active, got {counter_data['active_count']}",
+            )
+
+            # total_time_us and max_time_us may be 0 or very small for fast operations
+            # Just verify they exist and are non-negative
+            self.assertGreaterEqual(counter_data["total_time_us"], 0)
+            self.assertGreaterEqual(counter_data["max_time_us"], 0)
 
 
 if __name__ == "__main__":

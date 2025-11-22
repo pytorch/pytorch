@@ -64,15 +64,18 @@ class Wishart(ExponentialFamily):
     [5] Ku, Y.-C. & Bloomfield, P., 2010. `Generating Random Wishart Matrices with Fractional Degrees of Freedom in OX`.
     """
 
-    arg_constraints = {
-        "covariance_matrix": constraints.positive_definite,
-        "precision_matrix": constraints.positive_definite,
-        "scale_tril": constraints.lower_cholesky,
-        "df": constraints.greater_than(0),
-    }
     support = constraints.positive_definite
     has_rsample = True
     _mean_carrier_measure = 0
+
+    @property
+    def arg_constraints(self):
+        return {
+            "covariance_matrix": constraints.positive_definite,
+            "precision_matrix": constraints.positive_definite,
+            "scale_tril": constraints.lower_cholesky,
+            "df": constraints.greater_than(self.event_shape[-1] - 1),
+        }
 
     def __init__(
         self,
@@ -113,16 +116,19 @@ class Wishart(ExponentialFamily):
             )
 
         if scale_tril is not None:
+            # pyrefly: ignore [read-only]
             self.scale_tril = param.expand(batch_shape + (-1, -1))
         elif covariance_matrix is not None:
+            # pyrefly: ignore [read-only]
             self.covariance_matrix = param.expand(batch_shape + (-1, -1))
         elif precision_matrix is not None:
+            # pyrefly: ignore [read-only]
             self.precision_matrix = param.expand(batch_shape + (-1, -1))
 
-        self.arg_constraints["df"] = constraints.greater_than(event_shape[-1] - 1)
         if self.df.lt(event_shape[-1]).any():
             warnings.warn(
-                "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim."
+                "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim.",
+                stacklevel=2,
             )
 
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
@@ -274,7 +280,7 @@ class Wishart(ExponentialFamily):
         else:
             # More optimized version with data-dependent control flow.
             if is_singular.any():
-                warnings.warn("Singular sample detected.")
+                warnings.warn("Singular sample detected.", stacklevel=2)
 
                 for _ in range(max_try_correction):
                     sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
@@ -333,6 +339,7 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         return -self.precision_matrix / 2, (nu - p - 1) / 2
 
+    # pyrefly: ignore [bad-override]
     def _log_normalizer(self, x, y):
         p = self._event_shape[-1]
         return (y + (p + 1) / 2) * (

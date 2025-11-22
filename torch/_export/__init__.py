@@ -16,7 +16,8 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from functools import lru_cache
 
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
 from unittest.mock import patch
 
 import torch
@@ -47,6 +48,10 @@ from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from .wrappers import _wrap_submodules
 from .utils import _materialize_cpp_cia_ops
+from . import config
+
+if TYPE_CHECKING:
+    from torch._C._aoti import AOTIModelContainerRunner
 
 log = logging.getLogger(__name__)
 
@@ -62,7 +67,6 @@ class ExportDynamoConfig:
 # is called multiple times.
 @lru_cache
 def aot_compile_warning():
-    from torch._inductor import config
 
     log.warning("+============================+")
     log.warning("|     !!!   WARNING   !!!    |")
@@ -75,7 +79,7 @@ def aot_compile_warning():
 
 def aot_compile(
     f: Callable,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[dict[str, Any]] = None,
@@ -83,7 +87,7 @@ def aot_compile(
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
     same_signature: bool = True,
-) -> Union[list[str], str]:
+) -> Union[list[Any], str]:
     """
     Note: this function is not stable yet
 
@@ -121,30 +125,32 @@ def aot_compile(
     """
     from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
-    from torch._inductor import config
+    from torch._inductor import config as inductor_config
 
     aot_compile_warning()
 
-    if config.is_predispatch:
+    if inductor_config.is_predispatch:
         gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.
-        gm = _export_to_torch_ir(
-            f,
-            args,
-            kwargs,
-            dynamic_shapes,
-            disable_constraint_solver=disable_constraint_solver,
-            same_signature=same_signature,
-            # Disabling this flag, because instead we can rely on the mapping
-            # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
-            restore_fqn=False,
-        )
+        with torch._export.config.patch(use_new_tracer_experimental=True):
+            gm = _export_to_torch_ir(
+                f,
+                args,
+                kwargs,
+                dynamic_shapes,
+                disable_constraint_solver=disable_constraint_solver,
+                same_signature=same_signature,
+                # Disabling this flag, because instead we can rely on the mapping
+                # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
+                restore_fqn=False,
+            )
 
     with torch.no_grad():
         so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
 
+    assert isinstance(so_path, (str, list))
     return so_path
 
 def aot_load(so_path: str, device: str) -> Callable:
@@ -160,22 +166,23 @@ def aot_load(so_path: str, device: str) -> Callable:
     aot_compile_warning()
 
     if device == "cpu":
-        runner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)  # type: ignore[call-arg]
+        runner: AOTIModelContainerRunner = torch._C._aoti.AOTIModelContainerRunnerCpu(so_path, 1)
     elif device == "cuda" or device.startswith("cuda:"):
-        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)  # type: ignore[assignment, call-arg]
+        runner = torch._C._aoti.AOTIModelContainerRunnerCuda(so_path, 1, device)
     elif device == "xpu" or device.startswith("xpu:"):
-        runner = torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)  # type: ignore[assignment, call-arg]
-
+        runner = torch._C._aoti.AOTIModelContainerRunnerXpu(so_path, 1, device)
+    elif device == "mps" or device.startswith("mps:"):
+        runner = torch._C._aoti.AOTIModelContainerRunnerMps(so_path, 1)
     else:
         raise RuntimeError("Unsupported device " + device)
 
     def optimized(*args, **kwargs):
-        call_spec = runner.get_call_spec()  # type: ignore[attr-defined]
+        call_spec = runner.get_call_spec()
         in_spec = pytree.treespec_loads(call_spec[0])
         out_spec = pytree.treespec_loads(call_spec[1])
         flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, in_spec)))[0]
         flat_inputs = [x for x in flat_inputs if isinstance(x, torch.Tensor)]
-        flat_outputs = runner.run(flat_inputs)  # type: ignore[attr-defined]
+        flat_outputs = runner.run(flat_inputs)
         return pytree.tree_unflatten(flat_outputs, out_spec)
 
     return optimized

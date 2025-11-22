@@ -1,5 +1,4 @@
 import threading
-from typing import Optional
 
 
 __all__ = ["LinearBlockSparsePattern"]
@@ -15,7 +14,7 @@ def _is_valid_linear_block_sparse_pattern(
 
 # This is a stop-gap measure as current flow does not allow module
 # specific block sparse pattern.
-# Infact there is no way to convey sparse pattern via module config
+# In fact there is no way to convey sparse pattern via module config
 # of quantization flow. Thus using the global context to convey
 # sparsity pattern.
 # Once the flow supports it, this should be removed.
@@ -43,9 +42,9 @@ class LinearBlockSparsePattern:
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_value: Optional[BaseException],
-        backtrace: Optional[object],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        backtrace: object | None,
     ) -> None:
         LinearBlockSparsePattern.row_block_size = (
             LinearBlockSparsePattern.prev_row_block_size

@@ -34,7 +34,8 @@ enum class EventType : uint8_t {
   OutOfMemory,
   PyCall,
   PyCCall,
-  Kineto
+  Kineto,
+  PythonGC
 };
 
 // ============================================================================
@@ -177,6 +178,7 @@ struct ExtraFields<EventType::TorchOp> : TorchOpBasicFields {
   FallbackPair device_fallback_;
   bool allow_tf32_cublas_;
   std::unique_ptr<perf_counters_t> perf_event_counters_;
+  std::string metadata_json_;
 };
 
 template <>
@@ -189,6 +191,12 @@ struct ExtraFields<EventType::Backend> {
   std::string backend_;
   jit_stack_t jit_stack_;
   jit_modules_t jit_modules_;
+};
+
+template <>
+struct ExtraFields<EventType::PythonGC> {
+  std::string phase;
+  int64_t duration_ns_;
 };
 
 template <>
@@ -361,7 +369,8 @@ struct ExtraFields<EventType::Kineto> {
   uint64_t correlation_id_{0};
   libkineto::ActivityType activity_type_;
   Flow flow;
-  std::weak_ptr<Result> linked_activity_{};
+  std::weak_ptr<Result> linked_activity_;
+  std::string metadata_json_;
 };
 
 struct TORCH_API Result : public std::enable_shared_from_this<Result> {
@@ -371,12 +380,12 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
   }
 
   template <typename T>
-  decltype(auto) visit(T&& visitor) {
+  auto visit(T&& visitor) {
     return std::visit(std::forward<T>(visitor), extra_fields_);
   }
 
   template <typename T>
-  decltype(auto) visit(T&& visitor) const {
+  auto visit(T&& visitor) const {
     return std::visit(std::forward<T>(visitor), extra_fields_);
   }
 
@@ -415,13 +424,14 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
       ExtraFields<EventType::OutOfMemory>,
       ExtraFields<EventType::PyCall>,
       ExtraFields<EventType::PyCCall>,
-      ExtraFields<EventType::Kineto>>
+      ExtraFields<EventType::Kineto>,
+      ExtraFields<EventType::PythonGC>>
       extra_fields_;
 
   std::weak_ptr<Result> parent_;
   std::vector<std::shared_ptr<Result>> children_;
   bool finished_{false};
-
+  bool hidden_{false};
   const torch::profiler::impl::kineto::activity_t* kineto_activity_{nullptr};
 
  private:
@@ -437,7 +447,7 @@ struct TORCH_API Result : public std::enable_shared_from_this<Result> {
         extra_fields_{std::move(extra_fields)} {}
 
   template <EventType E>
-  static EventType deduceTag(const ExtraFields<E>&) {
+  static EventType deduceTag(const ExtraFields<E>& /*unused*/) {
     return E;
   }
 };
@@ -549,6 +559,11 @@ class TORCH_API ThreadLocalSubqueue {
     py_calls_.emplace_back(std::forward<Args>(args)...);
   }
 
+  template <class... Args>
+  void emplace_gc_call(Args&&... args) {
+    pythongc_.emplace_back(std::forward<Args>(args)...);
+  }
+
   uint64_t tid() const {
     return tid_;
   }
@@ -639,6 +654,9 @@ class TORCH_API ThreadLocalSubqueue {
       std::pair<python_tracer::TraceKey, c10::approx_time_t>,
       BlockSize>
       py_calls_;
+  // gc with_stack (Python)
+  AppendOnlyList<std::pair<std::string, c10::approx_time_t>, BlockSize>
+      pythongc_;
 };
 
 class TORCH_API RecordQueue {
@@ -646,6 +664,7 @@ class TORCH_API RecordQueue {
   RecordQueue(ProfilerConfig config, std::set<ActivityType> activities);
 
   bool tracePython() const;
+  bool getPythonGcEvents() const;
   ThreadLocalSubqueue* getSubqueue();
   void stop();
   void restart();
@@ -670,21 +689,22 @@ class TORCH_API RecordQueue {
 };
 
 TORCH_API bool get_record_concrete_inputs_enabled();
-TORCH_API void set_record_concrete_inputs_enabled_fn(std::function<bool()>);
-TORCH_API void set_record_concrete_inputs_enabled_val(bool);
+TORCH_API void set_record_concrete_inputs_enabled_fn(
+    std::function<bool()> /*fn*/);
+TORCH_API void set_record_concrete_inputs_enabled_val(bool /*val*/);
 
 TORCH_API bool get_fwd_bwd_enabled();
-TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()>);
-TORCH_API void set_fwd_bwd_enabled_val(bool);
+TORCH_API void set_fwd_bwd_enabled_fn(std::function<bool()> /*fn*/);
+TORCH_API void set_fwd_bwd_enabled_val(bool /*val*/);
 
 TORCH_API bool get_cuda_sync_enabled();
-TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
-TORCH_API void set_cuda_sync_enabled_val(bool);
+TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()> /*fn*/);
+TORCH_API void set_cuda_sync_enabled_val(bool /*val*/);
 
 // Comms related RecordFunctions will record information about tensor storage
 // locations.
 TORCH_API bool get_record_tensor_addrs_enabled();
-TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()>);
-TORCH_API void set_record_tensor_addrs_enabled_val(bool);
+TORCH_API void set_record_tensor_addrs_enabled_fn(std::function<bool()> /*fn*/);
+TORCH_API void set_record_tensor_addrs_enabled_val(bool /*val*/);
 
 } // namespace torch::profiler::impl

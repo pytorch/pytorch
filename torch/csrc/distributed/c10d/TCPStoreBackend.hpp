@@ -33,6 +33,10 @@ enum class QueryType : uint8_t {
   MULTI_SET,
   CANCEL_WAIT,
   PING,
+  QUEUE_PUSH,
+  QUEUE_POP,
+  QUEUE_LEN,
+  LIST_KEYS,
 };
 
 enum class CheckResponseType : uint8_t { READY, NOT_READY };
@@ -62,7 +66,7 @@ class BackgroundThread {
 
  private:
   std::atomic<bool> is_running_{false};
-  std::thread daemonThread_{};
+  std::thread daemonThread_;
 };
 
 std::unique_ptr<BackgroundThread> create_tcpstore_backend(

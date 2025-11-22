@@ -12,6 +12,11 @@ from torch._dynamo.exc import FailOnRecompileLimitHit
 from torch.testing._internal.logging_utils import kwargs_to_settings, log_settings
 
 
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+
+
 class RecompileUxTests(torch._dynamo.test_case.TestCase):
     # TODO(whc) dynamo actually recompiles one more time than the cache limit
     cache_limit = 1
@@ -101,7 +106,10 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             .startswith("torch._dynamo hit config.recompile_limit")
         )
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(
+        not torch.cuda.is_available() and not torch.xpu.is_available(),
+        "requires cuda or xpu",
+    )
     def test_nvfuser_guards(self):
         # we may want to model dynamo's guards sufficiently after nvfuser's ProfilingExecutor guards
         # such that we ensure dynamo is in charge of all the recompilations at the top level,
@@ -109,11 +117,11 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         def func(a, b, c):
             return a + b * c
 
-        a = torch.rand(3, 4, 5, device="cuda")
-        b = torch.rand(3, 4, 5, device="cuda")
-        b_v = torch.rand(3, 5, 4, device="cuda").view(3, 4, 5)
-        b_p = torch.rand(3, 5, 4, device="cuda").permute(0, 2, 1)
-        c = torch.rand(3, 4, 5, device="cuda")
+        a = torch.rand(3, 4, 5, device=device_type)
+        b = torch.rand(3, 4, 5, device=device_type)
+        b_v = torch.rand(3, 5, 4, device=device_type).view(3, 4, 5)
+        b_p = torch.rand(3, 5, 4, device=device_type).permute(0, 2, 1)
+        c = torch.rand(3, 4, 5, device=device_type)
         compile_counter = torch._dynamo.testing.CompileCounter()
 
         with torch._dynamo.config.patch("recompile_limit", 2):
@@ -234,13 +242,12 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             opt_f(torch.randn(8 + i))
 
         failure_str = "\n".join(failure_reasons)
-        for line in """\
-tensor 'x' size mismatch at index 0. expected 11, actual 12
-tensor 'x' size mismatch at index 0. expected 10, actual 12
-tensor 'x' size mismatch at index 0. expected 9, actual 12
-tensor 'x' size mismatch at index 0. expected 8, actual 12""".split(
-            "\n"
-        ):
+        for line in [
+            "tensor 'x' size mismatch at index 0. expected 11, actual 12",
+            "tensor 'x' size mismatch at index 0. expected 10, actual 12",
+            "tensor 'x' size mismatch at index 0. expected 9, actual 12",
+            "tensor 'x' size mismatch at index 0. expected 8, actual 12",
+        ]:
             self.assertIn(
                 line,
                 failure_str,
@@ -275,20 +282,13 @@ tensor 'x' size mismatch at index 0. expected 8, actual 12""".split(
             failure_reasons.clear()
             opt_f([7, 8])
 
-            for line in """\
-len(x) == 3""".split(
-                "\n"
-            ):
+            for line in ["len(x) == 3"]:
                 self.assertIn(line, filter_reasons())
 
             failure_reasons.clear()
             opt_f([9])
 
-            for line in """\
-len(x) == 2
-len(x) == 3""".split(
-                "\n"
-            ):
+            for line in ["len(x) == 2", "len(x) == 3"]:
                 self.assertIn(line, filter_reasons())
 
     @torch._dynamo.config.patch(recompile_limit=1)

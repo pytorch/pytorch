@@ -3,6 +3,7 @@
 <!-- toc -->
 
   - [Release Compatibility Matrix](#release-compatibility-matrix)
+    - [PyTorch CUDA Support Matrix](#pytorch-cuda-support-matrix)
   - [Release Cadence](#release-cadence)
   - [General Overview](#general-overview)
     - [Frequently Asked Questions](#frequently-asked-questions)
@@ -50,6 +51,8 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 
 | PyTorch version | Python | C++ | Stable CUDA | Experimental CUDA | Stable ROCm |
 | --- | --- | --- | --- | --- | --- |
+| 2.9 | >=3.10, <=(3.14, 3.14t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 13.0 (CUDNN 9.13.0.50) | ROCm 6.4 |
+| 2.8 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 12.6 (CUDNN 9.10.2.21), CUDA 12.8 (CUDNN 9.10.2.21) | CUDA 12.9 (CUDNN 9.10.2.21) | ROCm 6.4 |
 | 2.7 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 11.8 (CUDNN 9.1.0.70), CUDA 12.6 (CUDNN 9.5.1.17) | CUDA 12.8 (CUDNN 9.7.1.26) | ROCm 6.3 |
 | 2.6 | >=3.9, <=3.13, (3.13t experimental) | C++17 | CUDA 11.8, CUDA 12.4 (CUDNN 9.1.0.70) | CUDA 12.6 (CUDNN 9.5.1.17) | ROCm 6.2.4 |
 | 2.5 | >=3.9, <=3.12, (3.13 experimental) | C++17 | CUDA 11.8, CUDA 12.1, CUDA 12.4, CUDNN 9.1.0.70  | None | ROCm 6.2 |
@@ -60,6 +63,22 @@ Following is the Release Compatibility Matrix for PyTorch releases:
 | 2.0 | >=3.8, <=3.11 | C++14 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 | ROCm 5.4 |
 | 1.13 | >=3.7, <=3.10 | C++14 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 | ROCm 5.2 |
 | 1.12 | >=3.7, <=3.10 | C++14 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 | ROCm 5.0 |
+
+### PyTorch CUDA Support Matrix
+
+For Release 2.9 PyTorch Supports following CUDA Architectures:
+
+| CUDA | architectures supported for Linux x86 and Windows builds | notes |
+| --- | --- | --- |
+| 12.6.3 | Maxwell(5.0), Pascal(6.0), Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0) | |
+| 12.8.1 | Volta(7.0), Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0)  | |
+| 13.0.0 | Turing(7.5), Ampere(8.0, 8.6), Hopper(9.0), Blackwell(10.0, 12.0+PTX) | +PTX available on linux builds only |
+
+| CUDA | architectures supported for Linux aarch64 builds |
+| --- | --- |
+| 12.6.3 | Ampere(8.0), Hopper(9.0) |
+| 12.8.1 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 12.0)  |
+| 13.0.0 | Ampere(8.0), Hopper(9.0), Blackwell(10.0, 11.0, 12.0+PTX) |
 
 ## Release Cadence
 
@@ -73,9 +92,9 @@ Following is the release cadence. All future dates below are tentative. For late
 | 2.4 | Jun 2024 | Jul 2024 | Sept 2024 | Not planned |
 | 2.5 | Sep 2024 | Oct 2024 | Nov 2024 |  Not planned |
 | 2.6 | Dec 2024 | Jan 2025 | Not planned | Not planned |
-| 2.7 | Mar 2025 | Apr 2025 | (May 2025) | (Jun 2025) |
+| 2.7 | Mar 2025 | Apr 2025 | Jun 2025 | Not planned |
 | 2.8 | Jun 2025 | Jul 2025 | (Aug 2025) | (Sep 2025) |
-| 2.9 | Aug 2025 | Oct 2025 | (Nov 2025) | (Dec 2025) |
+| 2.9 | Sept 2025 | Oct 2025 | (Nov 2025) | (Dec 2025) |
 | 2.10 | Dec 2025 | Jan 2026 | (Feb 2026) | (Mar 2026) |
 | 2.11 | Mar 2026 | Apr 2026 | (Jun 2026) | (Jul 2026) |
 
@@ -221,7 +240,7 @@ Release candidates are currently stored in the following places:
 
 * Wheels: https://download.pytorch.org/whl/test/
 * Conda: https://anaconda.org/pytorch-test
-* Libtorch: https://download.pytorch.org/libtorch/test
+* Libtorch: https://download.pytorch.org/libtorch/test <!-- @lint-ignore -->
 
 Backups are stored in a non-public S3 bucket at [`s3://pytorch-backup`](https://s3.console.aws.amazon.com/s3/buckets/pytorch-backup?region=us-east-1&tab=objects)
 
@@ -322,7 +341,7 @@ Promotion should occur in two steps:
 * Promote S3 artifacts (wheels, libtorch) and Conda packages
 * Promote S3 wheels to PyPI
 
-**NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypa/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
+**NOTE**: The promotion of wheels to PyPI can only be done once so take caution when attempting to promote wheels to PyPI, (see https://github.com/pypi/warehouse/issues/726 for a discussion on potential draft releases within PyPI)
 
 ## Additional Steps to prepare for release day
 
@@ -373,8 +392,9 @@ The patch release process takes around 4-5 weeks to complete.
   * Should the new patch release be created?
   * Timeline execution for the patch release
 3. Cherry picking phase starts after the decision is made to create a patch release. At this point, a new release tracker for the patch release is created, and an announcement will be made on official channels [example announcement](https://dev-discuss.pytorch.org/t/pytorch-release-2-0-1-important-information/1176). The authors of the fixes to regressions will be asked to create their own cherry picks. This process normally takes 2 weeks.
-4. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger a new build and produce a new release candidate. An announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
-5. General Availability
+4. Updating `version.txt` in the release branch to match expected patch release version, see https://github.com/pytorch/pytorch/commit/f77213d3dae5d103a39cdaf93f21863843571e8d as an example
+5. Building Binaries, Promotion to Stable and testing. After all cherry picks have been merged, Release Managers trigger a new build and produce a new release candidate. An announcement is made on the official channel about the RC availability at this point. This process normally takes 2 weeks.
+6. General Availability
 
 ### Triage
 

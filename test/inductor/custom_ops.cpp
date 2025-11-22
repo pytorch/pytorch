@@ -1,5 +1,8 @@
 #include <torch/csrc/api/include/torch/types.h>  // @manual=fbcode//caffe2:libtorch
 
+#include <torch/csrc/inductor/aoti_torch/c/shim.h> // @manual
+#include <torch/csrc/inductor/aoti_torch/utils.h> // @manual
+
 #include <cstdint>
 #include <iostream>
 #include <string>
@@ -8,6 +11,67 @@ namespace at {
 
 Tensor custom_add_impl(Tensor t1, Tensor t2) {
   return t1 + t2;
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_output_impl(Tensor t1, Tensor t2) {
+  Tensor t3 = t1 + t2;
+  Tensor t4 = t1 - t2;
+  Tensor t5;
+  return {t3, t4, t5};
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_output_meta(Tensor t1, Tensor t2) {
+  Tensor t3 = t1.clone();
+  Tensor t4 = t1.clone();
+  Tensor t5;
+  return {t3, t4, t5};
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_output_2_impl(Tensor t1, Tensor t2) {
+  Tensor t3 = t1 + t2;
+  Tensor t4;
+  Tensor t5 = t1 - t2;
+  return {t3, t4, t5};
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_output_2_meta(Tensor t1, Tensor t2) {
+  Tensor t3 = t1.clone();
+  Tensor t4;
+  Tensor t5 = t1.clone();
+  return {t3, t4, t5};
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_nullopt_output_impl(Tensor t1, Tensor t2) {
+  Tensor t3 = t1 + t2;
+  Tensor t4;
+  Tensor t5 = t1 - t2;
+  return {t3, t4, t5, std::nullopt};
+}
+
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>, std::optional<Tensor>> fn_with_optional_tensor_nullopt_output_meta(Tensor t1, Tensor t2) {
+  Tensor t3 = t1.clone();
+  Tensor t4;
+  Tensor t5 = t1.clone();
+  return {t3, t4, t5, std::nullopt};
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>, int64_t, int64_t> fn_with_int_output_impl(Tensor t1, Tensor t2, int64_t i1) {
+  Tensor t3 = t1 + t2;
+  Tensor t4 = t1 - t2;
+  Tensor t5;
+  int64_t i2 = 0;
+  int64_t i3 = 0;
+  return {t3, t4, t5, i2, i3};
+}
+
+std::tuple<Tensor, std::optional<Tensor>, std::optional<Tensor>, int64_t, int64_t> fn_with_int_output_meta(Tensor t1, Tensor t2, int64_t i1) {
+  Tensor t3 = t1.clone();
+  Tensor t4 = t1.clone();
+  Tensor t5;
+  int64_t i2 = 0;
+  int64_t i3 = 0;
+  return {t3, t4, t5, i2, i3};
 }
 
 Tensor fn_with_all_inputs_impl(
@@ -310,10 +374,46 @@ void fn_out_variant_without_return_meta(
     Tensor& out) {
 }
 
+Tensor fn_square_impl(const Tensor& tensor) {
+  return tensor * tensor;
+}
+
+Tensor fn_square_meta(const Tensor& tensor) {
+  return at::empty_like(tensor);
+}
 } // namespace at
+
+
+extern "C" {
+  AOTI_TORCH_EXPORT AOTITorchError
+  aoti_torch_cpu_fn_square(
+      AtenTensorHandle input,
+      AtenTensorHandle* ret) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto tmp_result = at::fn_square_impl(
+          torch::aot_inductor::resolve_tensor_dispatch_flags(input));
+      *ret = torch::aot_inductor::new_tensor_handle(std::move(tmp_result));
+    });
+  }
+
+  AOTI_TORCH_EXPORT AOTITorchError
+  aoti_torch_cuda_fn_square(
+      AtenTensorHandle input,
+      AtenTensorHandle* ret) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto tmp_result = at::fn_square_impl(
+          torch::aot_inductor::resolve_tensor_dispatch_flags(input));
+      *ret = torch::aot_inductor::new_tensor_handle(std::move(tmp_result));
+    });
+  }
+}
 
 TORCH_LIBRARY(aoti_custom_ops, m) {
   m.def("custom_add(Tensor t1, Tensor t2) -> Tensor");
+  m.def("fn_with_optional_tensor_output(Tensor t1, Tensor t2) -> (Tensor, Tensor?, Tensor?)");
+  m.def("fn_with_optional_tensor_output_2(Tensor t1, Tensor t2) -> (Tensor, Tensor?, Tensor?)");
+  m.def("fn_with_optional_tensor_nullopt_output(Tensor t1, Tensor t2) -> (Tensor, Tensor?, Tensor?, Tensor?)");
+  m.def("fn_with_int_output(Tensor t1, Tensor t2, int i) -> (Tensor, Tensor?, Tensor?, int, int)");
   m.def(
       "fn_with_all_inputs(Tensor tensor, "
       "Tensor[] tensors, "
@@ -354,10 +454,15 @@ TORCH_LIBRARY(aoti_custom_ops, m) {
       "fn_with_input_mutation(Tensor(a!) t0, Tensor t1, Tensor(b!) t2) -> (Tensor, Tensor)");
 
   m.def("fn_out_variant_without_return(Tensor x, Tensor(a!) out) -> ()");
+  m.def("fn_square(Tensor x) -> Tensor");
 }
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
   m.impl("custom_add", at::custom_add_impl);
+  m.impl("fn_with_optional_tensor_output", at::fn_with_optional_tensor_output_impl);
+  m.impl("fn_with_optional_tensor_output_2", at::fn_with_optional_tensor_output_2_impl);
+  m.impl("fn_with_optional_tensor_nullopt_output", at::fn_with_optional_tensor_nullopt_output_impl);
+  m.impl("fn_with_int_output", at::fn_with_int_output_impl);
   m.impl("fn_with_all_inputs", at::fn_with_all_inputs_impl);
   m.impl("fn_with_default_input", at::fn_with_default_input_impl);
   m.impl("fn_with_tuple_output", at::fn_with_tuple_output_impl);
@@ -365,9 +470,14 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, CompositeExplicitAutograd, m) {
   m.impl("fn_with_mix_outputs", at::fn_with_mix_outputs_impl);
   m.impl("fn_with_input_mutation", at::fn_with_input_mutation_impl);
   m.impl("fn_out_variant_without_return", at::fn_out_variant_without_return_impl);
+  m.impl("fn_square", at::fn_square_impl);
 }
 
 TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
+  m.impl("fn_with_optional_tensor_output", at::fn_with_optional_tensor_output_meta);
+  m.impl("fn_with_optional_tensor_output_2", at::fn_with_optional_tensor_output_2_meta);
+  m.impl("fn_with_optional_tensor_nullopt_output", at::fn_with_optional_tensor_nullopt_output_meta);
+  m.impl("fn_with_int_output", at::fn_with_int_output_meta);
   m.impl("fn_with_all_inputs", at::fn_with_all_inputs_meta);
   m.impl("fn_with_default_input", at::fn_with_default_input_meta);
   m.impl("fn_with_tuple_output", at::fn_with_tuple_output_meta);
@@ -375,4 +485,5 @@ TORCH_LIBRARY_IMPL(aoti_custom_ops, Meta, m) {
   m.impl("fn_with_mix_outputs", at::fn_with_mix_outputs_meta);
   m.impl("fn_with_input_mutation", at::fn_with_input_mutation_meta);
   m.impl("fn_out_variant_without_return", at::fn_out_variant_without_return_meta);
+  m.impl("fn_square", at::fn_square_meta);
 }

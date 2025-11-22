@@ -1,10 +1,8 @@
 # Owner(s): ["module: fx"]
 
-import unittest
-
 import torch
 import torch.fx
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 class MyModuleBase(torch.nn.Module):
@@ -120,7 +118,7 @@ class TestConstParamShapeInControlFlow(TestCase):
         graph1_node_targets = [n.target for n in traced_graph.nodes]
         graph2_node_targets = [n.target for n in traced_graph2.nodes]
 
-        # the second graph has an exta relu function call node
+        # the second graph has an extra relu function call node
         assert torch.mm in graph1_node_targets and torch.mm in graph2_node_targets
         assert (
             torch.relu not in graph1_node_targets and torch.relu in graph2_node_targets
@@ -158,4 +156,4 @@ class TestConstParamShapeInControlFlow(TestCase):
 
 
 if __name__ == "__main__":
-    unittest.main()
+    raise_on_run_directly("test/test_fx.py")

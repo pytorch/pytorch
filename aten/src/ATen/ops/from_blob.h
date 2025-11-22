@@ -5,7 +5,7 @@ namespace at {
 
 namespace detail {
 
-TORCH_API inline void noopDelete(void*) {}
+inline void noopDelete(void* /*unused*/) {}
 
 } // namespace detail
 
@@ -90,12 +90,12 @@ class TORCH_API TensorMaker {
 
   void* data_;
   IntArrayRef sizes_;
-  OptionalIntArrayRef strides_{};
-  std::optional<int64_t> storage_offset_{};
-  std::function<void(void*)> deleter_{};
+  OptionalIntArrayRef strides_;
+  std::optional<int64_t> storage_offset_;
+  std::function<void(void*)> deleter_;
   std::unique_ptr<void, ContextDeleter> ctx_{nullptr, detail::noopDelete};
-  std::optional<Device> device_{};
-  TensorOptions opts_{};
+  std::optional<Device> device_;
+  TensorOptions opts_;
   bool resizeable_{};
   c10::Allocator* allocator_{};
 };

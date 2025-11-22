@@ -112,6 +112,7 @@ fma = make_prim(
     "fma(Tensor a, Tensor b, Tensor c) -> Tensor",
     lambda a, b, c: (a * b) + c,
     doc="Fused multiply add: fma(a, b, c) -> (a * b) + c without rounding after the multiplication",
+    tags=(torch.Tag.pointwise,),
 )
 prepare_softmax_online = make_prim(
     "prepare_softmax_online(Tensor a, int dim) -> (Tensor, Tensor)",
@@ -122,13 +123,20 @@ prepare_softmax_online = make_prim(
 
 
 def _flattened_index_to_nd(indices, width):
+    import sympy
+
+    from torch.utils._sympy.functions import FloorDiv
+
     dim = len(width)
 
     if dim == 1:
         return [indices]
     elif dim >= 2:
         m = functools.reduce(operator.mul, width[1:])
-        ih = indices // m
+        if isinstance(indices, sympy.Expr) or isinstance(m, sympy.Expr):
+            ih = FloorDiv(indices, m)
+        else:
+            ih = indices // m
         indices_new = indices - (ih * m)
         return [ih, *_flattened_index_to_nd(indices_new, width[1:])]
     else:

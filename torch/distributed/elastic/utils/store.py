@@ -7,10 +7,10 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Callable, Optional
+from typing import Optional
 
 import torch
 
@@ -184,7 +184,7 @@ def barrier(
 
     Optionally, passing rank will enable tracing of missing ranks on timeouts.
     `rank_tracing_decoder` lambda arg can be used to convert rank data
-    into a more meaninful information at an app level (e.g. hostname).
+    into a more meaningful information at an app level (e.g. hostname).
 
     Note: Since the data is not removed from the store, the barrier can be used
         once per unique ``key_prefix``.

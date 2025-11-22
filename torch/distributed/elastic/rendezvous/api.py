@@ -7,8 +7,9 @@
 
 import socket
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, ClassVar, Optional
+from typing import Any, ClassVar, Optional
 
 from torch.distributed import Store
 from torch.distributed.elastic.utils.distributed import get_free_port
@@ -157,9 +158,9 @@ class RendezvousHandler(ABC):
     @property
     def use_agent_store(self) -> bool:
         """Indicates that store reference returned by :py:meth:`next_rendezvous` can be shared with user
-        applications and will be available during application lifecyle.
+        applications and will be available during application lifecycle.
 
-        Rendezous handler impl will share store details as instance of :py:class:`RendezvousStoreInfo`.
+        Rendezvous handler impl will share store details as instance of :py:class:`RendezvousStoreInfo`.
         Applications as a convention use `MASTER_ADDR`/`MASTER_PORT` env variables to lookup the store.
         """
         return False

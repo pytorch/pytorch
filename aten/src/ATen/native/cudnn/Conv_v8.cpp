@@ -46,7 +46,7 @@ namespace {
 
 // TODO: remove duplicate code in Conv_v7.cpp
 constexpr int64_t operator"" _TiB(unsigned long long n) {
-  return size_t(n) << 40;
+  return static_cast<size_t>(n) << 40;
 }
 
 uint8_t getAlignment(const Tensor& t) {
@@ -93,7 +93,10 @@ cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(
 
   std::vector<int64_t> strides_copy(std::begin(strides), std::end(strides));
   fixSizeOneDimStride<int64_t>(
-      sizes.size(), &sizes[0], (int64_t*)&strides_copy[0], channels_last);
+      sizes.size(),
+      &sizes[0],
+      static_cast<int64_t*>(&strides_copy[0]),
+      channels_last);
   auto r = cudnn_frontend::TensorBuilder()
                .setDim(sizes.size(), sizes.data())
                .setStrides(strides_copy.size(), strides_copy.data())
@@ -252,18 +255,18 @@ struct CacheKeyFusedWrapper : ParamsWrapper<CacheKeyFused> {
   }
 };
 
-static int getLRUCacheLimit() {
+int getLRUCacheLimit() {
   constexpr int DEFAULT_LIMIT =
       10000; // roughly corresponds to 2GiB assuming 200KiB per ExecutionPlan
   // 0 is used to indicate no limit
   // negative values are used to indicate no caching
   static int limit = [&] {
-    const char* val = getenv("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
+    const auto val = c10::utils::get_env("TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT");
     if (!val) {
       return DEFAULT_LIMIT;
     }
     try {
-      return std::stoi(val);
+      return std::stoi(val.value());
     } catch (std::invalid_argument const&) {
       TORCH_WARN(
           "invalid TORCH_CUDNN_V8_API_LRU_CACHE_LIMIT,",
@@ -337,8 +340,7 @@ struct BenchmarkCache {
             engine_cache_order.begin(), engine_cache_order, it->second.second);
       }
     } else {
-      engine_cache.erase(key);
-      engine_cache.emplace(
+      engine_cache.insert_or_assign(
           key,
           std::make_pair(results, engine_cache_order.end())); // dummy iterator
     }
@@ -347,7 +349,7 @@ struct BenchmarkCache {
 
 // @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to
 // be thread safe across all engines see Limitations in
-// https://docs.nvidia.com/deeplearning/cudnn/release-notes/index.html
+// https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
 thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>
     benchmark_cache;
 thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>
@@ -1182,6 +1184,9 @@ void raw_cudnn_convolution_forward_out(
     const bool allow_tf32) {
   if (output.numel() == 0) {
     return;
+  }
+  for (auto it = dilation.begin(); it != dilation.end(); it++) {
+    TORCH_CHECK_VALUE(*it > 0, "Expected positive dilation in convolution.");
   }
   if (at::native::cudnnv8_enabled_check_debug()) {
     run_single_conv(

@@ -64,7 +64,7 @@
 // fastest algorithm combination with a sub optimal mathType.
 
 constexpr size_t operator"" _TiB(unsigned long long n) {
-  return size_t(n) * 1024 * 1024 * 1024 * 1024;
+  return static_cast<size_t>(n) * 1024 * 1024 * 1024 * 1024;
 }
 
 namespace at {
@@ -93,11 +93,10 @@ std::ostream& operator<<(std::ostream& out, const ConvolutionArgs& args) {
       << "input: " << args.idesc // already has a trailing newline
       << "output: " << args.odesc // already has a trailing newline
       << "weight: " << args.wdesc // already has a trailing newline
-      << "Pointer addresses: "
-      << "\n"
-      << "    input: " << args.input.const_data_ptr() << "\n"
-      << "    output: " << args.output.const_data_ptr() << "\n"
-      << "    weight: " << args.weight.const_data_ptr() << "\n";
+      << "Pointer addresses: " << '\n'
+      << "    input: " << args.input.const_data_ptr() << '\n'
+      << "    output: " << args.output.const_data_ptr() << '\n'
+      << "    weight: " << args.weight.const_data_ptr() << '\n';
 
   return out;
 }
@@ -285,7 +284,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
         sizeof(algos) / sizeof(algos[0]) == num_algos,
         "Missing cuDNN convolution forward algorithms");
     int perf_count;
-    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    c10::SmallVector<perf_t, CUDNN_CONVOLUTION_FWD_ALGO_COUNT> perf_results;
     if (!benchmark) {
       AT_CUDNN_CHECK_WITH_SHAPES(
           cudnnGetConvolutionForwardAlgorithm_v7(
@@ -296,7 +295,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
               args.odesc.desc(),
               num_algos,
               &perf_count,
-              perf_results.get()),
+              perf_results.data()),
           args);
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
@@ -314,7 +313,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
               args.output.data_ptr(),
               num_algos,
               &perf_count,
-              perf_results.get(),
+              perf_results.data(),
               ws.data,
               ws.size),
           args);
@@ -324,7 +323,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgoPerf_t> {
       // memory, e.g. a few GBs.
       c10::cuda::CUDACachingAllocator::emptyCache();
     }
-    return getValidAlgorithms<perf_t>(perf_results.get(), args, perf_count);
+    return getValidAlgorithms<perf_t>(perf_results.data(), args, perf_count);
   }
 
   static void getWorkspaceSize(
@@ -369,7 +368,8 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
         sizeof(algos) / sizeof(algos[0]) == num_algos,
         "Missing cuDNN convolution backward data algorithms.");
     int perf_count;
-    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    c10::SmallVector<perf_t, CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT>
+        perf_results;
     if (!benchmark) {
       AT_CUDNN_CHECK_WITH_SHAPES(
           cudnnGetConvolutionBackwardDataAlgorithm_v7(
@@ -380,7 +380,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
               args.idesc.desc(),
               num_algos,
               &perf_count,
-              perf_results.get()),
+              perf_results.data()),
           args);
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
@@ -398,7 +398,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
               args.input.data_ptr(),
               num_algos,
               &perf_count,
-              perf_results.get(),
+              perf_results.data(),
               ws.data,
               ws.size),
           args);
@@ -408,7 +408,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgoPerf_t> {
       // memory, e.g. a few GBs.
       c10::cuda::CUDACachingAllocator::emptyCache();
     }
-    return getValidAlgorithms<perf_t>(perf_results.get(), args, perf_count);
+    return getValidAlgorithms<perf_t>(perf_results.data(), args, perf_count);
   }
 
   static void getWorkspaceSize(
@@ -456,7 +456,8 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
     static_assert(
         sizeof(algos) / sizeof(algos[0]) == num_algos,
         "Missing cuDNN convolution backward filter algorithms.");
-    std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
+    c10::SmallVector<perf_t, CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT>
+        perf_results;
     int perf_count;
     if (!benchmark) {
       AT_CUDNN_CHECK_WITH_SHAPES(
@@ -468,7 +469,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
               args.wdesc.desc(),
               num_algos,
               &perf_count,
-              perf_results.get()),
+              perf_results.data()),
           args);
     } else {
       size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
@@ -486,7 +487,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
               args.weight.data_ptr(),
               num_algos,
               &perf_count,
-              perf_results.get(),
+              perf_results.data(),
               ws.data,
               ws.size),
           args);
@@ -496,7 +497,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgoPerf_t> {
       // memory, e.g. a few GBs.
       c10::cuda::CUDACachingAllocator::emptyCache();
     }
-    return getValidAlgorithms<perf_t>(perf_results.get(), args, perf_count);
+    return getValidAlgorithms<perf_t>(perf_results.data(), args, perf_count);
   }
 
   static void getWorkspaceSize(
@@ -773,7 +774,7 @@ void raw_cudnn_convolution_forward_out_32bit(
             args,
             "Forward algorithm: ",
             static_cast<int>(fwdAlgPerf.algo),
-            "\n");
+            '\n');
       });
 }
 

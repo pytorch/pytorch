@@ -67,7 +67,7 @@ TORCH_API std::shared_ptr<Node> get_current_node();
 // or more input `Variable`s and producing zero or more output `Variable`s. All
 // functions in PyTorch's autograd machinery derive from this class and
 // override its `apply` method. Instances of such subclasses will then be
-// invokable via the call operator.
+// invocable via the call operator.
 //
 //                    Nodes in the Autograd Graph
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -200,11 +200,12 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       const at::TensorOptions& options,
       c10::SymIntArrayRef shape,
       bool is_tensor_subclass,
-      bool is_nested) noexcept {
+      bool is_nested,
+      std::optional<at::ScalarType> grad_dtype) noexcept {
     uint32_t input_nr = input_metadata_.size();
     auto meta_shape = MetadataShape{std::in_place_type<SymIntSmallVec>, shape};
     input_metadata_.emplace_back(
-        options, meta_shape, is_tensor_subclass, is_nested);
+        options, meta_shape, is_tensor_subclass, is_nested, grad_dtype);
     return input_nr;
   }
 
@@ -592,10 +593,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   //   1) Extract tensors/symint args
   //   2) Collect node information for specialization and caching
   // Implementations in subclasses should call args.collect() with all node
-  // attrs. These functions are only called durring backward.
+  // attrs. These functions are only called during backward.
   virtual void compiled_args(CompiledNodeArgs& args) const {
-    throw std::runtime_error(
-        std::string("compiled_args not implemented: ") + name());
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, std::string("compiled_args not implemented: ") + name());
   }
 
   // Used by compiled autograd to call apply() with different saved tensors
@@ -604,8 +605,8 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
   virtual variable_list apply_with_saved(
       const variable_list& inputs,
       SwapSavedVariables& saved) {
-    throw std::runtime_error(
-        std::string("apply_with_saved not implemented: ") + name());
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, std::string("apply_with_saved not implemented: ") + name());
   }
 
   // If this node is the AOTBackward node produced by torch.compile.

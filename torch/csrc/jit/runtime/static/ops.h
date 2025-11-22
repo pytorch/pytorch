@@ -22,7 +22,7 @@ namespace torch::jit {
 
 using SROpFunctor = SROperator (*)(Node* n);
 struct SROperatorFunctor {
-  virtual SROperator Generate(Node*) {
+  virtual SROperator Generate(Node* /*unused*/) {
     SROperator out;
     return out;
   }
@@ -33,7 +33,7 @@ TORCH_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 
 #define REGISTER_OPERATOR_FUNCTOR(name, id, ...)             \
   struct SROperatorFunctor_##id : public SROperatorFunctor { \
-    const SROpFunctor fn = __VA_ARGS__;                      \
+    SROpFunctor fn = __VA_ARGS__;                            \
     SROperator Generate(Node* n) override {                  \
       return fn(n);                                          \
     }                                                        \
@@ -43,7 +43,7 @@ TORCH_DECLARE_REGISTRY(SROperatorRegistry, SROperatorFunctor);
 TORCH_DECLARE_REGISTRY(SRNativeOperatorRegistry, SROperatorFunctor);
 #define REGISTER_NATIVE_OPERATOR_FUNCTOR(name, id, ...)            \
   struct SRNativeOperatorFunctor_##id : public SROperatorFunctor { \
-    const SROpFunctor fn = __VA_ARGS__;                            \
+    SROpFunctor fn = __VA_ARGS__;                                  \
     SROperator Generate(Node* n) override {                        \
       return fn(n);                                                \
     }                                                              \
@@ -165,7 +165,7 @@ inline void LogAndDumpSchema(const Node* node) {
   VLOG(1) << "Found schema mismatch for: " << node->schema();
 }
 
-inline bool sr_schema_check(torch::jit::Node*) {
+inline bool sr_schema_check(torch::jit::Node* /*unused*/) {
   return true;
 }
 
@@ -182,5 +182,6 @@ bool sr_schema_check(
 }
 
 bool sr_schema_check_kind(torch::jit::Node* node, c10::Symbol node_kind);
-
 } // namespace torch::jit
+
+C10_DECLARE_bool(static_runtime_enable_fast_math);

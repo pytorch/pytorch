@@ -4,20 +4,24 @@ import inspect
 import logging
 import sys
 from collections import defaultdict
+from collections.abc import Callable
 from enum import auto, Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.utils._pytree import (
     _get_node_type,
     BUILTIN_TYPES,
+    KeyPath,
     keystr,
-    LeafSpec,
     MappingKey,
     SequenceKey,
     SUPPORTED_NODES,
-    tree_flatten,
+    tree_iter,
+    tree_map,
     tree_map_with_path,
+    tree_structure,
+    TreeSpec,
 )
 
 from .exported_program import ExportedProgram
@@ -56,6 +60,15 @@ class _DimHintType(Enum):
 
 @dataclasses.dataclass
 class _DimHint:
+    """
+    Internal class for dynamic shape hints.
+    - min and max are optional.
+    - _factory is for UX only, below example:
+        auto_hint = _DimHint.AUTO()  # _factory=True
+        bounded_hint = auto_hint(min=10, max=100)  # Returns new instance with _factory=False
+        bounded_hint(min=5, max=50)  # Will fail, non-factory instance cannot be called
+    """
+
     type: _DimHintType
     min: Optional[int] = None
     max: Optional[int] = None
@@ -81,21 +94,77 @@ class _DimHint:
         assert min is None or max is None or min <= max, "min must be <= max"
         return _DimHint(self.type, min=min, max=max, _factory=False)
 
+    def __repr__(self):
+        parts = [self.type.name]
+        if self.min is not None:
+            parts.append(f"min={self.min}")
+        if self.max is not None:
+            parts.append(f"max={self.max}")
+        return f"DimHint({', '.join(parts)})"
+
 
 class Dim:
     """
-    :func:`Dim` constructs a type analogous to a named symbolic integer with a range.
-    It can be used to describe multiple possible values of a dynamic tensor dimension.
-    Note that different dynamic dimensions of the same tensor, or of different tensors,
-    can be described by the same type.
+    The ``Dim`` class allows users to specify dynamism in their exported
+    programs. By marking a dimension with a ``Dim``, the compiler associates the
+    dimension with a symbolic integer containing a dynamic range.
 
-    Args:
-        name (str): Human-readable name for debugging.
-        min (Optional[int]): Minimum possible value of given symbol (inclusive)
-        max (Optional[int]): Maximum possible value of given symbol (inclusive)
+    The API can be used in 2 ways: Dim hints (i.e. automatic dynamic shapes:
+    ``Dim.AUTO``, ``Dim.DYNAMIC``, ``Dim.STATIC``), or named Dims (i.e.
+    ``Dim("name", min=1, max=2)``).
 
-    Returns:
-        A type that can be used in dynamic shape specifications for tensors.
+    Dim hints provide the lowest barrier to exportability, with the user only
+    needing to specify if a dimension if dynamic, static, or left for the
+    compiler to decide (``Dim.AUTO``). The export process will automatically
+    infer the remaining constraints on min/max ranges and relationships between
+    dimensions.
+
+    Example::
+
+        class Foo(nn.Module):
+            def forward(self, x, y):
+                assert x.shape[0] == 4
+                assert y.shape[0] >= 16
+                return x @ y
+
+
+        x = torch.randn(4, 8)
+        y = torch.randn(8, 16)
+        dynamic_shapes = {
+            "x": {0: Dim.AUTO, 1: Dim.AUTO},
+            "y": {0: Dim.AUTO, 1: Dim.AUTO},
+        }
+        ep = torch.export(Foo(), (x, y), dynamic_shapes=dynamic_shapes)
+
+    Here, export would raise an exception if we replaced all uses of ``Dim.AUTO`` with ``Dim.DYNAMIC``,
+    as ``x.shape[0]`` is constrained to be static by the model.
+
+    More complex relations between dimensions may also be codegened as runtime assertion nodes by the compiler,
+    e.g. ``(x.shape[0] + y.shape[1]) % 4 == 0``, to be raised if runtime inputs do not satisfy such constraints.
+
+    You may also specify min-max bounds for Dim hints, e.g. ``Dim.AUTO(min=16, max=32)``, ``Dim.DYNAMIC(max=64)``,
+    with the compiler inferring the remaining constraints within the ranges. An exception will be raised if
+    the valid range is entirely outside the user-specified range.
+
+    Named Dims provide a stricter way of specifying dynamism, where exceptions are raised if the compiler
+    infers constraints that do not match the user specification. For example, exporting the previous
+    model, the user would need the following ``dynamic_shapes`` argument::
+
+        s0 = Dim("s0")
+        s1 = Dim("s1", min=16)
+        dynamic_shapes = {
+            "x": {0: 4, 1: s0},
+            "y": {0: s0, 1: s1},
+        }
+        ep = torch.export(Foo(), (x, y), dynamic_shapes=dynamic_shapes)
+
+    Named Dims also allow specification of relationships between dimensions, up
+    to univariate linear relations.  For example, the following indicates one
+    dimension is a multiple of another plus 4::
+
+        s0 = Dim("s0")
+        s1 = 3 * s0 + 4
+
     """
 
     AUTO = _DimHint.AUTO()
@@ -198,11 +267,11 @@ class _StaticDim(Dim):
         self.value = value
 
     @property
-    def min(self):
+    def min(self):  # type: ignore[override]
         return self.value  # type: ignore[attr-defined]
 
     @property
-    def max(self):
+    def max(self):  # type: ignore[override]
         return self.value  # type: ignore[attr-defined]
 
 
@@ -228,7 +297,7 @@ class _DerivedDim(Dim):
         self.fn = fn
 
     @property
-    def min(self):
+    def min(self):  # type: ignore[override]
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
@@ -248,7 +317,7 @@ class _DerivedDim(Dim):
         return int(_min_symint)
 
     @property
-    def max(self):
+    def max(self):  # type: ignore[override]
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
@@ -440,6 +509,21 @@ class _RelaxedConstraint(_ConstraintTarget):
 Constraint = Union[_Constraint, _DerivedConstraint, _RelaxedConstraint]
 
 
+@dataclasses.dataclass
+class _IntWrapper:
+    """
+    Dummy wrapper class to wrap around integer inputs so that when we parse the
+    dynamic_shapes structure, we can mark if any of the integers were marked as
+    dynamic.
+    """
+
+    val: int
+    # Disallow specifying dynamism
+    dynamism: Optional[Union[_DimHint, int]] = dataclasses.field(
+        init=False, default=None
+    )
+
+
 def _process_equalities(
     constraint: Constraint,
     get_sources: Callable[[int, int], list["Source"]],
@@ -573,70 +657,71 @@ def _tree_map_with_path(
                     case_name="dynamic_shapes_validation",
                 )
 
-            def _compare(tree, dynamic_shapes, path):
+            def _compare(
+                treespec: TreeSpec, other_treespec: TreeSpec, path: KeyPath
+            ) -> None:
                 # raise an error at the point where tree and dynamic_shapes differ,
                 # including the path to that point and the reason for the difference
                 rendered_path = keystr(path)
-                if isinstance(tree, LeafSpec):
+                if treespec.is_leaf():
                     return
-                if isinstance(dynamic_shapes, LeafSpec):
+                if other_treespec.is_leaf():
                     raise_mismatch_error(
-                        f"`{tree_name}{rendered_path}` is a {tree.type}, "
+                        f"`{tree_name}{rendered_path}` is a {treespec.type}, "
                         f"but `dynamic_shapes{rendered_path}` is not"
                     )
-                if tree.type != dynamic_shapes.type:
+                if treespec.type != other_treespec.type:
                     raise_mismatch_error(
-                        f"`{tree_name}{rendered_path}` is a {tree.type}, "
-                        f"but `dynamic_shapes{rendered_path}` is a {dynamic_shapes.type}"
+                        f"`{tree_name}{rendered_path}` is a {treespec.type}, "
+                        f"but `dynamic_shapes{rendered_path}` is a {other_treespec.type}"
                     )
-                if len(tree.children_specs) != len(dynamic_shapes.children_specs):
+                if treespec.num_children != other_treespec.num_children:
                     raise_mismatch_error(
-                        f"`{tree_name}{rendered_path}` has {len(tree.children_specs)} elements, "
-                        f"but `dynamic_shapes{rendered_path}` has {len(dynamic_shapes.children_specs)} elements"
+                        f"`{tree_name}{rendered_path}` has {treespec.num_children} elements, "
+                        f"but `dynamic_shapes{rendered_path}` has {other_treespec.num_children} elements"
                     )
-                if tree.type is dict:
+                if treespec.type is dict:
                     # context, children could be out of order
-                    if sorted(tree.context) != sorted(dynamic_shapes.context):
+                    if set(treespec.context) != set(other_treespec.context):
                         raise_mismatch_error(
-                            f"`{tree_name}{rendered_path}` has keys {tree.context}, "
-                            f"but `dynamic_shapes{rendered_path}` has keys {dynamic_shapes.context}"
+                            f"`{tree_name}{rendered_path}` has keys {treespec.context}, "
+                            f"but `dynamic_shapes{rendered_path}` has keys {other_treespec.context}"
                         )
                     _remap = dict(
-                        zip(dynamic_shapes.context, dynamic_shapes.children_specs)
+                        zip(other_treespec.context, other_treespec.children())
                     )
-                    dynamic_shapes_children_specs = [_remap[k] for k in tree.context]
+                    other_children = [_remap[k] for k in treespec.context]
                 else:
-                    dynamic_shapes_children_specs = dynamic_shapes.children_specs
-                for i, (tree_, dynamic_shapes_) in enumerate(
-                    zip(tree.children_specs, dynamic_shapes_children_specs)
+                    other_children = other_treespec.children()
+                for i, (child, other_child) in enumerate(
+                    zip(treespec.children(), other_children)
                 ):
                     _compare(
-                        tree_,
-                        dynamic_shapes_,
-                        path + [_key(tree.type, tree.context, i)],
+                        child,
+                        other_child,
+                        path + (_key(treespec.type, treespec.context, i),),
                     )
 
-            _, tree_spec = tree_flatten(tree, is_leaf=is_leaf)
+            treespec = tree_structure(tree, is_leaf=is_leaf)
             for other_tree in dynamic_shapes:
-                _, other_tree_spec = tree_flatten(other_tree, is_leaf)
-                _compare(tree_spec, other_tree_spec, [])
+                other_treespec = tree_structure(other_tree, is_leaf)
+                _compare(treespec, other_treespec, ())
         raise
 
 
-def _combine_args(f, args, kwargs, _is_torch_jit_trace=False) -> dict[str, Any]:
+def _combine_args(f, args, kwargs) -> dict[str, Any]:
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
     if isinstance(f, ExportedProgram):
         f = f.module()
-    if not _is_torch_jit_trace:
-        signature = (
-            inspect.signature(f.forward)
-            if isinstance(f, torch.nn.Module)
-            else inspect.signature(f)
-        )
-        kwargs = kwargs if kwargs is not None else {}
-        return signature.bind(*args, **kwargs).arguments
-    return args
+
+    signature = (
+        inspect.signature(f.forward)
+        if isinstance(f, torch.nn.Module)
+        else inspect.signature(f)
+    )
+    kwargs = kwargs if kwargs is not None else {}
+    return signature.bind(*args, **kwargs).arguments
 
 
 class ShapesCollection:
@@ -650,7 +735,7 @@ class ShapesCollection:
 
     Example::
 
-        args = ({"x": tensor_x, "others": [tensor_y, tensor_z]})
+        args = {"x": tensor_x, "others": [tensor_y, tensor_z]}
 
         dim = torch.export.Dim(...)
         dynamic_shapes = torch.export.ShapesCollection()
@@ -660,22 +745,42 @@ class ShapesCollection:
         # dynamic_shapes = {"x": (dim, dim + 1, 8), "others": [{0: dim * 2}, None]}
 
         torch.export(..., args, dynamic_shapes=dynamic_shapes)
+
+    To specify dynamism for integers, we need to first wrap the integers using
+    _IntWrapper so that we have a "unique identification tag" for each integer.
+
+    Example::
+
+        args = {"x": tensor_x, "others": [int_x, int_y]}
+        # Wrap all ints with _IntWrapper
+        mapped_args = pytree.tree_map_only(int, lambda a: _IntWrapper(a), args)
+
+        dynamic_shapes = torch.export.ShapesCollection()
+        dynamic_shapes[tensor_x] = (dim, dim + 1, 8)
+        dynamic_shapes[mapped_args["others"][0]] = Dim.DYNAMIC
+
+        # This is equivalent to the following (now auto-generated):
+        # dynamic_shapes = {"x": (dim, dim + 1, 8), "others": [Dim.DYNAMIC, None]}
+
+        torch.export(..., args, dynamic_shapes=dynamic_shapes)
     """
 
     def __init__(self):
         self._shapes = {}
 
     def __setitem__(self, t, shape):
-        assert isinstance(
-            t, torch.Tensor
-        ), f"Cannot assign shape to non-tensor type {type(t)}"
+        assert isinstance(t, (torch.Tensor, _IntWrapper)), (
+            f"Cannot assign shape to non-tensor or non-_IntWrapper type {type(t)}"
+        )
+
         # TODO(avik): check that shape is indeed a Shape
+
         t_id = id(t)
         if t_id in self._shapes:
             _shape = self._shapes[t_id]
-            assert (
-                shape == _shape
-            ), f"Shapes assigned to tensor do not match: expected {_shape}, got {shape}"
+            assert shape == _shape, (
+                f"Shapes assigned to input do not match: expected {_shape}, got {shape}"
+            )
         else:
             self._shapes[id(t)] = shape
 
@@ -730,7 +835,7 @@ class AdditionalInputs:
 
     Example::
 
-        args0, kwargs0 = ... # example inputs for export
+        args0, kwargs0 = ...  # example inputs for export
 
         # other representative inputs that the exported program will run on
         dynamic_shapes = torch.export.AdditionalInputs()
@@ -750,9 +855,9 @@ class AdditionalInputs:
         """
 
         assert type(args) is tuple, f"Representative args {args} must be a tuple"
-        assert (
-            kwargs is None or type(kwargs) is dict
-        ), f"Representative kwargs {kwargs} must be None or a dict"
+        assert kwargs is None or type(kwargs) is dict, (
+            f"Representative kwargs {kwargs} must be None or a dict"
+        )
         self._examples.append((args, kwargs))
 
     def dynamic_shapes(self, m, args, kwargs=None):
@@ -764,17 +869,34 @@ class AdditionalInputs:
 
         dynamic_shapes, *other_dynamic_shapes = [
             _tree_map_with_path(
-                lambda path, t: tuple(t.shape), _combine_args(m, args, kwargs)
+                lambda path, t: tuple(t.shape) if isinstance(t, torch.Tensor) else t,
+                _combine_args(m, args, kwargs),
             )
             for args, kwargs in [(args, kwargs), *self._examples]
         ]
 
-        return tree_map_with_path(
-            lambda path, dim, *other_dims: (
-                dim
-                if all(other_dim == dim for other_dim in other_dims)
-                else Dim.DYNAMIC
-            ),
+        def _mark_dynamism(v, *other_vs):
+            if not all(type(v) is type(other) for other in other_vs):
+                raise ValueError(
+                    "The following inputs were found to have differing types, "
+                    f"so they cannot be marked as dynamic: {(v,) + other_vs}."
+                )
+
+            if isinstance(v, int) and not isinstance(v, bool):
+                if all(other_v == v for other_v in other_vs):
+                    return None
+                else:
+                    return Dim.DYNAMIC
+            else:
+                if not all(other_v == v for other_v in other_vs):
+                    raise ValueError(
+                        "The following inputs were found to have differing values, "
+                        f"but they cannot be marked as dynamic: {(v,) + other_vs}."
+                    )
+                return None
+
+        return tree_map(
+            _mark_dynamism,
             dynamic_shapes,
             *other_dynamic_shapes,
             is_leaf=lambda i: type(i) is int,
@@ -787,7 +909,7 @@ class AdditionalInputs:
 
         epm = ep.module()
         for args, kwargs in self._examples:
-            torch.export._unlift._check_input_constraints_pre_hook(
+            torch.export._unlift._check_input_constraints_for_module(
                 epm, args, kwargs or {}
             )
 
@@ -845,10 +967,18 @@ def _check_dynamic_shapes(
                         f"Unexpected dimension mapped to index {i} in input tensor shape {shape} "
                         f"specified at `dynamic_shapes{keystr(path)}` "
                         f"(expected None, an int, a Dim, Dim.AUTO, Dim.STATIC, or Dim.DYNAMIC, "
-                        f" but got {dim} instead)",
+                        f" but got {dim!r} instead)",
                         case_name="dynamic_shapes_validation",
                     )
         elif isinstance(shape, (tuple, list)):
+            if len(shape) != len(tensor.shape):
+                raise UserError(
+                    UserErrorType.INVALID_INPUT,
+                    f"Expected dynamic shape spec {shape} specified at `dynamic_shapes{keystr(path)}` "
+                    f"to have the same length as the actual tensor shape {tensor.shape} "
+                    f"(expected {len(tensor.shape)}, but got {len(shape)} instead)",
+                    case_name="dynamic_shapes_validation",
+                )
             for i, dim in enumerate(shape):
                 if isinstance(dim, Dim):
                     check_same_bounds(dim)
@@ -860,7 +990,7 @@ def _check_dynamic_shapes(
                         f"Unexpected dimension #{i} in input tensor shape {shape} "
                         f"specified at `dynamic_shapes{keystr(path)}` "
                         f"(expected None, an int, a Dim, Dim.AUTO, Dim.STATIC, or Dim.DYNAMIC, "
-                        f"but got {dim} instead)",
+                        f"but got {dim!r} instead)",
                         case_name="dynamic_shapes_validation",
                     )
         elif shape is not None:
@@ -903,6 +1033,13 @@ def _check_dynamic_shapes(
     def check_shape(path, t, dynamic_shape):
         if isinstance(t, torch.Tensor):
             check_symbols(path, t, dynamic_shape)
+        elif isinstance(t, _IntWrapper):
+            if isinstance(dynamic_shape, _Dim):
+                raise ValueError(
+                    "Unable to specify input integers as dynamic through named "
+                    "Dims. Please use Dim.AUTO/DYNAMIC instead."
+                )
+            assert dynamic_shape is None or isinstance(dynamic_shape, (int, _DimHint))
         else:
             if dynamic_shape is not None:
                 rendered_path = keystr(path)
@@ -1007,7 +1144,8 @@ def _process_dynamic_shapes(
                 i,
                 dim.__name__,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.value, upper=dim.value), warn_only=False  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.value, upper=dim.value),  # type: ignore[attr-defined]
+                    warn_only=False,
                 ),
             )
         else:
@@ -1017,15 +1155,33 @@ def _process_dynamic_shapes(
                 i,
                 dim.__name__,
                 StrictMinMaxConstraint(
-                    vr=ValueRanges(lower=dim.min, upper=dim.max), warn_only=False  # type: ignore[attr-defined]
+                    vr=ValueRanges(lower=dim.min, upper=dim.max),  # type: ignore[attr-defined]
+                    warn_only=False,
                 ),
             )
         return constraint
 
-    def update_symbols(path, tensor, shape):
+    def _parse_tensor_dim(tensor, idx, dim) -> None:
         def _create_static_dim(tensor, i, value):
             return _StaticDim(value)
 
+        if isinstance(dim, (int, Dim)):
+            if isinstance(dim, int):
+                dim = _create_static_dim(tensor, idx, dim)
+            constraint = to_constraint(dim, tensor, idx)
+            symbols[dim.__name__].append(constraint)
+        elif isinstance(dim, _DimHint):
+            if dim.type == _DimHintType.AUTO:
+                torch._dynamo.maybe_mark_dynamic(tensor, idx)
+            elif dim.type == _DimHintType.STATIC:
+                torch._dynamo.mark_static(tensor, idx)
+            elif dim.type == _DimHintType.DYNAMIC:
+                torch._dynamo.mark_dynamic(tensor, idx)
+            constraints.append(_RelaxedConstraint(id(tensor), idx))
+        elif dim is None:
+            torch._dynamo.mark_static(tensor, idx)
+
+    def update_symbols(path, tensor, shape):
         # clean out decorators from user side, or previous export call
         # we also delete these attributes in non_strict_utils.py/make_constraints()
         tensor._dynamo_weak_dynamic_indices = set()
@@ -1036,45 +1192,24 @@ def _process_dynamic_shapes(
 
         if isinstance(shape, dict):
             for i, dim in shape.items():
-                if isinstance(dim, (int, Dim)):
-                    if isinstance(dim, int):
-                        dim = _create_static_dim(tensor, i, dim)
-                    constraint = to_constraint(dim, tensor, i)
-                    symbols[dim.__name__].append(constraint)
-                elif isinstance(dim, _DimHint):
-                    if dim.type == _DimHintType.AUTO:
-                        torch._dynamo.maybe_mark_dynamic(tensor, i)
-                    elif dim.type == _DimHintType.STATIC:
-                        torch._dynamo.mark_static(tensor, i)
-                    elif dim.type == _DimHintType.DYNAMIC:
-                        torch._dynamo.mark_dynamic(tensor, i)
-                    constraints.append(_RelaxedConstraint(id(tensor), i))
-                elif dim is None:
-                    torch._dynamo.mark_static(tensor, i)
+                _parse_tensor_dim(tensor, i, dim)
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
-                if isinstance(dim, (int, Dim)):
-                    if isinstance(dim, int):
-                        dim = _create_static_dim(tensor, i, dim)
-                    constraint = to_constraint(dim, tensor, i)
-                    symbols[dim.__name__].append(constraint)
-                elif isinstance(dim, _DimHint):
-                    if dim.type == _DimHintType.AUTO:
-                        torch._dynamo.maybe_mark_dynamic(tensor, i)
-                    elif dim.type == _DimHintType.STATIC:
-                        torch._dynamo.mark_static(tensor, i)
-                    elif dim.type == _DimHintType.DYNAMIC:
-                        torch._dynamo.mark_dynamic(tensor, i)
-                    constraints.append(_RelaxedConstraint(id(tensor), i))
-                elif dim is None:
-                    torch._dynamo.mark_static(tensor, i)
+                _parse_tensor_dim(tensor, i, dim)
         elif shape is None:
             for i in range(tensor.dim()):
-                torch._dynamo.mark_static(tensor, i)
+                _parse_tensor_dim(tensor, i, None)
 
     def assoc_shape(path, t, dynamic_shape):
         if isinstance(t, torch.Tensor):
             update_symbols(path, t, dynamic_shape)
+        elif isinstance(t, _IntWrapper):
+            # If tensor dimensions are marked as dynamic, the tensors themselves
+            # get marked using mark_dynamic. However since we can't mark
+            # integers as dynamic, we first wrap integers in this class, and
+            # then set the `dim` field of the class with the dynamic shapes dim
+            # to mark the integer as dynamic.
+            t.dynamism = dynamic_shape
 
     _tree_map_with_path(assoc_shape, combined_args, dynamic_shapes, tree_name="inputs")
 
@@ -1097,13 +1232,10 @@ def _process_dynamic_shapes(
 
 
 def _get_dim_name_mapping(
-    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None]
+    dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
 ):
     name_to_dim = {}
-    for dim in tree_flatten(
-        dynamic_shapes,
-        is_leaf=lambda x: isinstance(x, Dim),
-    )[0]:
+    for dim in tree_iter(dynamic_shapes, is_leaf=lambda x: isinstance(x, Dim)):
         if dim is None:
             # NOTE: this must denote a non-Tensor or automatic at this point.
             continue
@@ -1201,7 +1333,7 @@ def refine_dynamic_shapes_from_suggested_fixes(
             roots.add(c.root.__name__)  # type: ignore[attr-defined]
 
     # check keys are existing dims or new roots
-    for k, c in shape_fixes.items():
+    for k in shape_fixes:
         assert k in name_to_dim or k in roots
 
     # cache so we don't produce multiple derived dim objects

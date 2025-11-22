@@ -25,7 +25,7 @@ errors.
 from __future__ import annotations
 
 import os
-from typing import Callable, Optional, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import error_reproduction
 import numpy as np
@@ -44,7 +44,7 @@ from torch.utils import _pytree as pytree
 
 if TYPE_CHECKING:
     import unittest
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch.testing._internal.opinfo import core as opinfo_core
 
@@ -220,7 +220,9 @@ def run_test_output_match(
 
                 test_name = test_suite.id()
                 function_output, model_proto = function_executor(
-                    test_name, reference_torch_outputs
+                    test_name,
+                    reference_torch_outputs,
+                    opset_version=torchlib_op_info.opset_introduced,
                 )(onnx_function, input_onnx, kwargs_onnx)
                 # Finally we re-flatten everything
                 # TODO: add pytree structure comparison.

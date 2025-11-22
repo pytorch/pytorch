@@ -2,7 +2,7 @@
 # mypy: allow-untyped-defs
 import enum
 import operator
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 import torch
 import torch.ao.nn.intrinsic.quantized as nniq
@@ -60,7 +60,8 @@ def get_node_first_input_and_output_type(
             return (NodeInputOrOutputType.INT8, NodeInputOrOutputType.INT8)
         elif node.target in FUNS_IO_TYPE_FP32_OR_INT8:
             first_arg = get_normalized_nth_input(node, gm, 0)
-            assert isinstance(first_arg, Node)
+            if not isinstance(first_arg, Node):
+                raise AssertionError(f"Expected Node, got {type(first_arg)}")
             (
                 _prev_node_input_type,
                 prev_node_output_type,
@@ -72,11 +73,15 @@ def get_node_first_input_and_output_type(
             return (NodeInputOrOutputType.UNKNOWN, NodeInputOrOutputType.UNKNOWN)
 
     elif node.op == "call_module":
-        assert node.op == "call_module"
-        assert isinstance(node.target, str)
+        if node.op != "call_module":
+            raise AssertionError(f"Expected call_module, got '{node.op}'")
+        if not isinstance(node.target, str):
+            raise AssertionError(f"Expected str, but got {type(node.target)}")
+
         mod = getattr_from_fqn(gm, node.target)
         is_known_fp32_or_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
+            isinstance(mod, target_type)  # type: ignore[arg-type]
+            for target_type in MODS_IO_TYPE_FP32_OR_INT8
         )
         if (
             isinstance(mod, (logger_cls, ObserverBase, FakeQuantizeBase))  # type: ignore[arg-type]
@@ -85,7 +90,8 @@ def get_node_first_input_and_output_type(
             # A logger or observer's input and output type is the output
             # type of the preceding node.
             first_arg = get_normalized_nth_input(node, gm, 0)
-            assert isinstance(first_arg, Node)
+            if not isinstance(first_arg, Node):
+                raise AssertionError(f"Expected Node, got {type(first_arg)}")
             (
                 _prev_node_input_type,
                 prev_node_output_type,
@@ -94,10 +100,12 @@ def get_node_first_input_and_output_type(
             )
             return (prev_node_output_type, prev_node_output_type)
         is_known_fp32_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_FP32  # type: ignore[arg-type]
+            isinstance(mod, target_type)  # type: ignore[arg-type]
+            for target_type in MODS_IO_TYPE_FP32
         )
         is_known_int8_input_module = any(
-            isinstance(mod, target_type) for target_type in MODS_IO_TYPE_INT8  # type: ignore[arg-type]
+            isinstance(mod, target_type)  # type: ignore[arg-type]
+            for target_type in MODS_IO_TYPE_INT8
         )
         if is_known_fp32_input_module:
             return (NodeInputOrOutputType.FP32, NodeInputOrOutputType.FP32)
@@ -112,7 +120,8 @@ def get_node_first_input_and_output_type(
             # So, we look up the output type of the previous node and return that
             # as the input type of this node instance.
             prev_node = get_normalized_nth_input(node, gm, 0)
-            assert isinstance(prev_node, Node)
+            if not isinstance(prev_node, Node):
+                raise AssertionError(f"Expected Node, got {type(prev_node)}")
             (
                 _prev_node_input_type,
                 prev_node_output_type,
@@ -127,7 +136,8 @@ def get_node_first_input_and_output_type(
             # as the input type of this node instance. We also look up the target
             # of to and return the correct output type.
             prev_node = get_normalized_nth_input(node, gm, 0)
-            assert isinstance(prev_node, Node)
+            if not isinstance(prev_node, Node):
+                raise AssertionError(f"Expected Node, got {type(prev_node)}")
             (
                 _prev_node_input_type,
                 prev_node_output_type,
@@ -136,15 +146,17 @@ def get_node_first_input_and_output_type(
             )
 
             cur_node_dtype_target = get_normalized_nth_input(node, gm, 1)
-            assert (
-                cur_node_dtype_target is torch.float16
-            ), f"{cur_node_dtype_target} handling needs to be added"
+            if cur_node_dtype_target is not torch.float16:
+                raise AssertionError(
+                    f"{cur_node_dtype_target} handling needs to be added"
+                )
 
             return (prev_node_output_type, NodeInputOrOutputType.FP16)
 
         elif node.target in METHS_IO_TYPE_FP32_OR_INT8:
             first_arg = get_normalized_nth_input(node, gm, 0)
-            assert isinstance(first_arg, Node)
+            if not isinstance(first_arg, Node):
+                raise AssertionError(f"Expected Node, got {type(first_arg)}")
             (
                 _prev_node_input_type,
                 prev_node_output_type,
@@ -162,7 +174,7 @@ def get_node_input_qparams(
     node: Node,
     gm: GraphModule,
     node_type_to_io_type_map: dict[str, set[NSNodeTargetType]],
-) -> Optional[tuple[Union[torch.Tensor, float], Union[torch.Tensor, int]]]:
+) -> tuple[torch.Tensor | float, torch.Tensor | int] | None:
     """
     Returns the qparams (scale, zero_point) of the first input to `node`,
     if they can be inferred from the graph.
@@ -177,15 +189,21 @@ def get_node_input_qparams(
     def _get_scale_zp_from_function_args(node, gm, scale_arg_idx, zp_arg_idx):
         scale_node = get_normalized_nth_input(node, gm, scale_arg_idx)
         zp_node = get_normalized_nth_input(node, gm, zp_arg_idx)
-        assert isinstance(scale_node, Node) and isinstance(scale_node.target, str)
-        assert isinstance(zp_node, Node) and isinstance(zp_node.target, str)
+        if not isinstance(scale_node, Node):
+            raise AssertionError(f"Expected Node, got {type(scale_node)}")
+        if not isinstance(scale_node.target, str):
+            raise AssertionError(f"Expected str, got {type(scale_node.target)}")
+        if not isinstance(zp_node, Node):
+            raise AssertionError(f"Expected Node, got {type(zp_node)}")
+        if not isinstance(zp_node.target, str):
+            raise AssertionError(f"Expected str, got {type(zp_node.target)}")
         scale_obj = getattr_from_fqn(gm, scale_node.target)
         zp_obj = getattr_from_fqn(gm, zp_node.target)
         return (scale_obj, zp_obj)
 
     if prev_node.op == "call_function":
         # quantize - read the args directly
-        if prev_node.target == torch.quantize_per_tensor:
+        if prev_node.target is torch.quantize_per_tensor:
             return _get_scale_zp_from_function_args(prev_node, gm, 1, 2)
         elif prev_node.target in (toq.add, toq.add_relu, toq.mul, toq.mul_relu):
             return _get_scale_zp_from_function_args(prev_node, gm, 2, 3)
@@ -196,7 +214,8 @@ def get_node_input_qparams(
 
     elif prev_node.op == "call_module":
         # get type of the module
-        assert isinstance(prev_node.target, str)
+        if not isinstance(prev_node.target, str):
+            raise AssertionError(f"Expected str, got {type(prev_node.target)}")
         module_obj = getattr_from_fqn(gm, prev_node.target)
         if isinstance(
             module_obj,
@@ -230,7 +249,8 @@ def get_node_input_qparams(
             return (module_obj.scale, module_obj.zero_point)  # type: ignore[return-value]
 
         is_known_fp32_or_int8_input_module = any(
-            isinstance(module_obj, target_type) for target_type in MODS_IO_TYPE_FP32_OR_INT8  # type: ignore[arg-type]
+            isinstance(module_obj, target_type)  # type: ignore[arg-type]
+            for target_type in MODS_IO_TYPE_FP32_OR_INT8
         )
         if is_known_fp32_or_int8_input_module:
             return get_node_input_qparams(prev_node, gm, node_type_to_io_type_map)
@@ -254,15 +274,24 @@ def return_first_non_observer_node(
     if node.op == "call_module":
         node_obj = getattr_from_fqn(gm, node.target)  # type: ignore[arg-type]
         if _is_activation_post_process(node_obj):
-            assert len(node.args) == 1
-            assert isinstance(node.args[0], Node)
+            if len(node.args) != 1:
+                raise AssertionError(
+                    f"Expected node.args to have length 1, got {len(node.args)}"
+                )
+            if not isinstance(node.args[0], Node):
+                raise AssertionError(f"Expected Node, got {type(node.args[0])}")
             node = node.args[0]
             # code duplication intended, not worth refactoring
-            assert isinstance(node.target, str)
+            if not isinstance(node.target, str):
+                raise AssertionError(f"Expected str, got {type(node.target)}")
             node_obj = getattr_from_fqn(gm, node.target)
             if _is_activation_post_process(node_obj):
-                assert len(node.args) == 1
-                assert isinstance(node.args[0], Node)
+                if len(node.args) != 1:
+                    raise AssertionError(
+                        f"Expected node.args to have length 1, got {len(node.args)}"
+                    )
+                if not isinstance(node.args[0], Node):
+                    raise AssertionError(f"Expected Node, got {type(node.args[0])}")
                 node = node.args[0]
     return node
 
@@ -312,7 +341,7 @@ def get_arg_indices_of_inputs_to_log(node: Node) -> list[int]:
         node.target in (torch.add, torch.ops.quantized.add, operator.add)
         or node.target in (torch.mul, torch.ops.quantized.mul, operator.mul)
     ):
-        result = [i for i in range(2) if type(node.args[i]) == Node]
+        result = [i for i in range(2) if type(node.args[i]) is Node]
         return result
     return [0]
 
@@ -326,7 +355,8 @@ def get_target_type_str(node: Node, gm: GraphModule) -> str:
     if node.op in ("call_function", "call_method"):
         target_type = torch.typename(node.target)
     elif node.op == "call_module":
-        assert isinstance(node.target, str)
+        if not isinstance(node.target, str):
+            raise AssertionError(f"Expected str, got {type(node.target)}")
         target_mod = getattr_from_fqn(gm, node.target)
         target_type = torch.typename(target_mod)
     return target_type
@@ -360,7 +390,8 @@ def rekey_logger_info_on_node_name_of_model(
         for model_name_to_results in result_type_to_results.values():
             for cur_model_name, list_of_results in model_name_to_results.items():
                 if cur_model_name == model_name:
-                    assert len(list_of_results)
+                    if len(list_of_results) == 0:
+                        raise AssertionError("Expected list_of_results to be not empty")
                     new_layer_name = list_of_results[0]["ref_node_name"]
                 else:
                     continue
@@ -400,6 +431,7 @@ def maybe_add_missing_fqns(results: NSResultsType) -> None:
                 for model_name, model_results in model_name_to_results.items():
                     if model_name == model_name_with_fqns:
                         continue
+
                     for i in range(len(model_results)):
                         fqn = ref_model_results[i]["fqn"]
                         model_results[i]["fqn"] = fqn
@@ -463,6 +495,7 @@ def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tenso
     Return:
         float or tuple of floats
     """
+    # pyrefly: ignore [unsupported-operation]
     return torch.sqrt(((x - y) ** 2).sum() / (x**2).sum())
 
 
@@ -512,14 +545,20 @@ def get_normalized_nth_input(node: Node, gm: GraphModule, idx: int) -> Node:
         )
         if norm_args_and_kwargs is not None:
             norm_args, norm_kwargs = norm_args_and_kwargs
-            assert len(norm_args) + len(norm_kwargs) > idx
+            if len(norm_args) + len(norm_kwargs) <= idx:
+                raise AssertionError(
+                    f"Index {idx} out of range: total = {len(norm_args) + len(norm_kwargs)}"
+                )
             if idx < len(norm_args):
                 return norm_args[idx]
             else:
                 # note: in Python 3.7+ dicts are ordered
                 return list(norm_kwargs.values())[idx]
         else:
-            assert len(node.args) + len(node.kwargs) > idx
+            if len(node.args) + len(node.kwargs) <= idx:
+                raise AssertionError(
+                    f"Index {idx} out of range: total = {len(node.args) + len(node.kwargs)}"
+                )
             if idx < len(node.args):
                 return node.args[idx]  # type: ignore[return-value]
             else:
@@ -529,7 +568,10 @@ def get_normalized_nth_input(node: Node, gm: GraphModule, idx: int) -> Node:
         # this RuntimeError happens when node argument normalization
         # requires typehints to proceed, such as for torch.add where
         # either the first, second or both arguments could be tensors
-        assert len(node.args) + len(node.kwargs) > idx
+        if len(node.args) + len(node.kwargs) <= idx:
+            raise AssertionError(
+                f"Index {idx} out of range: total = {len(node.args) + len(node.kwargs)}"
+            ) from None
         if idx < len(node.args):
             return node.args[idx]  # type: ignore[return-value]
         else:

@@ -12,10 +12,13 @@
 #include <c10/macros/Export.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/intrusive_ptr.h>
+#include <limits>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
 
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
@@ -160,6 +163,7 @@ struct Capsule {
   _(Double)                  \
   _(ComplexDouble)           \
   _(Int)                     \
+  _(UInt)                    \
   _(SymInt)                  \
   _(SymFloat)                \
   _(SymBool)                 \
@@ -622,7 +626,14 @@ struct TORCH_API IValue final {
   IValue(const c10::SymBool& i) {
     if (auto mi = i.maybe_as_bool()) {
       tag = Tag::Bool;
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
       payload.u.as_int = *mi;
+#elif __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+      /* due to byteorder if value assigned as_int, as_bool actually is not set correctly */
+      payload.u.as_bool = *mi;
+#else
+#error Unexpected or undefined __BYTE_ORDER__
+#endif
     } else {
       tag = Tag::SymBool;
       payload.u.as_intrusive_ptr = i.toSymNodeImpl().release();
@@ -652,6 +663,29 @@ struct TORCH_API IValue final {
       TORCH_INTERNAL_ASSERT(0, "expected int");
     }
   }
+
+  // Unsigned
+  IValue(uint64_t u) : tag( u <= std::numeric_limits<int64_t>::max() ? Tag::Int : Tag::UInt) {
+    payload.u.as_uint = u;
+  }
+
+
+  // See Note [Meaning of HAS_u]
+  // IValue type model closely follows that of c10::Scalar
+  // Where all integers are upcast to 64-bit representation, and `as_int` is used as default
+  // representation unless value could not be represented as signed int
+  bool isUnsigned() const {
+    return Tag::UInt == tag || (Tag::Int == tag && payload.u.as_int >= 0);
+  }
+
+  uint64_t toUInt() const {
+    if (isUnsigned()) {
+      return payload.u.as_uint;
+    } else {
+      TORCH_INTERNAL_ASSERT(0, "expected unsigned int");
+    }
+  }
+
 
   // Bool
   IValue(bool b) : tag(Tag::Bool) {
@@ -822,7 +856,7 @@ struct TORCH_API IValue final {
   IValue(std::optional<T> v);
   template <class T, enable_if_list_is_ivalue_constructible<T> = nullptr>
   IValue(c10::OptionalArrayRef<T> v);
-  IValue(std::nullopt_t);
+  IValue(std::nullopt_t /*unused*/);
 
   // ClassType
   IValue(c10::intrusive_ptr<ivalue::Object> v);
@@ -893,8 +927,14 @@ struct TORCH_API IValue final {
     } else {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
           s.isIntegral(false), "Unknown type in Scalar");
-      tag = Tag::Int;
-      payload.u.as_int = s.toLong();
+      if (s.isUnsigned()) {
+        const auto val = s.toUInt64();
+        payload.u.as_uint = val;
+        tag = val <= std::numeric_limits<int64_t>::max() ? Tag::Int : Tag::UInt;
+      } else {
+        payload.u.as_int = s.toLong();
+        tag = Tag::Int;
+      }
     }
   }
 
@@ -918,6 +958,8 @@ struct TORCH_API IValue final {
       return toSymFloat();
     else if (isSymBool())
       return toSymBool();
+    else if (isUnsigned())
+      return toUInt();
     TORCH_CHECK(false, "IValue is not a Scalar");
   }
 
@@ -1136,7 +1178,7 @@ struct TORCH_API IValue final {
   using HashIdentityIValueMap =
       std::unordered_map<IValue, IValue, HashIdentityIValue, CompIdentityIValues>;
 
-  // Chechs if this and rhs has a subvalues in common.
+  // Checks if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
   bool overlaps(const IValue& rhs) const;
 
@@ -1247,6 +1289,8 @@ struct TORCH_API IValue final {
         return true;
       case Tag::Int:
         return false;
+      case Tag::UInt:
+        return false;
       case Tag::SymInt:
         return true;
       case Tag::SymFloat:
@@ -1343,6 +1387,8 @@ struct TORCH_API IValue final {
     union TriviallyCopyablePayload {
       TriviallyCopyablePayload() : as_int(0) {}
       int64_t as_int;
+      // See Note [Meaning of HAS_u]
+      uint64_t as_uint;
       double as_double;
       bool as_bool;
       // Invariant: never nullptr; null state is represented as
@@ -1585,5 +1631,7 @@ struct TORCH_API WeakOrStrongTypePtr {
 };
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()
 
 #include <ATen/core/ivalue_inl.h> // IWYU pragma: keep

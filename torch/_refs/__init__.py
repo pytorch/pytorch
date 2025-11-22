@@ -7,10 +7,10 @@ import itertools
 import math
 import operator
 import warnings
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import partial, reduce, singledispatch, wraps
-from typing import Any, Callable, cast, Optional, overload, Union
+from typing import Any, cast, Optional, overload, Union
 
 import torch
 import torch._prims as prims
@@ -28,6 +28,8 @@ from torch._prims_common import (
     FloatLike,
     FloatWithoutSymFloat,
     IntLike,
+    is_contiguous_for_memory_format_or_false,
+    is_contiguous_or_false,
     is_weakly_lesser_type,
     Number,
     NumberType,
@@ -383,7 +385,13 @@ def handle_noncontiguous_outputs(input_tlist, output):
 
 
 def _broadcast_shapes(*_shapes):
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        is_nested_int,
+        size_hint,
+    )
+
+    backed_so = torch.fx.experimental._config.backed_size_oblivious
 
     shapes = tuple(
         (x,) if isinstance(x, IntLike) else x
@@ -394,10 +402,12 @@ def _broadcast_shapes(*_shapes):
     if len(shapes) == 0:
         return None
 
-    # Type checking
-    # TODO: make common validations available as utils
     for shape in shapes:
-        assert isinstance(shape, Sequence)
+        if not isinstance(shape, Sequence):
+            raise RuntimeError(
+                "Input shapes should be of type ints, a tuple of ints, or a list of ints, got ",
+                shape,
+            )
 
     # Computes common shape
     common_shape: list[Union[int, torch.SymInt]] = [
@@ -405,13 +415,46 @@ def _broadcast_shapes(*_shapes):
     ] * reduce(max, (len(shape) for shape in shapes))
     for arg_idx, shape in enumerate(shapes):
         for idx in range(-1, -1 - len(shape), -1):
-            if guard_size_oblivious(common_shape[idx] == 1):
+            # NB: handle nested ints specially to avoid invalid guarding on Ne(j0, 1).
+            if is_nested_int(shape[idx]):
+                # Broadcasting is allowed for (j0, 1) or (j0, j0);
+                # not (j0, j1), (j0, 5), etc.
+                if is_nested_int(common_shape[idx]) and guard_or_false(
+                    shape[idx] == common_shape[idx]
+                ):
+                    continue
+            else:
+                # When backed size oblivious is used, we specialize for broadcasting
+                # if its the only way to compile the example input.
+                # i.e: s0:1, s1:1 ==>
+                #           assert s0==s1, no specialization on ==1 or !=1.
+                #            The non-broadcast path is picked
+                #      s0:1, s1:4 ==>
+                #           specialize(s0) to be 1.
+                #      s0:4, s1:1 ==>
+                #           specialize(s1) to be 1.
+                if backed_so:
+                    a = size_hint(shape[idx], allow_none=True)
+                    b = size_hint(common_shape[idx], allow_none=True)
+                    if a == 1 and b != 1:
+                        torch._check(shape[idx] == 1)
+                    if b == 1 and a != 1:
+                        torch._check(common_shape[idx] == 1)
+                if guard_or_false(shape[idx] == common_shape[idx]):
+                    continue
+
+            if guard_or_false(common_shape[idx] == 1):
                 if shape[idx] < 0:
                     raise ValueError(
                         "Attempting to broadcast a dimension with negative length!"
                     )
                 common_shape[idx] = shape[idx]
-            elif guard_size_oblivious(shape[idx] != 1):
+
+            if not is_nested_int(shape[idx]) and guard_or_false(shape[idx] == 1):
+                # broadcast case .
+                continue
+            else:
+                # If broadcasting is undecided we pick non-broadcast path and add runtime assertion.
                 torch._check(
                     common_shape[idx] == shape[idx],
                     lambda: f"Attempting to broadcast a dimension of length {shape[idx]} at {idx}! "
@@ -428,6 +471,38 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
         *(t.shape if isinstance(t, TensorLike) else None for t in args)
     )
 
+    def should_expand(a: ShapeType, b: ShapeType) -> bool:
+        from torch.fx.experimental.symbolic_shapes import (
+            guard_or_false,
+            sym_and,
+            sym_or,
+        )
+
+        if len(a) != len(b):
+            return True
+
+        for x, y in zip(a, b):
+            if guard_or_false(x != y):
+                # We know they are not the same.
+                return True
+
+            # They are the same or we do not know if they are the same or not.
+            # 1==1 no-broadcast
+            # u0==1 and 1==u0 cases. We broadcast!
+            if guard_or_false(sym_and(x == 1, y == 1)):
+                pass
+            elif guard_or_false(sym_or(x == 1, y == 1)):
+                # assume broadcasting.
+                return True
+
+            # u0==u1 assume the same, no broadcasting!
+            torch._check(
+                x == y,
+                lambda: "sizes assumed to be the same due to unbacked broadcasting semantics",
+            )
+
+        return False
+
     def __maybe_broadcast(x, shape):
         if x is None:
             return None
@@ -437,7 +512,7 @@ def _maybe_broadcast(*args, preserve_cpu_scalar_tensors=True):
             if preserve_cpu_scalar_tensors and utils.is_cpu_scalar_tensor(x):
                 return x
 
-            if not utils.same_shape(x.shape, common_shape):
+            if should_expand(x.shape, common_shape):
                 return x.expand(common_shape)
 
             return x
@@ -649,7 +724,7 @@ def exp2(a):
 # CompositeImplicitAutograd - don't register decomp
 @out_wrapper()
 @elementwise_type_promotion_wrapper(
-    type_promoting_args=("a,"),
+    type_promoting_args=("a",),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
@@ -827,10 +902,14 @@ def logsumexp(
     if not isinstance(dim, Iterable):
         dim = (dim,)
     if self.numel() == 0:
+        # pyrefly: ignore [no-matching-overload]
         return torch.sum(torch.exp(self), dim, keepdim).log()
+    # pyrefly: ignore [bad-argument-type]
     maxes = torch.amax(torch.real(self), dim, keepdim=True)
     maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
+    # pyrefly: ignore [no-matching-overload]
     maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)
+    # pyrefly: ignore [no-matching-overload]
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
 
@@ -1122,7 +1201,7 @@ def add(
     if alpha is not None:
         dtype = a.dtype if isinstance(a, TensorLike) else b.dtype  # type: ignore[union-attr]
         python_type = utils.dtype_to_type(dtype)
-        if python_type != bool and not utils.is_weakly_lesser_type(
+        if python_type is not bool and not utils.is_weakly_lesser_type(
             type(alpha), python_type
         ):
             msg = f"alpha argument of type {type(alpha)} cannot be safely cast to type {python_type}!"
@@ -1188,10 +1267,12 @@ def copysign(
     a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
 ):
     if isinstance(b, Number) and isinstance(a, Tensor):
+        # pyrefly: ignore [bad-argument-type]
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
         msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
         raise RuntimeError(msg)
+    # pyrefly: ignore [bad-argument-type]
     return where(signbit(b), neg(abs(a)), abs(a))
 
 
@@ -1277,10 +1358,13 @@ def float_power(
 
     # Float power has the following contiguous cast behavior to be
     # consistent with its C++ impl
+
     a = _maybe_convert_to_dtype(a, dtype)
+
     b = _maybe_convert_to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
+    # pyrefly: ignore [bad-return]
     return pow(a, b)
 
 
@@ -1322,11 +1406,15 @@ def floor_divide(
 ):
     # Wrap scalars because some references only accept tensor arguments.
     if isinstance(a, Number) and isinstance(b, Number):
+        # pyrefly: ignore [bad-argument-type]
         a = scalar_tensor(a)
+        # pyrefly: ignore [bad-argument-type]
         b = scalar_tensor(b)
     elif isinstance(b, Number) and isinstance(a, Tensor):
+        # pyrefly: ignore [bad-argument-type]
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Number) and isinstance(b, Tensor):
+        # pyrefly: ignore [bad-argument-type]
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
         if a.device == torch.device("cpu"):
@@ -1803,8 +1891,10 @@ def xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberT
 
     # Operations like eq and log do not handle scalar values, so we convert them to scalar_tensors.
     if isinstance(b, TensorLike) and isinstance(a, Number):
+        # pyrefly: ignore [bad-argument-type]
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
     elif isinstance(a, TensorLike) and isinstance(b, Number):
+        # pyrefly: ignore [bad-argument-type]
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
 
     # mypy: expected "Tensor"
@@ -1944,9 +2034,13 @@ def clamp_max(
 
 
 # https://pytorch.org/docs/stable/generated/torch.where.html
-# TODO: implement alternate where
-@register_decomposition(aten.where)
-@out_wrapper()
+# TODO: implement where.default
+@register_decomposition(aten.where.self)
+@register_decomposition(aten.where.ScalarSelf)
+@register_decomposition(aten.where.ScalarOther)
+@register_decomposition(aten.where.Scalar)
+@register_decomposition(aten.where.self_out)
+@out_wrapper(exact_dtype=True)
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("a", "b"),
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
@@ -2206,11 +2300,14 @@ def _reduction(
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
     if not has_identity:
-        valid_shape = a.ndim == 0 or builtins.all(a.shape[i] for i in dims)
-        if not valid_shape:
-            raise RuntimeError(
-                "reducing over zero-size dimension for reduction operation without identity"
-            )
+        from torch.fx.experimental.symbolic_shapes import sym_and
+
+        valid_shape = a.ndim == 0 or sym_and(*(a.shape[i] > 0 for i in dims))
+        torch._check(
+            valid_shape,
+            lambda: "reducing over zero-size dimension for reduction operation without identity",
+        )
+
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
     )
@@ -2236,17 +2333,21 @@ def _reduction(
     return result
 
 
-def _make_copy_from_view(fn):
+def _make_copy_from_view(fn, return_none_on_out_variant=False):
     """
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
     aten_fn = getattr(aten, fn.__name__)
     annotations = getattr(fn, "__annotations__", {})
-    fn = out_wrapper()(aten_fn)
+    # view ops should not change dtypes, this ensures that the decomp path has
+    # the same error checks as eager.
+    fn = out_wrapper(exact_dtype=True)(aten_fn)
 
     @wraps(fn)
     def _fn(*args, out=None, **kwargs):
         result = fn(*args, out=out, **kwargs)
+        if return_none_on_out_variant and out is not None:
+            return None
         if out is not None:
             return result
 
@@ -2767,7 +2868,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     # This is a bit tricky.  Naively, you would expect to just pick one
     # arbitrary tensor and check that all tensors match this tensor.  However,
@@ -2786,6 +2887,7 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     # SymInts
 
     example = None
+    # pyrefly: ignore [bad-assignment]
     for i, t in enumerate(tensors):
         if example is None:
             if t.ndim != 1:
@@ -2821,14 +2923,14 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
                 # through), and is load bearing for our Inductor lowerings
                 # (which assume that size oblivious tests are OK to determine
                 # if a shape is permissibly zero.)
-                guard_size_oblivious(tensor.shape[0] == 0),
+                guard_or_false(tensor.shape[0] == 0),
                 lambda: f"Number of dimensions of tensors must match.  "
                 f"Expected {example.ndim}-D tensors, but got 1-D for "
                 f"tensor number {tensor_idx} in the list",
             )
         else:
             # Remove inputs that are 1-D, zero size
-            if tensor.ndim == 1 and guard_size_oblivious(tensor.shape[0] == 0):
+            if tensor.ndim == 1 and guard_or_false(tensor.shape[0] == 0):
                 continue
             # Don't bother checking size match, prims.cat will handle it
             filtered.append(tensor)
@@ -2931,7 +3033,7 @@ def constant_pad_nd(
         pad_idx = len(pad) - ((i + 1) * 2)
         new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1]
         torch._check(
-            new_dim > 0,
+            new_dim >= 0,
             lambda: f"The input size {input_sizes[l_diff + i]}, plus negative padding "
             f"{pad[pad_idx]} and {pad[pad_idx + 1]} resulted in a negative output size, "
             f"which is invalid. Check dimension {l_diff + i} of your input.",
@@ -2974,7 +3076,8 @@ def contiguous(
         lambda: "preserve memory format is unsupported by the contiguous operator",
     )
 
-    if utils.is_contiguous_for_memory_format(a, memory_format=memory_format):
+    # TODO: make logic consistent with aten contiguous
+    if is_contiguous_for_memory_format_or_false(a, memory_format=memory_format):
         return a
 
     return torch.clone(a, memory_format=memory_format)
@@ -2988,8 +3091,10 @@ def dstack(tensors: TensorSequenceType) -> TensorLikeType:
 
 
 @register_decomposition(aten.expand)
-def expand(a: Tensor, *shape) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+def expand(a: Tensor, *shape, implicit: bool = False) -> Tensor:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, size_hint, sym_or
+
+    backed_so = torch.fx.experimental._config.backed_size_oblivious
 
     # NOTE: cannot use utils.extract_shape_from_varargs here
     # because that also validates the shape, but the shape
@@ -3007,14 +3112,40 @@ def expand(a: Tensor, *shape) -> Tensor:
     for idx, x in enumerate(a.shape):
         offset_idx = idx + offset
         requested_length = shape[offset_idx]
-        torch._check(
-            guard_size_oblivious(requested_length == x)
-            or guard_size_oblivious(x == 1)
-            or requested_length == -1,
-            lambda: f"expand: attempting to expand a dimension of length {x}!",
-        )
 
-        shape_[offset_idx] = requested_length if requested_length != -1 else x
+        # expand(in -> out) has 3 different semantics:
+        # 1) out == -1 -> size = in, stride unchanged
+        # 2) in == 1 -> size = out, stride = 0
+        # 3) in == out -> size = in, stride unchanged
+        #
+        # the code below is written for unbacked semantics s.t. we assume unbacked symbols don't
+        # represent -1 unless explicitly specified, and the user is opting for case 2) or 3).
+        # the sym_or allows either case, but in the decomposition's current state, broadcast_in_dim()
+        # will either assume case 3) (via validate_shape() marking the expanded shape size-like), or will
+        # raise a data-dependent error trying to figure out if the stride is 0, requiring the user to manually
+        # select between the semantics of cases 2) and 3).
+        if guard_or_false(requested_length == -1):
+            shape_[offset_idx] = x
+        else:
+            # When backed size oblivious is used, we specialize for broadcasting
+            # if its the only way to compile the example input.
+            # i.e: x:1, requested_length:1 ==>
+            #           assert x==requested_length, no specialization on ==1 or !=1.
+            #            The non-broadcast path is picked
+            #      x:1, requested_length:4 ==>
+            #           specialize(x) to be 1.
+            if backed_so:
+                x_hint = size_hint(x, allow_none=True)
+                requested_hint = size_hint(requested_length, allow_none=True)
+                if x_hint == 1 and requested_hint != 1:
+                    torch._check(x == 1)
+
+            torch._check(
+                sym_or(x == 1, requested_length == x),
+                lambda: f"expand: attempting to expand a dimension of length {x} -> {requested_length}!",
+            )
+            torch._check(requested_length >= 0)
+            shape_[offset_idx] = requested_length
 
     # At this point shape must be valid
     utils.validate_shape(shape_)
@@ -3061,7 +3192,10 @@ def flatten(a: TensorLikeType, start_dim: int = 0, end_dim: int = -1) -> TensorL
 
     # Tries to take a view
     # TODO: we could look at directing collapse_view to skip its meta function here (unsafe_collapse_view)
-    new_shape, _new_strides = prims._collapse_view_helper(a, start_dim, end_dim)
+    # Unbacked semantics: if validity of in-place flattening is undecided we copy.
+    new_shape, _new_strides = prims._collapse_view_helper(
+        a, start_dim, end_dim, must_be_valid=None
+    )
     if new_shape is not None:
         return prims.collapse_view(a, start_dim, end_dim)
 
@@ -3147,6 +3281,7 @@ def _normalize(
         mean (Tensor): mean of the tensor along norm_dims.
         rstd (Tensor): 1/std of the tensor along norm_dims.
     """
+
     norm_dims = utils.canonicalize_dims(a.ndim, norm_dims)
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
@@ -3247,6 +3382,8 @@ def native_layer_norm(
     bias: Optional[Tensor],
     eps: float,
 ) -> tuple[Tensor, Tensor, Tensor]:
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     normalized_ndim = len(normalized_shape)
     torch._check(
         normalized_ndim >= 1,
@@ -3258,7 +3395,8 @@ def native_layer_norm(
     # while torch.Size([1, 2, 3]) == (1, 2, 3) is True
     # therefore we use tuple(normalized_shape)
     torch._check(
-        weight is None or weight.shape == tuple(normalized_shape),
+        # pyrefly: ignore [bad-argument-type]
+        weight is None or sym_eq(weight.shape, tuple(normalized_shape)),
         lambda: "Expected weight to be of same shape as normalized_shape, but got "
         + "weight of shape "
         + str(weight.shape)  # type: ignore[union-attr]
@@ -3266,7 +3404,8 @@ def native_layer_norm(
         + str(normalized_shape),
     )
     torch._check(
-        bias is None or bias.shape == tuple(normalized_shape),
+        # pyrefly: ignore [bad-argument-type]
+        bias is None or sym_eq(bias.shape, tuple(normalized_shape)),
         lambda: "Expected bias to be of same shape as normalized_shape, but got "
         + "bias of shape "
         + str(bias.shape)  # type: ignore[union-attr]
@@ -3275,7 +3414,11 @@ def native_layer_norm(
     )
     torch._check(
         input.ndim >= normalized_ndim
-        and input.shape[(input.ndim - normalized_ndim) :] == tuple(normalized_shape),
+        and sym_eq(
+            input.shape[(input.ndim - normalized_ndim) :],
+            # pyrefly: ignore [bad-argument-type]
+            tuple(normalized_shape),
+        ),
         lambda: "Given normalized_shape="
         + str(normalized_shape)
         + ", expected input with shape "
@@ -3284,11 +3427,11 @@ def native_layer_norm(
         + str(input.shape),
     )
 
-    input = input.contiguous()
+    input = contiguous(input)
     if weight is not None:
-        weight = weight.contiguous()
+        weight = contiguous(weight)
     if bias is not None:
-        bias = bias.contiguous()
+        bias = contiguous(bias)
 
     axis = input.ndim - normalized_ndim
     reduction_dims = list(range(axis, input.ndim))
@@ -3387,7 +3530,7 @@ def stft(
     )
     torch._check(
         not center or align_to_window is None,
-        "stft only supports align_to_window for center = False.",
+        lambda: "stft only supports align_to_window for center = False.",
     )
 
     hop_length_ = hop_length if hop_length is not None else n_fft // 4
@@ -3399,7 +3542,7 @@ def stft(
         )
         torch._check(
             return_complex_,
-            (
+            lambda: (
                 "stft requires the return_complex parameter be given for real inputs, "
                 + "and will further require that return_complex=True in a future PyTorch release."
             ),
@@ -3528,7 +3671,7 @@ def istft(
             n_fft // 2 + 1 == fft_size,
             lambda: (
                 "istft expected the frequency dimension (3rd to the last) of the input tensor "
-                + "to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
+                + f"to match n_fft / 2 + 1 when onesided=True, but got {fft_size}"
             ),
         )
     else:
@@ -3536,7 +3679,7 @@ def istft(
             n_fft == fft_size,
             lambda: (
                 "istft expected the frequency dimension (3rd to the last) of the input tensor "
-                + "to match n_fft when onesided=False, but got {fft_size}",
+                + f"to match n_fft when onesided=False, but got {fft_size}",
             ),
         )
 
@@ -3623,7 +3766,8 @@ def istft(
     if end > expected_output_signal_len:
         warnings.warn(
             "The length of signal is shorter than the length parameter. Result is being "
-            + "padded with zeros in the tail. Please check your center and hop_length settings"
+            + "padded with zeros in the tail. Please check your center and hop_length settings",
+            stacklevel=2,
         )
         y = aten.constant_pad_nd(y, (0, end - expected_output_signal_len), 0)
     return y
@@ -3716,53 +3860,9 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     return permuted_result.reshape(target_shape)
 
 
-def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
-
-    # Creates a valid shape
-    shape = utils.extract_shape_from_varargs(shape, validate=False)
-    # Reshape may be given a shape with a -1 length
-    # This indicates that the dimension's length should be inferred
-    shape = utils.infer_size(shape, a.numel())
-
-    # Special-cases tensors with no elements
-    if guard_size_oblivious(a.numel() == 0):
-        return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
-
-    # Special-cases reshaping zero dim tensors
-    if a.ndim == 0:
-        _a = a
-        for length in shape:
-            assert length == 1
-            _a = unsqueeze(_a, -1)
-        if _a is a:
-            return prims.view_of(a)
-        else:
-            return _a
-
-    # Special-cases reshaping to zero dim tensors
-    if len(shape) == 0:
-        _a = a
-        for length in a.shape:
-            assert length == 1
-            _a = squeeze(_a, -1)
-        if _a is a:
-            return prims.view_of(a)
-        else:
-            return _a
-
-    if a.is_contiguous():
-        # Special-cases for nd_to_1d
-        if len(shape) == 1 and a.ndim > 1:
-            return torch.as_strided(a, [a.numel()], [1])
-        # Special-cases for 1d_to_2d
-        if len(shape) == 2 and a.ndim == 1:
-            dim0 = shape[0]
-            dim1 = shape[1]
-            return torch.as_strided(a, [dim0, dim1], [dim1, 1])
-
-    # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
-
+def _reshape_view_helper_core_alg(
+    a: TensorLikeType, shape, allow_copy: bool
+) -> TensorLikeType:
     # NOTE [Reshape Algorithm]
     # This algorithm works by attempting to greedily construct the desired dimensions in
     # the output shape, left to right. It does this by, conceptually, accumulating
@@ -3794,25 +3894,24 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             continue
 
         # Skips dimensions that are already the correct length
-        if guard_size_oblivious(length == a_.shape[idx]):
+        if length == a_.shape[idx]:
             idx = idx + 1
             continue
 
-        # Gathers enough original dimensions such that this new dimension can be created
-        # Note that this accumulation will terminate because we've verified a and the shape
-        # specify the same number of elements above
         accum = a_.shape[idx]
         end = idx
-        while guard_size_oblivious(accum % length != 0):
-            end = end + 1
-            accum = accum * a_.shape[end]
+        while accum % length != 0:
+            end += 1
+            accum *= a_.shape[end]
         if end != idx:
             # NOTE: in this case multiple dimensions must be flatten to create the desired dimension
             # This flattening is why reshape sometimes creates a copy -- because flattening
             # may return a view of a copy
 
             # Checks if collapse can be a view and short-circuits to copying reshape if it can't
-            new_shape, _new_strides = prims._collapse_view_helper(a_, idx, end)
+            new_shape, _new_strides = prims._collapse_view_helper(
+                a_, idx, end, must_be_valid=None
+            )
             if new_shape is None:
                 if allow_copy:
                     return prims.reshape(a, shape)
@@ -3822,8 +3921,9 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
             a_ = flatten(a_, idx, end)
 
-        # Splits the (possibly flattened) dimension to create the desired dim length
-        if guard_size_oblivious(accum != length):
+        # Splits the (possibly flattened) dimension to create the desired dim length.
+        # guard_or_true is safe due to the tail unsqueeze routine.
+        if accum != length:
             a_ = prims.split_dim(a_, idx, length)
 
         idx = idx + 1
@@ -3840,6 +3940,59 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         return prims.view_of(a)
     else:
         return a_
+
+
+def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
+    # Creates a valid shape
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+    # Reshape may be given a shape with a -1 length
+    # This indicates that the dimension's length should be inferred
+    shape = utils.infer_size(shape, a.numel())
+
+    # Special-cases tensors with no elements
+    if a.numel() == 0:
+        return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
+
+    # Special-cases reshaping zero dim tensors
+    if a.ndim == 0:
+        _a = a
+        for length in shape:
+            assert length == 1
+            _a = unsqueeze(_a, -1)
+        if _a is a:
+            return prims.view_of(a)
+        else:
+            return _a
+
+    # Special-cases reshaping to zero dim tensors
+    if len(shape) == 0:
+        _a = a
+        for length in a.shape:
+            assert length == 1
+            _a = squeeze(_a, -1)
+        if _a is a:
+            return prims.view_of(a)
+        else:
+            return _a
+
+    if is_contiguous_or_false(a):
+        # Special-cases for nd_to_1d
+        if len(shape) == 1 and a.ndim > 1:
+            return torch.as_strided(a, [a.numel()], [1])
+        # Special-cases for 1d_to_2d
+        if len(shape) == 2 and a.ndim == 1:
+            dim0 = shape[0]
+            dim1 = shape[1]
+            return torch.as_strided(a, [dim0, dim1], [dim1, 1])
+
+    shape_numel = reduce(operator.mul, shape, 1)
+    torch._check(
+        a.numel() == shape_numel,
+        lambda: f"Could not reshape a tensor with shape {a.shape} as a tensor with shape {shape}!",
+    )
+
+    # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
+    return _reshape_view_helper_core_alg(a, shape, allow_copy)
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -3859,6 +4012,7 @@ def reshape_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
 @out_wrapper()
 def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLikeType:
     """Reference implementation of :func:`torch.roll`."""
+
     dims = utils.canonicalize_dims(a.ndim, dims)
     # ATen specifies int[1] type for shifts and dims which expands integers to tuples of length 1
     if not isinstance(shifts, Iterable):
@@ -3871,12 +4025,16 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLike
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
         return a.clone()
 
+    # pyrefly: ignore [bad-argument-type]
     if a.dim() == 0 and len(dims) > 0:
         raise IndexError(
+            # pyrefly: ignore [index-error]
             f"Dimension specified as {dims[0]} but tensor has no dimensions"
         )
 
+    # pyrefly: ignore [bad-argument-type]
     len_shifts = len(shifts)
+    # pyrefly: ignore [bad-argument-type]
     len_dims = len(dims)
     if len_shifts != 1 or len_dims != 1:
         if len_shifts == 0:
@@ -3884,21 +4042,27 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLike
         # Takes care of the case when dims is not specified (default)
         # By default, the tensor is flattened before shifting, after which the original shape is restored
         if len_dims == 0 and len_shifts == 1:
+            # pyrefly: ignore [bad-argument-type]
             return torch.roll(torch.flatten(a), shifts, 0).view(a.shape)
         if len_shifts != len_dims:
             raise RuntimeError(
                 f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
             )
         assert len_dims > 1
+        # pyrefly: ignore [index-error]
         tail_shifts = shifts[1:]
+        # pyrefly: ignore [index-error]
         tail_dims = dims[1:]
+        # pyrefly: ignore [index-error]
         first_dim_rolled = torch.roll(a, (shifts[0],), dims[0])
         return torch.roll(first_dim_rolled, tail_shifts, tail_dims)
 
     # This path is taken when only one dimension is rolled
     # For example to get `first_dim_rolled` above
+    # pyrefly: ignore [index-error]
     dim = dims[0]
     size = a.shape[dim]
+    # pyrefly: ignore [index-error]
     start = (size - shifts[0]) % size
     idx = torch.arange(size, device=a.device)
     return a.index_select(dim, torch.fmod(start + idx, size))
@@ -3937,11 +4101,13 @@ def rot90(
 
 
 def _check_stack_inputs(tensors: TensorSequenceType) -> None:
+    from torch.fx.experimental.symbolic_shapes import sym_eq
+
     entry_shape = tensors[0].shape
     for i in range(1, len(tensors)):
-        assert tensors[i].shape == entry_shape, (
-            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0 "
-            f"and {tensors[i].shape} at entry {i}"
+        torch._check(
+            sym_eq(tensors[i].shape, entry_shape),
+            lambda: f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0 ",
         )
 
 
@@ -3978,7 +4144,9 @@ def softmax(
         a_max = amax(a_, dim, keepdim=True)
         a_exp = exp(a_ - a_max)
     return _maybe_convert_to_dtype(
-        true_divide(a_exp, sum(a_exp, dim, keepdim=True)), result_dtype
+        # pyrefly: ignore [no-matching-overload]
+        true_divide(a_exp, sum(a_exp, dim, keepdim=True)),
+        result_dtype,
     )  # type: ignore[return-value]
 
 
@@ -4009,14 +4177,15 @@ def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
 
 @register_decomposition(aten.unbind)
 def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
-
     dim = utils.canonicalize_dim(t.ndim, dim)
     torch._check_index(
         len(t.shape) > 0,
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
-    if guard_size_oblivious(t.shape[dim] == 0):
+
+    # Note: t.shape[dim] can't be dynamic or unbacked, even if we use guard_or_false here we will fail
+    # later in the split since t.shape[dim] control the number of output tensors.
+    if t.shape[dim] == 0:
         return ()
     else:
         return tuple(
@@ -4147,13 +4316,14 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
 
 @register_decomposition(aten.squeeze.dims)
 def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     if dim is None:
         dims = tuple(idx for idx, size in enumerate(a.shape) if size == 1)
         return prims.squeeze(a, dims) if dims else prims.view_of(a)
 
     ndim = a.ndim
+
     dim = utils.canonicalize_dims(ndim, dim)
     dims = (dim,) if isinstance(dim, Dim) else dim
     # Short-circuits if the tensor has no dimensions
@@ -4162,7 +4332,8 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
         return prims.view_of(a)
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
-    dims = tuple(d for d in dims if guard_size_oblivious(a.shape[d] == 1))
+    # would it be better if we just not allow 1 for unbacked at runtiume?
+    dims = tuple(d for d in dims if guard_or_false(a.shape[d] == 1))
     if len(dims) == 0:
         return prims.view_of(a)
     if len(dims) == 1:
@@ -4181,8 +4352,8 @@ def split_with_sizes(
     # NB: Perform the check_is_size tests first so that the
     # sum test does not try to do a replacement
     for i in range(len(split_sizes)):
-        torch._check_is_size(
-            split_sizes[i],
+        torch._check(
+            split_sizes[i] >= 0,
             lambda: "split_with_sizes expects split_sizes have only non-negative entries",
         )
     torch._check_with(
@@ -4218,7 +4389,7 @@ def tensor_split(
 
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
-        if not indices_or_sections.device.type == "cpu":
+        if indices_or_sections.device.type != "cpu":
             msg = (
                 f"tensor_split: if indices_or_sections is a tensor it must be on the CPU, "
                 f"but received one on {indices_or_sections.device}"
@@ -4293,6 +4464,7 @@ def hsplit(
     if isinstance(indices_or_sections, IntLike):
         split_size = indices_or_sections
         torch._check(
+            # pyrefly: ignore [unsupported-operation]
             (split_size != 0 and a.shape[dim] % split_size == 0),
             lambda: (
                 "torch.hsplit attempted to split along dimension "
@@ -4304,6 +4476,7 @@ def hsplit(
                 + "!"
             ),
         )
+        # pyrefly: ignore [bad-argument-type]
         return tensor_split(a, split_size, dim)
 
     torch._check_type(
@@ -4334,6 +4507,7 @@ def vsplit(
     if isinstance(indices_or_sections, IntLike):
         split_size = indices_or_sections
         torch._check(
+            # pyrefly: ignore [unsupported-operation]
             (split_size != 0 and a.shape[0] % split_size == 0),
             lambda: (
                 f"torch.vsplit attempted to split along dimension 0"
@@ -4344,6 +4518,7 @@ def vsplit(
                 f"!"
             ),
         )
+        # pyrefly: ignore [bad-argument-type]
         return tensor_split(a, split_size, 0)
 
     torch._check_type(
@@ -4548,6 +4723,7 @@ def dsplit(a: TensorLikeType, sections: DimsType) -> TensorSequenceType:
         raise RuntimeError(
             f"torch.dsplit requires a tensor with at least 3 dimension, but got a tensor with {a.ndim} dimensions!"
         )
+    # pyrefly: ignore [unsupported-operation]
     if isinstance(sections, IntLike) and (sections == 0 or a.shape[2] % sections != 0):
         raise RuntimeError(
             "torch.dsplit attempted to split along dimension 2, "
@@ -4599,7 +4775,7 @@ def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     if a.ndim <= 1 or dim0 == dim1:
         return aten.alias.default(a)
 
-    _permutation = list(range(0, a.ndim))
+    _permutation = list(range(a.ndim))
     _permutation[_dim0] = _dim1
     _permutation[_dim1] = _dim0
     return torch.permute(a, _permutation)
@@ -5022,7 +5198,7 @@ def empty_like(
         )
 
     # memory_format == torch.preserve_format
-    logical_to_physical_perm = (
+    logical_to_physical_perm, _ = (
         utils.compute_elementwise_output_logical_to_physical_perm(a)
     )
     # identity perm is [2, 1, 0]
@@ -5321,6 +5497,7 @@ def logspace(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def meshgrid(tensors: Sequence[TensorLikeType], indexing: str):
     pass
 
@@ -5489,6 +5666,13 @@ def empty_strided(
     )
 
 
+def _strength_reduce_integer(val: int) -> torch.dtype:
+    for possible_dtype in (torch.uint8, torch.uint16, torch.int32):
+        if val <= torch.iinfo(possible_dtype).max:
+            return possible_dtype
+    return torch.int64
+
+
 @register_decomposition(aten.eye)
 @out_wrapper()
 def eye(
@@ -5510,12 +5694,15 @@ def eye(
     torch._check(n >= 0, lambda: f"n must be greater or equal to 0, got {n}")
     torch._check(m >= 0, lambda: f"m must be greater or equal to 0, got {m}")
 
-    range_n = torch.arange(n, dtype=torch.int64, device=device, requires_grad=False)
-    range_m = torch.arange(m, dtype=torch.int64, device=device, requires_grad=False)
+    range_dtype = torch.int64
+    if isinstance(n, utils.IntWithoutSymInt) and isinstance(m, utils.IntWithoutSymInt):
+        range_dtype = _strength_reduce_integer(max(n, m))
+    range_n = torch.arange(n, dtype=range_dtype, device=device, requires_grad=False)
+    range_m = torch.arange(m, dtype=range_dtype, device=device, requires_grad=False)
 
     cond = range_n.unsqueeze(-1) == range_m
-    if dtype is torch.bool:
-        return cond
+    if layout in (torch.strided, None) and not pin_memory:
+        return cond.to(dtype or torch.get_default_dtype())
     else:
         one = torch.ones(
             (1,),
@@ -5716,7 +5903,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         # `masked_fill` allows cpu scalar to be moved to cuda, xpu and hpu but not otherwise.
         is_cpu_scalar = (
             a.device.type
-            in ["cuda", "xpu", torch._C._get_privateuse1_backend_name(), "hpu"]
+            in ["cuda", "xpu", "mps", torch._C._get_privateuse1_backend_name(), "hpu"]
             and value.device.type == "cpu"
         )
         torch._check(
@@ -5737,6 +5924,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
 
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
+    # pyrefly: ignore [no-matching-overload]
     value = _maybe_convert_to_dtype(value, a.dtype)
     r = torch.where(mask, value, a)  # type: ignore[arg-type]
 
@@ -5822,7 +6010,8 @@ def norm(
 @out_wrapper()
 def trace(self: TensorLikeType) -> TensorLikeType:
     torch._check(
-        self.ndim == 2, lambda: "expected a matrix, but got tensor with dim {self.ndim}"
+        self.ndim == 2,
+        lambda: f"expected a matrix, but got tensor with dim {self.ndim}",
     )
     return torch.sum(torch.diag(self, 0))
 
@@ -6039,7 +6228,7 @@ def bucketize(
     if n_boundaries == 0:
         return torch.zeros_like(a)
     # We are trying to find the bucket (defined by pairs of consecutive elements of `boundaries`)
-    # each element of `a` belongs to. We use binary search to achieve logarithimic complexity,
+    # each element of `a` belongs to. We use binary search to achieve logarithmic complexity,
     # but each step of the search is done "in parallel" over all elements of `a`
     # can't use int32 as indexes, so we have to do all computations with int64 and convert at the end
     start = torch.zeros(a.shape, device=a.device, dtype=torch.int64)
@@ -6301,7 +6490,7 @@ def _dot_check_wrapper(fn):
 
 
 @register_decomposition(aten.dot)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
@@ -6321,7 +6510,7 @@ def dot(self, other):
 
 
 @register_decomposition(aten.vdot)
-@out_wrapper()
+@out_wrapper(exact_dtype=True)
 @_dot_check_wrapper
 @elementwise_type_promotion_wrapper(
     type_promoting_args=("self", "other"),
@@ -6464,7 +6653,7 @@ squeeze_copy = _make_copy_from_view(aten.squeeze)
 permute_copy = _make_copy_from_view(aten.permute)
 t_copy = _make_copy_from_view(aten.t)
 transpose_copy = _make_copy_from_view(aten.transpose)
-unbind_copy = _make_copy_from_view(aten.unbind)
+unbind_copy = _make_copy_from_view(aten.unbind, return_none_on_out_variant=True)
 unsqueeze_copy = _make_copy_from_view(aten.unsqueeze)
 view_copy = _make_copy_from_view(aten.view)
 
@@ -6530,6 +6719,7 @@ def _infer_scalar_type(obj):
         # double.
         if length == 0:
             return torch.get_default_dtype()
+
         for i in range(length):
             cur_item = obj[i]
             # TODO: test this
@@ -6567,6 +6757,7 @@ def _recursive_build(
         # torch.Size([1, 2])
         return obj.detach().to(dtype=scalarType, device="cpu", copy=True)
     elif isinstance(obj, Number):
+        # pyrefly: ignore [bad-argument-type]
         return torch.scalar_tensor(obj, dtype=scalarType)
 
     # seq can be a list of tensors

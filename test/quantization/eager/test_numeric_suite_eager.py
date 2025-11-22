@@ -2,42 +2,44 @@
 # ruff: noqa: F841
 
 import unittest
+
 import torch
-import torch.nn as nn
 import torch.ao.nn.quantized as nnq
-from torch.ao.quantization import (
-    DeQuantStub,
-    QuantStub,
-    convert,
-    default_qconfig,
-    prepare,
-    quantize,
-    quantize_dynamic,
-)
+import torch.nn as nn
 from torch.ao.ns._numeric_suite import (
-    OutputLogger,
-    Shadow,
-    ShadowLogger,
     compare_model_outputs,
     compare_model_stub,
     compare_weights,
-    prepare_model_outputs,
     get_matching_activations,
+    OutputLogger,
+    prepare_model_outputs,
+    Shadow,
+    ShadowLogger,
+)
+from torch.ao.quantization import (
+    convert,
+    default_qconfig,
+    DeQuantStub,
+    prepare,
+    quantize,
+    quantize_dynamic,
+    QuantStub,
 )
 from torch.testing._internal.common_quantization import (
     AnnotatedConvBnReLUModel,
     AnnotatedConvModel,
     AnnotatedConvTransposeModel,
     AnnotatedSingleLayerLinearModel,
-    LSTMwithHiddenDynamicModel,
     AnnotatedTwoLayerLinearModel,
+    LSTMwithHiddenDynamicModel,
     QuantizationTestCase,
     SingleLayerLinearDynamicModel,
-    test_only_eval_fn,
     skip_if_no_torchvision,
+    test_only_eval_fn,
 )
 from torch.testing._internal.common_quantized import override_qengines
-from torch.testing._internal.common_utils import IS_ARM64
+from torch.testing._internal.common_utils import IS_ARM64, raise_on_run_directly
+
 
 class SubModule(torch.nn.Module):
     def __init__(self) -> None:
@@ -152,7 +154,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in weight_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         model_list = [SingleLayerLinearDynamicModel(qengine)]
         for model in model_list:
@@ -176,7 +178,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in weight_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         model_list = [LSTMwithHiddenDynamicModel(qengine)]
         for model in model_list:
@@ -198,12 +200,20 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
-        model_list = [AnnotatedConvModel(qengine),
-                      AnnotatedConvTransposeModel("qnnpack"),  # ConvT cannot use per channel weights
-                      AnnotatedConvBnReLUModel(qengine)]
-        module_swap_list = [nn.Conv2d, nn.intrinsic.modules.fused.ConvReLU2d, nn.ConvTranspose2d]
+        model_list = [
+            AnnotatedConvModel(qengine),
+            AnnotatedConvTransposeModel(
+                "qnnpack"
+            ),  # ConvT cannot use per channel weights
+            AnnotatedConvBnReLUModel(qengine),
+        ]
+        module_swap_list = [
+            nn.Conv2d,
+            nn.intrinsic.modules.fused.ConvReLU2d,
+            nn.ConvTranspose2d,
+        ]
         for model in model_list:
             model.eval()
             if hasattr(model, "fuse_model"):
@@ -225,7 +235,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         linear_data = self.calib_data[0][0]
         module_swap_list = [nn.Linear]
@@ -250,7 +260,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         linear_data = self.calib_data[0][0]
         module_swap_list = [nn.Linear]
@@ -279,7 +289,6 @@ class TestNumericSuiteEager(QuantizationTestCase):
         self.assertTrue(isinstance(q_model.mod1, Shadow))
         self.assertFalse(isinstance(q_model.conv, Shadow))
 
-
     @override_qengines
     def test_compare_model_stub_functional_static(self):
         r"""Compare the output of static quantized functional layer and its float shadow module"""
@@ -305,7 +314,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
         for v in ob_dict.values():
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
             for i, val in enumerate(v["quantized"]):
-                self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                self.assertTrue(v["float"][i].shape == val.shape)
 
     @override_qengines
     def test_compare_model_stub_linear_dynamic(self):
@@ -319,7 +328,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         linear_data = self.calib_data[0][0]
 
@@ -348,7 +357,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in ob_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         lstm_input = torch.rand((1, 1, 2))
         lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
@@ -402,7 +411,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in act_compare_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         linear_data = self.calib_data[0][0]
         model_list = [AnnotatedSingleLayerLinearModel(qengine)]
@@ -438,7 +447,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
         for v in act_compare_dict.values():
             self.assertTrue(len(v["float"]) == len(v["quantized"]))
             for i, val in enumerate(v["quantized"]):
-                self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                self.assertTrue(v["float"][i].shape == val.shape)
 
     @override_qengines
     def test_compare_model_outputs_linear_dynamic(self):
@@ -455,7 +464,7 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in act_compare_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(v["float"][i].shape == v["quantized"][i].shape)
+                    self.assertTrue(v["float"][i].shape == val.shape)
 
         linear_data = self.calib_data[0][0]
 
@@ -484,16 +493,12 @@ class TestNumericSuiteEager(QuantizationTestCase):
             for v in act_compare_dict.values():
                 self.assertTrue(len(v["float"]) == len(v["quantized"]))
                 for i, val in enumerate(v["quantized"]):
-                    self.assertTrue(len(v["float"][i]) == len(v["quantized"][i]))
+                    self.assertTrue(len(v["float"][i]) == len(val))
                     if i == 0:
-                        self.assertTrue(v["float"][i][0].shape == v["quantized"][i][0].shape)
+                        self.assertTrue(v["float"][i][0].shape == val[0].shape)
                     else:
-                        self.assertTrue(
-                            v["float"][i][0].shape == v["quantized"][i][0].shape
-                        )
-                        self.assertTrue(
-                            v["float"][i][1].shape == v["quantized"][i][1].shape
-                        )
+                        self.assertTrue(v["float"][i][0].shape == val[0].shape)
+                        self.assertTrue(v["float"][i][1].shape == val[1].shape)
 
         lstm_input = torch.rand((1, 1, 2))
         lstm_hidden = (torch.rand(1, 1, 2), torch.rand(1, 1, 2))
@@ -540,12 +545,23 @@ class TestNumericSuiteEager(QuantizationTestCase):
 
     @skip_if_no_torchvision
     def _test_vision_model(self, float_model):
-        float_model.to('cpu')
+        float_model.to("cpu")
         float_model.eval()
         float_model.fuse_model()
         float_model.qconfig = torch.ao.quantization.default_qconfig
-        img_data = [(torch.rand(2, 3, 224, 224, dtype=torch.float), torch.randint(0, 1, (2,), dtype=torch.long)) for _ in range(2)]
-        qmodel = quantize(float_model, torch.ao.quantization.default_eval_fn, [img_data], inplace=False)
+        img_data = [
+            (
+                torch.rand(2, 3, 224, 224, dtype=torch.float),
+                torch.randint(0, 1, (2,), dtype=torch.long),
+            )
+            for _ in range(2)
+        ]
+        qmodel = quantize(
+            float_model,
+            torch.ao.quantization.default_eval_fn,
+            [img_data],
+            inplace=False,
+        )
 
         wt_compare_dict = compare_weights(float_model.state_dict(), qmodel.state_dict())
 
@@ -560,9 +576,11 @@ class TestNumericSuiteEager(QuantizationTestCase):
         # 'quantized', containing the activations of floating point and quantized model at matching locations.
         act_compare_dict = compare_model_outputs(float_model, qmodel, data)
 
-
         for key in act_compare_dict:
-            compute_error(act_compare_dict[key]['float'][0], act_compare_dict[key]['quantized'][0].dequantize())
+            compute_error(
+                act_compare_dict[key]["float"][0],
+                act_compare_dict[key]["quantized"][0].dequantize(),
+            )
 
         prepare_model_outputs(float_model, qmodel)
 
@@ -579,10 +597,16 @@ class TestNumericSuiteEager(QuantizationTestCase):
     @unittest.skipIf(IS_ARM64, "Not working on arm right now")
     def test_mobilenet_v2(self):
         from torchvision.models.quantization import mobilenet_v2
+
         self._test_vision_model(mobilenet_v2(pretrained=True, quantize=False))
 
     @skip_if_no_torchvision
     @unittest.skipIf(IS_ARM64, "Not working on arm right now")
     def test_mobilenet_v3(self):
         from torchvision.models.quantization import mobilenet_v3_large
+
         self._test_vision_model(mobilenet_v3_large(pretrained=True, quantize=False))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

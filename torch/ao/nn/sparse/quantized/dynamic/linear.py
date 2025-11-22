@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -18,6 +17,7 @@ class Linear(torch.nn.Module):
     r"""
     A dynamically quantized sparse linear module with float tensor as inputs and outputs.
     """
+
     _version = 1
     _op_type = "sparse_dynamic"
     _FLOAT_MODULE = torch.nn.Linear
@@ -83,9 +83,9 @@ class Linear(torch.nn.Module):
         error_msgs,
     ):
         op_type = int(state_dict[prefix + "op_type"])
-        assert (
-            op_type == "sparse"
-        ), f"Cannot load from op_type [{op_type}], expecting [{self._op_type}]"
+        assert op_type == "sparse", (
+            f"Cannot load from op_type [{op_type}], expecting [{self._op_type}]"
+        )
         state_dict.pop(prefix + "op_type")
 
         version = local_metadata.get("version", None)
@@ -124,9 +124,9 @@ class Linear(torch.nn.Module):
     def set_weight_bias(
         self,
         w: torch.Tensor,
-        b: Optional[torch.Tensor],
-        row_block_size: Optional[int],
-        col_block_size: Optional[int],
+        b: torch.Tensor | None,
+        row_block_size: int | None,
+        col_block_size: int | None,
     ) -> None:
         assert row_block_size is not None and col_block_size is not None
         self.out_features = w.shape[0]
@@ -139,7 +139,7 @@ class Linear(torch.nn.Module):
 
         We only care about the convert at this stage, no need for observers just yet.
         """
-        assert type(mod) == cls._FLOAT_MODULE, (
+        assert type(mod) is cls._FLOAT_MODULE, (
             " nnq."
             + cls.__name__
             + ".from_float only works for "
@@ -148,9 +148,11 @@ class Linear(torch.nn.Module):
         # TODO: Need to add options to qconfig to avoid the calibration.
         # TODO: Add calibration for the sparsity
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
-        if type(mod) == nni.LinearReLU:
+        if type(mod) is nni.LinearReLU:
             mod = mod[0]
+        # pyrefly: ignore [missing-attribute]
         if mod.qconfig is not None and mod.qconfig.weight is not None:
+            # pyrefly: ignore [not-callable]
             weight_observer = mod.qconfig.weight()
         else:
             # We have the circular import issues if we import the qconfig in the beginning of this file:
@@ -184,5 +186,6 @@ class Linear(torch.nn.Module):
             col_block_size,
             dtype=dtype,
         )
+        # pyrefly: ignore [bad-argument-type]
         qlinear.set_weight_bias(qweight, mod.bias, row_block_size, col_block_size)
         return qlinear

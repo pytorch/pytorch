@@ -27,12 +27,12 @@ batched_binary_configs_short = op_bench.config_list(
 )
 
 batched_binary_configs_long = op_bench.cross_product_configs(
-    B=[1, 128],
-    M=[8, 128],
-    N=[32, 64],
-    K=[4, 256],
-    device=["cpu", "cuda"],
-    dtype=[torch.float, torch.bfloat16],
+    B=[8, 32],
+    M=[256, 1024],
+    N=[256, 1024],
+    K=[64, 128],
+    device=["cuda"],
+    dtype=[torch.float32, torch.bfloat16, torch.float16],
     tags=["long"],
 )
 
@@ -40,8 +40,12 @@ batched_binary_configs_long = op_bench.cross_product_configs(
 class BatchedBinaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, B, M, N, K, device, dtype, op_func):
         self.inputs = {
-            "batch1": torch.rand((B, M, N), device=device).to(dtype=dtype),
-            "batch2": torch.rand((B, N, K), device=device).to(dtype=dtype),
+            "batch1": torch.rand(
+                (B, M, N), device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
+            "batch2": torch.rand(
+                (B, N, K), device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
         }
         self.op_func = op_func
 
@@ -52,6 +56,11 @@ class BatchedBinaryOpBenchmark(op_bench.TorchBenchmarkBase):
 op_bench.generate_pt_tests_from_op_list(
     batched_binary_ops,
     batched_binary_configs_short + batched_binary_configs_long,
+    BatchedBinaryOpBenchmark,
+)
+op_bench.generate_pt_gradient_tests_from_op_list(
+    batched_binary_ops,
+    batched_binary_configs_long,
     BatchedBinaryOpBenchmark,
 )
 
@@ -66,9 +75,15 @@ batched_ternary_ops = op_bench.op_list(
 class BatchedTernaryOpBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, B, M, N, K, device, dtype, op_func):
         self.inputs = {
-            "input_": torch.rand((B, M, K), device=device).to(dtype=dtype),
-            "batch1": torch.rand((B, M, N), device=device).to(dtype=dtype),
-            "batch2": torch.rand((B, N, K), device=device).to(dtype=dtype),
+            "input_": torch.rand(
+                (B, M, K), device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
+            "batch1": torch.rand(
+                (B, M, N), device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
+            "batch2": torch.rand(
+                (B, N, K), device=device, dtype=dtype, requires_grad=self.auto_set()
+            ),
         }
         self.op_func = op_func
 
@@ -81,6 +96,12 @@ op_bench.generate_pt_tests_from_op_list(
     batched_binary_configs_short + batched_binary_configs_long,
     BatchedTernaryOpBenchmark,
 )
+op_bench.generate_pt_gradient_tests_from_op_list(
+    batched_ternary_ops,
+    batched_binary_configs_long,
+    BatchedTernaryOpBenchmark,
+)
+
 
 # TODO: does it automatically register new scripts?
 
