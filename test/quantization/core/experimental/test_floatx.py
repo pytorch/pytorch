@@ -125,7 +125,7 @@ SPECIAL_NUMBERS = {
 }
 
 FLOAT8_DTYPES_WITH_INF = [torch.float8_e5m2]
-
+FLOAT8_SATURATING_DYTPES = [torch.float8_e4m3fn]
 
 def _int_bits_to_float(x):
     y = struct.unpack("!f", struct.pack("!I", x))[0]
@@ -177,9 +177,12 @@ def simulate_fp8_precision(input, variant):
     # Re-compose mantissa and exponent
     vals = (mantissa_val_rounded * 2.0 ** (-23 + exponent)).to(dtype)
 
-    # Replace overflows with inf/NaN as appropriate (no saturation)
-    have_inf = variant in FLOAT8_DTYPES_WITH_INF
-    vals[vals > torch.finfo(variant).max] = torch.inf if have_inf else torch.nan
+    # Replace overflows with inf/NaN/max as appropriate
+    # e5m2fn types still overflow to NaN (non-saturating)
+    has_inf = variant in FLOAT8_DTYPES_WITH_INF
+    is_sat = variant in FLOAT8_SATURATING_DYTPES
+    max_v = torch.finfo(variant).max
+    vals[vals > max_v] = torch.inf if has_inf else max_v if is_sat else torch.nan
 
     return vals * signs
 
@@ -263,6 +266,7 @@ class TestFloat8Dtype(TestCase):
         x = torch.cat((x, -x))
         x8 = x.to(dtype)
         x8_simulated = simulate_fp8_precision(x, dtype)
+
         self.assertEqual(x8_simulated, x8.float())
 
     def test_float8_e8m0fnu_rne_rounding(self, device):
