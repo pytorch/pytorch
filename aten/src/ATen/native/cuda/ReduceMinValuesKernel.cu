@@ -12,6 +12,7 @@
 #include <ATen/NumericUtils.h>
 
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/cuda/NumericLimits.cuh>
 
@@ -33,24 +34,24 @@ void min_values_kernel_cuda_impl(TensorIterator& iter) {
 }
 
 void min_values_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.dtype(), "min_values_cuda", [&]() {
+  AT_DISPATCH_V2(iter.dtype(), "min_values_cuda", AT_WRAP([&]() {
     min_values_kernel_cuda_impl<scalar_t>(iter);
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
 void min_launch_kernel(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.input_dtype(), "min_cuda", [&]() {
+  AT_DISPATCH_V2(iter.input_dtype(), "min_cuda", AT_WRAP([&]() {
     gpu_reduce_kernel<scalar_t, scalar_t>(
       iter,
       MinOps<scalar_t>{},
       thrust::pair<scalar_t, int64_t>(at::numeric_limits<scalar_t>::upper_bound(), 0));
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
 void min_all_launch_kernel(TensorIterator &iter) {
-  AT_DISPATCH_ALL_TYPES_AND3(kBFloat16, kHalf, kBool, iter.input_dtype(), "min_all_cuda", [&] {
+  AT_DISPATCH_V2(iter.input_dtype(), "min_all_cuda", AT_WRAP([&] {
     min_values_kernel_cuda_impl<scalar_t>(iter);
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kBFloat16, kHalf, kBool);
 }
 
 REGISTER_DISPATCH(min_values_stub, &min_values_kernel_cuda)
