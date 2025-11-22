@@ -1405,7 +1405,7 @@ class TestMaxAutotune(TestCase):
 
         def mock_lookup(self, *args, **kwargs):
             timings = lookup(self, *args, **kwargs)
-            return {choice: float("inf") for choice in timings.keys()}
+            return {choice: float("inf") for choice in timings}
 
         a = torch.zeros([16, 16], device=GPU_TYPE)
         b = torch.zeros([16, 16], device=GPU_TYPE)
