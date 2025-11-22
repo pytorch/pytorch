@@ -26,10 +26,13 @@ constexpr int kTpMessagePayloadIdx = 2;
 // stored as, well, tensors in the tensorpipe::Message).
 constexpr int kTpMessagePickleIdx = 3;
 
-inline c10::Device indexToDevice(c10::DeviceIndex index) {
+inline c10::Device indexToDevice(const std::string& tpDeviceType, c10::DeviceIndex index) {
   if (index == -1) {
     return c10::Device(at::kCPU);
+  } else if (tpDeviceType == tensorpipe::kXpuDeviceType) {
+    return c10::Device(at::kXPU, index);
   } else {
+    //default falls to CUDA
     return c10::Device(at::kCUDA, index);
   }
 }
@@ -98,6 +101,8 @@ c10::DeviceType convertDeviceType(const std::string& tpDeviceType) {
     return c10::kCPU;
   } else if (tpDeviceType == tensorpipe::kCudaDeviceType) {
     return c10::kCUDA;
+  } else if (tpDeviceType == tensorpipe::kXpuDeviceType) {
+    return c10::kXPU;
   } else {
     TORCH_INTERNAL_ASSERT(false, "Unrecognized TensorPipe buffer type.");
   }
@@ -199,9 +204,15 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
             tensor.storage(), streams, tpMessage);
     TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i + 1);
 
-    tensorpipe::Device targetDevice = devices.empty() || devices[i].is_cpu()
-        ? tensorpipe::Device{tensorpipe::kCpuDeviceType, 0}
-        : tensorpipe::Device{tensorpipe::kCudaDeviceType, devices[i].index()};
+    tensorpipe::Device targetDevice = tensorpipe::Device{tensorpipe::kCpuDeviceType, 0};
+    if (!devices.empty() && !devices[i].is_cpu()) {
+        if (devices[i].type() == at::kXPU) {
+          targetDevice = tensorpipe::Device{tensorpipe::kXpuDeviceType, devices[i].index()};
+        } else {
+          // default falls to CUDA
+          targetDevice = tensorpipe::Device{tensorpipe::kCudaDeviceType, devices[i].index()};
+        }
+    }
     tpMessage.tensors.back().targetDevice = std::move(targetDevice);
 
     if (maybeCopiedTensor.has_value()) {
@@ -326,9 +337,10 @@ c10::intrusive_ptr<Message> tensorpipeDeserialize(
   for (const auto i : c10::irange(tpDescriptor.tensors.size())) {
     const auto& tensor = tpDescriptor.tensors[i];
     if (tensor.targetDevice.has_value() &&
-        tensor.targetDevice->type == tensorpipe::kCudaDeviceType) {
+        (tensor.targetDevice->type == tensorpipe::kCudaDeviceType ||
+            tensor.targetDevice->type == tensorpipe::kXpuDeviceType)) {
       TORCH_INTERNAL_ASSERT(
-          tensors[i].device() == indexToDevice(tensor.targetDevice->index),
+          tensors[i].device() == indexToDevice(tensor.targetDevice->type, tensor.targetDevice->index),
           "Tensor ",
           i,
           " in message ",
