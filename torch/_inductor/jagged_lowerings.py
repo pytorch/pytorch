@@ -144,7 +144,7 @@ def register_jagged_ops():
                 padding_value,
             )
 
-        offsets: TensorBox = jagged_offsets[0]
+        offsets: TensorBox = jagged_offsets[0]  # type: ignore[assignment]
         offsets_len = offsets.get_size()[0]
         offsets_dtype = offsets.get_dtype()
         batch_size = offsets_len - 1
@@ -210,7 +210,7 @@ def register_jagged_ops():
                 jagged_len,
             )
 
-        offsets: TensorBox = jagged_offsets[0]
+        offsets: TensorBox = jagged_offsets[0]  # type: ignore[assignment]
         offsets_dtype = offsets.get_dtype()
         batch_size = dense_size[0]
         max_seq_len = dense_size[1]
