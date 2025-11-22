@@ -2312,7 +2312,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         eager_out = run(q, k, v)
         compiled_out = compiled_run(q, k, v)
-        torch.testing.assert_close(eager_out, compiled_out, atol = 1e-3, rtol = 1e-3)
+        torch.testing.assert_close(eager_out, compiled_out, atol=1e-3, rtol=1e-3)
 
         # Exercise different dynamic shapes to ensure SymInt sums remain well-formed.
         q2 = torch.randn(1, 2, 160, 32, device=device, dtype=dtype)
@@ -2321,7 +2321,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
         eager_out2 = run(q2, k2, v2)
         compiled_out2 = compiled_run(q2, k2, v2)
-        torch.testing.assert_close(eager_out2, compiled_out2, atol = 1e-3, rtol = 1e-3)
+        torch.testing.assert_close(eager_out2, compiled_out2, atol=1e-3, rtol=1e-3)
 
     @supported_platform
     def test_multiple_score_mod_calls(self, device):
