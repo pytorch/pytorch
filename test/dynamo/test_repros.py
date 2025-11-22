@@ -968,6 +968,15 @@ class LRUCacheWarningTests(LoggingTestCase):
     @requires_cuda
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
+        prev_default = torch._C._get_default_device()
+
+        def _restore_default_device():
+            if prev_default == "cpu":
+                torch.set_default_device(None)
+            else:
+                torch.set_default_device(prev_default)
+
+        self.addCleanup(_restore_default_device)
         torch.set_default_device("cuda")
 
         @torch.compile(backend="eager")
