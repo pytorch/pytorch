@@ -1214,7 +1214,16 @@ def speculate_subgraph_with_auto_output_flattening(
     # target of the proxy that we created for the higherOrderOperator.
     source_target: Optional[HigherOrderOperator] = None,
     enable_grad: Optional[bool] = None,
-    # TODO - We can probably just make everyone use automatic for wrap_semantics
+    # automatic: relies on Dynamo to find the used tensors and lift them as
+    # inputs.
+    #
+    # automatic_with_new_placeholder: relies on the function arg names to create
+    # a new proxy. Also, it will always INSERT a tensor placeholder as input,
+    # even though it might not be used in the graph (as opposed to automatic
+    # which will not insert the unused placeholder). This is useful for
+    # autograd.Function backward where we do need to account for all the inputs
+    # of the backwards to be lifted as inputs for making the fwd-bwd graph
+    # consistent.
     set_subgraph_inputs: Literal[
         "automatic", "automatic_with_new_placeholder", "flatten_manual", "manual"
     ] = "automatic",
@@ -3806,26 +3815,17 @@ class AutogradFunctionApplyVariable(VariableTracker):
             self.trace_backward_graph(tx, ctx, fwd_tracer, fwd_out, fwd_fn)
         )
 
-        # At this point, the fwd_out represents the output of the forward
-        # method. fwd_graph represents the tensor computation, its input and
-        # output do not match the original forward method. Same is true for the
-        # bwd_out and bwd_graph. However, in order to create a new
-        # autograd.Function to pass to the lower compiler, the fwd and bwd graph
-        # must be "consistent".
         self.rewire_bwd_graph_inputs(
-            fwd_out, fwd_graph, fwd_freevars, bwd_out, bwd_graph, bwd_freevars, args
+            fwd_freevars, bwd_out, bwd_graph, bwd_freevars, args
         )
 
         fwd_graph, bwd_graph = self.handle_saved_tensors_wiring(
-            ctx,
             fwd_out,
             fwd_graph,
             fwd_freevars,
             fwd_graph_output_vts,
-            bwd_out,
             bwd_graph,
             bwd_freevars,
-            bwd_args,
         )
 
         # If users call ctx.mark_non_differentiable, we should capture these output tensors who
@@ -3848,7 +3848,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
             "fwd_body",
             torch.fx.GraphModule(fwd_nn_modules.nn_modules, fwd_graph),
         )
-
         fwd_node = make_attr(tx, fwd_name)
 
         # Store bwd_body
@@ -3857,7 +3856,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
             "bwd_body",
             torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
         )
-
         bwd_node = make_attr(tx, bwd_name)
 
         p_args = (
@@ -3908,7 +3906,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
         return ctx
 
     def trace_forward_graph(self, tx, ctx, fwd_tracer, args, kwargs):
-        from torch._functorch.autograd_function import autograd_function_trace_helper
+        """
+        Traces the forward method of the autograd.Function object.
+        """
+        from torch._functorch.autograd_function import DynamoAutogradFunctionTraceHelper
 
         fwd_fn, fwd_args = self.prepare_fn_vt(ctx, "forward", args)
 
@@ -3916,7 +3917,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # mode and also applying view_as for input tensors that are returned as
         # outputs. Therefore, we wrap the original forward in a helper that have
         # those extra bits for Dynamo to trace.
-        fwd_fn = _make_inlined(tx, autograd_function_trace_helper)(fwd_fn)
+        fwd_fn = _make_inlined(tx, DynamoAutogradFunctionTraceHelper.fwd_trace_helper)(
+            fwd_fn
+        )
 
         # Speculate subgraph on the fwd
         fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts = (
@@ -3933,7 +3936,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
             )
         )
 
-        # For inputs that are not used but need to be captured, so that the gradient is tracked.
+        # There could be unused inputs in the forward, and Dynamo might not
+        # capture them. We must lift them as inputs, because even though they
+        # are not used in forward, we still need to account for their gradients
+        # in the backward.
         for arg in args:
             if isinstance(arg, variables.TensorVariable):
                 fwd_tracer.maybe_lift_tracked_freevar_to_input(arg.as_proxy())
@@ -3951,9 +3957,13 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
+
         return fwd_fn, fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts
 
     def trace_backward_graph(self, tx, ctx, fwd_tracer, fwd_out, fwd_fn):
+        """
+        Traces the backward method of the autograd.Function object.
+        """
         from . import UserDefinedClassVariable, UserFunctionVariable, UserMethodVariable
 
         # Note that for the forward, we do not restore side effects, because we
@@ -3990,7 +4000,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 return v.proxy.tracer is not fwd_tracer
             return True
 
-        # automatic with new placeholder relies on the function arg names to
+        # automatic_with_new_placeholder relies on the function arg names to
         # create a new proxy. Also, it will always INSERT a tensor placeholder
         # as input, even though it might not be used in the graph. This allows
         # us to make a mapping for the backward graph.
@@ -4016,6 +4026,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 if isinstance(
                     e, torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace
                 ):
+                    # TODO - Do not support this path because of eager
+                    # divergence forced by contiguous calls. Instead suggested
+                    # nonstrict_trace.
                     from unittest import mock
 
                     bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
@@ -4063,47 +4076,116 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         )
                 else:
                     raise e
+
+        # Restore the side effects
         tx.output.side_effects = prev_side_effects
+
         return bwd_args, bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts
 
     def rewire_bwd_graph_inputs(
         self,
-        fwd_out,
-        fwd_graph,
         fwd_freevars,
         bwd_out,
         bwd_graph,
         bwd_freevars,
         orig_fwd_args,
     ):
-        # Ensure fwd-input and bwd-output consistency - autograd.Function
-        # requires that the inputs of the forward line up correctly with the
-        # outputs of the backward. This is the responsibily of the user.  Now,
-        # when Dynamo is creating a new autograd.Function, it is now Dynamo
-        # responsibility to do this lineup. To do this, we use the original user
-        # point as the anchor point to provide this mapping.
-
-        # Some more description to understand the following codebase
+        # ---------------------------------------------------------------------
+        # Forward–Backward Input/Output Alignment
         #
-        # fwd_freevars/bwd_freevars: A map from outer graph proxy to inner graph
-        # placeholder proxy. The keys are ALWAYS outer graph proxy, these could
-        # be inputs in the main graph or also intermediates in the main graph
-        # that are passed as inputs to the subgraph.
+        # autograd.Function requires that the outputs of backward() correspond
+        # exactly to the inputs of forward(). Normally this alignment is the
+        # user’s responsibility. However, when Dynamo synthesizes a new
+        # autograd.Function for a traced region, Dynamo must perform this
+        # alignment automatically.
         #
-        # orig_fwd_args - Variable trackers for the forward graph inputs. Since
-        # these are inputs, the tensor variables here are all OUTER graph proxies.
-
-        # bwd_outs - Variable trackers for the backward output. Since these are
-        # output, the variable trackers here point to INNER graph proxies. The
-        # special case is when an input is passed directly to the output of the
-        # backward graph, in which case, the variable tracker can still point to
-        # the outer graph proxy.
-
-        # To make the fwd-inputs and bwd-outputs consistent, we just rewire the
-        # backward graph outputs to match with the forward graph inputs. To do
-        # this, we first rely on orig_fwd_args and bwd_outs to make a mapping of
-        # outer_proxy to inner graph proxy. And walk through the fwd_graph
-        # inputs and this map to find the bwd outputs.
+        # To do this, Dynamo uses the *original* forward call site as the anchor
+        # that defines how forward inputs map to backward outputs.
+        #
+        # ---------------------------------------------------------------------
+        # Terminology
+        #
+        # fwd_freevars / bwd_freevars:
+        #     Maps from *outer-graph proxies* to *inner-graph placeholder
+        #     proxies*. Keys are always outer-graph proxies (these may be actual
+        #     user inputs or intermediate values lifted into the subgraph).
+        #
+        # orig_fwd_args:
+        #     VariableTrackers for the forward() inputs. Since these correspond
+        #     to user-exposed arguments, each tracker points to an *outer-graph*
+        #     proxy.
+        #
+        # bwd_outs:
+        #     VariableTrackers for the backward() outputs. These usually point to
+        #     *inner-graph* proxies, except for cases where a forward input is
+        #     passed directly through to a backward output—in which case the
+        #     tracker may still refer to an outer-graph proxy.
+        #
+        # ---------------------------------------------------------------------
+        # Goal
+        #
+        # To ensure forward–backward consistency, we must rewire the backward
+        # graph outputs so that they line up with the forward graph inputs.
+        #
+        # We build a mapping from outer-graph proxy → inner-graph proxy using
+        # orig_fwd_args and bwd_outs, then iterate over the fwd_graph inputs to
+        # determine which backward outputs must be generated (or padded with
+        # None) to satisfy autograd’s calling convention.
+        #
+        # ---------------------------------------------------------------------
+        # Example
+        #
+        # Suppose the forward receives a user-defined object:
+        #
+        # @dataclass
+        # class Weird:
+        #     x: int
+        #     b: torch.Tensor
+        #     c: torch.Tensor
+        #
+        # class Foo(torch.autograd.Function):
+        #     @staticmethod
+        #     def forward(ctx, x: torch.Tensor, weird: Weird, z: torch.Tensor):
+        #         ctx.save_for_backward(weird.b, weird.c)
+        #         return weird.b * weird.c * x.clone()
+        #
+        #     @staticmethod
+        #     def backward(ctx, grad):
+        #         b, c = ctx.saved_tensors
+        #         return grad * b * c, None, grad * 2
+        #
+        # Dynamo lifts the tensor fields of the user-defined object for the trace:
+        #
+        # fwd_graph():
+        #     %l_weird_b : FakeTensor = placeholder[target=l_weird_b]
+        #     %l_weird_c : FakeTensor = placeholder[target=l_weird_c]
+        #     %l_x_      : FakeTensor = placeholder[target=l_x_]
+        #     %l_z_      : FakeTensor = placeholder[target=l_z_]
+        #     ...
+        #     return (outs,)
+        #
+        # The initial backward graph:
+        #
+        # bwd_graph():
+        #     %grad       : Tensor    = placeholder[target=grad]
+        #     %l_weird_b  : FakeTensor = placeholder[target=l_weird_b]
+        #     %l_weird_c  : FakeTensor = placeholder[target=l_weird_c]
+        #     ...
+        #     return (mul_1, mul_2)
+        #
+        # The forward graph has 4 inputs, but the backward graph produces only 2
+        # outputs, and their ordering does not match the forward argument order.
+        #
+        # So Dynamo rewires the backward graph outputs to align with the forward
+        # inputs:
+        #
+        # bwd_graph():
+        #     ...
+        #     return (None, None, mul_1, mul_2)
+        #
+        # This ensures the synthesized autograd.Function conforms to PyTorch’s
+        # forward/backward contract.
+        # ---------------------------------------------------------------------
 
         def get_bwd_node(vt):
             # Backward tensor vt here can be - (1) an intermediate, or (2) input
@@ -4149,17 +4231,27 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
     def handle_saved_tensors_wiring(
         self,
-        ctx,
         fwd_out,
         fwd_graph,
         fwd_freevars,
         fwd_graph_body_outputs,
-        bwd_out,
         bwd_graph,
         bwd_freevars,
-        bwd_args,
     ):
-        # First we need to map the existing forward graph outputs to bwd graph inputs.
+        # ---------------------------------------------------------------------
+        # In `rewire_bwd_graph_inputs`, we made fwd graph inputs line up with
+        # bwd graph outputs. This method lines up fwd graph outputs with bwd
+        # graph inputs, while also handling saved tensors.
+        #
+        # The problems are
+        # 1) The fwd graph outputs are not necessarily same as the fwd method
+        # outputs (e.g. when fwd method returns a user defined object).
+        # 2) The bwd graph might use some of the intermediates from the forward
+        # graph (via ctx.save_for_backward) but the forward graph might not have
+        # these as outputs as of now.
+        #
+        # ---------------------------------------------------------------------
+
         bwd_input_nodes = list(bwd_graph.find_nodes(op="placeholder"))
 
         fwd_vt_to_bwd_node = {}
