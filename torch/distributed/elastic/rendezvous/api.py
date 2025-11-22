@@ -11,7 +11,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, ClassVar, Optional
 
-from torch.distributed import Store
+from torch.distributed import Store, TCPStore
 from torch.distributed.elastic.utils.distributed import get_free_port
 
 
@@ -104,6 +104,14 @@ class RendezvousStoreInfo:
             store.get(RendezvousStoreInfo.MASTER_PORT_KEY).decode(encoding="UTF-8")
         )
         return RendezvousStoreInfo(master_addr=addr, master_port=port)
+
+    @staticmethod
+    def clean_up(store: Store) -> None:
+        """Clear master_addr/master_port keys from the store."""
+        # TODO: support EtcdStore after it supports delete_key
+        if isinstance(store, TCPStore):
+            store.delete_key(RendezvousStoreInfo.MASTER_ADDR_KEY)
+            store.delete_key(RendezvousStoreInfo.MASTER_PORT_KEY)
 
 
 class RendezvousInfo:
