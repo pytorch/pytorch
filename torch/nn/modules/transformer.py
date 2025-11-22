@@ -511,6 +511,7 @@ class TransformerEncoder(Module):
             _supported_device_type = [
                 "cpu",
                 "cuda",
+                "xpu",
                 torch.utils.backend_registration._privateuse1_backend_name,
             ]
             if torch.overrides.has_torch_function(tensor_args):
@@ -895,6 +896,7 @@ class TransformerEncoderLayer(Module):
             _supported_device_type = [
                 "cpu",
                 "cuda",
+                "xpu",
                 torch.utils.backend_registration._privateuse1_backend_name,
             ]
             if torch.overrides.has_torch_function(tensor_args):
