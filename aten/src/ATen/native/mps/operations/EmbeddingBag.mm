@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/mps/MPSProfiler.h>
@@ -6,6 +7,7 @@
 #include <ATen/native/Pool.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/mps/kernels/EmbeddingBag.h>
+#include <ATen/ops/aminmax.h>
 
 #include <fmt/format.h>
 
@@ -72,6 +74,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
     num_bags -= 1;
   }
   int64_t feature_size = weight.size(1);
+  int64_t num_embeddings = weight.size(0);
 
   auto bag_size = at::empty({num_bags}, indices.options());
   auto offset2bag = at::empty({indices.size(0)}, indices.options());
@@ -105,6 +108,17 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   params.feature_size = feature_size;
   params.mode = static_cast<EmbeddingBagMode>(mode);
   params.padding_idx = padding_idx;
+
+  if (num_indices > 0) {
+    auto [min_index, max_index] = at::aminmax(indices);
+    const auto min_idx_val = min_index.item<int64_t>();
+    const auto max_idx_val = max_index.item<int64_t>();
+    TORCH_CHECK(
+        min_idx_val >= 0, "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ", min_idx_val);
+    TORCH_CHECK(max_idx_val < num_embeddings,
+                "embedding_bag: Expected idx >= 0 && idx < num_embeddings but found idx to be ",
+                max_idx_val);
+  }
 
   auto num_threads = output.numel();
   MPSStream* stream = getCurrentMPSStream();
