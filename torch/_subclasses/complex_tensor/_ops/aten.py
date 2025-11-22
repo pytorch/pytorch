@@ -164,7 +164,7 @@ def div_impl(lhs: ComplexTensor, rhs: ComplexTensor, *, rounding_mode=None):
         raise NotImplementedError(
             "`rounding_mode` other than `None` not implemented for`ComplexTensor`."
         )
-    a_r, a_i = split_complex_tensor(lhs)
+    a_r, a_i = split_complex_arg(lhs)
     if not is_complex(rhs):
         return ComplexTensor(a_r / rhs, a_i / rhs)
     b_r, b_i = split_complex_arg(rhs)
@@ -699,7 +699,11 @@ def linalg_vector_norm_impl(self: ComplexTensor, *args, **kwargs) -> torch.Tenso
 
 @register_force_test(aten.copy_)
 def copy__impl(self: ComplexTensor, src, *args, **kwargs):
-    self_re, self_im = split_complex_tensor(self)
+    if not self.dtype.is_complex:
+        src_re, src_im = split_complex_arg(src)
+        return self.copy_(src_re)
+
+    self_re, self_im = split_complex_arg(self)
     src_re, src_im = split_complex_arg(src)
 
     ret_re = self_re.copy_(src_re, *args, **kwargs)
