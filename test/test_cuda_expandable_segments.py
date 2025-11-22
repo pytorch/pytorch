@@ -29,7 +29,6 @@ if __name__ == "__main__":
         torch.cuda.is_available()
         and not IS_JETSON
         and not IS_WINDOWS
-        and not TEST_WITH_ROCM
     ):
         get_disabled_tests(".")
 
