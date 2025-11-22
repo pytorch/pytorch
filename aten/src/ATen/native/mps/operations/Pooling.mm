@@ -394,20 +394,28 @@ static PoolSizes process_pool_sizes(const Tensor& input,
       std::stringstream input_size_str, output_size_str;
       // Build input size string for pooling dimensions
       for (const auto d : c10::irange(pooling_dims)) {
-        if (d > 0) input_size_str << "x";
+        if (d > 0)
+          input_size_str << "x";
         input_size_str << input.size(leading_dims + d);
       }
       // Build output size string for pooling dimensions
       for (const auto d : c10::irange(pooling_dims)) {
-        if (d > 0) output_size_str << "x";
+        if (d > 0)
+          output_size_str << "x";
         output_size_str << output_pooling_size[d];
       }
       // Always throw error - no need for extra bool flag
       TORCH_CHECK(output_pooling_size[dim] >= 1,
                   "Given input size: (",
-                  input.size(leading_dims - 1), "x", input_size_str.str(), "). ",
+                  input.size(leading_dims - 1),
+                  "x",
+                  input_size_str.str(),
+                  "). ",
                   "Calculated output size: (",
-                  input.size(leading_dims - 1), "x", output_size_str.str(), "). ",
+                  input.size(leading_dims - 1),
+                  "x",
+                  output_size_str.str(),
+                  "). ",
                   "Output size is too small");
     }
   }
