@@ -27,7 +27,7 @@ endif()
 
 set(METAL_CFLAGS -Wall -Wextra -fno-fast-math)
 
-if (MPS_ENABLE_NAX)
+if(MPS_ENABLE_NAX)
     set(METAL_FLAGS ${METAL_FLAGS} -Wno-c++20-extensions -std=metal4.0)
     list(APPEND METAL_CFLAGS ${METAL_FLAGS})
 endif()
