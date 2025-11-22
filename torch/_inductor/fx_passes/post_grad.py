@@ -703,7 +703,10 @@ def register_addmm_activation_fusions():
             return False
 
         output = match.output_node()
-        return not all(is_pointwise_use(use) for use in output.users)
+        if len(output.users):
+            return not all(is_pointwise_use(use) for use in output.users)
+        else:
+            return True
 
     args = [torch.empty(3), torch.empty(4, 2), torch.empty(2, 3)]
     beta_alpha_workaround = {"beta": 1.3, "alpha": 1.2}
