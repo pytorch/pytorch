@@ -2528,6 +2528,10 @@ class NoValidChoicesError(RuntimeError):
     pass
 
 
+# Indicating collective benchmark timeout
+COLLECTIVE_TIMEOUT_SENTINEL = float("-inf")
+
+
 @functools.cache
 def get_num_workers() -> int:
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
@@ -3051,6 +3055,18 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_elapse = time.time() - autotune_start_ts
         log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
 
+        # For collective: if any choice timed out, fallback to default implementation
+        if is_collective and timings:
+            has_timeout = any(
+                timing == COLLECTIVE_TIMEOUT_SENTINEL for timing in timings.values()
+            )
+            if has_timeout:
+                log.warning(
+                    "At least one choice timed out during collective benchmarking. "
+                    "Falling back to default implementation."
+                )
+                return {}
+
         if timings and all(not math.isfinite(timing) for timing in timings.values()):
             raise NoValidChoicesError
 
@@ -3426,8 +3442,10 @@ class AlgorithmSelectorCache(PersistentCache):
         Benchmark a choice for collective operations with cross-rank synchronization.
         This method ensures all ranks synchronize before benchmarking
         to get accurate measurements for distributed collective operations.
-        Timeout mechanism: If ANY rank times out locally, ALL ranks will fallback together
-        to avoid hang or deadlock.
+
+        Timeout/Error handling: If ANY rank times out or encounters an error,
+        ALL ranks will skip this choice by returning float("inf"), allowing
+        the autotuner to fall back to the default implementation.
         """
         from datetime import timedelta
 
@@ -3444,9 +3462,6 @@ class AlgorithmSelectorCache(PersistentCache):
         benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
-
-        if not (hasattr(choice, "gm") and choice.gm is not None):
-            return cls.benchmark_choice(choice, autotune_args)
 
         timeout = timedelta(seconds=timeout_seconds)
 
@@ -3481,11 +3496,12 @@ class AlgorithmSelectorCache(PersistentCache):
             # Sync decision across all ranks
             if sync_timeout_decision(local_timeout):
                 log.warning(
-                    "Warmup barrier timeout detected (timeout=%.1fs). "
-                    "All ranks falling back to regular benchmarking.",
+                    "Warmup barrier timeout detected for choice %s (timeout=%.1fs). "
+                    "All ranks skipping this choice.",
+                    getattr(choice, "name", "<unknown>"),
                     timeout_seconds,
                 )
-                return cls.benchmark_choice(choice, autotune_args)
+                return COLLECTIVE_TIMEOUT_SENTINEL
 
             torch.cuda.synchronize()
 
@@ -3501,13 +3517,14 @@ class AlgorithmSelectorCache(PersistentCache):
                 # Sync decision across all ranks
                 if sync_timeout_decision(local_timeout):
                     log.warning(
-                        "Barrier timeout at run %d/%d (timeout=%.1fs). "
-                        "All ranks falling back to regular benchmarking.",
+                        "Barrier timeout for choice %s at run %d/%d (timeout=%.1fs). "
+                        "All ranks skipping this choice.",
+                        getattr(choice, "name", "<unknown>"),
                         i + 1,
                         nruns,
                         timeout_seconds,
                     )
-                    return cls.benchmark_choice(choice, autotune_args)
+                    return COLLECTIVE_TIMEOUT_SENTINEL
 
                 torch.cuda.synchronize()
 
@@ -3538,11 +3555,12 @@ class AlgorithmSelectorCache(PersistentCache):
             # Sync decision across all ranks
             if sync_timeout_decision(local_timeout):
                 log.warning(
-                    "All-reduce timeout (timeout=%.1fs). "
-                    "All ranks falling back to regular benchmarking.",
+                    "All-reduce timeout for choice %s (timeout=%.1fs). "
+                    "All ranks skipping this choice.",
+                    getattr(choice, "name", "<unknown>"),
                     timeout_seconds,
                 )
-                return cls.benchmark_choice(choice, autotune_args)
+                return float("inf")
 
             timing = time_tensor.item()
 
@@ -3556,9 +3574,11 @@ class AlgorithmSelectorCache(PersistentCache):
 
         except Exception:
             log.warning(
-                "Collective benchmark exception. Falling back to regular benchmarking.",
+                "Collective benchmark exception for choice %s. Skipping this choice.",
+                getattr(choice, "name", "<unknown>"),
+                exc_info=True,
             )
-            return cls.benchmark_choice(choice, autotune_args)
+            return float("inf")
 
     @classmethod
     def benchmark_choices(
