@@ -5547,6 +5547,11 @@ class AOTInductorTestsTemplate:
             "triton_poi_fused_ones_1_xnumel",
             "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
         ]
+        if config.combo_kernels:
+            expected_scalar_args = [
+                "triton_poi_fused_0_xnumel",
+                "std::max(static_cast<int64_t>(512L), static_cast<int64_t>(u0))",
+            ]
 
         with config.patch({"aot_inductor.debug_intermediate_value_printer": "2"}):
             result, code = run_and_get_cpp_code(

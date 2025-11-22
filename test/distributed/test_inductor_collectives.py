@@ -2096,11 +2096,11 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                         "torch.ops._c10d_functional.all_gather_into_tensor_out.default("
                     )
                     .check("torch.ops._c10d_functional.reduce_scatter_tensor.default(")
-                    .check("extern_kernels.mm")
-                    .check("extern_kernels.addmm")
                     .check(
                         "torch.ops._c10d_functional.all_gather_into_tensor_out.default("
                     )
+                    .check("extern_kernels.mm")
+                    .check("extern_kernels.addmm")
                     .run(code)
                 )
             else:
