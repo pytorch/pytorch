@@ -52,8 +52,9 @@ from ..utils import (
     decode_device,
     get_all_devices,
     get_gpu_type,
-    is_gpu,
+    has_uses_tagged_as,
     is_pointwise_use,
+    is_gpu,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V
@@ -1495,8 +1496,10 @@ def should_prefer_unfused_addmm(match):
     if not is_gpu(inp.meta["val"].device.type):
         return False
 
-    output = match.output_node()
-    return all(is_pointwise_use(use) for use in output.users)
+    return has_uses_tagged_as(
+        match.output_node(),
+        (torch.Tag.pointwise, torch.Tag.reduction),
+    )
 
 
 @register_graph_pattern(
