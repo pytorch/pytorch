@@ -1908,14 +1908,9 @@ class TestMPS(TestCaseMPS):
         ("native_legit_no_training", lambda inp, mean, var: torch.ops.aten._native_batch_norm_legit_no_training.default(
             inp, None, None, mean, var, 0.1, 1e-5)[0]),
     ])
-    @parametrize("input_dtype,param_dtype,expect_error", [
-        (torch.float16, torch.float32, False),   # allowed mixed dtype
-        (torch.bfloat16, torch.float32, False),  # allowed mixed dtype
-        (torch.float32, torch.float16, True),    # disallowed: input not reduced float, params not float
-        (torch.float16, torch.bfloat16, True),   # disallowed: params not float
-        (torch.bfloat16, torch.float16, True),   # disallowed: params not float
-    ])
-    def test_batch_norm_mixed_dtypes(self, case_name, fn, input_dtype, param_dtype, expect_error):
+    @parametrize("input_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @parametrize("param_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_batch_norm_mixed_dtypes(self, case_name, fn, input_dtype, param_dtype):
         # See issue: https://github.com/pytorch/pytorch/issues/154887
         input_mps = torch.rand((2, 3, 4), dtype=input_dtype, device="mps")
         input_cpu = input_mps.cpu()
@@ -1924,15 +1919,14 @@ class TestMPS(TestCaseMPS):
         var_mps = torch.rand((3,), dtype=param_dtype, device="mps")
         var_cpu = var_mps.cpu()
 
-        if expect_error:
-            with self.assertRaises(Exception):
+        try:
+            cpu_out = fn(input_cpu, mean_cpu, var_cpu)
+        except Exception as cpu_err:
+            with self.assertRaises(type(cpu_err)):
                 fn(input_mps, mean_mps, var_mps)
-            with self.assertRaises(Exception):
-                fn(input_cpu, mean_cpu, var_cpu)
             return
 
         mps_out = fn(input_mps, mean_mps, var_mps)
-        cpu_out = fn(input_cpu, mean_cpu, var_cpu)
         self.assertEqual(mps_out, cpu_out, atol=1e-2, rtol=1e-2, msg=f"{case_name} mismatch")
 
 
