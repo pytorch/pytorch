@@ -93,6 +93,44 @@ class DistMathOpsTest(DTensorTestBase):
         for op_str in ("all", "sum", "prod", "max", "min", "any", "amax", "amin"):
             self.linear_op_reductions(op_str)
 
+    def _arg_reduction(self, op_str):
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+
+        tensor = torch.randn(12, 8, 8, device=self.device_type)
+        dtensor = distribute_tensor(tensor, device_mesh, shard_spec)
+
+        if op_str == "argmax":
+            op = torch.argmax
+        elif op_str == "argmin":
+            op = torch.argmin
+        else:
+            raise AssertionError(op_str)
+
+        # Dim reductions
+        keep_dim_or_not = [True, False, None]
+        for dim in range(tensor.ndim):
+            for keep_dim in keep_dim_or_not:
+                args = (tensor, dim, keep_dim) if keep_dim is not None else (tensor, dim)
+                args_dt = (dtensor, dim, keep_dim) if keep_dim is not None else (dtensor, dim)
+                dim_reduced_idx = op(*args)
+                dt_reduced_idx = op(*args_dt)
+                # DTensor result for indices should match the local result
+                dt_dim_reduced_idx = dt_reduced_idx.full_tensor()
+                self.assertEqual(dt_dim_reduced_idx, dim_reduced_idx)
+
+        # Full reduction (flattened)
+        full_idx = op(tensor)
+        dt_full_idx = op(dtensor).full_tensor()
+        self.assertEqual(dt_full_idx, full_idx)
+
+    @with_comms
+    def test_argmax_argmin(self):
+        # Validate that argmax/argmin work on DTensors and match local results
+        # across dims and keepdim variants.
+        self._arg_reduction("argmax")
+        self._arg_reduction("argmin")
+
     @with_comms
     @skip_unless_torch_gpu
     def test_mean(self):

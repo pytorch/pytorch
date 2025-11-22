@@ -363,6 +363,34 @@ LINEAR_REDUCTION_OP_MAP = {
 }
 
 
+@register_op_strategy([aten.argmax.default, aten.argmin.default], schema_info=RuntimeSchemaInfo(1))
+def arg_reduce_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    DTensor sharding strategy for argmax/argmin.
+    - We require replication along reduced dims (non-linear reduction for indices).
+    - For unreduced dims, preserve sharding where possible.
+    """
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    if not isinstance(input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(input_strategy)}")
+
+    dims = None
+    if len(op_schema.args_schema) > 1:
+        dims = _infer_reduction_dims(args_schema[1], input_strategy.ndim)
+    reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+    keep_dim = len(op_schema.args_schema) > 2 and bool(op_schema.args_schema[2])
+
+    # Use max/min to drive placement mapping; we do NOT allow pending partials.
+    reduction_op = "max" if op_schema.op is aten.argmax.default else "min"
+    return common_reduction_strategy(
+        input_strategy,
+        reduce_dims,
+        keep_dim=keep_dim,
+        reduction_linear=False,  # force replication on reduction dims
+        reduction_op=reduction_op,
+    )
+
 @register_op_strategy(
     list(LINEAR_REDUCTION_OP_MAP.keys()), schema_info=RuntimeSchemaInfo(1)
 )
