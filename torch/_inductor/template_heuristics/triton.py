@@ -646,6 +646,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         If the device does not report available shared memory, returns None.
         """
 
+        from ..utils import get_gpu_shared_memory
+
+        sm_available = None
+
         try:
             device = torch.cuda.current_device()
             props = torch.cuda.get_device_properties(device)
@@ -653,8 +657,16 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 return None
             sm_available = int(props.shared_memory_per_block_optin)
         except Exception:
-            # If CUDA is not available or properties cannot be queried, return None
-            return None
+            pass
+
+        # ROCm specific logic to get shared memory
+        if torch.version.hip and sm_available is None:
+            try:
+                sm_available = get_gpu_shared_memory()
+                if sm_available == 0:
+                    return None
+            except Exception:
+                return None
 
         # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation.
         def exceeds(gemm_config: BaseConfig, dtype_size: int) -> bool:
@@ -1318,6 +1330,7 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 waves_per_eu,
                 matrix_instr_nonkdim,
                 kpack,
+                conf.hint_override,
             )
 
             # Check if gemm specific arg exists - add to key if does
@@ -1344,7 +1357,12 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 }
                 if group_m is not None:
                     kwargs["GROUP_M"] = group_m
-                yield self.triton_config(**kwargs)
+
+                tc = self.triton_config(**kwargs)
+                # Preserve hint_override for multi-kernel support
+                if hasattr(conf, "hint_override") and conf.hint_override is not None:
+                    tc.hint_override = conf.hint_override
+                yield tc
 
     def get_flex_attn_fwd_configs(self, head_dim: int, dtype: Any) -> list[FlexConfig]:
         flex_attn_fwd_configs: list[FlexConfig] = []
@@ -1673,6 +1691,12 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         if "GROUP_M" not in triton_config.kwargs:
             group_m = triton_config.kwargs.get("GROUP_M", 8)
             options_dict["GROUP_M"] = group_m
+
+        # Keep ROCm multi-kernel size bucket attached to the config
+        if torch.version.hip and "hint_override" not in options_dict:
+            hint_override = getattr(triton_config, "hint_override", None)
+            if hint_override is not None:
+                options_dict["hint_override"] = hint_override
 
         return options_dict
 

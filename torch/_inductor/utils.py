@@ -3030,6 +3030,10 @@ def is_gpu(device: Optional[str]) -> bool:
     return device in GPU_TYPES
 
 
+def is_rocm() -> bool:
+    return torch.version.hip is not None
+
+
 def device_need_guard(device: str) -> bool:
     return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
 
