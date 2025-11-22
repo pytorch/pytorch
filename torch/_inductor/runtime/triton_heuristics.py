@@ -40,6 +40,7 @@ from .hints import (
     HeuristicType,
     ReductionHint,
     TileHint,
+    TRITON_MAX_TENSOR_NUMEL,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
 )
@@ -2255,6 +2256,16 @@ def check_max_block(cfg: dict[str, int]):
                 f"'{var}' too large. Maximum: {max_block}. Actual: {val}."
             )
 
+def _native_matmul_mask_numel_within_limit(cfg):
+    """
+    Native matmul/fused reductions construct masks sized by [YBLOCK, XBLOCK, R0_BLOCK].
+    Triton enforces a hard cap on tensor numel created by tl.full; guard against it here.
+    """
+    x = cfg.kwargs.get("XBLOCK", 1)
+    y = cfg.kwargs.get("YBLOCK", 1)
+    r = cfg.kwargs.get("R0_BLOCK", 1)
+    return (x * y * r) <= TRITON_MAX_TENSOR_NUMEL
+
 
 def _num_warps(num_warps, max_num_warps=8, min_num_warps=2, register_intensive=False):
     # On AMD GPU each warp has 64 lanes which is double the size on NV GPU,
@@ -2853,15 +2864,17 @@ def _reduction_configs(
 
     if triton_meta.get("native_matmul"):
         if len(size_hints) == 3:
-            return [
+            cfgs = [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_mm_configs
             ]
+            return [c for c in cfgs if _native_matmul_mask_numel_within_limit(c)]
         elif len(size_hints) == 4:
-            return [
+            cfgs = [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_bmm_configs
             ]
+            return [c for c in cfgs if _native_matmul_mask_numel_within_limit(c)]
         else:
             raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
@@ -3307,15 +3320,17 @@ def _persistent_reduction_configs(
 
     if triton_meta.get("native_matmul"):
         if len(size_hints) == 3:
-            return [
+            cfgs = [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_persistent_mm_configs
             ]
+            return [c for c in cfgs if _native_matmul_mask_numel_within_limit(c)]
         elif len(size_hints) == 4:
-            return [
+            cfgs = [
                 make_matmul_triton_config(sizes, num_warps, num_stages)
                 for sizes, num_warps, num_stages in triton_native_persistent_bmm_configs
             ]
+            return [c for c in cfgs if _native_matmul_mask_numel_within_limit(c)]
         else:
             raise NotImplementedError("native matmul only supports mm/bmm pattern")
 
