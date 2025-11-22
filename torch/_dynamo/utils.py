@@ -730,8 +730,11 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
+    # Use _RecordFunctionFast so the profiler calls in dynamo_timed doesn't go
+    # through dispatcher and get recorded in make_fx trace.
+    # dynamo_timed is called in backward impl. such as InvokeSubgraphAutogradOp.
     cx_mgrs: list[typing.Any] = [
-        torch.profiler.record_function(f"{key} (dynamo_timed)")
+        torch._C._profiler._RecordFunctionFast(f"{key} (dynamo_timed)")
     ]
     if log_waitcounter:
         wc_name = waitcounter_name_override if waitcounter_name_override else key
