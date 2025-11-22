@@ -559,15 +559,11 @@ class TestTorchDlPack(TestCase):
         for offset_elements in [1, 2, 3, 5]:
             base = make_tensor((10,), dtype=dtype, device=device)
             element_size = base.element_size()
-            base_data_ptr = base.storage().data_ptr()
-            original_shape = base.shape[0]
 
             expected_byte_offset = offset_elements * element_size
             expected_storage_offset = offset_elements
 
             view = base[offset_elements:]
-            expected_shape = view.shape
-            expected_shape_size = expected_shape[0]
 
             capsule = to_dlpack(base)
 
