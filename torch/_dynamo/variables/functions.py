@@ -114,6 +114,7 @@ if TYPE_CHECKING:
 _F = TypeVar("_F", bound=Callable[..., Any])
 CO_VARARGS = 0x04
 CO_VARKEYWORDS = 0x08
+_SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
 
 
 # Module-level cache keyed by the function object
@@ -420,6 +421,15 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         *BaseUserFunctionVariable._nonvar_fields,
     }
 
+    _TREE_MAP_MODULES = frozenset(
+        {
+            "optree",
+            "optree.ops",
+            "torch.utils._pytree",
+            "torch.utils._cxx_pytree",
+        }
+    )
+
     @classmethod
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
@@ -656,7 +666,42 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             ]:
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
+
+        tree_map_result = self._maybe_call_tree_map_fastpath(tx, args, kwargs)
+        if tree_map_result is not None:
+            return tree_map_result
+
         return super().call_function(tx, args, kwargs)
+
+    def _maybe_call_tree_map_fastpath(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> Optional[VariableTracker]:
+        if not (
+            self._is_tree_map_function()
+            and not ({*kwargs} - _SUPPORTED_TREE_MAP_KWARGS)
+            and len(args) >= 2
+        ):
+            return None
+
+        map_fn = args[0]
+        first_tree = args[1]
+        rest = args[2:]
+        return first_tree.call_tree_map(
+            tx,
+            self,
+            map_fn,
+            rest,
+            kwargs,
+        )
+
+    def _is_tree_map_function(self) -> bool:
+        return (
+            getattr(self.fn, "__name__", None) == "tree_map"
+            and getattr(self.fn, "__module__", None) in self._TREE_MAP_MODULES
+        )
 
 
 class BuiltinMethodVariable(BaseUserFunctionVariable):
