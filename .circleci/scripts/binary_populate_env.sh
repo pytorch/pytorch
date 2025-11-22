@@ -84,7 +84,9 @@ fi
 
 # Set triton via PYTORCH_EXTRA_INSTALL_REQUIREMENTS for triton rocm package
 if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*rocm.* && $(uname) == "Linux" ]]; then
-    TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}; ${TRITON_CONSTRAINT}"
+    # Extract ROCm version from PYTORCH_BUILD_VERSION (e.g., "2.6.0.dev20252111+rocm7.1" -> "7.1")
+    ROCM_VERSION=$(echo "$PYTORCH_BUILD_VERSION" | sed -n 's/.*rocm\([0-9.]*\).*/\1/p')
+    TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}+rocm${ROCM_VERSION}; ${TRITON_CONSTRAINT}"
     if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
         TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
         TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}+git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
