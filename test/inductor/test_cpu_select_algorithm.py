@@ -2977,6 +2977,40 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
             # Check that only 2 kernels are in the generated code
             assert code.count("AMXState amx_state") == 2
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (384, 385))
+    @parametrize("in_features", (196, 1024))
+    @parametrize("out_features", (384, 385))
+    @parametrize("bias", (False,))
+    @parametrize(
+        "epilogue",
+        ("relu",),
+    )
+    @dtypes(torch.bfloat16)
+    @torch.fx.experimental._config.patch(use_duck_shape=False)
+    @inductor_config.patch({"cpp.cpp_gemm_transverse_strategy": "HORIZONTAL"})
+    def test_horizontal_transverse(
+        self, batch_size, in_features, out_features, bias, epilogue, dtype
+    ):
+        class M(torch.nn.Module):
+            def __init__(self, bias, epilogue, other):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.epilogue = _get_epilogue(epilogue, other)
+
+            def forward(self, x):
+                return self.epilogue(self.linear(x))
+
+        counters.clear()
+        v = torch.randn(batch_size, in_features).to(dtype=dtype)
+        u = torch.randn(batch_size, out_features).to(dtype=dtype)
+        mod = M(bias=bias, epilogue=epilogue, other=u).to(dtype=dtype).eval()
+        with verify(dtype) as (atol, rtol):
+            self.common(mod, (v,), atol=atol, rtol=rtol)
+        self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(BaseTestSelectAlgorithm):
@@ -3018,6 +3052,9 @@ class TestSelectAlgorithmDynamicShapes(_DynamicShapesTestBase):
     )
     test_linear_thread_factors_dynamic_shapes = (
         TestSelectAlgorithm.test_linear_thread_factors
+    )
+    test_horizontal_transverse_dynamic_shapes = (
+        TestSelectAlgorithm.test_horizontal_transverse
     )
 
     @patches
