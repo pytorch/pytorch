@@ -1764,7 +1764,7 @@ test_operator_microbenchmark() {
   TEST_DIR=$(pwd)
 
   cd benchmarks/operator_benchmark/pt_extension
-  python -m pip install .
+  python -m pip install . -v --no-build-isolation
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
