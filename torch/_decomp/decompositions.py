@@ -5349,6 +5349,64 @@ def resize_as(self, other, memory_format=None):
     return aten.resize(self, other.shape, memory_format=memory_format)
 
 
+@register_decomposition(aten.max_pool2d_with_indices_backward)
+def max_pool2d_with_indices_backward(
+    grad_output: Tensor,
+    self: Tensor,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode: bool,
+    indices: Tensor,
+):
+    # Use native kernel in deterministic mode
+    if torch.are_deterministic_algorithms_enabled():
+        return NotImplemented
+
+    # Get spatial dimensions
+    in_height = self.size(-2)
+    in_width = self.size(-1)
+    out_height = grad_output.size(-2)
+    out_width = grad_output.size(-1)
+
+    # Handle both 3D (C, H, W) and 4D (B, C, H, W) cases by treating 3D as 4D
+    is_batched = self.dim() == 4
+    if not is_batched:
+        self = self.unsqueeze(0)
+        grad_output = grad_output.unsqueeze(0)
+        indices = indices.unsqueeze(0)
+
+    batch_size = self.size(0)
+    channels = self.size(1)
+
+    # Create grad_input in the flattened shape for efficient scatter_add
+    grad_input_flat = torch.zeros(
+        batch_size * channels,
+        in_height * in_width,
+        dtype=grad_output.dtype,
+        device=grad_output.device,
+    )
+
+    # Reshape grad_output and indices to (B*C, H_out*W_out)
+    grad_output_flat = grad_output.reshape(
+        batch_size * channels, out_height * out_width
+    )
+    indices_flat = indices.reshape(batch_size * channels, out_height * out_width)
+
+    # Use scatter_add to accumulate gradients
+    grad_input_flat = grad_input_flat.scatter_add(1, indices_flat, grad_output_flat)
+
+    # Reshape back to original input shape
+    grad_input = grad_input_flat.reshape(batch_size, channels, in_height, in_width)
+
+    # Remove batch dimension for 3D case
+    if not is_batched:
+        grad_input = grad_input.squeeze(0)
+
+    return grad_input
+
+
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
