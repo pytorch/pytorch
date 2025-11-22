@@ -113,6 +113,13 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void endAllocateToPool(
       c10::DeviceIndex device,
       c10::cuda::MempoolId_t mempool_id) override;
+  void beginAllocateToGraphPool(
+      c10::DeviceIndex device,
+      c10::cuda::MempoolId_t mempool_id,
+      std::function<bool(cudaStream_t)> filter) override;
+  void endAllocateToGraphPool(
+      c10::DeviceIndex device,
+      c10::cuda::MempoolId_t mempool_id) override;
   void releasePool(c10::DeviceIndex device, c10::cuda::MempoolId_t mempool_id)
       override;
   std::shared_ptr<void> getIpcDevPtr(std::string handle) override;
