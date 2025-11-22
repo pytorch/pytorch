@@ -1198,9 +1198,9 @@ def conv1d_to_conv2d(
     input: torch.Tensor,
     weight: torch.Tensor,
     bias: Optional[torch.Tensor] = None,
-    stride: tuple[int] = (1,),
-    padding: tuple[int] = (0,),
-    dilation: tuple[int] = (1,),
+    stride: tuple[int, ...] = (1,),
+    padding: tuple[int, ...] = (0,),
+    dilation: tuple[int, ...] = (1,),
     groups: int = 1,
 ) -> torch.Tensor:
     # Shapes:
