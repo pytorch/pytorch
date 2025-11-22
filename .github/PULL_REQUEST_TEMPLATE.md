@@ -1,3 +1,3 @@
 Fixes #ISSUE_NUMBER
 
-[ ] I have read [CONTRIBUTING.md](CONTRIBUTING.md).
+[ ] I have read the relevant parts of [CONTRIBUTING.md](CONTRIBUTING.md).
