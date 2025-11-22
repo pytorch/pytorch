@@ -50,6 +50,56 @@ static py::handle _callback_from_action(
   return callback;
 }
 
+// c_recursion_remaining only defined in 3.12 and 3.13
+
+static int32_t c_recursion_limit = -1;
+
+void dynamo_set_c_recursion_limit(int32_t limit) {
+  if (limit < 1) {
+    throw std::range_error("recursion limit must be greater or equal than 1");
+  }
+  c_recursion_limit = limit;
+  // cannot fail
+  Py_SetRecursionLimit(limit); // also set the Python limit
+}
+
+int32_t dynamo_get_c_recursion_limit() {
+  return c_recursion_limit;
+}
+
+#if IS_PYTHON_3_12_PLUS && !IS_PYTHON_3_14_PLUS
+
+struct CRecursionLimitRAII {
+  PyThreadState* tstate;
+  int32_t old_recursion_remaining;
+  CRecursionLimitRAII(PyThreadState* tstate) : tstate{tstate} {
+    auto limit = dynamo_get_c_recursion_limit();
+    auto& remaining = tstate->c_recursion_remaining;
+    this->old_recursion_remaining = remaining;
+    if (limit < 0) {
+      // no change to limit
+      return;
+    }
+    if (limit < remaining) {
+      PyErr_SetString(
+          PyExc_RuntimeError,
+          "new c_recursion limit is lower than thread's current c_recursion_remaining.");
+    }
+    remaining = limit;
+  }
+  ~CRecursionLimitRAII() {
+    this->tstate->c_recursion_remaining = this->old_recursion_remaining;
+  }
+};
+
+#else
+
+struct CRecursionLimitRAII {
+  CRecursionLimitRAII(PyThreadState* tstate) {}
+};
+
+#endif
+
 // frame and callback are borrowed references.
 // Returns new reference.
 PyObject* dynamo__custom_eval_frame(
@@ -258,6 +308,13 @@ PyObject* dynamo__custom_eval_frame(
   bool apply_to_code = false;
   PyObject* guarded_code = nullptr;
   try {
+    CRecursionLimitRAII tmp(tstate); // increase C recursion limit to the given
+                                     // value during compilation
+    // C recursion limit failure
+    if (PyErr_Occurred()) {
+      fail();
+      return eval_result;
+    }
     callback_result = dynamo_call_callback(
         callback, frame, locals.get(), cache_entry, frame_state);
     new_strategy =
@@ -320,7 +377,7 @@ PyObject* dynamo__custom_eval_frame(
   return eval_result;
 }
 
-PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
+PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
   PyObject* code_obj = nullptr;
   PyObject* strategy_obj = nullptr;
   if (!PyArg_ParseTuple(args, "OO", &code_obj, &strategy_obj)) {
@@ -344,7 +401,7 @@ PyObject* set_code_exec_strategy(PyObject* dummy, PyObject* args) {
   Py_RETURN_NONE;
 }
 
-void skip_code_recursive(PyCodeObject* code) {
+void dynamo_skip_code_recursive(PyCodeObject* code) {
   ExtraState* extra = get_extra_state(code);
   if (extra == nullptr) {
     extra = init_and_set_extra_state(code);

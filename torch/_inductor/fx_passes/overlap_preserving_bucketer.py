@@ -1,17 +1,20 @@
+import itertools
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
+import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
+    _schedulable_wait_node,
     bucket_key,
     BucketMode,
+    has_mergeable_all_gather_convert_dtype,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
-    is_wait_tensor,
 )
 from torch._inductor.fx_passes.overlap_scheduling import (
     CollBucket,
@@ -50,12 +53,12 @@ class WhyNoBucket:
 
 def is_collective_or_wait(n: fx.Node) -> bool:
     """Check if node is a collective start or wait."""
-    if is_wait_tensor(n):
+    if _schedulable_wait_node(n):
         return True
     # Collective starts have exactly one use: the wait_tensor
     if len(n.users) == 1:
         user = next(iter(n.users.keys()))
-        if is_wait_tensor(user):
+        if _schedulable_wait_node(user):
             return True
     return False
 
@@ -128,7 +131,6 @@ class OverlapPreservingBucketer:
         self,
         graph: fx.Graph,
         collective_info: dict[fx.Node, CollectiveInfo],
-        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]],
         scheduled: OrderedSet[fx.Node],
         max_bucket_memory_gb: float = 1.0,
         max_coll_distance: int = 1000,
@@ -137,18 +139,45 @@ class OverlapPreservingBucketer:
     ):
         self.graph = graph
         self.collective_info = collective_info
-        self.node_ancestors = node_ancestors
         self.scheduled = scheduled
         self.max_bucket_memory_gb = max_bucket_memory_gb
         self.node_idx = {n: i for i, n in enumerate(scheduled)}
-        self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
         self.bucket_mode = bucket_mode
         self.node_to_event: dict[fx.Node, PGEvent] = {}
-        self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
 
+        # Compute ancestors including original graph edges and hiding interval dependencies
+        self.node_ancestors = self._compute_node_ancestors()
+        self.aug_graph = AugmentedGraphHelper(self.graph, self.node_ancestors)
+
+        # Build timelines and add constraints to aug_graph
+        self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
         self._add_hiding_interval_constraints()
+
+    def _compute_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
+        """
+        Compute ancestor sets for all nodes including:
+        1. Original graph edges
+        2. Hiding interval deps: collective_start -> hiding_node -> wait
+        """
+        augmented_inputs: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        for start, info in self.collective_info.items():
+            if info.is_exposed:
+                continue
+            for hiding_node in info.hiding_nodes:
+                augmented_inputs[hiding_node].add(start)
+                augmented_inputs[info.wait_node].add(hiding_node)
+
+        node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
+        for node in self.scheduled:
+            for input_node in itertools.chain(
+                augmented_inputs[node], node.all_input_nodes
+            ):
+                node_ancestors[node].add(input_node)
+                node_ancestors[node] |= node_ancestors[input_node]
+
+        return node_ancestors
 
     def build_timelines(self) -> dict[str, Optional[PGEvent]]:
         "Construct each process groups ordered series of event"
@@ -185,7 +214,7 @@ class OverlapPreservingBucketer:
             if node in self.collective_info and get_group_name(node) == pg:
                 node_type = "starts"
                 hiding_nodes |= self.collective_info[node].hiding_nodes
-            elif is_wait_tensor(node):
+            elif _schedulable_wait_node(node):
                 wait_input = node.args[0]
                 if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
                     node_type = "waits"
@@ -207,6 +236,7 @@ class OverlapPreservingBucketer:
 
             prev_event = event
             position += 1
+
         return head
 
     def _populate_node_to_event(self, pg: str) -> None:
@@ -231,7 +261,6 @@ class OverlapPreservingBucketer:
                 self.aug_graph.add_extra_dep(n=info.wait_node, dep=hn)
 
     def bucket_collectives(self) -> None:
-        """Main entry point for bucketing collectives."""
         # Group collectives by PG first
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start in self.collective_info:
@@ -281,6 +310,15 @@ class OverlapPreservingBucketer:
         # Apply topological sort with all dependencies
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
+        for n, deps in additional_deps.items():
+            torch._check(
+                not n._erased, lambda: f"Erased node deps not transferred: {n}"
+            )
+            for d in deps:
+                torch._check(
+                    not d._erased, lambda: f"Erased node deps not transferred: {d}"
+                )
+
         _stable_topological_sort(self.graph, additional_deps)
 
         # After topological sort, preserve dependencies using effect tokens
@@ -315,7 +353,7 @@ class OverlapPreservingBucketer:
         # Sort collectives by node index for efficient distance checking
         sorted_collectives = sorted(collective_group, key=lambda n: self.node_idx[n])
 
-        for start_node in sorted_collectives:
+        for i, start_node in enumerate(sorted_collectives):
             if start_node in processed:
                 continue
 
@@ -325,30 +363,31 @@ class OverlapPreservingBucketer:
                 total_bytes=self.collective_info[start_node].size_bytes,
             )
             processed.add(start_node)
-            start_node_idx = self.node_idx[start_node]
+
+            # Greedy optimization: stop after consecutive failures
+            consecutive_failures = 0
+            max_consecutive_failures = 20
 
             # Check candidates in sorted order, break when beyond max distance
-            for candidate in sorted_collectives:
-                if candidate in processed:
-                    continue
-
-                candidate_idx = self.node_idx[candidate]
-                # Check if candidate is within max distance from the bucket start
-                distance = abs(candidate_idx - start_node_idx)
-                if distance > self.max_coll_distance:
-                    # Since sorted, all remaining candidates will be too far
-                    if candidate_idx > start_node_idx:
-                        break
-                    continue
-
+            for candidate in sorted_collectives[i + 1 : i + 1 + self.max_coll_distance]:
                 candidate_bytes = self.collective_info[candidate].size_bytes
+                # proxy on memory use, if we see a too large bucket,
+                # dont look for another, later bucket
                 if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
+                    break
+
+                if candidate in processed:
                     continue
 
                 if self._can_add_to_bucket(bucket_info, candidate):
                     bucket_info.collectives.append(candidate)
                     bucket_info.total_bytes += candidate_bytes
                     processed.add(candidate)
+                    consecutive_failures = 0  # Reset on success
+                else:
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_consecutive_failures:
+                        break
 
             if len(bucket_info.collectives) > 1:
                 buckets.append(bucket_info)
@@ -653,23 +692,28 @@ class OverlapPreservingBucketer:
         candidate_wait = candidate_info.wait_node
 
         for coll in bucket_info.collectives:
-            # Check if collectives are ancestors of each other
-            if self._ancestor_dep(coll, candidate):
+            if (
+                coll in self.node_ancestors[candidate]
+                or candidate in self.node_ancestors[coll]
+            ):
                 return True
 
             # Check if waits are ancestors of each other
             coll_wait = self.collective_info[coll].wait_node
-            if self._ancestor_dep(candidate_wait, coll_wait):
+            if (
+                coll_wait in self.node_ancestors[candidate_wait]
+                or candidate_wait in self.node_ancestors[coll_wait]
+            ):
                 return True
 
             # Check if existing hiding node conflicts with candidate wait
             for old_hiding_node in self.collective_info[coll].hiding_nodes:
-                if self._ancestor_dep(old_hiding_node, candidate_wait):
+                if candidate_wait in self.node_ancestors[old_hiding_node]:
                     return True
 
             # Check if candidate hiding node conflicts with existing wait
             for new_hiding_node in candidate_info.hiding_nodes:
-                if self._ancestor_dep(new_hiding_node, coll_wait):
+                if coll_wait in self.node_ancestors[new_hiding_node]:
                     return True
 
         return False
@@ -762,6 +806,11 @@ class OverlapPreservingBucketer:
         old_starts = list(bucket)
         old_waits = [self.collective_info[n].wait_node for n in bucket]
 
+        fused_convert_dtypes = []
+        for n in old_starts:
+            if has_mergeable_all_gather_convert_dtype(n):
+                fused_convert_dtypes.append(n.args[0])
+
         # Find where to place the bucketed operations
         next_node = bucket[0]
         while next_node in bucket:
@@ -795,7 +844,7 @@ class OverlapPreservingBucketer:
             )
 
         # Get new nodes
-        new_waits = [n for n in new_nodes if is_wait_tensor(n)]
+        new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
         assert len(new_waits) == 1
 
         new_wait = new_waits[0]
@@ -808,6 +857,22 @@ class OverlapPreservingBucketer:
             erased_to_new[old_start] = new_start
         for old_wait in old_waits:
             erased_to_new[old_wait] = new_wait
+
+        # Handle convert_element_type nodes that were fused and erased
+        # The bucketed operation may have a _pre_bucket op that handles dtype conversion
+        if fused_convert_dtypes:
+            # all gather bucketing may fuse in dtype conversion into the bucketing
+            # if so, we need to transfer hiding deps from the old dtype conversion
+            # to the new bucketing node
+            new_convert_dtypes_node = new_start.kwargs["out"]
+            assert isinstance(new_convert_dtypes_node, fx.Node)
+            assert (
+                new_convert_dtypes_node.target
+                == torch.ops.bucketing._pre_bucket_all_gather.default
+            )
+
+            for n in fused_convert_dtypes:
+                erased_to_new[n] = new_convert_dtypes_node
 
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
