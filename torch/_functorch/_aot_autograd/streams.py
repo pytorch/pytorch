@@ -340,3 +340,10 @@ def assign_epilogue_copy_streams(gm: torch.fx.GraphModule):
         copy_stream = get_stream(epi_copy)
         if arg_stream != copy_stream:
             set_stream(epi_copy, get_stream_or_current_stream(epi_copy.args[1]))
+
+
+def wrap_sync_control_deps(gm: torch.fx.GraphModule, node: Node) -> None:
+    stream = get_stream_or_current_stream(node)
+
+    for node in gm.graph.nodes:
+        pass
