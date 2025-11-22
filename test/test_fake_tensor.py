@@ -360,6 +360,33 @@ class FakeTensorTest(TestCase):
         with torch._subclasses.CrossRefFakeMode():
             y = torch.full((4, 4), 1)
 
+    def test_tensor_with_meta_device(self):
+        """Test that torch.tensor() creates FakeTensor when used with device('meta') context manager.
+        
+        This test verifies the fix for issue #139092.
+        """
+        from torch._subclasses.fake_tensor import FakeTensor
+        
+        with FakeTensorMode(), torch.device("meta"):
+            # Test scalar tensor
+            a = torch.tensor(3.0)
+            self.assertTrue(isinstance(a, FakeTensor), 
+                           f"Expected FakeTensor, got {type(a)}")
+            self.assertEqual(a.device.type, "meta")
+            self.assertEqual(a.shape, ())
+            
+            # Test list tensor
+            b = torch.tensor([1.0, 2.0, 3.0])
+            self.assertTrue(isinstance(b, FakeTensor))
+            self.assertEqual(b.device.type, "meta")
+            self.assertEqual(b.shape, (3,))
+            
+            # Test explicit device='meta' (should also work)
+            c = torch.tensor(5.0, device="meta")
+            self.assertTrue(isinstance(c, FakeTensor))
+            self.assertEqual(c.device.type, "meta")
+            self.assertEqual(c.shape, ())
+
     def check_function_with_fake(self, fn):
         out = fn()
         with torch._subclasses.FakeTensorMode():

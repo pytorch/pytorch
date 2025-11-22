@@ -6811,7 +6811,13 @@ def _internal_new_from_data(
         return NotImplemented
     else:
         if torch.device(device).type == "meta":
-            return NotImplemented
+            from torch._guards import active_fake_mode
+
+            # If FakeTensorMode is *not* active, keep old behavior: delegate to C++.
+            if active_fake_mode() is None:
+                return NotImplemented
+            # If FakeTensorMode *is* active, just fall through to the normal Python path
+            # below so it can intercept the ops.
 
         # In the C implementation, we would directly start poking the memory
         # of a freshly allocated CPU tensor.  Here, we're going to do an
