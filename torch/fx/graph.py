@@ -498,6 +498,9 @@ class CodeGen:
                 # Empty tuple is used for empty tuple type annotation Tuple[()]
                 return "()"
 
+            if isinstance(o, str):
+                return repr(o)
+
             typename = _type_repr(o)
 
             if origin_type := getattr(o, "__origin__", None):
