@@ -20,6 +20,12 @@ TRITON_MAX_BLOCK = {
     "R1_": 2048 * 16,  # * 16 is multi-kernel only
 }
 TRITON_MAX_RSPLIT = 64
+#
+# Upper bound on the number of elements for any Triton tensor created via tl.full.
+# Exceeding this limit causes Triton to raise:
+#   ValueError: numel (...) exceeds triton maximum tensor numel (1048576)
+# We mirror this here to let Inductor avoid generating illegal configurations.
+TRITON_MAX_TENSOR_NUMEL = 1 << 20
 
 
 class ReductionHint(Enum):

@@ -40,6 +40,7 @@ from torch._inductor.runtime.hints import (
     AutotuneHint,
     DeviceProperties,
     HeuristicType,
+    TRITON_MAX_TENSOR_NUMEL,
     TRITON_MAX_BLOCK,
 )
 from torch._inductor.runtime.triton_helpers import math as tl_math
@@ -90,6 +91,70 @@ class TestTritonHeuristics(TestCase):
             if key not in cfg.kwargs:
                 continue
             self.assertTrue(cfg.kwargs[key] <= TRITON_MAX_BLOCK[label])
+
+    def test_native_matmul_mask_tensor_product_cap(self):
+        """
+        Ensure native matmul configs never exceed Triton's maximum tl.full tensor numel.
+        """
+        from torch._inductor.runtime import triton_heuristics as TH
+
+        # mm path
+        mm_cfgs = TH._reduction_configs(
+            size_hints={"x": 1, "y": 1, "r0_": 1},
+            inductor_meta={},
+            triton_meta={"native_matmul": True},
+        )
+        self.assertTrue(mm_cfgs)
+        for cfg in mm_cfgs:
+            x = cfg.kwargs.get("XBLOCK", 1)
+            y = cfg.kwargs.get("YBLOCK", 1)
+            r = cfg.kwargs.get("R0_BLOCK", 1)
+            self.assertLessEqual(x * y * r, TRITON_MAX_TENSOR_NUMEL)
+
+        # bmm path (z present; mask uses y, x, r)
+        bmm_cfgs = TH._reduction_configs(
+            size_hints={"x": 1, "y": 1, "z": 1, "r0_": 1},
+            inductor_meta={},
+            triton_meta={"native_matmul": True},
+        )
+        self.assertTrue(bmm_cfgs)
+        for cfg in bmm_cfgs:
+            x = cfg.kwargs.get("XBLOCK", 1)
+            y = cfg.kwargs.get("YBLOCK", 1)
+            r = cfg.kwargs.get("R0_BLOCK", 1)
+            self.assertLessEqual(x * y * r, TRITON_MAX_TENSOR_NUMEL)
+
+    def test_native_matmul_persistent_mask_tensor_product_cap(self):
+        """
+        Ensure persistent native matmul configs (mm/bmm) also respect the cap.
+        """
+        from torch._inductor.runtime import triton_heuristics as TH
+
+        mm_persistent = TH._persistent_reduction_configs(
+            size_hints={"x": 1, "r0_": 1, "y": 1},
+            reduction_hint=False,
+            inductor_meta={},
+            triton_meta={"native_matmul": True},
+        )
+        # It's acceptable that persistent configs may be empty in some builds,
+        # but if present, they must obey the cap.
+        for cfg in mm_persistent:
+            x = cfg.kwargs.get("XBLOCK", 1)
+            y = cfg.kwargs.get("YBLOCK", 1)
+            r = cfg.kwargs.get("R0_BLOCK", 1)
+            self.assertLessEqual(x * y * r, TRITON_MAX_TENSOR_NUMEL)
+
+        bmm_persistent = TH._persistent_reduction_configs(
+            size_hints={"x": 1, "y": 1, "z": 1, "r0_": 1},
+            reduction_hint=False,
+            inductor_meta={},
+            triton_meta={"native_matmul": True},
+        )
+        for cfg in bmm_persistent:
+            x = cfg.kwargs.get("XBLOCK", 1)
+            y = cfg.kwargs.get("YBLOCK", 1)
+            r = cfg.kwargs.get("R0_BLOCK", 1)
+            self.assertLessEqual(x * y * r, TRITON_MAX_TENSOR_NUMEL)
 
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
