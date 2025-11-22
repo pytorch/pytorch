@@ -736,14 +736,27 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
-        return wrap_fx_proxy(
-            tx,
-            tx.output.create_proxy(
-                "call_method",
-                name,
-                *proxy_args_kwargs([self, *args], kwargs),
-            ),
+        proxy = tx.output.create_proxy(
+            "call_method",
+            name,
+            *proxy_args_kwargs([self, *args], kwargs),
         )
+
+        # [Note: Inplace ops and VariableTracker metadata]
+        # For inplace operations (methods ending with _), we need to propagate
+        # tensor metadata from the arguments to self. For example:
+        #   x.add_(y) where y.requires_grad=True => x.requires_grad becomes True
+        # This is similar to the fix in method___setitem__.
+        if name.endswith("_") and args:
+            inplace_idx = 0
+            while inplace_idx < len(args) and not isinstance(
+                args[inplace_idx], TensorVariable
+            ):
+                inplace_idx += 1
+            if inplace_idx < len(args):
+                self._propagate_inplace_metadata(tx, proxy, args[inplace_idx])
+
+        return wrap_fx_proxy(tx, proxy)
 
     def method_size(self, *args, **kwargs):
         return self._method_size_stride("size", *args, **kwargs)
@@ -1113,6 +1126,31 @@ class TensorVariable(VariableTracker):
                 {},
             )
 
+    def _propagate_inplace_metadata(self, tx, proxy, source_var):
+        """
+        Propagate tensor metadata from source_var to self after an inplace operation.
+        This ensures that properties like requires_grad are correctly tracked during tracing.
+
+        Args:
+            tx: InstructionTranslator instance
+            proxy: The proxy node representing the inplace operation
+            source_var: The source TensorVariable whose metadata should be propagated
+        """
+        # Ignore fresh unbacked symbols that could arise during the operation
+        with (
+            torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+            tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            if tx.fake_mode and tx.fake_mode.shape_env
+            else nullcontext(),
+        ):
+            get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
+
+        vt = source_var
+        if isinstance(vt, variables.lazy.LazyVariableTracker):
+            vt = variables.lazy.LazyVariableTracker.realize_all(vt)
+
+        self.synchronize_attributes(tx, type(vt))
+
     def method___setitem__(self, key, value):
         from ..symbolic_convert import InstructionTranslator
 
@@ -1139,19 +1177,7 @@ class TensorVariable(VariableTracker):
             # When the selection happens if idx is unbacked we allocate a new unbacked symbol for the
             # storage offset in select_meta, but the output of the operation 'setitem' does not depend
             # on the selection.
-            with (
-                torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
-                tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                if tx.fake_mode and tx.fake_mode.shape_env
-                else nullcontext(),
-            ):
-                get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
-
-            vt = value
-            if isinstance(vt, variables.lazy.LazyVariableTracker):
-                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
-
-            self.synchronize_attributes(tx, type(vt))
+            self._propagate_inplace_metadata(tx, proxy, value)
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
