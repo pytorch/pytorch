@@ -297,7 +297,7 @@ class BenchmarkRunner:
             break_idxs = [-1]
             curr_brackets = []
             for i, c in enumerate(s):
-                if c in open_to_close.keys():
+                if c in open_to_close:
                     curr_brackets.append(c)
                 elif c in open_to_close.values():
                     assert curr_brackets and open_to_close[curr_brackets[-1]] == c, (
