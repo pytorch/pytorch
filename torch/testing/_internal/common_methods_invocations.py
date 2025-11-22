@@ -28,7 +28,7 @@ from torch.testing._internal.common_device_type import \
     (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
      skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
      skipCPUIfNoMklSparse,
-     toleranceOverride, tol, skipXPU)
+     toleranceOverride, tol)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN, _get_torch_cuda_version,
@@ -42,7 +42,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_FBCODE, IS_WINDOWS, IS_MACOS, IS_S390X, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, MACOS_VERSION,
+    TEST_WITH_TORCHINDUCTOR, MACOS_VERSION, skipIfXpu, TEST_XPU
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -6112,7 +6112,6 @@ def sample_inputs_lu_unpack(op_info, device, dtype, requires_grad=False, **kwarg
         lu_data, pivots = torch.linalg.lu_factor(lu_sample.input)
         lu_data.requires_grad_(requires_grad)
         yield SampleInput(lu_data, pivots).with_metadata(output_process_fn_grad=out_fn)
-
 
 def sample_inputs_roll(op_info, device, dtype, requires_grad=False, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -12486,6 +12485,10 @@ op_db: list[OpInfo] = [
                    toleranceOverride({torch.float32: tol(atol=1.3e-04, rtol=1.3e-04),
                                       torch.complex64: tol(atol=1e-05, rtol=1.2e-03)}),
                    'TestCommon', 'test_numpy_ref_mps'),
+               # Default is up to 1e-07 allowed
+               DecorateInfo(
+                   toleranceOverride({torch.float64: tol(atol=8e-06, rtol=8e-07), }),
+                   'TestCommon', 'test_numpy_ref', device_type='xpu'),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-5),
                                       torch.bfloat16: tol(atol=2e-1, rtol=6e-1)}),
@@ -12557,6 +12560,12 @@ op_db: list[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(
+                   unittest.skip("Skipped! RuntimeError not raised introduced by fallback implementation."
+                                 "https://github.com/intel/torch-xpu-ops/issues/2384"),
+                   'TestCommon',
+                   'test_errors',
+                   device_type='xpu'),
            )),
     OpInfo('vdot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -12573,6 +12582,12 @@ op_db: list[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
+               DecorateInfo(
+                   unittest.skip("Skipped! RuntimeError not raised introduced by fallback implementation."
+                                 "https://github.com/intel/torch-xpu-ops/issues/2384"),
+                   'TestCommon',
+                   'test_errors',
+                   device_type='xpu'),
            )),
     OpInfo('bmm',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
@@ -13807,7 +13822,9 @@ op_db: list[OpInfo] = [
                                or (_get_torch_rocm_version() >= (5, 2))),
                           "cusparseSDDMM was added in 11.2.1"),
                skipCPUIfNoMklSparse,
-               skipXPU],
+               skipIfXpu(msg="RuntimeError: expected col_indices to be a contiguous tensor per batch, "
+                         "https://github.com/intel/torch-xpu-ops/issues/2283")
+           ],
            skips=(
                # NotImplementedError: Tensors of type SparseCsrTensorImpl do not have is_contiguous
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_noncontiguous_samples'),
@@ -14269,6 +14286,8 @@ op_db: list[OpInfo] = [
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
                     dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.complex32),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+                    # NotImplementedError of complex dtypes, https://github.com/intel/torch-xpu-ops/issues/2376
+                    dtypesIfXPU=custom_types(torch.float32, torch.float16, torch.bfloat16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
                     supports_rhs_python_scalar=False),
@@ -15416,6 +15435,8 @@ op_db: list[OpInfo] = [
            assert_jit_shape_analysis=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
+               skipIfXpu(msg="RuntimeError: could not create a primitive descriptor, "
+                         "https://github.com/intel/torch-xpu-ops/issues/1898"),
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1.3e-06), }),
                    'TestCommon', 'test_variant_consistency_eager', device_type='cuda'),
@@ -15490,7 +15511,9 @@ op_db: list[OpInfo] = [
                    'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(
                    toleranceOverride({torch.half: tol(atol=9e-3, rtol=2e-1), }),
-                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu')],
+                   'TestInductorOpInfo', 'test_comprehensive', device_type='cpu'),
+               skipIfXpu(msg="RuntimeError: could not create a primitive descriptor, "
+                         "https://github.com/intel/torch-xpu-ops/issues/1898"),],
            skips=(
                # RuntimeError: !lhs.isAliasOf(rhs)INTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":104, please report a bug to PyTorch.
@@ -16558,7 +16581,9 @@ op_db: list[OpInfo] = [
         supports_out=True,
         supports_forward_ad=False,
         supports_autograd=False,
-        decorators=[skipXPU, skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9')],
+        decorators=[skipCUDAIf(not SM89OrLater or TEST_WITH_ROCM, 'Requires CUDA SM >= 8.9'),
+                    skipIfXpu(msg="RuntimeError: expected col_indices to be a contiguous tensor per batch, "
+                              "https://github.com/intel/torch-xpu-ops/issues/2207")],
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
@@ -16658,7 +16683,9 @@ op_db: list[OpInfo] = [
         supports_fwgrad_bwgrad=False,
         supports_forward_ad=False,
         check_batched_forward_grad=False,
-        decorators=[skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention")],
+        decorators=[
+            skipCUDAIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "This platform doesn't support Flash Attention"),
+            skipIfXpu(msg='This op under development, https://github.com/intel/torch-xpu-ops/issues/2344')],
         skips=(
             # Checking the scalar value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
@@ -16686,7 +16713,7 @@ op_db: list[OpInfo] = [
         decorators=[
             skipCUDAIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "This platform doesn't support efficient attention"),
             skipCUDAIf(TEST_WITH_ROCM, "Efficient attention on ROCM doesn't support custom_mask_type==2"),
-            skipXPU],
+            skipIfXpu(msg='The op is under development, https://github.com/intel/torch-xpu-ops/issues/2285')],
         skips=(
             # Checking the scaler value of the philox seed and offset
             DecorateInfo(unittest.expectedFailure, 'TestCompositeCompliance', 'test_operator', device_type='cuda'),
@@ -17372,6 +17399,12 @@ op_db: list[OpInfo] = [
            skips=(
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(
+                   unittest.skip("Skipped! RuntimeError not raised introduced by fallback implementation."
+                                 "https://github.com/intel/torch-xpu-ops/issues/2384"),
+                   'TestCommon',
+                   'test_errors',
+                   device_type='xpu'),
            )),
     OpInfo('permute',
            ref=np.transpose,
@@ -18134,7 +18167,7 @@ op_db: list[OpInfo] = [
            ],
            skips=(
                # AssertionError: Scalars are not equal!
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', active_if=(not TEST_XPU)),
                # Gradcheck fails
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad',
                             dtypes=floating_and_complex_types()),
@@ -19775,6 +19808,7 @@ op_db: list[OpInfo] = [
            skips=(
                # Not implemented on CUDA
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='xpu'),
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
@@ -20418,6 +20452,8 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='cuda'),
+               # AssertionError: UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='xpu'),
                # RuntimeError: "max_values_cpu" not implemented for 'ComplexDouble'
                # Falling back to non-numerically stabilized exp, causing nan in the results.
                DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_forward_mode_AD', dtypes=[torch.complex128]),
@@ -22414,6 +22450,15 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
         ),
     ),
     PythonRefInfo(
@@ -22444,6 +22489,16 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.float32, torch.float64, torch.float16, torch.complex64, torch.complex128, torch.bfloat16),
                          device_type="cuda"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
+            # TODO torch.ops.aten.copy is not in _refs
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.float32, torch.float64, torch.float16, torch.complex64, torch.complex128, torch.bfloat16),
+                         device_type="xpu"),
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
                          dtypes=(torch.float32, torch.float64, torch.float16, torch.complex64, torch.complex128, torch.bfloat16),
                          device_type="cpu"),
@@ -22471,6 +22526,16 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+            # Off-by-one issue when casting floats to ints
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
         ),
     ),
     PythonRefInfo(
@@ -22492,6 +22557,17 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+            # Off-by-one issue when casting floats to ints
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
+            # RuntimeError: no _refs support for aten.copy.default on all dtypes
+            # https://github.com/intel/torch-xpu-ops/issues/2287
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         device_type="xpu"),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.int16, torch.int32, torch.int64),
+                         device_type="xpu"),
             # TODO copy doesn't have prim refs
             DecorateInfo(
                 unittest.expectedFailure, 'TestCommon', 'test_python_ref',
@@ -23327,6 +23403,8 @@ python_ref_db = [
         "_refs.nn.functional.pdist",
         torch_opinfo_name="nn.functional.pdist",
         supports_out=True,
+        decorators=[skipIfXpu(msg="segmentation fault, "
+                              "https://github.com/intel/torch-xpu-ops/issues/1519"),],
         skips=(
             # RunTimeError: no _refs support for torch.Tensor.index_select
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref'),
@@ -23591,6 +23669,12 @@ python_ref_db = [
         decorators=(
             # See https://github.com/pytorch/pytorch/issues/111126
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion'),
+            # AssertionError: Tensor-likes are not close!
+            # https://github.com/intel/torch-xpu-ops/issues/1895
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=[torch.float64,], device_type='xpu'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=[torch.float64,], device_type='xpu'),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -24532,6 +24616,10 @@ python_ref_db = [
         skips=(
             # RuntimeError: no _refs support for torch.Tensor.is_conj
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', dtypes=[torch.complex64, torch.complex128]),
+            # torch._subclasses.fake_tensor.MetadataMismatchError
+            # https://github.com/intel/torch-xpu-ops/issues/2382
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=[torch.complex64, torch.complex128], device_type='xpu'),
         ),
     ),
     PythonRefInfo(
@@ -25023,6 +25111,7 @@ python_ref_db = [
         supports_out=False,
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors', device_type='xpu'),
         ),
     ),
     PythonRefInfo(
