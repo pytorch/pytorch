@@ -718,6 +718,10 @@ def broadcast_to(array: ArrayLike, shape, subok: NotImplementedType = False):
 from torch import broadcast_shapes
 
 
+# dynamo expects functions to be in the torch._numpy namespace
+broadcast_shapes.__module__ = __name__
+
+
 def broadcast_arrays(*args: ArrayLike, subok: NotImplementedType = False):
     return torch.broadcast_tensors(*args)
 
