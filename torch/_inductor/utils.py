@@ -4117,12 +4117,5 @@ COLLECTIVE_OPS = OrderedSet(
 
 
 def is_collective_op(op_name: str) -> bool:
-    """Check if an operation is a collective operation.
-
-    Args:
-        op_name: Name of the operation to check
-
-    Returns:
-        True if the operation is a collective op, False otherwise
-    """
+    """Check if an operation is a collective operation."""
     return op_name in COLLECTIVE_OPS
