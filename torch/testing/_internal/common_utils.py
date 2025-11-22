@@ -1425,7 +1425,7 @@ if IS_WINDOWS:
                 raise UserWarning("only TemporaryFileName with delete=False is supported on Windows.")
         else:
             kwargs['delete'] = False
-        f = tempfile.NamedTemporaryFile(*args, **kwargs)
+        f = tempfile.NamedTemporaryFile(*args, **kwargs)  # noqa:SIM115
         try:
             f.close()
             yield f.name
