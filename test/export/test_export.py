@@ -16142,8 +16142,6 @@ def forward(self, x):
                     # expected 3*..., but got 8
                     ep.module()(torch.randn(4, 2))
 
-    @testing.expectedFailureSerDer  # T195866111
-    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureStrictV2
     def test_hints_wrapper(self):
         strict = True
