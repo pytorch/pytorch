@@ -742,40 +742,61 @@ Tensor instance_norm(
   shape[1] = b * c;
   shape[0] = SymInt(1);
 
-  // handle mixed types by converting parameters to input dtype if needed
-  Tensor weight_converted = weight;
-  Tensor bias_converted = bias;
-  Tensor running_mean_converted = running_mean;
-  Tensor running_var_converted = running_var;
+  const auto input_dtype = input.scalar_type();
 
-  if (weight.defined() && weight.scalar_type() != input.scalar_type()) {
-    weight_converted = weight.to(input.scalar_type());
-  }
-  if (bias.defined() && bias.scalar_type() != input.scalar_type()) {
-    bias_converted = bias.to(input.scalar_type());
-  }
-  if (running_mean.defined() && running_mean.scalar_type() != input.scalar_type()) {
-    running_mean_converted = running_mean.to(input.scalar_type());
-  }
-  if (running_var.defined() && running_var.scalar_type() != input.scalar_type()) {
-    running_var_converted = running_var.to(input.scalar_type());
+  // compute dtype mismatch flags once and reuse 
+  const bool mixed_dtype_stats = running_mean.defined() && 
+                                 running_mean.scalar_type() != input_dtype;
+  const bool mixed_dtype_weight = weight.defined() && 
+                                  weight.scalar_type() != input_dtype;
+  const bool mixed_dtype_bias = bias.defined() && 
+                                bias.scalar_type() != input_dtype;
+
+  const bool has_mixed_dtype = mixed_dtype_stats || mixed_dtype_weight || mixed_dtype_bias;
+
+  if (!has_mixed_dtype) {
+    // fast path: no dtype conversions needed
+    Tensor weight_ = repeat_if_defined(weight, b);
+    Tensor bias_ = repeat_if_defined(bias, b);
+    Tensor running_mean_ = repeat_if_defined(running_mean, b);
+    Tensor running_var_ = repeat_if_defined(running_var, b);
+
+    auto input_reshaped = input.contiguous().view_symint(shape);
+    auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
+                              use_input_stats, momentum, eps, cudnn_enabled);
+
+    // update running stats - simple copy, no conversion needed
+    if (running_mean.defined()) {
+      at::alias(running_mean).copy_(running_mean_.view_symint({ b, c }).mean(0, false));
+      at::alias(running_var).copy_(running_var_.view_symint({ b, c }).mean(0, false));
+    }
+
+    return out.view_symint(input.sym_sizes());
   }
 
-  Tensor weight_ = repeat_if_defined(weight_converted, b);
-  Tensor bias_ = repeat_if_defined(bias_converted, b);
-  Tensor running_mean_ = repeat_if_defined(running_mean_converted, b);
-  Tensor running_var_ = repeat_if_defined(running_var_converted, b);
+  // slow path: handle mixed dtypes
+  Tensor weight_for_bn = mixed_dtype_weight ? weight.to(input_dtype) : weight;
+  Tensor bias_for_bn = mixed_dtype_bias ? bias.to(input_dtype) : bias;
+  Tensor running_mean_for_bn = mixed_dtype_stats ? running_mean.to(input_dtype) : running_mean;
+  Tensor running_var_for_bn = mixed_dtype_stats ? running_var.to(input_dtype) : running_var;
+
+  Tensor weight_ = repeat_if_defined(weight_for_bn, b);
+  Tensor bias_ = repeat_if_defined(bias_for_bn, b);
+  Tensor running_mean_ = repeat_if_defined(running_mean_for_bn, b);
+  Tensor running_var_ = repeat_if_defined(running_var_for_bn, b);
 
   auto input_reshaped = input.contiguous().view_symint(shape);
   auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
                             use_input_stats, momentum, eps, cudnn_enabled);
 
-  // we alias running_mean and running_var because they are const but we want to modify their data
+  // update running stats (convert dtype if needed)
   if (running_mean.defined()) {
-    at::alias(running_mean).copy_(running_mean_.view_symint({ b, c }).mean(0, false));
-  }
-  if (running_var.defined()) {
-    at::alias(running_var).copy_(running_var_.view_symint({ std::move(b), std::move(c) }).mean(0, false));
+    auto updated_mean = running_mean_.view_symint({ b, c }).mean(0, false);
+    auto updated_var = running_var_.view_symint({ b, c }).mean(0, false);
+
+    const auto original_dtype = running_mean.scalar_type();
+    at::alias(running_mean).copy_(updated_mean.to(original_dtype));
+    at::alias(running_var).copy_(updated_var.to(original_dtype));
   }
 
   return out.view_symint(input.sym_sizes());
