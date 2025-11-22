@@ -8,7 +8,8 @@ maintaining type safety through the compilation process.
 
 import enum
 import operator
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, Optional, overload, TYPE_CHECKING, Union
+from typing_extensions import override
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
@@ -38,6 +39,14 @@ class ConstantVariable(VariableTracker):
     nested collections.
     """
 
+    @overload
+    @staticmethod
+    def create(value: bool) -> "ConstantVariable": ...
+
+    @overload
+    @staticmethod
+    def create(value: Any, **kwargs: Any) -> VariableTracker: ...
+
     @staticmethod
     def create(value: Any, **kwargs: Any) -> VariableTracker:
         """
@@ -53,10 +62,10 @@ class ConstantVariable(VariableTracker):
         # Routing for supported collection literals.
         if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.SetVariable(items, **kwargs)
+            return variables.SetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, frozenset):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.FrozensetVariable(items, **kwargs)
+            return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
             slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
@@ -266,9 +275,10 @@ its type to `common_constant_types`.
                 )
         return super().call_method(tx, name, args, kwargs)
 
+    @override
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> "ConstantVariable":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 

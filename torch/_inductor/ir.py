@@ -119,7 +119,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cuda.cuda_template import CUDATemplate
+    from .codegen.cutlass.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
@@ -528,6 +528,16 @@ def get_symbolic_inputs(inputs: Sequence[IRNode]) -> list[Expr]:
         sym_vars |= get_free_symbols(inp.get_stride(), unbacked_only=False)
 
     return list(sym_vars)
+
+
+def try_get_name(x):
+    if isinstance(x, TensorBox):
+        x = x.data
+    if isinstance(x, BaseView):
+        x = x.unwrap_view()
+    if isinstance(x, StorageBox):
+        x = x.data
+    return x.get_name() if isinstance(x, Buffer) else None
 
 
 class IRNode:
@@ -7429,6 +7439,8 @@ class DeviceCopy(ExternKernelOut):
     def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
         if (
             not x.is_extern()
+            # Can not apply this optimization if x has been mutated
+            and try_get_name(x) not in V.graph.mutated_buffers
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):

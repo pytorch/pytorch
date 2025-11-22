@@ -1229,7 +1229,7 @@ class TestPatternMatcher(TestCase):
 
         # Cases Activation(Addmm) -> _addmm_activation
         fusable_activations = (
-            lambda *args, **kwargs: torch.nn.functional.relu(*args, **kwargs),
+            torch.nn.functional.relu,
             # NOTE: only approximate="tanh" is fusable
             lambda *args, **kwargs: torch.nn.functional.gelu(
                 *args, approximate="tanh", **kwargs
