@@ -1,0 +1,28 @@
+name: job-filter
+
+on:
+  workflow_call:
+    inputs:
+      jobs-to-include:
+        required: false
+        type: string
+        default: ""
+    outputs:
+      jobs:
+        description: "Space-padded job filter string"
+        value: ${{ jobs.compute.outputs.jobs }}
+
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    outputs:
+      jobs: ${{ steps.set.outputs.jobs }}
+    steps:
+      - id: set
+        run: |
+          jobs="${{ inputs.jobs-to-include }}"
+          if [ -n "$jobs" ]; then
+            echo "jobs= ${jobs} " >> "$GITHUB_OUTPUT"
+          else
+            echo "jobs=" >> "$GITHUB_OUTPUT"
+          fi
