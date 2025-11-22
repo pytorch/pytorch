@@ -275,6 +275,27 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         actual = compiled_fn(*inputs)
         self.assertEqual(expected, actual)
 
+    def test_aot_compile_grad_mode_after_prior_compile(self):
+        def warmup_fn(x, y):
+            return x + y
+
+        def target_fn(x, y):
+            return x - y
+
+        torch.compile(warmup_fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        torch._dynamo.reset()
+
+        with torch.no_grad():
+            compiled_fn = torch.compile(target_fn, fullgraph=True).aot_compile(
+                ((torch.randn(3, 4), torch.randn(3, 4)), {})
+            )
+
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        with torch.no_grad():
+            self.assertEqual(compiled_fn(*inputs), target_fn(*inputs))
+
     def test_aot_compile_source_info(self):
         from torch._dynamo.package import SourceInfo
 
