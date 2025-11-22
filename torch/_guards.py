@@ -1058,10 +1058,27 @@ def tracing(
             context.fake_mode.shape_env.cleanup()
         _TLS.tracing_context = old_context
 
+def dataclass_with_cached_hash(cls=None, **kwargs):
+    def wrap(cls):
+        new_cls = dataclasses.dataclass(cls, **kwargs)
+        old_hash = cls.__hash__
+
+        def __hash__(self):
+            if not hasattr(self, "_hash"):
+                object.__setattr__(self, "_hash", old_hash(self))
+            return self._hash
+
+        new_cls.__hash__ = __hash__
+        return new_cls
+
+    if cls is None:
+        return wrap
+
+    return wrap(cls)
 
 # Subclasses can be found in torch/_dynamo/source.py
 # TODO(voz): Consider a toplevel torch/_source.py
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class Source:
     def is_dict_key(self) -> bool:
         return False
@@ -1112,7 +1129,7 @@ class Source:
 
 
 # Subclasses can be found in torch/_dynamo/source.py
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ChainedSource(Source):
     base: Source
 
