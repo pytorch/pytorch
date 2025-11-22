@@ -688,6 +688,62 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         raise AssertionError("scan is not lowered to while_loop")
 
 
+def register_addmm_activation_fusions():
+    def is_valid_addmm_activation_fusion(match: Match) -> bool:
+        if config.max_autotune_gemm:
+            return False
+
+        inp = match.kwargs["inp"].meta["val"]
+
+        if not inp.is_cuda:
+            return False
+
+        # ROCm - no Lt with activation epilogue fusion when bias is 2D
+        if torch.version.hip and (inp.dim() == 2):
+            return False
+
+        output = match.output_node()
+        if len(output.users):
+            return not all(is_pointwise_use(use) for use in output.users)
+        else:
+            return True
+
+    args = [torch.empty(3), torch.empty(4, 2), torch.empty(2, 3)]
+    beta_alpha_workaround = {"beta": 1.3, "alpha": 1.2}
+
+    patterns = (
+        lambda inp, m1, m2, beta, alpha: aten.relu(
+            aten.addmm(inp, m1, m2, beta=beta, alpha=alpha)
+        ),
+        lambda inp, m1, m2, beta, alpha: aten.gelu(
+            aten.addmm(inp, m1, m2, beta=beta, alpha=alpha), approximate="tanh"
+        ),
+    )
+    replacements = (
+        lambda inp, m1, m2, beta, alpha: aten._addmm_activation(
+            inp, m1, m2, beta=beta, alpha=alpha
+        ),
+        lambda inp, m1, m2, beta, alpha: aten._addmm_activation(
+            inp, m1, m2, beta=beta, alpha=alpha, use_gelu=True
+        ),
+    )
+
+    for pattern, replacement in zip(patterns, replacements):
+        register_replacement(
+            # pyrefly: ignore [bad-argument-type]
+            pattern,
+            # pyrefly: ignore [bad-argument-type]
+            replacement,
+            args,
+            # pyrefly: ignore [bad-argument-type]
+            trace_fn=fwd_only,
+            # pyrefly: ignore [bad-argument-type]
+            pass_dicts=pass_patterns[1],
+            extra_check=is_valid_addmm_activation_fusion,
+            scalar_workaround=beta_alpha_workaround,
+        )
+
+
 @init_once_fakemode
 def lazy_init():
     if torch._C._has_mkldnn:
@@ -712,6 +768,8 @@ def lazy_init():
         pass_dicts=pass_patterns[1],
         extra_check=prepare_softmax_extra_check,
     )
+
+    register_addmm_activation_fusions()
 
 
 def reorder_for_locality(graph: torch.fx.Graph):
