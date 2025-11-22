@@ -124,28 +124,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
                 raise SubgraphLoweringException(
                     f"{target} not supported in subgraph, (missing lowering)"
                 )
-            result = lowerings[target](*args, **kwargs)
-            return self._unwrap_optimized_add(result, target)
-
-    @staticmethod
-    def _unwrap_optimized_add(result: Any, target: Any) -> Any:
-        """
-        See Note [optimized_summation] in sym_node.py.
-
-        SymInt additions normally flow through SymNode magic methods, which
-        unpack the `(optimized_flag, sympy_expr)` tuple emitted by
-        `_optimized_add`. We dont get this because we are using a fresh interpreter without the meta data.
-        """
-        if target is not method_to_operator("add"):
-            return result
-        if (
-            isinstance(result, tuple)
-            and len(result) == 2
-            and isinstance(result[0], bool)
-            and isinstance(result[1], sympy.Expr)
-        ):
-            return result[1]
-        return result
+            return lowerings[target](*args, **kwargs)
 
     def output(self, target: str, args: tuple[Any], kwargs: dict[str, Any]) -> None:  # type: ignore[override]
         assert len(args) == 1
