@@ -6,7 +6,6 @@ from collections.abc import Callable
 from typing import Any, Optional, Union
 
 import torch
-from torch._inductor import config
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, TensorBox
 from torch._inductor.lowering import lowerings, validate_ir
@@ -202,14 +201,8 @@ def _adapt_user_input_gen_fns(
         """Create internal input generator that converts IR buffer to user's fake tensor."""
 
         def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
-            raw_shape = ir_buffer.get_size()
-            concrete_shape = V.graph.sizevars.size_hints(
-                raw_shape, fallback=config.unbacked_symint_fallback
-            )
-
-            fake_tensor = torch.empty(
-                concrete_shape, dtype=ir_buffer.get_dtype(), device="meta"
-            )
+            fake_tensor = ir_node_to_tensor(ir_buffer)
+            assert fake_tensor is not None, "ir_node_to_tensor returned None"
             return user_function(fake_tensor)
 
         return internal_input_gen_fn
@@ -388,16 +381,7 @@ def _generate_dynamic_configs(
     param_names = list(sig.parameters.keys())
 
     with V.fake_mode:
-        fake_tensors = []
-        for inp in tensor_inputs:
-            raw_shape = inp.get_size()
-            concrete_shape = V.graph.sizevars.size_hints(
-                raw_shape, fallback=config.unbacked_symint_fallback
-            )
-            fake_tensor = torch.empty(
-                concrete_shape, dtype=inp.get_dtype(), device=inp.get_device()
-            )
-            fake_tensors.append(fake_tensor)
+        fake_tensors = [ir_node_to_tensor(inp) for inp in tensor_inputs]
 
     fake_tensors_dict = dict(zip(param_names, fake_tensors))
 

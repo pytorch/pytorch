@@ -3433,11 +3433,9 @@ class AlgorithmSelectorCache(PersistentCache):
 
         import torch.distributed as dist
 
-        timeout_seconds = float(
-            os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_TIMEOUT", "30")
-        )
+        timeout_seconds = config.collective_benchmark_timeout
 
-        nruns = int(os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_NRUNS", "10"))
+        nruns = config.collective_benchmark_nruns
 
         # Use default process group (None = all ranks)
         process_group = None
