@@ -1403,7 +1403,7 @@ Example::
 add_docstr(
     torch.bernoulli,
     r"""
-bernoulli(input: Tensor, *, generator: Optional[Generator], out: Optional[Tensor]) -> Tensor
+bernoulli(input: Tensor, p: Optional[_float] = 0.5, *, generator: Optional[Generator] = None, out: Optional[Tensor] = None) -> Tensor
 
 Draws binary random numbers (0 or 1) from a Bernoulli distribution.
 
@@ -1428,6 +1428,8 @@ point ``dtype``.
 
 Args:
     input (Tensor): the input tensor of probability values for the Bernoulli distribution
+    p (float, optional): should be a scalar in range from 0 to 1 containing probabilities
+            to be used for drawing the binary random number, defaults to 0.5
 
 Keyword args:
     {generator}
