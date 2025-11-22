@@ -11704,11 +11704,11 @@ def reference_mse_loss(input, target, reduction="mean"):
         return se
 
 
-def reference_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int], weight=None, bias=None, eps=1e-5):
+def reference_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weight=None, bias=None, eps=1e-5):
     return reference_native_layer_norm(inp, normalized_shape, weight, bias, eps)[0]
 
 
-def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int], weight, bias, eps):
+def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weight, bias, eps):
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
     mean = inp_view.mean(axis=-1, keepdims=True)
@@ -11725,7 +11725,7 @@ def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int], 
     return Y.reshape(*inp.shape), mean.reshape(stat_shape), (1.0 / np.sqrt(var + eps)).reshape(stat_shape)
 
 
-def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int], weight=None, eps=None):
+def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weight=None, eps=None):
     if eps is None:
         eps = torch.finfo(numpy_to_torch_dtype(inp.dtype)).eps
     feature_size = np.prod(normalized_shape)
