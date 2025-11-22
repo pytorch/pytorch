@@ -306,9 +306,22 @@ void MPSHeapAllocatorImpl::free_buffer(BufferBlock* buffer_block) {
   TORCH_INTERNAL_ASSERT(buffer_block->in_use);
 
   BufferPool& pool = *buffer_block->heap->pool;
-  // Makes sure the BufferBlock* isn't already present in the pool we're freeing it back into.
-  TORCH_INTERNAL_ASSERT(pool.available_buffers.insert(buffer_block).second);
-  pool.available_size += buffer_block->size;
+
+  // CRITICAL FIX #2: Implement buffers_pending_free mechanism
+  // Check if buffer is still held by GPU command buffer (retainCount > 1)
+  // If yes, add to pending_free instead of available_buffers to prevent premature reuse
+  if (buffer_block->retainCount() > 1) {
+    // Buffer still in use by GPU - add to pending list
+    // It will be moved to available_buffers once retainCount drops to 1
+    pool.buffers_pending_free.insert(buffer_block);
+    // Don't add to available_buffers or update available_size yet
+  } else {
+    // Buffer is free now - add to available pool immediately
+    TORCH_INTERNAL_ASSERT(pool.available_buffers.insert(buffer_block).second);
+    pool.available_size += buffer_block->size;
+  }
+
+  // Common cleanup for both paths
   buffer_block->shape.clear(); // reset shape
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(m_current_allocated_memory >= buffer_block->size);
   m_current_allocated_memory -= buffer_block->size;
@@ -444,6 +457,10 @@ bool MPSHeapAllocatorImpl::release_cached_buffers() {
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   m_mutex.lock();
+  // CRITICAL FIX: Free pending buffers whose retainCount dropped after synchronization
+  // This prevents memory leaks in long-running training by releasing buffers that were
+  // stuck in buffers_pending_free due to retainCount > 1
+  freeInactiveBuffers();
   // Free all cached blocks to system allocator
   for (const auto& poolIt : m_pools) {
     BufferPool& pool = *poolIt.second;
@@ -675,8 +692,13 @@ void MPSHeapAllocatorImpl::freeInactiveBuffers() {
       for (auto it = pool.buffers_pending_free.begin(), last = pool.buffers_pending_free.end(); it != last;) {
         BufferBlock* buffer_block = *it;
         if (buffer_block->retainCount() <= 1) {
+          // Remove from pending list
           it = pool.buffers_pending_free.erase(it);
-          free_buffer(buffer_block);
+
+          // CRITICAL FIX #2: Now safe to add to available buffers (retainCount dropped to 1)
+          // This completes the buffers_pending_free lifecycle
+          TORCH_INTERNAL_ASSERT(pool.available_buffers.insert(buffer_block).second);
+          pool.available_size += buffer_block->size;
         } else {
           ++it;
         }
