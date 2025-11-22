@@ -3636,6 +3636,8 @@ module_db: list[ModuleInfo] = [
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
+                                dtypes=(torch.chalf,), device_type='xpu'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -3957,7 +3959,9 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-2, rtol=1e-3)}), "TestModule",
                                 "test_forward", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
-                                device_type='cuda'),),
+                                device_type='cuda'),
+                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
+                                device_type='xpu'),),
                ),
     ModuleInfo(torch.nn.CTCLoss,
                module_inputs_func=module_inputs_torch_nn_CTCLoss,
@@ -3994,6 +3998,7 @@ module_db: list[ModuleInfo] = [
                    # No channels_last support for GroupNorm currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='xpu'),
                    DecorateInfo(unittest.skip("Skipped!"), "TestModule", "test_grad",
                                 active_if=TEST_WITH_ROCM, device_type='cuda'),)
                ),
@@ -4293,7 +4298,9 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),)
+                                device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='xpu'),)
                ),
     ModuleInfo(torch.nn.ReflectionPad3d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad3d,
@@ -4302,7 +4309,9 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),)
+                                device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='xpu'),)
                ),
     ModuleInfo(torch.nn.ReplicationPad1d,
                module_inputs_func=module_inputs_torch_nn_ReplicationPad1d,
@@ -4314,7 +4323,9 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),)
+                                device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='xpu'),)
                ),
     ModuleInfo(torch.nn.ReplicationPad3d,
                module_inputs_func=module_inputs_torch_nn_ReplicationPad3d,
@@ -4323,7 +4334,9 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),)
+                                device_type='mps'),
+                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
+                                device_type='xpu'),)
                ),
     ModuleInfo(torch.nn.SELU,
                module_inputs_func=module_inputs_torch_nn_SELU,
