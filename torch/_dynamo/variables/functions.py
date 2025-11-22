@@ -209,11 +209,7 @@ def bind_args_cached(
             raise_observed_exception(
                 TypeError,
                 tx,
-                args=[
-                    ConstantVariable.create(
-                        f"Missing required positional argument: {name}"
-                    )
-                ],
+                args=[f"Missing required positional argument: {name}"],
             )
 
     # 2) *args
@@ -225,9 +221,7 @@ def bind_args_cached(
             TypeError,
             tx,
             args=[
-                ConstantVariable.create(
-                    f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
-                )
+                f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
             ],
         )
 
@@ -244,11 +238,7 @@ def bind_args_cached(
             raise_observed_exception(
                 TypeError,
                 tx,
-                args=[
-                    ConstantVariable.create(
-                        f"Missing required keyword-only argument: {name}"
-                    )
-                ],
+                args=[f"Missing required keyword-only argument: {name}"],
             )
 
     # 4) **kwargs
@@ -258,9 +248,7 @@ def bind_args_cached(
         raise_observed_exception(
             TypeError,
             tx,
-            args=[
-                ConstantVariable.create(f"Unexpected keyword arguments: {list(rem_kw)}")
-            ],
+            args=[f"Unexpected keyword arguments: {list(rem_kw)}"],
         )
 
     return ba
@@ -2800,7 +2788,7 @@ class PyTreeGetNodeTypeFunctionVariable(UserFunctionVariable):
         if len(args) != 1:
             raise_type_error_exc(
                 tx,
-                f"pytree_get_node_type requires exactly 1 argument, got {len(args)}",
+                f"_get_node_type() takes 1 positional argument but {len(args)} were given",
             )
         type_source = None
         if args[0].source:
