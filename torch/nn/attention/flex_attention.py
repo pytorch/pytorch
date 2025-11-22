@@ -1466,9 +1466,14 @@ def flex_attention(
                 query = query.to(target_dtype)
                 key = key.to(target_dtype)
                 value = value.to(target_dtype)
-    except Exception:
+    except Exception as e:
         # Fail closed: if autocast introspection is not available, continue with original tensors.
-        pass
+        # Log once to aid debugging without spamming users.
+        _warn_once(
+            "flex_attention_autocast_introspection_failed",
+            f"Autocast dtype harmonization skipped due to {type(e).__name__}: {e}",
+            category=RuntimeWarning,
+        )
 
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
