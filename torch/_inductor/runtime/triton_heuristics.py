@@ -3433,21 +3433,23 @@ def persistent_reduction(
 
     if inductor_meta.get("RSPLIT_SIZE"):
         new_configs = []
+        rsplit_size = inductor_meta.get("RSPLIT_SIZE")
+        rnumel_hint = size_hints["r0_"]
+        min_x_block = 1
+        if rnumel_hint <= 512:
+            min_x_block = 4
+        x_block = min(max(rsplit_size // 32, min_x_block), 16)
         for c in configs:
-            c.kwargs["RSPLIT_SIZE"] = inductor_meta.get("RSPLIT_SIZE")
-
-            c.kwargs["NUM_STAGES"] = 1
-
+            c.kwargs["RSPLIT_SIZE"] = rsplit_size
             # small XBLOCK to use less registers/smem
-            c.kwargs["XBLOCK"] = (
-                torch._inductor.config.triton.mix_order_reduction_initial_xblock
-            )
+            c.kwargs["XBLOCK"] = x_block
 
-            rnumel_hint = size_hints["r0_"]
+            num_iters = rsplit_size // x_block
+            c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), 3)
 
             if rnumel_hint <= 1024:
                 c.num_warps //= 2
-                c.num_warps = max(c.num_warps, 2)
+                c.num_warps = max(c.num_warps, 1)
                 new_configs.append(c)
 
                 # less warps so potentially each sm can run more thread blocks

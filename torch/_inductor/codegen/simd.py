@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.coordinate_descent_tuner import CoordescTuner
 from ..runtime.hints import DeviceProperties
-from ..runtime.runtime_utils import green_text, next_power_of_2, yellow_text
+from ..runtime.runtime_utils import green_text, last_power_of_2, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
@@ -1625,7 +1625,7 @@ class SIMDScheduling(BaseScheduling):
 
             # split_size is decided based on hint
             numel_hint = V.graph.sizevars.size_hint(numel)
-            split_size = max(next_power_of_2(numel_hint // estimated_num_splits), 16)
+            split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
             split_size = min(split_size, 128)
             return split_size
 
@@ -1678,7 +1678,6 @@ class SIMDScheduling(BaseScheduling):
                 split_size,
                 8,
             )
-            # print(f"Autotuning pick split size {split_size}")
 
         kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel_features,
