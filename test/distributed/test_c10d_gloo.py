@@ -1624,7 +1624,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     @skip_if_lt_x_gpu(2)
     @requires_gloo()
-    @skipIfRocm
     def test_block_current_stream_cuda(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
