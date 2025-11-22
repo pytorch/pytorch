@@ -425,6 +425,9 @@ if(USE_CCACHE)
     set(CMAKE_CUDA_COMPILER_LAUNCHER
         "${CCACHE_PROGRAM}"
         CACHE STRING "CUDA compiler launcher")
+    set(CMAKE_SYCL_COMPILER_LAUNCHER
+        "${CCACHE_PROGRAM}"
+        CACHE STRING "SYCL compiler launcher")
   else()
     message(
       STATUS
