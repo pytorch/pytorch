@@ -1,0 +1,116 @@
+# TODO: this looks sort of similar to _linux-test, but there are like a dozen
+# places where you would have to insert an if statement. Probably it's better to
+# just use a different workflow altogether
+
+name: test
+
+on:
+  schedule:
+    - cron: 0 */6 * * *
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      test-matrix:
+        required: true
+        type: string
+        description: JSON description of what test configs to run.
+      docker-image:
+        required: true
+        type: string
+        description: Docker image to run in.
+      sync-tag:
+        required: false
+        type: string
+        default: ""
+        description: |
+          If this is set, our linter will use this to make sure that every other
+          job with the same `sync-tag` is identical.
+      timeout-minutes:
+        required: false
+        type: number
+        default: 300
+        description: |
+          Set the maximum (in minutes) how long the workflow should take to finish
+      tests-to-include:
+        required: false
+        type: string
+        default: ""
+        description: |
+          List of tests to include (empty string implies default list)
+      dashboard-tag:
+        required: false
+        type: string
+        default: ""
+      disable-monitor:
+        description: |
+          [Experimental] Disable utilization monitoring for tests.
+          Currently, by default we disable the monitor job and only look for specific tests,
+          since we are investigating the behaviour of the monitor script with different tests.
+        required: false
+        type: boolean
+        default: true
+      monitor-log-interval:
+        description: |
+          Set the interval for the monitor script to log utilization.
+        required: false
+        type: number
+        default: 5
+      monitor-data-collect-interval:
+        description: |
+          Set the interval for the monitor script to collect data.
+        required: false
+        type: number
+        default: 1
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
+env:
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test:
+    # Don't run on forked repos or empty test matrix
+    if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
+    strategy:
+      matrix: ${{ fromJSON(inputs.test-matrix) }}
+      fail-fast: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          no-sudo: true
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: ${{ inputs.docker-image }}
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      - name: Save image as tar
+        run: |
+          docker save "$IMAGE" -o /home/runner/docker-cache/pytorch-image.tar
+        env:
+          IMAGE: ${{ inputs.docker-image }}
+
+      - name: Teardown ROCm
+        uses: ./.github/actions/teardown-rocm

@@ -40,8 +40,29 @@ jobs:
       docker-image-name: ci-image:pytorch-linux-jammy-rocm-n-py3
       test-matrix: |
         { include: [
-          { config: "inductor", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2" },
-          { config: "inductor", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2" },
+          { config: "inductor", shard: 1, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" },
+          { config: "inductor", shard: 2, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" },
+          { config: "inductor", shard: 3, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" },
+          { config: "inductor", shard: 4, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" },
+          { config: "inductor", shard: 5, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" },
+          { config: "inductor", shard: 6, num_shards: 6, runner: "linux.rocm.gpu.mi250.1" }
+        ]}
+    secrets: inherit
+
+  linux-jammy-rocm-py3_10-pull-image:
+    permissions:
+      id-token: write
+      contents: read
+    name: linux-jammy-rocm-py3.10-pull-image
+    uses: ./.github/workflows/_pull-image.yml
+    needs:
+      - linux-jammy-rocm-py3_10-inductor-build
+    with:
+      build-environment: linux-jammy-rocm-py3.10
+      docker-image: ${{ needs.linux-jammy-rocm-py3_10-build.outputs.docker-image }}
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.rocm.gpu.mi250.1" },
         ]}
     secrets: inherit
 
@@ -51,7 +72,9 @@ jobs:
       contents: read
     name: rocm-py3.10-inductor
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-jammy-rocm-py3_10-inductor-build
+    needs:
+      - linux-jammy-rocm-py3_10-inductor-build
+      - linux-jammy-rocm-py3_10-pull-image
     with:
       build-environment: linux-jammy-rocm-py3.10
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-build.outputs.docker-image }}
