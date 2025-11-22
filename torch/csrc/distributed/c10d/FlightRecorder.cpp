@@ -51,10 +51,11 @@ DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
     const char* cacheHome = std::getenv("XDG_CACHE_HOME");
 #endif
     std::string cacheRoot;
-    if (cacheHome)
+    if (cacheHome) {
       cacheRoot = cacheHome;
-    else
+    } else {
       cacheRoot = getCvarString({"HOME"}, "/tmp") + "/.cache";
+    }
     auto cacheDirPath = std::filesystem::path(cacheRoot + "/torch");
     // Create the .cache directory if it doesn't exist
     c10::filesystem::create_directories(cacheDirPath);
