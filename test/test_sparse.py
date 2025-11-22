@@ -646,8 +646,7 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense(masked_grad=gradcheck.masked)
             x.requires_grad_(True)
-            kwargs = {"eps": 1e-4} if device == "mps:0" else {}
-            gradcheck(fn, (x,), **kwargs)
+            gradcheck(fn, (x,))
 
         i = self.index_tensor([
             [0, 1, 2, 2],
@@ -1034,8 +1033,7 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    kwargs = {"eps": 1e-4} if device == "mps:0" else {}
-                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_(), **kwargs)
+                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_())
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
@@ -1698,7 +1696,7 @@ class TestSparse(TestSparseBase):
             def fn(S, D):
                 return torch.sparse.mm(S, D)
 
-            kwargs = {"eps": 1e-4, "atol": 2e-5} if device == "mps:0" else {}
+            kwargs = {"atol": 2e-5} if device == "mps:0" else {}
             gradcheck(fn, (S, D), masked=True, **kwargs)
 
         test_shape(7, 8, 9, 20, False)
@@ -1713,16 +1711,17 @@ class TestSparse(TestSparseBase):
         # https://github.com/pytorch/pytorch/issues/79914
         a = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
         b = torch.tensor([[0., 1]], dtype=dtype, device=device).to_sparse().requires_grad_(True)
-        gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(masked_grad=gradcheck.masked), [a, b], eps=1e-4)
+        gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(masked_grad=gradcheck.masked), [a, b])
 
         def test_shape(sparse_dims, nnz, with_shape):
             a = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
             b = self._gen_sparse(sparse_dims, nnz, with_shape, dtype, device, coalesced)[0].requires_grad_(True)
 
             self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense())
-            gradcheck(lambda x, y: (x * y).to_dense(), [a, b], eps=1e-4)
+            gradcheck(lambda x, y: (x * y).to_dense(), [a, b])
             # Issues with 0-dim indices/values
-            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True, eps=3e-4, atol=5e-5)
+            kwargs = {"eps": 3e-4, "atol": 5e-5} if device == "mps:0" else {}
+            gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True, **kwargs)
 
         test_shape(2, 3, [2, 3, 4, 5])
         test_shape(2, 3, [2, 2, 0])
@@ -2265,9 +2264,10 @@ class TestSparse(TestSparseBase):
                 # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
                 # lhs.sparse_mask(lhs_mask) accomplishes that.
                 lhs_mask = lhs.detach().clone()
+                kwargs = {"eps": 3e-4, "atol": 5e-5} if device == "mps:0" else {}
                 gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,),
-                          masked=True, eps=3e-4, atol=5e-5)
-                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False, eps=3e-4, atol=5e-5)
+                          masked=True, **kwargs)
+                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False, **kwargs)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
