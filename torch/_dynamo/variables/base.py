@@ -33,6 +33,7 @@ from ..utils import cmp_name_to_op_mapping, istype
 if TYPE_CHECKING:
     from ..codegen import PyCodegen
     from ..symbolic_convert import InstructionTranslator
+    from .constant import ConstantVariable
     from .functions import UserFunctionVariable
 
 
@@ -445,7 +446,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
-    def call_obj_hasattr(self, tx: Any, name: str) -> "VariableTracker":
+    def call_obj_hasattr(self, tx: Any, name: str) -> "ConstantVariable":
         unimplemented(
             gb_type="Unsupported hasattr call",
             context=f"call_obj_hasattr {self} {name}",

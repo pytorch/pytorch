@@ -524,7 +524,7 @@ class RangeVariable(BaseListVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         if self.python_type() is range:
             return variables.ConstantVariable.create(name in range.__dict__)
         return super().call_obj_hasattr(tx, name)
@@ -976,7 +976,7 @@ class ListVariable(CommonListMethodsVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         if self.python_type() is not list:
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr([], name))
@@ -1133,7 +1133,7 @@ class DequeVariable(CommonListMethodsVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         if self.python_type() is collections.deque:
             return variables.ConstantVariable.create(name in collections.deque.__dict__)
         return super().call_obj_hasattr(tx, name)
@@ -1174,7 +1174,7 @@ class TupleVariable(BaseListVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         if self.python_type() is not tuple:
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr((), name))
@@ -1336,7 +1336,7 @@ class SizeVariable(TupleVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         return variables.ConstantVariable.create(hasattr(torch.Size, name))
 
 
@@ -1584,7 +1584,7 @@ class NamedTupleVariable(TupleVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         return variables.ConstantVariable.create(
             name in self.dynamic_attributes or hasattr(self.tuple_cls, name)
         )
@@ -1697,7 +1697,7 @@ class ListIteratorVariable(IteratorVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         return variables.ConstantVariable.create(hasattr(iter([]), name))
 
     def python_type(self) -> type:
@@ -1770,7 +1770,7 @@ class RangeIteratorVariable(IteratorVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         if self.python_type() is range_iterator:
             ri = iter(range(0))
             return ConstantVariable(hasattr(ri, name))
