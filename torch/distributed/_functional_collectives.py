@@ -594,7 +594,6 @@ def all_reduce(input: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str =
     return wait_tensor(output)
 
 
-
 def all_reduce_backward(ctx, grad_output: torch.Tensor):
     """
     Backward for all_reduce: all_reduce with same reduce_op.
