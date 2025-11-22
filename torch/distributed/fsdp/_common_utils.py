@@ -380,6 +380,31 @@ def _get_handle_fqns_from_root(
     return param_fqns
 
 
+def _build_prefix_set(fqns: list[str]) -> set[str]:
+    """
+    Builds a set of all prefixes from a list of fully-qualified names.
+
+    For example, given ["a.b.c", "a.b.d"], returns {"a.", "a.b.", "a.b.c", "a.b.d"}.
+    This enables O(1) prefix existence checks instead of O(P) startswith scans.
+
+    Args:
+        fqns: List of fully-qualified names (e.g., parameter names).
+
+    Returns:
+        Set of all prefixes including the full FQNs themselves.
+    """
+    prefix_set = set()
+    for fqn in fqns:
+        # Add all intermediate prefixes
+        parts = fqn.split(".")
+        for i in range(1, len(parts) + 1):
+            prefix = ".".join(parts[:i])
+            if i < len(parts):
+                prefix += "."
+            prefix_set.add(prefix)
+    return prefix_set
+
+
 def _apply_to_modules(
     root_module: torch.nn.Module,
     module_fn: Callable,
@@ -399,6 +424,8 @@ def _apply_to_modules(
     to ``FullyShardedDataParallel`` and the ``named_parameters()`` is overwritten
     to remove the prefix.
     """
+    # Pre-compute prefix set for O(1) lookups instead of O(P) per module
+    prefix_set = _build_prefix_set(filter_fqns) if filter_fqns is not None else None
 
     def f(module: torch.nn.Module, prefix: str, tree_level: int, *args, **kwargs):
         # Call the module function before recursing over children (pre-order)
@@ -408,11 +435,9 @@ def _apply_to_modules(
                 continue
             new_prefix = prefix + submodule_name + "."
             new_tree_level = tree_level + 1
-            if filter_fqns is not None:
-                for fqn in filter_fqns:
-                    if fqn.startswith(new_prefix):
-                        break
-                else:
+            if prefix_set is not None:
+                # O(1) lookup instead of O(P) scan through all FQNs
+                if new_prefix not in prefix_set:
                     # DMP's named_parameter() will mess up the traversal with
                     # ``named_children`` + `named_parameter(recurse=False)``.
                     # This hack is a must to make the traversal work.
