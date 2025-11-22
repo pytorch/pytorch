@@ -701,10 +701,13 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
     TORCH_WARN("Torch was not compiled with cuDNN attention.");
   }
   return false;
-#endif
-#if defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
-  if (debug) {
-    TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use cuDNN Attention (< v9.0.0)");
+#else
+  auto cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
+  if (cudnn_version < 90000) {
+    if (debug) {
+      TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use cuDNN Attention (< v9.0.0)");
+    }
+    return false;
   }
   return false;
 #endif
@@ -716,7 +719,14 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
     }
     return false;
   }
-#endif
+  // TODO(eqy): use version gating for this once we have runtime verison and frontend version querying available
+  static bool avoid_recompile = c10::utils::check_env("TORCH_CUDNN_SDPA_AVOID_RECOMPILE") == true;
+  if (!avoid_recompile && params.query.size(2) % 128 != 0) {
+    if (debug) {
+      TORCH_WARN("cuDNN does not support s_q % 128 != 0 without TORCH_CUDNN_SDPA_AVOID_RECOMPILE=1.");
+    }
+    return false;
+  }
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints =
@@ -751,6 +761,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
     }
   }
   return true;
+#endif
 }
 
 bool is_flash_attention_available() {
