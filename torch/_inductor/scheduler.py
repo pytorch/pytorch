@@ -2315,12 +2315,24 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         grouped_nodes = []
         max_num_nodes = 8
         for nodes in sorted_nodes:
-            grouped_nodes.extend(
-                [
-                    nodes[i : i + max_num_nodes]
-                    for i in range(0, len(nodes), max_num_nodes)
-                ]
+            # Group nodes by device first to avoid mixed-device fusion
+            device_groups: dict[Optional[torch.device], list[BaseSchedulerNode]] = (
+                defaultdict(list)
             )
+            for node in nodes:
+                device = node.get_device()
+                if device and device.type == "mps":
+                    continue
+                device_groups[device].append(node)
+
+            # Chunk each device group separately
+            for device_nodes in device_groups.values():
+                grouped_nodes.extend(
+                    [
+                        device_nodes[i : i + max_num_nodes]
+                        for i in range(0, len(device_nodes), max_num_nodes)
+                    ]
+                )
 
         return grouped_nodes
 
@@ -2464,6 +2476,9 @@ class GroupedSchedulerNode(BaseSchedulerNode):
 
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return self.snodes
+
+    def get_device(self) -> Optional[torch.device]:
+        return self.snodes[0].get_device() if self.snodes else None
 
     @classmethod
     def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
@@ -6127,14 +6142,19 @@ class Scheduler:
         If config.benchmark_fusion is False, always return True.
         Otherwise, return True if fusion can brings speedup.
         """
-        if not config.benchmark_combo_kernel:
-            return True
 
         subkernel_nodes = nodes
         device = subkernel_nodes[0].get_device()
 
+        assert all(node.get_device() == device for node in subkernel_nodes), (
+            "All nodes in a combo kernel group must be on the same device"
+        )
+
         # don't support benchmark fusion for CPU C++ backend right now.
         if device is None or (device.type == "cpu" and config.cpu_backend != "triton"):
+            return False
+
+        if not config.benchmark_combo_kernel:
             return True
 
         from triton.compiler.errors import CompilationError
