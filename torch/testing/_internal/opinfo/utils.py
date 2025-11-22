@@ -232,7 +232,10 @@ def reference_reduction_numpy(f, supports_keepdims=True):
         if "mask" in keys:
             mask = kwargs.pop("mask")
             if mask is not None:
-                assert mask.layout == torch.strided
+                if mask.layout != torch.strided:
+                    raise AssertionError(
+                        f"mask must have strided layout, got {mask.layout}"
+                    )
                 kwargs["where"] = mask.cpu().numpy()
 
         if "identity" in keys:
