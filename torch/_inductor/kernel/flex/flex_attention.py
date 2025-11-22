@@ -836,6 +836,13 @@ def flex_attention_backward(*args, **kwargs):
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
+        USE_TMA_DEFAULT = bool(torch.xpu.is_available())
+        # The shape dtype of tensor desc is i32
+        if V.graph.sizevars.statically_known_true(
+            seq_len_q > 2**31 - 1
+        ) or V.graph.sizevars.statically_known_true(seq_len_kv > 2**31 - 1):
+            USE_TMA_DEFAULT = False
+        cur_kernel_options.setdefault("USE_TMA", USE_TMA_DEFAULT)
         cur_kernel_options.setdefault("BLOCK_M1", conf.block_m1)
         cur_kernel_options.setdefault("BLOCK_N1", conf.block_n1)
         cur_kernel_options.setdefault("BLOCK_M2", conf.block_m2)

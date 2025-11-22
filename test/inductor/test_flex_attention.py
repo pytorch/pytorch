@@ -218,11 +218,7 @@ class SubstringSet:
         return item in self.items
 
 
-DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
-    [
-        "cuda",
-    ]
-)
+DEVICE_SUPPORTS_BACKWARDS = SubstringSet(["cuda", "xpu"])
 
 device_configs["cuda"] = DeviceConfig(
     dtypes=(
@@ -960,7 +956,6 @@ class TestFlexAttention(InductorTestCase):
         q1_gold, k1_gold, v1_gold = query_key_value_clones(q1, k1, v1, torch.float64)
         ref_out1 = sdpa_partial1(q1_ref, k1_ref, v1_ref)
         golden_out1 = sdpa_partial1(q1_gold, k1_gold, v1_gold)
-
         if requires_grad:
             backward_grad1 = torch.randn((B, H, S, D), dtype=dtype, device=device)
             golden_out1.backward(backward_grad1.to(torch.float64))
@@ -1477,7 +1472,6 @@ class TestFlexAttention(InductorTestCase):
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @skip_on_rocm  # TODO: NaNs on ROCM
-    @skip_on_xpu  # TODO: NaNs on XPU like ROCM, need another PR to fix.
     def test_GQA(self, device, dtype: torch.dtype, score_mod: Callable):
         inputs = (
             score_mod,
@@ -6561,7 +6555,8 @@ def get_params(dtypes: list[torch.dtype]) -> list[Params]:
 
 supports_learnable_bias = unittest.skipUnless(
     (
-        (torch.cuda.is_available() and has_triton())
+        (torch.xpu.is_available() and has_triton())
+        or (torch.cuda.is_available() and has_triton())
         and (torch.cuda.get_device_capability() >= (8, 0) or torch.version.hip)
     ),
     "Requires Triton + A100 or Triton + ROCm",
