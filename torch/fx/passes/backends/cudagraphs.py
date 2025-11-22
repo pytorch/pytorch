@@ -48,7 +48,7 @@ def partition_cudagraphs(gm, inputs):
     CUDA graphs.  For a subgraph to be runnable under CUDA, all of the operations
     must involve CUDA tensors only/
     """
-
+    # TODO: read this
     FakeTensorProp(gm).propagate(*inputs)
     supported_ops = CudaGraphsSupport()
     # TODO: single node partition may be wrong due to the pessimization

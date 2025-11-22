@@ -1,4 +1,5 @@
 from . import (
+    cudagraph_partition,
     graph_drawer,
     graph_manipulation,
     net_min_base,
