@@ -113,6 +113,7 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
  private:
   c10::intrusive_ptr<Block> find_block(void* ptr);
+  c10::intrusive_ptr<Block> find_block_covering(void* ptr);
 
   std::shared_mutex mutex_;
   std::unordered_map<void*, c10::intrusive_ptr<Block>> ptr_to_block_;

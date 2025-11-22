@@ -766,10 +766,10 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
 c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     void* ptr,
     const std::optional<std::string>& group_name) {
-  auto block = find_block(ptr);
-  if (block == nullptr) {
-    return nullptr;
-  }
+  // In case of MemPool, the `ptr` passed in (i.e. tensor storage ptr) may not
+  // be the same as the allocation base pointer, so we need to find the block
+  // that covers the `ptr`
+  auto block = find_block_covering(ptr);
 
   // The group_name passed to rendezvous() takes precedence over
   // the default group_name specified during allocation.
@@ -788,6 +788,7 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     group_name_ = *block->default_group_name;
   }
 
+  // If found, this block has been rendezvous by the given group
   auto it = block->symm_mems.find(group_name_);
   if (it != block->symm_mems.end()) {
     return it->second;
@@ -824,6 +825,25 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
     return nullptr;
   }
   return it->second;
+}
+
+/* Search for a block that covers the given ptr; error out if not found */
+c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void* ptr) {
+  std::shared_lock lock(mutex_);
+  // In case of MemPool, tensor.storage().data_ptr() may not match
+  // exactly an allocation's base address. Thus we perform the search by
+  // testing if the former is within an allocation's range.
+  auto alloc_it = std::find_if(ptr_to_block_.begin(), ptr_to_block_.end(),
+                             [&](const auto& pair){
+                                auto& allocation = pair.second;
+                                auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+                                auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
+                                return ptr_int >= base_ptr && ptr_int < base_ptr + allocation->buffer_size; });
+  TORCH_CHECK(alloc_it != ptr_to_block_.end(),
+      "Pointer not within any SymmetricMemory allocation, "
+      "is the tensor allocated from SymmetricMemory?");
+
+  return alloc_it->second;
 }
 
 struct RegisterCUDASymmetricMemoryAllocator {
