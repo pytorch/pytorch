@@ -4186,13 +4186,13 @@ class GraphModule(torch.nn.Module):
 
         interleaved_5: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved_4, 0, 0, 3);  interleaved_4 = None
 
-        child_17: "f32[3, 10, 2]" = interleaved_1.flip([0]);  interleaved_1 = None
-        child_18: "f32[3, 10, 2]" = interleaved_3.flip([0]);  interleaved_3 = None
-        child_19: "f32[3, 10, 2]" = interleaved_5.flip([0]);  interleaved_5 = None
+        flip_3: "f32[3, 10, 2]" = interleaved_1.flip([0]);  interleaved_1 = None
+        flip_4: "f32[3, 10, 2]" = interleaved_3.flip([0]);  interleaved_3 = None
+        flip_5: "f32[3, 10, 2]" = interleaved_5.flip([0]);  interleaved_5 = None
 
-        movedim_3: "f32[3, 10, 2]" = torch.movedim(child_17, 0, 0);  child_17 = None
-        movedim_4: "f32[3, 10, 2]" = torch.movedim(child_18, 0, 0);  child_18 = None
-        movedim_5: "f32[3, 10, 2]" = torch.movedim(child_19, 0, 0);  child_19 = None
+        movedim_3: "f32[3, 10, 2]" = torch.movedim(flip_3, 0, 0);  flip_3 = None
+        movedim_4: "f32[3, 10, 2]" = torch.movedim(flip_4, 0, 0);  flip_4 = None
+        movedim_5: "f32[3, 10, 2]" = torch.movedim(flip_5, 0, 0);  flip_5 = None
         return (movedim_3, movedim_4, movedim_5)
 """,  # noqa: B950
         )
@@ -8595,7 +8595,7 @@ class GraphModule(torch.nn.Module):
         getitem_13: "Sym(u20)" = while_loop[5]
         getitem_14: "Sym(u21)" = while_loop[6]
 
-        child: "f32[2, 3]" = while_loop[7];  while_loop = None
+        getitem_7: "f32[2, 3]" = while_loop[7];  while_loop = None
 
         add: "Sym(u15 + 1)" = getitem_8 + 1
         add_1: "Sym(u16 + 1)" = getitem_9 + 1
@@ -8604,7 +8604,7 @@ class GraphModule(torch.nn.Module):
         add_4: "Sym(u19 + 1)" = getitem_12 + 1
         add_5: "Sym(u20 + 1)" = getitem_13 + 1
         add_6: "Sym(u21 + 1)" = getitem_14 + 1
-        add_7: "f32[2, 3]" = child + 1
+        add_7: "f32[2, 3]" = getitem_7 + 1
 
         add_8: "f32[2, 3]" = getitem_8 + l_t_;  getitem_8 = None
         add_9: "f32[2, 3]" = getitem_9 + l_t_;  getitem_9 = None
@@ -8613,7 +8613,7 @@ class GraphModule(torch.nn.Module):
         add_12: "f32[2, 3]" = getitem_12 + l_t_;  getitem_12 = None
         add_13: "f32[2, 3]" = getitem_13 + l_t_;  getitem_13 = None
         add_14: "f32[2, 3]" = getitem_14 + l_t_;  getitem_14 = None
-        add_15: "f32[2, 3]" = child + l_t_;  child = l_t_ = None
+        add_15: "f32[2, 3]" = getitem_7 + l_t_;  getitem_7 = l_t_ = None
         return (add, add_1, add_2, add_3, add_4, add_5, add_6, add_7, add_8, add_9, add_10, add_11, add_12, add_13, add_14, add_15)
 
     class cond_fn_0(torch.nn.Module):
