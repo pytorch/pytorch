@@ -208,6 +208,10 @@ class _KinetoProfile:
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
+        if self.use_device and hasattr(torch, self.use_device):
+            device_module = getattr(torch, self.use_device)
+            if hasattr(device_module, "synchronize"):
+                device_module.synchronize()
         if self.execution_trace_observer:
             self.execution_trace_observer.start()
         if self.profiler is None:
