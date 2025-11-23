@@ -120,9 +120,7 @@ CUfunction loadKernel(
   AT_CUDA_DRIVER_CHECK(hipModuleGetFunction(&func, mod, funcName.c_str()));
   int shared_optin = 0;
   AT_CUDA_DRIVER_CHECK(hipDeviceGetAttribute(
-      &shared_optin,
-      hipDeviceAttributeMaxSharedMemoryPerBlock,
-      device));
+      &shared_optin, hipDeviceAttributeMaxSharedMemoryPerBlock, device));
 
 #else
   AT_CUDA_DRIVER_CHECK(nvrtc().cuModuleLoad(&mod, filePath.c_str()));
