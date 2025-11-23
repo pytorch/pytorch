@@ -162,7 +162,6 @@ dtensor_fails = {
     xfail("cummax"),
     xfail("cummin"),
     xfail("diagonal_scatter"),
-    xfail("dist"),
     xfail("expand_copy"),
     xfail("exponential"),
     xfail("equal"),
