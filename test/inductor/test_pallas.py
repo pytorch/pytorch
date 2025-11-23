@@ -91,6 +91,24 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    def test_matmul(self):
+        """Test matrix multiplication."""
+
+        def fn(a, b):
+            return torch.matmul(a, b)
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(2, 2, device=self.DEVICE)
+        b = torch.randn(2, 2, device=self.DEVICE)
+        expected = fn(a, b)
+        print(f"Input a:\n{a}")
+        print(f"Input b:\n{b}")
+        result = compiled(a, b)
+        print(f"Expected output:\n{expected}")
+        print(f"Actual output:\n{result}")
+        self.assertEqual(result, expected)
+
     def test_sin(self):
         """Test sin operation."""
 

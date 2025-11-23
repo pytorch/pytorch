@@ -427,8 +427,20 @@ class PallasKernel(SIMDKernel):
         # Determine device type once at initialization
         device = V.graph.get_current_device_or_throw()
         self.is_gpu = device.type == "cuda"
+        self.is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
         self.use_masked_ops: bool | None = None
         self.tensor_masks = {}  # Map tensor name to mask variable name
+
+        if self.is_tpu:
+            if not torch._inductor.config.pallas_take_first_jax_device_only:
+                raise RuntimeError(
+                    "Pallas backend currently only supports using the first JAX device."
+                )
+            if not has_tpu_pallas():
+                raise RuntimeError(
+                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                    "Please make sure that you have a TPU available and that JAX is configured correctly."
+                )
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -887,17 +899,6 @@ class PallasKernel(SIMDKernel):
 
         kernel_name = name or "<KERNEL_NAME>"
         interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
-        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
-        if is_tpu:
-            if not torch._inductor.config.pallas_take_first_jax_device_only:
-                raise RuntimeError(
-                    "Pallas backend currently only supports using the first JAX device."
-                )
-            if not has_tpu_pallas():
-                raise RuntimeError(
-                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
-                    "Please make sure that you have a TPU available and that JAX is configured correctly."
-                )
         interpret_literal = "True" if interpret_is_cpu else "False"
 
         # For GPU (Triton backend), import pltriton for masked loads/stores
@@ -1081,7 +1082,7 @@ class PallasKernel(SIMDKernel):
                     # that occurs with DLPack. Once TorchTPU provides a direct method for placing a
                     # `torch.Tensor` on a TPU device, this should be reverted to use the
                     #  `jax.dlpack.from_dlpack` path.
-                    if is_tpu:
+                    if self.is_tpu:
                         code.writeline(
                             f"{alias_name}_jax = jax.device_put({alias_name}.cpu().numpy(), device=jax.devices('tpu')[0])"
                         )
@@ -1092,7 +1093,7 @@ class PallasKernel(SIMDKernel):
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in pointer_tail:
                 if ptr.startswith("in_out_ptr"):
-                    if is_tpu:
+                    if self.is_tpu:
                         code.writeline(
                             f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
                         )
@@ -1101,7 +1102,7 @@ class PallasKernel(SIMDKernel):
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in pointer_tail:
                 if ptr.startswith("in_ptr"):
-                    if is_tpu:
+                    if self.is_tpu:
                         code.writeline(
                             f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
                         )
@@ -1147,7 +1148,7 @@ class PallasKernel(SIMDKernel):
                 )
                 for idx in copy_output_indices:
                     name = output_params[idx]
-                    if is_tpu:
+                    if self.is_tpu:
                         code.writeline(
                             f"res_cpu = jax.device_get(result_values[{idx}])"
                         )
