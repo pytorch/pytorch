@@ -2229,6 +2229,100 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         self.assertGreater(stats.number_of_events, 0)
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_profiler_step_device_sync(self):
+        """
+        Test that device synchronization happens before profiler.step() to ensure
+        consistent tracking of device activities across profiling cycles.
+
+        Regression test for issue #162481 where CUDA operations were inconsistently
+        tracked when calling profiler.step() without explicit synchronization.
+
+        This test reproduces the exact scenario from the issue: launching many
+        async CUDA operations and checking that kernel counts are consistent
+        when transitioning between profiling phases via step().
+        """
+        num_ops = 10  # Number of operations per phase
+        flush_l2_size = (
+            int(8e9 // 4)
+            if torch.cuda.get_device_properties(0).total_memory > 10 * 1024**3
+            else int(1e8 // 4)
+        )
+
+        def run_profiling_with_schedule():
+            """Run profiling with schedule and count CUDA kernel events from chrome trace"""
+            prof_schedule = torch.profiler.schedule(
+                wait=0, warmup=1, active=1, repeat=1
+            )
+
+            a = torch.randn(1024, 1024, device="cuda")
+            b = torch.randn(1024, 1024, device="cuda")
+
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                schedule=prof_schedule,
+            ) as prof:
+                for step in range(2):  # warmup + active
+                    for _ in range(num_ops):
+                        # Flush L2 cache to make operations more visible
+                        torch.empty(
+                            flush_l2_size, dtype=torch.int, device="cuda"
+                        ).zero_()
+                        # Matrix multiplication that will trigger CUDA kernels
+                        c = torch.mm(a, b)
+                    # This step() call should trigger synchronization
+                    # Without sync, pending kernels from warmup may leak into active phase
+                    prof.step()
+
+            # Export trace and count kernel events from JSON
+            # This is more reliable than counting from events() directly
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    trace_data = json.load(f)
+                    events = trace_data.get("traceEvents", [])
+
+                    # Count actual GPU kernel executions (not CPU side launches)
+                    # Look for GEMM kernels which are the actual GPU computations
+                    gpu_kernel_count = 0
+                    for event in events:
+                        if (
+                            event.get("cat") == "kernel"
+                            and "gemm" in event.get("name", "").lower()
+                        ):
+                            gpu_kernel_count += 1
+
+            return gpu_kernel_count
+
+        # Run multiple profiling cycles and check consistency
+        kernel_counts = []
+        for cycle in range(3):
+            count = run_profiling_with_schedule()
+            kernel_counts.append(count)
+
+        # All cycles should report the same number of kernel events
+        # Without synchronization, the counts will vary (e.g., [9, 11, 10] instead of [10, 10, 10])
+        # because pending kernels from previous phases leak into the profiled phase
+        unique_counts = set(kernel_counts)
+
+        # The main assertion: counts should be consistent
+        self.assertEqual(
+            len(unique_counts),
+            1,
+            f"Inconsistent GPU kernel counts across profiling cycles: {kernel_counts}. "
+            f"Expected all cycles to report the same count, but got {len(unique_counts)} different values. "
+            f"This indicates device synchronization is not happening before profiler phase transitions.",
+        )
+
+        # Sanity check: we should have captured some kernels
+        self.assertGreater(
+            kernel_counts[0],
+            0,
+            "Expected to capture GPU kernel events during profiling",
+        )
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     @unittest.skipIf(
         torch.cuda.is_available(), "CUDA complains about forking after init"
     )
