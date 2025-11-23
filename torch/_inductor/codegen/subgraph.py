@@ -163,6 +163,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         else:
             mod = self._compiled_module
             sym_inputs = self._compiled_sym_inputs
+            assert sym_inputs is not None  # Type narrowing
 
         bm_func = mod.call
         bm_func([*sym_inputs, *args])

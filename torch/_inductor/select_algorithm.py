@@ -2309,6 +2309,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
 
 class ExternKernelCaller(ChoiceCaller):
+    """
+    Caller for external kernel implementations
+    """
+
     def __init__(
         self,
         choice: ExternKernelChoice,
@@ -3527,7 +3531,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     return float("inf")
 
                 torch.cuda.synchronize()
-                choice.benchmark_collective(*inputs, out=output)
+                choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
                 torch.cuda.synchronize()
 
             total_time = 0.0
@@ -3557,7 +3561,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 end_evt = torch.cuda.Event(enable_timing=True)
 
                 start_evt.record()
-                choice.benchmark_collective(*inputs, out=output)
+                choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
                 end_evt.record()
                 end_evt.synchronize()
 
