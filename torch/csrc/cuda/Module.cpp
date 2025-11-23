@@ -1061,8 +1061,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
       .def_readonly(
-          "max_threads_per_block", 
-          &cudaDeviceProp::maxThreadsPerBlock)
+          "max_threads_per_block", &cudaDeviceProp::maxThreadsPerBlock)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
 #ifndef USE_ROCM
       // NVIDIA-only properties
