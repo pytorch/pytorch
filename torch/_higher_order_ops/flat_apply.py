@@ -1,6 +1,7 @@
-# mypy: allow-untyped-defs
-from collections.abc import Callable
+import typing
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from typing_extensions import TypeIs
 
 import torch
 import torch.fx.node
@@ -8,17 +9,17 @@ import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
 
 
-def is_graphable(val) -> bool:
+def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
     """Definition: a graphable type is a type that that is an acceptable input/output type to a FX node."""
     return isinstance(val, torch.fx.node.base_types)
 
 
-def is_graphable_type(typ) -> bool:
+def is_graphable_type(typ: type[object]) -> bool:
     """Return whether the given type is graphable"""
     return issubclass(typ, torch.fx.node.base_types)
 
 
-def to_graphable(stuff):
+def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
     """Flattens stuff into a flat list of graphable types."""
     # We can consider preserving things like List[int] to improve
     # perf and readability (right now that is all flattened out)
@@ -33,13 +34,15 @@ def to_graphable(stuff):
     return flat_args, spec
 
 
-def from_graphable(flat_args, spec):
+def from_graphable(flat_args: Iterable[object], spec: pytree.TreeSpec) -> pytree.PyTree:
     """The inverse of to_graphable."""
     stuff = pytree.tree_unflatten(flat_args, spec)
     return stuff
 
 
-def func_to_graphable(func):
+def func_to_graphable(
+    func: Callable[..., object],
+) -> tuple[list[object], pytree.TreeSpec]:
     """
     Pack and flatten a function type into graphable types.
     This is useful for legalizing the function argument of `flat_apply`.
@@ -49,26 +52,32 @@ def func_to_graphable(func):
 
 @dataclass(frozen=True)
 class _ConstantFunction:
-    func: Callable
+    func: Callable[..., object]
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: object, **kwargs: object):
         return self.func(*args, **kwargs)
 
 
 pytree.register_constant(_ConstantFunction)
 
-_op_types = (
-    torch._ops.OpOverload,
-    torch._ops.OpOverloadPacket,
-    torch._ops.HigherOrderOperator,
+
+_OpTypes = (
+    torch._ops.OpOverload | torch._ops.OpOverloadPacket | torch._ops.HigherOrderOperator
 )
+_op_types = typing.get_args(_OpTypes)
 
 
 class FlatApply(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flat_apply")
 
-    def __call__(self, func, in_spec, *flat_args, **_unused):
+    def __call__(
+        self,
+        func: _OpTypes | pytree.TreeSpec,
+        in_spec: pytree.TreeSpec,
+        *flat_args: object,
+        **_unused: object,
+    ):
         """
         Functions that take in non-graphable types cannot directly be put into FX graph.
 
@@ -92,10 +101,14 @@ class FlatApply(HigherOrderOperator):
         """
         assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
         assert len(_unused) == 0
-        return impl(func, in_spec, *flat_args)
+        return impl(func, in_spec, flat_args)
 
 
-def impl(func, in_spec, *flat_args):
+def impl(
+    func: _OpTypes | pytree.TreeSpec,
+    in_spec: pytree.TreeSpec,
+    flat_args: tuple[object, ...],
+) -> object | tuple[object, pytree.TreeSpec]:
     if not isinstance(func, _op_types):
         # assume _ConstantFunction
         func = pytree._retrieve_constant(func)
@@ -113,7 +126,7 @@ def impl(func, in_spec, *flat_args):
     # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
     # in the latter case the tracers need to carry out the output specs
     # (they need to know how to reconstruct the object from just the flat_output).
-    def is_valid_output(x):
+    def is_valid_output(x: object) -> bool:
         if isinstance(x, (tuple, list)):
             return all(map(is_valid_output, x))
         return is_graphable(x)

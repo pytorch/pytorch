@@ -4,6 +4,7 @@ import inspect
 import logging
 import operator
 import types
+import typing
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, TypeVar
@@ -44,7 +45,7 @@ BaseArgumentTypes = Union[
     torch.SymBool,
     torch.SymFloat,
 ]
-base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
+base_types = typing.get_args(BaseArgumentTypes)
 
 Target: TypeAlias = Union[Callable[..., Any], str]
 
