@@ -20,6 +20,7 @@ from typing import cast, Optional
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
 
+import torch
 import torch.distributed as dist
 from torch.distributed import HashStore, Store
 from torch.distributed.elastic.rendezvous import (
@@ -55,6 +56,9 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
 
 TEST_PORT = 54321
 TEST_ADDR = "host"
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class CustomAssertMixin:
@@ -254,6 +258,8 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
 
         mock_datetime = self._datetime_patch.start()
         mock_datetime.utcnow.return_value = self._now
+        if device_type == "xpu":
+            mock_datetime.now.return_value = self._now
 
     def tearDown(self) -> None:
         self._datetime_patch.stop()
@@ -567,6 +573,8 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
 
         mock_datetime = self._datetime_patch.start()
         mock_datetime.utcnow.return_value = self._now
+        if device_type == "xpu":
+            mock_datetime.now.return_value = self._now
 
     def tearDown(self) -> None:
         self._datetime_patch.stop()
@@ -880,6 +888,8 @@ class AbstractTestRendezvousOp(ABC):
 
         mock_datetime = self._datetime_patch.start()
         mock_datetime.utcnow.return_value = self._now
+        if device_type == "xpu":
+            mock_datetime.now.return_value = self._now
 
         self._time_patch = patch(
             "torch.distributed.elastic.rendezvous.dynamic_rendezvous.time"
@@ -1413,6 +1423,8 @@ class DynamicRendezvousHandlerTest(TestCase):
         now = datetime(2000, 1, 1, hour=0, minute=0)
 
         mock_datetime.utcnow.return_value = now
+        if device_type == "xpu":
+            mock_datetime.now.return_value = now
 
         self._state.last_heartbeats[self._node] = now - (self._keep_alive_interval * 2)
 
@@ -1761,7 +1773,7 @@ class IntegrationTest(TestCase):
         handler2 = self._create_handler(
             min_nodes=1,
             max_nodes=2,
-            keep_alive_interval=timedelta(seconds=1),
+            keep_alive_interval=1 if device_type == "xpu" else timedelta(seconds=1),
         )
         handler3 = self._create_handler(
             min_nodes=1,
