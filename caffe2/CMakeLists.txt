@@ -843,7 +843,13 @@ endif()
 if(USE_MPS)
   if(CAN_COMPILE_METAL)
     add_dependencies(torch_cpu metallibs)
+    # Always link the Basic (Metal 3.1) library
     target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_basic,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_basic.metallib)
+    # Only link the NAX (Metal 4.0) library if it was enabled and built
+    if(MPS_ENABLE_NAX)
+      target_link_options(torch_cpu PRIVATE -Wl,-sectcreate,__TEXT,metal_nax,${CMAKE_CURRENT_BINARY_DIR}/aten/src/ATen/kernels_nax.metallib)
+    endif()
+
   else()
     target_compile_definitions(torch_cpu PRIVATE PYTORCH_JIT_COMPILE_SHADERS)
   endif()
