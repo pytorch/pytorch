@@ -1253,6 +1253,10 @@ class LocalTensorMode(TorchDispatchMode):
                 return _c10d._local_all_gather_(*args, **kwargs)
             elif func is torch.ops.c10d.allgather_into_tensor_coalesced_.default:
                 return _c10d._local_allgather_into_tensor_coalesced_(*args, **kwargs)
+            elif func is torch.ops.c10d._allgather_base_.default:
+                return _c10d._local_allgather_base_(*args, **kwargs)
+            elif func is torch.ops.c10d._reduce_scatter_base_.default:
+                return _c10d._local_reduce_scatter_base_(*args, **kwargs)
             elif func is torch.ops.c10d.gather_.default:
                 return _c10d._local_gather_(*args, **kwargs)
             elif func is torch.ops.c10d.alltoall_.default:
