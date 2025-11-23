@@ -2344,6 +2344,22 @@ class ExternKernelCaller(ChoiceCaller):
                 return do_bench_using_profiling(lambda: algo(*args))
             return benchmarker.benchmark(algo, args, {})
 
+    def benchmark_collective(self, *args, out):
+        """
+        Called by benchmark_collective_choice, only run once, timing handled externally with barrier sync.
+        """
+        if out.numel() == 0:
+            return 0.0
+
+        algo = self.to_callable()
+        if self.has_out_variant:
+            algo(*args, out=out)
+        else:
+            out_new = algo(*args)
+            out.copy_(out_new)
+
+        return 0.0
+
     def to_callable(self):
         fn = self.choice.to_callable()
         if self.kwargs:
@@ -2526,10 +2542,6 @@ class ErrorFromChoice(RuntimeError):
 
 class NoValidChoicesError(RuntimeError):
     pass
-
-
-# Indicating collective benchmark timeout
-COLLECTIVE_TIMEOUT_SENTINEL = float("-inf")
 
 
 @functools.cache
@@ -2854,6 +2866,7 @@ class AlgorithmSelectorCache(PersistentCache):
         # if we got any timings at all, pick the best of those
         choice = min(timings, key=timings.__getitem__)
         node = choice.output_node()
+
         log.debug("Autotuning selected choice: %s", node)
         if return_choice:
             return node, choice
@@ -3055,18 +3068,17 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_elapse = time.time() - autotune_start_ts
         log.debug("Autotuning elapsed time: %.02fs", autotune_elapse)
 
-        # For collective: if any choice timed out, fallback to default implementation
+        # For collective: if any choice returned inf (timeout or failure), fallback to default
         if is_collective and timings:
-            has_timeout = any(
-                timing == COLLECTIVE_TIMEOUT_SENTINEL for timing in timings.values()
-            )
-            if has_timeout:
+            has_inf = any(not math.isfinite(timing) for timing in timings.values())
+            if has_inf:
                 log.warning(
-                    "At least one choice timed out during collective benchmarking. "
+                    "At least one choice failed or timed out during collective benchmarking. "
                     "Falling back to default implementation."
                 )
                 return {}
 
+        # For regular: if all choices returned inf, raise error
         if timings and all(not math.isfinite(timing) for timing in timings.values()):
             raise NoValidChoicesError
 
@@ -3083,6 +3095,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 precompile_elapse,
                 prescreening_elapse,
                 hint_override=hint_override,
+                is_collective=is_collective,
             )
 
         def profiler_bench_function():
@@ -3501,9 +3514,21 @@ class AlgorithmSelectorCache(PersistentCache):
                     getattr(choice, "name", "<unknown>"),
                     timeout_seconds,
                 )
-                return COLLECTIVE_TIMEOUT_SENTINEL
+                return float("inf")
 
             torch.cuda.synchronize()
+
+            # Warmup with barrier synchronization for collective ops
+            nwarmup = ir.autotune_warmup
+            for _ in range(nwarmup):
+                work = dist.barrier(group=process_group, async_op=True)
+                if not work.wait(timeout):
+                    log.warning("Warmup barrier timeout, skipping this choice")
+                    return float("inf")
+
+                torch.cuda.synchronize()
+                choice.benchmark_collective(*inputs, out=output)
+                torch.cuda.synchronize()
 
             total_time = 0.0
 
@@ -3524,7 +3549,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         nruns,
                         timeout_seconds,
                     )
-                    return COLLECTIVE_TIMEOUT_SENTINEL
+                    return float("inf")
 
                 torch.cuda.synchronize()
 
@@ -3532,13 +3557,13 @@ class AlgorithmSelectorCache(PersistentCache):
                 end_evt = torch.cuda.Event(enable_timing=True)
 
                 start_evt.record()
-                choice.benchmark(*inputs, out=output)
+                choice.benchmark_collective(*inputs, out=output)
                 end_evt.record()
                 end_evt.synchronize()
 
                 total_time += start_evt.elapsed_time(end_evt)
 
-            avg_time = (total_time / nruns) * 1000.0
+            avg_time = total_time / nruns
 
             # All-reduce to get max time across ranks with timeout
             time_tensor = torch.tensor(
@@ -3565,7 +3590,7 @@ class AlgorithmSelectorCache(PersistentCache):
             timing = time_tensor.item()
 
             log.info(
-                "Collective benchmark for %s: %.2f us",
+                "Collective benchmark for %s: %.6f ms",
                 choice.name,
                 timing,
             )
@@ -3610,10 +3635,8 @@ class AlgorithmSelectorCache(PersistentCache):
         for choice in choices:
             try:
                 if is_collective:
-                    # Use collective benchmarking with timeout protection
                     timing = cls.benchmark_collective_choice(choice, autotune_args)
                 else:
-                    # Regular benchmarking
                     timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
                 from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
@@ -3968,8 +3991,26 @@ class AlgorithmSelectorCache(PersistentCache):
         precompile_elapse: float,
         prescreening_elapse: Optional[float] = None,
         hint_override: Optional[int] = None,
+        is_collective: bool = False,
     ):
-        """Log the autotuning results, currently only handles mm and flex"""
+        """Log the autotuning results, currently only handles mm and flex. Log Collective op autotuning result"""
+        if is_collective and timings:
+            import torch.distributed as dist
+
+            # Only rank 0 logs to avoid duplicate logs
+            rank = dist.get_rank() if dist.is_initialized() else 0
+            if rank == 0:
+                best_choice = min(timings, key=timings.__getitem__)
+                log.warning("[COLLECTIVE AUTOTUNING] All timings:")
+                for c, t in sorted(timings.items(), key=lambda x: x[1]):
+                    choice_name = getattr(c, "name", str(c))
+                    log.warning(
+                        "  - %s: %.6f ms %s",
+                        choice_name,
+                        t if math.isfinite(t) else float("inf"),
+                        "← SELECTED" if c == best_choice else "",
+                    )
+
         V.debug.log_autotuning_results(
             name, input_nodes, timings, elapse, precompile_elapse
         )
