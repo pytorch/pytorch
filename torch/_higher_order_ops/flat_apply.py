@@ -119,13 +119,8 @@ def impl(
 
     # Right now, all outputs must either be graphable or lists/tuples of graphables.
     #
-    # TODO: The following can be updated to support non-graphable outputs and pytrees.
-    # For non-graphable constant outputs: the assumption would be that they are constant
-    # (every time the function runs those MUST be the same)
-    # For pytree outputs:
-    # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
-    # in the latter case the tracers need to carry out the output specs
-    # (they need to know how to reconstruct the object from just the flat_output).
+    # If you need non-graphable outputs then use FlatApplyFlat and unflatten the
+    # result in-graph.
     def is_valid_output(x: object) -> bool:
         if isinstance(x, (tuple, list)):
             return all(map(is_valid_output, x))
@@ -136,3 +131,53 @@ def impl(
 
 
 flat_apply = FlatApply()
+
+
+class FlatApplyFlat(HigherOrderOperator):
+    def __init__(self) -> None:
+        super().__init__("flat_apply_flat")
+        self.out_spec: pytree.TreeSpec | None = None
+
+    def __call__(
+        self,
+        func: _OpTypes | pytree.TreeSpec,
+        in_spec: pytree.TreeSpec,
+        *flat_args: tuple[object],
+        **_unused: object,
+    ):
+        """
+        See flat_apply. FlatApplyFlat works like FlatApply but also flattens the function output.
+
+        The semantics of flat_apply_flat(func, in_spec, *flat_args) are roughly equivalent to:
+
+        >>> def flat_apply_impl(func, in_spec, *flat_args):
+        >>>     args, kwargs = pytree.tree_unflatten(flat_args, in_spec)
+        >>>     output = func(*args, **kwargs)
+        >>>     flat_output, self.out_spec = pytree.tree_flatten(output)
+        >>>     return flat_output
+
+        Why is out_spec a constant on the HOP instead of a returned value? Like
+        in_spec we want the output to be constant so we can reconstruct the
+        output statically.
+        """
+        assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
+        assert len(_unused) == 0
+
+        if not isinstance(func, _op_types):
+            # assume _ConstantFunction
+            func = pytree._retrieve_constant(func)
+            assert isinstance(func, _ConstantFunction)
+
+        args, kwargs = from_graphable(flat_args, in_spec)
+        out = func(*args, **kwargs)
+
+        result, out_spec = to_graphable(out)
+
+        if self.out_spec is None:
+            self.out_spec = out_spec
+        elif self.out_spec != out_spec:
+            raise RuntimeError(
+                "Invalid function passed to FlatApplyFlat. The called function returned a value with a different pytree shape on a subsequent call."
+            )
+
+        return result
