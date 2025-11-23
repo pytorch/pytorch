@@ -3,13 +3,16 @@
 from concurrent.futures import Future
 
 import torch
+import unittest
 from torch.distributed.checkpoint._experimental.staging import (
     CheckpointStagerConfig,
     DefaultStager,
 )
 from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
 
-
+requires_gpu = unittest.skipUnless(
+    torch.cuda.is_available() or torch.xpu.is_available(), "requires cuda or xpu"
+)
 class TestDefaultStager(TestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -23,7 +26,7 @@ class TestDefaultStager(TestCase):
             "nested": {"inner_tensor": torch.ones(2, 2), "inner_value": 42},
         }
 
-    @requires_cuda
+    @requires_gpu
     def test_sync_staging(self) -> None:
         """Test synchronous staging."""
         options = CheckpointStagerConfig(use_async_staging=False)
@@ -46,7 +49,7 @@ class TestDefaultStager(TestCase):
         # Clean up
         stager.close()
 
-    @requires_cuda
+    @requires_gpu
     def test_async_staging(self) -> None:
         """Test asynchronous staging."""
         options = CheckpointStagerConfig(use_async_staging=True)
@@ -72,7 +75,7 @@ class TestDefaultStager(TestCase):
 
     def test_cuda_non_blocking_without_cuda(self) -> None:
         """Test that non-blocking copy fails when CUDA is not available."""
-        if torch.cuda.is_available():
+        if torch.accelerator.is_available():
             self.skipTest("CUDA is available, cannot test CUDA unavailable scenario")
 
         options = CheckpointStagerConfig(use_non_blocking_copy=True)
@@ -142,16 +145,17 @@ class TestDefaultStager(TestCase):
 
                 stager.close()
 
-    @requires_cuda
+    @requires_gpu
     def test_cuda_tensors_staging(self) -> None:
         """Test staging with CUDA tensors."""
         # Create state dict with CUDA tensors
+        device = torch.accelerator.current_accelerator()
         cuda_state_dict = {
-            "cuda_tensor": torch.randn(3, 4).cuda(),
+            "cuda_tensor": torch.randn(3, 4).to(device),
             "cpu_tensor": torch.randn(2, 3),
             "mixed_model": {
-                "weight": torch.randn(5, 5).cuda(),
-                "bias": torch.randn(5).cuda(),
+                "weight": torch.randn(5, 5).to(device),
+                "bias": torch.randn(5).to(device),
             },
         }
 
@@ -168,7 +172,7 @@ class TestDefaultStager(TestCase):
 
         stager.close()
 
-    @requires_cuda
+    @requires_gpu
     def test_resource_cleanup(self) -> None:
         """Test that resources are properly cleaned up."""
         options = CheckpointStagerConfig(use_async_staging=False)
