@@ -812,7 +812,9 @@ from user code:
         )
 
     def test_faketensor_nyi(self):
-        @torch.library.custom_op("mylib::foo", mutates_args=())
+        op_name = "mylib::error_messages_faketensor"
+
+        @torch.library.custom_op(op_name, mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:
             return x.sin()
 
@@ -821,14 +823,14 @@ from user code:
             raise NotImplementedError
 
         def fn(x):
-            return torch.ops.mylib.foo(x)
+            return torch.ops.mylib.error_messages_faketensor(x)
 
         self.assertExpectedInlineMunged(
             Unsupported,
             lambda: torch.compile(fn, backend="eager", fullgraph=True)(torch.randn(3)),
             """\
 NotImplementedError/UnsupportedFakeTensorException when running FX node
-  Explanation: Dynamo failed to run FX node with fake tensors: call_function mylib.foo(*(FakeTensor(..., size=(3,)),), **{}): got NotImplementedError()
+  Explanation: Dynamo failed to run FX node with fake tensors: call_function mylib.error_messages_faketensor(*(FakeTensor(..., size=(3,)),), **{}): got NotImplementedError()
   Hint: If the op is a PyTorch op, please file an issue to PyTorch.
 
   Developer debug context:
@@ -837,7 +839,7 @@ NotImplementedError/UnsupportedFakeTensorException when running FX node
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    return torch.ops.mylib.foo(x)""",
+    return torch.ops.mylib.error_messages_faketensor(x)""",
         )
 
     def test_data_dependent_branching_fullgraph(self):
