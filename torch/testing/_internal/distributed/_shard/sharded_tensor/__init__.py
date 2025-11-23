@@ -86,7 +86,8 @@ class ShardedTensorTestBase(MultiProcessTestCase):
 # wrapper to initialize comms (processgroup + rpc)
 def with_comms(func=None, init_rpc=True, backend="nccl"):
     backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
-        torch.accelerator.current_accelerator().type)
+        torch.accelerator.current_accelerator().type
+    )
     if func is None:
         return partial(
             with_comms,
