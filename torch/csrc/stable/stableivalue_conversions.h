@@ -9,6 +9,7 @@
 #include <torch/headeronly/core/MemoryFormat.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/Deprecated.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
 
@@ -63,6 +64,9 @@ struct FromImpl {
     static_assert(
         !is_std_vector_v<T>,
         "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !std::is_same_v<T, std::string>,
+        "std::string requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
@@ -345,10 +349,10 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
       TORCH_ERROR_CODE_CHECK(
           torch_new_list_reserve_size(val.size(), &new_list_handle));
       for (const auto& elem : val) {
-        TORCH_ERROR_CODE_CHECK(torch_list_push_back(
-            new_list_handle, torch::stable::detail::from(elem)));
+        TORCH_ERROR_CODE_CHECK(
+            torch_list_push_back(new_list_handle, from(elem)));
       }
-      return torch::stable::detail::from(new_list_handle);
+      return from(new_list_handle);
     } catch (const std::runtime_error&) {
       if (new_list_handle != nullptr) {
         // clean up memory if an error was thrown
@@ -394,6 +398,21 @@ struct FromImpl<torch::stable::Device> {
   }
 };
 
+// Specialization for std::string, which should return a new owning reference of
+// the string
+template <>
+struct FromImpl<std::string> {
+  static StableIValue call(
+      const std::string& val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    StringHandle handle;
+    TORCH_ERROR_CODE_CHECK(
+        torch_new_string_handle(val.c_str(), val.length(), &handle))
+    return from(handle);
+  }
+};
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // =============================================================================
@@ -407,7 +426,6 @@ struct ToImpl {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    static_assert(std::is_trivially_copyable_v<T>);
     // Ensure 2.10+ types don't accidentally use the base case - provide clear
     // compile-time errors.
     static_assert(
@@ -419,6 +437,10 @@ struct ToImpl {
     static_assert(
         !is_std_vector_v<T>,
         "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !std::is_same_v<T, std::string>,
+        "std::string requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(std::is_trivially_copyable_v<T>);
     // T may not have a default constructor. (For example, it might be
     // c10::Device.) However, std::memcpy implicitly creates a T at the
     // destination. So, we can use a union to work around this lack of
@@ -705,6 +727,27 @@ struct ToImpl<torch::stable::Device> {
   }
 };
 
+// Specialization for std::string
+// Returns a new std::string; the string in val is deleted.
+template <>
+struct ToImpl<std::string> {
+  static std::string call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    StringHandle handle = to<StringHandle>(val);
+    size_t length;
+    TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
+    const char* data;
+    TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle, &data));
+    auto strptr = new std::string(data, length);
+
+    // delete the old string before returning new string
+    TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
+    return *strptr;
+  }
+};
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // =============================================================================
@@ -779,31 +822,11 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 // WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
 // note]
 template <typename T>
-[[deprecated("Use torch::stable::detail::from instead.")]]
-inline StableIValue from(T val) {
-  return torch::stable::detail::from(val);
-}
+C10_DEPRECATED_MESSAGE("Use torch::stable::detail::from instead.")
+auto from = &torch::stable::detail::from<T>;
 
 // WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
 // note]
 template <typename T>
-[[deprecated("Use torch::stable::detail::from instead.")]]
-inline StableIValue from(const std::optional<T>& val) {
-  return torch::stable::detail::from(val);
-}
-
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-[[deprecated(
-    "Use torch::stable::detail::from instead.")]] [[maybe_unused]] inline StableIValue
-from(const torch::stable::Tensor& val) {
-  return torch::stable::detail::from(val);
-}
-
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-template <typename T>
-[[deprecated("Use torch::stable::detail::to instead.")]]
-inline T to(StableIValue val) {
-  return torch::stable::detail::to<T>(val);
-}
+C10_DEPRECATED_MESSAGE("Use torch::stable::detail::to instead.")
+auto to = &torch::stable::detail::to<T>;
