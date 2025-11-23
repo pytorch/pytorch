@@ -1,0 +1,1244 @@
+I1119 20:33:44.352000 3626541 torch/_inductor/config.py:998] compile_threads set to 32
+I1119 20:33:45.163000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::bmm_dtype'', 'device_type='cuda'', 'op_name=None'
+I1119 20:33:45.163000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::_mm_plus_mm'', 'device_type=None', 'op_name=None'
+I1119 20:33:45.163000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::bmm'', 'device_type=None', 'op_name=None'
+I1119 20:33:45.163000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::_int_mm'', 'device_type=None', 'op_name=None'
+I1119 20:33:45.164000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::_scaled_mm'', 'device_type=None', 'op_name=None'
+I1119 20:33:45.164000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::mm_dtype'', 'device_type='cuda'', 'op_name=None'
+I1119 20:33:45.164000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::mm'', 'device_type=None', 'op_name=None'
+I1119 20:33:45.164000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenAddMMConfigHeuristics for 'template_name='aten::baddbmm'', 'device_type=None', 'op_name='baddbmm''
+I1119 20:33:45.164000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenAddMMConfigHeuristics for 'template_name='aten::addmm'', 'device_type=None', 'op_name='addmm''
+I1119 20:33:45.164000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenBiasAddMMConfigHeuristics for 'template_name='aten::bias_addmm'', 'device_type=None', 'op_name='addmm''
+I1119 20:33:45.164000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: EmptyContiguousMMConfigHeuristics for 'template_name='contiguous_addmm'', 'device_type=None', 'op_name='addmm''
+I1119 20:33:45.164000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: EmptyContiguousMMConfigHeuristics for 'template_name='contiguous_mm'', 'device_type=None', 'op_name='mm''
+I1119 20:33:45.165000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: EmptyDecomposeKConfigHeuristics for 'template_name='decompose_k'', 'device_type=None', 'op_name='mm''
+I1119 20:33:45.165000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: DecomposeKConfigHeuristics for 'template_name='decompose_k'', 'device_type='cuda'', 'op_name='mm''
+I1119 20:33:45.168000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cuda'', 'op_name=None'
+I1119 20:33:45.168000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name=None'
+I1119 20:33:45.169000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAAddMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cuda'', 'op_name='baddbmm''
+I1119 20:33:45.169000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAAddMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='addmm''
+I1119 20:33:45.169000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMAHTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='mm-ah''
+I1119 20:33:45.169000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='cuda'', 'op_name=None'
+I1119 20:33:45.169000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDABlackwellPersistentTMATemplateConfigHeuristic for 'template_name='triton::blackwell_ws_persistent_device_tma'', 'device_type='cuda'', 'op_name=None'
+I1119 20:33:45.169000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAAddmmPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='cuda'', 'op_name='addmm''
+I1119 20:33:45.169000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic for 'template_name='triton::blackwell_ws_persistent_device_tma'', 'device_type='cuda'', 'op_name='addmm''
+I1119 20:33:45.169000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1119 20:33:45.170000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic for 'template_name='triton::scaled_mm_device_tma_epilogue_scaling'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1119 20:33:45.170000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic for 'template_name='triton::scaled_mm_device_tma_main_loop_scaling'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1119 20:33:45.170000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledBlackwellTMATemplateConfigHeuristic for 'template_name='triton::blackwell_ws_persistent_device_tma'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1119 20:33:45.170000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='cuda'', 'op_name=None'
+I1119 20:33:45.170000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='int_mm''
+I1119 20:33:45.170000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cpu'', 'op_name=None'
+I1119 20:33:45.170000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name=None'
+I1119 20:33:45.170000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUAddmmTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cpu'', 'op_name='baddbmm''
+I1119 20:33:45.170000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUAddmmTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name='addmm''
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name='scaled_mm''
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name='int_mm''
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='cpu'', 'op_name=None'
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='xpu'', 'op_name=None'
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name=None'
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUAddmmTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='xpu'', 'op_name='baddbmm''
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUAddmmTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name='addmm''
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='xpu'', 'op_name=None'
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUAddmmPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='xpu'', 'op_name='addmm''
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name='scaled_mm''
+I1119 20:33:45.171000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name='int_mm''
+I1119 20:33:45.172000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='xpu'', 'op_name=None'
+I1119 20:33:45.172000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='mtia'', 'op_name=None'
+I1119 20:33:45.172000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name=None'
+I1119 20:33:45.172000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAAddMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='mtia'', 'op_name='baddbmm''
+I1119 20:33:45.172000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAAddMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name='addmm''
+I1119 20:33:45.172000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name='scaled_mm''
+I1119 20:33:45.172000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name='int_mm''
+I1119 20:33:45.172000 3626541 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='mtia'', 'op_name=None'
+/data/users/tianren/pytorch/torch/_dynamo/pgo.py:539: UserWarning: dynamo_pgo force disabled by torch.compiler.config.force_disable_caches
+  warn_once(
+I1119 20:33:45.897000 3626541 torch/_inductor/async_compile.py:258] [0/0] Creating 'subprocess' pool with 32 workers
+I1119 20:33:45.993000 3626541 torch/_inductor/compile_worker/subproc_pool.py:170] [0/0] Suppressing compile worker output due to config
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs] TRACED GRAPH
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]  ===== BEFORE PRE GRAD =====
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]  /data/users/tianren/pytorch/torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]     def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", s53: "Sym(s53)", L_x_: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", L_weight_: "f32[s53][1]cuda:0"):
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         l_x_ = L_x_
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         l_weight_ = L_weight_
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         # File: /data/users/tianren/pytorch/test_simple_cond.py:42 in dispatch_with_torch_cond, code: dim_size <= 512,
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         le: "Sym(s27 <= 512)" = s27 <= 512
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         # File: /data/users/tianren/pytorch/torch/_higher_order_ops/cond.py:170 in cond, code: return cond_op(pred, true_fn, false_fn, operands)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         cond_true_1 = self.cond_true_1
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         cond_false_1 = self.cond_false_1
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         cond = torch.ops.higher_order.cond(le, cond_true_1, cond_false_1, (l_weight_, l_x_, s53, s77, s27, s27));  le = cond_true_1 = cond_false_1 = l_weight_ = l_x_ = s53 = s77 = s27 = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         getitem_3: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = cond[0];  cond = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         return (getitem_3,)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]     class cond_true_1(torch.nn.Module):
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         def forward(self, l_weight_: "f32[s53][1]cuda:0", l_x_: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", s53: "Sym(s53)", s77: "Sym(s77)", s27_true_branch: "Sym(s27)", getitem_1_false_branch: "Sym(s27)"):
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             l_weight__1 = l_weight_
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             l_x__1 = l_x_
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             s53_1 = s53
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             s77_1 = s77
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             # File: /data/users/tianren/pytorch/test_simple_cond.py:17 in short_impl, code: result = x * weight.view(1, 1, -1)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             view: "f32[1, 1, s53][s53, s53, 1]cuda:0" = l_weight__1.view(1, 1, -1);  l_weight__1 = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             result: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = l_x__1 * view;  l_x__1 = view = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             # File: /data/users/tianren/pytorch/test_simple_cond.py:18 in short_impl, code: return torch.sin(result)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             sin: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.sin(result);  result = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             return (sin,)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]     class cond_false_1(torch.nn.Module):
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         def forward(self, l_weight_: "f32[s53][1]cuda:0", l_x_: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", s53: "Sym(s53)", s77: "Sym(s77)", s27_true_branch: "Sym(s27)", getitem_1_false_branch: "Sym(s27)"):
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             l_weight__1 = l_weight_
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             l_x__1 = l_x_
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             s53_1 = s53
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             s77_1 = s77
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             # File: /data/users/tianren/pytorch/test_simple_cond.py:45 in <lambda>, code: dim_size <= 2048,
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             le: "Sym(s27 <= 2048)" = getitem_1_false_branch <= 2048
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             # File: /data/users/tianren/pytorch/torch/_higher_order_ops/cond.py:170 in cond, code: return cond_op(pred, true_fn, false_fn, operands)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             cond_true_0 = self.cond_true_0
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             cond_false_0 = self.cond_false_0
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             cond = torch.ops.higher_order.cond(le, cond_true_0, cond_false_0, (getitem_1_false_branch, l_weight__1, l_x__1, s53_1, s77_1));  le = cond_true_0 = cond_false_0 = getitem_1_false_branch = l_weight__1 = l_x__1 = s53_1 = s77_1 = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             getitem: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = cond[0];  cond = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             return (getitem,)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         class cond_true_0(torch.nn.Module):
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             def forward(self, getitem_1: "Sym(s27)", l_weight_: "f32[s53][1]cuda:0", l_x_: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", s53: "Sym(s53)", s77: "Sym(s77)"):
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 l_weight__1 = l_weight_
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 l_x__1 = l_x_
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 s53_1 = s53
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 s77_1 = s77
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 # File: /data/users/tianren/pytorch/test_simple_cond.py:23 in medium_impl, code: result = x * weight.view(1, 1, -1)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 view: "f32[1, 1, s53][s53, s53, 1]cuda:0" = l_weight__1.view(1, 1, -1);  l_weight__1 = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 result: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = l_x__1 * view;  l_x__1 = view = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 # File: /data/users/tianren/pytorch/test_simple_cond.py:24 in medium_impl, code: return torch.tanh(result)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 tanh: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.tanh(result);  result = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 return (tanh,)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         class cond_false_0(torch.nn.Module):
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]             def forward(self, getitem_1: "Sym(s27)", l_weight_: "f32[s53][1]cuda:0", l_x_: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", s53: "Sym(s53)", s77: "Sym(s77)"):
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 l_weight__1 = l_weight_
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 l_x__1 = l_x_
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 s53_1 = s53
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 s77_1 = s77
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 # File: /data/users/tianren/pytorch/test_simple_cond.py:29 in long_impl, code: result = x * weight.view(1, 1, -1)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 view: "f32[1, 1, s53][s53, s53, 1]cuda:0" = l_weight__1.view(1, 1, -1);  l_weight__1 = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 result: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = l_x__1 * view;  l_x__1 = view = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 # File: /data/users/tianren/pytorch/test_simple_cond.py:30 in long_impl, code: return torch.relu(result)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 relu: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.relu(result);  result = None
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 return (relu,)
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]                 
+V1119 20:33:45.995000 3626541 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs] 
+V1119 20:33:46.435000 3626541 torch/_inductor/utils.py:1298] [0/0] Using inductor cache dir /tmp/torchinductor_tianren/tmp3d152mtz
+V1119 20:33:46.443000 3626541 torch/_inductor/compile_fx.py:892] [0/0] FX cache status: use_cache=False, local=True, remote=False, aot_mode=False, force_disable_caches=True
+V1119 20:33:46.443000 3626541 torch/_inductor/compile_fx.py:976] [0/0] FX cache bypass reason: FX cache disabled or key generation failed
+I1119 20:33:46.443000 3626541 torch/_inductor/compile_fx.py:1230] [0/0] Step 3: torchinductor compiling FORWARDS graph 0
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs] TRACED GRAPH
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]  ===== AFTER POST GRAD =====
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]  /data/users/tianren/pytorch/torch/fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]     def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", arg4_1: "f32[s53][1]cuda:0"):
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         # File: /data/users/tianren/pytorch/torch/_higher_order_ops/cond.py:170 in cond, code: return cond_op(pred, true_fn, false_fn, operands)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         true_graph_0 = self.true_graph_0
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         false_graph_0 = self.false_graph_0
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         # File: /data/users/tianren/pytorch/test_simple_cond.py:42 in dispatch_with_torch_cond, code: dim_size <= 512,
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         le: "Sym(s27 <= 512)" = arg1_1 <= 512
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         # File: /data/users/tianren/pytorch/torch/_higher_order_ops/cond.py:170 in cond, code: return cond_op(pred, true_fn, false_fn, operands)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         cond = torch.ops.higher_order.cond(le, true_graph_0, false_graph_0, (arg4_1, arg3_1, arg2_1, arg0_1, arg1_1, arg1_1));  le = true_graph_0 = false_graph_0 = arg4_1 = arg3_1 = arg2_1 = arg0_1 = arg1_1 = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         getitem: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = cond[0];  cond = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         return (getitem,)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]     class true_graph_0(torch.nn.Module):
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         def forward(self, arg0_1: "f32[s53][1]cuda:0", arg1_1: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", arg2_1: "Sym(s53)", arg3_1: "Sym(s77)", arg4_1: "Sym(s27)", arg5_1: "Sym(s27)"):
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             # File: /data/users/tianren/pytorch/test_simple_cond.py:17 in short_impl, code: result = x * weight.view(1, 1, -1)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             view: "f32[1, 1, s53][s53, s53, 1]cuda:0" = torch.ops.aten.reshape.default(arg0_1, [1, 1, -1]);  arg0_1 = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             mul_7: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.ops.aten.mul.Tensor(arg1_1, view);  arg1_1 = view = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             # File: /data/users/tianren/pytorch/test_simple_cond.py:18 in short_impl, code: return torch.sin(result)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             sin: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.ops.aten.sin.default(mul_7);  mul_7 = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             return (sin,)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]     class false_graph_0(torch.nn.Module):
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         def forward(self, arg0_1: "f32[s53][1]cuda:0", arg1_1: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", arg2_1: "Sym(s53)", arg3_1: "Sym(s77)", arg4_1: "Sym(s27)", arg5_1: "Sym(s27)"):
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             # File: /data/users/tianren/pytorch/torch/_higher_order_ops/cond.py:170 in cond, code: return cond_op(pred, true_fn, false_fn, operands)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             true_graph_0 = self.true_graph_0
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             false_graph_0 = self.false_graph_0
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             # File: /data/users/tianren/pytorch/test_simple_cond.py:45 in <lambda>, code: dim_size <= 2048,
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             le: "Sym(s27 <= 2048)" = arg4_1 <= 2048
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             # File: /data/users/tianren/pytorch/torch/_higher_order_ops/cond.py:170 in cond, code: return cond_op(pred, true_fn, false_fn, operands)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             cond = torch.ops.higher_order.cond(le, true_graph_0, false_graph_0, (arg4_1, arg0_1, arg1_1, arg2_1, arg3_1));  le = true_graph_0 = false_graph_0 = arg4_1 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             getitem: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = cond[0];  cond = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             return (getitem,)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         class true_graph_0(torch.nn.Module):
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             def forward(self, arg0_1: "Sym(s27)", arg1_1: "f32[s53][1]cuda:0", arg2_1: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", arg3_1: "Sym(s53)", arg4_1: "Sym(s77)"):
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 # File: /data/users/tianren/pytorch/test_simple_cond.py:23 in medium_impl, code: result = x * weight.view(1, 1, -1)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 view: "f32[1, 1, s53][s53, s53, 1]cuda:0" = torch.ops.aten.reshape.default(arg1_1, [1, 1, -1]);  arg1_1 = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 mul_7: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.ops.aten.mul.Tensor(arg2_1, view);  arg2_1 = view = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 # File: /data/users/tianren/pytorch/test_simple_cond.py:24 in medium_impl, code: return torch.tanh(result)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 tanh: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.ops.aten.tanh.default(mul_7);  mul_7 = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 return (tanh,)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         class false_graph_0(torch.nn.Module):
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]             def forward(self, arg0_1: "Sym(s27)", arg1_1: "f32[s53][1]cuda:0", arg2_1: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", arg3_1: "Sym(s53)", arg4_1: "Sym(s77)"):
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 # File: /data/users/tianren/pytorch/test_simple_cond.py:29 in long_impl, code: result = x * weight.view(1, 1, -1)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 view: "f32[1, 1, s53][s53, s53, 1]cuda:0" = torch.ops.aten.reshape.default(arg1_1, [1, 1, -1]);  arg1_1 = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 mul_7: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.ops.aten.mul.Tensor(arg2_1, view);  arg2_1 = view = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 # File: /data/users/tianren/pytorch/test_simple_cond.py:30 in long_impl, code: return torch.relu(result)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 relu: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.ops.aten.relu.default(mul_7);  mul_7 = None
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 return (relu,)
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]                 
+V1119 20:33:46.473000 3626541 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs] 
+V1119 20:33:46.479000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg0_1 : [num_users=1] = placeholder[target=arg0_1] 
+V1119 20:33:46.480000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg1_1 : [num_users=2] = placeholder[target=arg1_1] 
+V1119 20:33:46.480000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg2_1 : [num_users=1] = placeholder[target=arg2_1] 
+V1119 20:33:46.480000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg3_1 : [num_users=1] = placeholder[target=arg3_1] 
+V1119 20:33:46.480000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg4_1 : [num_users=1] = placeholder[target=arg4_1] 
+V1119 20:33:46.480000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %true_graph_0 : [num_users=1] = get_attr[target=true_graph_0] 
+V1119 20:33:46.481000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %false_graph_0 : [num_users=1] = get_attr[target=false_graph_0] 
+V1119 20:33:46.481000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %le : [num_users=1] = call_function[target=operator.le](args = (%arg1_1, 512), kwargs = {}) is_magic_method
+V1119 20:33:46.481000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %cond : [num_users=1] = call_function[target=torch.ops.higher_order.cond](args = (%le, %true_graph_0, %false_graph_0, (%arg4_1, %arg3_1, %arg2_1, %arg0_1, %arg1_1, %arg1_1)), kwargs = {}) 
+V1119 20:33:46.482000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function cond at 0x7fc554585b20>
+V1119 20:33:46.482000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg0_1 : [num_users=1] = placeholder[target=arg0_1] 
+V1119 20:33:46.483000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg1_1 : [num_users=1] = placeholder[target=arg1_1] 
+V1119 20:33:46.483000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg2_1 : [num_users=0] = placeholder[target=arg2_1] 
+V1119 20:33:46.483000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg3_1 : [num_users=0] = placeholder[target=arg3_1] 
+V1119 20:33:46.483000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg4_1 : [num_users=0] = placeholder[target=arg4_1] 
+V1119 20:33:46.484000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg5_1 : [num_users=0] = placeholder[target=arg5_1] 
+V1119 20:33:46.484000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %view : [num_users=1] = call_function[target=torch.ops.aten.reshape.default](args = (%arg0_1, [1, 1, -1]), kwargs = {}) 
+V1119 20:33:46.484000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function view at 0x7fc554678e00>
+V1119 20:33:46.485000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %mul_7 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg1_1, %view), kwargs = {}) 
+V1119 20:33:46.485000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function mul at 0x7fc5546ea2a0>
+V1119 20:33:46.488000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%mul_7,), kwargs = {}) 
+V1119 20:33:46.488000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function make_pointwise.<locals>.inner at 0x7fc5546f5b20>
+V1119 20:33:46.490000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering return (sin,) 
+V1119 20:33:46.491000 3626541 torch/_inductor/graph.py:1498] [0/0] Force channels last inputs for 0 conv for the current graph with id -1
+V1119 20:33:46.491000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg0_1 : [num_users=1] = placeholder[target=arg0_1] 
+V1119 20:33:46.492000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg1_1 : [num_users=1] = placeholder[target=arg1_1] 
+V1119 20:33:46.492000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg2_1 : [num_users=1] = placeholder[target=arg2_1] 
+V1119 20:33:46.492000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg3_1 : [num_users=1] = placeholder[target=arg3_1] 
+V1119 20:33:46.492000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg4_1 : [num_users=2] = placeholder[target=arg4_1] 
+V1119 20:33:46.493000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg5_1 : [num_users=0] = placeholder[target=arg5_1] 
+V1119 20:33:46.493000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %true_graph_0 : [num_users=1] = get_attr[target=true_graph_0] 
+V1119 20:33:46.493000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %false_graph_0 : [num_users=1] = get_attr[target=false_graph_0] 
+V1119 20:33:46.493000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %le : [num_users=1] = call_function[target=operator.le](args = (%arg4_1, 2048), kwargs = {}) is_magic_method
+V1119 20:33:46.493000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %cond : [num_users=1] = call_function[target=torch.ops.higher_order.cond](args = (%le, %true_graph_0, %false_graph_0, (%arg4_1, %arg0_1, %arg1_1, %arg2_1, %arg3_1)), kwargs = {}) 
+V1119 20:33:46.494000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function cond at 0x7fc554585b20>
+V1119 20:33:46.494000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg0_1 : [num_users=0] = placeholder[target=arg0_1] 
+V1119 20:33:46.494000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg1_1 : [num_users=1] = placeholder[target=arg1_1] 
+V1119 20:33:46.495000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg2_1 : [num_users=1] = placeholder[target=arg2_1] 
+V1119 20:33:46.495000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg3_1 : [num_users=0] = placeholder[target=arg3_1] 
+V1119 20:33:46.495000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg4_1 : [num_users=0] = placeholder[target=arg4_1] 
+V1119 20:33:46.495000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %view : [num_users=1] = call_function[target=torch.ops.aten.reshape.default](args = (%arg1_1, [1, 1, -1]), kwargs = {}) 
+V1119 20:33:46.495000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function view at 0x7fc554678e00>
+V1119 20:33:46.496000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %mul_7 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg2_1, %view), kwargs = {}) 
+V1119 20:33:46.496000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function mul at 0x7fc5546ea2a0>
+V1119 20:33:46.497000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %tanh : [num_users=1] = call_function[target=torch.ops.aten.tanh.default](args = (%mul_7,), kwargs = {}) 
+V1119 20:33:46.497000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function make_pointwise.<locals>.inner at 0x7fc5546f7a60>
+V1119 20:33:46.499000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering return (tanh,) 
+V1119 20:33:46.499000 3626541 torch/_inductor/graph.py:1498] [0/0] Force channels last inputs for 0 conv for the current graph with id -1
+V1119 20:33:46.499000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg0_1 : [num_users=0] = placeholder[target=arg0_1] 
+V1119 20:33:46.500000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg1_1 : [num_users=1] = placeholder[target=arg1_1] 
+V1119 20:33:46.500000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg2_1 : [num_users=1] = placeholder[target=arg2_1] 
+V1119 20:33:46.500000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg3_1 : [num_users=0] = placeholder[target=arg3_1] 
+V1119 20:33:46.500000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %arg4_1 : [num_users=0] = placeholder[target=arg4_1] 
+V1119 20:33:46.500000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %view : [num_users=1] = call_function[target=torch.ops.aten.reshape.default](args = (%arg1_1, [1, 1, -1]), kwargs = {}) 
+V1119 20:33:46.501000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function view at 0x7fc554678e00>
+V1119 20:33:46.501000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %mul_7 : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg2_1, %view), kwargs = {}) 
+V1119 20:33:46.501000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function mul at 0x7fc5546ea2a0>
+V1119 20:33:46.502000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%mul_7,), kwargs = {}) 
+V1119 20:33:46.503000 3626541 torch/_inductor/graph.py:1291] [0/0]   via <function make_pointwise.<locals>.inner at 0x7fc5546f4e00>
+V1119 20:33:46.504000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering return (relu,) 
+V1119 20:33:46.504000 3626541 torch/_inductor/graph.py:1498] [0/0] Force channels last inputs for 0 conv for the current graph with id -1
+V1119 20:33:46.504000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%cond, 0), kwargs = {}) 
+V1119 20:33:46.506000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering return (getitem,) 
+V1119 20:33:46.507000 3626541 torch/_inductor/graph.py:1498] [0/0] Force channels last inputs for 0 conv for the current graph with id -1
+V1119 20:33:46.507000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%cond, 0), kwargs = {}) 
+V1119 20:33:46.508000 3626541 torch/_inductor/graph.py:1602] [0/0] lowering return (getitem,) 
+V1119 20:33:46.508000 3626541 torch/_inductor/graph.py:1498] [0/0] Force channels last inputs for 0 conv for the current graph with id 0
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0] scheduling Conditional(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   python_kernel_name=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   name=buf0,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   layout=MultiOutputLayout(device=device(type='cuda', index=0)),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   inputs=[StorageBox(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='arg4_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), StorageBox(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='arg3_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   )],
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   constant_args=[s27 <= 512, s53, s77, s27, s27],
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   kwargs={},
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   output_view=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   python_kernel_name=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   cpp_kernel_name=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ordered_kwargs_for_cpp_kernel=(),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   op_overload=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   arg_properties=[{}, {}],
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   allarg_properties={},
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   kwarg_properties=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   unbacked_bindings={},
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   mutation_outputs=[],
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   predicate=ShapeAsConstantBuffer(expr=s27 <= 512),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   operands=[StorageBox(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='arg4_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), StorageBox(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='arg3_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), ShapeAsConstantBuffer(expr=s53), ShapeAsConstantBuffer(expr=s77), ShapeAsConstantBuffer(expr=s27), ShapeAsConstantBuffer(expr=s27)],
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   true_subgraph=Subgraph(name='true_graph_0', graph_module=<lambda>(), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc81392fe60>),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   false_subgraph=Subgraph(name='false_graph_0', graph_module=<lambda>(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     (true_graph_0): <lambda>()
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     (false_graph_0): <lambda>()
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc81403f140>),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   outputs=[MultiOutput(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     python_kernel_name=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     name=buf1,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     inputs=[Conditional(name='buf0', layout=MultiOutputLayout(device=device(type='cuda', index=0)), inputs=[StorageBox(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       InputBuffer(name='arg4_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ), StorageBox(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       InputBuffer(name='arg3_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     )], constant_args=[s27 <= 512, s53, s77, s27, s27], kwargs={}, output_view=None, python_kernel_name=None, cpp_kernel_name=None, ordered_kwargs_for_cpp_kernel=(), op_overload=None, arg_properties=[{}, {}], allarg_properties={}, kwarg_properties=None, unbacked_bindings={}, mutation_outputs=[], predicate=ShapeAsConstantBuffer(expr=s27 <= 512), operands=[StorageBox(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       InputBuffer(name='arg4_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ), StorageBox(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       InputBuffer(name='arg3_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ), ShapeAsConstantBuffer(expr=s53), ShapeAsConstantBuffer(expr=s77), ShapeAsConstantBuffer(expr=s27), ShapeAsConstantBuffer(expr=s27)], true_subgraph=Subgraph(name='true_graph_0', graph_module=<lambda>(), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc81392fe60>), false_subgraph=Subgraph(name='false_graph_0', graph_module=<lambda>(
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       (true_graph_0): <lambda>()
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       (false_graph_0): <lambda>()
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc81403f140>), outputs=[...])],
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     constant_args=(),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     kwargs={},
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     output_view=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     python_kernel_name=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     cpp_kernel_name=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ordered_kwargs_for_cpp_kernel=(),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     op_overload=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     arg_properties=[{}],
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     allarg_properties={},
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     kwarg_properties=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     unbacked_bindings={},
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     mutation_outputs=[],
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     origin_node=getitem,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     origins=OrderedSet([cond, true_graph_0, false_graph_0]),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     stack_traces = {,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         return torch.cond(,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     }
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   )],
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origin_node=None,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origins=OrderedSet([cond, true_graph_0, false_graph_0]),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   }
+V1119 20:33:46.510000 3626541 torch/_inductor/scheduler.py:2988] [0/0] )
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0] scheduling MultiOutput(
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   python_kernel_name=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   name=buf1,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]),
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   inputs=[Conditional(name='buf0', layout=MultiOutputLayout(device=device(type='cuda', index=0)), inputs=[StorageBox(
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='arg4_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), StorageBox(
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='arg3_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   )], constant_args=[s27 <= 512, s53, s77, s27, s27], kwargs={}, output_view=None, python_kernel_name=None, cpp_kernel_name=None, ordered_kwargs_for_cpp_kernel=(), op_overload=None, arg_properties=[{}, {}], allarg_properties={}, kwarg_properties=None, unbacked_bindings={}, mutation_outputs=[], predicate=ShapeAsConstantBuffer(expr=s27 <= 512), operands=[StorageBox(
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='arg4_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), StorageBox(
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='arg3_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), ShapeAsConstantBuffer(expr=s53), ShapeAsConstantBuffer(expr=s77), ShapeAsConstantBuffer(expr=s27), ShapeAsConstantBuffer(expr=s27)], true_subgraph=Subgraph(name='true_graph_0', graph_module=<lambda>(), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc81392fe60>), false_subgraph=Subgraph(name='false_graph_0', graph_module=<lambda>(
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     (true_graph_0): <lambda>()
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     (false_graph_0): <lambda>()
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc81403f140>), outputs=[MultiOutput(
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     python_kernel_name=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     name=buf1,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]),
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     inputs=[...],
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     constant_args=(),
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     kwargs={},
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     output_view=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     python_kernel_name=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     cpp_kernel_name=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ordered_kwargs_for_cpp_kernel=(),
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     op_overload=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     arg_properties=[{}],
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     allarg_properties={},
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     kwarg_properties=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     unbacked_bindings={},
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     mutation_outputs=[],
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     origin_node=getitem,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     origins=OrderedSet([cond, true_graph_0, false_graph_0]),
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     stack_traces = {,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         return torch.cond(,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     }
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   )])],
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   constant_args=(),
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   kwargs={},
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   output_view=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   python_kernel_name=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   cpp_kernel_name=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ordered_kwargs_for_cpp_kernel=(),
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   op_overload=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   arg_properties=[{}],
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   allarg_properties={},
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   kwarg_properties=None,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   unbacked_bindings={},
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   mutation_outputs=[],
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origin_node=getitem,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origins=OrderedSet([cond, true_graph_0, false_graph_0]),
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   }
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:2988] [0/0] )
+V1119 20:33:46.512000 3626541 torch/_inductor/scheduler.py:3059] [0/0] scheduling output buf1
+I1119 20:33:46.514000 3626541 torch/_inductor/memory.py:894] [0/0] Reordering for peak memory -- 2 nodes
+I1119 20:33:46.514000 3626541 torch/_inductor/memory.py:928] [0/0] Baseline peak memory: 0
+I1119 20:33:46.514000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_lpmf peak memory: 0
+I1119 20:33:46.515000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_bfs peak memory: 0
+I1119 20:33:46.515000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_dfs peak memory: 0
+I1119 20:33:46.687000 3626541 torch/_inductor/analysis/device_info.py:207] [0/0] Device NVIDIA H100 does not have a datasheet entry for None, returning None
+V1119 20:33:46.688000 3626541 torch/_inductor/scheduler.py:5996] [0/0] Generating code for node op0 with estimated runtime 0.000000
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0] scheduling ComputedBuffer(name='true_graph_0_buf0', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]), data=Pointwise(
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   'cuda',
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   torch.float32,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   def inner_fn(index):
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       i0, i1, i2 = index
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp0 = ops.load(true_graph_0_arg1_1, i2 + i1 * s53 + i0 * s27 * s53)
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp1 = ops.load(true_graph_0_arg0_1, i2)
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp2 = tmp0 * tmp1
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp3 = ops.sin(tmp2)
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return tmp3
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ranges=[s77, s27, s53],
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origin_node=sin,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origins=OrderedSet([cond, true_graph_0, false_graph_0, sin, m...,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   },
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 43, in <lambda>,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: short_impl(x, weight),,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 18, in short_impl,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.sin(result),
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   },
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 43, in <lambda>,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: short_impl(x, weight),,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 17, in short_impl,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       result = x * weight.view(1, 1, -1),
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   }
+V1119 20:33:46.694000 3626541 torch/_inductor/scheduler.py:2988] [0/0] ), _split_size=None, _original_inner_fn=None, _original_ranges=None, _original_reduction_ranges=None)
+V1119 20:33:46.695000 3626541 torch/_inductor/scheduler.py:3059] [0/0] scheduling output true_graph_0_buf0
+I1119 20:33:46.704000 3626541 torch/_inductor/memory.py:894] [0/0] Reordering for peak memory -- 1 nodes
+I1119 20:33:46.704000 3626541 torch/_inductor/memory.py:928] [0/0] Baseline peak memory: 0
+I1119 20:33:46.704000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_lpmf peak memory: 0
+I1119 20:33:46.705000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_bfs peak memory: 0
+I1119 20:33:46.705000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_dfs peak memory: 0
+V1119 20:33:46.707000 3626541 torch/_inductor/scheduler.py:5996] [0/0] Generating code for node true_graph_0_op0 with estimated runtime 0.000214
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0] get_bounds:
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0] graph():
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0]     %ops : [num_users=5] = placeholder[target=ops]
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0]     %get_index : [num_users=1] = call_module[target=get_index](args = (index0,), kwargs = {})
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0]     %load : [num_users=1] = call_method[target=load](args = (%ops, true_graph_0_arg1_1, %get_index), kwargs = {})
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0]     %get_index_1 : [num_users=1] = call_module[target=get_index](args = (index1,), kwargs = {})
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0]     %load_1 : [num_users=1] = call_method[target=load](args = (%ops, true_graph_0_arg0_1, %get_index_1), kwargs = {})
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0]     %mul : [num_users=1] = call_method[target=mul](args = (%ops, %load, %load_1), kwargs = {})
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0]     %sin : [num_users=1] = call_method[target=sin](args = (%ops, %mul), kwargs = {})
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0]     %get_index_2 : [num_users=1] = call_module[target=get_index](args = (index0,), kwargs = {})
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0]     %store : [num_users=1] = call_method[target=store](args = (%ops, true_graph_0_buf0, %get_index_2, %sin, None), kwargs = {})
+V1119 20:33:46.815000 3626541 torch/_inductor/bounds.py:81] [0/0]     return store
+V1119 20:33:46.818000 3626541 torch/_inductor/codegen/triton.py:2092] [0/0] Cannot use TMA descriptor for load / store since:  Requires triton>=3.4.0, a CUDA device with cc>=9.0 and `use_tensor_descriptor` and `assume_aligned_inputs` options enabled
+V1119 20:33:46.820000 3626541 torch/_inductor/codegen/triton.py:2092] [0/0] Cannot use TMA descriptor for load / store since:  Requires triton>=3.4.0, a CUDA device with cc>=9.0 and `use_tensor_descriptor` and `assume_aligned_inputs` options enabled
+V1119 20:33:46.821000 3626541 torch/_inductor/codegen/triton.py:2092] [0/0] Cannot use TMA descriptor for load / store since:  Requires triton>=3.4.0, a CUDA device with cc>=9.0 and `use_tensor_descriptor` and `assume_aligned_inputs` options enabled
+V1119 20:33:47.142000 3626541 torch/_inductor/codegen/simd.py:1873] [0/0] Generating kernel code with kernel_name: triton_poi_fused_mul_sin_view_0
+V1119 20:33:47.143000 3626541 torch/_inductor/graph.py:2325] [0/0] Finished codegen for all nodes. The list of kernel names available: OrderedSet([])
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0] scheduling Conditional(
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   python_kernel_name=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   name=false_graph_0_buf0,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   layout=MultiOutputLayout(device=device(type='cuda', index=0)),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   inputs=[StorageBox(
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='false_graph_0_arg0_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), StorageBox(
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='false_graph_0_arg1_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   )],
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   constant_args=[s27 <= 2048, s27, s53, s77],
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   kwargs={},
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   output_view=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   python_kernel_name=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   cpp_kernel_name=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ordered_kwargs_for_cpp_kernel=(),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   op_overload=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   arg_properties=[{}, {}],
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   allarg_properties={},
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   kwarg_properties=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   unbacked_bindings={},
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   mutation_outputs=[],
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   predicate=ShapeAsConstantBuffer(expr=s27 <= 2048),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   operands=[ShapeAsConstantBuffer(expr=s27), StorageBox(
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='false_graph_0_arg0_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), StorageBox(
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='false_graph_0_arg1_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), ShapeAsConstantBuffer(expr=s53), ShapeAsConstantBuffer(expr=s77)],
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   true_subgraph=Subgraph(name='true_graph_0', graph_module=<lambda>(), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc813a3f4d0>),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   false_subgraph=Subgraph(name='false_graph_0', graph_module=<lambda>(), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc814080bf0>),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   outputs=[MultiOutput(
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     python_kernel_name=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     name=false_graph_0_buf1,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     inputs=[Conditional(name='false_graph_0_buf0', layout=MultiOutputLayout(device=device(type='cuda', index=0)), inputs=[StorageBox(
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       InputBuffer(name='false_graph_0_arg0_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ), StorageBox(
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       InputBuffer(name='false_graph_0_arg1_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     )], constant_args=[s27 <= 2048, s27, s53, s77], kwargs={}, output_view=None, python_kernel_name=None, cpp_kernel_name=None, ordered_kwargs_for_cpp_kernel=(), op_overload=None, arg_properties=[{}, {}], allarg_properties={}, kwarg_properties=None, unbacked_bindings={}, mutation_outputs=[], predicate=ShapeAsConstantBuffer(expr=s27 <= 2048), operands=[ShapeAsConstantBuffer(expr=s27), StorageBox(
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       InputBuffer(name='false_graph_0_arg0_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ), StorageBox(
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       InputBuffer(name='false_graph_0_arg1_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ), ShapeAsConstantBuffer(expr=s53), ShapeAsConstantBuffer(expr=s77)], true_subgraph=Subgraph(name='true_graph_0', graph_module=<lambda>(), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc813a3f4d0>), false_subgraph=Subgraph(name='false_graph_0', graph_module=<lambda>(), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc814080bf0>), outputs=[...])],
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     constant_args=(),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     kwargs={},
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     output_view=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     python_kernel_name=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     cpp_kernel_name=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ordered_kwargs_for_cpp_kernel=(),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     op_overload=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     arg_properties=[{}],
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     allarg_properties={},
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     kwarg_properties=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     unbacked_bindings={},
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     mutation_outputs=[],
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     origin_node=getitem,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     origins=OrderedSet([cond, true_graph_0, false_graph_0, cond, ...,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     stack_traces = {,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         return torch.cond(,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/test_simple_cond.py", line 44, in <lambda>,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         lambda: torch.cond(,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     }
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   )],
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origin_node=None,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origins=OrderedSet([cond, true_graph_0, false_graph_0, cond, ...,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   },
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 44, in <lambda>,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: torch.cond(,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   }
+V1119 20:33:47.146000 3626541 torch/_inductor/scheduler.py:2988] [0/0] )
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0] scheduling MultiOutput(
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   python_kernel_name=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   name=false_graph_0_buf1,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]),
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   inputs=[Conditional(name='false_graph_0_buf0', layout=MultiOutputLayout(device=device(type='cuda', index=0)), inputs=[StorageBox(
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='false_graph_0_arg0_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), StorageBox(
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='false_graph_0_arg1_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   )], constant_args=[s27 <= 2048, s27, s53, s77], kwargs={}, output_view=None, python_kernel_name=None, cpp_kernel_name=None, ordered_kwargs_for_cpp_kernel=(), op_overload=None, arg_properties=[{}, {}], allarg_properties={}, kwarg_properties=None, unbacked_bindings={}, mutation_outputs=[], predicate=ShapeAsConstantBuffer(expr=s27 <= 2048), operands=[ShapeAsConstantBuffer(expr=s27), StorageBox(
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='false_graph_0_arg0_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), StorageBox(
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     InputBuffer(name='false_graph_0_arg1_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ), ShapeAsConstantBuffer(expr=s53), ShapeAsConstantBuffer(expr=s77)], true_subgraph=Subgraph(name='true_graph_0', graph_module=<lambda>(), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc813a3f4d0>), false_subgraph=Subgraph(name='false_graph_0', graph_module=<lambda>(), graph=<torch._inductor.graph.SubgraphLowering object at 0x7fc814080bf0>), outputs=[MultiOutput(
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     python_kernel_name=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     name=false_graph_0_buf1,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]),
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     inputs=[...],
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     constant_args=(),
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     kwargs={},
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     output_view=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     python_kernel_name=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     cpp_kernel_name=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ordered_kwargs_for_cpp_kernel=(),
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     op_overload=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     arg_properties=[{}],
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     allarg_properties={},
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     kwarg_properties=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     unbacked_bindings={},
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     mutation_outputs=[],
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     origin_node=getitem,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     origins=OrderedSet([cond, true_graph_0, false_graph_0, cond, ...,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     stack_traces = {,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         return torch.cond(,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/test_simple_cond.py", line 44, in <lambda>,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         lambda: torch.cond(,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]         return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     ,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     }
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   )])],
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   constant_args=(),
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   kwargs={},
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   output_view=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   python_kernel_name=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   cpp_kernel_name=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ordered_kwargs_for_cpp_kernel=(),
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   op_overload=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   arg_properties=[{}],
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   allarg_properties={},
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   kwarg_properties=None,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   unbacked_bindings={},
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   mutation_outputs=[],
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origin_node=getitem,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origins=OrderedSet([cond, true_graph_0, false_graph_0, cond, ...,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 44, in <lambda>,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: torch.cond(,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   }
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:2988] [0/0] )
+V1119 20:33:47.147000 3626541 torch/_inductor/scheduler.py:3059] [0/0] scheduling output false_graph_0_buf1
+I1119 20:33:47.148000 3626541 torch/_inductor/memory.py:894] [0/0] Reordering for peak memory -- 2 nodes
+I1119 20:33:47.149000 3626541 torch/_inductor/memory.py:928] [0/0] Baseline peak memory: 0
+I1119 20:33:47.149000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_lpmf peak memory: 0
+I1119 20:33:47.149000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_bfs peak memory: 0
+I1119 20:33:47.150000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_dfs peak memory: 0
+I1119 20:33:47.150000 3626541 torch/_inductor/analysis/device_info.py:207] [0/0] Device NVIDIA H100 does not have a datasheet entry for None, returning None
+V1119 20:33:47.151000 3626541 torch/_inductor/scheduler.py:5996] [0/0] Generating code for node false_graph_0_op0 with estimated runtime 0.000000
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0] scheduling ComputedBuffer(name='false_graph_0_true_graph_0_buf0', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]), data=Pointwise(
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   'cuda',
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   torch.float32,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   def inner_fn(index):
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       i0, i1, i2 = index
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp0 = ops.load(false_graph_0_true_graph_0_arg2_1, i2 + i1 * s53 + i0 * s27 * s53)
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp1 = ops.load(false_graph_0_true_graph_0_arg1_1, i2)
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp2 = tmp0 * tmp1
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp3 = ops.tanh(tmp2)
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return tmp3
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ranges=[s77, s27, s53],
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origin_node=tanh,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origins=OrderedSet([cond, true_graph_0, false_graph_0, cond, ...,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   },
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 44, in <lambda>,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: torch.cond(,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   },
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 44, in <lambda>,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: torch.cond(,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 46, in <lambda>,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: medium_impl(x, weight),,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 24, in medium_impl,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.tanh(result),
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   },
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 44, in <lambda>,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: torch.cond(,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 46, in <lambda>,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: medium_impl(x, weight),,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 23, in medium_impl,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       result = x * weight.view(1, 1, -1),
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   }
+V1119 20:33:47.154000 3626541 torch/_inductor/scheduler.py:2988] [0/0] ), _split_size=None, _original_inner_fn=None, _original_ranges=None, _original_reduction_ranges=None)
+V1119 20:33:47.156000 3626541 torch/_inductor/scheduler.py:3059] [0/0] scheduling output false_graph_0_true_graph_0_buf0
+I1119 20:33:47.160000 3626541 torch/_inductor/memory.py:894] [0/0] Reordering for peak memory -- 1 nodes
+I1119 20:33:47.160000 3626541 torch/_inductor/memory.py:928] [0/0] Baseline peak memory: 0
+I1119 20:33:47.160000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_lpmf peak memory: 0
+I1119 20:33:47.161000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_bfs peak memory: 0
+I1119 20:33:47.161000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_dfs peak memory: 0
+V1119 20:33:47.163000 3626541 torch/_inductor/scheduler.py:5996] [0/0] Generating code for node false_graph_0_true_graph_0_op0 with estimated runtime 0.000214
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0] get_bounds:
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0] graph():
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0]     %ops : [num_users=5] = placeholder[target=ops]
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0]     %get_index : [num_users=1] = call_module[target=get_index](args = (index0,), kwargs = {})
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0]     %load : [num_users=1] = call_method[target=load](args = (%ops, false_graph_0_true_graph_0_arg2_1, %get_index), kwargs = {})
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0]     %get_index_1 : [num_users=1] = call_module[target=get_index](args = (index1,), kwargs = {})
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0]     %load_1 : [num_users=1] = call_method[target=load](args = (%ops, false_graph_0_true_graph_0_arg1_1, %get_index_1), kwargs = {})
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0]     %mul : [num_users=1] = call_method[target=mul](args = (%ops, %load, %load_1), kwargs = {})
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0]     %tanh : [num_users=1] = call_method[target=tanh](args = (%ops, %mul), kwargs = {})
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0]     %get_index_2 : [num_users=1] = call_module[target=get_index](args = (index0,), kwargs = {})
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0]     %store : [num_users=1] = call_method[target=store](args = (%ops, false_graph_0_true_graph_0_buf0, %get_index_2, %tanh, None), kwargs = {})
+V1119 20:33:47.168000 3626541 torch/_inductor/bounds.py:81] [0/0]     return store
+V1119 20:33:47.169000 3626541 torch/_inductor/codegen/triton.py:2092] [0/0] Cannot use TMA descriptor for load / store since:  Requires triton>=3.4.0, a CUDA device with cc>=9.0 and `use_tensor_descriptor` and `assume_aligned_inputs` options enabled
+V1119 20:33:47.170000 3626541 torch/_inductor/codegen/triton.py:2092] [0/0] Cannot use TMA descriptor for load / store since:  Requires triton>=3.4.0, a CUDA device with cc>=9.0 and `use_tensor_descriptor` and `assume_aligned_inputs` options enabled
+V1119 20:33:47.171000 3626541 torch/_inductor/codegen/triton.py:2092] [0/0] Cannot use TMA descriptor for load / store since:  Requires triton>=3.4.0, a CUDA device with cc>=9.0 and `use_tensor_descriptor` and `assume_aligned_inputs` options enabled
+V1119 20:33:47.172000 3626541 torch/_inductor/codegen/simd.py:1873] [0/0] Generating kernel code with kernel_name: triton_poi_fused_mul_tanh_view_1
+V1119 20:33:47.172000 3626541 torch/_inductor/graph.py:2325] [0/0] Finished codegen for all nodes. The list of kernel names available: OrderedSet([])
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0] scheduling ComputedBuffer(name='false_graph_0_false_graph_0_buf0', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]), data=Pointwise(
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   'cuda',
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   torch.float32,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   def inner_fn(index):
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       i0, i1, i2 = index
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp0 = ops.load(false_graph_0_false_graph_0_arg2_1, i2 + i1 * s53 + i0 * s27 * s53)
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp1 = ops.load(false_graph_0_false_graph_0_arg1_1, i2)
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp2 = tmp0 * tmp1
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       tmp3 = ops.relu(tmp2)
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return tmp3
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ranges=[s77, s27, s53],
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origin_node=relu,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   origins=OrderedSet([cond, true_graph_0, false_graph_0, cond, ...,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   },
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 44, in <lambda>,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: torch.cond(,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   },
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 44, in <lambda>,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: torch.cond(,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 47, in <lambda>,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: long_impl(x, weight),,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 30, in long_impl,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.relu(result),
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   },
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   stack_traces = {,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 41, in dispatch_with_torch_cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return torch.cond(,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 44, in <lambda>,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: torch.cond(,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/torch/_higher_order_ops/cond.py", line 170, in cond,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       return cond_op(pred, true_fn, false_fn, operands),
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 47, in <lambda>,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       lambda: long_impl(x, weight),,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]     File "/data/users/tianren/pytorch/test_simple_cond.py", line 29, in long_impl,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]       result = x * weight.view(1, 1, -1),
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   ,
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0]   }
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:2988] [0/0] ), _split_size=None, _original_inner_fn=None, _original_ranges=None, _original_reduction_ranges=None)
+V1119 20:33:47.176000 3626541 torch/_inductor/scheduler.py:3059] [0/0] scheduling output false_graph_0_false_graph_0_buf0
+I1119 20:33:47.180000 3626541 torch/_inductor/memory.py:894] [0/0] Reordering for peak memory -- 1 nodes
+I1119 20:33:47.181000 3626541 torch/_inductor/memory.py:928] [0/0] Baseline peak memory: 0
+I1119 20:33:47.181000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_lpmf peak memory: 0
+I1119 20:33:47.181000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_bfs peak memory: 0
+I1119 20:33:47.182000 3626541 torch/_inductor/memory.py:946] [0/0] topological_sort_dfs peak memory: 0
+V1119 20:33:47.183000 3626541 torch/_inductor/scheduler.py:5996] [0/0] Generating code for node false_graph_0_false_graph_0_op0 with estimated runtime 0.000214
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0] get_bounds:
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0] graph():
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0]     %ops : [num_users=5] = placeholder[target=ops]
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0]     %get_index : [num_users=1] = call_module[target=get_index](args = (index0,), kwargs = {})
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0]     %load : [num_users=1] = call_method[target=load](args = (%ops, false_graph_0_false_graph_0_arg2_1, %get_index), kwargs = {})
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0]     %get_index_1 : [num_users=1] = call_module[target=get_index](args = (index1,), kwargs = {})
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0]     %load_1 : [num_users=1] = call_method[target=load](args = (%ops, false_graph_0_false_graph_0_arg1_1, %get_index_1), kwargs = {})
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0]     %mul : [num_users=1] = call_method[target=mul](args = (%ops, %load, %load_1), kwargs = {})
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0]     %relu : [num_users=1] = call_method[target=relu](args = (%ops, %mul), kwargs = {})
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0]     %get_index_2 : [num_users=1] = call_module[target=get_index](args = (index0,), kwargs = {})
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0]     %store : [num_users=1] = call_method[target=store](args = (%ops, false_graph_0_false_graph_0_buf0, %get_index_2, %relu, None), kwargs = {})
+V1119 20:33:47.187000 3626541 torch/_inductor/bounds.py:81] [0/0]     return store
+V1119 20:33:47.188000 3626541 torch/_inductor/codegen/triton.py:2092] [0/0] Cannot use TMA descriptor for load / store since:  Requires triton>=3.4.0, a CUDA device with cc>=9.0 and `use_tensor_descriptor` and `assume_aligned_inputs` options enabled
+V1119 20:33:47.189000 3626541 torch/_inductor/codegen/triton.py:2092] [0/0] Cannot use TMA descriptor for load / store since:  Requires triton>=3.4.0, a CUDA device with cc>=9.0 and `use_tensor_descriptor` and `assume_aligned_inputs` options enabled
+V1119 20:33:47.190000 3626541 torch/_inductor/codegen/triton.py:2092] [0/0] Cannot use TMA descriptor for load / store since:  Requires triton>=3.4.0, a CUDA device with cc>=9.0 and `use_tensor_descriptor` and `assume_aligned_inputs` options enabled
+V1119 20:33:47.191000 3626541 torch/_inductor/codegen/simd.py:1873] [0/0] Generating kernel code with kernel_name: triton_poi_fused_mul_relu_view_2
+V1119 20:33:47.192000 3626541 torch/_inductor/graph.py:2325] [0/0] Finished codegen for all nodes. The list of kernel names available: OrderedSet([])
+V1119 20:33:47.193000 3626541 torch/_inductor/scheduler.py:5996] [0/0] Generating code for node false_graph_0_op1 with estimated runtime 0.000000
+V1119 20:33:47.193000 3626541 torch/_inductor/graph.py:2325] [0/0] Finished codegen for all nodes. The list of kernel names available: OrderedSet([])
+V1119 20:33:47.194000 3626541 torch/_inductor/scheduler.py:5996] [0/0] Generating code for node op1 with estimated runtime 0.000000
+V1119 20:33:47.195000 3626541 torch/_inductor/graph.py:2325] [0/0] Finished codegen for all nodes. The list of kernel names available: OrderedSet([])
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] Output code: 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] # AOT ID: ['0_inference']
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from ctypes import c_void_p, c_long, c_int
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import torch
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import math
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import random
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import os
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import tempfile
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from math import inf, nan
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from cmath import nanj
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.hooks import run_intermediate_hooks
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.utils import maybe_profile
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.codegen.memory_planning import _align as align
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch import device, empty_strided
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.async_compile import AsyncCompile
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.select_algorithm import extern_kernels
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import triton
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import triton.language as tl
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.runtime.triton_heuristics import start_graph, end_graph
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] aten = torch.ops.aten
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] inductor_ops = torch.ops.inductor
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] _quantized = torch.ops._quantized
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] assert_alignment = torch._C._dynamo.guards.assert_alignment
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] alloc_from_pool = torch.ops.inductor._alloc_from_pool
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] async_compile = AsyncCompile()
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] # kernel path: /tmp/torchinductor_tianren/tmp3d152mtz/s7/cs7mw7sp5j577f47d5cz67vnnylgz6rp4ybjic52awumtzsblmlf.py
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] # Unsorted Source Nodes: [cond, sin, result, view], Original ATen: [aten.sin, aten.mul, aten.view]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] # Source node to ATen node mapping:
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   cond => cond
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   result => mul_7
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   sin => sin
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   view => view
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] triton_poi_fused_mul_sin_view_0 = async_compile.triton('triton_poi_fused_mul_sin_view_0', '''
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import triton
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import triton.language as tl
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.runtime import triton_helpers, triton_heuristics
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] triton_helpers.set_driver_to_gpu()
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] @triton_heuristics.pointwise(
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     size_hints={'x': 65536}, 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     filename=__file__,
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     triton_meta={'signature': {'in_ptr0': '*fp32', 'in_ptr1': '*fp32', 'out_ptr0': '*fp32', 'ks0': 'i64', 'xnumel': 'i32', 'XBLOCK': 'constexpr'}, 'device': DeviceProperties(type='cuda', index=0, multi_processor_count=132, cc=90, major=9, regs_per_multiprocessor=65536, max_threads_per_multi_processor=2048, warp_size=32), 'constants': {}, 'native_matmul': False, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]]}], 'enable_fp_fusion': True},
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     inductor_meta={'grid_type': 'Grid1D', 'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_mul_sin_view_0', 'mutated_arg_names': [], 'optimize_mem': True, 'no_x_dim': False, 'atomic_add_found': False, 'num_load': 2, 'num_store': 1, 'num_reduction': 0, 'backend_hash': 'BDCD04EBA777A11071614C3A47955F25C1ECF1ACA0FACD1C9BC97535638A01EB', 'assert_indirect_indexing': True, 'autotune_local_cache': True, 'autotune_pointwise': True, 'autotune_remote_cache': None, 'force_disable_caches': True, 'dynamic_scale_rblock': True, 'max_autotune': False, 'max_autotune_pointwise': False, 'min_split_scan_rblock': 256, 'spill_threshold': 16, 'store_cubin': False, 'deterministic': False, 'force_filter_reduction_configs': False, 'are_deterministic_algorithms_enabled': False},
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     min_elem_per_thread=0
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] )
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] @triton.jit
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] def triton_poi_fused_mul_sin_view_0(in_ptr0, in_ptr1, out_ptr0, ks0, xnumel, XBLOCK : tl.constexpr):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     xoffset = tl.program_id(0) * XBLOCK
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     xindex = xoffset + tl.arange(0, XBLOCK)[:]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     xmask = xindex < xnumel
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     x2 = xindex
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     x0 = (xindex % ks0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp0 = tl.load(in_ptr0 + (x2), xmask, eviction_policy='evict_last')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp1 = tl.load(in_ptr1 + (x0), xmask, eviction_policy='evict_last')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp2 = tmp0 * tmp1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp3 = tl_math.sin(tmp2)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tl.store(out_ptr0 + (x2), tmp3, xmask)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] ''', device_str='cuda')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] def true_graph_0(args):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     true_graph_0_arg0_1, true_graph_0_arg1_1, true_graph_0_arg2_1, true_graph_0_arg3_1, true_graph_0_arg4_1, true_graph_0_arg5_1 = args
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     args.clear()
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s53 = true_graph_0_arg2_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s77 = true_graph_0_arg3_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s27 = true_graph_0_arg4_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     assert_size_stride(true_graph_0_arg0_1, (s53, ), (1, ))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     assert_size_stride(true_graph_0_arg1_1, (s77, s27, s53), (s27*s53, s53, 1))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     with torch.cuda._DeviceGuard(0):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         torch.cuda.set_device(0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         true_graph_0_buf0 = empty_strided_cuda((s77, s27, s53), (s27*s53, s53, 1), torch.float32)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         # Unsorted Source Nodes: [cond, sin, result, view], Original ATen: [aten.sin, aten.mul, aten.view]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         triton_poi_fused_mul_sin_view_0_xnumel = s27*s53*s77
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         stream0 = get_raw_stream(0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         triton_poi_fused_mul_sin_view_0.run(true_graph_0_arg1_1, true_graph_0_arg0_1, true_graph_0_buf0, s53, triton_poi_fused_mul_sin_view_0_xnumel, stream=stream0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         del true_graph_0_arg0_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         del true_graph_0_arg1_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     return (true_graph_0_buf0, )
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] # kernel path: /tmp/torchinductor_tianren/tmp3d152mtz/d6/cd65e6f3gog7sbbppnxkcaicustcbjbthiy6mmdudzgmqxirwmes.py
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] # Unsorted Source Nodes: [cond, tanh, result, view], Original ATen: [aten.tanh, aten.mul, aten.view]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] # Source node to ATen node mapping:
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   cond => cond, cond
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   result => mul_7
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   tanh => tanh
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   view => view
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] triton_poi_fused_mul_tanh_view_1 = async_compile.triton('triton_poi_fused_mul_tanh_view_1', '''
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import triton
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import triton.language as tl
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.runtime import triton_helpers, triton_heuristics
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] triton_helpers.set_driver_to_gpu()
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] @triton_heuristics.pointwise(
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     size_hints={'x': 65536}, 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     filename=__file__,
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     triton_meta={'signature': {'in_ptr0': '*fp32', 'in_ptr1': '*fp32', 'out_ptr0': '*fp32', 'ks0': 'i64', 'xnumel': 'i32', 'XBLOCK': 'constexpr'}, 'device': DeviceProperties(type='cuda', index=0, multi_processor_count=132, cc=90, major=9, regs_per_multiprocessor=65536, max_threads_per_multi_processor=2048, warp_size=32), 'constants': {}, 'native_matmul': False, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]]}], 'enable_fp_fusion': True},
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     inductor_meta={'grid_type': 'Grid1D', 'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_mul_tanh_view_1', 'mutated_arg_names': [], 'optimize_mem': True, 'no_x_dim': False, 'atomic_add_found': False, 'num_load': 2, 'num_store': 1, 'num_reduction': 0, 'backend_hash': 'BDCD04EBA777A11071614C3A47955F25C1ECF1ACA0FACD1C9BC97535638A01EB', 'assert_indirect_indexing': True, 'autotune_local_cache': True, 'autotune_pointwise': True, 'autotune_remote_cache': None, 'force_disable_caches': True, 'dynamic_scale_rblock': True, 'max_autotune': False, 'max_autotune_pointwise': False, 'min_split_scan_rblock': 256, 'spill_threshold': 16, 'store_cubin': False, 'deterministic': False, 'force_filter_reduction_configs': False, 'are_deterministic_algorithms_enabled': False},
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     min_elem_per_thread=0
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] )
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] @triton.jit
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] def triton_poi_fused_mul_tanh_view_1(in_ptr0, in_ptr1, out_ptr0, ks0, xnumel, XBLOCK : tl.constexpr):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     xoffset = tl.program_id(0) * XBLOCK
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     xindex = xoffset + tl.arange(0, XBLOCK)[:]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     xmask = xindex < xnumel
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     x2 = xindex
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     x0 = (xindex % ks0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp0 = tl.load(in_ptr0 + (x2), xmask, eviction_policy='evict_last')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp1 = tl.load(in_ptr1 + (x0), xmask, eviction_policy='evict_last')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp2 = tmp0 * tmp1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp3 = libdevice.tanh(tmp2)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tl.store(out_ptr0 + (x2), tmp3, xmask)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] ''', device_str='cuda')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] def false_graph_0_true_graph_0(args):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     false_graph_0_true_graph_0_arg0_1, false_graph_0_true_graph_0_arg1_1, false_graph_0_true_graph_0_arg2_1, false_graph_0_true_graph_0_arg3_1, false_graph_0_true_graph_0_arg4_1 = args
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     args.clear()
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s27 = false_graph_0_true_graph_0_arg0_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s53 = false_graph_0_true_graph_0_arg3_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s77 = false_graph_0_true_graph_0_arg4_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     assert_size_stride(false_graph_0_true_graph_0_arg1_1, (s53, ), (1, ))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     assert_size_stride(false_graph_0_true_graph_0_arg2_1, (s77, s27, s53), (s27*s53, s53, 1))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     with torch.cuda._DeviceGuard(0):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         torch.cuda.set_device(0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         false_graph_0_true_graph_0_buf0 = empty_strided_cuda((s77, s27, s53), (s27*s53, s53, 1), torch.float32)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         # Unsorted Source Nodes: [cond, tanh, result, view], Original ATen: [aten.tanh, aten.mul, aten.view]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         triton_poi_fused_mul_tanh_view_1_xnumel = s27*s53*s77
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         stream0 = get_raw_stream(0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         triton_poi_fused_mul_tanh_view_1.run(false_graph_0_true_graph_0_arg2_1, false_graph_0_true_graph_0_arg1_1, false_graph_0_true_graph_0_buf0, s53, triton_poi_fused_mul_tanh_view_1_xnumel, stream=stream0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         del false_graph_0_true_graph_0_arg1_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         del false_graph_0_true_graph_0_arg2_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     return (false_graph_0_true_graph_0_buf0, )
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] # kernel path: /tmp/torchinductor_tianren/tmp3d152mtz/3z/c3zorw62z3nc7hksuhrlphz66mayauxcwuaxxjfkwveway4m6nzw.py
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] # Unsorted Source Nodes: [cond, relu, result, view], Original ATen: [aten.relu, aten.mul, aten.view]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] # Source node to ATen node mapping:
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   cond => cond, cond
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   relu => relu
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   result => mul_7
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] #   view => view
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] triton_poi_fused_mul_relu_view_2 = async_compile.triton('triton_poi_fused_mul_relu_view_2', '''
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import triton
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] import triton.language as tl
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.runtime import triton_helpers, triton_heuristics
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] triton_helpers.set_driver_to_gpu()
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] @triton_heuristics.pointwise(
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     size_hints={'x': 65536}, 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     filename=__file__,
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     triton_meta={'signature': {'in_ptr0': '*fp32', 'in_ptr1': '*fp32', 'out_ptr0': '*fp32', 'ks0': 'i64', 'xnumel': 'i32', 'XBLOCK': 'constexpr'}, 'device': DeviceProperties(type='cuda', index=0, multi_processor_count=132, cc=90, major=9, regs_per_multiprocessor=65536, max_threads_per_multi_processor=2048, warp_size=32), 'constants': {}, 'native_matmul': False, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]]}], 'enable_fp_fusion': True},
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     inductor_meta={'grid_type': 'Grid1D', 'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_mul_relu_view_2', 'mutated_arg_names': [], 'optimize_mem': True, 'no_x_dim': False, 'atomic_add_found': False, 'num_load': 2, 'num_store': 1, 'num_reduction': 0, 'backend_hash': 'BDCD04EBA777A11071614C3A47955F25C1ECF1ACA0FACD1C9BC97535638A01EB', 'assert_indirect_indexing': True, 'autotune_local_cache': True, 'autotune_pointwise': True, 'autotune_remote_cache': None, 'force_disable_caches': True, 'dynamic_scale_rblock': True, 'max_autotune': False, 'max_autotune_pointwise': False, 'min_split_scan_rblock': 256, 'spill_threshold': 16, 'store_cubin': False, 'deterministic': False, 'force_filter_reduction_configs': False, 'are_deterministic_algorithms_enabled': False},
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     min_elem_per_thread=0
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] )
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] @triton.jit
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] def triton_poi_fused_mul_relu_view_2(in_ptr0, in_ptr1, out_ptr0, ks0, xnumel, XBLOCK : tl.constexpr):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     xoffset = tl.program_id(0) * XBLOCK
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     xindex = xoffset + tl.arange(0, XBLOCK)[:]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     xmask = xindex < xnumel
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     x2 = xindex
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     x0 = (xindex % ks0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp0 = tl.load(in_ptr0 + (x2), xmask, eviction_policy='evict_last')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp1 = tl.load(in_ptr1 + (x0), xmask, eviction_policy='evict_last')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp2 = tmp0 * tmp1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp3 = tl.full([1], 0, tl.int32)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tmp4 = triton_helpers.maximum(tmp3, tmp2)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     tl.store(out_ptr0 + (x2), tmp4, xmask)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] ''', device_str='cuda')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] def false_graph_0_false_graph_0(args):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     false_graph_0_false_graph_0_arg0_1, false_graph_0_false_graph_0_arg1_1, false_graph_0_false_graph_0_arg2_1, false_graph_0_false_graph_0_arg3_1, false_graph_0_false_graph_0_arg4_1 = args
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     args.clear()
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s27 = false_graph_0_false_graph_0_arg0_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s53 = false_graph_0_false_graph_0_arg3_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s77 = false_graph_0_false_graph_0_arg4_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     assert_size_stride(false_graph_0_false_graph_0_arg1_1, (s53, ), (1, ))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     assert_size_stride(false_graph_0_false_graph_0_arg2_1, (s77, s27, s53), (s27*s53, s53, 1))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     with torch.cuda._DeviceGuard(0):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         torch.cuda.set_device(0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         false_graph_0_false_graph_0_buf0 = empty_strided_cuda((s77, s27, s53), (s27*s53, s53, 1), torch.float32)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         # Unsorted Source Nodes: [cond, relu, result, view], Original ATen: [aten.relu, aten.mul, aten.view]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         triton_poi_fused_mul_relu_view_2_xnumel = s27*s53*s77
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         stream0 = get_raw_stream(0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         triton_poi_fused_mul_relu_view_2.run(false_graph_0_false_graph_0_arg2_1, false_graph_0_false_graph_0_arg1_1, false_graph_0_false_graph_0_buf0, s53, triton_poi_fused_mul_relu_view_2_xnumel, stream=stream0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         del false_graph_0_false_graph_0_arg1_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         del false_graph_0_false_graph_0_arg2_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     return (false_graph_0_false_graph_0_buf0, )
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] def false_graph_0(args):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     false_graph_0_arg0_1, false_graph_0_arg1_1, false_graph_0_arg2_1, false_graph_0_arg3_1, false_graph_0_arg4_1, false_graph_0_arg5_1 = args
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     args.clear()
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s53 = false_graph_0_arg2_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s77 = false_graph_0_arg3_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     s27 = false_graph_0_arg4_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     assert_size_stride(false_graph_0_arg0_1, (s53, ), (1, ))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     assert_size_stride(false_graph_0_arg1_1, (s77, s27, s53), (s27*s53, s53, 1))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     with torch.cuda._DeviceGuard(0):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         torch.cuda.set_device(0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         false_graph_0_buf0 = [None] * 1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         if s27 <= 2048:
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             # subgraph: true_graph_0
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             false_graph_0_true_graph_0_args = [s27, false_graph_0_arg0_1, false_graph_0_arg1_1, s53, s77]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             del false_graph_0_arg0_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             del false_graph_0_arg1_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             false_graph_0_buf0 = false_graph_0_true_graph_0(false_graph_0_true_graph_0_args)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         else:
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             # subgraph: false_graph_0
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             false_graph_0_false_graph_0_args = [s27, false_graph_0_arg0_1, false_graph_0_arg1_1, s53, s77]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             false_graph_0_buf0 = false_graph_0_false_graph_0(false_graph_0_false_graph_0_args)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         false_graph_0_buf1 = false_graph_0_buf0[0]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         assert_size_stride(false_graph_0_buf1, (s77, s27, s53), (s27*s53, s53, 1), 'torch.ops.cond')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         assert_alignment(false_graph_0_buf1, 16, 'torch.ops.cond')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         del false_graph_0_buf0
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     return (false_graph_0_buf1, )
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] async_compile.wait(globals())
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] del async_compile
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] class Runner:
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     def __init__(self, partitions):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         self.partitions = partitions
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     def recursively_apply_fns(self, fns):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         new_callables = []
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         for fn, c in zip(fns, self.partitions):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             new_callables.append(fn(c))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         self.partitions = new_callables
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     def call(self, args):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         arg0_1, arg1_1, arg2_1, arg3_1, arg4_1 = args
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         args.clear()
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         s77 = arg0_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         s27 = arg1_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         s53 = arg2_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         assert_size_stride(arg3_1, (s77, s27, s53), (s27*s53, s53, 1))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         assert_size_stride(arg4_1, (s53, ), (1, ))
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         with torch.cuda._DeviceGuard(0):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             torch.cuda.set_device(0)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             buf0 = [None] * 1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             if s27 <= 512:
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]                 # subgraph: true_graph_0
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]                 true_graph_0_args = [arg4_1, arg3_1, s53, s77, s27, s27]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]                 del arg3_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]                 del arg4_1
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]                 buf0 = true_graph_0(true_graph_0_args)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             else:
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]                 # subgraph: false_graph_0
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]                 false_graph_0_args = [arg4_1, arg3_1, s53, s77, s27, s27]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]                 buf0 = false_graph_0(false_graph_0_args)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             buf1 = buf0[0]
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             assert_size_stride(buf1, (s77, s27, s53), (s27*s53, s53, 1), 'torch.ops.cond')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             assert_alignment(buf1, 16, 'torch.ops.cond')
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]             del buf0
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]         return (buf1, )
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] runner = Runner(partitions=[])
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] call = runner.call
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] recursively_apply_fns = runner.recursively_apply_fns
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] def benchmark_compiled_module(times=10, repeat=10):
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     from torch._dynamo.testing import rand_strided
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     from torch._inductor.utils import print_performance
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     arg0_1 = 2
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     arg1_1 = 256
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     arg2_1 = 128
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     arg3_1 = rand_strided((2, 256, 128), (32768, 128, 1), device='cuda:0', dtype=torch.float32)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     arg4_1 = rand_strided((128, ), (1, ), device='cuda:0', dtype=torch.float32)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     fn = lambda: call([arg0_1, arg1_1, arg2_1, arg3_1, arg4_1])
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     return print_performance(fn, times=times, repeat=repeat)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] if __name__ == "__main__":
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     from torch._inductor.wrapper_benchmark import compiled_module_main
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code]     compiled_module_main('None', benchmark_compiled_module)
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2431] [0/0] [__output_code] 
+V1119 20:33:47.196000 3626541 torch/_inductor/graph.py:2442] [0/0] [__output_code] Output code written to: /tmp/torchinductor_tianren/tmp3d152mtz/x2/cx27gjh7ep4uwtbojdyw3j2ablvbu7xhvx6wyskghjdtzj4sqnrw.py
+V1119 20:33:47.202000 3626541 torch/_inductor/runtime/triton_heuristics.py:256] [0/0] autotune caching is disabled by config.force_disable_caches
+V1119 20:33:47.203000 3626541 torch/_inductor/runtime/triton_heuristics.py:316] [0/0] CachingAutotuner gets 2 configs for triton_poi_fused_mul_sin_view_0
+V1119 20:33:47.203000 3626541 torch/_inductor/runtime/triton_heuristics.py:322] [0/0] XBLOCK: 512, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None
+V1119 20:33:47.203000 3626541 torch/_inductor/runtime/triton_heuristics.py:322] [0/0] XBLOCK: 256, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None
+V1119 20:33:47.203000 3626541 torch/_inductor/runtime/triton_heuristics.py:331] [0/0] Triton cache dir: /tmp/torchinductor_tianren/tmp3d152mtz/triton
+V1119 20:33:47.431000 3626541 torch/_inductor/runtime/triton_heuristics.py:256] [0/0] autotune caching is disabled by config.force_disable_caches
+V1119 20:33:47.432000 3626541 torch/_inductor/runtime/triton_heuristics.py:316] [0/0] CachingAutotuner gets 2 configs for triton_poi_fused_mul_tanh_view_1
+V1119 20:33:47.432000 3626541 torch/_inductor/runtime/triton_heuristics.py:322] [0/0] XBLOCK: 512, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None
+V1119 20:33:47.432000 3626541 torch/_inductor/runtime/triton_heuristics.py:322] [0/0] XBLOCK: 256, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None
+V1119 20:33:47.433000 3626541 torch/_inductor/runtime/triton_heuristics.py:331] [0/0] Triton cache dir: /tmp/torchinductor_tianren/tmp3d152mtz/triton
+V1119 20:33:47.591000 3626541 torch/_inductor/runtime/triton_heuristics.py:256] [0/0] autotune caching is disabled by config.force_disable_caches
+V1119 20:33:47.592000 3626541 torch/_inductor/runtime/triton_heuristics.py:316] [0/0] CachingAutotuner gets 2 configs for triton_poi_fused_mul_relu_view_2
+V1119 20:33:47.592000 3626541 torch/_inductor/runtime/triton_heuristics.py:322] [0/0] XBLOCK: 512, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None
+V1119 20:33:47.593000 3626541 torch/_inductor/runtime/triton_heuristics.py:322] [0/0] XBLOCK: 256, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None
+V1119 20:33:47.593000 3626541 torch/_inductor/runtime/triton_heuristics.py:331] [0/0] Triton cache dir: /tmp/torchinductor_tianren/tmp3d152mtz/triton
+V1119 20:33:47.700000 3626541 torch/_inductor/graph.py:2401] [0/0] Output code written to: /tmp/torchinductor_tianren/tmp3d152mtz/x2/cx27gjh7ep4uwtbojdyw3j2ablvbu7xhvx6wyskghjdtzj4sqnrw.py
+I1119 20:33:47.700000 3626541 torch/_inductor/graph.py:2402] [0/0] [__output_code] Output code written to: /tmp/torchinductor_tianren/tmp3d152mtz/x2/cx27gjh7ep4uwtbojdyw3j2ablvbu7xhvx6wyskghjdtzj4sqnrw.py
+V1119 20:33:47.701000 3626541 torch/_inductor/compile_fx.py:1093] [0/0] FX codegen and compilation took 1.265s
+I1119 20:33:47.701000 3626541 torch/_inductor/compile_fx.py:1120] [0/0] Overview info of inductor aten mms: 
+I1119 20:33:47.701000 3626541 torch/_inductor/compile_fx.py:1121] [0/0] Name                           | B                    | M                    | N                    | K                    | Count               
+I1119 20:33:47.701000 3626541 torch/_inductor/compile_fx.py:1126] [0/0] ----------------------------------------------------------------------------------------------------------------------------------
+I1119 20:33:47.702000 3626541 torch/_inductor/compile_fx.py:1136] [0/0] Step 3: torchinductor done compiling FORWARDS graph 0
+V1119 20:33:47.753000 3626541 torch/_inductor/runtime/triton_heuristics.py:1076] Benchmark all input configs for triton_poi_fused_mul_sin_view_0, get:
+V1119 20:33:47.753000 3626541 torch/_inductor/runtime/triton_heuristics.py:1078] XBLOCK: 512, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None: 0.005504, nreg 28, nspill 8, #shared-mem 0
+V1119 20:33:47.753000 3626541 torch/_inductor/runtime/triton_heuristics.py:1078] XBLOCK: 256, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None: 0.005184, nreg 22, nspill 8, #shared-mem 0
+V1119 20:33:47.753000 3626541 torch/_inductor/runtime/triton_heuristics.py:1114] Best config for triton_poi_fused_mul_sin_view_0: XBLOCK: 256, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None: 0.005184, nreg 22, nspill 8, #shared-mem 0
+V1119 20:33:47.875000 3626541 torch/_inductor/runtime/triton_heuristics.py:1076] Benchmark all input configs for triton_poi_fused_mul_tanh_view_1, get:
+V1119 20:33:47.875000 3626541 torch/_inductor/runtime/triton_heuristics.py:1078] XBLOCK: 512, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None: 0.005952, nreg 28, nspill 0, #shared-mem 0
+V1119 20:33:47.875000 3626541 torch/_inductor/runtime/triton_heuristics.py:1078] XBLOCK: 256, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None: 0.005792, nreg 22, nspill 0, #shared-mem 0
+V1119 20:33:47.875000 3626541 torch/_inductor/runtime/triton_heuristics.py:1114] Best config for triton_poi_fused_mul_tanh_view_1: XBLOCK: 256, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None: 0.005792, nreg 22, nspill 0, #shared-mem 0
+V1119 20:33:47.904000 3626541 torch/_inductor/runtime/triton_heuristics.py:1076] Benchmark all input configs for triton_poi_fused_mul_relu_view_2, get:
+V1119 20:33:47.905000 3626541 torch/_inductor/runtime/triton_heuristics.py:1078] XBLOCK: 512, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None: 0.007328, nreg 28, nspill 0, #shared-mem 0
+V1119 20:33:47.905000 3626541 torch/_inductor/runtime/triton_heuristics.py:1078] XBLOCK: 256, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None: 0.007520, nreg 22, nspill 0, #shared-mem 0
+V1119 20:33:47.905000 3626541 torch/_inductor/runtime/triton_heuristics.py:1114] Best config for triton_poi_fused_mul_relu_view_2: XBLOCK: 512, num_warps: 4, num_ctas: 1, num_stages: 1, maxnreg: None: 0.007328, nreg 28, nspill 0, #shared-mem 0
+
+🧪 Testing torch.cond with Dynamic Compilation
+
+================================================================================
+Test 1: Basic torch.cond + Dynamic Compilation
+================================================================================
+
+Using device: cuda
+
+1. Compiling dispatch function with dynamic=True...
+   ✓ Compiled successfully
+
+2. Testing with different input sizes:
+
+   Test 2a: Short sequence (dim=256, should use SIN)
+      Result shape: torch.Size([2, 256, 128])
+      Match expected (sin): True
+
+   Test 2b: Medium sequence (dim=1024, should use TANH)
+      Result shape: torch.Size([2, 1024, 128])
+      Match expected (tanh): True
+
+   Test 2c: Long sequence (dim=4096, should use RELU)
+      Result shape: torch.Size([2, 4096, 128])
+      Match expected (relu): True
+
+================================================================================
+Test Summary:
+  Short sequence (sin):   ✓ PASS
+  Medium sequence (tanh): ✓ PASS
+  Long sequence (relu):   ✓ PASS
+
+🎉 All tests PASSED!
+================================================================================
+
+================================================================================
+Test 2: Verify Dynamic Compilation Behavior
+================================================================================
+
+1. First run with dim=256...
+   ✓ Completed
+
+2. Second run with dim=1024 (should reuse dynamic kernel)...
+   ✓ Completed
+
+3. Third run with dim=4096 (should reuse dynamic kernel)...
+   ✓ Completed
+
+💡 If dynamic=True works correctly:
+   - All 3 runs should use the same compiled kernel
+   - No recompilation warnings should appear
+   - The kernel should handle different dim sizes at runtime
+================================================================================
+
+✅ All functional tests passed!
+
+Next steps:
+  1. Run with TORCH_LOGS='+inductor,output_code' to verify:
+     - torch.cond appears in the traced graph
+     - Dynamic shapes are preserved (symbolic dimensions)
+     - Generated kernel contains conditional logic
+     - All 3 implementations (sin/tanh/relu) are in the code
+
+  Command:
+  TORCHINDUCTOR_FORCE_DISABLE_CACHES=1 TORCH_LOGS='+inductor,output_code' \
+    python3 test_simple_cond.py > log_simple_cond.txt 2>&1
+I1119 20:33:49.790000 3626541 torch/_inductor/remote_cache.py:432] Cache Metrics: None
+I1119 20:33:49.790000 3626541 torch/_inductor/remote_cache.py:432] 

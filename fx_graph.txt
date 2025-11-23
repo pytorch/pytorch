@@ -1,0 +1,4 @@
+graph():
+    %x : [num_users=2] = placeholder[target=x]
+    %one_shot_all_reduce : [num_users=0] = call_function[target=torch.ops.symm_mem.one_shot_all_reduce.default](args = (%x, sum, 0), kwargs = {})
+    return (x,)

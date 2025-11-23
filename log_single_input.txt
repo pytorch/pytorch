@@ -1,0 +1,214 @@
+I1119 12:28:11.891000 2059752 torch/_inductor/config.py:998] compile_threads set to 32
+I1119 12:28:12.713000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::bmm_dtype'', 'device_type='cuda'', 'op_name=None'
+I1119 12:28:12.714000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::_mm_plus_mm'', 'device_type=None', 'op_name=None'
+I1119 12:28:12.714000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::bmm'', 'device_type=None', 'op_name=None'
+I1119 12:28:12.714000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::_int_mm'', 'device_type=None', 'op_name=None'
+I1119 12:28:12.714000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::_scaled_mm'', 'device_type=None', 'op_name=None'
+I1119 12:28:12.714000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::mm_dtype'', 'device_type='cuda'', 'op_name=None'
+I1119 12:28:12.714000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::mm'', 'device_type=None', 'op_name=None'
+I1119 12:28:12.714000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenAddMMConfigHeuristics for 'template_name='aten::baddbmm'', 'device_type=None', 'op_name='baddbmm''
+I1119 12:28:12.714000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenAddMMConfigHeuristics for 'template_name='aten::addmm'', 'device_type=None', 'op_name='addmm''
+I1119 12:28:12.714000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenBiasAddMMConfigHeuristics for 'template_name='aten::bias_addmm'', 'device_type=None', 'op_name='addmm''
+I1119 12:28:12.715000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: EmptyContiguousMMConfigHeuristics for 'template_name='contiguous_addmm'', 'device_type=None', 'op_name='addmm''
+I1119 12:28:12.715000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: EmptyContiguousMMConfigHeuristics for 'template_name='contiguous_mm'', 'device_type=None', 'op_name='mm''
+I1119 12:28:12.715000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: EmptyDecomposeKConfigHeuristics for 'template_name='decompose_k'', 'device_type=None', 'op_name='mm''
+I1119 12:28:12.715000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: DecomposeKConfigHeuristics for 'template_name='decompose_k'', 'device_type='cuda'', 'op_name='mm''
+I1119 12:28:12.719000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cuda'', 'op_name=None'
+I1119 12:28:12.719000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name=None'
+I1119 12:28:12.719000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAAddMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cuda'', 'op_name='baddbmm''
+I1119 12:28:12.719000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAAddMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='addmm''
+I1119 12:28:12.719000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMAHTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='mm-ah''
+I1119 12:28:12.719000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='cuda'', 'op_name=None'
+I1119 12:28:12.719000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDABlackwellPersistentTMATemplateConfigHeuristic for 'template_name='triton::blackwell_ws_persistent_device_tma'', 'device_type='cuda'', 'op_name=None'
+I1119 12:28:12.719000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAAddmmPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='cuda'', 'op_name='addmm''
+I1119 12:28:12.720000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic for 'template_name='triton::blackwell_ws_persistent_device_tma'', 'device_type='cuda'', 'op_name='addmm''
+I1119 12:28:12.720000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1119 12:28:12.720000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic for 'template_name='triton::scaled_mm_device_tma_epilogue_scaling'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1119 12:28:12.720000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic for 'template_name='triton::scaled_mm_device_tma_main_loop_scaling'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1119 12:28:12.720000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledBlackwellTMATemplateConfigHeuristic for 'template_name='triton::blackwell_ws_persistent_device_tma'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1119 12:28:12.720000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='cuda'', 'op_name=None'
+I1119 12:28:12.720000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='int_mm''
+I1119 12:28:12.720000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cpu'', 'op_name=None'
+I1119 12:28:12.720000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name=None'
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUAddmmTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cpu'', 'op_name='baddbmm''
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUAddmmTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name='addmm''
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name='scaled_mm''
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name='int_mm''
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='cpu'', 'op_name=None'
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='xpu'', 'op_name=None'
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name=None'
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUAddmmTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='xpu'', 'op_name='baddbmm''
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUAddmmTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name='addmm''
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='xpu'', 'op_name=None'
+I1119 12:28:12.721000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUAddmmPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='xpu'', 'op_name='addmm''
+I1119 12:28:12.722000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name='scaled_mm''
+I1119 12:28:12.722000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name='int_mm''
+I1119 12:28:12.722000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='xpu'', 'op_name=None'
+I1119 12:28:12.722000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='mtia'', 'op_name=None'
+I1119 12:28:12.722000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name=None'
+I1119 12:28:12.722000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAAddMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='mtia'', 'op_name='baddbmm''
+I1119 12:28:12.722000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAAddMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name='addmm''
+I1119 12:28:12.722000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name='scaled_mm''
+I1119 12:28:12.722000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name='int_mm''
+I1119 12:28:12.722000 2059752 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='mtia'', 'op_name=None'
+/data/users/tianren/pytorch/torch/_dynamo/variables/higher_order_ops.py:1803: UserWarning: Pred is a Python constant. When used with torch.cond, it specializes on one of the branches. If you want torch.cond to preserve two branches, please make the predicate a boolean tensor or a SymBool.
+  warnings.warn(
+I1119 12:28:13.421000 2059752 torch/_inductor/async_compile.py:258] [0/0] Creating 'subprocess' pool with 32 workers
+I1119 12:28:13.517000 2059752 torch/_inductor/compile_worker/subproc_pool.py:170] [0/0] Suppressing compile worker output due to config
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs] TRACED GRAPH
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]  ===== BEFORE PRE GRAD =====
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]  /data/users/tianren/pytorch/torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]     def forward(self, L_x_: "f32[2, 256, 128][32768, 128, 1]cuda:0", L_weight_: "f32[128][1]cuda:0"):
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         l_x_ = L_x_
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         l_weight_ = L_weight_
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         # File: /data/users/tianren/pytorch/test_single_input.py:9 in short_impl, code: result = x * weight
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         result: "f32[2, 256, 128][32768, 128, 1]cuda:0" = l_x_ * l_weight_;  l_x_ = l_weight_ = None
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         # File: /data/users/tianren/pytorch/test_single_input.py:10 in short_impl, code: return torch.sin(result)
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         sin: "f32[2, 256, 128][32768, 128, 1]cuda:0" = torch.sin(result);  result = None
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         return (sin,)
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         
+V1119 12:28:13.519000 2059752 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs] 
+V1119 12:28:13.849000 2059752 torch/_inductor/triton_bundler.py:357] [0/0] Bailing out TritonBundler.read_and_emit, /tmp/torchinductor_tianren/triton/0/3LGP5IBU4ZI4B4OBTOYKKKUDJ4KQEQA32WRCK4BPX4FHDYXRRPIA is non empty
+V1119 12:28:13.850000 2059752 torch/_inductor/triton_bundler.py:357] [0/0] Bailing out TritonBundler.read_and_emit, /tmp/torchinductor_tianren/triton/0/4PWM6CDGR7SETWCFJFU5O6JG2SP27NSYSZL6POQMIIQYMZ3LI6CQ is non empty
+I1119 12:28:13.850000 2059752 torch/_inductor/triton_bundler.py:219] [0/0] Loading 1 statically launchable autotuners
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] Output code: 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # AOT ID: ['0_inference']
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from ctypes import c_void_p, c_long, c_int
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import torch
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import math
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import random
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import os
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import tempfile
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from math import inf, nan
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from cmath import nanj
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.hooks import run_intermediate_hooks
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.utils import maybe_profile
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.codegen.memory_planning import _align as align
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch import device, empty_strided
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.async_compile import AsyncCompile
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.select_algorithm import extern_kernels
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton.language as tl
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.triton_heuristics import start_graph, end_graph
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._C import _cuda_getCurrentRawStream as get_raw_stream
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] aten = torch.ops.aten
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] inductor_ops = torch.ops.inductor
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] _quantized = torch.ops._quantized
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] assert_size_stride = torch._C._dynamo.guards.assert_size_stride
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] assert_alignment = torch._C._dynamo.guards.assert_alignment
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cpu_pinned = torch._C._dynamo.guards._empty_strided_cpu_pinned
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_xpu = torch._C._dynamo.guards._empty_strided_xpu
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_mtia = torch._C._dynamo.guards._empty_strided_mtia
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] reinterpret_tensor = torch._C._dynamo.guards._reinterpret_tensor
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] alloc_from_pool = torch.ops.inductor._alloc_from_pool
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] async_compile = AsyncCompile()
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] empty_strided_p2p = torch._C._distributed_c10d._SymmetricMemory.empty_strided_p2p
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # kernel path: /tmp/torchinductor_tianren/kw/ckw56j7ikwezb3s2h32r46glnwhl3weujfpvmkbramsvtqjzxmwi.py
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Topologically Sorted Source Nodes: [result, sin], Original ATen: [aten.mul, aten.sin]
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Source node to ATen node mapping:
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   result => mul
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   sin => sin
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] # Graph fragment:
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %arg0_1 : Tensor "f32[2, 256, 128][32768, 128, 1]cuda:0" = PlaceHolder[target=arg0_1]
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %arg1_1 : Tensor "f32[128][1]cuda:0" = PlaceHolder[target=arg1_1]
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %mul : Tensor "f32[2, 256, 128][32768, 128, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg0_1, %arg1_1), kwargs = {})
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   %sin : Tensor "f32[2, 256, 128][32768, 128, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%mul,), kwargs = {})
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] #   return %sin
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] triton_poi_fused_mul_sin_0 = async_compile.triton('triton_poi_fused_mul_sin_0', '''
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] import triton.language as tl
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime import triton_helpers, triton_heuristics
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.triton_helpers import libdevice, math as tl_math
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] triton_helpers.set_driver_to_gpu()
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] @triton_heuristics.pointwise(
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     size_hints={'x': 65536}, 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     filename=__file__,
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     triton_meta={'signature': {'in_ptr0': '*fp32', 'in_ptr1': '*fp32', 'out_ptr0': '*fp32', 'xnumel': 'i32', 'XBLOCK': 'constexpr'}, 'device': DeviceProperties(type='cuda', index=0, multi_processor_count=132, cc=90, major=9, regs_per_multiprocessor=65536, max_threads_per_multi_processor=2048, warp_size=32), 'constants': {}, 'native_matmul': False, 'configs': [{(0,): [['tt.divisibility', 16]], (1,): [['tt.divisibility', 16]], (2,): [['tt.divisibility', 16]], (3,): [['tt.divisibility', 16]]}], 'enable_fp_fusion': True},
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     inductor_meta={'grid_type': 'Grid1D', 'autotune_hints': set(), 'kernel_name': 'triton_poi_fused_mul_sin_0', 'mutated_arg_names': [], 'optimize_mem': True, 'no_x_dim': False, 'atomic_add_found': False, 'num_load': 2, 'num_store': 1, 'num_reduction': 0, 'backend_hash': 'BDCD04EBA777A11071614C3A47955F25C1ECF1ACA0FACD1C9BC97535638A01EB', 'assert_indirect_indexing': True, 'autotune_local_cache': True, 'autotune_pointwise': True, 'autotune_remote_cache': None, 'force_disable_caches': False, 'dynamic_scale_rblock': True, 'max_autotune': False, 'max_autotune_pointwise': False, 'min_split_scan_rblock': 256, 'spill_threshold': 16, 'store_cubin': False, 'deterministic': False, 'force_filter_reduction_configs': False, 'are_deterministic_algorithms_enabled': False, 'tiling_scores': {'x': 786944}},
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     min_elem_per_thread=0
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] )
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] @triton.jit
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] def triton_poi_fused_mul_sin_0(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xnumel = 65536
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xoffset = tl.program_id(0) * XBLOCK
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xindex = xoffset + tl.arange(0, XBLOCK)[:]
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     xmask = tl.full([XBLOCK], True, tl.int1)[:]
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     x2 = xindex
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     x0 = (xindex % 128)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp0 = tl.load(in_ptr0 + (x2), None)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp1 = tl.load(in_ptr1 + (x0), None, eviction_policy='evict_last')
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp2 = tmp0 * tmp1
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tmp3 = tl_math.sin(tmp2)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     tl.store(out_ptr0 + (x2), tmp3, None)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] ''', device_str='cuda')
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] async_compile.wait(globals())
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] del async_compile
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] class Runner:
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def __init__(self, partitions):
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         self.partitions = partitions
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def recursively_apply_fns(self, fns):
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         new_callables = []
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         for fn, c in zip(fns, self.partitions):
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             new_callables.append(fn(c))
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         self.partitions = new_callables
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     def call(self, args):
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         arg0_1, arg1_1 = args
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         args.clear()
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg0_1, (2, 256, 128), (32768, 128, 1))
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         assert_size_stride(arg1_1, (128, ), (1, ))
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         with torch.cuda._DeviceGuard(0):
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             torch.cuda.set_device(0)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             buf0 = empty_strided_cuda((2, 256, 128), (32768, 128, 1), torch.float32)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             # Topologically Sorted Source Nodes: [result, sin], Original ATen: [aten.mul, aten.sin]
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             stream0 = get_raw_stream(0)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             triton_poi_fused_mul_sin_0.run(arg0_1, arg1_1, buf0, 65536, stream=stream0)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg0_1
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]             del arg1_1
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]         return (buf0, )
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] runner = Runner(partitions=[])
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] call = runner.call
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] recursively_apply_fns = runner.recursively_apply_fns
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] def benchmark_compiled_module(times=10, repeat=10):
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._dynamo.testing import rand_strided
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._inductor.utils import print_performance
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg0_1 = rand_strided((2, 256, 128), (32768, 128, 1), device='cuda:0', dtype=torch.float32)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     arg1_1 = rand_strided((128, ), (1, ), device='cuda:0', dtype=torch.float32)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     fn = lambda: call([arg0_1, arg1_1])
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     return print_performance(fn, times=times, repeat=repeat)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] if __name__ == "__main__":
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     from torch._inductor.wrapper_benchmark import compiled_module_main
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code]     compiled_module_main('None', benchmark_compiled_module)
+V1119 12:28:13.870000 2059752 torch/_inductor/codecache.py:1250] [0/0] [__output_code] 
+V1119 12:28:13.871000 2059752 torch/_inductor/codecache.py:1251] [0/0] [__output_code] Output code written to: /tmp/torchinductor_tianren/re/creo7tykazwzfac7km4gdia5ri5ejzhktzveilusqlqtv6zpnowa.py
+I1119 12:28:13.871000 2059752 torch/_inductor/codecache.py:1574] [0/0] fx graph cache hit for key f6nq7g2744bndctt5f2cv2ggdv3jcmna6plqrey53xliqufdidwa
+Using device: cuda
+
+Test with ONLY ONE input (dim=256)
+  Result shape: torch.Size([2, 256, 128])
+  Match: True
+
+✅ Test completed!
+I1119 12:28:17.275000 2059752 torch/_inductor/remote_cache.py:432] Cache Metrics:
+I1119 12:28:17.275000 2059752 torch/_inductor/remote_cache.py:432]   LocalAutotuneCache: {hit: 1, miss: 0, put: 0, exception: 0}
+I1119 12:28:17.275000 2059752 torch/_inductor/remote_cache.py:432]   backend:_LocalAutotuneCacheBackend: {hit: 1, miss: 0, put: 0, exception: 0}
+I1119 12:28:17.275000 2059752 torch/_inductor/remote_cache.py:432] 

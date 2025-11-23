@@ -1,0 +1,112 @@
+
+🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬
+Testing Inductor V.fake_mode with Dynamic Symbolic Shapes
+🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬
+
+This test verifies the CRITICAL assumption:
+  ❓ Does V.fake_mode provide symbolic shapes (SymInt)?
+  ❓ Will torch.cond be preserved in our implementation?
+
+
+================================================================================
+Test 1: Verify Inductor V.fake_mode Provides Symbolic Shapes
+================================================================================
+
+1. Creating dispatch function...
+
+2. Compiling with torch.compile(dynamic=True)...
+
+3. Running with test input to trigger compilation...
+
+4. Checking correctness...
+   Result shape: torch.Size([2, 256, 128])
+   Match expected: True
+
+✓ Test 1 PASSED: Inductor compilation works with torch.cond
+================================================================================
+
+================================================================================
+Test 2: Direct V.fake_mode Access and ir_node_to_tensor()
+================================================================================
+
+This test simulates the EXACT pattern we'll use in custom_op.py
+We'll create a custom lowering that inspects V.fake_mode
+
+
+   Registered custom lowering for inspection
+
+   Compiling function that uses custom op...
+
+   Running to trigger lowering inspection...
+
+
+   📍 Inside custom lowering function!
+   ✓ V.fake_mode exists: <class 'torch._subclasses.fake_tensor.FakeTensorMode'>
+   ✓ V.fake_mode.shape_env exists: <class 'torch.fx.experimental.symbolic_shapes.ShapeEnv'>
+
+   ✓ Found 2 tensor inputs
+   ✓ Created fake inputs using ir_node_to_tensor()
+
+   Inspecting first fake tensor:
+   - Type: <class 'torch._subclasses.fake_tensor.FakeTensor'>
+   - Shape: torch.Size([2, 256, 128])
+   - Device: cuda:0
+   - Is FakeTensor: True
+
+   🔍 CRITICAL CHECK - Dimension analysis:
+   - x_fake.shape[1] = 256
+   - Type: <class 'int'>
+   - Type name: int
+   ⚠️  DIMENSION IS CONCRETE (int)
+   - This means torch.cond will be optimized away
+
+   Attempting to trace torch.cond dispatch...
+   ✓ Successfully traced torch.cond dispatch
+   ⚠️  torch.cond was optimized away
+
+   Graph structure (first 20 lines):
+      graph():
+          %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
+          %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+          %view : [num_users=1] = call_function[target=torch.ops.aten.view.default](args = (%arg1_1, [1, 1, -1]), kwargs = {})
+          %mul : [num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg0_1, %view), kwargs = {})
+          %sin : [num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%mul,), kwargs = {})
+          return sin
+
+================================================================================
+Inspection Results Summary:
+================================================================================
+✅ v_fake_mode_exists: True
+✅ fake_inputs_created: True
+❌ dim_is_symbolic: False
+✅ dim_type: <class 'int'>
+✅ dim_value: 256
+✅ torch_cond_traced: True
+❌ graph_has_cond: False
+
+================================================================================
+⚠️  Test 2: Some checks failed
+
+❌ CRITICAL: Dimensions are NOT symbolic in V.fake_mode
+   This means we need to manually mark dimensions as dynamic
+
+❌ CRITICAL: torch.cond was optimized away
+   This means the dispatch won't work as expected
+================================================================================
+
+================================================================================
+FINAL RESULTS
+================================================================================
+Test 1 (Inductor compile): ✅ PASSED
+Test 2 (V.fake_mode inspection): ❌ FAILED
+
+⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ 
+SOME TESTS FAILED
+⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ ⚠️ 
+
+❌ Need to investigate further or adjust approach
+
+📋 Recommendations:
+   1. Check if we need to manually mark dimensions as dynamic
+   2. Investigate alternative approaches
+   3. Consider keeping SubgraphBuffer as fallback

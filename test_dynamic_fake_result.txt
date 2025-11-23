@@ -1,0 +1,112 @@
+Traceback (most recent call last):
+  File "/data/users/tianren/pytorch/test_dynamic_fake_cond.py", line 97, in test_dynamic_fake_with_cond
+    gm = make_fx(
+         ^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/fx/experimental/proxy_tensor.py", line 2699, in wrapped
+    return make_fx_tracer.trace(f, *args)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/fx/experimental/proxy_tensor.py", line 2623, in trace
+    with self._init_modes_from_inputs(f, args):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/tianren/.conda/envs/pytorch-3.12/lib/python3.12/contextlib.py", line 137, in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/fx/experimental/proxy_tensor.py", line 2434, in _init_modes_from_inputs
+    assert fake_tensor_mode.shape_env is not None, (
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: shape_env should be set if tracing with 'symbolic'
+
+🧪 Testing dynamic fake tensors + torch.cond + make_fx
+
+================================================================================
+Test: make_fx on torch.cond with DYNAMIC fake tensors
+================================================================================
+
+📊 Fake tensor info:
+  x.shape = torch.Size([2, 256, 128])
+  x.shape types = ['int', 'int', 'int']
+  Is dim[1] symbolic? False
+
+  FakeTensorMode settings:
+    shape_env: None
+
+🔍 Tracing torch.cond with make_fx...
+
+❌ Failed to trace: shape_env should be set if tracing with 'symbolic'
+
+================================================================================
+Test: Explicitly create dynamic fake tensors
+================================================================================
+
+📊 Creating dynamic fake tensors:
+  batch_size: s32 (type: <class 'torch.SymInt'>)
+  seq_len: s21 (type: <class 'torch.SymInt'>)
+  hidden_dim: 128 (type: <class 'int'>)
+
+  x_fake.shape = torch.Size([s32, s21, 128])
+  x_fake.shape[1] type = <class 'torch.SymInt'>
+  Is symbolic? True
+
+🔍 Tracing torch.cond with SYMBOLIC fake tensors...
+
+✅ Successfully traced with symbolic shapes!
+
+📝 GraphModule code:
+================================================================================
+
+
+
+def forward(self, x_1, weight_1):
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 1)
+    le = sym_size_int <= 512
+    sym_size_int_1 = torch.ops.aten.sym_size.int(x_1, 0)
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(le, true_graph_0, false_graph_0, (x_1, weight_1, sym_size_int, sym_size_int_1, sym_size_int));  le = true_graph_0 = false_graph_0 = x_1 = weight_1 = sym_size_int = sym_size_int_1 = None
+    getitem = cond[0];  cond = None
+    return getitem
+    
+================================================================================
+
+🔍 Graph analysis:
+  Total nodes: 10
+  Cond operations: 1
+    → cond
+  Size operations: 2
+    → sym_size_int
+    → sym_size_int_1
+
+================================================================================
+Test: Simple size comparison with symbolic shapes
+================================================================================
+x_fake.shape[1] = s21
+Type: <class 'torch.SymInt'>
+Is SymInt? True
+
+Tracing simple_cond...
+  pred = s21 <= 512, type = <class 'torch.SymBool'>
+
+✅ Traced successfully!
+
+GraphModule:
+
+
+
+def forward(self, x_1):
+    sym_size_int = torch.ops.aten.sym_size.int(x_1, 1)
+    le = sym_size_int <= 512
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    cond = torch.ops.higher_order.cond(le, true_graph_0, false_graph_0, (x_1, sym_size_int));  le = true_graph_0 = false_graph_0 = x_1 = sym_size_int = None
+    getitem = cond[0];  cond = None
+    return getitem
+    
+
+================================================================================
+📋 Summary:
+  - FakeTensorMode needs ShapeEnv to create symbolic shapes
+  - Need to explicitly mark dims as DYNAMIC
+  - make_fx can preserve torch.cond if predicate is SymBool
+  - In inductor: V.fake_mode should already provide symbolic FakeTensors
+================================================================================
+

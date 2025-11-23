@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/data/users/tianren/pytorch/test_single_input.py", line 4, in <module>
+    import torch
+  File "/data/users/tianren/pytorch/torch/__init__.py", line 36, in <module>
+    from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
+ModuleNotFoundError: No module named 'typing_extensions'

@@ -1,0 +1,36 @@
+================================================================================
+CAPTURED FX GRAPH:
+================================================================================
+graph():
+    %s27 : torch.SymInt [num_users=2] = placeholder[target=s27]
+    %l_x_ : torch.Tensor [num_users=1] = placeholder[target=L_x_]
+    %l_weight_ : torch.Tensor [num_users=1] = placeholder[target=L_weight_]
+    %le : [num_users=1] = call_function[target=operator.le](args = (%s27, 512), kwargs = {})
+    %cond_true_1 : [num_users=1] = get_attr[target=cond_true_1]
+    %cond_false_1 : [num_users=1] = get_attr[target=cond_false_1]
+    %cond : [num_users=1] = call_function[target=torch.ops.higher_order.cond](args = (%le, %cond_true_1, %cond_false_1, (%l_weight_, %l_x_, %s27, %s27)), kwargs = {})
+    %getitem_3 : [num_users=1] = call_function[target=operator.getitem](args = (%cond, 0), kwargs = {})
+    return (getitem_3,)
+
+================================================================================
+GRAPH MODULE CODE:
+================================================================================
+
+
+
+def forward(self, s27 : torch.SymInt, L_x_ : torch.Tensor, L_weight_ : torch.Tensor):
+    l_x_ = L_x_
+    l_weight_ = L_weight_
+    le = s27 <= 512
+    cond_true_1 = self.cond_true_1
+    cond_false_1 = self.cond_false_1
+    cond = torch.ops.higher_order.cond(le, cond_true_1, cond_false_1, (l_weight_, l_x_, s27, s27));  le = cond_true_1 = cond_false_1 = l_weight_ = l_x_ = s27 = None
+    getitem_3 = cond[0];  cond = None
+    return (getitem_3,)
+    
+
+================================================================================
+RESULT:
+================================================================================
+Shape: torch.Size([2, 256, 128])
+Device: cuda:0

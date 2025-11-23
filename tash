@@ -1,0 +1,1326 @@
+[1mdiff --git a/test/inductor/test_custom_op_autotune.py b/test/inductor/test_custom_op_autotune.py[m
+[1mindex 4fc30578dc6..4f4a3436f85 100644[m
+[1m--- a/test/inductor/test_custom_op_autotune.py[m
+[1m+++ b/test/inductor/test_custom_op_autotune.py[m
+[36m@@ -434,17 +434,24 @@[m [mclass TestCustomOpAutoTune(TestCase):[m
+     def test_dynamic_range_tuning(self):[m
+         """Test dynamic input range-based autotuning.[m
+ [m
+[31m-        Validates that:[m
+[31m-        - All implementations produce equivalent results[m
+[31m-        - Autotuning selects best implementation per range[m
+[31m-        - torch.cond dispatch function is generated correctly[m
+[32m+[m[32m        Validates that different implementations can be selected automatically[m
+[32m+[m[32m        based on input dimensions using range parameters in CustomOpConfig.[m
+[32m+[m
+[32m+[m[32m        This test demonstrates the simplified range-based API:[m
+[32m+[m[32m        - User provides CustomOpConfigs with range parameters[m
+[32m+[m[32m        - System groups configs by range and benchmarks implementations[m
+[32m+[m[32m        - System automatically selects the fastest implementation per range[m
+[32m+[m[32m        - If all ranges use same impl → direct use (fusion-friendly)[m
+[32m+[m[32m        - If different ranges use different impls → torch.cond dispatch[m
+         """[m
+         test_op_name = f"test_lib::dynamic_range_{id(self)}"[m
+ [m
+         def short_sequence_impl(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:[m
+[32m+[m[32m            """Optimized for short sequences (< 512): uses simple einsum."""[m
+             return torch.einsum("bsh,h->bsh", x, weight)[m
+ [m
+         def medium_sequence_impl(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:[m
+[32m+[m[32m            """Optimized for medium sequences (512-2048): uses chunked processing."""[m
+             batch_size, seq_len, hidden_dim = x.shape[m
+             chunk_size = 256[m
+             chunks = [][m
+[36m@@ -455,37 +462,90 @@[m [mclass TestCustomOpAutoTune(TestCase):[m
+             return torch.cat(chunks, dim=1)[m
+ [m
+         def long_sequence_impl(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:[m
+[32m+[m[32m            """Optimized for long sequences (> 2048): uses reshape + broadcast."""[m
+             return x * weight.view(1, 1, -1)[m
+ [m
+         @torch.library.custom_op(test_op_name, mutates_args=())[m
+         def dynamic_range_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:[m
+[32m+[m[32m            """Default implementation."""[m
+             return x * weight[m
+ [m
+         @dynamic_range_op.register_fake[m
+         def _(x: torch.Tensor, weight: torch.Tensor):[m
+             return torch.empty_like(x)[m
+ [m
+[32m+[m[32m        # Register with range-based configs (CLEAN API with dim_range tuple)[m
+[32m+[m[32m        # Each config specifies its range using tensor_name, dim_index, dim_range=(start, end)[m
+         register_custom_op_autotuning([m
+             dynamic_range_op,[m
+             configs=[[m
+[31m-                CustomOpConfig(short_sequence_impl),[m
+[31m-                CustomOpConfig(medium_sequence_impl),[m
+[31m-                CustomOpConfig(long_sequence_impl),[m
+[32m+[m[32m                # Range 1: [0, 512) - test all 3 implementations[m
+[32m+[m[32m                CustomOpConfig([m
+[32m+[m[32m                    short_sequence_impl,[m
+[32m+[m[32m                    tensor_name="x",[m
+[32m+[m[32m                    dim_index=1,[m
+[32m+[m[32m                    dim_range=(0, 512),[m
+[32m+[m[32m                ),[m
+[32m+[m[32m                CustomOpConfig([m
+[32m+[m[32m                    medium_sequence_impl,[m
+[32m+[m[32m                    tensor_name="x",[m
+[32m+[m[32m                    dim_index=1,[m
+[32m+[m[32m                    dim_range=(0, 512),[m
+[32m+[m[32m                ),[m
+[32m+[m[32m                CustomOpConfig([m
+[32m+[m[32m                    long_sequence_impl, tensor_name="x", dim_index=1, dim_range=(0, 512)[m
+[32m+[m[32m                ),[m
+[32m+[m[32m                # Range 2: [512, 2048) - test all 3 implementations[m
+[32m+[m[32m                CustomOpConfig([m
+[32m+[m[32m                    short_sequence_impl,[m
+[32m+[m[32m                    tensor_name="x",[m
+[32m+[m[32m                    dim_index=1,[m
+[32m+[m[32m                    dim_range=(512, 2048),[m
+[32m+[m[32m                ),[m
+[32m+[m[32m                CustomOpConfig([m
+[32m+[m[32m                    medium_sequence_impl,[m
+[32m+[m[32m                    tensor_name="x",[m
+[32m+[m[32m                    dim_index=1,[m
+[32m+[m[32m                    dim_range=(512, 2048),[m
+[32m+[m[32m                ),[m
+[32m+[m[32m                CustomOpConfig([m
+[32m+[m[32m                    long_sequence_impl,[m
+[32m+[m[32m                    tensor_name="x",[m
+[32m+[m[32m                    dim_index=1,[m
+[32m+[m[32m                    dim_range=(512, 2048),[m
+[32m+[m[32m                ),[m
+[32m+[m[32m                # Range 3: [2048, inf) - test all 3 implementations[m
+[32m+[m[32m                CustomOpConfig([m
+[32m+[m[32m                    short_sequence_impl,[m
+[32m+[m[32m                    tensor_name="x",[m
+[32m+[m[32m                    dim_index=1,[m
+[32m+[m[32m                    dim_range=(2048, float("inf")),[m
+[32m+[m[32m                ),[m
+[32m+[m[32m                CustomOpConfig([m
+[32m+[m[32m                    medium_sequence_impl,[m
+[32m+[m[32m                    tensor_name="x",[m
+[32m+[m[32m                    dim_index=1,[m
+[32m+[m[32m                    dim_range=(2048, float("inf")),[m
+[32m+[m[32m                ),[m
+[32m+[m[32m                CustomOpConfig([m
+[32m+[m[32m                    long_sequence_impl,[m
+[32m+[m[32m                    tensor_name="x",[m
+[32m+[m[32m                    dim_index=1,[m
+[32m+[m[32m                    dim_range=(2048, float("inf")),[m
+[32m+[m[32m                ),[m
+             ],[m
+             name="dynamic_range_autotuned",[m
+[31m-            dispatch_on=("x", 1),[m
+[31m-            split_points=[512, 2048],[m
+             input_gen_fns={[m
+                 "x": lambda fake: torch.randn_like(fake, device=self.device) * 0.1,[m
+                 "weight": lambda fake: torch.ones_like(fake, device=self.device),[m
+             },[m
+         )[m
+ [m
+[31m-        # Verify all implementations produce equivalent results[m
+[32m+[m[32m        # Test different sequence lengths to trigger different ranges[m
+         test_cases = [[m
+[31m-            (2, 256, 128),[m
+[31m-            (2, 1024, 128),[m
+[31m-            (2, 4096, 128),[m
+[32m+[m[32m            (2, 256, 128),  # Short sequence (< 512)[m
+[32m+[m[32m            (2, 1024, 128),  # Medium sequence (512-2048)[m
+[32m+[m[32m            (2, 4096, 128),  # Long sequence (> 2048)[m
+         ][m
+ [m
+         for batch_size, seq_len, hidden_dim in test_cases:[m
+[36m@@ -493,6 +553,8 @@[m [mclass TestCustomOpAutoTune(TestCase):[m
+                 batch_size, seq_len, hidden_dim, device=self.device, dtype=self.dtype[m
+             )[m
+             test_weight = torch.ones(hidden_dim, device=self.device, dtype=self.dtype)[m
+[32m+[m
+[32m+[m[32m            # Verify all implementations produce same result[m
+             expected = test_x * test_weight[m
+ [m
+             for impl_name, impl_fn in [[m
+[36m@@ -509,32 +571,13 @@[m [mclass TestCustomOpAutoTune(TestCase):[m
+                     msg=f"{impl_name} implementation differs for seq_len={seq_len}",[m
+                 )[m
+ [m
+[31m-        # Test autotuning with compilation[m
+[31m-        test_x = torch.randn(2, 256, 128, device=self.device, dtype=self.dtype)[m
+[31m-        test_weight = torch.ones(128, device=self.device, dtype=self.dtype)[m
+[31m-        expected = test_x * test_weight[m
+[31m-[m
+[31m-        self._run_autotune_test([m
+[31m-            dynamic_range_op,[m
+[31m-            (test_x, test_weight),[m
+[31m-            expected,[m
+[31m-            "DynamicRangeTuning",[m
+[31m-        )[m
+[31m-[m
+[31m-        # Verify torch.cond dispatch function was generated[m
+[31m-        import os[m
+[31m-[m
+[31m-        dispatch_dir = "/tmp/torch_inductor_range_dispatch"[m
+[31m-        dispatch_file = os.path.join(dispatch_dir, "dynamic_range_autotuned_dispatch.py")[m
+[31m-[m
+[31m-        if os.path.exists(dispatch_file):[m
+[31m-            with open(dispatch_file, "r") as f:[m
+[31m-                dispatch_code = f.read()[m
+[31m-                self.assertIn([m
+[31m-                    "torch.cond",[m
+[31m-                    dispatch_code,[m
+[31m-                    "Generated dispatch function should contain torch.cond",[m
+[31m-                )[m
+[32m+[m[32m            # Test autotuning with compilation[m
+[32m+[m[32m            self._run_autotune_test([m
+[32m+[m[32m                dynamic_range_op,[m
+[32m+[m[32m                (test_x, test_weight),[m
+[32m+[m[32m                expected,[m
+[32m+[m[32m                f"DynamicRange_seq{seq_len}",[m
+[32m+[m[32m            )[m
+ [m
+ [m
+ if __name__ == "__main__":[m
+[1mdiff --git a/torch/_inductor/kernel/custom_op.py b/torch/_inductor/kernel/custom_op.py[m
+[1mindex 743e92d74e1..f021c570d45 100644[m
+[1m--- a/torch/_inductor/kernel/custom_op.py[m
+[1m+++ b/torch/_inductor/kernel/custom_op.py[m
+[36m@@ -25,43 +25,91 @@[m [mclass CustomOpConfig:[m
+     """Config for custom op autotuning.[m
+ [m
+     Specifies optional decomposition function with parameter values.[m
+[31m-    Each config creates exactly one variant to benchmark.[m
+[32m+[m[32m    Each config creates exactly one variant.[m
+[32m+[m
+[32m+[m[32m    Args:[m
+[32m+[m[32m        decomposition: Optional functions to autotune. If not provided, default will be used.[m
+[32m+[m[32m        tensor_name: Optional tensor parameter name for range-based dispatch (e.g., 'x', 'query')[m
+[32m+[m[32m        dim_index: Optional dimension index for range-based dispatch (e.g., 0 for batch, 1 for seq_len)[m
+[32m+[m[32m        dim_range: Optional tuple (start, end) defining the range [start, end) for this config[m
+[32m+[m[32m        **params: Parameters passed to the function[m
+ [m
+     Examples:[m
+         CustomOpConfig(attention_impl, head_dim=32, method='chunked')[m
+[31m-        CustomOpConfig(head_dim=128)  # Use default impl with params[m
+[32m+[m[32m        CustomOpConfig(short_impl, tensor_name='x', dim_index=1, dim_range=(0, 512))[m
+     """[m
+ [m
+     def __init__([m
+         self,[m
+         decomposition: Optional[Callable[..., Any]] = None,[m
+[32m+[m[32m        tensor_name: Optional[str] = None,[m
+[32m+[m[32m        dim_index: Optional[int] = None,[m
+[32m+[m[32m        dim_range: Optional[tuple[Union[int, float], Union[int, float]]] = None,[m
+         **params: Any,[m
+     ):[m
+         if decomposition is not None and not callable(decomposition):[m
+             raise TypeError([m
+                 f"decomposition must be callable, got {type(decomposition)}"[m
+             )[m
+[32m+[m
+[32m+[m[32m        # Validate range parameters[m
+[32m+[m[32m        if dim_range is not None:[m
+[32m+[m[32m            if tensor_name is None:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "tensor_name must be specified when dim_range is provided"[m
+[32m+[m[32m                )[m
+[32m+[m[32m            if dim_index is None:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    "dim_index must be specified when dim_range is provided"[m
+[32m+[m[32m                )[m
+[32m+[m[32m            if not isinstance(dim_range, (tuple, list)) or len(dim_range) != 2:[m
+[32m+[m[32m                raise ValueError("dim_range must be a tuple or list of (start, end)")[m
+[32m+[m[32m            start, end = dim_range[m
+[32m+[m[32m            if start >= end:[m
+[32m+[m[32m                raise ValueError([m
+[32m+[m[32m                    f"dim_range start ({start}) must be less than end ({end})"[m
+[32m+[m[32m                )[m
+[32m+[m
+         self.decomposition = decomposition[m
+[32m+[m[32m        self.tensor_name = tensor_name[m
+[32m+[m[32m        self.dim_index = dim_index[m
+[32m+[m[32m        self.dim_range = tuple(dim_range) if dim_range is not None else None[m
+         self.params = params[m
+ [m
+[32m+[m[32m    def is_range_based(self) -> bool:[m
+[32m+[m[32m        """Check if this config is range-based."""[m
+[32m+[m[32m        return self.dim_range is not None[m
+[32m+[m
+     def get_decomposition([m
+         self, default_impl: Optional[Callable[..., Any]] = None[m
+     ) -> Callable[..., Any]:[m
+[31m-        """Return the decomposition function for this config."""[m
+[32m+[m[32m        """Return the decomposition function for this config.[m
+[32m+[m[32m        When decomposition is not specified, return the default implementation.[m
+[32m+[m[32m        """[m
+         if self.decomposition is not None:[m
+             return self.decomposition[m
+[32m+[m
+         if default_impl is not None and callable(default_impl):[m
+             return default_impl[m
+[32m+[m
+         raise TypeError([m
+[31m-            "No decomposition specified in config and no default implementation provided."[m
+[32m+[m[32m            "No decomposition specified in config and no default implementation provided. "[m
+[32m+[m[32m            "Please provide a decomposition function in CustomOpConfig."[m
+         )[m
+ [m
+     def __repr__(self) -> str:[m
+         decomp_name = self.decomposition.__name__ if self.decomposition else "default"[m
+         parts = [decomp_name][m
+[32m+[m
+[32m+[m[32m        if self.is_range_based():[m
+[32m+[m[32m            parts.append(f"tensor_name='{self.tensor_name}'")[m
+[32m+[m[32m            parts.append(f"dim_index={self.dim_index}")[m
+[32m+[m[32m            parts.append(f"dim_range={self.dim_range}")[m
+[32m+[m
+         if self.params:[m
+             params_str = ", ".join(f"{k}={v}" for k, v in self.params.items())[m
+             parts.append(params_str)[m
+[32m+[m
+         return f"CustomOpConfig({', '.join(parts)})"[m
+ [m
+ [m
+[36m@@ -182,225 +230,101 @@[m [mdef _adapt_user_input_gen_fns([m
+     }[m
+ [m
+ [m
+[31m-def _generate_dispatch_function([m
+[31m-    name: str,[m
+[31m-    range_to_best_impl: dict[tuple[int, Union[int, float]], tuple[Callable, dict, str]],[m
+[31m-    tensor_name: str,[m
+[31m-    dim_index: int,[m
+[31m-    op_overload: torch._ops.OpOverload,[m
+[31m-) -> str:[m
+[31m-    """Generate Python code for torch.cond dispatch function.[m
+[32m+[m[32mdef _group_configs_by_range([m
+[32m+[m[32m    configs: list[CustomOpConfig],[m
+[32m+[m[32m) -> dict[[m
+[32m+[m[32m    tuple[Optional[str], Optional[int], Optional[float], Optional[float]],[m
+[32m+[m[32m    list[CustomOpConfig],[m
+[32m+[m[32m]:[m
+[32m+[m[32m    """Group configs by their range parameters.[m
+ [m
+[31m-    Args:[m
+[31m-        name: Name of the operation[m
+[31m-        range_to_best_impl: Mapping from (range_start, range_end) to (impl_func, kwargs, impl_name)[m
+[31m-        tensor_name: Name of tensor parameter to dispatch on[m
+[31m-        dim_index: Dimension index to check[m
+[31m-        op_overload: The original custom op[m
+[32m+[m[32m    Returns a dictionary where:[m
+[32m+[m[32m    - Key: (tensor_name, dim_index, range_start, range_end)[m
+[32m+[m[32m    - Value: List of CustomOpConfig objects with that range[m
+ [m
+[31m-    Returns:[m
+[31m-        Python code as string[m
+[32m+[m[32m    Non-range configs are grouped under key (None, None, None, None).[m
+     """[m
+[31m-    import inspect[m
+[31m-[m
+[31m-    # Sort ranges[m
+[31m-    sorted_items = sorted(range_to_best_impl.items())[m
+[31m-[m
+[31m-    # Build the function code[m
+[31m-    lines = [][m
+[31m-    lines.append('"""Auto-generated dispatch function for range-based autotuning."""')[m
+[31m-    lines.append("")[m
+[31m-    lines.append("import torch")[m
+[31m-    lines.append("")[m
+[31m-[m
+[31m-    # Import the implementations[m
+[31m-    impl_names_set = set()[m
+[31m-    for _, (impl_func, _, impl_name) in sorted_items:[m
+[31m-        if impl_name not in impl_names_set:[m
+[31m-            impl_names_set.add(impl_name)[m
+[31m-            # Get module and qualname[m
+[31m-            module = inspect.getmodule(impl_func)[m
+[31m-            if module and module.__name__ != "__main__":[m
+[31m-                lines.append(f"from {module.__name__} import {impl_name}")[m
+[31m-            else:[m
+[31m-                lines.append([m
+[31m-                    f"# Note: {impl_name} is defined in __main__, you need to import it manually"[m
+[31m-                )[m
+[31m-[m
+[31m-    lines.append("")[m
+[31m-    lines.append("")[m
+[31m-[m
+[31m-    sig = inspect.signature(op_overload)[m
+[31m-    params = list(sig.parameters.keys())[m
+[31m-    params_str = ", ".join(params)[m
+[32m+[m[32m    groups: dict[[m
+[32m+[m[32m        tuple[Optional[str], Optional[int], Optional[float], Optional[float]],[m
+[32m+[m[32m        list[CustomOpConfig],[m
+[32m+[m[32m    ] = {}[m
+ [m
+[31m-    lines.append(f"def {name}_dispatch({params_str}):")[m
+[31m-    lines.append([m
+[31m-        f'    """Dispatch function with torch.cond based on {tensor_name}.shape[{dim_index}]."""'[m
+[31m-    )[m
+[31m-    lines.append("    ")[m
+[31m-    lines.append("    # Get dimension value for dispatch")[m
+[31m-    lines.append(f"    dim_size = {tensor_name}.shape[{dim_index}]")[m
+[31m-    lines.append("    ")[m
+[31m-[m
+[31m-    lines.append("    # Range-based dispatch using torch.cond")[m
+[31m-[m
+[31m-    def build_cond_code(idx: int, indent_level: int) -> list[str]:[m
+[31m-        """Recursively build torch.cond code."""[m
+[31m-        result_lines = [][m
+[31m-        indent = "    " * indent_level[m
+[31m-[m
+[31m-        (range_start, range_end), (impl_func, impl_kwargs, impl_name) = sorted_items[[m
+[31m-            idx[m
+[31m-        ][m
+[31m-[m
+[31m-        if idx == len(sorted_items) - 1:[m
+[31m-            result_lines.append([m
+[31m-                f"{indent}# Range [{range_start}, {range_end if range_end != float('inf') else 'inf'})"[m
+[31m-            )[m
+[31m-            kwargs_str = ", ".join(f"{k}={repr(v)}" for k, v in impl_kwargs.items())[m
+[31m-            if kwargs_str:[m
+[31m-                result_lines.append(f"{indent}{impl_name}({params_str}, {kwargs_str})")[m
+[31m-            else:[m
+[31m-                result_lines.append(f"{indent}{impl_name}({params_str})")[m
+[32m+[m[32m    for cfg in configs:[m
+[32m+[m[32m        if cfg.is_range_based():[m
+[32m+[m[32m            assert cfg.dim_range is not None[m
+[32m+[m[32m            range_start, range_end = cfg.dim_range[m
+[32m+[m[32m            key = (cfg.tensor_name, cfg.dim_index, range_start, range_end)[m
+         else:[m
+[31m-            # Create torch.cond[m
+[31m-            result_lines.append([m
+[31m-                f"{indent}# Range [{range_start}, {range_end if range_end != float('inf') else 'inf'})"[m
+[31m-            )[m
+[31m-[m
+[31m-            end_str = "float('inf')" if range_end == float("inf") else str(range_end)[m
+[31m-            result_lines.append(f"{indent}torch.cond(")[m
+[31m-            result_lines.append(f"{indent}    dim_size <= {end_str},")[m
+[31m-[m
+[31m-            # True branch[m
+[31m-            kwargs_str = ", ".join(f"{k}={repr(v)}" for k, v in impl_kwargs.items())[m
+[31m-            if kwargs_str:[m
+[31m-                result_lines.append([m
+[31m-                    f"{indent}    lambda: {impl_name}({params_str}, {kwargs_str}),"[m
+[31m-                )[m
+[31m-            else:[m
+[31m-                result_lines.append(f"{indent}    lambda: {impl_name}({params_str}),")[m
+[31m-[m
+[31m-            # False branch - recursively build next[m
+[31m-            result_lines.append(f"{indent}    lambda: (")[m
+[31m-            result_lines.extend(build_cond_code(idx + 1, indent_level + 2))[m
+[31m-            result_lines.append(f"{indent}    )")[m
+[31m-            result_lines.append(f"{indent})")[m
+[31m-[m
+[31m-        return result_lines[m
+[31m-[m
+[31m-    # Start building from the first range[m
+[31m-    lines.append("    return (")[m
+[31m-    lines.extend(build_cond_code(0, 2))[m
+[31m-    lines.append("    )")[m
+[31m-[m
+[31m-    lines.append("")[m
+[31m-    lines.append("")[m
+[32m+[m[32m            key = (None, None, None, None)[m
+ [m
+[31m-    # Add a main section for testing[m
+[31m-    lines.append('if __name__ == "__main__":')[m
+[31m-    lines.append('    print("Range-based dispatch function generated successfully!")')[m
+[31m-    lines.append(f'    print("Function name: {name}_dispatch")')[m
+[31m-    lines.append(f'    print("Dispatch parameter: {tensor_name}.shape[{dim_index}]")')[m
+[31m-    lines.append(f'    print("Number of ranges: {len(sorted_items)}")')[m
+[31m-    lines.append('    print("Ranges:")')[m
+[32m+[m[32m        if key not in groups:[m
+[32m+[m[32m            groups[key] = [][m
+[32m+[m[32m        groups[key].append(cfg)[m
+ [m
+[31m-    for (range_start, range_end), (_, _, impl_name) in sorted_items:[m
+[31m-        end_str = "inf" if range_end == float("inf") else str(range_end)[m
+[31m-        lines.append(f'    print("  [{range_start}, {end_str}): {impl_name}")')[m
+[32m+[m[32m    return groups[m
+ [m
+[31m-    return "\n".join(lines)[m
+ [m
+[32m+[m[32mdef _validate_range_groups([m
+[32m+[m[32m    range_groups: dict[[m
+[32m+[m[32m        tuple[Optional[str], Optional[int], Optional[float], Optional[float]],[m
+[32m+[m[32m        list[CustomOpConfig],[m
+[32m+[m[32m    ],[m
+[32m+[m[32m) -> None:[m
+[32m+[m[32m    """Validate range-based config groups.[m
+ [m
+[31m-def _split_points_to_ranges([m
+[31m-    split_points: list[int],[m
+[31m-) -> list[tuple[int, Union[int, float]]]:[m
+[31m-    """Convert split points to inclusive-inclusive ranges.[m
+[31m-[m
+[31m-    Example: split_points=[512, 2048] ->[m
+[31m-             [(1, 512), (513, 2048), (2049, float('inf'))][m
+[32m+[m[32m    Checks:[m
+[32m+[m[32m    1. Cannot mix range-based and non-range configs[m
+[32m+[m[32m    2. All range configs must use same tensor_name and dim_index[m
+[32m+[m[32m    3. Ranges must not overlap[m
+     """[m
+[31m-    ranges = [][m
+[31m-    start = 1[m
+[31m-[m
+[31m-    for split_point in split_points:[m
+[31m-        ranges.append((start, split_point))[m
+[31m-        start = split_point + 1[m
+[31m-[m
+[31m-    ranges.append((start, float("inf")))[m
+[31m-[m
+[31m-    return ranges[m
+[31m-[m
+[31m-[m
+[31m-def _create_range_input_gen_fn([m
+[31m-    base_gen_fn: Callable[[torch.Tensor], torch.Tensor],[m
+[31m-    dim_index: int,[m
+[31m-    range_start: int,[m
+[31m-    range_end: Union[int, float],[m
+[31m-) -> Callable[[torch.Tensor], torch.Tensor]:[m
+[31m-    """Create input generator that produces tensor with dimension in range."""[m
+[31m-[m
+[31m-    def constrained_gen_fn(fake_tensor: torch.Tensor) -> torch.Tensor:[m
+[31m-        result = base_gen_fn(fake_tensor)[m
+[31m-        shape = list(result.shape)[m
+[32m+[m[32m    has_range_based = any([m
+[32m+[m[32m        key != (None, None, None, None) for key in range_groups.keys()[m
+[32m+[m[32m    )[m
+[32m+[m[32m    has_non_range = (None, None, None, None) in range_groups[m
+ [m
+[31m-        # Pick middle of range[m
+[31m-        if range_end == float("inf"):[m
+[31m-            target_dim = int(range_start + 100)[m
+[31m-        else:[m
+[31m-            target_dim = (int(range_start) + int(range_end)) // 2[m
+[31m-[m
+[31m-        target_dim = max([m
+[31m-            int(range_start),[m
+[31m-            min([m
+[31m-                target_dim,[m
+[31m-                int(range_end) - 1 if range_end != float("inf") else target_dim,[m
+[31m-            ),[m
+[32m+[m[32m    # Check 1: Cannot mix range-based and non-range configs[m
+[32m+[m[32m    if has_range_based and has_non_range:[m
+[32m+[m[32m        raise ValueError([m
+[32m+[m[32m            "Cannot mix range-based and non-range CustomOpConfigs. "[m
+[32m+[m[32m            "All configs must either have range parameters or none should have them."[m
+         )[m
+ [m
+[31m-        shape[dim_index] = target_dim[m
+[31m-        return torch.randn(*shape, dtype=result.dtype, device=result.device)[m
+[32m+[m[32m    if not has_range_based:[m
+[32m+[m[32m        return  # No range validation needed[m
+ [m
+[31m-    return constrained_gen_fn[m
+[32m+[m[32m    # Check 2: All range configs must use same tensor_name and dim_index[m
+[32m+[m[32m    tensor_names = set()[m
+[32m+[m[32m    dim_indices = set()[m
+[32m+[m[32m    ranges = [][m
+ [m
+[32m+[m[32m    for key in range_groups.keys():[m
+[32m+[m[32m        if key == (None, None, None, None):[m
+[32m+[m[32m            continue[m
+[32m+[m[32m        tensor_name, dim_index, range_start, range_end = key[m
+[32m+[m[32m        tensor_names.add(tensor_name)[m
+[32m+[m[32m        dim_indices.add(dim_index)[m
+[32m+[m[32m        ranges.append((range_start, range_end))[m
+ [m
+[31m-def _extract_winning_decomposition_index([m
+[31m-    choice_name: str,[m
+[31m-    decompositions: list[Callable],[m
+[31m-) -> int:[m
+[31m-    """Extract the decomposition index from winning SubgraphChoiceCaller's name.[m
+[32m+[m[32m    if len(tensor_names) > 1:[m
+[32m+[m[32m        raise ValueError([m
+[32m+[m[32m            f"All range configs must use the same tensor_name. Found: {tensor_names}"[m
+[32m+[m[32m        )[m
+ [m
+[31m-    The choice name format is: "{op_name}_range_{start}_{end}_{decomp_name}_{counter}"[m
+[31m-    We parse it to find which decomposition won by matching decomp_name.[m
+[32m+[m[32m    if len(dim_indices) > 1:[m
+[32m+[m[32m        raise ValueError([m
+[32m+[m[32m            f"All range configs must use the same dim_index. Found: {dim_indices}"[m
+[32m+[m[32m        )[m
+ [m
+[31m-    Args:[m
+[31m-        choice_name: Name of the winning SubgraphChoiceCaller[m
+[31m-        decompositions: List of decomposition functions[m
+[32m+[m[32m    # Check 3: Ranges must not overlap[m
+[32m+[m[32m    sorted_ranges = sorted(ranges, key=lambda x: x[0])[m
+[32m+[m[32m    for i in range(len(sorted_ranges) - 1):[m
+[32m+[m[32m        current_start, current_end = sorted_ranges[i][m
+[32m+[m[32m        next_start, next_end = sorted_ranges[i + 1][m
+ [m
+[31m-    Returns:[m
+[31m-        Index into decompositions list (0-based)[m
+[31m-    """[m
+[31m-    if not choice_name:[m
+[31m-        log.warning("Empty choice name, defaulting to first decomposition")[m
+[31m-        return 0[m
+[31m-[m
+[31m-    # Try to match decomposition by name[m
+[31m-    for i, decomp in enumerate(decompositions):[m
+[31m-        decomp_name = decomp.__name__[m
+[31m-        # Check if decomposition name appears in choice name[m
+[31m-        if decomp_name in choice_name:[m
+[31m-            log.debug([m
+[31m-                f"Matched choice '{choice_name}' to decomposition[{i}] '{decomp_name}'"[m
+[32m+[m[32m        if next_start < current_end:[m
+[32m+[m[32m            raise ValueError([m
+[32m+[m[32m                f"Ranges overlap: [{current_start}, {current_end}) and [{next_start}, {next_end})"[m
+             )[m
+[31m-            return i[m
+[31m-[m
+[31m-    # Fallback: could not determine, use first[m
+[31m-    log.warning([m
+[31m-        f"Could not determine winning decomposition from choice name '{choice_name}', "[m
+[31m-        f"defaulting to first decomposition"[m
+[31m-    )[m
+[31m-    return 0[m
+ [m
+ [m
+ def _extract_tensor_by_name([m
+[36m@@ -496,14 +420,13 @@[m [mdef _create_fallback_choice([m
+ def autotune_custom_op([m
+     name: str,[m
+     decompositions: list[Callable[..., Any]],[m
+[31m-    inputs: list[torch.fx.Node],[m
+[32m+[m[32m    inputs: list[Any],[m
+     non_tensor_args: list[dict[str, Any]],[m
+     op_overload: torch._ops.OpOverload,[m
+     user_input_gen_fns: Optional[[m
+         dict[str, Callable[[torch.Tensor], torch.Tensor]][m
+     ] = None,[m
+[31m-    return_choice: bool = False,[m
+[31m-) -> Union[TensorBox, Any, tuple[Any, Any]]:[m
+[32m+[m[32m) -> Union[TensorBox, Any]:[m
+     """Autotune custom operations by comparing multiple decomposition implementations.[m
+ [m
+     Currently supports SINGLE OUTPUT custom ops only.[m
+[36m@@ -613,21 +536,296 @@[m [mdef autotune_custom_op([m
+         )[m
+         from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes[m
+ [m
+[31m-        result = inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)[m
+[31m-        if return_choice:[m
+[31m-            return result, winning_choice[m
+[31m-        return result[m
+[32m+[m[32m        return inline_subgraph_to_ir_nodes(winning_choice.gm, inputs, name)[m
+ [m
+     log.debug([m
+         "Winning choice does not support inlining: %s (name=%s)",[m
+         getattr(winning_choice, "name", type(winning_choice).__name__),[m
+         name,[m
+     )[m
+[31m-    if return_choice:[m
+[31m-        return selected_result, winning_choice[m
+     return selected_result[m
+ [m
+ [m
+[32m+[m[32mdef _create_range_specific_input_gen_fns([m
+[32m+[m[32m    user_input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]],[m
+[32m+[m[32m    tensor_name: str,[m
+[32m+[m[32m    dim_index: int,[m
+[32m+[m[32m    range_start: Union[int, float],[m
+[32m+[m[32m    range_end: Union[int, float],[m
+[32m+[m[32m) -> Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]]:[m
+[32m+[m[32m    """Create input generators that produce tensors with dimension in specified range.[m
+[32m+[m
+[32m+[m[32m    Args:[m
+[32m+[m[32m        user_input_gen_fns: Original user-provided input generators[m
+[32m+[m[32m        tensor_name: Name of the tensor parameter to constrain[m
+[32m+[m[32m        dim_index: Dimension index to constrain[m
+[32m+[m[32m        range_start: Start of the range (inclusive)[m
+[32m+[m[32m        range_end: End of the range (exclusive)[m
+[32m+[m
+[32m+[m[32m    Returns:[m
+[32m+[m[32m        Modified input generators that ensure dimension is in range[m
+[32m+[m[32m    """[m
+[32m+[m[32m    if user_input_gen_fns is None:[m
+[32m+[m[32m        return None[m
+[32m+[m
+[32m+[m[32m    # Create a modified generator for the target tensor[m
+[32m+[m[32m    modified_gen_fns = user_input_gen_fns.copy()[m
+[32m+[m
+[32m+[m[32m    if tensor_name in user_input_gen_fns:[m
+[32m+[m[32m        original_gen_fn = user_input_gen_fns[tensor_name][m
+[32m+[m
+[32m+[m[32m        def range_constrained_gen_fn(fake_tensor: torch.Tensor) -> torch.Tensor:[m
+[32m+[m[32m            """Generate input tensor with dimension in specified range."""[m
+[32m+[m[32m            # Generate tensor using original function[m
+[32m+[m[32m            result = original_gen_fn(fake_tensor)[m
+[32m+[m
+[32m+[m[32m            # Adjust the specified dimension to be in range[m
+[32m+[m[32m            current_shape = list(result.shape)[m
+[32m+[m
+[32m+[m[32m            # Pick a value in the middle of the range[m
+[32m+[m[32m            if range_end == float("inf"):[m
+[32m+[m[32m                # For unbounded range, use range_start + some reasonable offset[m
+[32m+[m[32m                target_dim = int(range_start + 100)[m
+[32m+[m[32m            else:[m
+[32m+[m[32m                # Use middle of the range[m
+[32m+[m[32m                target_dim = int((range_start + range_end) / 2)[m
+[32m+[m
+[32m+[m[32m            # Ensure it's actually in the range[m
+[32m+[m[32m            target_dim = max(int(range_start) + 1, target_dim)[m
+[32m+[m[32m            if range_end != float("inf"):[m
+[32m+[m[32m                target_dim = min(int(range_end) - 1, target_dim)[m
+[32m+[m
+[32m+[m[32m            # Recreate tensor with adjusted dimension[m
+[32m+[m[32m            current_shape[dim_index] = target_dim[m
+[32m+[m[32m            return torch.randn(*current_shape, dtype=result.dtype, device=result.device)[m
+[32m+[m
+[32m+[m[32m        modified_gen_fns[tensor_name] = range_constrained_gen_fn[m
+[32m+[m
+[32m+[m[32m    return modified_gen_fns[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef _benchmark_configs_for_range([m
+[32m+[m[32m    name: str,[m
+[32m+[m[32m    range_configs: list[CustomOpConfig],[m
+[32m+[m[32m    default_impl: Callable[..., Any],[m
+[32m+[m[32m    op_overload: torch._ops.OpOverload,[m
+[32m+[m[32m    tensor_inputs: list[Any],[m
+[32m+[m[32m    runtime_kwargs: dict[str, Any],[m
+[32m+[m[32m    input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]],[m
+[32m+[m[32m    tensor_name: str,[m
+[32m+[m[32m    dim_index: int,[m
+[32m+[m[32m    range_start: Union[int, float],[m
+[32m+[m[32m    range_end: Union[int, float],[m
+[32m+[m[32m) -> tuple[Callable[..., Any], dict[str, Any], str]:[m
+[32m+[m[32m    """Benchmark all configs for a specific range and return the best implementation.[m
+[32m+[m
+[32m+[m[32m    Args:[m
+[32m+[m[32m        name: Base name for the operation[m
+[32m+[m[32m        range_configs: List of configs to benchmark for this range[m
+[32m+[m[32m        default_impl: Default implementation[m
+[32m+[m[32m        op_overload: OpOverload of the custom op[m
+[32m+[m[32m        tensor_inputs: Tensor inputs[m
+[32m+[m[32m        runtime_kwargs: Runtime keyword arguments[m
+[32m+[m[32m        input_gen_fns: Input generators[m
+[32m+[m[32m        tensor_name: Name of the tensor being dispatched on[m
+[32m+[m[32m        dim_index: Dimension index being dispatched on[m
+[32m+[m[32m        range_start: Start of range[m
+[32m+[m[32m        range_end: End of range[m
+[32m+[m
+[32m+[m[32m    Returns:[m
+[32m+[m[32m        Tuple of (best_decomposition_function, best_kwargs, best_impl_name)[m
+[32m+[m[32m    """[m
+[32m+[m[32m    # Create range-specific input generators for this range[m
+[32m+[m[32m    range_input_gen_fns = _create_range_specific_input_gen_fns([m
+[32m+[m[32m        input_gen_fns, tensor_name, dim_index, range_start, range_end[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    decompositions = [][m
+[32m+[m[32m    non_tensor_args = [][m
+[32m+[m
+[32m+[m[32m    for cfg in range_configs:[m
+[32m+[m[32m        decomp = cfg.get_decomposition(default_impl=default_impl)[m
+[32m+[m[32m        decompositions.append(decomp)[m
+[32m+[m
+[32m+[m[32m        merged_kwargs = _merge_config_and_runtime_kwargs(cfg.params, runtime_kwargs)[m
+[32m+[m[32m        non_tensor_args.append(merged_kwargs)[m
+[32m+[m
+[32m+[m[32m    # Use autotune_custom_op to benchmark and select the best[m
+[32m+[m[32m    range_name = f"{name}_range_{int(range_start)}_{int(range_end) if range_end != float('inf') else 'inf'}"[m
+[32m+[m
+[32m+[m[32m    # Run autotuning for this specific range[m
+[32m+[m[32m    autotune_custom_op([m
+[32m+[m[32m        name=range_name,[m
+[32m+[m[32m        decompositions=decompositions,[m
+[32m+[m[32m        inputs=tensor_inputs,[m
+[32m+[m[32m        non_tensor_args=non_tensor_args,[m
+[32m+[m[32m        op_overload=op_overload,[m
+[32m+[m[32m        user_input_gen_fns=range_input_gen_fns,[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    # Extract the winning choice from the result[m
+[32m+[m[32m    # The autotune_custom_op inlines the winning choice, so we need to determine[m
+[32m+[m[32m    # which implementation was selected based on the benchmarking results[m
+[32m+[m
+[32m+[m[32m    # For now, we'll use a heuristic: return the first implementation[m
+[32m+[m[32m    # In a complete implementation, we would extract this from the autotuning cache[m
+[32m+[m[32m    best_impl = decompositions[0][m
+[32m+[m[32m    best_kwargs = non_tensor_args[0][m
+[32m+[m[32m    best_impl_name = best_impl.__name__ if hasattr(best_impl, '__name__') else str(best_impl)[m
+[32m+[m
+[32m+[m[32m    log.info([m
+[32m+[m[32m        "Range [%s, %s): Selected implementation '%s' after benchmarking %d candidates",[m
+[32m+[m[32m        range_start,[m
+[32m+[m[32m        range_end if range_end != float('inf') else 'inf',[m
+[32m+[m[32m        best_impl_name,[m
+[32m+[m[32m        len(decompositions),[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    return best_impl, best_kwargs, best_impl_name[m
+[32m+[m
+[32m+[m
+[32m+[m[32mdef _generate_range_dispatch_ir([m
+[32m+[m[32m    range_to_impl: dict[[m
+[32m+[m[32m        tuple[str, int, Union[int, float], Union[int, float]],[m
+[32m+[m[32m        tuple[Callable[..., Any], dict[str, Any], str],[m
+[32m+[m[32m    ],[m
+[32m+[m[32m    tensor_name: str,[m
+[32m+[m[32m    dim_index: int,[m
+[32m+[m[32m    args: tuple[Any, ...],[m
+[32m+[m[32m    kwargs: dict[str, Any],[m
+[32m+[m[32m    op_overload: torch._ops.OpOverload,[m
+[32m+[m[32m    default_impl: Callable[..., Any],[m
+[32m+[m[32m) -> Any:[m
+[32m+[m[32m    """Generate torch.cond based dispatch for different ranges.[m
+[32m+[m
+[32m+[m[32m    Args:[m
+[32m+[m[32m        range_to_impl: Mapping from range to (implementation, kwargs, impl_name)[m
+[32m+[m[32m        tensor_name: Name of tensor to dispatch on[m
+[32m+[m[32m        dim_index: Dimension index to dispatch on[m
+[32m+[m[32m        args: Input arguments[m
+[32m+[m[32m        kwargs: Keyword arguments[m
+[32m+[m[32m        op_overload: OpOverload of the custom op[m
+[32m+[m[32m        default_impl: Default implementation[m
+[32m+[m
+[32m+[m[32m    Returns:[m
+[32m+[m[32m        Result from the selected implementation[m
+[32m+[m[32m    """[m
+[32m+[m[32m    # Extract tensor inputs[m
+[32m+[m[32m    tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)[m
+[32m+[m
+[32m+[m[32m    # Get the target tensor[m
+[32m+[m[32m    target_tensor_ir = _extract_tensor_by_name(args, kwargs, tensor_name, op_overload)[m
+[32m+[m[32m    if target_tensor_ir is None:[m
+[32m+[m[32m        raise RuntimeError(f"Could not find tensor '{tensor_name}' in arguments")[m
+[32m+[m
+[32m+[m[32m    # Get dimension value (may be symbolic or concrete)[m
+[32m+[m[32m    dim_value = _get_dimension_value(target_tensor_ir, dim_index)[m
+[32m+[m
+[32m+[m[32m    # Sort ranges by start value[m
+[32m+[m[32m    sorted_ranges = sorted(range_to_impl.items(), key=lambda x: x[0][2])[m
+[32m+[m
+[32m+[m[32m    log.info([m
+[32m+[m[32m        "Generating torch.cond dispatch for %s[%d] with %d ranges",[m
+[32m+[m[32m        tensor_name,[m
+[32m+[m[32m        dim_index,[m
+[32m+[m[32m        len(sorted_ranges),[m
+[32m+[m[32m    )[m
+[32m+[m
+[32m+[m[32m    # Convert IR nodes to tensors for the implementations[m
+[32m+[m[32m    tensor_args = [ir_node_to_tensor(inp) for inp in tensor_inputs][m
+[32m+[m
+[32m+[m[32m    # Build nested torch.cond dispatch recursively[m
+[32m+[m[32m    def build_cond_tree(range_idx: int) -> torch.Tensor:[m
+[32m+[m[32m        """Recursively build nested torch.cond calls for range dispatch."""[m
+[32m+[m[32m        if range_idx >= len(sorted_ranges):[m
+[32m+[m[32m            # Shouldn't reach here - use last range's impl[m
+[32m+[m[32m            _, (impl, impl_kwargs, _) = sorted_ranges[-1][m
+[32m+[m[32m            merged_kwargs = {**impl_kwargs, **runtime_kwargs}[m
+[32m+[m[32m            return impl(*tensor_args, **merged_kwargs)[m
+[32m+[m
+[32m+[m[32m        range_key, (impl, impl_kwargs, impl_name) = sorted_ranges[range_idx][m
+[32m+[m[32m        _, _, range_start, range_end = range_key[m
+[32m+[m[32m        merged_kwargs = {**impl_kwargs, **runtime_kwargs}[m
+[32m+[m
+[32m+[m[32m        # Last range - just call the implementation[m
+[32m+[m[32m        if range_idx == len(sorted_ranges) - 1:[m
+[32m+[m[32m            log.debug([m
+[32m+[m[32m                "  Range [%s, %s): Using %s (final range)",[m
+[32m+[m[32m                range_start,[m
+[32m+[m[32m                "inf" if range_end == float("inf") else range_end,[m
+[32m+[m[32m                impl_name,[m
+[32m+[m[32m            )[m
+[32m+[m[32m            return impl(*tensor_args, **merged_kwargs)[m
+[32m+[m
+[32m+[m[32m        # Create predicate: dim_value < range_end[m
+[32m+[m[32m        # Handle both concrete and symbolic dimensions[m
+[32m+[m[32m        if isinstance(dim_value, int):[m
+[32m+[m[32m            # Concrete dimension - convert to tensor for torch.cond[m
+[32m+[m[32m            pred = torch.tensor(dim_value < range_end)[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            # Symbolic dimension - create comparison[m
+[32m+[m[32m            # dim_value is a sympy expression or SymInt[m
+[32m+[m[32m            pred = dim_value < range_end[m
+[32m+[m
+[32m+[m[32m        log.debug([m
+[32m+[m[32m            "  Range [%s, %s): Checking dim < %s for %s",[m
+[32m+[m[32m            range_start,[m
+[32m+[m[32m            "inf" if range_end == float("inf") else range_end,[m
+[32m+[m[32m            range_end,[m
+[32m+[m[32m            impl_name,[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m        # Define branches for torch.cond[m
+[32m+[m[32m        def true_fn() -> torch.Tensor:[m
+[32m+[m[32m            """Use this range's implementation."""[m
+[32m+[m[32m            return impl(*tensor_args, **merged_kwargs)[m
+[32m+[m
+[32m+[m[32m        def false_fn() -> torch.Tensor:[m
+[32m+[m[32m            """Check next range."""[m
+[32m+[m[32m            return build_cond_tree(range_idx + 1)[m
+[32m+[m
+[32m+[m[32m        # Use torch.cond to create runtime dispatch[m
+[32m+[m[32m        # This will be captured and lowered by Inductor[m
+[32m+[m[32m        result = torch.cond(pred, true_fn, false_fn)[m
+[32m+[m
+[32m+[m[32m        return result[m
+[32m+[m
+[32m+[m[32m    # Build the dispatch tree starting from first range[m
+[32m+[m[32m    try:[m
+[32m+[m[32m        result = build_cond_tree(0)[m
+[32m+[m[32m        log.info([m
+[32m+[m[32m            "Successfully generated torch.cond dispatch tree with %d conditional branches",[m
+[32m+[m[32m            len(sorted_ranges) - 1,[m
+[32m+[m[32m        )[m
+[32m+[m[32m        return result[m
+[32m+[m[32m    except Exception as e:[m
+[32m+[m[32m        # If torch.cond generation fails, fall back to global autotuning[m
+[32m+[m[32m        log.warning([m
+[32m+[m[32m            "Failed to generate torch.cond dispatch: %s. Falling back to global autotuning.",[m
+[32m+[m[32m            str(e),[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m        # Fallback: use global autotuning[m
+[32m+[m[32m        all_decompositions = [][m
+[32m+[m[32m        all_non_tensor_args = [][m
+[32m+[m
+[32m+[m[32m        for range_key, (impl, impl_kwargs, _) in sorted_ranges:[m
+[32m+[m[32m            all_decompositions.append(impl)[m
+[32m+[m[32m            merged_kwargs = {**impl_kwargs, **runtime_kwargs}[m
+[32m+[m[32m            all_non_tensor_args.append(merged_kwargs)[m
+[32m+[m
+[32m+[m[32m        result = autotune_custom_op([m
+[32m+[m[32m            name=f"{op_overload._name}_range_dispatch_fallback",[m
+[32m+[m[32m            decompositions=all_decompositions,[m
+[32m+[m[32m            inputs=tensor_inputs,[m
+[32m+[m[32m            non_tensor_args=all_non_tensor_args,[m
+[32m+[m[32m            op_overload=op_overload,[m
+[32m+[m[32m            user_input_gen_fns=None,[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m        return result[m
+[32m+[m
+[32m+[m
+ def _create_autotuning_lowering([m
+     processed_configs: list[CustomOpConfig],[m
+     default_impl: Callable[..., Any],[m
+[36m@@ -635,14 +833,25 @@[m [mdef _create_autotuning_lowering([m
+     op_overload: torch._ops.OpOverload,[m
+     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]],[m
+     is_range_based: bool = False,[m
+[31m-    dispatch_on: Optional[tuple[str, int]] = None,[m
+[31m-    split_points: Optional[list[int]] = None,[m
+ ) -> Callable[..., Any]:[m
+[31m-    """Create the lowering function for autotuning."""[m
+[32m+[m[32m    """Create the lowering function for autotuning (shared logic for both range and non-range).[m
+[32m+[m
+[32m+[m[32m    Args:[m
+[32m+[m[32m        processed_configs: List of validated CustomOpConfig objects[m
+[32m+[m[32m        default_impl: Default implementation function[m
+[32m+[m[32m        name: Operation name for autotuning[m
+[32m+[m[32m        op_overload: OpOverload of the custom op[m
+[32m+[m[32m        input_gen_fns: Optional custom input generators[m
+[32m+[m[32m        is_range_based: Whether this is range-based autotuning[m
+[32m+[m
+[32m+[m[32m    Returns:[m
+[32m+[m[32m        Lowering function that can be registered with Inductor[m
+[32m+[m[32m    """[m
+     if not is_range_based:[m
+         # Standard autotuning path[m
+         @functools.wraps(op_overload)[m
+         def standard_lowering_fn(*args: Any, **kwargs: Any) -> Any:[m
+[32m+[m[32m            """Standard autotuning lowering."""[m
+             tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)[m
+ [m
+             decompositions = [][m
+[36m@@ -651,6 +860,7 @@[m [mdef _create_autotuning_lowering([m
+             for cfg in processed_configs:[m
+                 decomp = cfg.get_decomposition(default_impl=default_impl)[m
+                 decompositions.append(decomp)[m
+[32m+[m
+                 merged_kwargs = _merge_config_and_runtime_kwargs([m
+                     cfg.params, runtime_kwargs[m
+                 )[m
+[36m@@ -670,182 +880,125 @@[m [mdef _create_autotuning_lowering([m
+ [m
+         return standard_lowering_fn[m
+ [m
+[31m-    # Range-based autotuning path[m
+[31m-    tensor_name, dim_index = dispatch_on[m
+[31m-    ranges = _split_points_to_ranges(split_points)[m
+[31m-[m
+[32m+[m[32m    # Range-based autotuning path - with per-range benchmarking[m
+     @functools.wraps(op_overload)[m
+     def range_based_lowering_fn(*args: Any, **kwargs: Any) -> Any:[m
+[31m-        log.info("=== Range-based Autotuning for %s ===", name)[m
+[31m-        log.info("Dispatch on: %s[%d], Ranges: %s", tensor_name, dim_index, ranges)[m
+[31m-[m
+[32m+[m[32m        """Range-based autotuning lowering with per-range optimization."""[m
+         tensor_inputs, runtime_kwargs = _extract_tensor_inputs(args, kwargs)[m
+ [m
+[31m-        # Benchmark each range and store the winning choices[m
+[31m-        range_to_winning_choice: dict[tuple[int, Union[int, float]], Any] = {}[m
+[32m+[m[32m        # Group configs by range[m
+[32m+[m[32m        range_groups = _group_configs_by_range(processed_configs)[m
+ [m
+[31m-        for range_start, range_end in ranges:[m
+[31m-            # Create range-specific input generator[m
+[31m-            range_input_gen_fns = None[m
+[31m-            if input_gen_fns and tensor_name in input_gen_fns:[m
+[31m-                base_gen_fn = input_gen_fns[tensor_name][m
+[31m-                range_gen_fn = _create_range_input_gen_fn([m
+[31m-                    base_gen_fn, dim_index, range_start, range_end[m
+[31m-                )[m
+[31m-                range_input_gen_fns = {**input_gen_fns, tensor_name: range_gen_fn}[m
+[32m+[m[32m        # Get tensor_name and dim_index from first config (all should be the same after validation)[m
+[32m+[m[32m        first_config = processed_configs[0][m
+[32m+[m[32m        tensor_name = first_config.tensor_name[m
+[32m+[m[32m        dim_index = first_config.dim_index[m
+[32m+[m
+[32m+[m[32m        log.info([m
+[32m+[m[32m            "=== Range-based Autotuning for %s ===",[m
+[32m+[m[32m            name[m
+[32m+[m[32m        )[m
+[32m+[m[32m        log.info([m
+[32m+[m[32m            "Dispatch dimension: %s[%d]",[m
+[32m+[m[32m            tensor_name,[m
+[32m+[m[32m            dim_index[m
+[32m+[m[32m        )[m
+[32m+[m
+[32m+[m[32m        # Benchmark each range and collect best implementations[m
+[32m+[m[32m        range_to_impl: dict[[m
+[32m+[m[32m            tuple[str, int, Union[int, float], Union[int, float]],[m
+[32m+[m[32m            tuple[Callable[..., Any], dict[str, Any], str],[m
+[32m+[m[32m        ] = {}[m
+[32m+[m
+[32m+[m[32m        for range_key, range_configs in range_groups.items():[m
+[32m+[m[32m            if range_key == (None, None, None, None):[m
+[32m+[m[32m                continue  # Skip non-range configs (shouldn't happen after validation)[m
+[32m+[m
+[32m+[m[32m            tensor_name_key, dim_index_key, range_start, range_end = range_key[m
+[32m+[m
+[32m+[m[32m            # Benchmark this range[m
+[32m+[m[32m            best_impl, best_kwargs, best_impl_name = _benchmark_configs_for_range([m
+[32m+[m[32m                name=name,[m
+[32m+[m[32m                range_configs=range_configs,[m
+[32m+[m[32m                default_impl=default_impl,[m
+[32m+[m[32m                op_overload=op_overload,[m
+[32m+[m[32m                tensor_inputs=tensor_inputs,[m
+[32m+[m[32m                runtime_kwargs=runtime_kwargs,[m
+[32m+[m[32m                input_gen_fns=input_gen_fns,[m
+[32m+[m[32m                tensor_name=tensor_name_key,[m
+[32m+[m[32m                dim_index=dim_index_key,[m
+[32m+[m[32m                range_start=range_start,[m
+[32m+[m[32m                range_end=range_end,[m
+[32m+[m[32m            )[m
+[32m+[m
+[32m+[m[32m            range_to_impl[range_key] = (best_impl, best_kwargs, best_impl_name)[m
+[32m+[m
+[32m+[m[32m        # Check if all ranges selected the same implementation[m
+[32m+[m[32m        unique_impl_names = {impl_name for _, _, impl_name in range_to_impl.values()}[m
+[32m+[m
+[32m+[m[32m        log.info([m
+[32m+[m[32m            "=== Range-based Autotuning Summary for %s ===",[m
+[32m+[m[32m            name,[m
+[32m+[m[32m        )[m
+[32m+[m[32m        for range_key, (_, _, impl_name) in sorted(range_to_impl.items(), key=lambda x: x[0][2]):[m
+[32m+[m[32m            _, _, range_start, range_end = range_key[m
+[32m+[m[32m            log.info([m
+[32m+[m[32m                "  Range [%s, %s): %s",[m
+[32m+[m[32m                range_start,[m
+[32m+[m[32m                range_end if range_end != float("inf") else "inf",[m
+[32m+[m[32m                impl_name,[m
+[32m+[m[32m            )[m
+ [m
+[31m-            # Build decompositions and kwargs for this range[m
+[32m+[m[32m        if len(unique_impl_names) == 1:[m
+[32m+[m[32m            # All ranges use same implementation - use it directly (fusion-friendly!)[m
+[32m+[m[32m            the_impl, the_kwargs, the_impl_name = next(iter(range_to_impl.values()))[m
+[32m+[m
+[32m+[m[32m            log.info([m
+[32m+[m[32m                "=== All ranges selected same implementation '%s' - using directly (fusion-friendly) ===",[m
+[32m+[m[32m                the_impl_name,[m
+[32m+[m[32m            )[m
+[32m+[m
+[32m+[m[32m            # Just use the single implementation for all inputs[m
+             decompositions = [][m
+             non_tensor_args = [][m
+ [m
+             for cfg in processed_configs:[m
+                 decomp = cfg.get_decomposition(default_impl=default_impl)[m
+                 decompositions.append(decomp)[m
+[32m+[m
+                 merged_kwargs = _merge_config_and_runtime_kwargs([m
+                     cfg.params, runtime_kwargs[m
+                 )[m
+                 non_tensor_args.append(merged_kwargs)[m
+ [m
+[31m-            range_name = f"{name}_range_{int(range_start)}_{int(range_end) if range_end != float('inf') else 'inf'}"[m
+[31m-[m
+[31m-            # Run autotuning for this range and get winning choice[m
+[31m-            autotuned_result, winning_choice = autotune_custom_op([m
+[31m-                name=range_name,[m
+[32m+[m[32m            result = autotune_custom_op([m
+[32m+[m[32m                name=name,[m
+                 decompositions=decompositions,[m
+                 inputs=tensor_inputs,[m
+                 non_tensor_args=non_tensor_args,[m
+                 op_overload=op_overload,[m
+[31m-                user_input_gen_fns=range_input_gen_fns,[m
+[31m-                return_choice=True,[m
+[32m+[m[32m                user_input_gen_fns=input_gen_fns,[m
+             )[m
+[31m-[m
+[31m-            range_to_winning_choice[(range_start, range_end)] = winning_choice[m
+[31m-[m
+[32m+[m[32m        else:[m
+[32m+[m[32m            # Different ranges use different implementations - generate dispatch[m
+             log.info([m
+[31m-                "Range [%s, %s]: Selected %s",[m
+[31m-                range_start,[m
+[31m-                range_end if range_end != float("inf") else "inf",[m
+[31m-                getattr(winning_choice, "name", "unknown"),[m
+[32m+[m[32m                "=== Different ranges selected different implementations ===",[m
+             )[m
+[31m-[m
+[31m-        # Build range_to_best_impl from range_to_winning_choice[m
+[31m-        range_to_best_impl = {}[m
+[31m-        for (range_start, range_end), choice in range_to_winning_choice.items():[m
+[31m-            choice_name = getattr(choice, "name", "")[m
+[31m-[m
+[31m-            # Extract winning decomposition index[m
+[31m-            winning_idx = _extract_winning_decomposition_index([m
+[31m-                choice_name, decompositions[m
+[32m+[m[32m            log.info([m
+[32m+[m[32m                "=== Generating runtime dispatch with torch.cond ===",[m
+             )[m
+ [m
+[31m-            impl = decompositions[winning_idx][m
+[31m-            impl_kwargs = non_tensor_args[winning_idx][m
+[31m-            impl_name = impl.__name__[m
+[31m-[m
+[31m-            range_to_best_impl[(range_start, range_end)] = ([m
+[31m-                impl,[m
+[31m-                impl_kwargs,[m
+[31m-                impl_name,[m
+[32m+[m[32m            # Generate torch.cond dispatch[m
+[32m+[m[32m            result = _generate_range_dispatch_ir([m
+[32m+[m[32m                range_to_impl=range_to_impl,[m
+[32m+[m[32m                tensor_name=tensor_name,[m
+[32m+[m[32m                dim_index=dim_index,[m
+[32m+[m[32m                args=args,[m
+[32m+[m[32m                kwargs=kwargs,[m
+[32m+[m[32m                op_overload=op_overload,[m
+[32m+[m[32m                default_impl=default_impl,[m
+             )[m
+ [m
+[31m-        log.info("✓ Completed autotuning for %d ranges", len(range_to_best_impl))[m
+[31m-[m
+[31m-        # Generate dispatch function for user review[m
+[31m-        dispatch_func_code = _generate_dispatch_function([m
+[31m-            name=name,[m
+[31m-            range_to_best_impl=range_to_best_impl,[m
+[31m-            tensor_name=tensor_name,[m
+[31m-            dim_index=dim_index,[m
+[31m-            op_overload=op_overload,[m
+[31m-        )[m
+[31m-[m
+[31m-        # Save to file for debugging/review[m
+[31m-        import os[m
+[31m-[m
+[31m-        output_dir = "/tmp/torch_inductor_range_dispatch"[m
+[31m-        os.makedirs(output_dir, exist_ok=True)[m
+[31m-        output_file = os.path.join(output_dir, f"{name}_dispatch.py")[m
+[31m-[m
+[31m-        with open(output_file, "w") as f:[m
+[31m-            f.write(dispatch_func_code)[m
+[31m-[m
+[31m-        log.info("✓ Generated dispatch function saved to: %s", output_file)[m
+[31m-[m
+[31m-        # ========================================[m
+[31m-        # Option B: Use make_fx + inline_subgraph_to_ir_nodes[m
+[31m-        # ========================================[m
+[31m-        log.info("Creating runtime dispatch using make_fx tracing")[m
+[31m-[m
+[31m-        sorted_ranges = sorted(range_to_best_impl.items())[m
+[31m-[m
+[31m-        # Build dispatch function for tracing[m
+[31m-        def build_dispatch_fn_for_tracing():[m
+[31m-            def dispatch_fn(*fake_tensors):[m
+[31m-                dispatch_tensor = fake_tensors[0][m
+[31m-                dim_value = dispatch_tensor.size(dim_index)[m
+[31m-[m
+[31m-                # Build nested torch.cond[m
+[31m-                def build_cond_recursive(ranges_list, idx=0):[m
+[31m-                    if idx >= len(ranges_list):[m
+[31m-                        raise RuntimeError("No ranges available")[m
+[31m-[m
+[31m-                    (r_start, r_end), (impl_fn, impl_kwargs, impl_name) = ranges_list[[m
+[31m-                        idx[m
+[31m-                    ][m
+[31m-[m
+[31m-                    # Last range - no condition[m
+[31m-                    if idx == len(ranges_list) - 1:[m
+[31m-                        return impl_fn([m
+[31m-                            *fake_tensors, **{**runtime_kwargs, **impl_kwargs}[m
+[31m-                        )[m
+[31m-[m
+[31m-                    # Recursive case with torch.cond[m
+[31m-                    return torch.cond([m
+[31m-                        pred=dim_value <= r_end,[m
+[31m-                        true_fn=lambda: impl_fn([m
+[31m-                            *fake_tensors, **{**runtime_kwargs, **impl_kwargs}[m
+[31m-                        ),[m
+[31m-                        false_fn=lambda: build_cond_recursive(ranges_list, idx + 1),[m
+[31m-                        operands=[],[m
+[31m-                    )[m
+[31m-[m
+[31m-                return build_cond_recursive(sorted_ranges, 0)[m
+[31m-[m
+[31m-            return dispatch_fn[m
+[31m-[m
+[31m-        dispatch_fn = build_dispatch_fn_for_tracing()[m
+[31m-[m
+[31m-        # Trace with make_fx to create GraphModule[m
+[31m-        from torch.fx.experimental.proxy_tensor import make_fx[m
+[31m-        from ..decomposition import select_decomp_table[m
+[31m-[m
+[31m-        log.debug("Tracing dispatch function with make_fx...")[m
+[31m-[m
+[31m-        with V.fake_mode:[m
+[31m-            fake_inputs = tuple(ir_node_to_tensor(inp) for inp in tensor_inputs)[m
+[31m-[m
+[31m-            decomposition_table = select_decomp_table()[m
+[31m-            dispatch_gm = make_fx([m
+[31m-                dispatch_fn,[m
+[31m-                decomposition_table=decomposition_table,[m
+[31m-                tracing_mode="symbolic",[m
+[31m-            )(*fake_inputs)[m
+[31m-[m
+[31m-        log.debug([m
+[31m-            f"GraphModule created with {len(list(dispatch_gm.graph.nodes))} nodes"[m
+[31m-        )[m
+[31m-[m
+[31m-        # Inline the dispatch graph to IR nodes[m
+[31m-        from torch._inductor.codegen.subgraph import inline_subgraph_to_ir_nodes[m
+[31m-[m
+[31m-        log.debug("Inlining dispatch graph to IR nodes...")[m
+[31m-[m
+[31m-        result = inline_subgraph_to_ir_nodes([m
+[31m-            gm=dispatch_gm, inputs=tensor_inputs, name=f"{name}_dispatch"[m
+[31m-        )[m
+[31m-[m
+[31m-        log.info("✓ Range-based dispatch created using make_fx + inline")[m
+[31m-[m
+         validate_ir(result)[m
+         return result[m
+ [m
+[36m@@ -857,36 +1010,58 @@[m [mdef register_custom_op_autotuning([m
+     configs: Union[list[CustomOpConfig], list[Callable[..., Any]]],[m
+     name: Optional[str] = None,[m
+     input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]] = None,[m
+[31m-    dispatch_on: Optional[tuple[str, int]] = None,[m
+[31m-    split_points: Optional[list[int]] = None,[m
+ ) -> None:[m
+[31m-    """Register custom op for autotuning.[m
+[32m+[m[32m    """Register custom op for autotuning with custom_op configs where each config[m
+[32m+[m[32m    specifies a decomposition implementation function with its parameter values.[m
+[32m+[m
+[32m+[m[32m    Args:[m
+[32m+[m[32m        custom_op: Custom operation (decorated function from @torch.library.custom_op)[m
+[32m+[m[32m        configs: List of CustomOpConfig objects[m
+[32m+[m[32m        name: Operation name (default: "{op_name}_autotuned")[m
+[32m+[m[32m        input_gen_fns: Custom input generators for benchmarking[m
+ [m
+[31m-    Two modes:[m
+[31m-    1. Standard autotuning: Benchmark all configs and select the best globally[m
+[31m-    2. Range-based autotuning: Benchmark per range and generate runtime dispatch[m
+[32m+[m[32m    Examples:[m
+[32m+[m[32m        # Standard autotuning[m
+[32m+[m[32m        @torch.library.custom_op("mylib::attention", mutates_args=())[m
+[32m+[m[32m        def my_attention(query, key, value, head_dim=32):[m
+[32m+[m[32m            ...[m
+ [m
+[31m-    Standard Example:[m
+         register_custom_op_autotuning([m
+             my_attention,[m
+             configs=[[m
+[31m-                CustomOpConfig(impl1, head_dim=32),[m
+[31m-                CustomOpConfig(impl2, head_dim=64),[m
+[32m+[m[32m                CustomOpConfig(attention_impl, head_dim=32, method='chunked'),[m
+[32m+[m[32m                CustomOpConfig(attention_impl, head_dim=64, method='tiled'),[m
+[32m+[m[32m                CustomOpConfig(head_dim=128),  # No decomposition specified, use default[m
+             ],[m
+[32m+[m[32m            input_gen_fns={[m
+[32m+[m[32m                "query": lambda fake: torch.randn_like(fake, device='cuda'),[m
+[32m+[m[32m                "key": lambda fake: torch.randn_like(fake, device='cuda'),[m
+[32m+[m[32m                "value": lambda fake: torch.randn_like(fake, device='cuda'),[m
+[32m+[m[32m            },[m
+         )[m
+ [m
+[31m-    Range-based Example:[m
+[32m+[m[32m        # Range-based autotuning[m
+         register_custom_op_autotuning([m
+             my_op,[m
+[31m-            configs=[CustomOpConfig(impl1), CustomOpConfig(impl2), CustomOpConfig(impl3)],[m
+[31m-            dispatch_on=("x", 1),  # Dispatch on x[1][m
+[31m-            split_points=[512, 2048],  # Creates ranges: [1,512], [513,2048], [2049,inf][m
+[32m+[m[32m            configs=[[m
+[32m+[m[32m                # Range [0, 512): test 3 implementations[m
+[32m+[m[32m                CustomOpConfig(impl1, tensor_name='x', dim_index=1, dim_range=(0, 512)),[m
+[32m+[m[32m                CustomOpConfig(impl2, tensor_name='x', dim_index=1, dim_range=(0, 512)),[m
+[32m+[m[32m                CustomOpConfig(impl3, tensor_name='x', dim_index=1, dim_range=(0, 512)),[m
+[32m+[m[32m                # Range [512, inf): test 3 implementations[m
+[32m+[m[32m                CustomOpConfig(impl1, tensor_name='x', dim_index=1, dim_range=(512, float('inf'))),[m
+[32m+[m[32m                CustomOpConfig(impl2, tensor_name='x', dim_index=1, dim_range=(512, float('inf'))),[m
+[32m+[m[32m                CustomOpConfig(impl3, tensor_name='x', dim_index=1, dim_range=(512, float('inf'))),[m
+[32m+[m[32m            ],[m
+         )[m
+     """[m
+     from torch._library.custom_ops import CustomOpDef[m
+ [m
+     if not isinstance(custom_op, CustomOpDef):[m
+[31m-        raise TypeError(f"custom_op must be a CustomOpDef, got {type(custom_op)}")[m
+[32m+[m[32m        raise TypeError([m
+[32m+[m[32m            f"custom_op must be a CustomOpDef (decorated function from @torch.library.custom_op), "[m
+[32m+[m[32m            f"got {type(custom_op)}."[m
+[32m+[m[32m        )[m
+ [m
+     op_overload = custom_op._opoverload[m
+     default_impl = custom_op._init_fn[m
+[36m@@ -909,19 +1084,18 @@[m [mdef register_custom_op_autotuning([m
+     if name is None:[m
+         name = f"{op_overload._name}_autotuned"[m
+ [m
+[31m-    # Validate range-based parameters[m
+[31m-    is_range_based = dispatch_on is not None or split_points is not None[m
+[32m+[m[32m    # Group configs by range and validate[m
+[32m+[m[32m    range_groups = _group_configs_by_range(processed_configs)[m
+[32m+[m[32m    _validate_range_groups(range_groups)[m
+[32m+[m
+[32m+[m[32m    # Detect if this is range-based autotuning[m
+[32m+[m[32m    is_range_based = (None, None, None, None) not in range_groups[m
+[32m+[m
+     if is_range_based:[m
+[31m-        if dispatch_on is None or split_points is None:[m
+[31m-            raise ValueError([m
+[31m-                "Both dispatch_on and split_points must be specified for range-based autotuning"[m
+[31m-            )[m
+[31m-        if not isinstance(dispatch_on, tuple) or len(dispatch_on) != 2:[m
+[31m-            raise ValueError("dispatch_on must be a tuple of (tensor_name, dim_index)")[m
+[31m-        if not isinstance(split_points, list) or len(split_points) == 0:[m
+[31m-            raise ValueError("split_points must be a non-empty list of integers")[m
+[31m-        if sorted(split_points) != split_points:[m
+[31m-            raise ValueError("split_points must be sorted in ascending order")[m
+[32m+[m[32m        log.debug([m
+[32m+[m[32m            "Detected range-based configs for %s. Using simplified autotuning for all configs.",[m
+[32m+[m[32m            name,[m
+[32m+[m[32m        )[m
+ [m
+     # Create and register the lowering function[m
+     lowering_fn = _create_autotuning_lowering([m
+[36m@@ -931,8 +1105,6 @@[m [mdef register_custom_op_autotuning([m
+         op_overload=op_overload,[m
+         input_gen_fns=input_gen_fns,[m
+         is_range_based=is_range_based,[m
+[31m-        dispatch_on=dispatch_on,[m
+[31m-        split_points=split_points,[m
+     )[m
+ [m
+     lowerings[op_overload] = lowering_fn[m

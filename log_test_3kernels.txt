@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/data/users/tianren/pytorch/test/inductor/test_dynamic_range_standalone.py", line 4, in <module>
+    import torch
+ModuleNotFoundError: No module named 'torch'

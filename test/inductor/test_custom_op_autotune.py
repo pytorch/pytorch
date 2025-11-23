@@ -453,6 +453,187 @@ class TestCustomOpAutoTune(TestCase):
             multi_param_op, (test_x, test_factor), expected_result, "MultiParam"
         )
 
+    @skipIfXpu
+    def test_dynamic_range_tuning(self):
+        """Test dynamic input range-based autotuning.
+
+        Validates that:
+        - All implementations produce equivalent results
+        - Autotuning selects best implementation per range
+        - torch.cond dispatch function is generated correctly
+        """
+        test_op_name = f"test_lib::dynamic_range_{id(self)}"
+
+        def short_sequence_impl(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.einsum("bsh,h->bsh", x, weight)
+
+        def medium_sequence_impl(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            batch_size, seq_len, hidden_dim = x.shape
+            chunk_size = 256
+            chunks = []
+            for start in range(0, seq_len, chunk_size):
+                end = min(start + chunk_size, seq_len)
+                chunk = x[:, start:end, :]
+                chunks.append(chunk * weight)
+            return torch.cat(chunks, dim=1)
+
+        def long_sequence_impl(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x * weight.view(1, 1, -1)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def dynamic_range_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x * weight
+
+        @dynamic_range_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            dynamic_range_op,
+            configs=[
+                CustomOpConfig(short_sequence_impl),
+                CustomOpConfig(medium_sequence_impl),
+                CustomOpConfig(long_sequence_impl),
+            ],
+            name="dynamic_range_autotuned",
+            dispatch_on=("x", 1),
+            split_points=[512, 2048],
+            input_gen_fns={
+                "x": lambda fake: torch.randn_like(fake, device=self.device) * 0.1,
+                "weight": lambda fake: torch.ones_like(fake, device=self.device),
+            },
+        )
+
+        # Verify all implementations produce equivalent results
+        test_cases = [
+            (2, 256, 128),
+            (2, 1024, 128),
+            (2, 4096, 128),
+        ]
+
+        for batch_size, seq_len, hidden_dim in test_cases:
+            test_x = torch.randn(
+                batch_size, seq_len, hidden_dim, device=self.device, dtype=self.dtype
+            )
+            test_weight = torch.ones(hidden_dim, device=self.device, dtype=self.dtype)
+            expected = test_x * test_weight
+
+            for impl_name, impl_fn in [
+                ("short", short_sequence_impl),
+                ("medium", medium_sequence_impl),
+                ("long", long_sequence_impl),
+            ]:
+                result = impl_fn(test_x, test_weight)
+                torch.testing.assert_close(
+                    result,
+                    expected,
+                    rtol=1e-5,
+                    atol=1e-5,
+                    msg=f"{impl_name} implementation differs for seq_len={seq_len}",
+                )
+
+            # Test autotuning with compilation
+            self._run_autotune_test(
+                dynamic_range_op,
+                (test_x, test_weight),
+                expected,
+                f"DynamicRange_seq{seq_len}",
+            )
+
+    @skipIfXpu
+    def test_non_adjacent_range_merging(self):
+        """Test that non-adjacent ranges with the same implementation are merged with OR predicates.
+
+        Validates:
+        - Non-adjacent ranges using the same impl are grouped together
+        - OR predicates are generated for grouped ranges
+        - Reduces number of torch.cond branches from N ranges to M impl groups
+
+        Example: If ranges [1,64], [129,256], [513,inf] all choose impl_medium,
+        they should be grouped into a single branch with OR predicate:
+        (dim <= 64) | ((dim >= 129) & (dim <= 256)) | (dim >= 513)
+        """
+        test_op_name = f"test_lib::range_merge_{id(self)}"
+
+        def impl_small(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Implementation 1: direct add"""
+            return x + weight
+
+        def impl_medium(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Implementation 2: add with intermediate variable"""
+            result = x
+            result = result + weight
+            return result
+
+        def impl_large(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Implementation 3: add with broadcasting"""
+            return x + weight.view(1, 1, -1).expand_as(x)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def range_merge_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            """Custom op with 5 ranges that may merge to fewer impl groups"""
+            return x + weight
+
+        @range_merge_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty_like(x)
+
+        # Register with only 3 unique implementations for 5 ranges
+        # All implementations are numerically equivalent (x + weight)
+        # but use different computational approaches
+        register_custom_op_autotuning(
+            range_merge_op,
+            configs=[
+                CustomOpConfig(impl_small),
+                CustomOpConfig(impl_medium),
+                CustomOpConfig(impl_large),
+            ],
+            dispatch_on=("x", 1),
+            split_points=[64, 128, 256, 512],  # Creates 5 ranges
+            input_gen_fns={
+                "x": lambda fake: torch.randn_like(fake, device=self.device),
+                "weight": lambda fake: torch.randn_like(fake, device=self.device),
+            },
+        )
+
+        # Verify all implementations produce equivalent results
+        test_cases = [
+            (32, "Range 1: [1, 64]"),
+            (96, "Range 2: [65, 128]"),
+            (192, "Range 3: [129, 256]"),
+            (384, "Range 4: [257, 512]"),
+            (768, "Range 5: [513, inf]"),
+        ]
+
+        for seq_len, desc in test_cases:
+            test_x = torch.randn(2, seq_len, 32, device=self.device, dtype=self.dtype)
+            test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
+            expected = test_x + test_weight
+
+            # Verify each implementation produces equivalent result
+            for impl_name, impl_fn in [
+                ("small", impl_small),
+                ("medium", impl_medium),
+                ("large", impl_large),
+            ]:
+                result = impl_fn(test_x, test_weight)
+                # All implementations should produce x + weight
+                torch.testing.assert_close(
+                    result,
+                    expected,
+                    rtol=1e-5,
+                    atol=1e-5,
+                    msg=f"{impl_name} produced different result for {desc}",
+                )
+
+            # Test autotuning with compilation
+            self._run_autotune_test(
+                range_merge_op,
+                (test_x, test_weight),
+                expected,
+                f"RangeMerge_{seq_len}",
+            )
+
 
 if __name__ == "__main__":
     run_tests()

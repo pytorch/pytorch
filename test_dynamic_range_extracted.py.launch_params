@@ -1,0 +1,4 @@
+triton_poi_fused_dynamic_range_standalone_0 | T, T, T, 65536, XBLOCK=256, num_warps=4, num_stages=1 | (256, 1, 1)
+triton_poi_fused_dynamic_range_standalone_0 | T, T, T, 262144, XBLOCK=1024, num_warps=4, num_stages=1 | (256, 1, 1)
+triton_poi_fused_dynamic_range_standalone_0 | T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, T, 65536, XBLOCK=256, num_warps=4, num_stages=1 | (256, 1, 1)
+triton_poi_fused_dynamic_range_standalone_1 | T, T, T, T, T, T, T, T, T, T, 65536, XBLOCK=256, num_warps=4, num_stages=1 | (256, 1, 1)

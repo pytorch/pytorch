@@ -1,0 +1,115 @@
+
+🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬
+Testing Manual Symbolic Shape Creation for torch.cond
+🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬🔬
+
+This test demonstrates HOW to make torch.cond work in lowering context
+by manually creating fake tensors with symbolic shapes.
+
+================================================================================
+Test: Manually Create Fake Tensors with Symbolic Shapes
+================================================================================
+
+1. Creating ShapeEnv...
+   ✓ ShapeEnv created: <class 'torch.fx.experimental.symbolic_shapes.ShapeEnv'>
+
+2. Creating FakeTensorMode with ShapeEnv...
+   ✓ FakeTensorMode created: <class 'torch._subclasses.fake_tensor.FakeTensorMode'>
+
+3. Creating real tensors as templates...
+   x_real shape: torch.Size([2, 256, 128])
+   weight_real shape: torch.Size([128])
+
+4. Creating fake tensors WITH symbolic shapes...
+   Key: Use StatelessSymbolicContext to mark dimensions as DYNAMIC
+
+   Creating x_fake with symbolic context...
+   Symbolic sizes: (2, s44, 128)
+   Types: ['int', 'SymInt', 'int']
+   x_fake created!
+   x_fake shape: torch.Size([2, s44, 128])
+   x_fake is FakeTensor: True
+   weight_fake shape: torch.Size([128])
+
+5. 🔍 CRITICAL CHECK - Is dimension 1 symbolic?
+   x_fake.shape[1] = s44
+   Type: <class 'torch.SymInt'>
+   Type name: SymInt
+   Is SymInt: True
+   ✅ DIMENSION IS SYMBOLIC!
+   This means torch.cond will be preserved!
+
+6. Tracing torch.cond dispatch with symbolic tensors...
+      Inside dispatch_fn: dim = s44, type = SymInt
+   ✓ Successfully traced!
+
+7. Checking traced graph...
+   torch.cond in graph: True
+   ✅ torch.cond IS PRESERVED!
+
+8. Checking for all implementations:
+   Has sin: False
+   Has tanh: False
+   Has relu: False
+
+9. Graph structure (first 30 lines):
+   ----------------------------------------------------------------------------
+   graph():
+       %arg0_1 : [num_users=2] = placeholder[target=arg0_1]
+       %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+       %sym_size_int : [num_users=2] = call_function[target=torch.ops.aten.sym_size.int](args = (%arg0_1, 1), kwargs = {})
+       %le : [num_users=1] = call_function[target=operator.le](args = (%sym_size_int, 512), kwargs = {})
+       %true_graph_0 : [num_users=1] = get_attr[target=true_graph_0]
+       %false_graph_0 : [num_users=1] = get_attr[target=false_graph_0]
+       %cond : [num_users=1] = call_function[target=torch.ops.higher_order.cond](args = (%le, %true_graph_0, %false_graph_0, (%arg1_1, %arg0_1, %sym_size_int, %sym_size_int)), kwargs = {})
+       %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%cond, 0), kwargs = {})
+       return getitem
+   ----------------------------------------------------------------------------
+
+================================================================================
+❌ TEST FAILED
+   torch.cond preserved: True
+   All impls present: False
+
+================================================================================
+Comparison: Our Approach vs V.fake_mode
+================================================================================
+
+1. Testing V.fake_mode (from inductor)...
+   This simulates the current behavior in custom_op.py
+
+   In V.fake_mode:
+   - ir_node_to_tensor() creates fake tensors
+   - BUT dimensions are concrete int, not SymInt
+   - Because V.fake_mode doesn't have symbolic_context set
+   - Result: torch.cond gets optimized away
+
+2. Our approach with manual symbolic creation...
+   - Create ShapeEnv
+   - Create FakeTensorMode with ShapeEnv
+   - Use StatelessSymbolicContext with DimDynamic.DYNAMIC
+   - Call shape_env.create_symbolic_sizes_strides_storage_offset()
+   - Result: dimensions are SymInt!
+   - Result: torch.cond is preserved!
+
+3. Key insight:
+   The problem is NOT V.fake_mode itself
+   The problem is we need to TELL it which dimensions are dynamic
+   We do this via StatelessSymbolicContext
+
+4. What we need to do in custom_op.py:
+   a) Identify which dimension we're dispatching on (tensor_name, dim_index)
+   b) Get real tensor shapes from IR nodes
+   c) Create StatelessSymbolicContext marking dispatch dim as DYNAMIC
+   d) Use V.fake_mode.shape_env.create_symbolic_sizes_strides_storage_offset()
+   e) Create fake tensors with these symbolic sizes
+   f) Trace torch.cond dispatch with these symbolic tensors
+   g) torch.cond will be preserved!
+================================================================================
+
+================================================================================
+FINAL RESULTS
+================================================================================
+Manual symbolic creation: ❌ FAILED
+
+❌ Test failed - need to investigate further

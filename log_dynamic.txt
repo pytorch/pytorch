@@ -1,0 +1,623 @@
+I1117 14:58:21.195000 661891 torch/_inductor/config.py:998] compile_threads set to 32
+I1117 14:58:22.508000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::bmm_dtype'', 'device_type='cuda'', 'op_name=None'
+I1117 14:58:22.508000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::_mm_plus_mm'', 'device_type=None', 'op_name=None'
+I1117 14:58:22.509000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::bmm'', 'device_type=None', 'op_name=None'
+I1117 14:58:22.509000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::_int_mm'', 'device_type=None', 'op_name=None'
+I1117 14:58:22.510000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::_scaled_mm'', 'device_type=None', 'op_name=None'
+I1117 14:58:22.510000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::mm_dtype'', 'device_type='cuda'', 'op_name=None'
+I1117 14:58:22.511000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenConfigHeuristics for 'template_name='aten::mm'', 'device_type=None', 'op_name=None'
+I1117 14:58:22.511000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenAddMMConfigHeuristics for 'template_name='aten::baddbmm'', 'device_type=None', 'op_name='baddbmm''
+I1117 14:58:22.511000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenAddMMConfigHeuristics for 'template_name='aten::addmm'', 'device_type=None', 'op_name='addmm''
+I1117 14:58:22.512000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: ATenBiasAddMMConfigHeuristics for 'template_name='aten::bias_addmm'', 'device_type=None', 'op_name='addmm''
+I1117 14:58:22.512000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: EmptyContiguousMMConfigHeuristics for 'template_name='contiguous_addmm'', 'device_type=None', 'op_name='addmm''
+I1117 14:58:22.513000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: EmptyContiguousMMConfigHeuristics for 'template_name='contiguous_mm'', 'device_type=None', 'op_name='mm''
+I1117 14:58:22.513000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: EmptyDecomposeKConfigHeuristics for 'template_name='decompose_k'', 'device_type=None', 'op_name='mm''
+I1117 14:58:22.514000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: DecomposeKConfigHeuristics for 'template_name='decompose_k'', 'device_type='cuda'', 'op_name='mm''
+I1117 14:58:22.518000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cuda'', 'op_name=None'
+I1117 14:58:22.518000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name=None'
+I1117 14:58:22.519000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAAddMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cuda'', 'op_name='baddbmm''
+I1117 14:58:22.519000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAAddMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='addmm''
+I1117 14:58:22.520000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMAHTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='mm-ah''
+I1117 14:58:22.520000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='cuda'', 'op_name=None'
+I1117 14:58:22.521000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDABlackwellPersistentTMATemplateConfigHeuristic for 'template_name='triton::blackwell_ws_persistent_device_tma'', 'device_type='cuda'', 'op_name=None'
+I1117 14:58:22.521000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAAddmmPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='cuda'', 'op_name='addmm''
+I1117 14:58:22.521000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic for 'template_name='triton::blackwell_ws_persistent_device_tma'', 'device_type='cuda'', 'op_name='addmm''
+I1117 14:58:22.522000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1117 14:58:22.522000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic for 'template_name='triton::scaled_mm_device_tma_epilogue_scaling'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1117 14:58:22.523000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic for 'template_name='triton::scaled_mm_device_tma_main_loop_scaling'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1117 14:58:22.523000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAScaledBlackwellTMATemplateConfigHeuristic for 'template_name='triton::blackwell_ws_persistent_device_tma'', 'device_type='cuda'', 'op_name='scaled_mm''
+I1117 14:58:22.524000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='cuda'', 'op_name=None'
+I1117 14:58:22.524000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CUDAInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cuda'', 'op_name='int_mm''
+I1117 14:58:22.524000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cpu'', 'op_name=None'
+I1117 14:58:22.525000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name=None'
+I1117 14:58:22.525000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUAddmmTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='cpu'', 'op_name='baddbmm''
+I1117 14:58:22.526000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUAddmmTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name='addmm''
+I1117 14:58:22.526000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name='scaled_mm''
+I1117 14:58:22.526000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='cpu'', 'op_name='int_mm''
+I1117 14:58:22.527000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: CPUMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='cpu'', 'op_name=None'
+I1117 14:58:22.527000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='xpu'', 'op_name=None'
+I1117 14:58:22.528000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name=None'
+I1117 14:58:22.528000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUAddmmTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='xpu'', 'op_name='baddbmm''
+I1117 14:58:22.528000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUAddmmTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name='addmm''
+I1117 14:58:22.529000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='xpu'', 'op_name=None'
+I1117 14:58:22.529000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUAddmmPersistentTMATemplateConfigHeuristic for 'template_name='triton::mm_persistent_tma'', 'device_type='xpu'', 'op_name='addmm''
+I1117 14:58:22.530000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name='scaled_mm''
+I1117 14:58:22.530000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='xpu'', 'op_name='int_mm''
+I1117 14:58:22.531000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: XPUMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='xpu'', 'op_name=None'
+I1117 14:58:22.531000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='mtia'', 'op_name=None'
+I1117 14:58:22.531000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name=None'
+I1117 14:58:22.532000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAAddMMTemplateConfigHeuristic for 'template_name='triton::bmm'', 'device_type='mtia'', 'op_name='baddbmm''
+I1117 14:58:22.532000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAAddMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name='addmm''
+I1117 14:58:22.533000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAScaledMMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name='scaled_mm''
+I1117 14:58:22.533000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAInt8MMTemplateConfigHeuristic for 'template_name='triton::mm'', 'device_type='mtia'', 'op_name='int_mm''
+I1117 14:58:22.533000 661891 torch/_inductor/template_heuristics/registry.py:65] Registered template heuristic: MTIAMMPlusMMTemplateConfigHeuristic for 'template_name='triton::mm_plus_mm'', 'device_type='mtia'', 'op_name=None'
+I1117 14:58:23.323000 661891 torch/_inductor/async_compile.py:258] [0/0] Creating 'subprocess' pool with 32 workers
+I1117 14:58:23.422000 661891 torch/_inductor/compile_worker/subproc_pool.py:170] [0/0] Suppressing compile worker output due to config
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs] TRACED GRAPH
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]  ===== BEFORE PRE GRAD =====
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]  /data/users/tianren/pytorch/torch/fx/_lazy_graph_module.py class GraphModule(torch.nn.Module):
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]     def forward(self, s77: "Sym(s77)", s27: "Sym(s27)", s53: "Sym(s53)", L_x_: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", L_weight_: "f32[s53][1]cuda:0"):
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         l_x_ = L_x_
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         l_weight_ = L_weight_
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         # File: /data/users/tianren/pytorch/test/inductor/test_dynamic_range_standalone.py:108 in test_fn, code: return dynamic_range_op(x, weight)
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         dynamic_range_139793145186080_default: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.ops.test_lib.dynamic_range_139793145186080.default(l_x_, l_weight_);  l_x_ = l_weight_ = None
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         return (dynamic_range_139793145186080_default,)
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs]         
+V1117 14:58:23.424000 661891 torch/_inductor/compile_fx.py:2411] [0/0] [__pre_grad_graphs] 
+V1117 14:58:24.064000 661891 torch/_inductor/compile_fx.py:892] [0/0] FX cache status: use_cache=True, local=True, remote=False, aot_mode=False, force_disable_caches=False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] FX graph cache hash details for key fac3ugfnnxlyumkcp3ynenkyfjefrynuy5bewyxad7bh5lxvbpts:
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [sdxtohon6kpwnm2xmajvnkcy244yiw2ooxrt35agvb2ra3z6whd] gm: <lambda>()
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0]     dynamic_range_139793145186080 = torch.ops.test_lib.dynamic_range_139793145186080.default(arg3_1, arg4_1);  arg3_1 = arg4_1 = None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0]     return (dynamic_range_139793145186080,)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0]     
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] # To see more debug info, please use `graph_module.print_readable()`
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [44pgx7aae5tjkl32f5bz2j27t7cizgvktvuvuluf52pfoxrlys5] example_inputs[0]: ('s77',)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [zqcxf25f6schvbsnbp77xlgexzcay62k56p6j33nktj3yg3xql5] example_inputs[1]: ('s27',)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [dx6m4jnwpapmgp2mcccvvo45quguxgb5cw4njfukbqyd6loocug] example_inputs[2]: ('s53',)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [5osqon2utnqfnffn4mi2td6tgie434vherassnwqsns7kfv42nl] example_inputs[3]: TensorMetadata(dtype=torch.float32, shape=torch.Size([s77, s27, s53]), stride=(s27*s53, s53, 1), device=device(type='cuda', index=0), layout=torch.strided, memory_format=None, storage_offset=0, storage_bytes=None, requires_grad=False, is_quantized=False, is_conj=False, is_neg=False, is_inference=False, is_sparse=False, is_coalesced=None, dense_dim=None, sparse_dim=None)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tnk2duejfb5bvmbpvsq3l7eeaq45vca4qllqaqk5k2iohmdys66] example_inputs[4]: TensorMetadata(dtype=torch.float32, shape=torch.Size([s53]), stride=(1,), device=device(type='cuda', index=0), layout=torch.strided, memory_format=None, storage_offset=0, storage_bytes=None, requires_grad=False, is_quantized=False, is_conj=False, is_neg=False, is_inference=False, is_sparse=False, is_coalesced=None, dense_dim=None, sparse_dim=None)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v3hzzlv4tjgvp3pyhmzagjd25orl6n7nynoa7svlhhwk73b7u3c] cache_key_tag: 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [lmglpn4zi7vob56n34r2j2rk7flv5xfgrcvmo7xcpirqsitygqx] fx_kwargs[boxed_forward_device_index]: BoxedDeviceIndex(value=None)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] fx_kwargs[cpp_wrapper]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [xq2hdkbfkbcuye6rgtypayrkhqf4cntij2dsd24rei3lsknakkf] fx_kwargs[cudagraphs]: BoxedBool(value=False)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] fx_kwargs[extern_node_serializer]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] fx_kwargs[fx_wrapper]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] fx_kwargs[is_backward]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] fx_kwargs[is_inference]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] fx_kwargs[layout_opt]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [h25wqx6vliw4j5rtzzbv6latydxyei3deyg6v7wzvnzryfktuki] fx_kwargs[static_input_idxs]: []
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [kcuxe2zwm3mzv2uk6adm6iskoy35bqfv725twacrdewod2dbl5d] inputs_to_check[0]: 3
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [lkkae3meylaixfif4thncru4hjqeaislawjoghffrbwuscaagei] inputs_to_check[1]: 4
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [du4vyrfyozrfxcf6kk6ma7oqwatapifazeelfsawmsiu6gjdtxp] deterministic_algorithms_settings: (False, False, True)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [pyawus3dzq5k52f53obyevhjmttghvob2hr5d7g4uml5s7av6wb] cuda_matmul_settings: ('none', True, True)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [4nfpjjx3qv7cjbuq4xevxecvizdjuc26vs3dmz4zp4nb7yeha2x] torch_version: _]z����?z�@�����{�>6x�)8�J�=
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [poglqjwowp4gnkmehjby2lvdjrwuo5tbxa2gayd6smgasl2hgsd] system_info[device]: {'name': 'NVIDIA H100'}
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [clxrcah4tnsqpyo7ofmbwy5i3t3bwzajak4ct2aqrncz35rgmqk] system_info[version]: {'triton': '3.5.00355c3e3452fa4500122244b8fff8864f22bc05c417a3d6f5dada9f2e92f8040-c4d799c32eb6a3b92ad36ad7ea5645efc5b2fc6cd5c73dadc3a678d57dd2ccf4-c37149275a03d063fc1c339cd76a19da1c17e3d555410372e6cad29eedef6202-23d635e690d670bf61798e1259674b78c0ed5ba222ab6a455f329f27a758fc2d-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855-03bffcc16c9d6be5ea8fde645caf3a6e3c0ac892eec49051a79d4cc99b66b9c7-e68505098eef3e7c0b050cb91da2587ab6c10d455ca0b941ff06fa8068e16305-318dbf7101b6ea9ebccfc57046fd8d963fe1d837c487005b37edf471a3207a9d-25cb0bee9547488335de2d495af738298ba6d4c20f1d37941dc17751c57a211e-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855-3e3d33fbab70c7c05fc70e2e2fdd763dca0b847f62150592b99f8886a419ee64-83ef58f2371da7ad8e01822c2afc82f9a2d6516c2249ee0bbd8873bb20616be0-01a5893c8aec83f997d0e4452de7dbac0f06883c4f92e5e97ec7b03dc9f8457a-5c1281b67c0d949da34ccf1c3b68804a2caa2665953984d837d753e91af611fe-5d15c5bebef8d7aa51b21fd187e5faa95eba4a213254355bc69e0648013599f7-30106ed84518c6ca7aca08e2c0ee188755f512cc0cb2d7da8914cc48c1ad6dcc-adb54e71d0ffc3bdac437fbc97929769fbbe4ebd03e6361c6357f2a24f7c5954-27b2a5d1e8db008bacefe6019f63922bbd65926de90bb1b527ee597477d2f365-a610dc5c215589aab7a784e1c07acef3e16d53ef00f08de793899964956f4e2a-18572e33e474a820799036f2b2f8c3e54d8a526386356716cccf2bf32a832376-2cdca74c4297804dcf499a7e9d4315ab87edfe2d72f536a8fdc02f28a3e7dacd-b53abe93473eb37d88bc378692065c9a8b1bf54b6417cb1911a13d10918c6d20-f60c2bb2d8eebe1c191f4b8b819844414dd1bce243645635a094f9f92665a58e-08abee21ce6230a873ed0831f70f9570b7ce39969dbf9b2f28ae1a1992ee1cc7-8e4b8599f819f32bcabae6fd118dbbccfbec0ba9e1909224d39c5fe32fbb491f-3db4bee9427c7eb0e2105aff484bdacc819357d298e8f6e89c372ae9c3625bdf-59cf295f3aab4fa62b96a627aa9fec1302950133750de59e542c7b4c9e5b80b6-5305890c3b133def44e2f3d3405e0fb1fd6ce78d0a28b2127670a195bbe11c66', 'cuda': '12.4'}
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [l3afxu4ycjwiasp557ikgya4pkhjmtmvrnsf4k3hgasyemhl747] system_info[hash]: 72df87843923244f5dfe78006e89da8f3b9c95b753d87107ae12f932f99f8dba
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[TYPE_CHECKING]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[inplace_padding]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[can_inplace_pad_graph_input]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[enable_auto_functionalized_v2]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[debug]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[disable_progress]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[verbose_progress]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[worker_log_path]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [mxibia26nanvqq4lqvdfub66benrqh5fqtsyzzj2qnwy7srv2s3] inductor_config[precompilation_timeout_seconds]: 3600
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[remote_gemm_autotune_cache]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[bundle_triton_into_fx_graph_cache]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[non_blocking_remote_cache_write]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[bundled_autotune_remote_cache]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[unsafe_skip_cache_dynamic_shape_guards]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [4bryyl4ahh5whyg3zwqebpwmjnx6w77nqgqbdjlowju6lkqtn7w] inductor_config[unsafe_marked_cacheable_functions]: {}
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[sleep_sec_TESTING_ONLY]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [pikr7bbcoixfzftsazp5ggufhdklj24babfry77bl4nuvyrrcp4] inductor_config[triton_kernel_default_layout_constraint]: needs_fixed_stride_order
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cpp_wrapper]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cpp_wrapper_build_separate]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[fx_wrapper]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[cpp_cache_precompile_headers]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[online_softmax]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[dce]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[static_weight_shapes]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[size_asserts]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[nan_asserts]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[runtime_triton_nan_asserts]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[scalar_asserts]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[alignment_asserts]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[pick_loop_orders]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[inplace_buffers]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[allow_buffer_reuse]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[memory_planning]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[use_fast_math]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[bfloat16_atomic_adds_enabled]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [x75won4jmsgeb63pcvwr2y4eteyzzdhmf5rv6xhjppie4hx2yu5] inductor_config[memory_pool]: intermediates
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[benchmark_harness]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[epilogue_fusion]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[prologue_fusion]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[epilogue_fusion_first]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[pattern_matcher]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[b2b_gemm_pass]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[custom_partitioner_fn]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[pre_grad_custom_pass]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[_post_fusion_custom_pass]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[split_cat_fx_passes]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[efficient_conv_bn_eval_fx_passes]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[is_predispatch]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[group_fusion]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[batch_fusion]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [4bryyl4ahh5whyg3zwqebpwmjnx6w77nqgqbdjlowju6lkqtn7w] inductor_config[pre_grad_fusion_options]: {}
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [4bryyl4ahh5whyg3zwqebpwmjnx6w77nqgqbdjlowju6lkqtn7w] inductor_config[post_grad_fusion_options]: {}
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[reorder_for_locality]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[dynamic_scale_rblock]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[force_fuse_int_mm_with_mul]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[use_mixed_mm]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [zwmmbkdkarexuhbigurz5lfnhx64tht7fznecjkrvznh6rzivbv] inductor_config[fx_passes_numeric_check]: {'pre_grad': False, 'precision': 0.0001, 'num_iterations': 1, 'requires_optimizer': True}
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v2td5s4lnsvyxvaevy4chx6kc5h3mm2axazbgwimqule5zrzao7] inductor_config[mixed_mm_choice]: heuristic
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[reorder_for_compute_comm_overlap]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [h25wqx6vliw4j5rtzzbv6latydxyei3deyg6v7wzvnzryfktuki] inductor_config[reorder_for_compute_comm_overlap_passes]: []
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[reorder_prefetch_limit]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[reorder_for_peak_memory]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[reorder_for_peak_memory_debug]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [vrl5ktomgtzox5xucd3np6vug3vyj6hwwzahqijuwpmamlv7ohi] inductor_config[size_threshold_for_succ_based_strategy]: 0
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [t3u4yj5mzijyfjvypyqngc4gf3wv6433necbugezv54jsexzrfp] inductor_config[bucket_all_gathers_fx]: none
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[bucket_all_gathers_fx_bucket_size_determinator]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [t3u4yj5mzijyfjvypyqngc4gf3wv6433necbugezv54jsexzrfp] inductor_config[bucket_reduce_scatters_fx]: none
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[bucket_reduce_scatters_fx_bucket_size_determinator]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [lxxtoqhcoepwfokeiibd575gnxo3uzwiv4hmpomlwkpzqz3qzsh] inductor_config[estimate_op_runtime]: default
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[runtime_estimations_mms_benchmark]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [yezuzjtg4h3jjur4jwtwiehbyixa7eonq4tqsqmwqve2lvvmrem] inductor_config[intra_node_bw]: 300
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [5fxczt3ciyxitdhizb7sfsgn7fhpczcqsngttnt5ot2wyctk7co] inductor_config[inter_node_bw]: 25
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[use_experimental_benchmarker]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[distributed_max_autotune_gemm]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[max_autotune]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[max_autotune_pointwise]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[max_autotune_gemm]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [j6c55jha5r2sdys2rwq7uqhtleea5dgjcye7nicfgft36v7xfvp] inductor_config[autotune_num_choices_displayed]: 10
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[max_autotune_report_choices_stats]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[max_autotune_prune_choices_based_on_shared_mem]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton_disable_device_detection]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[graph_partition]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [h25wqx6vliw4j5rtzzbv6latydxyei3deyg6v7wzvnzryfktuki] inductor_config[custom_should_partition_ops]: []
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[max_autotune_allow_flexible_layouts]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[force_same_precision]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [h25wqx6vliw4j5rtzzbv6latydxyei3deyg6v7wzvnzryfktuki] inductor_config[multi_kernel_hints]: []
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [2y7luesktjrque3nr7qtxnum2mkbeegzdrsvkm3rvdlhqboajhx] inductor_config[max_autotune_gemm_backends]: ATEN,TRITON,CPP
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [uqlsbif4zxd75vt522p52txyuguieipi2lwz5g5awt56lccqk7s] inductor_config[max_autotune_conv_backends]: ATEN,TRITON
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [jvchmi66fvqzlemhr5fcqorz5trfdtdalzfagtj2aolmimwqhdq] inductor_config[max_autotune_gemm_search_space]: DEFAULT
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [jvchmi66fvqzlemhr5fcqorz5trfdtdalzfagtj2aolmimwqhdq] inductor_config[max_autotune_flex_search_space]: DEFAULT
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[fallback_by_default]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[selective_decompose]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[use_dce]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[use_pre_grad_passes]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[use_joint_graph_passes]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[use_post_grad_passes]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cutedsl_enable_autotuning]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[autotune_fallback_to_aten]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [wft6ljqsfr3x4m7fa5zuyb7cwknky4irrxz4bjr6uzr2yiopxqj] inductor_config[unbacked_symint_fallback]: 8192
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[search_autotune_cache]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[save_args]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[autotune_in_subproc]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [iglov24t7x5ruci344aer2tm6nqshi4veuw4wxlssxtu46cx76m] inductor_config[max_autotune_subproc_result_timeout_seconds]: 60.0
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [zslw6pp37dzmhi5lhweftlhhdttfjade3t5j3y3vfk3ouze7nhw] inductor_config[max_autotune_subproc_graceful_timeout_seconds]: 0.0
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [zslw6pp37dzmhi5lhweftlhhdttfjade3t5j3y3vfk3ouze7nhw] inductor_config[max_autotune_subproc_terminate_timeout_seconds]: 0.0
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[autotune_multi_device]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[coordinate_descent_tuning]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[coordinate_descent_check_all_directions]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [aghvyrrgwvxijco2pk5wzc3cgmmthrbmgxitiibxuuscxdwrjd3] inductor_config[coordinate_descent_search_radius]: 1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v3hzzlv4tjgvp3pyhmzagjd25orl6n7nynoa7svlhhwk73b7u3c] inductor_config[autoheuristic_collect]: 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [jwbrgxes7vjqumngs5hyj6gn5nytv2whnppnzngvaagfmawhkkd] inductor_config[autoheuristic_use]: mixed_mm
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[run_jit_post_compile_hook]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [jvchmi66fvqzlemhr5fcqorz5trfdtdalzfagtj2aolmimwqhdq] inductor_config[autoheuristic_log_path]: DEFAULT
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [4p2fdjlvxrcw7c7fvzm5huhtqxnro4kvkx56f7p5zyrxqkwooov] inductor_config[layout_opt_default]: 1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[layout_optimization]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[force_layout_optimization]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[keep_output_stride]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[warn_mix_layout]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [lkkae3meylaixfif4thncru4hjqeaislawjoghffrbwuscaagei] inductor_config[realize_reads_threshold]: 4
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [rr5m5hsocoyodldz7vcvaizdwvm2rt34evmqdxvng7wz3tufvo6] inductor_config[realize_opcount_threshold]: 30
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [yttmfmxblgcbsvbokguzowcorrcxz5uunxtcvsbe6nijgcx45he] inductor_config[realize_acc_reads_threshold]: 8
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[realize_acc_reads_size_threshold]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[fallback_random]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[fallback_embedding_bag_byte_unpack]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[implicit_fallbacks]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[assume_unaligned_fallback_output]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[inductor_choices_class]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aggressive_fusion]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[debug_fusion]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[benchmark_fusion]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v3hzzlv4tjgvp3pyhmzagjd25orl6n7nynoa7svlhhwk73b7u3c] inductor_config[enabled_metric_tables]: 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[loop_ordering_after_fusion]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[loop_index_inversion_in_fusion]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [j6c55jha5r2sdys2rwq7uqhtleea5dgjcye7nicfgft36v7xfvp] inductor_config[score_fusion_memory_threshold]: 10
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[benchmark_epilogue_fusion]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [aghvyrrgwvxijco2pk5wzc3cgmmthrbmgxitiibxuuscxdwrjd3] inductor_config[max_epilogue_benchmarked_choices]: 1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [jykiys6ynafs3zdylwa5ggq6j655mxeh42d6mtdi22gffkrmiac] inductor_config[max_fusion_size]: 64
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [jykiys6ynafs3zdylwa5ggq6j655mxeh42d6mtdi22gffkrmiac] inductor_config[max_fusion_buffer_group_pairwise_attempts]: 64
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[max_fusion_unique_io_buffers]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [yttmfmxblgcbsvbokguzowcorrcxz5uunxtcvsbe6nijgcx45he] inductor_config[max_pointwise_cat_inputs]: 8
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[force_pointwise_cat]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [yttmfmxblgcbsvbokguzowcorrcxz5uunxtcvsbe6nijgcx45he] inductor_config[unroll_reductions_threshold]: 8
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[comment_origin]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[conv_1x1_as_mm]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[split_reductions]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[deterministic]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [vrl5ktomgtzox5xucd3np6vug3vyj6hwwzahqijuwpmamlv7ohi] inductor_config[min_num_split]: 0
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[benchmark_kernel]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[constant_and_index_propagation]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[always_keep_tensor_constants]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[assert_indirect_indexing]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[compute_all_bounds]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[combo_kernels]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[benchmark_combo_kernel]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [aghvyrrgwvxijco2pk5wzc3cgmmthrbmgxitiibxuuscxdwrjd3] inductor_config[combo_kernels_autotune]: 1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [aghvyrrgwvxijco2pk5wzc3cgmmthrbmgxitiibxuuscxdwrjd3] inductor_config[combo_kernel_allow_mixed_sizes]: 1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[combo_kernel_foreach_dynamic_shapes]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [7c6i6h6bfell5u33q6rcv25lpgmk4jah3uhjjx6bjevvjnshoim] inductor_config[combo_kernel_max_num_args]: 250
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[joint_graph_constant_folding]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[debug_index_asserts]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[emulate_precision_casts]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[emulate_divison_rounding]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[is_nightly_or_source]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[developer_warnings]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[optimize_scatter_upon_const_tensor]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[add_pre_grad_passes]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[remove_pre_grad_passes]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [eyt4i73byifiidlcgmugo4juf3sqznr7bv6k2xujnk6hfzd7vcn] inductor_config[small_memory_access_threshold]: 16777216
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[worker_suppress_logging]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[log_tlparse]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[_fuse_ddp_communication]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [5fxczt3ciyxitdhizb7sfsgn7fhpczcqsngttnt5ot2wyctk7co] inductor_config[_fuse_ddp_bucket_size]: 25
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[_micro_pipeline_tp]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[_collective.auto_select]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [4vdewewvaarnygruqwzavmkvu4lqggolypo2tq5ohtx2kcelkky] inductor_config[_collective.one_shot_all_reduce_threshold_bytes]: 131072
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aten_distributed_optimizations.enable_overlap_scheduling]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aten_distributed_optimizations.collective_bucketing]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aten_distributed_optimizations.insert_overlap_deps]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aten_distributed_optimizations.max_compute_pre_fetch]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aten_distributed_optimizations.custom_runtime_estimation]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [y5k6t5wy5da5t7gcf4bkajyleeovwikw6pyjiaf6ieqev62zxrj] inductor_config[aten_distributed_optimizations.collective_estimator]: analytical
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[quiesce_async_compile_pool]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [smfbtbb3fuwobubxbj6g3jio7u6ufdkgz35qhppjgt3yxptkxha] inductor_config[quiesce_async_compile_time]: 60
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[use_static_cuda_launcher]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[static_launch_user_defined_triton_kernels]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[strict_static_cuda_launcher]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[global_cache_dir]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [j6c55jha5r2sdys2rwq7uqhtleea5dgjcye7nicfgft36v7xfvp] inductor_config[kernel_name_max_ops]: 10
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[shape_padding]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[comprehensive_padding]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[pad_channels_last]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[pad_dynamic_shapes]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[disable_padding_cpu]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[expand_dimension_for_pointwise_nodes]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ljdqgtysl3vdf7j6attlz5gmjg2ncihnveojfyubosplmkrjgra] inductor_config[padding_alignment_bytes]: 128
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [dnnw5ks3yxrp7mwvihb2hh4tqx35ye637xt33x64kw4fvz2nyzg] inductor_config[padding_stride_threshold]: 1024
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[pad_outputs]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[bw_outputs_user_visible]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[force_shape_pad]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[permute_fusion]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[profiler_mark_wrapper_call]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[generate_intermediate_hooks]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[debug_ir_traceback]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[_raise_error_for_testing]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v3hzzlv4tjgvp3pyhmzagjd25orl6n7nynoa7svlhhwk73b7u3c] inductor_config[_profile_var]: 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[profile_bandwidth]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v3hzzlv4tjgvp3pyhmzagjd25orl6n7nynoa7svlhhwk73b7u3c] inductor_config[profile_bandwidth_regex]: 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[profile_bandwidth_output]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[profile_bandwidth_with_do_bench_using_profiling]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[disable_cpp_codegen]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[freezing]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[freezing_discard_parameters]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[decompose_mem_bound_mm]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[assume_aligned_inputs]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[unsafe_ignore_unsupported_triton_autotune_args]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[check_stack_no_cycles_TESTING_ONLY]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[enable_linear_binary_folding]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[annotate_training]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[enable_caching_generated_triton_templates]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [4bryyl4ahh5whyg3zwqebpwmjnx6w77nqgqbdjlowju6lkqtn7w] inductor_config[autotune_lookup_table]: {}
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [c2gaopsp6oqinpzvhlaz4gsqnq3shl5e54b7j6dsgwjadh5uatx] inductor_config[file_lock_timeout]: 600
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[enable_autograd_for_aot]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v3hzzlv4tjgvp3pyhmzagjd25orl6n7nynoa7svlhhwk73b7u3c] inductor_config[torchinductor_worker_logpath]: 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [sz3im5ogc6asp7g4uqocnovype63tkdexzfrniv6hn2oank3biu] inductor_config[cpp.threads]: -1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[cpp.no_redundant_loops]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cpp.dynamic_threads]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cpp.simdlen]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [xgnfe6mw7nii5zpxhlblgsehzrcqmjqpqswcwvf5adwbhz7aj2h] inductor_config[cpp.min_chunk_size]: 512
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [c7zj4qytmety6keurs3hsh5wn7foxp3dqx4kym2ucszzcb2ngrf] inductor_config[cpp.cxx]: (None, 'g++')
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cpp.enable_kernel_profile]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[cpp.weight_prepack]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cpp.inject_relu_bug_TESTING_ONLY]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cpp.inject_log1p_bug_TESTING_ONLY]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cpp.vec_isa_ok]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [yrty22bseefglnysuoec4ji7j2rnaggdj3g33zzj7avogwfmgdw] inductor_config[cpp.descriptive_names]: original_aten
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ebt2ncs4f5y7dn7btzi76mnouepvzad474tmp5iju4wiuumjl4s] inductor_config[cpp.max_horizontal_fusion_size]: 16
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[cpp.fallback_scatter_reduce_sum]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cpp.enable_unsafe_math_opt_flag]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ijs44lspkinjvhcs7uff7n3noc53jvsp4yfljjh22mafhb7khxe] inductor_config[cpp.enable_floating_point_contract_flag]: off
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[cpp.enable_tiling_heuristics]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cpp.enable_grouped_gemm_template]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [aghvyrrgwvxijco2pk5wzc3cgmmthrbmgxitiibxuuscxdwrjd3] inductor_config[cpp.gemm_max_k_slices]: 1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cpp.gemm_cache_blocking]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cpp.gemm_thread_factors]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[cpp.enable_loop_tail_vec]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cpp.enable_concat_linear]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cpp.use_decompose_tanh]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cpp.use_small_dequant_buffer]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cpp.force_inline_kernel]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[cpp.use_constexpr_for_int_array]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.cudagraphs]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.cudagraph_trees]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.cudagraph_skip_dynamic_graphs]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[triton.cudagraph_capture_sizes]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.slow_path_cudagraph_asserts]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.cudagraph_trees_history_recording]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.cudagraph_support_input_mutation]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ljdqgtysl3vdf7j6attlz5gmjg2ncihnveojfyubosplmkrjgra] inductor_config[triton.cudagraph_unexpected_rerecord_limit]: 128
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [yttmfmxblgcbsvbokguzowcorrcxz5uunxtcvsbe6nijgcx45he] inductor_config[triton.cudagraph_dynamic_shape_warn_limit]: 8
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.force_cudagraph_sync]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.force_cudagraphs_warmup]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.cudagraph_or_error]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.reorder_for_reducing_graph_partitions]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.fast_path_cudagraph_asserts]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.skip_cudagraph_warmup]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.debug_sync_graph]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.debug_sync_kernel]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.dense_indexing]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.coalesce_tiling_analysis]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[triton.max_tiles]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.prefer_nd_tiling]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.autotune_pointwise]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.autotune_cublasLt]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[triton.autotune_at_compile_time]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.autotune_with_sample_inputs]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.tile_reductions]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.native_matmul]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.tiling_prevents_pointwise_fusion]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.tiling_prevents_reduction_fusion]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.unique_kernel_names]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.unique_user_kernel_names]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [yrty22bseefglnysuoec4ji7j2rnaggdj3g33zzj7avogwfmgdw] inductor_config[triton.descriptive_names]: original_aten
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.persistent_reductions]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.cooperative_reductions]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.force_cooperative_reductions]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [vrl5ktomgtzox5xucd3np6vug3vyj6hwwzahqijuwpmamlv7ohi] inductor_config[triton.multi_kernel]: 0
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.divisible_by_16]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [fv6slhtedtydps5s5u2etitscliblzcidyitqf7krsv4e23fzk6] inductor_config[triton.min_split_scan_rblock]: 256
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.store_cubin]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ebt2ncs4f5y7dn7btzi76mnouepvzad474tmp5iju4wiuumjl4s] inductor_config[triton.spill_threshold]: 16
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.use_block_ptr]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.use_tensor_descriptor]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[triton.inject_relu_bug_TESTING_ONLY]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.codegen_upcast_to_fp32]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.enable_persistent_tma_matmul]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.enable_template_tma_store]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.enable_epilogue_subtiling]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.skip_l1_cache]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.disallow_failing_autotune_kernels_TESTING_ONLY]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [j6c55jha5r2sdys2rwq7uqhtleea5dgjcye7nicfgft36v7xfvp] inductor_config[triton.num_decompose_k_splits]: 10
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [jffvide67gguonizth6bla7qwy6egn73yfn66335sv5b7i2rx3p] inductor_config[triton.decompose_k_threshold]: 32
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.enable_pdl]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[triton.mix_order_reduction]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [aghvyrrgwvxijco2pk5wzc3cgmmthrbmgxitiibxuuscxdwrjd3] inductor_config[triton.mix_order_reduction_initial_xblock]: 1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[triton.mix_order_reduction_split_size]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[triton.mix_order_reduction_autotune_split_size]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v3hzzlv4tjgvp3pyhmzagjd25orl6n7nynoa7svlhhwk73b7u3c] inductor_config[aot_inductor.output_path]: 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor.debug_compile]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor.debug_symbols]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [6fxyf5ymh244xdypwkhtsbszab4nnfsgmul2kmyqmw422i5h54e] inductor_config[aot_inductor.compile_wrapper_opt_level]: O1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ngkkx5e6z7erl6da23zb2cmsctz4yvaqyameyg5hbqln4wrhh7x] inductor_config[aot_inductor.debug_intermediate_value_printer]: 0
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aot_inductor.filtered_kernel_names]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v3hzzlv4tjgvp3pyhmzagjd25orl6n7nynoa7svlhhwk73b7u3c] inductor_config[aot_inductor.serialized_in_spec]: 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v3hzzlv4tjgvp3pyhmzagjd25orl6n7nynoa7svlhhwk73b7u3c] inductor_config[aot_inductor.serialized_out_spec]: 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor.use_runtime_constant_folding]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor.force_mmap_weights]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[aot_inductor.use_consts_asm_build]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor.package]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aot_inductor.package_cpp_only]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[aot_inductor.dynamic_linkage]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [4bryyl4ahh5whyg3zwqebpwmjnx6w77nqgqbdjlowju6lkqtn7w] inductor_config[aot_inductor.metadata]: {}
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[aot_inductor.raise_error_on_ignored_optimization]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor.dump_aoti_minifier]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [pr5nr4a7dthirgd2ljo3d2xakc63ywxugusu6mkmr6gmpeliyib] inductor_config[aot_inductor.repro_level]: 2
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [4bryyl4ahh5whyg3zwqebpwmjnx6w77nqgqbdjlowju6lkqtn7w] inductor_config[aot_inductor.presets]: {}
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor.allow_stack_allocation]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor.use_minimal_arrayref_interface]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor.weight_use_caching_allocator]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[aot_inductor.package_constants_in_so]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aot_inductor.package_constants_on_disk_format]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[aot_inductor.precompile_headers]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aot_inductor.embed_kernel_binary]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aot_inductor.emit_multi_arch_kernel]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aot_inductor.model_name_for_generated_files]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [4bryyl4ahh5whyg3zwqebpwmjnx6w77nqgqbdjlowju6lkqtn7w] inductor_config[aot_inductor.custom_ops_to_c_shims]: {}
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aot_inductor.custom_op_libs]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor.enable_lto]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[aot_inductor.link_libtorch]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aot_inductor.cross_target_platform]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aot_inductor.aoti_shim_library]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[aot_inductor.aoti_shim_library_path]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[aot_inductor_mode.compile_standalone]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cuda.arch]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cuda.version]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tvyftmtdmezlejo2xllu7awzv4pzc4vm4fub4b3gpl5jptjkosi] inductor_config[cuda.compile_opt_level]: -O1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cuda.enable_cuda_lto]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cuda.enable_ptxas_info]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cuda.enable_debug_info]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cuda.use_fast_math]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cuda.cutlass_max_profiling_configs]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ty4d7ntvjwumcgotd4j6w7bwokf5njhzmtvqvxa32jjub6k2ty2] inductor_config[cuda.cutlass_max_profiling_swizzle_options]: [1, 2, 4, 8]
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cuda.cutlass_epilogue_fusion_enabled]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cuda.cutlass_tma_only]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cuda.cuda_cxx]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [aghvyrrgwvxijco2pk5wzc3cgmmthrbmgxitiibxuuscxdwrjd3] inductor_config[cuda.cutlass_backend_min_gemm_size]: 1
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cuda.generate_test_runner]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cuda.cutlass_op_allowlist_regex]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[cuda.cutlass_op_denylist_regex]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ngkkx5e6z7erl6da23zb2cmsctz4yvaqyameyg5hbqln4wrhh7x] inductor_config[cuda.cutlass_instantiation_level]: 0
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cuda.cutlass_hash_with_compile_cmd]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[cuda.cutlass_prescreening]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ly46nlihymo3siersryfadlchkmxk6ohljz4l7vognsjg2qurpp] inductor_config[cuda.cutlass_enabled_ops]: all
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[cuda.use_binary_remote_cache]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cuda.upload_to_binary_remote_cache]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[cuda.binary_remote_cache_force_write]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[cuda.enable_caching_codegen]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [h25wqx6vliw4j5rtzzbv6latydxyei3deyg6v7wzvnzryfktuki] inductor_config[rocm.arch]: []
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [gzctoy3drvth5kwqmdxb4tjn2picfdjsdu33nbniulhx5hsi3lv] inductor_config[rocm.ck_supported_arch]: ['gfx90a', 'gfx942', 'gfx950']
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [klfqjprnpfhcdurgvuikvc4rpd5ynkpk77toousr5h3u5roty6p] inductor_config[rocm.compile_opt_level]: -O2
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[rocm.is_debug]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[rocm.save_temps]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[rocm.use_fast_math]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[rocm.flush_denormals]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[rocm.print_kernel_resource_usage]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[rocm.rocm_home]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[rocm.ck_dir]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[rocm.generate_test_runner]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[rocm.n_max_profiling_configs]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[rocm.ck_max_profiling_configs]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[rocm.ck_tile_max_profiling_configs]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[rocm.use_preselected_instances]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[rocm.kBatch_sweep]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ebt2ncs4f5y7dn7btzi76mnouepvzad474tmp5iju4wiuumjl4s] inductor_config[rocm.split_k_threshold]: 16
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ebt2ncs4f5y7dn7btzi76mnouepvzad474tmp5iju4wiuumjl4s] inductor_config[rocm.contiguous_threshold]: 16
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [bsvfcwwoczx2rlkdz2eta6doujsymyihmi46hhwk6clrrvwcb6m] inductor_config[cpu_backend]: cpp
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [caw4ly2z672k6kjfahoxwpajp5idhhtrpgf3ma2clylcp7c7aid] inductor_config[cuda_backend]: triton
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [caw4ly2z672k6kjfahoxwpajp5idhhtrpgf3ma2clylcp7c7aid] inductor_config[xpu_backend]: triton
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [ljhgflgihidopsfsdcbqynv27nceykby3nutyd5jlcpq7n6e7l4] inductor_config[halide.cpu_target]: host
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [wx7vmsmrdpk5ue2txlywp3lj3faqmdjphs5fgg2ehzsyno7uovg] inductor_config[halide.gpu_target]: host-cuda
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [svgytlua5wcyeia7wq7e6zgh5tsueikrnzchmdmouvmkpfsc2zq] inductor_config[halide.scheduler_cuda]: Anderson2021
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [k5ogk6345jvklsnu7g2njqstiz2g6pm5wmqpgg3kasrmuqwjvl6] inductor_config[halide.scheduler_cpu]: Adams2019
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[halide.asserts]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[halide.debug]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[halide.scan_kernels]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [zwewsbwzgzypcnzixgl7ybbc4tk5kq36yeo267m422vyiuhdyiv] inductor_config[_save_config_ignore]: ['trace.upload_tar', 'joint_custom_pre_pass', 'joint_custom_post_pass', 'pre_grad_custom_pass', 'aot_inductor.repro_level', 'aot_inductor.dump_aoti_minifier', 'post_grad_custom_pre_pass', 'post_grad_custom_post_pass', '_fuse_ddp_communication_passes', '_pre_fusion_custom_pass']
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [6trwnwm4voevl4joplmkcssruwgd46kgqfejamut6kq662kstpd] inductor_config[_cache_config_ignore_prefix]: ['trace', 'cuda.cutlass_dir', 'worker_start_method', 'compile_threads', 'post_grad_custom_post_pass', 'post_grad_custom_pre_pass', 'joint_custom_pre_pass', 'joint_custom_post_pass', '_fuse_ddp_communication_passes', '_pre_fusion_custom_pass', 'always_complex_memory_overlap_TESTING_ONLY', 'fx_graph_cache', 'fx_graph_remote_cache', 'autotune_local_cache', 'autotune_remote_cache']
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [h25wqx6vliw4j5rtzzbv6latydxyei3deyg6v7wzvnzryfktuki] inductor_config[external_matmul]: []
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[write_are_deterministic_algorithms_enabled]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[lookup_table.table]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[lookup_table.check_src_hash]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[test_configs.force_extern_kernel_in_multi_template]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[test_configs.max_mm_configs]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[test_configs.runtime_triton_dtype_assert]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[test_configs.runtime_triton_shape_assert]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[test_configs.static_cpp_dtype_assert]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[test_configs.autotune_choice_name_regex]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[test_configs.autotune_choice_desc_regex]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[test_configs.graphsafe_rng_func_ignores_fallback_random]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] inductor_config[test_configs.track_memory_lifecycle]: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[test_configs.use_libtorch]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [cev5uo2jlwdhw2uyzcm7vr6cl23azjfw437f5r5lskm7spucos6] inductor_config[test_configs.assume_bucketing_reduces_latency]: True
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[test_configs.force_filter_reduction_configs]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [v3hzzlv4tjgvp3pyhmzagjd25orl6n7nynoa7svlhhwk73b7u3c] inductor_config[test_configs.distort_benchmarking_result]: 
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[test_configs.bisect_pre_grad_graph]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] inductor_config[test_configs.bisect_keep_custom_backend_for_inductor]: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] post_grad_custom_pre_pass: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [esstihe2nyydk4mhzpvox3qkajyu5y5t23hk3fi2me7jn75xi3o] precompile_enabled: False
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] post_grad_custom_post_pass: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] joint_custom_pre_pass: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] joint_custom_post_pass: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] _pre_fusion_custom_pass: None
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [nk3qjerriqqc77fquy5nbegbf4gnlzzbxbtxwvyxvcdzt65xl2a] _fuse_ddp_communication_passes[0]: fuse_ddp_with_concat_op
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [t46i2lzpuxqpmemjedva3sub75arja6fqed4duz4kp2bb7d3sgc] _fuse_ddp_communication_passes[1]: schedule_comm_wait
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [74x2jtykapblkbwkh24fsfbwq4iejjkibyckoc2bmgj6llnf57s] custom_backend_passes: (None, None, None, None, None)
+V1117 14:58:24.070000 661891 torch/_inductor/codecache.py:983] [0/0] [tquy2we2efmowuj4wuqzcfcfdcrkzkzmwdae6hprj7fa64jpusq] _custom_partitioner_fn: None
+V1117 14:58:24.071000 661891 torch/_inductor/compile_fx.py:928] [0/0] FX cache key generated: fac3ugfnnxlyumkcp3ynenkyfjefrynuy5bewyxad7bh5lxvbpts
+I1117 14:58:24.072000 661891 torch/_inductor/codecache.py:1613] [0/0] fx graph cache miss for key fac3ugfnnxlyumkcp3ynenkyfjefrynuy5bewyxad7bh5lxvbpts
+V1117 14:58:24.072000 661891 torch/_inductor/compile_fx.py:997] [0/0] FX cache miss, compiling and saving to cache
+V1117 14:58:24.073000 661891 torch/_inductor/triton_bundler.py:140] [0/0] TritonBundler.begin_compile is called
+I1117 14:58:24.073000 661891 torch/_inductor/compile_fx.py:1230] [0/0] Step 3: torchinductor compiling FORWARDS graph 0
+V1117 14:58:24.093000 661891 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs] TRACED GRAPH
+V1117 14:58:24.093000 661891 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]  ===== AFTER POST GRAD =====
+V1117 14:58:24.093000 661891 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]  /data/users/tianren/pytorch/torch/fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
+V1117 14:58:24.093000 661891 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]     def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0", arg4_1: "f32[s53][1]cuda:0"):
+V1117 14:58:24.093000 661891 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         # File: /data/users/tianren/pytorch/test/inductor/test_dynamic_range_standalone.py:108 in test_fn, code: return dynamic_range_op(x, weight)
+V1117 14:58:24.093000 661891 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         dynamic_range_139793145186080: "f32[s77, s27, s53][s27*s53, s53, 1]cuda:0" = torch.ops.test_lib.dynamic_range_139793145186080.default(arg3_1, arg4_1);  arg3_1 = arg4_1 = None
+V1117 14:58:24.093000 661891 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         return (dynamic_range_139793145186080,)
+V1117 14:58:24.093000 661891 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs]         
+V1117 14:58:24.093000 661891 torch/_inductor/compile_fx.py:1310] [0/0] [__post_grad_graphs] 
+V1117 14:58:24.095000 661891 torch/_inductor/graph.py:1602] [0/0] lowering %arg0_1 : [num_users=0] = placeholder[target=arg0_1] 
+V1117 14:58:24.096000 661891 torch/_inductor/graph.py:1602] [0/0] lowering %arg1_1 : [num_users=0] = placeholder[target=arg1_1] 
+V1117 14:58:24.096000 661891 torch/_inductor/graph.py:1602] [0/0] lowering %arg2_1 : [num_users=0] = placeholder[target=arg2_1] 
+V1117 14:58:24.097000 661891 torch/_inductor/graph.py:1602] [0/0] lowering %arg3_1 : [num_users=1] = placeholder[target=arg3_1] 
+V1117 14:58:24.097000 661891 torch/_inductor/graph.py:1602] [0/0] lowering %arg4_1 : [num_users=1] = placeholder[target=arg4_1] 
+V1117 14:58:24.098000 661891 torch/_inductor/graph.py:1602] [0/0] lowering %dynamic_range_139793145186080 : [num_users=1] = call_function[target=torch.ops.test_lib.dynamic_range_139793145186080.default](args = (%arg3_1, %arg4_1), kwargs = {}) 
+V1117 14:58:24.098000 661891 torch/_inductor/graph.py:1291] [0/0]   via <function test_lib::dynamic_range_139793145186080 at 0x7f220385a160>
+I1117 14:58:24.099000 661891 torch/_inductor/kernel/custom_op.py:713] [0/0] === Range-based Autotuning for dynamic_range_autotuned ===
+I1117 14:58:24.100000 661891 torch/_inductor/kernel/custom_op.py:714] [0/0] Dispatch on: x[1], Ranges: [(1, 512), (513, 2048), (2049, inf)]
+V1117 14:58:24.165000 661891 torch/_inductor/triton_bundler.py:151] [0/0] TritonBundler.end_compile is called
+Running test on device: cuda
+
+=== Verifying all implementations produce equivalent results ===
+  ✓ short_impl correct for seq_len=256
+  ✓ medium_impl correct for seq_len=256
+  ✓ long_impl correct for seq_len=256
+  ✓ short_impl correct for seq_len=1024
+  ✓ medium_impl correct for seq_len=1024
+  ✓ long_impl correct for seq_len=1024
+  ✓ short_impl correct for seq_len=4096
+  ✓ medium_impl correct for seq_len=4096
+  ✓ long_impl correct for seq_len=4096
+
+=== Testing autotuning with compilation (DYNAMIC SHAPES) ===
+  Compiling with dynamic=True to preserve all torch.cond branches...
+Traceback (most recent call last):
+  File "/data/users/tianren/pytorch/test/inductor/test_dynamic_range_standalone.py", line 144, in <module>
+    test_dynamic_range_tuning()
+  File "/data/users/tianren/pytorch/test/inductor/test_dynamic_range_standalone.py", line 113, in test_dynamic_range_tuning
+    result = test_fn(test_x, test_weight)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_dynamo/eval_frame.py", line 934, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/compile_fx.py", line 1016, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/data/users/tianren/pytorch/torch/_inductor/compile_fx.py", line 1000, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/compile_fx.py", line 1754, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/compile_fx.py", line 1449, in codegen_and_compile
+    graph.run(*example_inputs)
+  File "/data/users/tianren/pytorch/torch/_inductor/graph.py", line 983, in run
+    return super().run(*args)
+           ^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/fx/interpreter.py", line 200, in run
+    self.env[node] = self.run_node(node)
+                     ^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/graph.py", line 1697, in run_node
+    result = super().run_node(n)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/fx/interpreter.py", line 295, in run_node
+    return getattr(self, n.op)(n.target, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/graph.py", line 1341, in call_function
+    raise LoweringException(e, target, args, kwargs).with_traceback(
+  File "/data/users/tianren/pytorch/torch/_inductor/graph.py", line 1331, in call_function
+    out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/kernel/custom_op.py", line 763, in range_based_lowering_fn
+    autotuned_result, winning_choice = autotune_custom_op(
+                                       ^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/kernel/custom_op.py", line 594, in autotune_custom_op
+    layout=FixedLayout(
+           ^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/ir.py", line 3691, in __init__
+    assert all(isinstance(s, (Expr, int)) for s in size)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch._inductor.exc.InductorError: LoweringException: AssertionError: 
+  target: test_lib.dynamic_range_139793145186080.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='arg3_1', layout=FixedLayout('cuda:0', torch.float32, size=[s77, s27, s53], stride=[s27*s53, s53, 1]))
+  ))
+  args[1]: TensorBox(StorageBox(
+    InputBuffer(name='arg4_1', layout=FixedLayout('cuda:0', torch.float32, size=[s53], stride=[1]))
+  ))
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
+I1117 14:58:27.099000 661891 torch/_inductor/remote_cache.py:432] Cache Metrics: None
+I1117 14:58:27.099000 661891 torch/_inductor/remote_cache.py:432] 

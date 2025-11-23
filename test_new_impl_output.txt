@@ -1,0 +1,79 @@
+Traceback (most recent call last):
+  File "/data/users/tianren/pytorch/test_new_torch_cond_impl.py", line 165, in <module>
+    success = test_torch_cond_range_autotuning()
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/test_new_torch_cond_impl.py", line 92, in test_torch_cond_range_autotuning
+    result1 = compiled_op(x1, weight)
+              ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_dynamo/eval_frame.py", line 934, in compile_wrapper
+    raise e.remove_dynamo_frames() from None  # see TORCHDYNAMO_VERBOSE=1
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/compile_fx.py", line 1016, in _compile_fx_inner
+    raise InductorError(e, currentframe()).with_traceback(
+  File "/data/users/tianren/pytorch/torch/_inductor/compile_fx.py", line 1000, in _compile_fx_inner
+    mb_compiled_graph = fx_codegen_and_compile(
+                        ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/compile_fx.py", line 1754, in fx_codegen_and_compile
+    return scheme.codegen_and_compile(gm, example_inputs, inputs_to_check, graph_kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/compile_fx.py", line 1449, in codegen_and_compile
+    graph.run(*example_inputs)
+  File "/data/users/tianren/pytorch/torch/_inductor/graph.py", line 983, in run
+    return super().run(*args)
+           ^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/fx/interpreter.py", line 200, in run
+    self.env[node] = self.run_node(node)
+                     ^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/graph.py", line 1697, in run_node
+    result = super().run_node(n)
+             ^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/fx/interpreter.py", line 295, in run_node
+    return getattr(self, n.op)(n.target, args, kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/graph.py", line 1341, in call_function
+    raise LoweringException(e, target, args, kwargs).with_traceback(
+  File "/data/users/tianren/pytorch/torch/_inductor/graph.py", line 1331, in call_function
+    out = lowerings[target](*args, **kwargs)  # type: ignore[index]
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/kernel/custom_op.py", line 956, in range_based_lowering_wrapper
+    return _range_based_lowering_fn(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/kernel/custom_op.py", line 827, in _range_based_lowering_fn
+    autotuned_result, winning_choice = autotune_custom_op(
+                                       ^^^^^^^^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/kernel/custom_op.py", line 511, in autotune_custom_op
+    layout=FixedLayout(
+           ^^^^^^^^^^^^
+  File "/data/users/tianren/pytorch/torch/_inductor/ir.py", line 3691, in __init__
+    assert all(isinstance(s, (Expr, int)) for s in size)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch._inductor.exc.InductorError: LoweringException: AssertionError: 
+  target: test.my_op.default
+  args[0]: TensorBox(StorageBox(
+    InputBuffer(name='arg3_1', layout=FixedLayout('cuda:0', torch.float32, size=[s33, s50, s69], stride=[s50*s69, s69, 1]))
+  ))
+  args[1]: TensorBox(StorageBox(
+    InputBuffer(name='arg4_1', layout=FixedLayout('cuda:0', torch.float32, size=[s69], stride=[1]))
+  ))
+
+Set TORCHDYNAMO_VERBOSE=1 for the internal stack trace (please do this especially if you're reporting a bug to PyTorch). For even more developer context, set TORCH_LOGS="+dynamo"
+
+
+ERROR conda.cli.main_run:execute(49): `conda run python3 test_new_torch_cond_impl.py` failed. (See above for error)
+
+🧪 Testing New torch.cond-based Range Autotuning Implementation
+
+================================================================================
+Test: torch.cond-based Range Autotuning
+================================================================================
+
+1. Registering custom op with range-based autotuning...
+   ✓ Registered successfully
+
+2. Compiling with dynamic=True...
+   ✓ Compiled
+
+3. Testing with different input sizes...
+
+   Test 3a: Short sequence (seq_len=256, should use SIN)
+
