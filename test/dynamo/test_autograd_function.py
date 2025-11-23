@@ -1652,7 +1652,7 @@ class GraphModule(torch.nn.Module):
             @staticmethod
             def backward(ctx, grad_a, grad_b):
                 (a,) = ctx.saved_tensors
-                return grad_b * 2, grad_b * 3
+                return grad_b * 2, a * grad_b * 3
 
         def fn(x, y):
             z = Add.apply(x, y)
@@ -1706,17 +1706,18 @@ class GraphModule(torch.nn.Module):
             out: "f32[8, 8]" = l_x_ * l_y_;  l_x_ = l_y_ = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return ((a, b, out), ())
+            return ((a, b, out), (a,))
 
     class bwd_body_0(torch.nn.Module):
-        def forward(self, unused_0, unused_1, grad_b: "f32[8, 8]"):
+        def forward(self, unused_0, unused_1, grad_b: "f32[8, 8]", a: "f32[8, 8]"):
             _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
 
             mul: "f32[8, 8]" = grad_b * 2
-            mul_1: "f32[8, 8]" = grad_b * 3;  grad_b = None
+            mul_1: "f32[8, 8]" = a * grad_b;  a = grad_b = None
+            mul_2: "f32[8, 8]" = mul_1 * 3;  mul_1 = None
 
             _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
-            return (mul, mul_1)
+            return (mul, mul_2)
 """,
         )
 
