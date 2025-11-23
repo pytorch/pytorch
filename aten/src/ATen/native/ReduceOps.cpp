@@ -132,6 +132,68 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#include <unordered_set>
+
+namespace {
+
+// Compute final reduction dims based on dim / exclude_dim.
+// - If exclude_dim is not set: behaves like the old code (uses dim as-is)
+// - If exclude_dim is set: dim must be empty, and we reduce over all
+//   dimensions that are NOT in exclude_dim.
+DimVector compute_reduce_dims_from_exclude(
+    const Tensor& self,
+    IntArrayRef dim,
+    c10::optional<IntArrayRef> exclude_dim) {
+
+  const auto ndim = self.dim();
+
+  // No exclude_dim -> keep old behavior
+  if (!exclude_dim.has_value() || exclude_dim->size() == 0) {
+    return DimVector(dim.begin(), dim.end());
+  }
+
+  TORCH_CHECK(
+      dim.empty(),
+      "Only one of 'dim' or 'exclude_dim' may be specified ("
+      "dim must be empty when exclude_dim is provided).");
+
+  // Normalize and validate exclude_dim
+  std::vector<int64_t> exclude_norm;
+  exclude_norm.reserve(exclude_dim->size());
+
+  for (auto d_raw : *exclude_dim) {
+    int64_t d = d_raw;
+    if (d < 0) {
+      d += ndim;
+    }
+    TORCH_CHECK(
+        d >= 0 && d < ndim,
+        "exclude_dim index ", d_raw,
+        " is out of range for tensor of dimension ", ndim);
+    exclude_norm.push_back(d);
+  }
+
+  std::unordered_set<int64_t> exclude_set(
+      exclude_norm.begin(), exclude_norm.end());
+
+  // Build final reduction dims = all dims not in exclude_set
+  DimVector reduce_dims;
+  reduce_dims.reserve(ndim);
+
+  for (int64_t d = 0; d < ndim; ++d) {
+    if (exclude_set.count(d) == 0) {
+      reduce_dims.push_back(d);
+    }
+  }
+
+  TORCH_CHECK(
+      !reduce_dims.empty(),
+      "exclude_dim covers all dimensions; nothing left to reduce.");
+
+  return reduce_dims;
+}
+
+} // namespace
 
 namespace at::meta {
 
@@ -375,32 +437,61 @@ TORCH_META_FUNC(aminmax)
 }
 
 TORCH_META_FUNC(amax)
-(const Tensor& self, IntArrayRef dim, bool keepdim) {
+(const Tensor& self,
+ IntArrayRef dim,
+ bool keepdim,
+ c10::optional<IntArrayRef> exclude_dim) {
+
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()) {
-    TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
-            self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
+    TORCH_CHECK(
+        self.scalar_type() == maybe_result.scalar_type(),
+        "Expected the dtype for input and out to match, but got ",
+        self.scalar_type(), " for input's dtype and ",
+        maybe_result.scalar_type(), " for out's dtype.");
   }
   if (self.numel() == 0) {
     at::native::zero_numel_check_dims(self, dim, "amax()");
   }
-  const ScalarType& out_dtype = maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
-  resize_reduction(*this, self, dim, keepdim, out_dtype);
+
+  const ScalarType& out_dtype =
+      maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
+
+  // Use dim/exclude_dim to compute the final reduction dims
+  DimVector reduce_dims =
+      compute_reduce_dims_from_exclude(self, dim, exclude_dim);
+
+  resize_reduction(*this, self, reduce_dims, keepdim, out_dtype);
 }
 
+
 TORCH_META_FUNC(amin)
-(const Tensor& self, IntArrayRef dim, bool keepdim) {
+(const Tensor& self,
+ IntArrayRef dim,
+ bool keepdim,
+ c10::optional<IntArrayRef> exclude_dim) {
+
   auto maybe_result = maybe_get_output();
   if (maybe_result.defined()) {
-    TORCH_CHECK(self.scalar_type() == maybe_result.scalar_type(), "Expected the dtype for input and out to match, but got ",
-                self.scalar_type(), " for input's dtype and ",  maybe_result.scalar_type(), " for out's dtype.");
+    TORCH_CHECK(
+        self.scalar_type() == maybe_result.scalar_type(),
+        "Expected the dtype for input and out to match, but got ",
+        self.scalar_type(), " for input's dtype and ",
+        maybe_result.scalar_type(), " for out's dtype.");
   }
   if (self.numel() == 0) {
     at::native::zero_numel_check_dims(self, dim, "amin()");
   }
-  const ScalarType& out_dtype = maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
-  resize_reduction(*this, self, dim, keepdim, out_dtype);
+
+  const ScalarType& out_dtype =
+      maybe_result.defined() ? maybe_result.scalar_type() : self.scalar_type();
+
+  DimVector reduce_dims =
+      compute_reduce_dims_from_exclude(self, dim, exclude_dim);
+
+  resize_reduction(*this, self, reduce_dims, keepdim, out_dtype);
 }
+
 
 TORCH_META_FUNC(hash_tensor)
 (const Tensor& self, IntArrayRef dim, bool keepdim, int64_t mode) {
@@ -1733,17 +1824,37 @@ Tensor& any_dims_out_default(
   return result.copy_(tmp);
 }
 
-TORCH_IMPL_FUNC(amin_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
+TORCH_IMPL_FUNC(amin_out) (
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    c10::optional<IntArrayRef> exclude_dim,
+    const Tensor& result) {
+
+  DimVector reduce_dims =
+      compute_reduce_dims_from_exclude(self, dim, exclude_dim);
+
   auto iter =
-      meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
+      meta::make_reduction(self, result, reduce_dims, keepdim, self.scalar_type());
+
   if (iter.numel() != 0) {
     min_values_stub(iter.device_type(), iter);
   }
 }
 
-TORCH_IMPL_FUNC(amax_out) (const Tensor& self, IntArrayRef dim, bool keepdim, const Tensor& result) {
+TORCH_IMPL_FUNC(amax_out) (
+    const Tensor& self,
+    IntArrayRef dim,
+    bool keepdim,
+    c10::optional<IntArrayRef> exclude_dim,
+    const Tensor& result) {
+
+  DimVector reduce_dims =
+      compute_reduce_dims_from_exclude(self, dim, exclude_dim);
+
   auto iter =
-      meta::make_reduction(self, result, dim, keepdim, self.scalar_type());
+      meta::make_reduction(self, result, reduce_dims, keepdim, self.scalar_type());
+
   if (iter.numel() != 0) {
     max_values_stub(iter.device_type(), iter);
   }

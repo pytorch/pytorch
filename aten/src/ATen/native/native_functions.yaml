@@ -3929,12 +3929,20 @@
     CompositeImplicitAutograd: value_selecting_reduction_backward_symint
     NestedTensorCPU, NestedTensorCUDA: value_selecting_reduction_backward_nested_symint
 
-- func: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+- func: amax(Tensor self,
+             int[1] dim=[],
+             bool keepdim=False,
+             int[1]? exclude_dim=None) -> Tensor
   variants: function, method
   structured_delegate: amax.out
   tags: [core, reduction]
 
-- func: amax.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: amax.out(Tensor self,
+                 int[1] dim=[],
+                 bool keepdim=False,
+                 int[1]? exclude_dim=None,
+                 *,
+                 Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU, CUDA, MTIA: amax_out
@@ -4118,12 +4126,20 @@
   device_check: NoCheck   # TensorIterator
   tags: reduction
 
-- func: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
+- func: amin(Tensor self,
+             int[1] dim=[],
+             bool keepdim=False,
+             int[1]? exclude_dim=None) -> Tensor
   variants: function, method
   structured_delegate: amin.out
   tags: [core, reduction]
 
-- func: amin.out(Tensor self, int[1] dim=[], bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
+- func: amin.out(Tensor self,
+                 int[1] dim=[],
+                 bool keepdim=False,
+                 int[1]? exclude_dim=None,
+                 *,
+                 Tensor(a!) out) -> Tensor(a!)
   structured: True
   dispatch:
     CPU, CUDA, MTIA: amin_out
