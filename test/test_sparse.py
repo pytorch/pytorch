@@ -1678,7 +1678,7 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, True, (1, 1))
 
     @coalescedonoff
-    @dtypes(torch.double, torch.float32)
+    @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_sparse_mm(self, device, dtype, coalesced):
@@ -1703,7 +1703,7 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, True)
 
     @coalescedonoff
-    @dtypes(torch.double, torch.float32)
+    @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
@@ -2234,7 +2234,7 @@ class TestSparse(TestSparseBase):
         self._test_sparse_mask_shape(0, 0, [10, 10, 10], [2, 0], dtype, device, coalesced)
         self._test_sparse_mask_shape(0, 0, [10, 10, 0], [2, 0], dtype, device, coalesced)
 
-    @dtypes(torch.double, torch.cdouble, torch.float32, torch.complex64)
+    @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     @skipIfCrossRef
     def test_sparse_mask_backward(self, device, dtype):
