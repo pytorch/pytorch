@@ -166,6 +166,7 @@ def main() -> None:
         py_version=args.py_version,
         release=args.release,
         with_clang_ldd=args.with_clang_ldd,
+        rocm_version=args.rocm_version,
     )
 
 
