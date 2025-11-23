@@ -18,7 +18,7 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE
     COMMAND_ERROR_IS_FATAL ANY)
 
-# Check for NAX support based on Metal version and macOS SDK version
+# Check for NAX(Neural Accelerator) support based on Metal version and macOS SDK version
 if(MPS_METAL_VERSION GREATER_EQUAL 400 AND MACOS_SDK_VERSION GREATER_EQUAL 26.2)
     set(MPS_ENABLE_NAX TRUE)
 else()
