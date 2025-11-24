@@ -980,6 +980,9 @@ class TestFP8Lowering(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @torch._inductor.config.patch("emulate_precision_casts", True)
     def test_mx_fusion(self, device):
+        # use a device key for library registration
+        device_type = torch.device(device).type
+        device_dispatch_key = "CUDA" if device_type == "cuda" else "XPU"
         # Register fake_scaled_mm custom op scoped to this test
         with torch.library._scoped_library("test_fp8", "FRAGMENT") as lib:
             # Define the op schema
@@ -991,7 +994,7 @@ class TestFP8Lowering(TestCase):
             input_values = []
 
             # Register CUDA/XPU implementation
-            @torch.library.impl(lib, "fake_scaled_mm", device)
+            @torch.library.impl(lib, "fake_scaled_mm", device_dispatch_key)
             def fake_scaled_mm_impl(
                 mat_a,
                 mat_b,
@@ -1060,7 +1063,7 @@ class TestFP8Lowering(TestCase):
                 )
                 isnan = torch.ops.aten.isnan.default(unsqueeze)
                 scalar_tensor = torch.ops.aten.scalar_tensor.default(
-                    255, dtype=torch.uint8, layout=torch.strided, device="cuda"
+                    255, dtype=torch.uint8, layout=torch.strided, device=device
                 )
                 where = torch.ops.aten.where.self(
                     isnan, scalar_tensor, convert_element_type
@@ -1110,7 +1113,7 @@ class TestFP8Lowering(TestCase):
                 isnan_1 = torch.ops.aten.isnan.default(unsqueeze_1)
                 unsqueeze_1 = None
                 scalar_tensor_1 = torch.ops.aten.scalar_tensor.default(
-                    255, dtype=torch.uint8, layout=torch.strided, device="cuda"
+                    255, dtype=torch.uint8, layout=torch.strided, device=device
                 )
                 where_1 = torch.ops.aten.where.self(
                     isnan_1, scalar_tensor_1, convert_element_type_3
