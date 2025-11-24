@@ -684,13 +684,12 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
     def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
         return len(sharded_indices[rank])
 
-    # delete pyre-ignore once separating _StridedShard from Shard
-    def _local_shard_size_and_offset(  # pyre-ignore[bad-override]
+    def _local_shard_size_and_offset(
         self,
         curr_local_size: int,
         num_chunks: int,
         rank: int,
-    ) -> tuple[int, list[int]]:
+    ) -> tuple[int, Optional[int]]:
         # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
         # so that we can reuse self._split_tensor which splits on self.dim
         shape = [1] * self.dim + [curr_local_size]
@@ -708,9 +707,9 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
         local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
-        offsets = sharded_indices[rank].tolist()
 
-        return local_shard_size, offsets
+        # offsets from _StridedShard is never used
+        return local_shard_size, None
 
 
 class Replicate(torch._C._distributed.Replicate):
