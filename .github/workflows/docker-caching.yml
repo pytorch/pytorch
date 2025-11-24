@@ -8,20 +8,29 @@ on:
         description: JSON description of what test configs to run.
       download-docker-builds-artifacts:
         required: true
-        type:
+        type: string
         description: Builds artifacts for docker image.
+      directory:
+        required: true
+        type: string
+        description: Path to store tarballs.
+
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   caching:
     if: github.repository_owner == 'pytorch'
     strategy:
-        matrix: ${{ inputs.matrix }}
+        matrix: ${{ fromJSON(inputs.test-matrix) }}
         fail-fast: false
     runs-on: ${{ inputs.matrix.runner }}
     steps:
       - name: debug
         run: |
-          JSON_STRINGIFIED="${{ toJSON(needs.download-docker-builds-artifacts.outputs) }}"
+          JSON_STRINGIFIED="${{ toJSON(download-docker-builds-artifacts) }}"
           echo "Outputs of download-docker-builds-artifacts job: ${JSON_STRINGIFIED}"
 
       - name: configure aws credentials
@@ -64,6 +73,7 @@ jobs:
           fi
           docker tag ${{ steps.ghcr-io-tag.outputs.ghcr_image }} ${{ matrix.docker-image }}
           # mv is atomic operation, so we use intermediate tar.tmp file to prevent read-write contention
-          docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ${{ matrix.docker-image }}
-          mv ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ~/pytorch-data/docker/${docker_image_tag}_${ref_suffix}.tar
+          docker save -o ${{ inputs.directory }}/${docker_image_tag}.tar.tmp ${{ matrix.docker-image }}
+          mv ${{ inputs.directory }}/${docker_image_tag}.tar.tmp ${{ inputs.directory }}${docker_image_tag}_${ref_suffix}.tar
+
     
