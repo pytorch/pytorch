@@ -8,6 +8,7 @@ namespace c10::xpu::XPUCachingAllocator {
 
 class XPUAllocator : DeviceAllocator {
  public:
+  virtual void init(c10::DeviceIndex device_count) = 0;
   virtual void* raw_alloc(size_t nbytes) = 0;
   virtual void raw_delete(void* ptr) = 0;
 };
@@ -16,6 +17,10 @@ C10_XPU_API extern std::atomic<XPUAllocator*> allocator;
 
 inline XPUAllocator* get() {
   return allocator.load();
+}
+
+inline void init(c10::DeviceIndex device_count) {
+  get()->init(device_count);
 }
 
 inline void emptyCache(MempoolId_t mempool_id = {0, 0}) {

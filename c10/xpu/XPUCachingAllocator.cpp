@@ -1353,7 +1353,7 @@ class NativeCachingAllocator : public XPUAllocator {
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocators;
 
-  void init(DeviceIndex device_count) {
+  void init(DeviceIndex device_count) override {
     const auto size = static_cast<DeviceIndex>(device_allocators.size());
     if (size < device_count) {
       device_allocators.resize(device_count);
@@ -1554,10 +1554,6 @@ struct NativeAllocatorStaticInitializer {
 };
 
 static NativeAllocatorStaticInitializer native_allocator_static_initializer;
-
-void init(DeviceIndex device_count) {
-  return native_allocator.init(device_count);
-}
 
 void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
   return native_allocator.enablePeerAccess(dev, dev_to_access);
