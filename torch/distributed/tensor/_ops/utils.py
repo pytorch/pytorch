@@ -63,6 +63,7 @@ def _args_schema_with_tensor_meta(
 
 
 def _expand_single_dim_strategy_to_mesh(
+    mesh: DeviceMesh,
     op_schema: OpSchema,
     single_dim_strategy: Callable[
         [ArgsType, KwargsType], list[list[Placement | ShardingPlaceholder]]
@@ -72,8 +73,6 @@ def _expand_single_dim_strategy_to_mesh(
     Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
     sharding types used by inputs.
     """
-    # TODO: pass mesh in
-    mesh = op_schema.args_schema[0].mesh
 
     def expanded_strategy(
         args_schema: ArgsType, kwargs_schema: KwargsType

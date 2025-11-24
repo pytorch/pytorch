@@ -151,7 +151,9 @@ def time_fn(mesh, test, key):
             test["dim_maps"],
             wrap_op_strategy=False,
         )
-        fn = _expand_single_dim_strategy_to_mesh(op_schema, test["single_dim_strategy"])
+        fn = _expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, test["single_dim_strategy"]
+        )
         args_schema, kwargs_schema = _args_schema_with_tensor_meta(
             op_schema.args_schema, op_schema.kwargs_schema
         )
