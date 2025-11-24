@@ -356,7 +356,7 @@ class EnumVariable(VariableTracker):
     def create(
         cls, cls_type: Any, value_vt: VariableTracker, options: Any
     ) -> "EnumVariable":
-        if isinstance(value_vt, variables.ConstantVariable):
+        if value_vt.is_python_constant():
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)

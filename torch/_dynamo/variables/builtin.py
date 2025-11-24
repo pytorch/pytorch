@@ -689,7 +689,7 @@ class BuiltinVariable(VariableTracker):
         def expand_list_like(
             tx: "InstructionTranslator", lst: VariableTracker, const: VariableTracker
         ) -> VariableTracker:
-            if isinstance(lst, ConstantVariable):
+            if lst.is_python_constant():
                 lst, const = const, lst
             try:
                 assert isinstance(lst, BaseListVariable)
@@ -1030,8 +1030,7 @@ class BuiltinVariable(VariableTracker):
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
                 if fn is AssertionError and not all(
-                    isinstance(x, variables.ConstantVariable)
-                    and isinstance(x.value, str)
+                    x.is_python_constant() and isinstance(x.as_python_constant(), str)
                     for x in args
                 ):
                     unimplemented(
@@ -1503,7 +1502,7 @@ class BuiltinVariable(VariableTracker):
                 )
 
         if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
-            if isinstance(args[0], ConstantVariable):
+            if args[0].is_python_constant():
                 try:
                     fn = getattr(float, name)
                     res = fn(args[0].as_python_constant())
@@ -1549,11 +1548,11 @@ class BuiltinVariable(VariableTracker):
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in str_methods:
-                if isinstance(args[0], ConstantVariable):
+                if args[0].is_python_constant():
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is float and len(args) >= 1:
-            if isinstance(args[0], ConstantVariable):
+            if args[0].is_python_constant():
                 return ConstantVariable.create(
                     getattr(float, name)(args[0].as_python_constant())
                 )
@@ -1801,7 +1800,7 @@ class BuiltinVariable(VariableTracker):
                 "call_function", py_fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
-        elif isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+        elif a.is_python_constant() and b.is_python_constant():
             value = self.fn(
                 a.as_python_constant(),
                 b.as_python_constant(),
@@ -3067,10 +3066,10 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
-        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+        if a.is_python_constant() and b.is_python_constant():
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
+        if (isinstance(a, SymNodeVariable) or a.is_python_constant()) and (
+            isinstance(b, SymNodeVariable) or b.is_python_constant()
         ):
             return SymNodeVariable.create(
                 tx,
@@ -3112,10 +3111,10 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
-        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+        if a.is_python_constant() and b.is_python_constant():
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
+        if (isinstance(a, SymNodeVariable) or a.is_python_constant()) and (
+            isinstance(b, SymNodeVariable) or b.is_python_constant()
         ):
             return SymNodeVariable.create(
                 tx,
@@ -3133,10 +3132,10 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
-        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+        if a.is_python_constant() and b.is_python_constant():
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
+        if (isinstance(a, SymNodeVariable) or a.is_python_constant()) and (
+            isinstance(b, SymNodeVariable) or b.is_python_constant()
         ):
             return SymNodeVariable.create(
                 tx,
@@ -3153,10 +3152,10 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
-        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+        if a.is_python_constant() and b.is_python_constant():
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
+        if (isinstance(a, SymNodeVariable) or a.is_python_constant()) and (
+            isinstance(b, SymNodeVariable) or b.is_python_constant()
         ):
             return SymNodeVariable.create(
                 tx,
@@ -3189,10 +3188,10 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
-        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+        if a.is_python_constant() and b.is_python_constant():
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
+        if (isinstance(a, SymNodeVariable) or a.is_python_constant()) and (
+            isinstance(b, SymNodeVariable) or b.is_python_constant()
         ):
             return SymNodeVariable.create(
                 tx,

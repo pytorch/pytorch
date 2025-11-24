@@ -1680,7 +1680,7 @@ class OutputGraph(OutputGraphCommon):
                                 "input",
                                 vt.source,
                             )
-                        elif isinstance(vt, torch._dynamo.variables.ConstantVariable):
+                        elif vt.is_python_constant():
                             self.export_metadata.output_return_type[idx] = (
                                 "constant",
                                 vt.as_python_constant(),

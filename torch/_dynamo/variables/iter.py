@@ -115,7 +115,7 @@ class ItertoolsVariable(VariableTracker):
             def retrieve_const_key(key: VariableTracker) -> Any:
                 if isinstance(key, variables.SymNodeVariable):
                     return key.evaluate_expr()
-                elif isinstance(key, variables.ConstantVariable):
+                elif key.is_python_constant():
                     return key.as_python_constant()
                 else:
                     unimplemented(
@@ -585,7 +585,7 @@ class FilterVariable(IteratorVariable):
         while True:
             item = _next()
             self.index += 1
-            if isinstance(self.fn, ConstantVariable) and self.fn.value is None:
+            if self.fn.is_python_constant() and self.fn.as_python_constant() is None:
                 res = item
             else:
                 res = self.fn.call_function(tx, [item], {})

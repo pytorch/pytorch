@@ -2703,9 +2703,9 @@ class VariableBuilder:
                     f"Dynamo attempts to add additional input during export: value={wrapped_value}, source={self.get_source()}"
                 )
             fake_tensor_value = None
-            if isinstance(unspec_var, ConstantVariable):
+            if unspec_var.is_python_constant():
                 # TODO: when can this happen?
-                example_value = unspec_var.value
+                example_value = unspec_var.as_python_constant()
             else:
                 example_value = unspec_var.proxy.node.meta["example_value"]
             assert is_fake(example_value)

@@ -761,10 +761,9 @@ def generic_jump(
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
                 result = x.call_function(self, [], {})  # type: ignore[arg-type, assignment]
-                if isinstance(result, ConstantVariable) and isinstance(
-                    result.value, (bool, int)
-                ):
-                    if truth_fn(result.value):
+                if result.is_python_constant():
+                    result_value = result.as_python_constant()
+                    if isinstance(result_value, (bool, int)) and truth_fn(result_value):
                         if push:
                             self.push(value)
                         self.jump(inst)
@@ -2633,7 +2632,7 @@ class InstructionTranslatorBase(
             return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
-        if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
+        if isinstance(obj, NNModuleVariable) and not val.is_python_constant():
             # We don't allow side effects during export on non-constant values
             # https://github.com/pytorch/torchdynamo/issues/1475
             assert not self.export, (
@@ -3548,7 +3547,7 @@ class InstructionTranslatorBase(
         kwargs: dict[str, VariableTracker] = {}
         assert inst.arg is not None
         for part in self.popn(inst.arg):
-            if isinstance(part, ConstantVariable):
+            if part.is_python_constant():
                 format_string_parts.append("{}")
                 args.append(part)
             elif isinstance(part, variables.StringFormatVariable):
@@ -4981,8 +4980,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 # When the generator returns None, we raise StopIteration
                 args = []
                 if not (
-                    isinstance(self.symbolic_result, ConstantVariable)
-                    and self.symbolic_result.value is None
+                    self.symbolic_result.is_python_constant()
+                    and self.symbolic_result.as_python_constant() is None
                 ):
                     args = [self.symbolic_result]
                 exc.raise_observed_exception(StopIteration, self, args=args)
@@ -5223,7 +5222,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if not (isinstance(val, ConstantVariable) and val.value is None):
+        if not (val.is_python_constant() and val.as_python_constant() is None):
             # invoke send
             # Unreachable code - if you hit this, you are implementing generator support and have
             # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
@@ -5265,7 +5264,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             isinstance(tos, UserDefinedObjectVariable)
             and isinstance(tos.value, collections.abc.Iterator)
         ):
-            if isinstance(val, ConstantVariable) and val.value is None:
+            if val.is_python_constant() and val.as_python_constant() is None:
                 try:
                     val = tos.next_variable(self)  # type: ignore[arg-type]
                 except (StopIteration, exc.ObservedUserStopIteration) as ex:

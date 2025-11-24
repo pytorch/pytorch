@@ -160,7 +160,7 @@ def check_meta_consistency_vt(
             return var.proxy.node.meta["example_value"]
         elif isinstance(var, SymNodeVariable):
             return var.sym_num
-        elif isinstance(var, ConstantVariable):
+        elif var.is_python_constant():
             return var.as_python_constant()
         else:
             unimplemented(
@@ -478,7 +478,8 @@ def _call_while_loop(
         def unspecialize_carried_inputs(tx, carry) -> VariableTracker:
             # See NOTE [unspecialize int carry with unbacked symints]
             if (
-                isinstance(carry, ConstantVariable) and carry.python_type() is int
+                carry.is_python_constant()
+                and isinstance(carry.as_python_constant(), int)
             ) or isinstance(carry, SymNodeVariable):
                 example_value = _create_unbacked_symint(
                     tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
@@ -576,7 +577,7 @@ def _call_while_loop(
                     *graph_break_hints.USER_ERROR,
                 ],
             )
-    elif isinstance(cond_r, ConstantVariable):
+    elif cond_r.is_python_constant():
         # short-circuiting while_loop when cond_fn returns a constant such as 0, 1 True or False
         pred = cond_r.as_python_constant()
         if pred:
@@ -1901,7 +1902,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ],
                 )
             for ret in ret_val.unpack_var_sequence(tx):
-                if isinstance(ret, ConstantVariable) and ret.python_type() is not int:
+                if ret.is_python_constant() and not isinstance(
+                    ret.as_python_constant(), int
+                ):
                     unimplemented(
                         gb_type="torch.cond: unsupported branch return type (constant non-int)",
                         context=str(ret_val),
@@ -2028,7 +2031,8 @@ def validate_subgraph_output_types(output: VariableTracker):
             if (
                 isinstance(out, SymNodeVariable) and out.python_type() in (int, bool)
             ) or (
-                isinstance(out, ConstantVariable) and out.python_type() in (int, bool)
+                out.is_python_constant()
+                and isinstance(out.as_python_constant(), (int, bool))
             ):
                 continue
             unimplemented(
@@ -2941,7 +2945,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         grad_enabled, fn_var, *rest_args = args
 
-        if not isinstance(grad_enabled, ConstantVariable):
+        if not grad_enabled.is_python_constant():
             unimplemented(
                 gb_type="wrap_with_set_grad_enabled: non-constant grad_enabled",
                 context=str(grad_enabled),
@@ -3029,7 +3033,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         device_type, dtype, enabled, cache_enabled, fn_var, *rest_args = args
 
         for arg in [device_type, dtype, enabled, cache_enabled]:
-            if not isinstance(arg, ConstantVariable):
+            if not arg.is_python_constant():
                 unimplemented(
                     gb_type="wrap_with_autocast: expected constant arg",
                     context=str(args),
@@ -3650,7 +3654,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx, query, score_mod, "score_mod"
         )
         mask_fn = block_mask.items[-1]
-        if isinstance(mask_fn, ConstantVariable):
+        if mask_fn.is_python_constant():
             mask_fn = UserFunctionVariable(torch.nn.attention._flex_attention._no_mask)
         mask_fn_node, mask_fn_lifted_args = self.create_wrapped_node(
             tx, query, mask_fn, "mask_fn"

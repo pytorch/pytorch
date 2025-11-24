@@ -365,7 +365,9 @@ class RangeVariable(BaseListVariable):
 
         def maybe_as_int(x: VariableTracker) -> VariableTracker:
             return (
-                ConstantVariable(int(x.value)) if isinstance(x, ConstantVariable) else x
+                ConstantVariable.create(int(x.as_python_constant()))
+                if x.is_python_constant()
+                else x
             )
 
         # cast each argument to an integer
@@ -1269,8 +1271,8 @@ class SizeVariable(TupleVariable):
         sym_sizes = []
 
         for v in self.items:
-            if isinstance(v, ConstantVariable):
-                const_result *= v.value
+            if v.is_python_constant():
+                const_result *= v.as_python_constant()
             else:
                 assert isinstance(v, SymNodeVariable), type(v)
                 # Delay proxy calls  until we know it will be necessary

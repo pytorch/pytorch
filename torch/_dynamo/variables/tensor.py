@@ -597,11 +597,14 @@ class TensorVariable(VariableTracker):
             dyn_length = self.call_method(tx, "size", [ConstantVariable.create(0)], {})
             # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
             # symbolic_shapes, but that end up as int/sympy.Integer
-            assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
+            assert (
+                isinstance(dyn_length, SymNodeVariable)
+                or dyn_length.is_python_constant()
+            )
             if isinstance(dyn_length, SymNodeVariable):
                 length = dyn_length.evaluate_expr(tx.output)
             else:
-                length = dyn_length.value
+                length = dyn_length.as_python_constant()
 
         if idxes is None:
             idxes = range(length)
@@ -1409,7 +1412,8 @@ class TensorVariable(VariableTracker):
         if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
             len(args) >= 1
             and all(
-                isinstance(a, ConstantVariable) and a.python_type() is int for a in args
+                a.is_python_constant() and isinstance(a.as_python_constant(), int)
+                for a in args
             )
         ):
             from ..symbolic_convert import InstructionTranslator
@@ -1633,7 +1637,9 @@ class NumpyNdarrayVariable(TensorVariable):
             elif len(args) > 0:
                 dtype_arg = args[0]
             is_object_str = (
-                isinstance(dtype_arg, ConstantVariable) and dtype_arg.value == "O"
+                dtype_arg is not None
+                and dtype_arg.is_python_constant()
+                and dtype_arg.as_python_constant() == "O"
             )
             is_object_type = (
                 isinstance(dtype_arg, BuiltinVariable) and dtype_arg.fn is object
