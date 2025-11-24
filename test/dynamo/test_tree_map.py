@@ -168,6 +168,94 @@ class TreeMapCompileTests(TestCase):
         result = compiled(tree)
         _assert_trees_allclose(self, expected, result)
 
+    def test_tree_map_only_applies_to_tensor_nodes(self) -> None:
+        tree = {"tensor": torch.ones(2), "int": 3}
+
+        def mapper(node):
+            if not isinstance(node, torch.Tensor):
+                raise AssertionError("mapper should only see tensors")
+            return node + 2
+
+        def fn(arg):
+            return pytree.tree_map_only(torch.Tensor, mapper, arg)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(tree)
+        result = compiled(tree)
+        _assert_trees_allclose(self, expected, result)
+
+    def test_tree_map_only_multiple_trees_falls_back(self) -> None:
+        lhs = {"a": torch.ones(2), "b": torch.ones(2) * 2}
+        rhs = {"a": torch.ones(2) * 3, "b": torch.ones(2) * 4}
+
+        def fn(a, b):
+            return pytree.tree_map_only(torch.Tensor, lambda x, y: x + y, a, b)
+
+        with self.assertRaisesRegex(TypeError, "callable"):
+            fn(lhs, rhs)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        with self.assertRaisesRegex(
+            (TypeError, torch._dynamo.exc.Unsupported),
+            r"(callable|Unsupported function call)",
+        ):
+            compiled(lhs, rhs)
+
+    def test_tree_map_only_handles_multiple_types(self) -> None:
+        tree = {"int": 7, "tuple": (1, 2), "tensor": torch.ones(2)}
+
+        def mapper(node):
+            if isinstance(node, int):
+                return node + 1
+            if isinstance(node, tuple):
+                return tuple(val + 10 for val in node)
+            raise AssertionError("unexpected node passed to mapper")
+
+        def fn(arg):
+            return pytree.tree_map_only((int, tuple), mapper, arg)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(tree)
+        result = compiled(tree)
+        _assert_trees_allclose(self, expected, result)
+
+    def test_tree_map_is_leaf_non_constant_fallback(self) -> None:
+        tree = {"a": torch.arange(2.0), "b": torch.arange(2.0) + 1}
+
+        def is_leaf(node):
+            if isinstance(node, torch.Tensor):
+                # Depends on runtime tensor value; cannot be folded to a constant.
+                return (node.sum() > 1).item()
+            return False
+
+        def mapper(node):
+            return node * 2 if isinstance(node, torch.Tensor) else node
+
+        def fn(arg):
+            return pytree.tree_map(mapper, arg, is_leaf=is_leaf)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(tree)
+        result = compiled(tree)
+        _assert_trees_allclose(self, expected, result)
+
+    def test_tree_map_only_predicate_selector_skips_fastpath(self) -> None:
+        tree = {"keep": torch.ones(2), "other": (1, 2)}
+
+        def selector(node):
+            return isinstance(node, torch.Tensor) and node.shape == (2,)
+
+        def mapper(node):
+            return node + 5 if isinstance(node, torch.Tensor) else node
+
+        def fn(arg):
+            return pytree.tree_map_only(selector, mapper, arg)
+
+        compiled = torch.compile(fn, backend="eager", fullgraph=True)
+        expected = fn(tree)
+        result = compiled(tree)
+        _assert_trees_allclose(self, expected, result)
+
     def test_tree_map_none_nodes_reject_mismatched_siblings(self) -> None:
         def fn(a, b):
             return optree.tree_map(lambda u, v: (u, v), a, b)
