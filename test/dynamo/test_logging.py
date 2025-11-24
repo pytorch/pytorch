@@ -703,10 +703,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
         _compiled_callable1(x, y)
         _compiled_callable2(x, y)
         record_str = "\n".join(r.getMessage() for r in records)
-        self.assertIn(
-            "backend mismatch between",
-            record_str
-        )
+        self.assertIn("backend mismatch between", record_str)
 
     @make_logging_test(guards=True, recompiles=True)
     def test_guards_recompiles(self, records):
