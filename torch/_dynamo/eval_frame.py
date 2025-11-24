@@ -797,15 +797,14 @@ class _TorchDynamoContext:
 
             assert self._hooks is not None
 
-            with torch._functorch.config.patch(strict_autograd_cache=True):
-                return aot_compile_fullgraph(
-                    fn,
-                    example_inputs,
-                    hooks=self._hooks,
-                    backend=innermost_fn(
-                        self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
-                    ),
-                )
+            return aot_compile_fullgraph(
+                fn,
+                example_inputs,
+                hooks=self._hooks,
+                backend=innermost_fn(
+                    self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+                ),
+            )
 
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
