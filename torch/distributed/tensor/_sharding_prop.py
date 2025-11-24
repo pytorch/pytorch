@@ -13,6 +13,8 @@ from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
+    ArgsType,
+    KwargsType,
     OpInfo,
     OpSchema,
     OpSpec,
@@ -23,12 +25,15 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops.utils import _expand_single_dim_strategy_to_mesh
+from torch.distributed.tensor._ops.utils import (
+    _args_schema_with_tensor_meta,
+    _expand_single_dim_strategy_to_mesh,
+)
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
 )
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor.placement_types import Placement, ShardingPlaceholder
 
 
 aten = torch.ops.aten
@@ -65,7 +70,9 @@ class ShardingPropagator:
         ] = {}
         self.op_single_dim_strategy_funcs: dict[
             OpOverload,
-            Callable[[OpSchema], list[list[Placement]]],
+            Callable[
+                [ArgsType, KwargsType], list[list[Placement | ShardingPlaceholder]]
+            ],
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
@@ -112,7 +119,9 @@ class ShardingPropagator:
     def register_single_dim_op_strategy(
         self,
         op_overload: OpOverload,
-        strategy_func: Callable[[OpSchema], list[list[Placement]]],
+        strategy_func: Callable[
+            [ArgsType, KwargsType], list[list[Placement | ShardingPlaceholder]]
+        ],
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
         """
@@ -367,6 +376,10 @@ class ShardingPropagator:
         )
 
     def propagate(self, op_info: OpInfo) -> None:
+        # NB: The logic here is duplicated in _propagate_op_sharding_dispatch_slow_path.
+        # Ideally, this function would be deleted, but there are a handful of
+        # one off call sites here that aren't cleaned up.
+
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
@@ -411,9 +424,13 @@ class ShardingPropagator:
             # steps in the lowest-redistribution-cost direction until finding a valid strategy combination.
             single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
             _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                single_dim_strategy
+                op_schema, single_dim_strategy
             )
-            strategy = _expanded_strategy_fn(op_schema)
+
+            args_schema, kwargs_schema = _args_schema_with_tensor_meta(
+                op_schema.args_schema, op_schema.kwargs_schema
+            )
+            strategy = _expanded_strategy_fn(args_schema, kwargs_schema)
             # TODO: prefer to rename vars to match typing, this is an OpSpec. But matching naming from elif block
             # for sanity for now
             assert isinstance(strategy, OpStrategy), "TupleStrategy for single-dim NYI"
