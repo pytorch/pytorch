@@ -1049,6 +1049,7 @@ class CollectionsSource(Source):
 
         install_guard(self.make_guard(GuardBuilder.ID_MATCH))
 
+    @functools.cached_property
     def name(self) -> str:
         return "__import__('collections')"
 
