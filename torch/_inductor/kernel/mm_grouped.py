@@ -211,38 +211,38 @@ def do_mma(a, b, accumulator):
 
 {%- if A_IS_2D %}
 {%- if B_IS_2D %}
-    G = {{size("offsets_ptr", 0)}}
+    G: tl.constexpr = {{size("offsets_ptr", 0)}}
 {%- else %}
-    G = {{size("b_ptr", 0)}}
+    G: tl.constexpr = {{size("b_ptr", 0)}}
 {%- endif %}
 {%- else %}
 {%- if B_IS_2D %}
-    G = {{size("a_ptr", 0)}}
+    G: tl.constexpr = {{size("a_ptr", 0)}}
 {%- else %}
-    G = {{size("a_ptr", 0)}}
+    G: tl.constexpr = {{size("a_ptr", 0)}}
 {%- endif %}
 {%- endif %}
 
     # the b_ptr tensor is given with its last two dims transposed, revert here
 
-    M = {{size("a_ptr", -2)}}
-    N = {{size("b_ptr", -1)}}
-    K = {{size("a_ptr", -1)}}
+    M: tl.constexpr = {{size("a_ptr", -2)}}
+    N: tl.constexpr = {{size("b_ptr", -1)}}
+    K: tl.constexpr = {{size("a_ptr", -1)}}
 
-    A_STRIDE_M = {{stride("a_ptr", -2)}}
-    A_STRIDE_K = {{stride("a_ptr", -1)}}
+    A_STRIDE_M: tl.constexpr = {{stride("a_ptr", -2)}}
+    A_STRIDE_K: tl.constexpr = {{stride("a_ptr", -1)}}
 {%- if not A_IS_2D %}
-    A_STRIDE_G = {{stride("a_ptr", 0)}}
+    A_STRIDE_G: tl.constexpr = {{stride("a_ptr", 0)}}
 {%- if SCALED %}
-    SCALE_A_STRIDE_G = {{stride("scale_a_ptr", 0)}}
+    SCALE_A_STRIDE_G: tl.constexpr = {{stride("scale_a_ptr", 0)}}
 {%- endif %}
 {%- endif %}
-    B_STRIDE_N = {{stride("b_ptr", -1)}}
-    B_STRIDE_K = {{stride("b_ptr", -2)}}
+    B_STRIDE_N: tl.constexpr = {{stride("b_ptr", -1)}}
+    B_STRIDE_K: tl.constexpr = {{stride("b_ptr", -2)}}
 {%- if not B_IS_2D %}
-    B_STRIDE_G = {{stride("b_ptr", 0)}}
+    B_STRIDE_G: tl.constexpr = {{stride("b_ptr", 0)}}
 {%- if SCALED %}
-    SCALE_B_STRIDE_G = {{stride("scale_b_ptr", 0)}}
+    SCALE_B_STRIDE_G: tl.constexpr = {{stride("scale_b_ptr", 0)}}
 {%- endif %}
 {%- endif %}
 
@@ -256,25 +256,21 @@ def do_mma(a, b, accumulator):
 {%- if A_IS_2D %}
 {%- if A_IS_K_MAJOR %}
         shape=[M, K],
-        # fixme: strides=[A_STRIDE_M, A_STRIDE_K],
-        strides=[{{stride("a_ptr", -2)}}, {{stride("a_ptr", -1)}}],
+        strides=[A_STRIDE_M, A_STRIDE_K],
         block_shape=[BLOCK_M, BLOCK_K],
 {%- else %}
         shape=[K, M],
-        # fixme: strides=[A_STRIDE_K, A_STRIDE_M],
-        strides=[{{stride("a_ptr", -1)}}, {{stride("a_ptr", -2)}}],
+        strides=[A_STRIDE_K, A_STRIDE_M],
         block_shape=[BLOCK_K, BLOCK_M],
 {%- endif %}
 {%- else %}
 {%- if A_IS_K_MAJOR %}
         shape=[G, M, K],
-        # fixme: strides=[A_STRIDE_G, A_STRIDE_M, A_STRIDE_K],
-        strides=[{{stride("a_ptr", 0)}}, {{stride("a_ptr", -2)}}, {{stride("a_ptr", -1)}}],
+        strides=[A_STRIDE_G, A_STRIDE_M, A_STRIDE_K],
         block_shape=[1, BLOCK_M, BLOCK_K],
 {%- else %}
         shape=[G, K, M],
-        # fixme: strides=[A_STRIDE_G, A_STRIDE_K, A_STRIDE_M],
-        strides=[{{stride("a_ptr", 0)}}, {{stride("a_ptr", -1)}}, {{stride("a_ptr", -2)}}],
+        strides=[A_STRIDE_G, A_STRIDE_K, A_STRIDE_M],
         block_shape=[1, BLOCK_K, BLOCK_M],
 {%- endif %}
 {%- endif %}
@@ -289,25 +285,21 @@ def do_mma(a, b, accumulator):
 {%- if B_IS_2D %}
 {%- if B_IS_K_MAJOR %}
         shape=[N, K],
-        # fixme: strides=[B_STRIDE_N, B_STRIDE_K],
-        strides=[{{stride("b_ptr", -1)}}, {{stride("b_ptr", -2)}}],
+        strides=[B_STRIDE_N, B_STRIDE_K],
         block_shape=[BLOCK_N, BLOCK_K],
 {%- else %}
         shape=[K, N],
-        # fixme: strides=[B_STRIDE_K, B_STRIDE_N],
-        strides=[{{stride("b_ptr", -2)}}, {{stride("b_ptr", -1)}}],
+        strides=[B_STRIDE_K, B_STRIDE_N],
         block_shape=[BLOCK_K, BLOCK_N],
 {%- endif %}
 {%- else %}
 {%- if B_IS_K_MAJOR %}
         shape=[G, N, K],
-        # fixme: strides=[B_STRIDE_G, B_STRIDE_N, B_STRIDE_K],
-        strides=[{{stride("b_ptr", 0)}}, {{stride("b_ptr", -1)}}, {{stride("b_ptr", -2)}}],
+        strides=[B_STRIDE_G, B_STRIDE_N, B_STRIDE_K],
         block_shape=[1, BLOCK_N, BLOCK_K],
 {%- else %}
         shape=[G, K, N],
-        # fixme: strides=[B_STRIDE_G, B_STRIDE_K, B_STRIDE_N],
-        strides=[{{stride("b_ptr", 0)}}, {{stride("b_ptr", -2)}}, {{stride("b_ptr", -1)}}],
+        strides=[B_STRIDE_G, B_STRIDE_K, B_STRIDE_N],
         block_shape=[1, BLOCK_K, BLOCK_N],
 {%- endif %}
 {%- endif %}
