@@ -99,9 +99,6 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
 
     # Insert backward nodes
     for node in list(gm.graph.nodes)[bwd_start:]:
-        if node.op == "output":
-            continue
-
         # Gather all checkpointed deps needed by this node
         deps = set()
         for inp in node.all_input_nodes:
@@ -119,9 +116,6 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
 
         env[node] = new_graph.node_copy(node, remat_input)
 
-    output_node = list(gm.graph.nodes)[-1]
-    assert output_node.op == "output"
-    new_graph.node_copy(output_node, remat_input)
     new_gm = torch.fx.GraphModule(gm, new_graph)
 
     # DCE with custom is_impure_node (like default_partition)
