@@ -1050,9 +1050,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             # When any inputs are FakeScriptObject, we need to
             # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher
             # because C++ dispatcher will check the schema and cannot recognize FakeScriptObject.
-            return self._dispatch_in_python(
-                self._fallthrough_keys(), *args, **kwargs
-            )
+            return self._dispatch_in_python(self._fallthrough_keys(), *args, **kwargs)
         return self._op(*args, **kwargs)
 
     def _dispatch_in_python(
