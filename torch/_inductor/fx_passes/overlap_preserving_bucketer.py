@@ -8,12 +8,12 @@ import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
+    _schedulable_wait_node,
     bucket_key,
     BucketMode,
     has_mergeable_all_gather_convert_dtype,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
-    is_wait_tensor,
 )
 from torch._inductor.fx_passes.overlap_scheduling import (
     CollBucket,
@@ -52,12 +52,12 @@ class WhyNoBucket:
 
 def is_collective_or_wait(n: fx.Node) -> bool:
     """Check if node is a collective start or wait."""
-    if is_wait_tensor(n):
+    if _schedulable_wait_node(n):
         return True
     # Collective starts have exactly one use: the wait_tensor
     if len(n.users) == 1:
         user = next(iter(n.users.keys()))
-        if is_wait_tensor(user):
+        if _schedulable_wait_node(user):
             return True
     return False
 
@@ -187,7 +187,7 @@ class OverlapPreservingBucketer:
             if node in self.collective_info and get_group_name(node) == pg:
                 node_type = "starts"
                 hiding_nodes |= self.collective_info[node].hiding_nodes
-            elif is_wait_tensor(node):
+            elif _schedulable_wait_node(node):
                 wait_input = node.args[0]
                 if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
                     node_type = "waits"
@@ -326,7 +326,7 @@ class OverlapPreservingBucketer:
         # Sort collectives by node index for efficient distance checking
         sorted_collectives = sorted(collective_group, key=lambda n: self.node_idx[n])
 
-        for start_node in sorted_collectives:
+        for i, start_node in enumerate(sorted_collectives):
             if start_node in processed:
                 continue
 
@@ -336,25 +336,17 @@ class OverlapPreservingBucketer:
                 total_bytes=self.collective_info[start_node].size_bytes,
             )
             processed.add(start_node)
-            start_node_idx = self.node_idx[start_node]
 
             # Check candidates in sorted order, break when beyond max distance
-            for candidate in sorted_collectives:
+            for candidate in sorted_collectives[i + 1 : i + 1 + self.max_coll_distance]:
                 if candidate in processed:
                     continue
 
-                candidate_idx = self.node_idx[candidate]
-                # Check if candidate is within max distance from the bucket start
-                distance = abs(candidate_idx - start_node_idx)
-                if distance > self.max_coll_distance:
-                    # Since sorted, all remaining candidates will be too far
-                    if candidate_idx > start_node_idx:
-                        break
-                    continue
-
                 candidate_bytes = self.collective_info[candidate].size_bytes
+                # proxy on memory use, if we see a too large bucket,
+                # dont look for another, later bucket
                 if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
-                    continue
+                    break
 
                 if self._can_add_to_bucket(bucket_info, candidate):
                     bucket_info.collectives.append(candidate)
@@ -811,7 +803,7 @@ class OverlapPreservingBucketer:
             )
 
         # Get new nodes
-        new_waits = [n for n in new_nodes if is_wait_tensor(n)]
+        new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
         assert len(new_waits) == 1
 
         new_wait = new_waits[0]
