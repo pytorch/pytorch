@@ -8842,18 +8842,18 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
 
 
 def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
-    def to_fp8_saturated(x: torch.Tensor, fp8_dtype: torch.dtype):
+    def to_fp8_saturated(x: torch.Tensor, fp8_dtype: torch.dtype) -> torch.Tensor:
         max_val = E4M3_MAX_POS if fp8_dtype == e4m3_type else E5M2_MAX_POS
         x = x.clamp(min=-1 * max_val, max=max_val)
         return x.to(fp8_dtype)
 
-    def amax_to_scale(amax: torch.Tensor, float8_dtype: torch.dtype):
+    def amax_to_scale(amax: torch.Tensor, float8_dtype: torch.dtype) -> torch.Tensor:
         EPS = 1e-12
         max_pos = E4M3_MAX_POS if float8_dtype == e4m3_type else E5M2_MAX_POS
         scale_val = max_pos / torch.clamp(amax, min=EPS)
         return scale_val.to(dtype=torch.float32, device=device)
 
-    def make_scale(x: float, float8_dtype: torch.dtype, dim=None):
+    def make_scale(x: float, float8_dtype: torch.dtype, dim=None) -> torch.Tensor:
         if dim is None:
             amax = torch.tensor(abs(x), dtype=torch.float32, device=device)
         else:
@@ -8862,7 +8862,7 @@ def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
             ).values
         return amax_to_scale(amax, float8_dtype)
 
-    def make_mat(size: tuple[int], scale: float, fp8_dtype: torch.dtype):
+    def make_mat(size: tuple[int], scale: float, fp8_dtype: torch.dtype) -> torch.Tensor:
         mat = torch.randn(size, device=device, dtype=torch.float32)
         return to_fp8_saturated(mat * scale, fp8_dtype)
 
