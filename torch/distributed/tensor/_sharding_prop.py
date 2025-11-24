@@ -11,6 +11,7 @@ from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     ArgsType,
@@ -32,6 +33,7 @@ from torch.distributed.tensor._ops.utils import (
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
+    try_find_mesh_from_args,
 )
 from torch.distributed.tensor.placement_types import Placement, ShardingPlaceholder
 
@@ -423,8 +425,10 @@ class ShardingPropagator:
             # Later, replace this with a min-cost guided graph search, starting from the current input placements and taking
             # steps in the lowest-redistribution-cost direction until finding a valid strategy combination.
             single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
+            mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
+            assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
             _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                op_schema, single_dim_strategy
+                mesh, op_schema, single_dim_strategy
             )
 
             args_schema, kwargs_schema = _args_schema_with_tensor_meta(
