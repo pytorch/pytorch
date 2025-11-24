@@ -54,11 +54,11 @@ def argmin_argmax_handler(
             torch.Size([1] * len(input_shape)) if keepdim else torch.Size([])
         )
     elif keepdim:
-        if len(input_shape):
+        if input_shape:
             input_shape[dim] = 1
         expected_shape = torch.Size(input_shape)
     else:
-        if len(input_shape):
+        if input_shape:
             input_shape.pop(dim)
         expected_shape = torch.Size(input_shape)
 
