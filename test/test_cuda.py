@@ -4422,6 +4422,70 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(
+        TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync"
+    )
+    def test_memory_snapshot_skip_actions(self):
+        """Test that skip_actions parameter correctly filters out specified action types."""
+        # Test cases: (skip_actions, description)
+        test_cases = [
+            (["free_requested"], "single action"),
+            (["free_requested", "free_completed"], "multiple actions"),
+            (["alloc"], "alloc action"),
+            (["segment_alloc", "segment_free"], "segment actions"),
+            (["snapshot"], "snapshot action"),
+            ([], "empty list"),
+            (None, "None default"),
+        ]
+        print("running test_memory_snapshot_skip_actions")
+
+        for skip_actions, description in test_cases:
+            with self.subTest(skip_actions=skip_actions, description=description):
+                try:
+                    torch.cuda.memory.empty_cache()
+                    torch.cuda.memory._record_memory_history(
+                        context="all", stacks="python", skip_actions=skip_actions
+                    )
+
+                    # Perform allocations and frees to generate various actions
+                    x = torch.rand(128, 128, device="cuda")
+                    addr = x.untyped_storage().data_ptr()
+                    del x
+                    torch.cuda.synchronize()
+                    
+                    # Take snapshot to potentially generate snapshot event
+                    ss = torch.cuda.memory._snapshot()
+                    device_idx = 0
+                    while len(ss["device_traces"][device_idx]) == 0:
+                        device_idx = device_idx + 1
+                    device_trace = ss["device_traces"][device_idx]
+                    all_actions = {event["action"] for event in device_trace}
+                    
+                    # Verify traces are not empty (other actions are still recorded)
+                    self.assertGreater(
+                        len(device_trace), 0,
+                        f"Trace should not be empty for skip_actions={skip_actions}"
+                    )
+                    
+                    if skip_actions:
+                        all_actions = {event["action"] for event in device_trace}
+                        
+                        # Verify skipped actions are not in traces
+                        for sa in skip_actions:
+                            self.assertNotIn(
+                                sa, all_actions,
+                                f"Action {sa} should be skipped with skip_actions={skip_actions}"
+                            )
+                        # Check that we have actions that are NOT in the skip list
+                        non_skipped_actions = all_actions - set(skip_actions)
+                        self.assertGreater(
+                            len(non_skipped_actions), 0,
+                            f"Should have non-skipped actions for skip_actions={skip_actions}"
+                        )
+
+                finally:
+                    torch.cuda.memory._record_memory_history(None)
+
     @serialTest()
     def test_max_split_expandable(self):
         try:
