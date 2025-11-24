@@ -15,8 +15,6 @@ using namespace c10::CachingDeviceAllocator;
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
 
-class XPUAllocator;
-
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
@@ -1320,7 +1318,7 @@ class DeviceCachingAllocator {
 
 static void local_raw_delete(void* ptr);
 
-class XPUAllocator : public DeviceAllocator {
+class NativeCachingAllocator : public XPUAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
@@ -1540,7 +1538,7 @@ class XPUAllocator : public DeviceAllocator {
   }
 };
 
-static XPUAllocator allocator;
+static NativeCachingAllocator allocator;
 
 void local_raw_delete(void* ptr) {
   allocator.free(ptr);
