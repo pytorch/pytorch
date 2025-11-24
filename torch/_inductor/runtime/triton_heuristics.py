@@ -29,6 +29,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
+    _IS_WINDOWS,
     prefix_is_reduction,
     triton_version_uses_attrs_dict,
     XPU_KERNEL_BIN_EXT,
@@ -759,7 +760,9 @@ class CachingAutotuner(KernelInterface):
                 options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
 
         if self.device_props.type == "xpu":
-            options["generate_native_code"] = True
+            # TODO: remove this after Intel triton supports generate native code on Windows.
+            if not _IS_WINDOWS:
+                options["generate_native_code"] = True
 
         return options
 
