@@ -87,12 +87,6 @@ def _expand_single_dim_strategy_to_mesh(
         # TODO: can we just pass the input placements in a mode convenient form?
         shard_builders: dict[str, Callable[[int], Placement]] = {}
         for spec in op_schema.args_spec:
-            # assert len(arg_strategy.strategies) == 1, (
-            #     "we should only get one strategy for each input at this point"
-            # )
-            # assert len(arg_strategy.strategies[0].output_spec.placements) > 0, (
-            #     "we expect valid output placements"
-            # )
             for p in spec.placements:
                 if isinstance(p, _StridedShard):
                     key = f"StridedShard(sf={p.split_factor})"
