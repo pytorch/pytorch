@@ -2734,7 +2734,6 @@ class AlgorithmSelectorCache(PersistentCache):
         best_config_future=None,
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
     ):
-        print(f"CHOICES in AlgorithmSelectorCache.__call__: {choices}")
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         # Run preprocessing functions on choices

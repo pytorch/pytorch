@@ -162,14 +162,10 @@ class InductorChoices:
 
         # Get the appropriate template-specific heuristic
         heuristic = get_template_heuristic(template_name, device_type, op_name)
-        configs = list(
-            heuristic.get_template_configs(
-                kernel_inputs,
-                op_name,
-            )
+        cs = heuristic.get_template_configs(
+            kernel_inputs,
+            op_name,
         )
-        print(f"Configs from heuristic for {template_name}: {configs}")
-        cs = configs
         # adjust the kernel inputs to the template-specific heuristic, if needed
         # default here is to just return the kernel_inputs as is
         inputs_val = heuristic.adjust_kernel_inputs(kernel_inputs, op_name)
