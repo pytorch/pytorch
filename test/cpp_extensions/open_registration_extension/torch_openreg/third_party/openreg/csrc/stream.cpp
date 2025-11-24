@@ -177,7 +177,6 @@ orError_t orStreamCreateWithPriority(
     orStream_t* stream,
     [[maybe_unused]] unsigned int flag,
     int priority) {
-  priority = -priority;
   if (!stream) {
     return orErrorUnknown;
   }
@@ -210,7 +209,7 @@ orError_t orStreamCreate(orStream_t* stream) {
   int min_p, max_p;
   orDeviceGetStreamPriorityRange(&min_p, &max_p);
 
-  return orStreamCreateWithPriority(stream, min_p, max_p);
+  return orStreamCreateWithPriority(stream, 0, max_p);
 }
 
 orError_t orStreamGetPriority(
@@ -283,9 +282,9 @@ orError_t orDeviceGetStreamPriorityRange(
     return orErrorUnknown;
   }
 
-  // OpenReg priority levels are -1 and 0
-  *leastPriority = -1;
-  *greatestPriority = 0;
+  // OpenReg priority levels are 0 and 1
+  *leastPriority = 0;
+  *greatestPriority = 1;
   return orSuccess;
 }
 

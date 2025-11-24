@@ -49,8 +49,8 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
  *                ignored for ext   ignored for ext
  *
  * StreamIdType:
- *  000 = high stream
- *  001 = normal stream
+ *  000 = normal stream
+ *  001 = high stream
  *  110 = default stream
  *  111 = external stream
 
@@ -240,7 +240,7 @@ OpenRegStream getStreamFromPool(const int priority, DeviceIndex device_index) {
 
 OpenRegStream getStreamFromPool(const bool isHighPriority, DeviceIndex device) {
   initOpenRegStreamsOnce();
-  int priority = isHighPriority ? 0 : max_stream_priorities - 1;
+  int priority = isHighPriority ? max_stream_priorities - 1 : 0;
   return getStreamFromPool(priority, device);
 }
 
