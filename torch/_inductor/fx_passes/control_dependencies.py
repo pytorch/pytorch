@@ -65,12 +65,12 @@ def _(additional_deps, subgraph, *args, **kwargs):
     return subgraph(*args, **kwargs)
 
 
-class ControlDep(HigherOrderOperator):
+class RequiresDeps(HigherOrderOperator):
     """
     Higher-order operator that enforces ordering by making dependencies explicit.
     This is version of ControlDeps for one node, that allows to use it without subgraph.
 
-    Schema: control_deps(additional_deps, out) -> out
+    Schema: requires_deps(additional_deps, out) -> out
     where:
     - additional_deps: tuple of tensors that must be computed before out
     - out tensor that requires computation of additional_deps before its use.
@@ -79,31 +79,31 @@ class ControlDep(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("control_dep")
+        super().__init__("requires_deps")
 
     def __call__(self, additional_deps, out):
         return super().__call__(additional_deps, out)
 
 
-control_dep = ControlDep()
+requires_deps = RequiresDeps()
 
 
-@register_fake(control_dep)
+@register_fake(requires_deps)
 def _(additional_deps, out):
     return out
 
 
-control_dep.fallthrough(DispatchKey.AutogradCPU)
-control_dep.fallthrough(DispatchKey.AutogradCUDA)
+requires_deps.fallthrough(DispatchKey.AutogradCPU)
+requires_deps.fallthrough(DispatchKey.AutogradCUDA)
 
 
-@control_dep.py_impl(ProxyTorchDispatchMode)
+@requires_deps.py_impl(ProxyTorchDispatchMode)
 def _impl(mode, *args, **kwargs):
     proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
     proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
     out_proxy = mode.tracer.create_proxy(
         "call_function",
-        control_dep,
+        requires_deps,
         (*proxy_args,),
         proxy_kwargs,
     )

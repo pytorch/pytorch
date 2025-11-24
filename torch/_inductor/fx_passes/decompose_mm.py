@@ -109,7 +109,7 @@ def _trace_fn_mm_rs_scatter_dim_non0(
         ws.append(torch.ops._c10d_functional.wait_tensor(rso))
 
     # Waits must finish before out read
-    return torch.ops.higher_order.control_dep(ws, out)
+    return torch.ops.higher_order.requires_deps(ws, out)
 
 
 def _mm_split_cat_rs_fn_view3d(
@@ -149,7 +149,7 @@ def _mm_split_cat_rs_fn_view3d(
         ws.append(torch.ops._c10d_functional.wait_tensor(rso))
 
     # Waits must finish before out read
-    return torch.ops.higher_order.control_dep(ws, out)
+    return torch.ops.higher_order.requires_deps(ws, out)
 
 
 def _size_hint(s: sympy.Expr) -> int:

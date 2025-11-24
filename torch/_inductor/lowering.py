@@ -7389,11 +7389,11 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     return output
 
 
-from torch._inductor.fx_passes.control_dependencies import control_dep
+from torch._inductor.fx_passes.control_dependencies import requires_deps
 
 
-@register_lowering(control_dep, type_promotion_kind=None)
-def control_dep_op_lowering(additional_deps, out):
+@register_lowering(requires_deps, type_promotion_kind=None)
+def requires_deps_op_lowering(additional_deps, out):
     # Realize all additional dependencies
     dep_names = []
     for dep in additional_deps:
