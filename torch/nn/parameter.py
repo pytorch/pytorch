@@ -18,7 +18,7 @@ __all__ = [
 # Metaclass to combine _TensorMeta and the instance check override for Parameter.
 class _ParameterMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Parameter)` return True for custom tensor instances that have the _is_param flag.
-    def __instancecheck__(self, instance):
+    def __instancecheck__(self, instance) -> bool:
         if self is Parameter:
             if isinstance(instance, torch.Tensor) and getattr(
                 instance, "_is_param", False
@@ -82,7 +82,7 @@ class Parameter(torch.Tensor, metaclass=_ParameterMeta):
             return result
 
     # pyrefly: ignore [bad-override]
-    def __repr__(self):
+    def __repr__(self) -> str:
         return "Parameter containing:\n" + super().__repr__()
 
     def __reduce_ex__(self, proto):
@@ -125,7 +125,7 @@ class UninitializedTensorMixin:
         torch._has_compatible_shallow_copy_type,
     ]
 
-    def materialize(self, shape, device=None, dtype=None):
+    def materialize(self, shape, device=None, dtype=None) -> None:
         r"""Create a Parameter or Tensor with the same properties of the uninitialized one.
 
         Given a shape, it materializes a parameter in the same device
@@ -163,7 +163,7 @@ class UninitializedTensorMixin:
             "`module.share_memory()`."
         )
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<{self.__class__.__name__}>"
 
     def __reduce_ex__(self, proto):
@@ -235,7 +235,7 @@ class UninitializedParameter(UninitializedTensorMixin, Parameter):
 # Metaclass to combine _TensorMeta and the instance check override for Buffer.
 class _BufferMeta(torch._C._TensorMeta):
     # Make `isinstance(t, Buffer)` return True for custom tensor instances that have the _is_buffer flag.
-    def __instancecheck__(self, instance):
+    def __instancecheck__(self, instance) -> bool:
         if self is Buffer:
             if isinstance(instance, torch.Tensor) and getattr(
                 instance, "_is_buffer", False

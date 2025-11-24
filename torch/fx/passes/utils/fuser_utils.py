@@ -226,11 +226,11 @@ def insert_subgm(
                 return node
         return None
 
-    last_input_node: Node | None = last_node(orig_inputs)
-    assert last_input_node is not None
+    last_output_node: Node | None = last_node(orig_outputs)
+    assert last_output_node is not None
 
     # Create a call_module node in main graph.
-    with gm.graph.inserting_after(last_input_node):
+    with gm.graph.inserting_after(last_output_node):
         module_node = gm.graph.call_module(
             submodule_name, args=orig_inputs, kwargs=None
         )
