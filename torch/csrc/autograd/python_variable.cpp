@@ -2134,6 +2134,33 @@ static bool contains_any_symint(const py::tuple& tup) {
   return false;
 }
 
+static void flatten_ivalue_for_pytree(
+    const c10::IValue& ivalue,
+    c10::SmallVector<c10::IValue, 8>& flattened) {
+  if (ivalue.isList()) {
+    const auto list = ivalue.toList();
+    for (const auto& element : list) {
+      flatten_ivalue_for_pytree(element, flattened);
+    }
+    return;
+  }
+  if (ivalue.isTensorList()) {
+    const auto list = ivalue.toTensorList();
+    for (const auto& tensor : list) {
+      flatten_ivalue_for_pytree(c10::IValue(tensor), flattened);
+    }
+    return;
+  }
+  if (ivalue.isTuple()) {
+    const auto tuple = ivalue.toTuple();
+    for (const auto& element : tuple->elements()) {
+      flatten_ivalue_for_pytree(element, flattened);
+    }
+    return;
+  }
+  flattened.push_back(ivalue);
+}
+
 static bool dtensor_spec_has_symints(py::handle spec) {
   const auto tensor_meta = spec.attr(dtensor_interned_strings.tensor_meta);
   if (tensor_meta.is_none()) {
@@ -2157,18 +2184,32 @@ create_native_op_schema(
   // operating on IValues instead of Python stuff.
 
   py::object runtime_schema_info = get_runtime_schema_info_for_op(py_op);
-  if (runtime_schema_info &&
+  const bool needs_pytree = runtime_schema_info &&
       checked_istrue(py::handle(runtime_schema_info)
                          .attr(dtensor_interned_strings.needs_pytree)
-                         .ptr())) {
-    // Punting on pytree flattening in the fast path on IValues for
-    // now since only a minority of ops need it.
-    return std::nullopt;
-  }
+                         .ptr());
 
   OperatorArgsKwargsView args_kwargs(op, *stack);
+  c10::SmallVector<c10::IValue, 8> positional_args_storage;
+  positional_args_storage.reserve(args_kwargs.num_positional_args());
+  for (auto argument_it = args_kwargs.args_begin();
+       argument_it != args_kwargs.args_end();
+       ++argument_it) {
+    positional_args_storage.push_back(*argument_it);
+  }
+  if (needs_pytree) {
+    c10::SmallVector<c10::IValue, 8> flattened_positional_args;
+    flattened_positional_args.reserve(positional_args_storage.size());
+    for (const auto& arg : positional_args_storage) {
+      flatten_ivalue_for_pytree(arg, flattened_positional_args);
+    }
+    positional_args_storage = std::move(flattened_positional_args);
+  }
+  const auto positional_args =
+      c10::ArrayRef<c10::IValue>(positional_args_storage);
+
   auto native_info = unpack_runtime_schema_info(
-      py::handle(runtime_schema_info), args_kwargs.num_positional_args());
+      py::handle(runtime_schema_info), positional_args.size());
 
   c10::SmallVector<IValueOrDTensorSpec, 8> comparison_key;
   std::size_t comparison_key_hash = 0;
@@ -2209,13 +2250,10 @@ create_native_op_schema(
     comparison_key.emplace_back(std::move(arg));
   };
 
-  Py_ssize_t idx = 0;
+  std::size_t idx = 0;
   const bool allow_implicit_replication =
       at::get_dtensor_allow_implicit_replication();
-  for (auto argument_it = args_kwargs.args_begin();
-       argument_it != args_kwargs.args_end();
-       ++argument_it) {
-    const auto& arg = *argument_it;
+  for (const auto& arg : positional_args) {
     const auto [tensor_flavor, py_tensor] = check_for_dtensor_or_tensor(arg);
     switch (tensor_flavor) {
       case TensorFlavor::EXACTLY_DTENSOR:
@@ -2305,7 +2343,7 @@ create_native_op_schema(
           op,
           std::move(comparison_key),
           comparison_key_hash,
-          args_kwargs.num_positional_args()),
+          positional_args.size()),
       std::move(compute_mesh));
 }
 
