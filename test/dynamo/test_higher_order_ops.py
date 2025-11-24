@@ -39,7 +39,10 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 
 
 def count_ops(gm, args, freq, op):
@@ -131,7 +134,7 @@ def default_args_generator(seed_value):
         yield new_args
 
 
-class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
+class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -3395,8 +3398,95 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(RuntimeError, msg):
             fn_with_hints(x, y)
 
+    @requires_cuda_and_triton
+    def test_wrap_inductor_compiled_regions_option(self):
+        """
+        Test that wrap_inductor_compiled_regions option wraps compiled regions
+        in inductor_compiled_code HOP, making them visible to DebugMode.
+        """
+        from torch.utils._debug_mode import DebugMode
 
-class HigherOrderOpVmapGuardTests(LoggingTestCase):
+        # Test with wrapping enabled
+        @torch.compile(
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+        )
+        def fn_wrapped(x, y):
+            return torch.matmul(x, y)
+
+        # Test with wrapping disabled (default)
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn_not_wrapped(x, y):
+            return torch.matmul(x, y)
+
+        x = torch.randn(4, 4, device="cuda")
+        y = torch.randn(4, 4, device="cuda")
+
+        # Test wrapped version - HOP should be visible in DebugMode
+        with DebugMode() as debug_mode_wrapped:
+            result_wrapped = fn_wrapped(x, y)
+
+        debug_string_wrapped = debug_mode_wrapped.debug_string()
+        self.assertIn("inductor_compiled_code", debug_string_wrapped)
+
+        # Test non-wrapped version - HOP should NOT be visible
+        with DebugMode() as debug_mode_not_wrapped:
+            result_not_wrapped = fn_not_wrapped(x, y)
+
+        debug_string_not_wrapped = debug_mode_not_wrapped.debug_string()
+        self.assertNotIn("inductor_compiled_code", debug_string_not_wrapped)
+
+        # Both should produce correct results
+        expected = torch.matmul(x, y)
+        self.assertEqual(result_wrapped, expected)
+        self.assertEqual(result_not_wrapped, expected)
+
+    @requires_cuda_and_triton
+    def test_wrap_inductor_compiled_regions_with_backward(self):
+        """
+        Test that wrap_inductor_compiled_regions works correctly with autograd.
+        """
+        from torch.utils._debug_mode import DebugMode
+
+        @torch.compile(
+            backend="inductor",
+            options={"wrap_inductor_compiled_regions": True},
+            fullgraph=True,
+        )
+        def fn(x, y):
+            return torch.matmul(x, y)
+
+        x = torch.randn(4, 4, device="cuda", requires_grad=True)
+        y = torch.randn(4, 4, device="cuda", requires_grad=True)
+
+        # Clone for eager comparison
+        x_eager = x.detach().clone().requires_grad_(True)
+        y_eager = y.detach().clone().requires_grad_(True)
+
+        # Compiled forward and backward
+        with DebugMode() as debug_mode:
+            result = fn(x, y)
+            loss = result.sum()
+            loss.backward()
+
+        # HOP should be visible in forward pass
+        self.assertIn("inductor_compiled_code", debug_mode.debug_string())
+
+        # Eager forward and backward for comparison
+        expected = torch.matmul(x_eager, y_eager)
+        expected_loss = expected.sum()
+        expected_loss.backward()
+
+        # Check correctness
+        self.assertEqual(result, expected)
+        self.assertEqual(x.grad, x_eager.grad)
+        self.assertEqual(y.grad, y_eager.grad)
+
+
+class HigherOrderOpVmapGuardTests(
+    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks, LoggingTestCase
+):
     @make_logging_test(recompiles=True)
     def test_vmap_grad_guard_ok(self, records):
         vmap = torch.vmap
@@ -3665,7 +3755,9 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         self.assertGreater(len(records), 0)
 
 
-class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
+class FuncTorchHigherOrderOpTests(
+    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
+):
     def tearDown(self):
         # Ensure that in the case of a test failure, the next test won't fail
         # because of a previous call to _vmap_increment_nesting that wasn't undone
@@ -6782,7 +6874,9 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, actual)
 
 
-class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
+class ActivationCheckpointingTests(
+    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
+):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
         cloned_args = []
         for arg in args:
@@ -6889,7 +6983,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
             fn, backend, x, y, skip_check=True
         )  # dropout decomp is known to diverge with eager
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @torch._functorch.config.patch(functionalize_rng_ops=True)
     def test_fallback(self):
         def gn(x, y):
@@ -7173,7 +7267,7 @@ xfail_hops_compile = {
 }
 
 
-class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
+class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @requires_cuda_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
