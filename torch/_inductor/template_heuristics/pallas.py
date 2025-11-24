@@ -21,6 +21,5 @@ class PallasMatmulHeuristic(TemplateConfigHeuristics):
     ) -> Generator[dict[str, Any], None, None]:
         tpu_configs = [
             {"bm": 128, "bk": 128, "bn": 128},
-            {"bm": 2, "bk": 2, "bn": 2},
         ]
         yield from tpu_configs

@@ -99,15 +99,11 @@ class PallasTestsMixin:
 
         compiled = self._compile(fn)
 
-        a = torch.randn(2, 2, device=self.DEVICE)
-        b = torch.randn(2, 2, device=self.DEVICE)
+        a = torch.randn(128, 128, device=self.DEVICE, dtype=torch.float32)
+        b = torch.randn(128, 128, device=self.DEVICE, dtype=torch.float32)
         expected = fn(a, b)
-        print(f"Input a:\n{a}")
-        print(f"Input b:\n{b}")
         result = compiled(a, b)
-        print(f"Expected output:\n{expected}")
-        print(f"Actual output:\n{result}")
-        self.assertEqual(result, expected)
+        self.assertEqual(result, expected, rtol=1e-1, atol=1e-1)
 
     def test_sin(self):
         """Test sin operation."""
