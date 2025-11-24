@@ -771,6 +771,7 @@ class ConstDictVariable(VariableTracker):
                     user_cls = self.user_cls
                     to_cpy = self
                 else:
+                    assert isinstance(other, ConstDictVariable)
                     user_cls = other.user_cls
                     to_cpy = other
 
