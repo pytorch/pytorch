@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 import unittest
+import warnings
 
 import torch
 import torch.xpu._gpu_trace as gpu_trace
@@ -41,7 +42,7 @@ TEST_MULTIXPU = torch.xpu.device_count() > 1
 cpu_device = torch.device("cpu")
 xpu_device = torch.device("xpu")
 
-any_common_cpu_xpu_one = OpDTypes.any_common_cpu_cuda_one
+any_common_cpu_xpu_one = OpDTypes.any_common_cpu_xpu_one
 _xpu_computation_op_list = [
     "fill",
     "zeros",
@@ -1151,6 +1152,237 @@ if __name__ == "__main__":
             z[0] = z[0] + 1.0
             self.assertEqual(z, x)
 
+    def test_graph_is_current_stream_capturing(self):
+        self.assertFalse(torch.xpu.is_current_stream_capturing())
+
+        if TEST_XPU:
+            s = torch.xpu.Stream()
+            with torch.xpu.stream(s):
+                g = torch.xpu.XPUGraph()
+                self.assertFalse(torch.xpu.is_current_stream_capturing())
+                g.capture_begin()
+                self.assertTrue(torch.xpu.is_current_stream_capturing())
+                g.capture_end()    
+
+    @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+    def test_graph_capture_simple(self):
+        s = torch.xpu.Stream()
+
+        with torch.xpu.stream(s):
+            a = torch.full((1000,), 1, device="xpu")
+            g = torch.xpu.XPUGraph()
+            torch.xpu.empty_cache()
+            g.capture_begin()
+            b = a
+            for _ in range(10):
+                b = b + 1
+            g.capture_end()
+        torch.xpu.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertEqual(b.sum().item(), 11000.0)
+
+    @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+    def test_graphsafe_set_get_rng_state(self):
+        # Define a function to create generator states, with optional graph registration
+        def create_states(generator):
+            """Initializes generator states and registers them with a XPU graph if provided."""
+            # Ensure the XPU generator is initialized
+            torch.rand(1, device="xpu")
+            generator.manual_seed(0)
+
+            # Save the current state of the generator
+            old_state = generator.graphsafe_get_state()
+            # Create and save a cloned state of the generator
+            new_state = generator.clone_state()
+            # Return the original generator and its two states
+            return generator, old_state, new_state
+
+        def register_states_to_graph(generator_state, graph):
+            _, old_state, new_state = generator_state
+            graph.register_generator_state(old_state)
+            graph.register_generator_state(new_state)
+
+        # Define a function to perform specific RNG actions using the generator's states
+        def perform_random_generation_steps(generator_state):
+            generator, old_state, new_state = generator_state
+            random_values = []
+
+            # Generate random numbers with the new generator state
+            generator.graphsafe_set_state(new_state)
+            random_values.append(torch.rand(5, device="xpu", generator=generator))
+
+            # Generate random numbers twice with the old generator state
+            generator.graphsafe_set_state(old_state)
+            random_values.extend(
+                [torch.rand(5, device="xpu", generator=generator) for _ in range(2)]
+            )
+
+            return random_values
+
+        # Define a function to retrieve the final offsets of the original and new generator states
+        def get_final_offsets_of_states(generator_state):
+            _, old_state, new_state = generator_state
+            old_state_offset = old_state.get_offset()
+            new_state_offset = new_state.get_offset()
+            return old_state_offset, new_state_offset
+
+        # Set up and test a new XPU generator
+        generator = torch.Generator(device="xpu")
+        generator_state = create_states(generator)
+
+        # Set up and test the default XPU generator with a XPU Graph
+        g = torch.xpu.XPUGraph()
+        s = torch.xpu.Stream()
+        default_generator = torch.xpu.default_generators[0]
+        default_generator_state = create_states(default_generator)
+        register_states_to_graph(default_generator_state, g)
+
+        # Perform random number generation within a XPU graph
+        with torch.xpu.stream(s):
+            g.capture_begin()
+            graphed_random_values = perform_random_generation_steps(
+                default_generator_state
+            )
+            g.capture_end()
+
+        # Synchronize the streams and replay the graph
+        torch.xpu.current_stream().wait_stream(s)
+        for _ in range(3):
+            random_values = perform_random_generation_steps(generator_state)
+            g.replay()
+            offset = get_final_offsets_of_states(generator_state)
+            graph_offset = get_final_offsets_of_states(default_generator_state)
+
+            # Compare the final offsets of states for both generators to ensure consistency
+            self.assertEqual(offset, graph_offset)
+            # Compare the states generated outside and inside the graph
+            self.assertEqual(random_values, graphed_random_values)
+
+    @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+    def test_memory_stats_of_multiple_generators_and_graphs(self):
+        # Function to clear XPU cache and collect garbage
+        def clear_xpu_cache():
+            gc.collect()
+            torch.xpu.empty_cache()
+
+        # capture and execute a random number generation within a XPU graph.
+        def simple_graph_task(graph):
+            s = torch.xpu.Stream()
+            with torch.xpu.stream(s):
+                graph.capture_begin()
+                torch.rand(1, device="xpu")
+                graph.capture_end()
+            torch.xpu.current_stream().wait_stream(s)
+            graph.replay()
+
+        def get_memory_stats():
+            stats = torch.xpu.memory_stats()
+            num_blocks = stats["active.all.current"]
+            total_size = stats["active_bytes.all.current"]
+            return num_blocks, total_size
+
+        def test(num_graphs, num_generators):
+            baseline = get_memory_stats()
+            baseline_num_blocks, baseline_total_size = baseline
+
+            # Allocate XPU graphs
+            graphs = [torch.xpu.XPUGraph() for _ in range(num_graphs)]
+
+            # Allocate and manage generator states
+            default_generator = torch.xpu.default_generators[0]
+            generators = [default_generator.graphsafe_get_state()]
+
+            # Starts from 1 as one state is already added
+            for _ in range(1, num_generators):
+                generators.append(default_generator.clone_state())
+
+            for graph in graphs:
+                for generator_state in generators:
+                    graph.register_generator_state(generator_state)
+                simple_graph_task(graph)
+
+            # Assert conditions after graph tasks
+            num_blocks, total_size = get_memory_stats()
+            # The allocated blocks should only be proportional to the number of generators
+            expected_blocks_diff = 2 * num_generators
+            expected_size_diff = 2 * 512 * num_generators  # Each block's size is 512
+
+            self.assertEqual(
+                (num_blocks - baseline_num_blocks),
+                expected_blocks_diff,
+                "Unexpected number of active blocks.",
+            )
+            self.assertEqual(
+                (total_size - baseline_total_size),
+                expected_size_diff,
+                "Unexpected total memory size.",
+            )
+
+            # Cleanup graphs and clear XPU cache
+            while graphs:
+                graph = graphs.pop()
+                del graph
+            clear_xpu_cache()
+
+            # Assert that memory stats return to baseline after cleanup
+            self.assertEqual(
+                get_memory_stats(),
+                baseline,
+                "Memory stats do not match baseline after cleanup.",
+            )
+
+        # Running the test function with different parameters
+        test(1, 1)
+        test(3, 2)
+        test(10, 20)
+
+    @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+    def test_graph_capture_reset_recapture(self):
+        s = torch.xpu.Stream()
+
+        with torch.xpu.stream(s):
+            a = torch.full((1000,), 1, device="xpu")
+            g = torch.xpu.XPUGraph()
+            torch.xpu.empty_cache()
+            g.capture_begin()
+            b = a
+            for _ in range(10):
+                b = b + 1
+            g.capture_end()
+        torch.xpu.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertEqual(b.sum().item(), 11000.0)
+
+        g.reset()
+
+        with torch.xpu.stream(s):
+            g.capture_begin()
+            b.fill_(2.0)
+            for _ in range(10):
+                b = b + 2
+            g.capture_end()
+        torch.xpu.current_stream().wait_stream(s)
+
+        g.replay()
+        self.assertEqual(b.sum().item(), 22000.0)
+
+        g.reset()
+        del g
+
+    def test_graph_warn_if_has_zero_nodes(self):
+        with warnings.catch_warnings(record=True) as caught:
+            g = torch.xpu.XPUGraph()
+            s = torch.xpu.Stream()
+            with torch.xpu.stream(s):
+                g.capture_begin()
+                g.capture_end()
+        self.assertTrue(
+            any("The XPU Graph is empty" in str(w.message) for w in caught)
+        )
 
 @unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuOps(TestCase):
