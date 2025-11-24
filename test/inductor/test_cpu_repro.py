@@ -726,8 +726,7 @@ class CPUReproTests(TestCase):
             seq_len,
         )
 
-    @parametrize(
-        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+    _test_lstm_packed_change_input_sizes_cpu_params = list(
         itertools.product(
             *[
                 [False],
@@ -741,7 +740,12 @@ class CPUReproTests(TestCase):
                 [2],
                 [3],
             ]
-        ),
+        )
+    )
+
+    @parametrize(
+        "unbatched, input_size, hidden_size, num_layers, bidirectional, bias, empty_state, batch_first, batch_size, seq_len",
+        _test_lstm_packed_change_input_sizes_cpu_params,
     )
     def test_lstm_packed_change_input_sizes_cpu(
         self,
@@ -4445,16 +4449,17 @@ class CPUReproTests(TestCase):
             def forward(self, x):
                 return self.gn(x)
 
-        for dynamic in [True, False]:
-            torch._dynamo.reset()
-            metrics.reset()
-            mod = M().eval()
-            x = torch.randn(1, 32, 128, 128, 128)
-            with torch.no_grad():
-                expected = mod(x)
-                compiled_m = torch.compile(mod, dynamic=dynamic)
-                actual = compiled_m(x)
-                self.assertEqual(expected, actual)
+        for simdlen, dynamic in itertools.product([None, 0], [True, False]):
+            with config.patch({"cpp.simdlen": simdlen}):
+                torch._dynamo.reset()
+                metrics.reset()
+                mod = M().eval()
+                x = torch.randn(1, 32, 128, 128, 128)
+                with torch.no_grad():
+                    expected = mod(x)
+                    compiled_m = torch.compile(mod, dynamic=dynamic)
+                    actual = compiled_m(x)
+                    self.assertEqual(expected, actual)
 
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
