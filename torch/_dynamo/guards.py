@@ -4306,6 +4306,20 @@ def get_guard_fail_reason_helper(
     scope.update(guard_manager.closure_vars)
     reasons: list[str] = []
 
+    # Check if there was a backend mismatch detected in C++
+    if hasattr(guard_manager, "_backend_mismatch_reason"):
+        backend_mismatch_reason = getattr(
+            guard_manager, "_backend_mismatch_reason", None
+        )
+        if backend_mismatch_reason:
+            reasons.append(backend_mismatch_reason)
+            try:
+                delattr(guard_manager, "_backend_mismatch_reason")
+            except AttributeError:
+                pass
+            reason_str = f"{compile_id}: " + "; ".join(reasons)
+            return strip_local_scope(reason_str)
+
     no_tensor_aliasing_check_failed = False
 
     verbose_code_parts: list[str] = []

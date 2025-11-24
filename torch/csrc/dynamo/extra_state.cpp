@@ -161,7 +161,15 @@ void lookup(
     bool valid = backend == Py_False ||
         backend_match(cache_entry.backend.ptr(), backend);
 
-    if (valid) {
+    if (!valid) {
+      py::object backend_repr = py::repr(py::handle(backend));
+      py::object cached_backend_repr = py::repr(cache_entry.backend);
+      std::string reason = std::string("backend instance mismatch between ") +
+          py::cast<std::string>(cached_backend_repr) + std::string(" and ") +
+          py::cast<std::string>(backend_repr);
+      cache_entry.guard_manager.attr("_backend_mismatch_reason") =
+          py::str(reason);
+    } else {
       try {
         if (is_skip_guard_eval_unsafe) {
           valid = torch::dynamo::run_root_guard_manager(
