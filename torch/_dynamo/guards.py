@@ -4312,10 +4312,7 @@ def get_guard_fail_reason_helper(
         )
         if backend_mismatch_reason:
             reasons.append(backend_mismatch_reason)
-            try:
-                delattr(guard_manager, "_backend_mismatch_reason")
-            except AttributeError:
-                pass
+            delattr(guard_manager, "_backend_mismatch_reason")
             reason_str = f"{compile_id}: " + "; ".join(reasons)
             return strip_local_scope(reason_str)
 
