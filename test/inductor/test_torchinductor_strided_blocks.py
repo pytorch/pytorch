@@ -1401,7 +1401,7 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
     not (
         HAS_CUDA_AND_TRITON
         and torch.cuda.get_device_capability()[0] >= 9
-        and torch.version.hip != None
+        and torch.version.hip is not None
     ),
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
 )
