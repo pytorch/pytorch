@@ -8,7 +8,10 @@ else
   with_cuda=no
 fi
 
-if [[ -d "/opt/rocm" ]]; then
+# Detect ROCm path dynamically
+if command -v rocm-sdk &> /dev/null && python3 -m rocm_sdk path --root &> /dev/null; then
+  with_rocm="$(python3 -m rocm_sdk path --root)"
+elif [[ -d "/opt/rocm" ]]; then
   with_rocm=/opt/rocm
 else
   with_rocm=no

@@ -98,10 +98,17 @@ if [ -n "$CUDA_VERSION" ]; then
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
+  # Detect ROCM_PATH dynamically
+  if command -v rocm-sdk &> /dev/null && python3 -m rocm_sdk path --root &> /dev/null; then
+      ROCM_PATH="$(python3 -m rocm_sdk path --root)"
+  else
+      ROCM_PATH="/opt/rocm"
+  fi
+  
   # ROCm compiler is hcc or clang. However, it is commonly invoked via hipcc wrapper.
-  # hipcc will call either hcc or clang using an absolute path starting with /opt/rocm,
+  # hipcc will call either hcc or clang using an absolute path starting with $ROCM_PATH,
   # causing the /opt/cache/bin to be skipped. We must create the sccache wrappers
-  # directly under /opt/rocm while also preserving the original compiler names.
+  # directly under $ROCM_PATH while also preserving the original compiler names.
   # Note symlinks will chain as follows: [hcc or clang++] -> clang -> clang-??
   # Final link in symlink chain must point back to original directory.
 
@@ -116,23 +123,23 @@ if [ -n "$ROCM_VERSION" ]; then
     chmod a+x "$OLDCOMP"
   }
 
-  if [[ -e "/opt/rocm/hcc/bin/hcc" ]]; then
+  if [[ -e "${ROCM_PATH}/hcc/bin/hcc" ]]; then
     # ROCm 3.3 or earlier.
-    mkdir /opt/rocm/hcc/bin/original
-    write_sccache_stub_rocm /opt/rocm/hcc/bin/hcc
-    write_sccache_stub_rocm /opt/rocm/hcc/bin/clang
-    write_sccache_stub_rocm /opt/rocm/hcc/bin/clang++
+    mkdir ${ROCM_PATH}/hcc/bin/original
+    write_sccache_stub_rocm ${ROCM_PATH}/hcc/bin/hcc
+    write_sccache_stub_rocm ${ROCM_PATH}/hcc/bin/clang
+    write_sccache_stub_rocm ${ROCM_PATH}/hcc/bin/clang++
     # Fix last link in symlink chain, clang points to versioned clang in prior dir
-    pushd /opt/rocm/hcc/bin/original
+    pushd ${ROCM_PATH}/hcc/bin/original
     ln -s ../$(readlink clang)
     popd
-  elif [[ -e "/opt/rocm/llvm/bin/clang" ]]; then
+  elif [[ -e "${ROCM_PATH}/llvm/bin/clang" ]]; then
     # ROCm 3.5 and beyond.
-    mkdir /opt/rocm/llvm/bin/original
-    write_sccache_stub_rocm /opt/rocm/llvm/bin/clang
-    write_sccache_stub_rocm /opt/rocm/llvm/bin/clang++
+    mkdir ${ROCM_PATH}/llvm/bin/original
+    write_sccache_stub_rocm ${ROCM_PATH}/llvm/bin/clang
+    write_sccache_stub_rocm ${ROCM_PATH}/llvm/bin/clang++
     # Fix last link in symlink chain, clang points to versioned clang in prior dir
-    pushd /opt/rocm/llvm/bin/original
+    pushd ${ROCM_PATH}/llvm/bin/original
     ln -s ../$(readlink clang)
     popd
   else
