@@ -46,6 +46,7 @@ from ..utils import (
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
+from .functions import UserFunctionVariable
 from .iter import IteratorVariable
 from .user_defined import UserDefinedTupleVariable
 
