@@ -179,6 +179,9 @@ static Tensor& normal_mps_impl(Tensor& self,
   const Tensor& std_t = *(at::borrow_from_optional_tensor(std_opt));
   const Tensor& mean_t = *(at::borrow_from_optional_tensor(mean_opt));
 
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !c10::isComplexType(self.scalar_type()), op_name, " for MPS does not support complex inputs");
+
   TORCH_CHECK(std_s >= 0.0, op_name, " expects std >= 0.0, but found std ", std_s);
   if (std_t.defined()) {
     TORCH_CHECK(!std_t.is_complex(), op_name, " expects standard deviation to be non-complex");
