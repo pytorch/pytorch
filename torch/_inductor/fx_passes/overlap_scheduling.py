@@ -1011,11 +1011,10 @@ class OverlapScheduler:
                 self.current_compute_index,
             )
 
-            # NOTE: We previously tracked path compute time and added it back to available
+            # TODO: We previously tracked path compute time and added it back to available
             # overlap time. With per-PG tracking this is complex: if there were in-flight
             # collectives on one PG but not another, we can't add path time back to the PG
-            # that wasn't in-flight. Leaving this out for now as path nodes are typically
-            # cheap (views, pointwise ops).
+            # that wasn't in-flight
 
             # Schedule path and collective
             self._schedule_path_to_collective(path, overlap_node)
@@ -1029,6 +1028,9 @@ class OverlapScheduler:
 
             # Update available time for this PG
             remaining_time_per_pg[pg_name] -= overlap_amount
+
+            if sum(remaining_time_per_pg.values()) == 0:
+                break
 
         if remaining_time_per_pg:
             self.wasted_compute += min(remaining_time_per_pg.values())
