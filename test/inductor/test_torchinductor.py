@@ -127,13 +127,14 @@ from torch._inductor.compile_fx import (
 )
 from torch._inductor.utils import has_torchvision_roi_align
 from torch.testing._internal.common_utils import slowTest
-from torch.testing._internal.inductor_utils import (
+from torch.testing._internal.inductor_utils import (  # noqa: F401
     clone_preserve_strides_offset,
     GPU_TYPE,
     HAS_CPU,
     HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
+    HAS_TPU,
     IS_BIG_GPU,
     requires_gpu,
     RUN_CPU,
@@ -15165,7 +15166,7 @@ if RUN_GPU:
         def test_grouped_mm(self):
             @torch.compile(fullgraph=True)
             def f(a, b, offs, out_dtype):
-                return torch._grouped_mm(
+                return F.grouped_mm(
                     a, b.transpose(-2, -1), offs=offs, out_dtype=out_dtype
                 )
 
