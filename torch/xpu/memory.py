@@ -565,6 +565,7 @@ __all__ = [
     "reset_peak_memory_stats",
     "set_per_process_memory_fraction",
     "MemPool",
+    "use_mem_pool",
 ]
 
 if not hasattr(torch._C, "_xpu_XPUAllocator"):
@@ -581,7 +582,7 @@ if not hasattr(torch._C, "_XPUMemPool"):
     torch._C.__dict__["_xpu_endAllocateToPool"] = _dummy_type("_xpu_endAllocateToPool")
     torch._C.__dict__["_xpu_releasePool"] = _dummy_type("_xpu_releasePool")
 
-from torch._C import (  # noqa: F401
+from torch._C import (  # pyrefly: ignore [missing-module-attribute]
     _xpu_beginAllocateCurrentThreadToPool,
     _xpu_endAllocateToPool,
     _xpu_releasePool,

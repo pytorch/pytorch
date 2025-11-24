@@ -1812,7 +1812,7 @@ class NativeCachingAllocator : public XPUAllocator {
  public:
   std::vector<std::unique_ptr<DeviceCachingAllocator>> device_allocators;
 
-  void init(DeviceIndex device_count) override {
+  void init(DeviceIndex device_count) {
     const auto size = static_cast<DeviceIndex>(device_allocators.size());
     if (size < device_count) {
       device_allocators.resize(device_count);
