@@ -1314,7 +1314,7 @@ class DeviceCachingAllocator {
 
 static void local_raw_delete(void* ptr);
 
-class NativeCachingAllocator : public XPUAllocator {
+class XPUAllocator : public DeviceAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
@@ -1534,7 +1534,7 @@ class NativeCachingAllocator : public XPUAllocator {
   }
 };
 
-static NativeCachingAllocator allocator;
+static XPUAllocator allocator;
 
 void local_raw_delete(void* ptr) {
   allocator.free(ptr);

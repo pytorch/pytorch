@@ -33,10 +33,7 @@ C10_XPU_API double getMemoryFraction(DeviceIndex device);
 
 C10_XPU_API void setMemoryFraction(double fraction, DeviceIndex device);
 
-class XPUAllocator : public DeviceAllocator {
-  virtual void* raw_alloc(size_t nbytes) = 0;
-  virtual void raw_delete(void* ptr) = 0;
-};
+class XPUAllocator;
 
 C10_XPU_API void createOrIncrefPool(
     c10::DeviceIndex device,
