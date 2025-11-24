@@ -2474,7 +2474,10 @@ class VariableBuilder:
                 ]
             ) or not config.assume_static_by_default:
                 shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
-                shape_log.info("marking %s as dynamic (from assume_static_by_default = False)", name)
+                shape_log.info(
+                    "marking %s as dynamic (from assume_static_by_default = False)",
+                    name,
+                )
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but
@@ -3623,7 +3626,10 @@ def _automatic_dynamic(
             # TODO: When does this show up?
             if not config.assume_static_by_default:
                 shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
-                shape_log.info("marking %s as dynamic (from assume_static_by_default = False)", name)
+                shape_log.info(
+                    "marking %s as dynamic (from assume_static_by_default = False)",
+                    name,
+                )
             dynamic_size = DimDynamic.DUCK
 
         if constraint_stride is not None:
