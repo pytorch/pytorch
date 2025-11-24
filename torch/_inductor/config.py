@@ -955,6 +955,16 @@ class aten_distributed_optimizations:
     max_memory_increase_gb: Optional[float] = None  # Absolute cap in GB
     max_memory_increase_ratio: Optional[float] = None  # Ratio of baseline peak memory
 
+    # If is not None, split matmul-reduce_scatter will be applied for
+    # more fine grained overlapping.
+    # This is tuple, that contains list of numbers of possible chunks and
+    # minimal size of dimension after split.
+    # E.g. ([2, 4, 8], 2048) means that greatest number from the list will be picked,
+    # that makes split dimension not less than 2048.
+    split_matmul_reducescatter = None
+    split_matmul_reducescatter_with_views = False
+    split_matmul_reducescatter_split_cat = False
+
 
 def parallel_compile_enabled_internally() -> bool:
     """

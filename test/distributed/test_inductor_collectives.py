@@ -2412,6 +2412,116 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                 )
                 assert est_ms_nccl > 0
 
+    @skip_if_lt_x_gpu(2)
+    @patch.object(
+        torch._inductor.config.aten_distributed_optimizations,
+        "split_matmul_reducescatter",
+        ([2], 1),
+    )
+    def test_split_mm_pw_rs(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(permute_89, cat_33):
+            mm_57 = torch.ops.aten.mm.default(permute_89, cat_33)
+            convert_element_type_275 = torch.ops.prims.convert_element_type.default(
+                mm_57, torch.float32
+            )
+            reduce_scatter_tensor_8 = (
+                torch.ops._c10d_functional.reduce_scatter_tensor.default(
+                    convert_element_type_275, "avg", group_size, group_name
+                )
+            )
+            wait_tensor_126 = torch.ops._c10d_functional.wait_tensor.default(
+                reduce_scatter_tensor_8
+            )
+            return wait_tensor_126
+
+        def inps():
+            return (
+                torch.randn(16032, 16384, dtype=torch.bfloat16, device=self.device),
+                torch.randn(16384, 8192, dtype=torch.bfloat16, device=self.device),
+            )
+
+        ins = inps()
+        ref_out = func(*ins)
+
+        compiled = torch.compile(func)
+        code = run_and_get_triton_code(compiled, *ins)
+        FileCheck().check_count("extern_kernels.mm(", 2, exactly=True).run(code)
+        FileCheck().check_count("wait_tensor.default(", 2, exactly=True).run(code)
+
+        compiled_out = compiled(*ins)
+
+        self.assertEqual(ref_out, compiled_out)
+
+    @skip_if_lt_x_gpu(2)
+    @patch.object(
+        torch._inductor.config.aten_distributed_optimizations,
+        "split_matmul_reducescatter",
+        ([2], 1),
+    )
+    @patch.object(
+        torch._inductor.config.aten_distributed_optimizations,
+        "split_matmul_reducescatter_split_cat",
+        True,
+    )
+    @patch.object(
+        torch._inductor.config.aten_distributed_optimizations,
+        "split_matmul_reducescatter_with_views",
+        True,
+    )
+    def test_split_mm_split_cat_rs(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+        dim2 = 8 // group_size
+
+        def func(c, b, a):
+            mm = torch.ops.aten.mm.default(a, b)
+            view = torch.ops.aten.reshape.default(mm, [2, 8, 8])
+            chunks = view.chunk(group_size, dim=2)
+            cat = torch.cat(chunks)
+            rs = torch.ops._c10d_functional.reduce_scatter_tensor.default(
+                cat, "sum", group_size, group_name
+            )
+            w = torch.ops._c10d_functional.wait_tensor.default(rs)
+            return torch.ops.aten.add.Tensor(c, w)
+
+        def inps():
+            return (
+                torch.randn(2, 8, dim2, dtype=torch.bfloat16, device=self.device),
+                torch.randn(128, 8, dtype=torch.bfloat16, device=self.device),
+                torch.randn(16, 128, dtype=torch.bfloat16, device=self.device),
+            )
+
+        ins = inps()
+        ref_out = func(*ins)
+
+        compiled = torch.compile(func)
+        code = run_and_get_triton_code(compiled, *ins)
+        FileCheck().check_count("extern_kernels.mm(", 2, exactly=True).run(code)
+        FileCheck().check_count("wait_tensor.default(", 2, exactly=True).run(code)
+
+        compiled_out = compiled(*ins)
+
+        self.assertEqual(ref_out, compiled_out)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
