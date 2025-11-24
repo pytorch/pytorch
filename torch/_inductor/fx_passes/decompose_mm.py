@@ -4,6 +4,7 @@ import operator
 import sympy
 
 import torch
+from torch._inductor.config import aten_distributed_optimizations as _config_dist
 from torch._inductor.fx_passes.bucketing import _insert_fn_trace_before_node
 from torch._logging import trace_structured
 from torch.fx.experimental.symbolic_shapes import size_hint
@@ -194,7 +195,9 @@ def _find_matmul_node(input_node):
     return None, []
 
 
-def _extract_post_mm_ops(intermediate_nodes):
+def _extract_post_mm_ops(
+    intermediate_nodes,
+) -> tuple[list["_PostMMOp"] | None, torch.fx.Node | None]:
     """Extract and validate operations between matmul and reduce-scatter.
 
     Validates that only supported operations appear between the matmul and
@@ -212,14 +215,19 @@ def _extract_post_mm_ops(intermediate_nodes):
     """
 
     def _is_pointwise(n):
-        return n.target in (torch.ops.prims.convert_element_type.default,)
+        return len(node.all_input_nodes) == 1 and torch.Tag.pointwise in getattr(
+            n.target, "tags", ()
+        )
 
-    post_mm_ops = []
+    post_mm_ops: list[_PostMMOp] = []
     reshape_ops_count = 0
     view3d_node = None
 
     for node in reversed(intermediate_nodes):
         if node.target in (aten.view.default, aten.reshape.default):
+            if not _config_dist.split_matmul_reducescatter_with_views:
+                return None, None
+
             in_shape = node.args[0].meta["val"].shape
             out_shape = node.args[1]
 
@@ -374,7 +382,9 @@ def _split_mm_rs(
     reduce_scatters = []
     for node in reversed(g.nodes):
         if node.target == c10d.wait_tensor.default:
-            if match := non_zero_dim_reduce_scatter_pattern_single_user.match(node):
+            if _config_dist.split_matmul_reducescatter_split_cat and (
+                match := non_zero_dim_reduce_scatter_pattern_single_user.match(node)
+            ):
                 assert isinstance(match, Match)
                 reduce_scatters.append(
                     _ReduceScatterMatch(
@@ -388,7 +398,9 @@ def _split_mm_rs(
                         group_name=match.kwargs["group_name"],
                     )
                 )
-            elif match := zero_dim_reduce_scatter_pattern_single_user.match(node):
+                continue
+
+            if match := zero_dim_reduce_scatter_pattern_single_user.match(node):
                 assert isinstance(match, Match)
                 reduce_scatters.append(
                     _ReduceScatterMatch(
@@ -402,6 +414,7 @@ def _split_mm_rs(
                         group_name=match.kwargs["group_name"],
                     )
                 )
+                continue
 
     for reduce_scatter in reversed(reduce_scatters):
         _process_matmul_reduce_scatter(
@@ -485,7 +498,9 @@ def _process_matmul_reduce_scatter(
     if view3d_n is not None:
         _fn_to_trace = _mm_split_cat_rs_fn_view3d
         # dim0 of 3d reshape
-        view3d_size_to_split = view3d_n.args[1][0]
+        arg1 = view3d_n.args[1]
+        assert arg1 is not None
+        view3d_size_to_split = arg1[0]  # pyrefly: ignore[index-error]
 
     size_before_split = 1
     cont_check_t = arg_a_t
