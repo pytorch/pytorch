@@ -135,7 +135,7 @@ class _PhiloxState:
 
     @property
     def seed(self) -> int:
-        return int(self._state[:8].view(dtype=torch.int64).item())
+        return int(self._state[:8].view(dtype=torch.uint64).item())
 
     @seed.setter
     def seed(self, seed: int) -> None:

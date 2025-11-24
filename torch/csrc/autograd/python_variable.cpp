@@ -1426,6 +1426,17 @@ py::object dispatchDTensorOp(
 
   torch::jit::Stack saved_args = *stack;
   NativeShardingPropagatorCache* native_sharding_propagator_cache = nullptr;
+  // In the original Python implementation of DTensor dispatch, the creation
+  // of OpInfo (which includes the OpSchema computed here) never fails. However,
+  // C++ support for all the features of OpSchema are not supported; in this
+  // case opt_native_op_schema is nullopt.  In this case, we need to fallback
+  // to the Python logic for doing so.  If you are comparing against the old
+  // Python code, this is a bit tricky, since the Python 'dispatch' function
+  // has been completely deleted.
+
+  // First, we will try to short-circuit Python entirely using the fast path.
+  // Here, we never materialize OpInfo, we generate a gimped NativeOpSchema
+  // object which has exactly the information you need to do a hash lookup.
   auto opt_native_op_schema = create_native_op_schema(op, py_op, stack);
   if (opt_native_op_schema.has_value()) {
     native_sharding_propagator_cache =
@@ -1433,21 +1444,30 @@ py::object dispatchDTensorOp(
     cached_sharding =
         native_sharding_propagator_cache->find(opt_native_op_schema->first);
   }
+
   py::object py_op_info;
   if (!cached_sharding) {
+    // OK, the C++ fastpath failed.  Let's use the Python path to generate the
+    // OpInfo (which is guaranteed to work), which we will need to either
+    // redo the cache lookup or compute the value for real.
     py_op_info = checked_vectorcall(
         op_dispatcher.attr("unwrap_to_op_info").ptr(),
         py_op.ptr(),
         args.ptr(),
         kwargs.ptr());
+
     py::object sharding = checked_vectorcall(
-        op_dispatcher
-            .attr("_propagate_op_sharding_non_cached_dispatch_slow_path")
-            .ptr(),
+        op_dispatcher.attr("_propagate_op_sharding_dispatch_slow_path").ptr(),
         py_op.ptr(),
         args.ptr(),
         kwargs.ptr(),
-        py_op_info.ptr());
+        py_op_info.ptr(),
+        /*try_cache*/ !opt_native_op_schema.has_value() ? Py_True : Py_False);
+    // This is a hack, because the dispatch slow path sometimes returns
+    // a sharding result (in which case we need to keep going) but it
+    // will sometimes just decompose and directly return a Tensor result,
+    // in which case we should return immediately.  In this case, sharding
+    // is not a sharding at all; it's the real result!
     if (!py::isinstance(sharding, get_output_sharding_class())) {
       stack->clear();
       return sharding;
