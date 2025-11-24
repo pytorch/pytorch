@@ -2940,8 +2940,10 @@ class TestAutotuneCache(TestCase):
 
         with PatchCaches():
             a1 = f_compiled(x, y, a, b)
-
-            self.assertEqual(global_stats.autotune_remote, Stats(2, 0, 2))
+            if config.combo_kernels:
+                self.assertEqual(global_stats.autotune_remote, Stats(1, 0, 1))
+            else:
+                self.assertEqual(global_stats.autotune_remote, Stats(0, 0, 0))
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
@@ -2952,7 +2954,10 @@ class TestAutotuneCache(TestCase):
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
             self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
-        self.assertEqual(global_stats.autotune_remote, Stats(2, 2, 2))
+        if config.combo_kernels:
+            self.assertEqual(global_stats.autotune_remote, Stats(1, 1, 1))
+        else:
+            self.assertEqual(global_stats.autotune_remote, Stats(2, 2, 2))
 
         # Check that the cache entries seem reasonable
         for k in global_stats.autotune_remote.cache.keys():
@@ -2988,12 +2993,18 @@ class TestAutotuneCache(TestCase):
         with PatchCaches():
             f_compiled(x, y, a, b)
 
-            self.assertEqual(global_stats.autotune_remote, Stats(2, 0, 2))
+            if config.combo_kernels:
+                self.assertEqual(global_stats.autotune_remote, Stats(1, 0, 1))
+            else:
+                self.assertEqual(global_stats.autotune_remote, Stats(2, 0, 2))
 
             self.reset()
             f_compiled(x, y, a, b)
 
-        self.assertEqual(global_stats.autotune_remote, Stats(2, 2, 2))
+        if config.combo_kernels:
+            self.assertEqual(global_stats.autotune_remote, Stats(1, 1, 1))
+        else:
+            self.assertEqual(global_stats.autotune_remote, Stats(2, 2, 2))
 
         # Check that the cache entries seem reasonable
         for k in global_stats.autotune_remote.cache.keys():
@@ -3029,14 +3040,19 @@ class TestAutotuneCache(TestCase):
 
         with PatchCaches():
             f_compiled(a, b, c, d, e, f)
-
-            self.assertEqual(global_stats.autotune_local, Stats(3, 0, 3))
+            if config.combo_kernels:
+                self.assertEqual(global_stats.autotune_local, Stats(1, 0, 1))
+            else:
+                self.assertEqual(global_stats.autotune_local, Stats(3, 0, 3))
             self.assertEqual(global_stats.bundled_autotune, Stats(1, 0, 1))
 
             self.reset()
             f_compiled(a, b, c, d, e, f)
 
-            self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
+            if config.combo_kernels:
+                self.assertEqual(global_stats.autotune_local, Stats(2, 1, 1))
+            else:
+                self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
             self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
 
             with torch.compiler.config.patch({"cache_key_tag": "test"}):
@@ -3044,13 +3060,18 @@ class TestAutotuneCache(TestCase):
                 self.reset()
                 f_compiled(a, b, c, d, e, f)
 
-                self.assertEqual(global_stats.autotune_local, Stats(3, 0, 3))
+                if config.combo_kernels:
+                    self.assertEqual(global_stats.autotune_local, Stats(1, 0, 1))
+                else:
+                    self.assertEqual(global_stats.autotune_local, Stats(3, 0, 3))
                 self.assertEqual(global_stats.bundled_autotune, Stats(1, 0, 1))
 
                 self.reset()
                 f_compiled(a, b, c, d, e, f)
-
-                self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
+                if config.combo_kernels:
+                    self.assertEqual(global_stats.autotune_local, Stats(2, 1, 1))
+                else:
+                    self.assertEqual(global_stats.autotune_local, Stats(6, 3, 3))
                 self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
 
         # Check that the cache entries seem reasonable
