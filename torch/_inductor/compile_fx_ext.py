@@ -10,8 +10,8 @@ import sys
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union
-from typing_extensions import final, override, Self, TypeGuard
+from typing import Any, Optional, TYPE_CHECKING, TypeGuard, Union
+from typing_extensions import final, override, Self
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
@@ -468,6 +468,8 @@ class _SerializedFxCompile(FxCompile):
         fake_mode = _current_fake_mode()
         fake_tensor_mode = _FakeTensorModeSerializer(fake_mode)
 
+        from pickle import PicklingError
+
         try:
             input = _WireProtocolInput(
                 gm,
@@ -483,7 +485,7 @@ class _SerializedFxCompile(FxCompile):
                 fake_tensor_mode,
             ).serialize()
             return (input, constants)
-        except (AttributeError, BypassFxGraphCache):
+        except (AttributeError, BypassFxGraphCache, PicklingError):
             # For example: AttributeError: Can't pickle local object
             # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
 

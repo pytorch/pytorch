@@ -265,8 +265,8 @@ bool SubgraphRewriter::run(
   for (const auto& [pattern, replacement] : patterns_) {
     const auto& pattern_graph = stringToGraph(pattern);
     const auto& replacement_graph = stringToGraph(replacement);
-    mutated |= runForPattern(
-        graph, *pattern_graph.get(), *replacement_graph.get(), filters);
+    mutated |=
+        runForPattern(graph, *pattern_graph, *replacement_graph, filters);
   }
   return mutated;
 }

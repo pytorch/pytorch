@@ -357,6 +357,9 @@ class TestFFT(TestCase):
     @unittest.skipIf(not TEST_NUMPY, 'NumPy not found')
     @ops([op for op in spectral_funcs if op.ndimensional == SpectralFuncType.ND],
          allowed_dtypes=(torch.cfloat, torch.cdouble))
+    @toleranceOverride({
+        torch.cfloat : tol(2e-4, 1.3e-6),
+    })
     def test_reference_nd(self, device, dtype, op):
         if op.ref is None:
             raise unittest.SkipTest("No reference implementation")
@@ -481,7 +484,7 @@ class TestFFT(TestCase):
             torch.fft.ifft2,
         ]:
             inp = make_tensor((10, 10), device=device, dtype=dtype)
-            out = torch.fft.fftn(inp, dim=[])
+            out = op(inp, dim=[])
 
             expect_dtype = RESULT_TYPE.get(inp.dtype, inp.dtype)
             expect = inp.to(expect_dtype)

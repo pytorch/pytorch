@@ -17,7 +17,7 @@ static inline void cpu_atomic_add_float(float* dst, float fvalue)
   } uf32_t;
 
   uf32_t new_value, old_value;
-  std::atomic<unsigned>* dst_intV = (std::atomic<unsigned>*)(dst);
+  std::atomic<unsigned>* dst_intV = (std::atomic<unsigned>*)dst;
 
   old_value.floatV = *dst;
   new_value.floatV = old_value.floatV + fvalue;
