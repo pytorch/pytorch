@@ -57,7 +57,7 @@ jobs:
   #   uses: ./.github/workflows/docker-caching.yml
   #   with:
   #     download-docker-builds-artifacts: ${{ download-docker-builds-artifacts.outputs }}
-  #     directory: ~/pytorch-data/docker/
+  #     directory: ~/pytorch-data/docker
   #     matrix: |
   #       runner: [linux.rocm.gfx942.docker-cache]
   #       docker-image: [
