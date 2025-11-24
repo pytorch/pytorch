@@ -730,7 +730,7 @@ class OverlapScheduler:
         self,
         node: fx.Node,
         available_compute: float,
-        exclude_pgs: set[str] | None = None,
+        exclude_pg: str | None = None,
     ) -> dict[str, float]:
         """
         Reduce exposed time of in-flight collectives using available compute time.
@@ -738,11 +738,9 @@ class OverlapScheduler:
         Collectives on different process groups can overlap simultaneously with the same
         compute, so we track remaining time separately per PG.
         """
-        exclude_pgs = exclude_pgs or set()
-
         # Initialize all PGs with full available compute (except excluded)
         remaining_time_per_pg: dict[str, float] = {
-            pg: available_compute for pg in self.all_pgs if pg not in exclude_pgs
+            pg: available_compute for pg in self.all_pgs if pg != exclude_pg
         }
 
         for start_node, info in self.in_flight.items():
@@ -750,7 +748,7 @@ class OverlapScheduler:
                 continue
 
             pg_name = get_group_name(start_node)
-            if pg_name in exclude_pgs:
+            if pg_name == exclude_pg:
                 continue
 
             pg_remaining = remaining_time_per_pg[pg_name]
@@ -781,10 +779,8 @@ class OverlapScheduler:
         remaining_time_per_pg = self._reduce_exposed_time_of_in_flight_collectives(
             node, available_compute
         )
-
         # Then, schedule new collectives for overlap
         self._schedule_collectives_for_overlap(node, remaining_time_per_pg)
-
         self._schedule(node)
 
         if is_compute_node(node):
@@ -903,21 +899,18 @@ class OverlapScheduler:
         for coll_to_schedule in to_schedule:
             self._handle_wait(self.collective_info[coll_to_schedule].wait_node)
 
-        # If this collective is exposed, use that time to overlap with OTHER PGs
-        # This is the same logic as _handle_compute_or_other, but only for other PGs
+        # If we are waiting on an exposed collective, use this time to
+        # overlap on other PGs.
         info = self.collective_info[coll_start]
         if info.exposed_time_ms > 0:
             exposed_time = info.exposed_time_ms
-            exclude_pgs = {group_name}
+            exclude_pg = group_name
 
-            # Reduce exposed time of in-flight collectives on OTHER PGs
             remaining_time_per_pg = self._reduce_exposed_time_of_in_flight_collectives(
-                node, exposed_time, exclude_pgs=exclude_pgs
+                node, exposed_time, exclude_pg=exclude_pg
             )
-
-            # Schedule new collectives on OTHER PGs
             self._schedule_collectives_for_overlap(
-                node, remaining_time_per_pg, exclude_pgs=exclude_pgs
+                node, remaining_time_per_pg, exclude_pg=exclude_pg
             )
 
         self.in_flight_bytes -= self.in_flight[coll_start].size_bytes
@@ -928,13 +921,13 @@ class OverlapScheduler:
         self,
         overlap_node: fx.Node,
         remaining_time_per_pg: dict[str, float],
-        exclude_pgs: set[str] | None = None,
+        exclude_pg: str | None = None,
     ) -> None:
         """Opportunistically schedule collectives that can be hidden by available overlap time."""
-        if not remaining_time_per_pg or all(t <= 0 for t in remaining_time_per_pg.values()):
+        if not remaining_time_per_pg or all(
+            t <= 0 for t in remaining_time_per_pg.values()
+        ):
             return
-
-        exclude_pgs = exclude_pgs or set()
 
         overlap_node_ancestors = self.node_ancestors[overlap_node]
 
@@ -945,7 +938,7 @@ class OverlapScheduler:
                 break
 
             pg_name = get_group_name(collective)
-            if pg_name in exclude_pgs:
+            if pg_name == exclude_pg:
                 continue
 
             if (
