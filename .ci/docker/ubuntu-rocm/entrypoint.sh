@@ -24,7 +24,7 @@ if [[ "${ROCM_VERSION}" == "nightly" ]]; then
 else
     echo "Using traditional ROCm installation from /opt/rocm"
     # Paths already set by detect_rocm_path.sh, just add to PATH
-    export PATH="/opt/rocm/bin:/opt/rocm/hcc/bin:/opt/rocm/hip/bin:/opt/rocm/opencl/bin:/opt/rocm/llvm/bin:${PATH}"
+    export PATH="/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}"
     export MAGMA_HOME="${MAGMA_HOME:-/opt/rocm/magma}"
 fi
 
