@@ -1157,7 +1157,7 @@ class PackageExporter:
         Returns:
             A list containing the names of modules which depend on ``module_name``.
         """
-        if module_name in self.dependency_graph._pred.keys():
+        if module_name in self.dependency_graph._pred:
             return list(self.dependency_graph._pred[module_name].keys())
         else:
             return []

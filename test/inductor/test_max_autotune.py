@@ -876,15 +876,16 @@ class TestMaxAutotune(TestCase):
 
                 # Extract grid sizes from the trace events for TMA kernels
                 kernel_name = "triton_tem_fused"
-                kernel_events = [
-                    {
-                        "grid": evt.get("args", {}).get("grid", []),
-                        "grid_size": math.prod(evt.get("args", {}).get("grid", [])),
-                    }
-                    for evt in json.load(open(f.name))["traceEvents"]
-                    if evt.get("cat", "") == "kernel"
-                    and kernel_name in evt.get("name", "").lower()
-                ]
+                with open(f.name) as file:
+                    kernel_events = [
+                        {
+                            "grid": evt.get("args", {}).get("grid", []),
+                            "grid_size": math.prod(evt.get("args", {}).get("grid", [])),
+                        }
+                        for evt in json.load(file)["traceEvents"]
+                        if evt.get("cat", "") == "kernel"
+                        and kernel_name in evt.get("name", "").lower()
+                    ]
 
                 # We should have exactly 1 kernel event for this run
                 self.assertEqual(
@@ -1416,11 +1417,6 @@ class TestMaxAutotune(TestCase):
                 torch.compile(lambda a, b: a.matmul(b))(a, b)
             self.assertIn("NoValidChoicesError", str(context.exception))
 
-    @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties().total_memory < 2e10,
-        "Only if the GPU has at least 20GB memory to be safe",
-    )
     @config.patch(force_shape_pad=True, max_autotune=True)
     def test_linear_and_cel(self):
         """
@@ -1912,6 +1908,29 @@ class TestMaxAutotune(TestCase):
 
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
+
+    @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
+    @unittest.skipIf(TEST_WITH_ROCM, "out_dtype override only available on NVIDIA")
+    def test_bmm_out_dtype(self):
+        def f(a, b):
+            return torch.bmm(a, b, out_dtype=torch.float32)
+
+        a = torch.randn(2, 3, 4, device=GPU_TYPE, dtype=torch.float16)
+        b = torch.randn(2, 4, 5, device=GPU_TYPE, dtype=torch.float16)
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends="TRITON",
+        ):
+            compiled_f = torch.compile(f)
+            with self.assertRaisesRegex(
+                torch._inductor.exc.InductorError,
+                r"LoweringException: NoValidChoicesError: No choices to select",
+            ):
+                out, code = run_and_get_code(compiled_f, a, b)
+
+        compiled_f = torch.compile(f)
+        out, code = run_and_get_code(compiled_f, a, b)
+        FileCheck().check("extern_kernels.bmm_dtype").run(code[0])
 
     def test_triton_template_generated_code_cache_key(self):
         generate_and_load_args = len(
@@ -2458,6 +2477,66 @@ class TestMaxAutotune(TestCase):
                 _ = compiled_fn(bias, x, w)
         finally:
             clear_preprocessing_fns(clear_defaults=False)
+
+    @config.patch(
+        {"test_configs.max_mm_configs": 4, "max_autotune_gemm_backends": "TRITON"}
+    )
+    def test_fixed_layout_at_lowering(self):
+        """
+        Test that max-autotune with addmm/bmm/mm_plus_mm correctly handles
+        padding and maintains correct output strides. Specifically, when matrix
+        b with shape (4608, 1490) is padded, its stride should become 1536.
+        """
+
+        def mm_func(a, b) -> torch.Tensor:
+            a_t = torch.permute(a, [1, 0]).to(torch.bfloat16)
+            b_dtype = b.to(torch.bfloat16)
+            # Add .to() to make sure that mm could be potentially padded
+            # Strides for output are not padded
+            return (a_t @ b_dtype).to(torch.float32)
+
+        def addmm_func(a, b, bias) -> torch.Tensor:
+            a_t = torch.permute(a, [1, 0]).to(torch.bfloat16)
+            b_dtype = b.to(torch.bfloat16)
+            bias_dtype = bias.to(torch.bfloat16)
+            return torch.addmm(bias_dtype, a_t, b_dtype).to(torch.float32)
+
+        def bmm_func(a, b) -> torch.Tensor:
+            a_t = torch.permute(a, [2, 0, 1]).to(torch.bfloat16)
+            b_dtype = b.to(torch.bfloat16)
+            return torch.bmm(a_t, b_dtype).to(torch.float32)
+
+        def mm_plus_mm_func(a1, b1, a2, b2) -> torch.Tensor:
+            a1_t = torch.permute(a1, [1, 0]).to(torch.bfloat16)
+            b1_dtype = b1.to(torch.bfloat16)
+            a2_t = torch.permute(a2, [1, 0]).to(torch.bfloat16)
+            b2_dtype = b2.to(torch.bfloat16)
+            return (a1_t @ b1_dtype + a2_t @ b2_dtype).to(torch.float32)
+
+        a = torch.randn((4608, 512), device=GPU_TYPE, dtype=torch.bfloat16)
+        b = torch.randn((4608, 1490), device=GPU_TYPE)
+        bias = torch.randn(1490, device=GPU_TYPE)
+
+        a_bmm = torch.randn((512, 4608, 8), device=GPU_TYPE, dtype=torch.bfloat16)
+        b_bmm = torch.randn((8, 4608, 1490), device=GPU_TYPE)
+
+        # Test mm_plus_mm
+        a2 = torch.randn((4608, 512), device=GPU_TYPE, dtype=torch.bfloat16)
+        b2 = torch.randn((4608, 1490), device=GPU_TYPE)
+
+        # 1490 padded to 1536, check in template code
+        output_code_padding_check = "stride_bk = 1536"
+        funcs_and_args = [
+            (mm_func, (a, b)),
+            (addmm_func, (a, b, bias)),
+            (bmm_func, (a_bmm, b_bmm)),
+            (mm_plus_mm_func, (a, b, a2, b2)),
+        ]
+
+        for f, args in funcs_and_args:
+            c_f = torch.compile(f, mode="max-autotune-no-cudagraphs")
+            _, code_out = run_and_get_code(c_f, *args)
+            FileCheck().check(output_code_padding_check).run(code_out[0])
 
 
 class TestMaxAutotunePrecompile(TestCase):

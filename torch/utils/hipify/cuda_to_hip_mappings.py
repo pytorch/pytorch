@@ -8632,14 +8632,19 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
         ("CUSPARSE_COMPUTE_16F", ("HIPSPARSELT_COMPUTE_16F", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_COMPUTE_32I", ("HIPSPARSELT_COMPUTE_32I", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_COMPUTE_TF32", ("HIPSPARSELT_COMPUTE_TF32", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_ALG_CONFIG_ID", ("HIPSPARSELT_MATMUL_ALG_CONFIG_ID", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID", ("HIPSPARSELT_MATMUL_ALG_CONFIG_MAX_ID", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSELT_MATMUL_BIAS_POINTER", ("HIPSPARSELT_MATMUL_BIAS_POINTER", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSELT_MATMUL_ALG_DEFAULT", ("HIPSPARSELT_MATMUL_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSELT_MATMUL_ALG_CONFIG_ID", ("HIPSPARSELT_MATMUL_ALG_CONFIG_ID", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING", ("HIPSPARSELT_MATMUL_ALPHA_VECTOR_SCALING", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_SPLIT_K", ("HIPSPARSELT_MATMUL_SPLIT_K", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_SPLIT_K_MODE", ("HIPSPARSELT_MATMUL_SPLIT_K_MODE", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("cusparseLtHandle_t", ("hipsparseLtHandle_t", CONV_TYPE, API_SPECIAL)),
         ("cusparseLtMatDescriptor_t", ("hipsparseLtMatDescriptor_t", CONV_TYPE, API_SPECIAL)),
         ("cusparseLtInit", ("hipsparseLtInit", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseLtStructuredDescriptorInit", ("hipsparseLtStructuredDescriptorInit", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtSplitKMode_t", ("hipsparseLtSplitKMode_t", CONV_TYPE, API_SPECIAL)),
         ("cusparseLtSpMMACompressedSize2", ("hipsparseLtSpMMACompressedSize2", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseLtSpMMACompress2", ("hipsparseLtSpMMACompress2", CONV_MATH_FUNC, API_SPECIAL)),
         ("cusparseLtMatmulDescriptor_t", ("hipsparseLtMatmulDescriptor_t", CONV_TYPE, API_SPECIAL)),
@@ -9226,6 +9231,8 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
                 API_PYTORCH,
             ),
         ),
+        ("cuda::CUDAEvent", ("hip::HIPEventMasqueradingAsCUDA", API_PYTORCH)),
+        ("CUDAEvent", ("HIPEventMasqueradingAsCUDA", API_PYTORCH)),
         ("cuda::CUDAStream", ("hip::HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         ("CUDAStream", ("HIPStreamMasqueradingAsCUDA", API_PYTORCH)),
         (
@@ -9279,6 +9286,14 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         (
             "c10/cuda/CUDACachingAllocator.h",
             ("ATen/hip/impl/HIPCachingAllocatorMasqueradingAsCUDA.h", API_PYTORCH),
+        ),
+        (
+            "ATen/cuda/CUDAEvent.h",  # To keep BC, we have to keep this mapping
+            ("ATen/hip/HIPEvent.h", API_PYTORCH),
+        ),
+        (
+            "c10/cuda/CUDAEvent.h",
+            ("ATen/hip/impl/HIPEventMasqueradingAsCUDA.h", API_PYTORCH),
         ),
         (
             "c10/cuda/CUDAStream.h",
@@ -9420,6 +9435,7 @@ C10_MAPPINGS = collections.OrderedDict(
         ("c10/cuda/CUDAMathCompat.h", ("c10/hip/HIPMathCompat.h", API_C10)),
         ("c10/cuda/CUDAFunctions.h", ("c10/hip/HIPFunctions.h", API_C10)),
         ("c10/cuda/CUDAMiscFunctions.h", ("c10/hip/HIPMiscFunctions.h", API_C10)),
+        ("c10/cuda/CUDAEvent.h", ("c10/hip/HIPEvent.h", API_C10)),
         ("c10/cuda/CUDAStream.h", ("c10/hip/HIPStream.h", API_C10)),
         ("c10/cuda/CUDAGraphsC10Utils.h", ("c10/hip/HIPGraphsC10Utils.h", API_C10)),
         ("c10/cuda/CUDAAllocatorConfig.h", ("c10/hip/HIPAllocatorConfig.h", API_C10)),
