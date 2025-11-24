@@ -22,6 +22,7 @@ from torch.distributed.tensor._dtensor_spec import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -557,16 +558,30 @@ class DTensorRedistributePlanner:
         dst_spec: DTensorSpec,
         full_tensor_shape: tuple[int, ...],
     ) -> list[_TransformInfo]:
-        src_placements, src_shard_order = (
-            DTensorSpec._normalize_placements_into_shard_order(
-                src_spec.placements, src_spec.mesh
+        # In case _StridedShard exists in placements, we let _StridedShard have
+        # higher priority to express shard_order.
+        if any(
+            isinstance(placement, _StridedShard) for placement in src_spec.placements
+        ):
+            src_placements, src_shard_order = (
+                DTensorSpec._normalize_placements_into_shard_order(
+                    src_spec.placements, src_spec.mesh
+                )
             )
-        )
-        dst_placements, dst_shard_order = (
-            DTensorSpec._normalize_placements_into_shard_order(
-                dst_spec.placements, dst_spec.mesh
+        else:
+            src_placements = src_spec.placements
+            src_shard_order = src_spec.shard_order
+        if any(
+            isinstance(placement, _StridedShard) for placement in dst_spec.placements
+        ):
+            dst_placements, dst_shard_order = (
+                DTensorSpec._normalize_placements_into_shard_order(
+                    dst_spec.placements, dst_spec.mesh
+                )
             )
-        )
+        else:
+            dst_placements = dst_spec.placements
+            dst_shard_order = dst_spec.shard_order
         assert src_shard_order is not None
         assert dst_shard_order is not None
         src_state = self.DistState(src_placements, src_shard_order)
