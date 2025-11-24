@@ -51,8 +51,7 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
             "of checkpoint regions, or use joint graph mode (where partitioner handles RNG)."
         )
 
-    # Apply partitioner's edge case handling FIRST
-    # This marks nodes that must be saved (MUST_SAVE, collectives, mutations, etc.)
+    # Use partitioner pass to normalize AC node tags.
     gm = cleanup_recompute_tags(gm, is_default_partition=False)
 
     if not config.unsafe_allow_optimization_of_collectives:
@@ -74,7 +73,6 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
             'This is likely because you forgot to annotate your backward region with fx.traceback.annotate({"backward": 0}) '
         )
 
-    # Build reordered graph
     new_graph = fx.Graph()
     env: dict[fx.Node, fx.Node] = {}
     recomputed_nodes: dict[fx.Node, fx.Node] = {}
@@ -102,19 +100,21 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
             continue
         env[node] = new_graph.node_copy(node, lambda x: env[x])
 
-    # Insert backward nodes
+    # Insert backward nodes, assumption here is that
+    # you already annotated your backward region with fx.traceback.annotate({"backward": 0})
     for node in list(gm.graph.nodes)[bwd_start:]:
         if node.op == "output":
             continue
 
-        # Gather ALL checkpointed deps needed by this node
+        # Gather all checkpointed deps needed by this node
         deps = set()
         for inp in node.all_input_nodes:
             if must_recompute(inp):
                 gather_checkpointed_deps(inp, deps)
 
         # Insert deps in forward order (guaranteed disjoint from already-inserted)
-        # This ensures topological order is preserved (a, b, c, d where c=a+b)
+        # This is not as inefficient as it looks, because we only add fresh dependencies
+        # when they are not yet processed as recomputed nodes.
         for dep in sorted(deps, key=lambda n: order[n]):
             assert dep not in recomputed_nodes, "We shouldn't have recomputed it before"
             dup = new_graph.node_copy(dep, remat_input)
@@ -128,13 +128,9 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     new_graph.node_copy(output_node, remat_input)
     new_gm = torch.fx.GraphModule(gm, new_graph)
 
-    print("CODE", new_gm.code)
-
     # DCE with custom is_impure_node (like default_partition)
     # Treats certain collectives as pure while delegating to default impurity logic
     new_gm.graph.eliminate_dead_code(is_impure_node=is_impure_node_for_dce)
-
-    print("CODE V2", new_gm.code)
 
     # raise_getitems pass for better memory (like default_partition)
     new_gm = raise_getitems(new_gm)

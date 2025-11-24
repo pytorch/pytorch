@@ -2002,8 +2002,10 @@ class GraphModule(torch.nn.Module):
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
 
+    def count_op(self, gm, target):
+        return sum(1 for n in gm.graph.nodes if n.target == target)
+
     def _compile_and_capture(self, fn, rematerialize_nodes_with_ac_annotations):
-        """Helper to compile a function and capture the graph."""
         captured_gm = None
 
         def compiler(gm, example_inputs):
@@ -2027,7 +2029,6 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_rematerialize_simple_forward_backward(self):
-        """AC reordering: verify correctness, recomputation, and graph structure."""
         x_data = torch.randn(4, 4)
         y_data = torch.randn(4, 4)
 
@@ -2053,21 +2054,10 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(dx1, dx2))
         self.assertTrue(torch.allclose(dy1, dy2))
 
-        mm_with = sum(
-            1 for n in gm_with.graph.nodes if n.target == torch.ops.aten.mm.default
-        )
-        mm_without = sum(
-            1 for n in gm_without.graph.nodes if n.target == torch.ops.aten.mm.default
-        )
-        sigmoid_with = sum(
-            1 for n in gm_with.graph.nodes if n.target == torch.ops.aten.sigmoid.default
-        )
-        sigmoid_without = sum(
-            1
-            for n in gm_without.graph.nodes
-            if n.target == torch.ops.aten.sigmoid.default
-        )
-
+        mm_with = self.count_op(gm_with, torch.ops.aten.mm.default)
+        mm_without = self.count_op(gm_without, torch.ops.aten.mm.default)
+        sigmoid_with = self.count_op(gm_with, torch.ops.aten.sigmoid.default)
+        sigmoid_without = self.count_op(gm_without, torch.ops.aten.sigmoid.default)
         # With reordering: 4 mm (1 fwd + 2 bwd grad + 1 recompute), 2 sigmoid (1 fwd + 1 recompute)
         # Without: 3 mm (1 fwd + 2 bwd grad), 1 sigmoid (1 fwd, saved)
         self.assertEqual(mm_with, 4, "mm should be recomputed in backward")
@@ -2104,7 +2094,6 @@ def forward(self, arg0_1, arg1_1):
         def fwd_bwd_with_rng():
             x = x_data.detach().requires_grad_(True)
 
-            # Checkpoint with RNG op (rand_like)
             z = torch.utils.checkpoint.checkpoint(
                 lambda a: torch.sigmoid(a + torch.rand_like(a)), x, use_reentrant=False
             )
@@ -2126,10 +2115,8 @@ def forward(self, arg0_1, arg1_1):
 
         x_data = torch.randn(4, 4)
 
-        def fwd_bwd_with_rng():
+        def fwd_bwd():
             x = x_data.detach().requires_grad_(True)
-
-            # Checkpoint with RNG op (rand_like)
             z = torch.utils.checkpoint.checkpoint(
                 lambda a: torch.sigmoid(a + 4), x, use_reentrant=False
             )
@@ -2140,14 +2127,13 @@ def forward(self, arg0_1, arg1_1):
             torch._dynamo.exc.BackendCompilerFailed,
             "We are trying to rematerialize AC nodes in the backward region",
         ):
-            self._compile_and_capture(fwd_bwd_with_rng, True)
+            self._compile_and_capture(fwd_bwd, True)
 
     def test_ac_rematerialize_with_selective_checkpoint_policy(self):
         x_data = torch.randn(4, 128)
         weight1 = torch.randn(128, 128)
         bias1 = torch.randn(128)
 
-        # Policy: MUST_SAVE addmm, PREFER_RECOMPUTE everything else
         def policy_fn(ctx, op, *args, **kwargs):
             if op == torch.ops.aten.addmm.default:
                 return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
@@ -2163,8 +2149,6 @@ def forward(self, arg0_1, arg1_1):
             b1 = bias1.detach().requires_grad_(True)
 
             def checkpoint_fn(inp, w, b):
-                # addmm will be MUST_SAVE (not recomputed)
-                # relu will be PREFER_RECOMPUTE (recomputed)
                 linear = torch.nn.functional.linear(inp, w, b)  # addmm
                 return torch.relu(linear)
 
@@ -2186,19 +2170,13 @@ def forward(self, arg0_1, arg1_1):
         torch.testing.assert_close(result_with[1], result_without[1])
         torch.testing.assert_close(result_with[2], result_without[2])
 
-        def count_op(gm, target):
-            return sum(1 for n in gm.graph.nodes if n.target == target)
+        addmm_without = self.count_op(gm_without, torch.ops.aten.addmm.default)
+        relu_without = self.count_op(gm_without, torch.ops.aten.relu.default)
 
-        addmm_without = count_op(gm_without, torch.ops.aten.addmm.default)
-        relu_without = count_op(gm_without, torch.ops.aten.relu.default)
+        addmm_with = self.count_op(gm_with, torch.ops.aten.addmm.default)
+        relu_with = self.count_op(gm_with, torch.ops.aten.relu.default)
 
-        addmm_with = count_op(gm_with, torch.ops.aten.addmm.default)
-        relu_with = count_op(gm_with, torch.ops.aten.relu.default)
-
-        # addmm should NOT be recomputed (same count in both)
         self.assertEqual(addmm_without, addmm_with)
-
-        # relu SHOULD be recomputed (more in WITH due to 1 fwd + 1 recomputed)
         self.assertEqual(relu_with, relu_without + 1)
 
         recomputed_nodes = [
@@ -2213,10 +2191,6 @@ def forward(self, arg0_1, arg1_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_rematerialize_transitive_dependency_sorting(self):
-        """
-        Verify dependencies are inserted in correct topological order.
-        """
-
         x_data = torch.randn(4, 4)
         y_data = torch.randn(4, 4)
         z_data = torch.randn(4, 4)
@@ -2226,20 +2200,17 @@ def forward(self, arg0_1, arg1_1):
             y = y_data.detach().requires_grad_(True)
             z = z_data.detach().requires_grad_(True)
 
-            def util_checkpoint(x, y, z):
+            def _util_checkpoint(x, y, z):
                 a = x.clone()
                 b = y.clone()
                 c = a + b
                 d = z.clone()
                 return c, d
 
-            # Forward region - all checkpointed
             c, d = torch.utils.checkpoint.checkpoint(
-                util_checkpoint, x, y, z, use_reentrant=False
+                _util_checkpoint, x, y, z, use_reentrant=False
             )
 
-            # Backward region: e = d + c
-            # all_input_nodes returns [clone_2, add] which needs all transitive deps
             with torch.fx.traceback.annotate({"backward": 0}):
                 e = d + c
                 loss = e.sum()
