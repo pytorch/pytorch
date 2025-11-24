@@ -55,8 +55,9 @@ def _extract_group_names(snodes: list[BaseSchedulerNode]) -> OrderedSet[str]:
     group_names: OrderedSet[str] = OrderedSet()
     for snode in snodes:
         if is_collective(snode.node):
-            group_names.add(snode.node.constant_args[-1])
-
+            group_names.add(
+                snode.node.constant_args[-1]  # pyrefly: ignore[missing-attribute]
+            )
     return group_names
 
 
