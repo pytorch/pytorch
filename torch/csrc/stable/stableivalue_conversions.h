@@ -14,6 +14,21 @@
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 
+// Helper variable templates to detect 2.10+ types for better compile-time error
+// messages
+template <typename T>
+inline constexpr bool is_header_only_array_ref_v = false;
+
+template <typename T>
+inline constexpr bool
+    is_header_only_array_ref_v<torch::headeronly::HeaderOnlyArrayRef<T>> = true;
+
+template <typename T>
+inline constexpr bool is_std_vector_v = false;
+
+template <typename T>
+inline constexpr bool is_std_vector_v<std::vector<T>> = true;
+
 // forward declare so that the from/to() implementations in the detail
 // namespace of library.h where the real work is done can compile.
 template <typename T>
@@ -35,6 +50,17 @@ struct FromImpl {
       T val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
+    // Ensure 2.10+ types don't accidentally use the base case - provide clear
+    // compile-time errors.
+    static_assert(
+        !std::is_same_v<T, torch::stable::Device>,
+        "torch::stable::Device requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_header_only_array_ref_v<T>,
+        "HeaderOnlyArrayRef<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_std_vector_v<T>,
+        "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
@@ -126,6 +152,18 @@ struct FromImpl<ScalarType> {
   }
 };
 
+// [Note DeviceType version guard]
+// This conversion was introduced in 2.10. However, we do not gate it
+// with TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0 because this
+// conversion is not actually used to pass DeviceType between user
+// extensions and libtorch (i.e. there is no c10::TypeKind::DeviceType).
+// The purpose of gating other conversions is to ensure that user
+// extensions do not try to pass a StableIValue that libtorch is
+// unable to interpret.
+// This conversion is only used
+// (1) In the conversion for torch::stable::Device (already gated)
+// (2) Within the user extension to translate between libtorch/extension's
+//     DeviceType (no gating needed)
 // Specialization for torch::headeronly::DeviceType => StableIValue
 // Note that we call into the shim to translate between the user's
 // DeviceType and libtorch's DeviceType, which can be different!
@@ -225,6 +263,11 @@ struct FromImpl<torch::stable::Tensor> {
   }
 };
 
+// =============================================================================
+// FROM CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+// =============================================================================
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // Specialization for torch::headeronly::HeaderOnlyArrayRef<T> => StableIValue
 // Returns a new owning reference of the underlying list.
 template <typename T>
@@ -238,11 +281,11 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
       TORCH_ERROR_CODE_CHECK(
           torch_new_list_reserve_size(val.size(), &new_list_handle));
       for (const auto& elem : val) {
-        TORCH_ERROR_CODE_CHECK(
-            torch_list_push_back(new_list_handle, from(elem)));
+        TORCH_ERROR_CODE_CHECK(torch_list_push_back(
+            new_list_handle, torch::stable::detail::from(elem)));
       }
-      return from(new_list_handle);
-    } catch (const std::runtime_error& e) {
+      return torch::stable::detail::from(new_list_handle);
+    } catch (const std::runtime_error&) {
       if (new_list_handle != nullptr) {
         // clean up memory if an error was thrown
         TORCH_ERROR_CODE_CHECK(torch_delete_list(new_list_handle));
@@ -287,6 +330,8 @@ struct FromImpl<torch::stable::Device> {
   }
 };
 
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // =============================================================================
 // TO CONVERSIONS (StableIValue -> T)
 // =============================================================================
@@ -299,6 +344,17 @@ struct ToImpl {
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
     static_assert(std::is_trivially_copyable_v<T>);
+    // Ensure 2.10+ types don't accidentally use the base case - provide clear
+    // compile-time errors.
+    static_assert(
+        !std::is_same_v<T, torch::stable::Device>,
+        "torch::stable::Device requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_header_only_array_ref_v<T>,
+        "HeaderOnlyArrayRef<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_std_vector_v<T>,
+        "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     // T may not have a default constructor. (For example, it might be
     // c10::Device.) However, std::memcpy implicitly creates a T at the
     // destination. So, we can use a union to work around this lack of
@@ -387,6 +443,7 @@ struct ToImpl<ScalarType> {
   }
 };
 
+// See [Note DeviceType version guard]
 // Specialization for StableIValue => torch::headeronly::DeviceType
 template <>
 struct ToImpl<DeviceType> {
@@ -467,6 +524,11 @@ struct ToImpl<torch::stable::Tensor> {
   }
 };
 
+// =============================================================================
+// TO CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+// =============================================================================
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // Specialization for StableIValue => std::vector<T>
 // std::vector<T> should be represented as a StableListHandle
 // filled with StableIValues
@@ -491,7 +553,7 @@ struct ToImpl<std::vector<T>> {
       }
       TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       return result;
-    } catch (const std::runtime_error& e) {
+    } catch (const std::runtime_error&) {
       // clean up memory if an exception is thrown, and rethrow
       TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       throw;
@@ -516,6 +578,8 @@ struct ToImpl<torch::stable::Device> {
     return torch::stable::Device(device_type, device_index);
   }
 };
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // =============================================================================
 //  end to helpers for converting between StableIValue and T

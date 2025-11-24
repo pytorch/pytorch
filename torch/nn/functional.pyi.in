@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 
 from collections.abc import Callable, Sequence
+from enum import Enum
 from typing import Any, Literal, overload, TypeAlias
 
 from torch import Tensor
@@ -714,6 +715,39 @@ def rrelu(
 ) -> Tensor: ...
 
 __all__ += ["rrelu"]
+
+def scaled_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    bias: Tensor | None = None,
+    output_dtype: _dtype = ...,
+    contraction_dim: list[int] | tuple[int] = (),
+    use_fast_accum: bool = False,
+) -> Tensor: ...
+
+__all__ += ["scaled_mm"]
+
+class SwizzleType(Enum):
+    NO_SWIZZLE = 0
+    SWIZZLE_32_4_4 = 1
+
+__all__ += ["SwizzleType"]
+
+class ScalingType(Enum):
+    TensorWise = 0
+    RowWise = 1
+    BlockWise1x16 = 2
+    BlockWise1x32 = 3
+    BlockWise1x128 = 4
+    BlockWise128x128 = 5
+
+__all__ += ["ScalingType"]
 
 def selu(input: Tensor, inplace: bool = ...) -> Tensor: ...
 
