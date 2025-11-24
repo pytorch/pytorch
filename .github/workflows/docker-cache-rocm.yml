@@ -76,9 +76,9 @@ jobs:
       download-docker-builds-artifacts: ${{ needs.download-docker-builds-artifacts.outputs }}
       directory: /home/runner/docker-cache
       matrix: |
-        runner: [linux.rocm.gfx942.docker-cache]
+        runner: [linux.rocm.mi250.docker-cache]
         docker-image: [
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
+          #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
           #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
         ]
