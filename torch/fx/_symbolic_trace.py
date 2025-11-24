@@ -422,7 +422,9 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, _constant_attribute_types) or is_opaque_type(type(a)):
+        if isinstance(a, _constant_attribute_types) or (
+            is_opaque_type(type(a)) and not pytree.is_constant_class(type(a))
+        ):
             qualname: Optional[str] = self.tensor_attrs.get(
                 a
             )  # pyrefly: ignore[no-matching-overload]

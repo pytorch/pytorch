@@ -1433,6 +1433,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        import torch.utils._pytree as pytree
+
         from . import ConstantVariable, SymNodeVariable, TensorVariable
         from .builder import wrap_fx_proxy
 
@@ -1499,7 +1501,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             except AsPythonConstantNotImplementedError as e:
                 typ = e.vt.python_type()
                 type_name = typ.__qualname__
-                import torch.utils._pytree as pytree
 
                 if pytree.is_constant_class(typ):
                     unimplemented(
@@ -1651,6 +1652,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             if x.source is None
             and isinstance(x, UserDefinedObjectVariable)
             and is_opaque_type(type(x.value))
+            and not pytree.is_constant_class(
+                type(x.value)
+            )  # we allow value-type opaque objects in the graph
         ]
         if len(intermediate_opaques) > 0:
             unimplemented(

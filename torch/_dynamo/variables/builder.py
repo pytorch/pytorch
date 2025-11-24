@@ -58,7 +58,7 @@ from torch._dynamo.utils import (
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
 from torch._subclasses.meta_utils import is_sparse_any, safe_grad
@@ -258,7 +258,7 @@ from .nn_module import (
     UnspecializedNNModuleVariable,
 )
 from .optimizer import OptimizerVariable
-from .script_object import TorchScriptObjectVariable
+from .script_object import OpaqueObjectValueTypeVariable, TorchScriptObjectVariable
 from .sdpa import SDPAParamsVariable
 from .streams import EventVariable, StreamContextVariable, StreamVariable
 from .tensor import (
@@ -1424,6 +1424,12 @@ class VariableBuilder:
                 # ID_MATCH even if its a global variable.
                 self.install_guards(GuardBuilder.CLASS_MATCH)
 
+            if is_opaque_value_type(value):
+                return OpaqueObjectValueTypeVariable(
+                    value,
+                    source=self.source,
+                )
+
             return UserDefinedClassVariable(
                 value,
                 source=self.source,
@@ -1459,6 +1465,11 @@ class VariableBuilder:
                 if is_constant_class(type(value)):
                     # Value-type: guard on equality (will use __eq__)
                     self.install_guards(GuardBuilder.CONSTANT_MATCH)
+                    return TorchScriptObjectVariable.create(
+                        value,
+                        value,
+                        source=self.source,
+                    )
                 else:
                     # Reference-type: guard only on type/identity
                     self.install_guards(GuardBuilder.TYPE_MATCH)

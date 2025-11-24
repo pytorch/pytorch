@@ -2819,6 +2819,8 @@ class SIMDScheduling(BaseScheduling):
         bad_size_additional_tiling_penalty = 1.025
         good_size_tiling_penalty = 1.005
 
+        total_uncoalesced = sum(coalesce_analysis.uncoalesced_addrs.values())
+
         def score_mod(t):
             score_factor = 1.0
             for tile_size in t[0].tiling.values():
@@ -2827,12 +2829,19 @@ class SIMDScheduling(BaseScheduling):
                 else:
                     score_factor = score_factor / good_size_tiling_penalty
 
-            return -t[0].score * score_factor
+            # Add uncoalesced memory score to prevent small coalesced benefits
+            # from dominating large amounts of uncoalesced memory
+            uncoalesced_penalty = total_uncoalesced * 0.05
+
+            return -(t[0].score + uncoalesced_penalty) * score_factor
 
         # apply penalty for longer tilings that dont increase score much
         for cand, tiling_score in sorted(tilings, key=score_mod):
-            if cls.tiling_is_compatible(
-                node_schedule, pointwise_numel, reduction_numel, cand.tiling
+            if (
+                cls.tiling_is_compatible(
+                    node_schedule, pointwise_numel, reduction_numel, cand.tiling
+                )
+                or cand.tiling == default_tiling
             ):
                 # we always include default reduction numel == 1, dont include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
