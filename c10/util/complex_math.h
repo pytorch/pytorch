@@ -1,7 +1,3 @@
-#pragma clang diagnostic push
-// ExecuTorch depends on these files and is pinned to C++17
-#pragma clang diagnostic error "-Wpre-c++20-compat"
-
 #if !defined(C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H)
 #error \
     "c10/util/complex_math.h is not meant to be individually included. Include c10/util/complex.h instead."
@@ -408,5 +404,3 @@ using c10_complex_math::tan;
 using c10_complex_math::tanh;
 
 } // namespace std
-
-#pragma clang diagnostic pop

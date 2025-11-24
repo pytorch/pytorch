@@ -1,7 +1,3 @@
-#pragma clang diagnostic push
-// ExecuTorch depends on these files and is pinned to C++17
-#pragma clang diagnostic error "-Wpre-c++20-compat"
-
 #include <torch/headeronly/util/Half.h>
 
 // need to keep the following for BC because the APIs in here were exposed
@@ -10,5 +6,3 @@
     !defined(__APPLE__)
 #include <ATen/cpu/vec/vec_half.h>
 #endif
-
-#pragma clang diagnostic pop

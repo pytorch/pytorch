@@ -1,9 +1,5 @@
 #pragma once
 
-#pragma clang diagnostic push
-// ExecuTorch depends on these files and is pinned to C++17
-#pragma clang diagnostic error "-Wpre-c++20-compat"
-
 #include <complex>
 
 #include <c10/macros/Macros.h>
@@ -80,5 +76,3 @@ constexpr c10::complex<T> conj(const c10::complex<T>& z) {
 // utilities for complex types
 #include <c10/util/complex_utils.h> // IWYU pragma: keep
 #undef C10_INTERNAL_INCLUDE_COMPLEX_REMAINING_H
-
-#pragma clang diagnostic pop

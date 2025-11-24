@@ -12,10 +12,6 @@
 
 #pragma once
 
-#pragma clang diagnostic push
-// ExecuTorch depends on these files and is pinned to C++17
-#pragma clang diagnostic error "-Wpre-c++20-compat"
-
 #include <c10/util/bit_cast.h>
 
 #include <algorithm>
@@ -907,5 +903,3 @@ std::enable_if_t<std::is_unsigned_v<T>, T> SaturatingMultiplyAdd(
 /// Use this rather than HUGE_VALF; the latter causes warnings on MSVC.
 extern const float huge_valf;
 } // namespace c10::llvm
-
-#pragma clang diagnostic pop

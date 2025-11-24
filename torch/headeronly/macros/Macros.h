@@ -1,10 +1,6 @@
 #ifndef C10_MACROS_MACROS_H_
 #define C10_MACROS_MACROS_H_
 
-#pragma clang diagnostic push
-// ExecuTorch depends on these files and is pinned to C++17
-#pragma clang diagnostic error "-Wpre-c++20-compat"
-
 #ifdef __cplusplus
 #include <cassert>
 #else
@@ -696,5 +692,3 @@ __host__ __device__
 #endif
 
 #endif // C10_MACROS_MACROS_H_
-
-#pragma clang diagnostic pop

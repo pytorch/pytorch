@@ -1,9 +1,5 @@
 #pragma once
 
-#pragma clang diagnostic push
-// ExecuTorch depends on these files and is pinned to C++17
-#pragma clang diagnostic error "-Wpre-c++20-compat"
-
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
 
@@ -301,5 +297,3 @@ C10_HOST_DEVICE inline T nextafter(T from, T to) {
 } // namespace std
 
 C10_CLANG_DIAGNOSTIC_POP()
-
-#pragma clang diagnostic pop

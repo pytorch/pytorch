@@ -1,9 +1,5 @@
 #pragma once
 
-#pragma clang diagnostic push
-// ExecuTorch depends on these files and is pinned to C++17
-#pragma clang diagnostic error "-Wpre-c++20-compat"
-
 #include <cstring>
 #include <type_traits>
 
@@ -52,5 +48,3 @@ HIDDEN_NAMESPACE_END(torch, headeronly)
 namespace c10 {
 using torch::headeronly::bit_cast;
 } // namespace c10
-
-#pragma clang diagnostic pop

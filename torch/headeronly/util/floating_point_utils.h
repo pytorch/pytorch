@@ -1,9 +1,5 @@
 #pragma once
 
-#pragma clang diagnostic push
-// ExecuTorch depends on these files and is pinned to C++17
-#pragma clang diagnostic error "-Wpre-c++20-compat"
-
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/bit_cast.h>
 #include <cstdint>
@@ -40,5 +36,3 @@ namespace c10::detail {
 using torch::headeronly::detail::fp32_from_bits;
 using torch::headeronly::detail::fp32_to_bits;
 } // namespace c10::detail
-
-#pragma clang diagnostic pop

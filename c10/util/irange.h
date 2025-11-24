@@ -2,10 +2,6 @@
 
 #pragma once
 
-#pragma clang diagnostic push
-// ExecuTorch depends on these files and is pinned to C++17
-#pragma clang diagnostic error "-Wpre-c++20-compat"
-
 #include <c10/util/TypeSafeSignMath.h>
 
 #include <algorithm>
@@ -125,5 +121,3 @@ constexpr integer_range<Integer, true> irange(Integer end) {
 }
 
 } // namespace c10
-
-#pragma clang diagnostic pop
