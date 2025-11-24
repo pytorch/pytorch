@@ -529,7 +529,14 @@ def common_pointwise_strategy(
                 shard_dim = normalize_dim(placement.dim, len(spec_to_follow.shape))
                 common_ndim = len(common_shape)
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
-                out_placements.append(Shard(new_shard_dim))
+                if isinstance(placement, _StridedShard):
+                    out_placements.append(
+                        _StridedShard(
+                            new_shard_dim, split_factor=placement.split_factor
+                        )
+                    )
+                else:
+                    out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
                 # note that only partial-sum and partial-avg are supported for linearity
                 partial_supports_linearity = placement.is_partial(
