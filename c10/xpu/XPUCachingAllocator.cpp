@@ -15,6 +15,8 @@ using namespace c10::CachingDeviceAllocator;
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
 
+class XPUAllocator;
+
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
