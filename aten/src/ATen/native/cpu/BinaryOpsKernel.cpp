@@ -353,6 +353,9 @@ void remainder_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "remainder_cpu", [&]() {
       cpu_kernel(iter, [](scalar_t a, scalar_t b) -> scalar_t {
         TORCH_CHECK(b != 0, "ZeroDivisionError");
+        if (a == std::numeric_limits<scalar_t>::min() && b == scalar_t(-1)) {
+          return 0;
+        }
         scalar_t r = a % b;
         if ((r != 0) && (c10::is_negative(r) != c10::is_negative(b))) {
           r += b;
@@ -1035,6 +1038,9 @@ void fmod_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_INTEGRAL_TYPES(iter.common_dtype(), "fmod_cpu", [&]() {
       cpu_kernel(iter, [=](scalar_t x, scalar_t d) -> scalar_t {
         TORCH_CHECK(d != 0, "ZeroDivisionError");
+        if (x == std::numeric_limits<scalar_t>::min() && d == scalar_t(-1)) {
+          return 0;
+        }
         return x % d;
       });
     });
