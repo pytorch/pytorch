@@ -1117,6 +1117,10 @@ class BaseSchedulerNode:
         """
         Returns estimated op runtime in milliseconds (ms)
         """
+        if config.estimate_op_runtime != "default":
+            assert callable(config.estimate_op_runtime)
+            return config.estimate_op_runtime(self)
+
         buf = self.get_nodes()[0].get_outputs()[0]
         layout = buf.node.get_output_spec()
         if not is_gpu(get_device_type(layout)):
