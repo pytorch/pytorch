@@ -49,11 +49,12 @@ thread_local std::unique_ptr<StreamId[]> current_streams = nullptr;
  *                ignored for ext   ignored for ext
  *
  * StreamIdType:
- *  000-001 = OpenReg priority stream
+ *  000 = high stream
+ *  001 = normal stream
  *  110 = default stream
  *  111 = external stream
- * Priorities 000-101 are reserved for the normal stream pool and can be extended as per practical requirements.
- * OpenReg currently supports priorities 0 and 1.
+
+ * The range 000 to 101 is reserved for stream pools of different priorities and can be expanded as needed. (OpenReg currently supports two priorities: 0 and 1)
  *
  * For external stream, StreamID is a orStream_t pointer. This means that last
  * bit will always be 0. So when constructing StreamId for a native stream we
@@ -94,7 +95,7 @@ inline std::ostream& operator<<(std::ostream& stream, StreamIdType s) {
     case StreamIdType::EXT:
       return stream << "EXT";
     default:
-      return stream << "NORMAL" << static_cast<int>(s.getStreamType());
+      return stream << "PRIORITY" << static_cast<int>(s.getStreamType());
   }
 }
 
