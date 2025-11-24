@@ -9,7 +9,9 @@ import types
 import unittest
 import weakref
 from collections import defaultdict, namedtuple, OrderedDict, UserDict
-from typing import Any
+from collections.abc import Callable
+from functools import partial
+from typing import Any, NamedTuple
 
 import torch
 import torch._dynamo.test_case
@@ -1703,6 +1705,46 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         d = self.thetype({1: 2})
         it = d.__iter__()
         self.assertEqual(next(it), 1)
+
+    def test_functools_partial_key(self):
+        def gn(x, y):
+            return x + y
+
+        def fn(x):
+            new_dict = {}
+            new_gn1 = partial(gn, x=1)
+            new_dict[new_gn1] = 5
+            return x * new_dict[new_gn1]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
+
+    def test_namedtuple_functools(self):
+        class Container(NamedTuple):
+            partial_fn: Callable
+            const: int
+
+        def gn(x, y):
+            return x + y
+
+        def fn(x):
+            new_dict = {}
+
+            new_gn = partial(gn, x=1)
+            key = Container(new_gn, 4)
+            new_dict[key] = 5
+            return x * new_dict[key]
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertTrue(same(ref, res))
 
 
 class DictSubclassMethodsTests(DictMethodsTests):

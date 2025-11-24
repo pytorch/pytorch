@@ -103,6 +103,12 @@ def is_hashable(x: VariableTracker) -> bool:
         and isinstance(x.value, int)
     ):
         return isinstance(x.value, py_Hashable)
+    elif isinstance(x, variables.FunctoolsPartialVariable):
+        return (
+            is_hashable(x.func)
+            and all(is_hashable(arg) for arg in x.args)
+            and all(is_hashable(value) for value in x.keywords.values())
+        )
     else:
         return isinstance(
             x,
@@ -189,6 +195,11 @@ class ConstDictVariable(VariableTracker):
                 # an object as key (`class _ZeroSentinel(int): ...`):
                 # python test/dynamo/test_unittest.py CPythonTestLongMessage.test_baseAssertEqual
                 return self.vt.value  # type: ignore[attr-defined,union-attr]
+            elif isinstance(self.vt, variables.FunctoolsPartialVariable):
+                Hashable = ConstDictVariable._HashableTracker
+                items = (self.vt.func, *self.vt.args, *self.vt.keywords.values())
+                x = tuple(Hashable(e).underlying_value for e in items)
+                return x
             else:
                 x = self.vt.as_python_constant()
             return x
@@ -368,7 +379,14 @@ class ConstDictVariable(VariableTracker):
     ) -> VariableTracker:
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
-            raise_observed_exception(KeyError, tx)
+            try:
+                error_message = (
+                    f"Dict key lookup failed for {str(arg)}. "
+                    f"Debug representation of the key is {arg.debug_repr()!r}"
+                )
+            except Exception:
+                error_message = f"Dict key lookup failed for {str(arg)}"
+            raise_observed_exception(KeyError, tx, msg=error_message)
         return self.items[key]
 
     def getitem_const(
