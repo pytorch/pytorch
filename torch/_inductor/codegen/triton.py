@@ -2778,7 +2778,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape = tuple([1] * len(self.dense_size_list()))
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            if self.fixed_config and not self._has_constant_xmask():
+            if (
+                self.fixed_config or self._is_combo_kernel()
+            ) and not self._has_constant_xmask():
                 mask_vars = OrderedSet(["xmask"])
             else:
                 mask_vars = OrderedSet()
@@ -5490,6 +5492,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         xtree = self.range_trees[0]
         assert xtree.prefix == "x"
         return self._has_constant_mask(xtree)
+
+    def _is_combo_kernel(self) -> bool:
+        """Returns True if this kernel is a sub-kernel within a combo kernel."""
+        return any(
+            tree.pid_cache.get("tl.program_id(0)") == "pid_offset"
+            for tree in self.range_trees
+        )
 
     def filter_masks(self, mask_vars: OrderedSet[str]) -> None:
         for tree in self.range_trees:
