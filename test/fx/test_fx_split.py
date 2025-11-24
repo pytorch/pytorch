@@ -84,7 +84,7 @@ class TestFXSplit(TestCase):
         # Create custom operator support to mark wrapped_add as supported
         class CustomOpSupport(op_support.OperatorSupportBase):
             def is_node_supported(self, submodules, node) -> bool:
-                return node.target == wrapped_add
+                return node.target is wrapped_add
 
         # Create a simple splitter to test the edge case
         class TestSplitter(splitter_base._SplitterBase):
