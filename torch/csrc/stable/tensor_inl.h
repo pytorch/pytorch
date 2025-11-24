@@ -33,4 +33,37 @@ inline Device Tensor::device() const {
   return Device(extension_device_type, static_cast<DeviceIndex>(device_index));
 }
 
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+// The following data ptr cast methods mirror the methods defined in
+// aten/src/ATen/templates/TensorMethods.cpp
+#define DEFINE_DATA_PTR_CAST(T, name, PRED)               \
+  template <>                                             \
+  inline T* Tensor::mutable_data_ptr() const {            \
+    auto stype = scalar_type();                           \
+    STD_TORCH_CHECK(                                      \
+        PRED(stype, torch::headeronly::ScalarType::name), \
+        "expected scalar type " #name " but found ",      \
+        torch::headeronly::toString(stype));              \
+    return static_cast<T*>(mutable_data_ptr());           \
+  }                                                       \
+  template <>                                             \
+  inline const T* Tensor::const_data_ptr() const {        \
+    auto stype = scalar_type();                           \
+    STD_TORCH_CHECK(                                      \
+        PRED(stype, torch::headeronly::ScalarType::name), \
+        "expected scalar type " #name " but found ",      \
+        torch::headeronly::toString(stype));              \
+    return static_cast<const T*>(const_data_ptr());       \
+  }
+
+#define _PRED(S1, S2) S1 == S2
+#define DEFINE_CAST(T, name) DEFINE_DATA_PTR_CAST(T, name, _PRED)
+AT_FORALL_SCALAR_TYPES_WITH_COMPLEX(DEFINE_CAST)
+DEFINE_CAST(uint16_t, UInt16)
+DEFINE_CAST(uint32_t, UInt32)
+DEFINE_CAST(uint64_t, UInt64)
+#undef DEFINE_CAST
+#undef _PRED
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 HIDDEN_NAMESPACE_END(torch, stable)

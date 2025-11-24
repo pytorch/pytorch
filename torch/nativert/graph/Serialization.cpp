@@ -101,6 +101,11 @@ Value* symbolicToValue(
     case torch::_export::Argument::Tag::AS_SYM_FLOAT: {
       return graph.getValue(arg.get_as_sym_float().get_as_name());
     }
+    case torch::_export::Argument::Tag::AS_STRING_TO_ARGUMENT: {
+      TORCH_CHECK(
+          false,
+          "String to argument mapping is not yet supported in symbolic context");
+    }
     default:
       TORCH_CHECK(
           false,
@@ -453,6 +458,7 @@ bool isSymbolic(const torch::_export::Argument& arg) {
     case torch::_export::Argument::Tag::AS_SYM_FLOAT:
     case torch::_export::Argument::Tag::AS_SYM_FLOATS:
     case torch::_export::Argument::Tag::AS_CUSTOM_OBJ:
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR:
       return true;
     default:
       return false;
@@ -532,6 +538,23 @@ Constant constantToValue(
     case torch::_export::Argument::Tag::AS_SYM_FLOATS: {
       TORCH_CHECK(false, "SymFloats is not yet implemented");
     }
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR:
+      TORCH_CHECK(false, "Optional tensor is symbolic, not constant");
+    case torch::_export::Argument::Tag::AS_COMPLEX:
+      TORCH_CHECK(false, "Complex values are not yet supported as constants");
+    case torch::_export::Argument::Tag::AS_INT_LISTS: {
+      std::vector<std::vector<int64_t>> ret;
+      for (const auto& inner_list : jsonArg.get_as_int_lists()) {
+        std::vector<int64_t> inner_ret;
+        for (const auto& val : inner_list) {
+          inner_ret.push_back(val);
+        }
+        ret.push_back(inner_ret);
+      }
+      return ret;
+    }
+    case torch::_export::Argument::Tag::AS_STRING_TO_ARGUMENT:
+      return None();
     default:
       TORCH_CHECK(false, "Got unknown json argument");
   }
