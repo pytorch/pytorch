@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 from collections import OrderedDict
+from collections.abc import Callable
+from typing import Any
 
 
 __all__ = ["raises", "expand_tuples", "reverse_dict", "groupby", "typename"]
 
 
-def raises(err, lamda):  # codespell:ignore lamda
+def raises(err, lamda: Callable[[], Any]):  # codespell:ignore lamda
     try:
         lamda()  # codespell:ignore lamda
         return False

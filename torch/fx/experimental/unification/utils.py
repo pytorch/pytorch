@@ -1,6 +1,9 @@
 # mypy: allow-untyped-defs
 __all__ = ["hashable", "transitive_get", "raises", "reverse_dict", "xfail", "freeze"]
 
+from collections.abc import Callable
+from typing import Any
+
 
 def hashable(x):
     try:
@@ -23,7 +26,7 @@ def transitive_get(key, d):
     return key
 
 
-def raises(err, lamda):  # codespell:ignore lamda
+def raises(err, lamda: Callable[[], Any]):  # codespell:ignore lamda
     try:
         lamda()  # codespell:ignore lamda
         return False
