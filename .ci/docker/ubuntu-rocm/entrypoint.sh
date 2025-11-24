@@ -11,8 +11,9 @@ if [[ "${ROCM_VERSION}" == "nightly" ]]; then
     
     # Export environment variables (ROCM_PATH, ROCM_HOME already set by detect_rocm_path.sh)
     export PATH="${ROCM_BIN}:${ROCM_PATH}/bin:${ROCM_PATH}/llvm/bin:${PATH}"
-    export MAGMA_HOME="${ROCM_PATH}/magma"
     export CMAKE_PREFIX_PATH="${ROCM_CMAKE}:${CMAKE_PREFIX_PATH:-}"
+    
+    # Note: MAGMA_HOME not set - theRock installations don't include MAGMA
     
     # Set for PyTorch build
     export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-gfx942}"
@@ -20,7 +21,6 @@ if [[ "${ROCM_VERSION}" == "nightly" ]]; then
     echo "TheRock ROCm environment configured:"
     echo "  ROCM_PATH=$ROCM_PATH"
     echo "  ROCM_HOME=$ROCM_HOME"
-    echo "  MAGMA_HOME=$MAGMA_HOME"
 else
     echo "Using traditional ROCm installation from /opt/rocm"
     # Paths already set by detect_rocm_path.sh, just add to PATH
