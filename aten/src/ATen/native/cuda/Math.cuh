@@ -333,11 +333,16 @@ const auto zeta_string = jiterator_stringify(
 
     // Short-circuits negative q integers map to +infty,
     //   negative q non-integers map to NaN
+    // Note: This mirrors the CPU implementation in Math.h to keep CPU/CUDA consistent.
     if (q <= zero) {
-      if (q == floor(q)) {
+      T q_floor = floor(q);
+      // Treat negative integers specially: zeta(s, q) -> +inf
+      if (q == q_floor) {
         return POS_INFINITY;
       }
-      if (x != floor(x)) {
+      T x_floor = floor(x);
+      // For non-integer x in this regime, return NaN
+      if (x != x_floor) {
         return NAN;
       }
     }
