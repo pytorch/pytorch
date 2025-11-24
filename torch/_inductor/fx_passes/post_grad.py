@@ -287,6 +287,22 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # user1(wait_ag1)
         stable_topological_sort(gm.graph)
 
+    if (
+        split_mm_rs_config
+        := config.aten_distributed_optimizations.split_matmul_reducescatter
+    ) is not None:
+        from torch._inductor.fx_passes.decompose_mm import _split_mm_rs
+
+        num_chunks = split_mm_rs_config[0]
+        min_size_after_split = split_mm_rs_config[1]
+        GraphTransformObserver(gm, "split_matmul_reducescatter").apply_graph_pass(
+            lambda graph: _split_mm_rs(
+                graph.owning_module,
+                num_chunks,
+                min_size_after_split,
+            )
+        )
+
     # Apply overlap scheduling if enabled
     if config.aten_distributed_optimizations.enable_overlap_scheduling:
         from torch._inductor.config import aten_distributed_optimizations as dist_opts
