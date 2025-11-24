@@ -31,7 +31,7 @@ class PythonFile:
         contents: str | None = None,
     ) -> None:
         self.linter_name = linter_name
-        self.path = path.relative_to(ROOT) if path.is_absolute() else path
+        self.path = path.relative_to(ROOT) if path and path.is_absolute() else path
         self._contents = contents
 
     @cached_property
