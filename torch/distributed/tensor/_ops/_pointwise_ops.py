@@ -166,11 +166,9 @@ pointwise_ops = [
     aten.digamma.default,
     aten.digamma.out,
     aten.digamma_.default,
-    aten.div.Tensor,
     aten.div.Tensor_mode,
     aten.div.out,
     aten.div.out_mode,
-    aten.div_.Tensor,
     aten.div_.Tensor_mode,
     aten.eq.Tensor,
     aten.eq.Tensor_out,
@@ -305,7 +303,6 @@ pointwise_ops = [
     aten.nan_to_num.out,
     aten.nan_to_num_.default,
     aten.ne.Scalar,
-    aten.neg.default,
     aten.neg.out,
     aten.neg_.default,
     aten.nextafter.default,
@@ -391,7 +388,6 @@ pointwise_ops = [
     aten.trunc.default,
     aten.trunc.out,
     aten.trunc_.default,
-    aten.where.self,
     aten.where.self_out,
     aten.xlogy.OutScalar_Self,
     aten.xlogy.OutScalar_Other,
@@ -404,7 +400,6 @@ pointwise_ops = [
     # backward point-wise ops
     # please keep the entries below alphabetically sorted
     aten.gelu_backward.default,
-    aten.sigmoid_backward.default,
     aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
@@ -417,11 +412,15 @@ linear_pointwise_ops = {
     aten.add_.Tensor: 1,
     aten.div.Scalar: 0,
     aten.div_.Scalar: 0,
+    aten.div.Tensor: 2,
+    aten.div_.Tensor: 2,
     aten.mul.Scalar: 0,
     aten.mul_.Scalar: 0,
     aten.mul.Tensor: 2,
     aten.mul_.Tensor: 2,
     aten.copy_.default: 1,
+    aten.sigmoid_backward.default: 2,
+    aten.neg.default: 0,
 }
 
 
@@ -534,7 +533,7 @@ def common_pointwise_strategy(
                 partial_supports_linearity = placement.is_partial(
                     "sum"
                 ) or placement.is_partial("avg")
-                if linearity > 0 and partial_supports_linearity:
+                if linearity >= 0 and partial_supports_linearity:
                     # propagate the partial placement
                     out_placements.append(placement)
                 else:
@@ -622,6 +621,125 @@ for op in linear_pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         linear_pointwise_strategy
     )
+
+
+@register_op_strategy(aten.where.self)
+def where_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Custom strategy for aten.where.self that optimizes for the case where
+    inputs have (Replicate, Partial, Replicate) placements.
+
+    torch.where(condition, input, other) selects elements from input or other
+    based on condition. When input is Partial and other is Replicate, instead
+    of redistributing input to Replicate (expensive allreduce), we convert
+    other to Partial (free metadata change) and keep the output as Partial.
+    """
+    # Ensure we have exactly 3 args (condition, input, other)
+    if len(op_schema.args_schema) != 3:
+        return pointwise_strategy(op_schema)
+
+    condition_strategy = op_schema.args_schema[0]
+    input_strategy = op_schema.args_schema[1]
+    other_strategy = op_schema.args_schema[2]
+
+    # All should be OpStrategy
+    if not all(
+        isinstance(s, OpStrategy)
+        for s in [condition_strategy, input_strategy, other_strategy]
+    ):
+        return pointwise_strategy(op_schema)
+
+    # Check if all strategies are on the same mesh
+    if not (condition_strategy.mesh == input_strategy.mesh == other_strategy.mesh):
+        return pointwise_strategy(op_schema)
+
+    mesh = condition_strategy.mesh
+
+    # Get the first spec from each strategy
+    condition_spec = condition_strategy.strategies[0].output_spec
+    input_spec = input_strategy.strategies[0].output_spec
+    other_spec = other_strategy.strategies[0].output_spec
+
+    # Check if we have the optimization case: all dimensions have
+    # (Replicate, Partial, Replicate) pattern
+    can_optimize = True
+    partial_type = None
+
+    for c_place, i_place, o_place in zip(
+        condition_spec.placements,
+        input_spec.placements,
+        other_spec.placements,
+    ):
+        if (
+            isinstance(c_place, Replicate)
+            and isinstance(i_place, Partial)
+            and isinstance(o_place, Replicate)
+        ):
+            # Track the partial type (should be consistent across dimensions)
+            if partial_type is None:
+                partial_type = i_place
+            elif partial_type.reduce_op != i_place.reduce_op:
+                can_optimize = False
+                break
+        else:
+            # If any dimension doesn't match the pattern, can't optimize
+            can_optimize = False
+            break
+
+    if not can_optimize or partial_type is None:
+        # Fall back to default pointwise strategy
+        return pointwise_strategy(op_schema)
+
+    # Optimization: convert other from Replicate to Partial matching input's partial type
+    # and make output Partial
+    where_strategy_result = OpStrategy([])
+
+    # Create output placements (Partial matching input)
+    out_placements = list(input_spec.placements)
+
+    # Create input specs
+    # condition: keep as Replicate
+    condition_target_spec = DTensorSpec(
+        mesh=mesh,
+        placements=condition_spec.placements,
+        tensor_meta=condition_spec.tensor_meta,
+    )
+
+    # input: keep as Partial
+    input_target_spec = DTensorSpec(
+        mesh=mesh,
+        placements=input_spec.placements,
+        tensor_meta=input_spec.tensor_meta,
+    )
+
+    # other: convert Replicate to Partial (same type as input)
+    other_target_placements = tuple(out_placements)
+    other_target_spec = DTensorSpec(
+        mesh=mesh,
+        placements=other_target_placements,
+        tensor_meta=other_spec.tensor_meta,
+    )
+
+    # Calculate redistribute costs
+    redistribute_costs = [
+        generate_redistribute_costs(condition_strategy, condition_target_spec),
+        generate_redistribute_costs(input_strategy, input_target_spec),
+        generate_redistribute_costs(other_strategy, other_target_spec),
+    ]
+
+    where_strategy_result.strategies.append(
+        OpSpec(
+            output_specs=DTensorSpec(
+                mesh=mesh,
+                placements=tuple(out_placements),
+            ),
+            input_specs=[condition_target_spec, input_target_spec, other_target_spec],
+            redistribute_cost=redistribute_costs,
+        )
+    )
+
+    return where_strategy_result
+
 
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
