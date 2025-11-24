@@ -154,6 +154,7 @@ class OverlapPreservingBucketer:
         # Build timelines and add constraints to aug_graph
         self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
         self._add_hiding_interval_constraints()
+        self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
     def _compute_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """
@@ -260,6 +261,8 @@ class OverlapPreservingBucketer:
                 self.aug_graph.add_extra_dep(n=hn, dep=start)
                 self.aug_graph.add_extra_dep(n=info.wait_node, dep=hn)
 
+            self.all_hiding_nodes |= info.hiding_nodes
+
     def bucket_collectives(self) -> None:
         # Group collectives by PG first
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
@@ -355,6 +358,12 @@ class OverlapPreservingBucketer:
 
         for i, start_node in enumerate(sorted_collectives):
             if start_node in processed:
+                continue
+
+            if (
+                start_node in self.all_hiding_nodes
+                or self.collective_info[start_node].wait_node in self.all_hiding_nodes
+            ):
                 continue
 
             # Initialize bucket with first collective
@@ -739,6 +748,13 @@ class OverlapPreservingBucketer:
         why = WhyNoBucket(existing_coll, candidate)
 
         candidate_info = self.collective_info[candidate]
+
+        if (
+            candidate in self.all_hiding_nodes
+            or candidate_info.wait_node in self.all_hiding_nodes
+        ):
+            why("nyi: bucketing collective used for overlap")
+            return False
 
         # Step 1: Quick check using precomputed ancestors
         # These ancestors are computed prior to adding augmented dependencies and not updated,
