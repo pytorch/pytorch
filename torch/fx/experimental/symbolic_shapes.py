@@ -5569,7 +5569,12 @@ class ShapeEnv:
         def track_symint(
             source: Source, val: IntLikeType, constraint: DimConstraint = None
         ) -> None:
-            log.debug("track_symint %s %s %s", LazyString(source.name), val, constraint)
+            log.debug(
+                "track_symint %s %s %s",
+                LazyString(lambda: source.name),
+                val,
+                constraint,
+            )
             assert not isinstance(val, SymInt) or is_symbolic(val)
 
             if isinstance(val, SymInt) and val.node.maybe_as_int() is not None:
@@ -5658,7 +5663,7 @@ class ShapeEnv:
                     )
 
         def track_symfloat(source: Source, val: FloatLikeType) -> None:
-            log.debug("track_symfloat %s %s", LazyString(source.name), val)
+            log.debug("track_symfloat %s %s", LazyString(lambda: source.name), val)
             assert not isinstance(val, SymFloat) or is_symbolic(val)
 
             if isinstance(val, SymFloat) and val.node.maybe_as_float() is not None:
