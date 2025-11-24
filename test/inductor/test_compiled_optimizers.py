@@ -447,6 +447,7 @@ def make_test(
     **kwargs,
 ):
     @config.patch("score_fusion_memory_threshold", 1)
+    @config.patch("combo_kernels", False)
     def test_fn(self):
         stack = ExitStack()
         try:

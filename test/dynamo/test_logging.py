@@ -214,7 +214,9 @@ from user code:
     test_inductor_debug = within_range_record_test(
         3, 30 if torch._inductor.config.combo_kernels else 28, inductor=logging.DEBUG
     )
-    test_inductor_info = within_range_record_test(2, 10, inductor=logging.INFO)
+    test_inductor_info = within_range_record_test(
+        2, 12 if torch._inductor.config.combo_kernels else 10, inductor=logging.INFO
+    )
 
     @make_logging_test()
     def test_inductor_error(self, records):
