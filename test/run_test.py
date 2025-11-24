@@ -1487,8 +1487,10 @@ def parse_args():
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and (GITHUB_WORKFLOW in ("trunk", "pull")
-        or GITHUB_WORKFLOW.startswith(("rocm-", "periodic-rocm-"))),
+        and (
+            GITHUB_WORKFLOW in ("trunk", "pull")
+            or GITHUB_WORKFLOW.startswith(("rocm-", "periodic-rocm-"))
+        ),
     )
     parser.add_argument(
         "--shard",
