@@ -34,12 +34,14 @@ def is_impure_node_for_dce(node):
 
 def _is_backward_node(node: fx.Node) -> bool:
     """Check if node is in backward region via annotation"""
-    return node.meta.get("custom", {}).get("backward") is not None
+    return node.meta.get("custom", {}).get("remat_pass_tag", None) == "is_backward"
 
 
 def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModule:
     """
-    Duplicate checkpointed nodes for backward use. DCE removes unused forward versions.
+    Duplicate checkpointed nodes for backward use. DCE removes unused forward versions. We assume that
+    you already annotated your backward region with fx.traceback.annotate({"remat_pass_tag": "is_backward"})
+    which helps us identify the backward region.
     """
     if not has_recomputable_ops(gm):
         return gm
@@ -77,14 +79,15 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     env: dict[fx.Node, fx.Node] = {}
     recomputed_nodes: dict[fx.Node, fx.Node] = {}
 
+    # Insert forward nodes
+    for node in list(gm.graph.nodes)[:bwd_start]:
+        env[node] = new_graph.node_copy(node, lambda x: env[x])
+
     def remat_input(x):
-        # fx.Node can be int or float
+        # fx.Node can have args that are primitive types (e.g. int, float, bool)
         if not isinstance(x, fx.Node):
             return x
         return recomputed_nodes.get(x, env[x])
-
-    for node in gm.graph.find_nodes(op="placeholder"):
-        env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     def gather_checkpointed_deps(node: fx.Node, visited: set) -> None:
         if node in visited or node in recomputed_nodes:
@@ -94,14 +97,7 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
             if must_recompute(inp):
                 gather_checkpointed_deps(inp, visited)
 
-    # Insert forward nodes
-    for node in list(gm.graph.nodes)[:bwd_start]:
-        if node.op == "placeholder":
-            continue
-        env[node] = new_graph.node_copy(node, lambda x: env[x])
-
-    # Insert backward nodes, assumption here is that
-    # you already annotated your backward region with fx.traceback.annotate({"backward": 0})
+    # Insert backward nodes
     for node in list(gm.graph.nodes)[bwd_start:]:
         if node.op == "output":
             continue

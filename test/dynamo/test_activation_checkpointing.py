@@ -2041,12 +2041,14 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
             )
             loss = z.sum()
 
-            with torch.fx.traceback.annotate({"backward": 0}):
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
                 dx, dy = _grad(loss, (x, y))
 
             return dx.detach(), dy.detach()
 
-        (dx1, dy1), gm_without = self._compile_and_capture(simple_fwd_bwd, False, (x, y))
+        (dx1, dy1), gm_without = self._compile_and_capture(
+            simple_fwd_bwd, False, (x, y)
+        )
         (dx2, dy2), gm_with = self._compile_and_capture(simple_fwd_bwd, True, (x, y))
 
         self.assertTrue(torch.allclose(dx1, dx2))
@@ -2093,7 +2095,7 @@ def forward(self, arg0_1, arg1_1):
             )
             loss = z.sum()
 
-            with torch.fx.traceback.annotate({"backward": 0}):
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
                 dx = _grad(loss, x)[0]
 
             return dx
@@ -2144,11 +2146,13 @@ def forward(self, arg0_1, arg1_1):
             )
             loss = result.sum()
 
-            with torch.fx.traceback.annotate({"backward": 0}):
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
                 dx, dw, db = _grad(loss, (x, w1, b1))
             return dx, dw, db
 
-        result_with, gm_with = self._compile_and_capture(fwd_bwd_with_policy, True, (x, w1, b1))
+        result_with, gm_with = self._compile_and_capture(
+            fwd_bwd_with_policy, True, (x, w1, b1)
+        )
         result_without, gm_without = self._compile_and_capture(
             fwd_bwd_with_policy, False, (x, w1, b1)
         )
@@ -2194,14 +2198,16 @@ def forward(self, arg0_1, arg1_1):
                 _util_checkpoint, x, y, z, use_reentrant=False
             )
 
-            with torch.fx.traceback.annotate({"backward": 0}):
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
                 e = d + c
                 loss = e.sum()
                 dx = _grad(loss, x)[0]
 
             return dx.detach()
 
-        _, captured_gm = self._compile_and_capture(fwd_bwd_with_transitive_deps, True, (x, y, z))
+        _, captured_gm = self._compile_and_capture(
+            fwd_bwd_with_transitive_deps, True, (x, y, z)
+        )
 
         # If we don't sort, we see following sequence:
         # clone_2_recomputed = torch.ops.aten.clone.default(arg2_1)
