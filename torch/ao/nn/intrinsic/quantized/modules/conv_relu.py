@@ -61,9 +61,7 @@ class ConvReLU1d(nnq.Conv1d):
         )
 
     def forward(self, input):
-        """
-        Runs the forward pass.
-        """
+        r"""Applies fused quantized Conv1d and ReLU."""
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 3:
@@ -83,11 +81,7 @@ class ConvReLU1d(nnq.Conv1d):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
-        r"""Create a qat module from a float module or qparams_dict
-
-        Args: `mod` a float module, either produced by torch.ao.quantization utilities
-        or directly from user
-        """
+        r"""Creates a quantized module from a float module."""
         if type(mod) is torch.ao.nn.intrinsic.qat.ConvBnReLU1d:
             assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
@@ -103,7 +97,7 @@ class ConvReLU1d(nnq.Conv1d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module"""
+        r"""Creates a quantized module from a reference module."""
         assert type(ref_qconv) is not torch.ao.nn.intrinsic.ConvBnReLU1d, (
             "BatchNorm1d should be fused into Conv1d before converting to reference module"
         )
@@ -152,9 +146,7 @@ class ConvReLU2d(nnq.Conv2d):
         )
 
     def forward(self, input):
-        """
-        Runs the forward pass.
-        """
+        r"""Applies fused quantized Conv2d and ReLU."""
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
@@ -173,11 +165,7 @@ class ConvReLU2d(nnq.Conv2d):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
-        r"""Create a qat module from a float module or qparams_dict
-
-        Args: `mod` a float module, either produced by torch.ao.quantization utilities
-        or directly from user
-        """
+        r"""Creates a quantized module from a float module."""
         if type(mod) is torch.ao.nn.intrinsic.qat.ConvBnReLU2d:
             assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
@@ -195,7 +183,7 @@ class ConvReLU2d(nnq.Conv2d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module"""
+        r"""Creates a quantized module from a reference module."""
         assert type(ref_qconv) is not torch.ao.nn.intrinsic.ConvBnReLU2d, (
             "BatchNorm2d should be fused into Conv2d before converting to reference module"
         )
@@ -244,9 +232,7 @@ class ConvReLU3d(nnq.Conv3d):
         )
 
     def forward(self, input):
-        """
-        Runs the forward pass.
-        """
+        r"""Applies fused quantized Conv3d and ReLU."""
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 5:
@@ -265,11 +251,7 @@ class ConvReLU3d(nnq.Conv3d):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
-        r"""Create a qat module from a float module or qparams_dict
-
-        Args: `mod` a float module, either produced by torch.ao.quantization utilities
-        or directly from user
-        """
+        r"""Creates a quantized module from a float module."""
         if type(mod) is torch.ao.nn.intrinsic.qat.ConvBnReLU3d:
             assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
@@ -287,7 +269,7 @@ class ConvReLU3d(nnq.Conv3d):
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        r"""Create a (fbgemm/qnnpack) quantized module from a reference quantized module"""
+        r"""Creates a quantized module from a reference module."""
         assert type(ref_qconv) is not torch.ao.nn.intrinsic.ConvBnReLU3d, (
             "BatchNorm3d should be fused into Conv3d before converting to reference module"
         )
