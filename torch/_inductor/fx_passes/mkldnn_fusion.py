@@ -1528,10 +1528,10 @@ if torch._C._has_mkldnn:
     def _mkldnn_fusion_init():
         # TODO: aarch64: enable op fusion for acl once it supports fused operators. Disabling it for now.
         # Otherwise even the matmul or innerproduct can not be accelerated with acl
-        mkldnn_ready = (
-            torch.backends.mkldnn.enabled and torch.backends.mkldnn.is_available()
-        )
-        if not mkldnn_ready:
+        if (
+            not torch.backends.mkldnn.enabled
+            or not torch.backends.mkldnn.is_available()
+        ):
             return
 
         if not torch.ops.mkldnn._is_mkldnn_acl_supported():
