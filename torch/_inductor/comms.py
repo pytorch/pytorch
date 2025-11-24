@@ -51,26 +51,43 @@ if TYPE_CHECKING:
     from torch._inductor.scheduler import BaseSchedulerNode
 
 
+def _extract_group_names(snodes: list[BaseSchedulerNode]) -> OrderedSet[str]:
+    group_names: OrderedSet[str] = OrderedSet()
+    for snode in snodes:
+        if is_collective(snode.node):
+            group_names.add(snode.node.constant_args[-1])
+
+    return group_names
+
+
 def align_runtime_estimations_across_all_distributed_ranks(
     snodes: list[BaseSchedulerNode],
 ):
     runtime_estimations = {}
     for snode in snodes:
         runtime_estimations[snode] = snode.get_estimated_runtime()
-    import torch.distributed as dist
-    from torch.distributed.distributed_c10d import _get_default_group
 
-    world_size = dist.get_world_size()
-    pg = _get_default_group()
-    gathered_runtime_estimations: list[list[float]] = [[] for _ in range(world_size)]
-    dist.all_gather_object(
-        gathered_runtime_estimations, list(runtime_estimations.values()), pg
-    )
-    median_runtime_estimations = torch.median(
-        torch.tensor(gathered_runtime_estimations), dim=0
-    ).values.tolist()
+    import torch.distributed as dist
+    from torch.distributed.distributed_c10d import _resolve_process_group
+
+    group_names = _extract_group_names(snodes)
+
+    runtime_estimations_values = list(runtime_estimations.values())
+    for group_name in group_names:
+        group = _resolve_process_group(group_name)
+        group_size = group.size()
+        gathered_runtime_estimations: list[list[float]] = [
+            [] for _ in range(group_size)
+        ]
+        dist.all_gather_object(
+            gathered_runtime_estimations, runtime_estimations_values, group
+        )
+        runtime_estimations_values = torch.median(
+            torch.tensor(gathered_runtime_estimations), dim=0
+        ).values.tolist()
+
     for i in range(len(snodes)):
-        snodes[i].override_estimated_runtime = median_runtime_estimations[i]
+        snodes[i].override_estimated_runtime = runtime_estimations_values[i]
 
 
 def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
