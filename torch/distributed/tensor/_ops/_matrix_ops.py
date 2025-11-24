@@ -15,6 +15,7 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -22,7 +23,6 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_shardable,
     map_placements_after_broadcast,
     prod,
-    register_op_strategy,
 )
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
