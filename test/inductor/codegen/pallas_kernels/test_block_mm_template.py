@@ -1,11 +1,17 @@
+# Owner(s): ["oncall: pt2"]
 import unittest
+
 import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.experimental import pallas as pl
 from jax.experimental.pallas import tpu as pltpu
 
-from torch._inductor.codegen.pallas_kernels.block_mm_template import PallasTpuBlockMatmulTemplate
+from torch._inductor.codegen.pallas_kernels.block_mm_template import (
+    PallasTpuBlockMatmulTemplate,
+)
+
+
 """
 class PallasTemplateTests(unittest.TestCase):
     def test_pallas_tpu_block_matmul_template(self):
@@ -52,77 +58,90 @@ class PallasTemplateTests(unittest.TestCase):
         self.assertIn("import jax", rendered_code)
         self.assertIn("from jax.experimental import pallas as pl", rendered_code)
 """
+
+
 class MockLayout:
     def __init__(self, dtype) -> None:
         self.dtype = dtype
 
+
 class MockInputNode:
     def __init__(self, dtype) -> None:
         self._dtype = dtype
+
     def get_layout(self) -> MockLayout:
         return MockLayout(self._dtype)
 
+
 class PallasKernelCorrectnessJaxTests(unittest.TestCase):
-  def test_block_mm_template(self):
-    dtypes_to_test = [
-        # jnp.int8,
-        # jnp.int16,
-        # jnp.int32,
-        # jnp.float8_e5m2,
-        # jnp.float8_e4m3fn,
-        # jnp.float8_e4m3b11fnuz,
-        jnp.bfloat16,
-        jnp.float32,
-      ]
-    
-    for x_dtype in dtypes_to_test:
-        for y_dtype in dtypes_to_test:
-            with self.subTest(x_dtype=x_dtype, y_dtype=y_dtype):
-                choice_name = f"test_kernel_{x_dtype.__name__}_{y_dtype.__name__}"
+    def test_block_mm_template(self):
+        dtypes_to_test = [
+            # jnp.int8,
+            # jnp.int16,
+            # jnp.int32,
+            # jnp.float8_e5m2,
+            # jnp.float8_e4m3fn,
+            # jnp.float8_e4m3b11fnuz,
+            jnp.bfloat16,
+            jnp.float32,
+        ]
 
-                mock_input_nodes = [MockInputNode(x_dtype), MockInputNode(y_dtype)]
-                kwargs = {"bm": 128, "bk": 128, "bn": 128}
+        for x_dtype in dtypes_to_test:
+            for y_dtype in dtypes_to_test:
+                with self.subTest(x_dtype=x_dtype, y_dtype=y_dtype):
+                    choice_name = f"test_kernel_{x_dtype.__name__}_{y_dtype.__name__}"
 
-                kernel_code = PallasTpuBlockMatmulTemplate._render_kernel(mock_input_nodes).replace("<KERNEL_NAME>", choice_name)
-                pallas_call_code = PallasTpuBlockMatmulTemplate._render_pallas_call(kwargs).replace("<KERNEL_NAME>", choice_name)
+                    mock_input_nodes = [MockInputNode(x_dtype), MockInputNode(y_dtype)]
+                    kwargs = {"bm": 128, "bk": 128, "bn": 128}
 
-                scope = {
-                    "jax": jax,
-                    "jnp": jnp,
-                    "pl": pl,
-                    "pltpu": pltpu,
-                }
-                exec(kernel_code + "\n" + pallas_call_code, scope)
+                    kernel_code = PallasTpuBlockMatmulTemplate._render_kernel(
+                        mock_input_nodes
+                    ).replace("<KERNEL_NAME>", choice_name)
+                    pallas_call_code = PallasTpuBlockMatmulTemplate._render_pallas_call(
+                        kwargs
+                    ).replace("<KERNEL_NAME>", choice_name)
 
-                pallas_call_for_test = scope[f"{choice_name}_pallas_call"]
+                    scope = {
+                        "jax": jax,
+                        "jnp": jnp,
+                        "pl": pl,
+                        "pltpu": pltpu,
+                    }
+                    exec(kernel_code + "\n" + pallas_call_code, scope)
 
-                k1, k2 = jax.random.split(jax.random.key(0))
-                
-            if jnp.issubdtype(x_dtype, jnp.integer):
-                x = jax.random.randint(k1, (512, 512), 0, 10, dtype=x_dtype)
-            else:
-                x = jax.random.uniform(k1, (512, 512), dtype=x_dtype)
+                    pallas_call_for_test = scope[f"{choice_name}_pallas_call"]
 
-            if jnp.issubdtype(y_dtype, jnp.integer):
-                y = jax.random.randint(k2, (512, 512), 0, 10, dtype=y_dtype)
-            else:
-                y = jax.random.uniform(k2, (512, 512), dtype=y_dtype)
+                    k1, k2 = jax.random.split(jax.random.key(0))
 
-            z = pallas_call_for_test(x, y)
+                if jnp.issubdtype(x_dtype, jnp.integer):
+                    x = jax.random.randint(k1, (512, 512), 0, 10, dtype=x_dtype)
+                else:
+                    x = jax.random.uniform(k1, (512, 512), dtype=x_dtype)
 
-            if x_dtype == jnp.bfloat16 or y_dtype == jnp.bfloat16:
-                rtol = 1e-2
-                atol = 1e-2
-            elif jnp.issubdtype(x_dtype, jnp.integer) and jnp.issubdtype(y_dtype, jnp.integer):
-                rtol = 0
-                atol = 0
-            else:
-                rtol = 1e-6
-                atol = 1e-6
+                if jnp.issubdtype(y_dtype, jnp.integer):
+                    y = jax.random.randint(k2, (512, 512), 0, 10, dtype=y_dtype)
+                else:
+                    y = jax.random.uniform(k2, (512, 512), dtype=y_dtype)
 
-            np.testing.assert_allclose(
-                z, jnp.dot(x, y), rtol=rtol, atol=atol
-            )
+                z = pallas_call_for_test(x, y)
+
+                if x_dtype == jnp.bfloat16 or y_dtype == jnp.bfloat16:
+                    rtol = 1e-2
+                    atol = 1e-2
+                elif jnp.issubdtype(x_dtype, jnp.integer) and jnp.issubdtype(
+                    y_dtype, jnp.integer
+                ):
+                    rtol = 0
+                    atol = 0
+                else:
+                    rtol = 1e-6
+                    atol = 1e-6
+
+                np.testing.assert_allclose(z, jnp.dot(x, y), rtol=rtol, atol=atol)
+
+
+from torch._inductor.test_case import run_tests
+
 
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()

@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 from typing import Any, TYPE_CHECKING
 
 from .base import TemplateConfigHeuristics
 from .registry import register_template_heuristic
+
 
 if TYPE_CHECKING:
     from collections.abc import Generator

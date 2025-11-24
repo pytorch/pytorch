@@ -1,44 +1,42 @@
 from __future__ import annotations
-from abc import ABC, abstractmethod
-import functools
+
 import hashlib
+from abc import ABC, abstractmethod
+from typing import Any, Optional, TYPE_CHECKING, Union
 
-import sympy
 import jax.numpy as jnp
+import sympy
 
-from torch._inductor.select_algorithm import KernelTemplate, ChoiceCaller
+from torch._inductor.codegen.common import IndentedBuffer
+from torch._inductor.codegen.pallas import PallasKernel
+from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
 from torch._inductor.ir import (
     Buffer,
     ChoiceCaller,
     IRNode,
     Layout,
-    OutputSpec, 
-    Sequence, 
-    TemplateBuffer, 
-    ShapeAsConstantBuffer, 
+    OutputSpec,
+    ShapeAsConstantBuffer,
+    TemplateBuffer,
     TensorBox,
 )
-from torch._inductor.scheduler import BaseSchedulerNode
-from torch._inductor.virtualized import V
-from torch._inductor.codegen.common import IndentedBuffer
-from torch._inductor.codegen.pallas import PallasKernel
-from torch._inductor.codegen.simd_kernel_features import SIMDKernelFeatures
+from torch._inductor.select_algorithm import KernelTemplate
 
-from collections.abc import Callable
-from typing import Any, Optional, Union
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
 
 # --- Templates ---
 
-MATMUL_KERNEL_TEMPLATE = """ 
+MATMUL_KERNEL_TEMPLATE = """
 def <KERNEL_NAME>_kernel(x_ref, y_ref, z_ref) -> None:
   @pl.when(pl.program_id(2) == 0)
   def _() -> None:
     z_ref[...] = jnp.zeros_like(z_ref)
 
-  z_ref[...] += jax.lax.dot_general(
+  z_ref[...] += jnp.dot(
       x_ref[...],
       y_ref[...],
-      dimension_numbers=(((1,), (0,)), ((), ())),
       preferred_element_type={{acc_dtype}}
   ).astype(z_ref.dtype)
 """
@@ -81,19 +79,21 @@ def <KERNEL_NAME>_main({{main_fn_args}}, stream=None):
 
 # --- IR Node for Pallas Kernels ---
 
+
 class PallasTemplateBuffer(TemplateBuffer):
     def __init__(
         self,
         layout: OutputSpec,
         inputs: Sequence[IRNode],
         make_kernel_render: Optional[Callable[..., Any]],
-        template: "PallasTemplate",
+        template: PallasTemplate,
     ) -> None:
         super().__init__(layout, inputs, make_kernel_render)
         self.template = template
 
 
 # --- Choice Caller ---
+
 
 class PallasChoiceCaller(ChoiceCaller):
     def __init__(
@@ -102,8 +102,10 @@ class PallasChoiceCaller(ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         description: str,
-        make_kernel_render: Callable[[], str],
-        template: "PallasTemplate",
+        make_kernel_render: Callable[
+            ..., tuple[PallasTemplateKernel, Callable[[], str]]
+        ],
+        template: PallasTemplate,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
@@ -115,6 +117,7 @@ class PallasChoiceCaller(ChoiceCaller):
     def to_callable(self) -> Callable[..., Any]:
         def benchmark_stub(*args, **kwargs):
             return 0.0
+
         return benchmark_stub
 
     def hash_key(self) -> str:
@@ -133,8 +136,17 @@ class PallasChoiceCaller(ChoiceCaller):
 
 # --- Pallas Kernel Class ---
 
+
 class PallasTemplateKernel(PallasKernel):
-    def __init__(self, template: "PallasTemplate", choice_name: str, layout: "Layout", input_nodes: list[IRNode], output_node: IRNode, **kwargs):
+    def __init__(
+        self,
+        template: PallasTemplate,
+        choice_name: str,
+        layout: Layout,
+        input_nodes: list[IRNode],
+        output_node: IRNode,
+        **kwargs,
+    ):
         self.template = template
         self.choice_name = choice_name
         self.kwargs = kwargs
@@ -145,10 +157,7 @@ class PallasTemplateKernel(PallasKernel):
         tiling = {"x": numel, "r0_": sympy.S.One}
         features = SIMDKernelFeatures([], numel)
 
-        super().__init__(
-            tiling=tiling,
-            features=features
-        )
+        super().__init__(tiling=tiling, features=features)
 
         for node in input_nodes:
             self.args.input(node.get_name())
@@ -156,7 +165,6 @@ class PallasTemplateKernel(PallasKernel):
 
     def render(self) -> str:
         full_code = IndentedBuffer()
-        full_code.writeline("import functools")
         full_code.writeline("import torch")
         full_code.writeline("import jax")
         full_code.writeline("import jax.numpy as jnp")
@@ -171,6 +179,7 @@ class PallasTemplateKernel(PallasKernel):
 
 # --- Template Classes ---
 
+
 class PallasTemplate(KernelTemplate, ABC):
     def __init__(self, name: str) -> None:
         super().__init__(name)
@@ -182,9 +191,12 @@ class PallasTemplate(KernelTemplate, ABC):
     @staticmethod
     def _template_from_string(source: str):
         import jinja2
+
         return jinja2.Template(source)
 
-    def generate(self, input_nodes, layout, **kwargs) -> PallasChoiceCaller:
+    def generate(self, **kwargs: Any) -> PallasChoiceCaller:
+        input_nodes = kwargs.pop("input_nodes")
+        layout = kwargs.pop("layout")
         choice_name = self.get_choice_name(**kwargs)
         description = self.get_description(**kwargs)
         make_kernel_render = self.get_make_kernel_render(choice_name, layout, **kwargs)
@@ -207,7 +219,24 @@ class PallasTemplate(KernelTemplate, ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_make_kernel_render(self, choice_name: str, layout: "Layout", **kwargs) -> Callable[..., tuple[PallasTemplateKernel, Callable[[], str]]]:
+    def get_make_kernel_render(
+        self, choice_name: str, layout: Layout, **kwargs
+    ) -> Callable[..., tuple[PallasTemplateKernel, Callable[[], str]]]:
+        raise NotImplementedError
+
+    @staticmethod
+    @abstractmethod
+    def _render_kernel(input_nodes) -> str:
+        raise NotImplementedError
+
+    @staticmethod
+    @abstractmethod
+    def _render_pallas_call(kwargs: Any) -> str:
+        raise NotImplementedError
+
+    @staticmethod
+    @abstractmethod
+    def _render_main_fn(args: Any) -> str:
         raise NotImplementedError
 
 
@@ -215,16 +244,18 @@ class PallasTpuBlockMatmulTemplate(PallasTemplate):
     def __init__(self, name: str):
         super().__init__(name)
         self._src_hash = hashlib.sha256(
-            (MATMUL_KERNEL_TEMPLATE + PALLAS_CALL_TEMPLATE + MAIN_FUNCTION_TEMPLATE).encode("utf-8")
+            (
+                MATMUL_KERNEL_TEMPLATE + PALLAS_CALL_TEMPLATE + MAIN_FUNCTION_TEMPLATE
+            ).encode("utf-8")
         ).hexdigest()
 
     @staticmethod
     def _render_kernel(input_nodes) -> str:
-        assert len(input_nodes) == 2, "Matmul kernel expects 2 inputs" 
+        assert len(input_nodes) == 2, "Matmul kernel expects 2 inputs"
         x_dtype = input_nodes[0].get_layout().dtype
         y_dtype = input_nodes[1].get_layout().dtype
 
-        if jnp.issubdtype(x_dtype, jnp.integer) and jnp.issubdtype(y_dtype, jnp.integer):
+        if x_dtype == jnp.int8 and y_dtype == jnp.int8:
             acc_dtype = "jnp.int32"
         else:
             acc_dtype = "jnp.float32"
@@ -239,9 +270,7 @@ class PallasTpuBlockMatmulTemplate(PallasTemplate):
         bk = kwargs.get("bk", 128)
         bn = kwargs.get("bn", 128)
         return PallasTemplate._template_from_string(PALLAS_CALL_TEMPLATE).render(
-            bm=bm,
-            bk=bk,
-            bn=bn
+            bm=bm, bk=bk, bn=bn
         )
 
     @staticmethod
@@ -252,7 +281,7 @@ class PallasTpuBlockMatmulTemplate(PallasTemplate):
             main_fn_args=", ".join(main_fn_args),
             x=main_fn_args[0],
             y=main_fn_args[1],
-            z=main_fn_args[2]
+            z=main_fn_args[2],
         )
 
     @property
@@ -278,12 +307,18 @@ class PallasTpuBlockMatmulTemplate(PallasTemplate):
 
         return f"bm={bm}, bk={bk}, bn={bn}"
 
-    def get_make_kernel_render(self, choice_name: str, layout: "Layout", **kwargs) -> Callable[..., tuple[PallasTemplateKernel, Callable[[], str]]]:
+    def get_make_kernel_render(
+        self, choice_name: str, layout: Layout, **kwargs
+    ) -> Callable[..., tuple[PallasTemplateKernel, Callable[[], str]]]:
         def make_kernel_render_fn(template_node, *args, **kwargs_render):
             output_node = template_node
             input_nodes = template_node.inputs
-            kernel = PallasTemplateKernel(self, choice_name, layout, input_nodes, output_node, **kwargs)
+            kernel = PallasTemplateKernel(
+                self, choice_name, layout, input_nodes, output_node, **kwargs
+            )
             return kernel, kernel.render
+
         return make_kernel_render_fn
+
 
 pallas_tpu_block_mm_template = PallasTpuBlockMatmulTemplate("pallas_tpu_block_mm")
