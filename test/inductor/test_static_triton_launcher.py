@@ -12,12 +12,14 @@ from torch._inductor.runtime.static_cuda_launcher import StaticallyLaunchedCudaK
 from torch._inductor.runtime.triton_compat import CompiledKernel, tl, triton
 from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.triton_utils import requires_gpu_and_triton
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
-from torch.testing._internal.common_utils import skipIfXpu, IS_WINDOWS
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 _orig_getitem = triton.runtime.JITFunction.__getitem__
+
+
 def _patched_getitem(self, grid):
     orig_launcher = _orig_getitem(self, grid)
 
@@ -27,14 +29,14 @@ def _patched_getitem(self, grid):
 
     return launcher_with_native_code
 
+
 @requires_gpu_and_triton
-class TestStaticCudaLauncher(TestCase):
+class TestStaticTritonLauncher(TestCase):
     def setUp(self):
         super().setUp()
         self.tmp_files = []
         if HAS_XPU_AND_TRITON:
             triton.runtime.JITFunction.__getitem__ = _patched_getitem
-
 
     def tearDown(self):
         super().tearDown()
@@ -535,6 +537,7 @@ class TestStaticTritonCompileResult(TestCase):
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
-    #TODO: Enable test on XPU windows once supported. 
+
+    # TODO: Enable test on XPU windows once supported.
     if not (HAS_XPU_AND_TRITON and IS_WINDOWS):
         run_tests()

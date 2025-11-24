@@ -303,9 +303,6 @@ _post_fusion_custom_pass: Optional[
     ]
 ] = None
 
-# Deprecated
-split_cat_fx_passes = True
-
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
 efficient_conv_bn_eval_fx_passes = False
 
@@ -1026,7 +1023,9 @@ quiesce_async_compile_time: int = Config(
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
 
 # Alias of use_static_cuda_launcher, used by both CUDA/XPU.
-use_static_triton_launcher: bool = Config(alias="torch._inductor.config.use_static_cuda_launcher")
+use_static_triton_launcher: bool = Config(
+    alias="torch._inductor.config.use_static_cuda_launcher"
+)
 
 # Attempt to statically launch user defined triton kernels
 # Requires use_static_cuda_launcher

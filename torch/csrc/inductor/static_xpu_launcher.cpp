@@ -1,6 +1,8 @@
-/** This file follows the API design of "static_cuda_launcher.cpp" and copied parts of the code.
-* TODO: Extract the parts shared with static_cuda_launcher.cpp and unify to a static_triton_launcher.h
-**/
+/** This file follows the API design of "static_cuda_launcher.cpp" and copied
+ *parts of the code.
+ * TODO: Extract the parts shared with static_cuda_launcher.cpp and unify to a
+ *static_triton_launcher.h
+ **/
 
 #if defined(USE_XPU)
 #include <torch/csrc/utils/pythoncapi_compat.h>
@@ -13,8 +15,8 @@
 #include <stdexcept>
 
 #include <torch/csrc/utils/python_numbers.h>
-#include <fstream>
 #include <filesystem>
+#include <fstream>
 #include <optional>
 
 #include <level_zero/ze_api.h>
@@ -29,12 +31,11 @@
     }                                                                     \
   }
 
-
 namespace {
 
 // 120 max args + 1 for global scratch size
 #define MAX_ARGS 121
-typedef void* syclDevicePtr_t ;
+typedef void* syclDevicePtr_t;
 
 syclDevicePtr_t getPointer(PyObject* obj, const sycl::queue* queuePtr) {
   syclDevicePtr_t data_ptr = 0;
@@ -68,9 +69,14 @@ syclDevicePtr_t getPointer(PyObject* obj, const sycl::queue* queuePtr) {
   ze_memory_allocation_properties_t prop;
   prop.stype = ZE_STRUCTURE_TYPE_MEMORY_ALLOCATION_PROPERTIES;
   prop.pNext = nullptr;
-  auto res = zeMemGetAllocProperties((ze_context_handle_t)handle, data_ptr, &prop, nullptr);
-  TORCH_CHECK(res == ZE_RESULT_SUCCESS, "Failed to get memory properties for pointer argument");
-  TORCH_CHECK(prop.type == ZE_MEMORY_TYPE_DEVICE, "Pointer argument doesn't reference XPU device memory");
+  auto res = zeMemGetAllocProperties(
+      (ze_context_handle_t)handle, data_ptr, &prop, nullptr);
+  TORCH_CHECK(
+      res == ZE_RESULT_SUCCESS,
+      "Failed to get memory properties for pointer argument");
+  TORCH_CHECK(
+      prop.type == ZE_MEMORY_TYPE_DEVICE,
+      "Pointer argument doesn't reference XPU device memory");
   return data_ptr;
 }
 
@@ -159,9 +165,8 @@ void parseKernelArgs(
 static inline ze_module_handle_t _createModule(
     const uint8_t* binaryPtr,
     size_t binarySize,
-    const int device_idx) { 
-  sycl::device& syclDevice =
-      c10::xpu::get_raw_device(device_idx);
+    const int device_idx) {
+  sycl::device& syclDevice = c10::xpu::get_raw_device(device_idx);
   auto& syclContext = c10::xpu::get_device_context();
   auto device =
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclDevice);
@@ -219,16 +224,17 @@ static inline sycl::kernel* _createKernel(
     props.pNext = nullptr;
     ZE_CHECK(zeKernelGetProperties(kernel, &props));
     *nSpillsPtr = props.spillMemSize;
-  } 
+  }
   auto& syclContext = c10::xpu::get_device_context();
   auto mod = sycl::make_kernel_bundle<
       sycl::backend::ext_oneapi_level_zero,
       sycl::bundle_state::executable>(
       {module, sycl::ext::oneapi::level_zero::ownership::transfer},
       syclContext);
-  auto fun = new sycl::kernel(sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
-      {mod, kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
-      syclContext));
+  auto fun =
+      new sycl::kernel(sycl::make_kernel<sycl::backend::ext_oneapi_level_zero>(
+          {mod, kernel, sycl::ext::oneapi::level_zero::ownership::transfer},
+          syclContext));
   return fun;
 }
 
@@ -237,8 +243,7 @@ static sycl::kernel* loadKernel(
     const char* funcName,
     uint32_t sharedMemBytes,
     uint32_t* nSpillsPtr,
-    int device_idx
-  ) {
+    int device_idx) {
   std::ifstream IFS(filePath, std::ios::binary);
   std::ostringstream OSS;
   OSS << IFS.rdbuf();
@@ -249,63 +254,55 @@ static sycl::kernel* loadKernel(
   return _createKernel(mod, funcName, nSpillsPtr);
 }
 
-
 static void launchKernel(
     sycl::kernel* kernelPtr,
     uint32_t gridX,
     uint32_t gridY,
     uint32_t gridZ,
     uint32_t numWarps,
-    uint32_t sharedMemory,
+    uint32_t sharedMemBytes,
     void** params,
-    sycl::queue* queuePtr
-    ) {
-      std::cerr << "before getting threads_per_warp" << std::endl;
-      uint32_t threadsPerWarp = kernelPtr->get_info<sycl::info::kernel_device_specific::compile_sub_group_size>(queuePtr->get_device());
-      std::cerr << "threads_per_warps: " << threadsPerWarp << std::endl;
-      if (threadsPerWarp == 0) {
-        abort();
-        threadsPerWarp = 32; // default to 32 if not set
-      }
-      std::string kernelName =
-          kernelPtr->get_info<sycl::info::kernel::function_name>();
-      std::cerr << "kernelName:" << kernelName << std::endl;
-      uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();
-      std::cerr << "numParams:" << numParams << std::endl;
-      size_t globalRangeX = gridX * threadsPerWarp * numWarps;
-      size_t globalRangeY = gridY;
-      size_t globalRangeZ = gridZ;
-      size_t localRangeX = numWarps * threadsPerWarp;
-      size_t localRangeY = 1;
-      size_t localRangeZ = 1;
-      sycl::range<3> globalRange(globalRangeZ, globalRangeY, globalRangeX);
-      sycl::range<3> localRange(localRangeZ, localRangeY, localRangeX);
-      sycl::nd_range<3> parallelWorkSize(globalRange, localRange);
-      if (sharedMemory) {
-        // numParams from sycl info  = user provided args + sharedMemoryBuffer
-        numParams -= 1;
-      }
-      // Submit the imported kernel.
-      auto cgf = [&](sycl::handler& cgh) {
-        for (uint32_t i = 0; i < numParams; ++i) {
-          cgh.set_arg(i, *(static_cast<void**>(params[i])));
-        }
-      
-        if (sharedMemory > 0) {
-          constexpr int dimensions = 1;
-          using share_mem_t = sycl::local_accessor<int8_t, dimensions>;
-          share_mem_t localBuffer = share_mem_t(sharedMemory, cgh);
-          cgh.set_arg(numParams, localBuffer);
-          cgh.parallel_for(parallelWorkSize, *kernelPtr);
-        } else {
-          cgh.parallel_for(parallelWorkSize, *kernelPtr);
-        }
-      };
-      auto event = queuePtr->submit(cgf);
-
+    sycl::queue* queuePtr) {
+  uint32_t threadsPerWarp = kernelPtr->get_info<
+      sycl::info::kernel_device_specific::compile_sub_group_size>(
+      queuePtr->get_device());
+  if (threadsPerWarp == 0) {
+    abort();
+    threadsPerWarp = 32; // default to 32 if not set
+  }
+  std::string kernelName =
+      kernelPtr->get_info<sycl::info::kernel::function_name>();
+  uint32_t numParams = kernelPtr->get_info<sycl::info::kernel::num_args>();
+  size_t globalRangeX = gridX * threadsPerWarp * numWarps;
+  size_t globalRangeY = gridY;
+  size_t globalRangeZ = gridZ;
+  size_t localRangeX = numWarps * threadsPerWarp;
+  size_t localRangeY = 1;
+  size_t localRangeZ = 1;
+  sycl::range<3> globalRange(globalRangeZ, globalRangeY, globalRangeX);
+  sycl::range<3> localRange(localRangeZ, localRangeY, localRangeX);
+  sycl::nd_range<3> parallelWorkSize(globalRange, localRange);
+  if (sharedMemBytes > 0) {
+    // numParams from sycl info  = user provided args + sharedMemoryBuffer
+    numParams -= 1;
+  }
+  // Submit the imported kernel.
+  auto cgf = [&](sycl::handler& cgh) {
+    for (uint32_t i = 0; i < numParams; ++i) {
+      cgh.set_arg(i, *(static_cast<void**>(params[i])));
     }
 
-
+    if (sharedMemBytes > 0) {
+      using share_mem_t = sycl::local_accessor<int8_t, 1>;
+      share_mem_t localBuffer = share_mem_t(sharedMemBytes, cgh);
+      cgh.set_arg(numParams, localBuffer);
+      cgh.parallel_for(parallelWorkSize, *kernelPtr);
+    } else {
+      cgh.parallel_for(parallelWorkSize, *kernelPtr);
+    }
+  };
+  auto event = queuePtr->submit(cgf);
+}
 
 /* Load the kernel into memory (called during torch.compile), and
   return a pointer to it (along with nregs and nspills).
@@ -326,14 +323,17 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
   // Level-zero does not support get n_regs, so we return 0 here.
   uint32_t n_regs = 0;
   uint32_t n_spills = 0;
-  std::cerr<<"load_kernel called with filePath: "<<filePath<<", funcName: "<<funcName<<", sharedMemBytes: "<<sharedMemBytes<<", device: "<<device<<std::endl;
-  sycl::kernel* func = loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
+  sycl::kernel* func =
+      loadKernel(filePath, funcName, sharedMemBytes, &n_spills, device);
 
-  std::cerr<<"load_kernel done: "<< std::endl;
+  PyObject* kernel_py = PyCapsule_New(
+      reinterpret_cast<void*>(func), "sycl_kernel", [](PyObject* cap) {
+        void* ptr = PyCapsule_GetPointer(cap, "sycl_kernel");
+        delete reinterpret_cast<sycl::kernel*>(ptr);
+      });
+
   n_spills /= 4;
-  // Return a tuple of CUFunction, n_regs, n_spills
-  return Py_BuildValue(
-      "(Kii)", reinterpret_cast<uint64_t>(func), n_regs, n_spills);
+  return Py_BuildValue("(Oii)", kernel_py, n_regs, n_spills);
   END_HANDLE_TH_ERRORS
 }
 
@@ -354,8 +354,8 @@ PyObject* launch_kernel_inner(
   // pointers to launchKernel.
   std::array<uint64_t, MAX_ARGS> argStorage = {};
   std::array<void*, MAX_ARGS> kernelArgs = {};
-  parseKernelArgs(varArgs, argTypes, argStorage.data(), kernelArgs.data(), queuePtr);
-  std::cerr<<"launch_kernel_inner before launchKernel"<<std::endl;
+  parseKernelArgs(
+      varArgs, argTypes, argStorage.data(), kernelArgs.data(), queuePtr);
   launchKernel(
       func,
       gridX,
@@ -366,7 +366,6 @@ PyObject* launch_kernel_inner(
       kernelArgs.data(),
       queuePtr);
 
-  std::cerr<<"launch_kernel_inner after launchKernel"<<std::endl;
   Py_RETURN_NONE;
 }
 
@@ -385,7 +384,8 @@ PyObject* launch_kernel_slow(
   std::vector<uint64_t> argStorage(numArgs);
   std::vector<void*> kernelArgs(numArgs);
 
-  parseKernelArgs(varArgs, argTypes, argStorage.data(), kernelArgs.data(), queuePtr);
+  parseKernelArgs(
+      varArgs, argTypes, argStorage.data(), kernelArgs.data(), queuePtr);
 
   launchKernel(
       func,
@@ -416,19 +416,18 @@ PyObject* launch_kernel_slow(
 */
 PyObject* launch_kernel(PyObject* self, PyObject* args) {
   HANDLE_TH_ERRORS
-  uint64_t func_ptr = 0;
+  PyObject* kernel_py = nullptr;
   int gridX = 0, gridY = 0, gridZ = 0, numWarps = 0, sharedMemBytes = 0;
   // stream here should be the raw stream gotten from
   // device_interface.get_raw_stream()
   uint64_t stream = 0;
   const char* argTypes = nullptr;
   PyObject* varArgs = nullptr;
-  std::cerr<<"launch_kernel called"<<std::endl;
   // Parse the fixed arguments and the format string
   if (!PyArg_ParseTuple(
           args,
-          "KiiiiisOK",
-          &func_ptr,
+          "OiiiiisOK",
+          &kernel_py,
           &gridX,
           &gridY,
           &gridZ,
@@ -444,21 +443,14 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
     Py_RETURN_NONE;
   }
 
-  sycl::kernel* func = reinterpret_cast<sycl::kernel*>(func_ptr); // NOLINT
+  sycl::kernel* func = reinterpret_cast<sycl::kernel*>(
+      PyCapsule_GetPointer(kernel_py, "sycl_kernel")); // NOLINT
   sycl::queue* queuePtr = reinterpret_cast<sycl::queue*>(stream); // NOLINT
   auto num_args = std::strlen(argTypes);
-  std::cerr << "num_args: " << num_args << std::endl;
   // Kernels with no arguments should just pass nullptr to cuLaunchKernel
   if (num_args == 0) {
     launchKernel(
-        func,
-        gridX,
-        gridY,
-        gridZ,
-        numWarps,
-        sharedMemBytes,
-        nullptr,
-        queuePtr);
+        func, gridX, gridY, gridZ, numWarps, sharedMemBytes, nullptr, queuePtr);
     Py_RETURN_NONE;
   } else if (num_args <= MAX_ARGS) {
     return launch_kernel_inner(
@@ -544,7 +536,7 @@ PyTypeObject StaticCudaLauncherType = {
 } // anonymous namespace
 // Module initialization: add StaticCudaLauncher to the module with our static
 // methods.
-bool StaticCudaLauncher_init(PyObject* module) {
+bool StaticXpuLauncher_init(PyObject* module) {
   if (PyType_Ready(&StaticCudaLauncherType) < 0) {
     return false;
   }
