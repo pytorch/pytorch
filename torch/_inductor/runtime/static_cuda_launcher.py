@@ -38,7 +38,10 @@ class StaticallyLaunchedCudaKernel:
         # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
         # pyrefly: ignore [missing-attribute]
-        self.cubin_raw = kernel.asm.get("cubin", None)
+        if "zebin" in kernel.asm:
+            self.cubin_raw =kernel.asm["zebin"]
+        else:
+            self.cubin_raw = kernel.asm.get("cubin", None)
         # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
 

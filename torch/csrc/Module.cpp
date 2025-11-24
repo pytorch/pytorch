@@ -125,6 +125,12 @@
 #endif
 #endif
 
+#ifdef USE_XPU
+#include <torch/csrc/inductor/static_xpu_launcher.h>
+#endif
+
+
+
 #ifdef USE_DISTRIBUTED
 #ifdef USE_C10D
 #include <torch/csrc/distributed/autograd/python_autograd.h>
@@ -2151,6 +2157,9 @@ PyObject* initModule() {
   torch::cuda::initModule(module);
 #endif
 #if defined(USE_CUDA) && !defined(USE_ROCM)
+  ASSERT_TRUE(StaticCudaLauncher_init(module));
+#endif
+#if defined(USE_XPU)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
 #ifdef USE_MPS

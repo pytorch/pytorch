@@ -1617,9 +1617,8 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             return None
 
         def check_can_launch() -> StaticallyLaunchedCudaKernel:
-            if triton_meta.get("device_type") != "cuda":
-                # Only cuda kernels
-                raise CannotStaticallyLaunchKernel("Non-cuda device")
+            if triton_meta.get("device_type") not in ("cuda" "xpu"):
+                raise CannotStaticallyLaunchKernel("Non-cuda//XPU device")
 
             if torch._inductor.config.cpp_wrapper:
                 # If we're running with cpp wrapper, it doesn't
@@ -1645,10 +1644,14 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                     "static launch does not support launch attributes"
                 )
 
+            binary_ext = {"xpu": XPU_KERNEL_BIN_EXT, "hip": "hsaco"}.get(
+                triton_meta.get("device_type"), "cubin"
+            )
+
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),
                 triton_hash_to_path_key(kernel.hash),
-                f"{kernel.src.fn.__name__}.cubin",
+                f"{kernel.src.fn.__name__}.{binary_ext}",
             )
 
             if not os.path.exists(cubin_location):
@@ -1901,6 +1904,7 @@ class TritonCompileResult(CompileResult[CompiledKernel]):
             "torch": torch_lib,
             "triton": triton_lib,
         }
+        print("make launcher num_warps:", scope["num_warps"])
 
         if not hasattr(binary, "launch_metadata"):
             # launch args before CompiledKernel.launch_metadata is added.
