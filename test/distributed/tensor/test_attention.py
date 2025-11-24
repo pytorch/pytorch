@@ -34,6 +34,9 @@ from torch.distributed.tensor.experimental._attention import (
 from torch.distributed.tensor.experimental._context_parallel._cp_custom_ops import (
     flex_cp_allgather,
 )
+from torch.distributed.tensor.experimental._context_parallel._sharding_rules import (
+    unregister_cp_sharding_rules,
+)
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
@@ -822,19 +825,13 @@ class TestSharding(DTensorTestBase):
     def test_attention_shard_without_cp(self) -> None:
         """Test that sharding on sequence dimension without CP enabled is not supported."""
         from torch.distributed.tensor import distribute_tensor, Replicate, Shard
-        from torch.distributed.tensor.debug import (
-            _clear_fast_path_sharding_prop_cache,
-            _clear_python_sharding_prop_cache,
-        )
-
-        _clear_python_sharding_prop_cache()
-        _clear_fast_path_sharding_prop_cache()
 
         B = 2
         nheads = 4
         seq_len = 256
         dim = 32
 
+        unregister_cp_sharding_rules()
         device_mesh = init_device_mesh(
             mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
         )

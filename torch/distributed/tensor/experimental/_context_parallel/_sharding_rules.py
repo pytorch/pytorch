@@ -405,5 +405,14 @@ def unregister_cp_sharding_rules():
     for ctx in _cp_strategy_contexts.values():
         ctx.__exit__(None, None, None)
 
+    # Clear the cache can cause performance degradation.
+    from torch.distributed.tensor.debug import (
+        _clear_fast_path_sharding_prop_cache,
+        _clear_python_sharding_prop_cache,
+    )
+
+    _clear_python_sharding_prop_cache()
+    _clear_fast_path_sharding_prop_cache()
+
     _cp_strategy_contexts = {}
     _original_strategies = {}
