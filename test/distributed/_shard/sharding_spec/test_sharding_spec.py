@@ -47,8 +47,8 @@ from torch.testing._internal.distributed._shard.sharded_tensor._test_st_common i
 if torch.accelerator.is_available():
     DEVICE_TYPE = torch.accelerator.current_accelerator().type
 else:
-    # use cuda as default device type for testing when accelerator is not available
-    DEVICE_TYPE = "cuda"
+    # use cpu as default device type for testing when accelerator is not available
+    DEVICE_TYPE = "cpu"
 BACKEND = torch.distributed.get_default_backend_for_device(DEVICE_TYPE)
 
 class TestShardingSpec(TestCase):
