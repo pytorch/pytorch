@@ -30,9 +30,10 @@ def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
     """
     Fallback strategy all use Replication()
     """
-    inputs_strategy = op_schema.args_strategy
-    # TODO(zpcore): handle kwarg_inputs_strategy
-    # kwarg_inputs_strategy = op_schema.kwargs_schema
+    args_strategy = op_schema.args_strategy
+    kwargs_strategy = op_schema.kwargs_strategy
+    inputs_strategy = args_strategy + kwargs_strategy
+
     output_type = [str(ret.type) for ret in op_schema.op._schema.returns]
     output_len = output_type.count("Tensor")
     # TODO(zpcore): Confirm if view op can be handle properly or not. Prevent
@@ -281,8 +282,15 @@ def expand_to_full_mesh_op_strategy(
             s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
         ]
 
-        input_args_strategy = op_schema.args_strategy
-        assert len(input_specs) == len(input_args_strategy)
+        args_strategy = op_schema.args_strategy
+        kwargs_strategy = op_schema.kwargs_strategy
+        input_args_strategy = args_strategy + kwargs_strategy
+
+        if len(input_specs) != len(input_args_strategy):
+            raise AssertionError(
+                f"input_specs({len(input_specs)}) != strategies({len(input_args_strategy)}: "
+                f"{len(args_strategy)} args + {len(kwargs_strategy)} kwargs)"
+            )
         self_spec = input_args_strategy[0].strategies[0].output_spec
 
         if inplace_op and self_spec.placements != input_specs[0].placements:
