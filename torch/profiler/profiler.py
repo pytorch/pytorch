@@ -208,10 +208,22 @@ class _KinetoProfile:
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
-        if self.use_device and hasattr(torch, self.use_device):
-            device_module = getattr(torch, self.use_device)
-            if hasattr(device_module, "synchronize"):
-                device_module.synchronize()
+        if self.use_device is not None and torch.accelerator.is_available():
+            try:
+                torch.accelerator.synchronize()
+            except Exception as e:
+                if hasattr(torch, self.use_device):
+                    device_module = getattr(torch, self.use_device)
+                    if not hasattr(device_module, "synchronize"):
+                        warn(
+                            f"synchronize() is not implemented for used accelerator {self.use_device}: {e}",
+                            stacklevel=2,
+                        )
+                else:
+                    warn(
+                        f"Used accelerator {self.use_device} is not available in torch: {e}",
+                        stacklevel=2,
+                    )
         if self.execution_trace_observer:
             self.execution_trace_observer.start()
         if self.profiler is None:
