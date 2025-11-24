@@ -630,7 +630,6 @@ class TestSparse(TestSparseBase):
         i[0][0] = 0
         self.assertEqual(torch.empty((3, 0), dtype=dtype, device=device), self.safeToDense(x))
 
-    @expectedFailureMPS
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
@@ -647,7 +646,8 @@ class TestSparse(TestSparseBase):
             def fn(x):
                 return x.to_dense(masked_grad=gradcheck.masked)
             x.requires_grad_(True)
-            gradcheck(fn, (x,))
+            kwargs = {"eps": 1e-4} if device == "mps:0" else {}
+            gradcheck(fn, (x,), **kwargs)
 
         i = self.index_tensor([
             [0, 1, 2, 2],
@@ -995,7 +995,6 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     @gradcheck_semantics()
     def test_permute(self, device, dtype, coalesced, gradcheck):
@@ -1035,7 +1034,8 @@ class TestSparse(TestSparseBase):
                     else:
                         self.assertFalse(s_permuted.is_coalesced())
 
-                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_())
+                    kwargs = {"eps": 1e-4} if device == "mps:0" else {}
+                    gradcheck(lambda t: t.permute(dims).to_dense(masked_grad=gradcheck.masked), s.requires_grad_(), **kwargs)
                 else:
                     # otherwise check if exception is thrown
                     fail_message = "transpositions between sparse and dense dimensions are not allowed"
@@ -1391,9 +1391,9 @@ class TestSparse(TestSparseBase):
         # case nnz > size[d]
         run_test(tlen, tlen // 2)
 
-    @onlyCPU
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
+    @dtypesIfMPS(torch.float32, torch.complex64)
     def test_mm(self, device, dtype, coalesced):
         def test_shape(di, dj, dk, nnz):
             x, _, _ = self._gen_sparse(2, nnz, [di, dj], dtype, device, coalesced)
@@ -1680,7 +1680,6 @@ class TestSparse(TestSparseBase):
         test_shape(7, 8, 9, 20, True, (1, 1))
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
@@ -1698,7 +1697,9 @@ class TestSparse(TestSparseBase):
 
             def fn(S, D):
                 return torch.sparse.mm(S, D)
-            gradcheck(fn, (S, D), masked=True)
+
+            kwargs = {"eps": 1e-4, "atol": 2e-5} if device == "mps:0" else {}
+            gradcheck(fn, (S, D), masked=True, **kwargs)
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
@@ -2236,7 +2237,6 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
-    @expectedFailureMPS
     @skipIfCrossRef
     def test_sparse_mask_backward(self, device, dtype):
         from itertools import product, repeat
@@ -2246,7 +2246,6 @@ class TestSparse(TestSparseBase):
         nnzs = (0, 5, 15, 25)
 
         lhs_data = torch.arange(1, 26, device=device).reshape(shape).to(dtype).to_sparse(sparse_dims)
-        rhs_data = lhs_data.clone()
 
         for nnz in nnzs:
             for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
@@ -2266,8 +2265,9 @@ class TestSparse(TestSparseBase):
                 # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
                 # lhs.sparse_mask(lhs_mask) accomplishes that.
                 lhs_mask = lhs.detach().clone()
-                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,), masked=True)
-                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False)
+                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,),
+                          masked=True, eps=3e-4, atol=5e-5)
+                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False, eps=3e-4, atol=5e-5)
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
@@ -2674,7 +2674,6 @@ class TestSparse(TestSparseBase):
             self._test_asin_arcsin(input_uncoalesced, coalesced)
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_mv(self, device, dtype, coalesced):
@@ -3920,7 +3919,6 @@ class TestSparse(TestSparseBase):
             self.skipTest(f"Test with dtype={dtype}, device={device} runs only with coalesced inputs")
 
     @coalescedonoff
-    @expectedFailureMPS
     # NOTE: addcmul_out is not implemented for bool.
     @dtypes(*all_types_and_complex_and(torch.bfloat16, torch.float16))
     @dtypesIfMPS(*all_mps_types())

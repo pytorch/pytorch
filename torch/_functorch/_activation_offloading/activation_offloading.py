@@ -297,13 +297,6 @@ def offload_chosen_sets(
     offload_activation_bw(bwd_module.graph)
 
 
-def get_default_stream_id(nodes: list[fx.Node]) -> int:
-    first_node: fx.Node = nodes[0]
-    source_node: fx.Node = first_node.args[0]  # type: ignore[assignment]
-    device: torch.device = source_node.meta["val"].device
-    return get_current_stream(device)
-
-
 def add_forward_offload_stream_ops(graph: fx.Graph) -> None:
     """
     Add stream operations for forward pass CPU offloading.
@@ -333,7 +326,9 @@ def add_forward_offload_stream_ops(graph: fx.Graph) -> None:
         return
 
     # Get default stream id and offload stream id
-    default_stream_id: int = get_default_stream_id(offload_nodes)
+    default_stream_id: int = get_current_stream(
+        offload_nodes[0].args[0].meta["val"].device  # type: ignore[assignment]
+    )
     offload_stream_id: int = new_stream()
 
     for offload_node in offload_nodes:
@@ -413,7 +408,9 @@ def add_backward_reload_stream_ops(graph: fx.Graph) -> None:
         return
 
     # Get default stream id and offload stream id
-    default_stream_id: int = get_default_stream_id(reload_nodes)
+    default_stream_id: int = get_current_stream(
+        reload_nodes[0].args[0].meta["original_device"]  # type: ignore[assignment]
+    )
     reload_stream_id: int = new_stream()
 
     for reload_node in reload_nodes:
