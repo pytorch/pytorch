@@ -91,6 +91,10 @@ class Block:
         return self.end_line - self.start_line
 
     @property
+    def line_range(self) -> range:
+        return range(self.start_line, self.end_line + 1)
+
+    @property
     def is_class(self) -> bool:
         return self.category == Block.Category.CLASS
 
