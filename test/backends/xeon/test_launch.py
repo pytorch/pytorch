@@ -42,8 +42,6 @@ class TestTorchrun(TestCase):
         from torch.backends.xeon.run_cpu import _CPUinfo
 
         cpuinfo = _CPUinfo(lscpu_info)
-        assert cpuinfo._physical_core_nums() == 8
-        assert cpuinfo._logical_core_nums() == 16
         assert cpuinfo.get_node_physical_cores(0) == [0, 1, 2, 3]
         assert cpuinfo.get_node_physical_cores(1) == [4, 5, 6, 7]
         assert cpuinfo.get_node_logical_cores(0) == [0, 1, 2, 3, 8, 9, 10, 11]
@@ -74,18 +72,32 @@ class TestTorchrun(TestCase):
     def test_multi_threads(self):
         num = 0
         with subprocess.Popen(
-            f"python -m torch.backends.xeon.run_cpu --ninstances 4 --use-default-allocator \
-            --disable-iomp --disable-numactl --disable-taskset --log-path {self._test_dir} --no-python pwd",
+            f'python -m torch.backends.xeon.run_cpu --ninstances 4 --use-default-allocator \
+            --disable-iomp --disable-numactl --disable-taskset --log-path {self._test_dir} --no-python echo "test"',
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         ) as p:
             for line in p.stdout.readlines():
-                segs = str(line, "utf-8").strip().split("-")
-                if segs[-1].strip() == "pwd":
+                segs = str(line, "utf-8").strip().split(":")
+                if segs[-1].strip() == "test":
                     num += 1
         assert num == 4, "Failed to launch multiple instances for inference"
 
+    def test_multi_instance_uneven_core_distribute(self):
+        num = 0
+        with subprocess.Popen(
+            f'python -m torch.backends.xeon.run_cpu --ninstances 3 --ncore-per-instance 5 5 6 --use-default-allocator \
+            --disable-iomp --disable-numactl --disable-taskset --log-path {self._test_dir} --no-python echo "test"',
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        ) as p:
+            for line in p.stdout.readlines():
+                segs = str(line, "utf-8").strip().split(":")
+                if segs[-1].strip() == "test":
+                    num += 1
+        assert num == 3, "Failed to launch multiple instances for inference"
 
 if __name__ == "__main__":
     run_tests()

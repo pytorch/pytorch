@@ -567,13 +567,23 @@ this node and skip_cross_node_cores. ",
                 core_num_per_instance = 4
                 cores = list()
                 args.ninstances = 0
-                for node_core_list in self.cpuinfo.node_physical_cores:
-                    node_core_num = len(node_core_list)
-                    for i in range(core_num_per_instance, node_core_num + 1, core_num_per_instance):
+                if args.skip_cross_node_cores:
+                    # Per-numa core allocation, the remainder cores are not used
+                    for node_core_list in self.cpuinfo.node_physical_cores:
+                        node_core_num = len(node_core_list)
+                        for i in range(core_num_per_instance, node_core_num + 1, core_num_per_instance):
+                            args.ninstances += 1
+                            cores.extend(node_core_list[i - core_num_per_instance: i])
+                    args.ncores_per_instance = [core_num_per_instance] * args.ninstances
+                else:
+                    # Compact allocation of all physical cores, regardless of numa
+                    cores = self.cpuinfo.get_all_physical_cores()
+                    args.ninstances = len(cores) // core_num_per_instance
+                    args.ncores_per_instance = [core_num_per_instance] * args.ninstances
+                    remainder = len(cores) % core_num_per_instance
+                    if remainder > 0:
                         args.ninstances += 1
-                        cores.extend(node_core_list[i - core_num_per_instance: i])
-                args.ncores_per_instance = [core_num_per_instance] * args.ninstances
-
+                        args.ncores_per_instance.append(remainder)
             if args.throughput_mode:
                 logger.warning(
                     "--throughput-mode is exclusive to --ninstances, --ncores-per-instance, --node-id and \
