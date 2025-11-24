@@ -51,12 +51,27 @@ jobs:
           cat ./docker-builds-artifacts/*txt >> "${GITHUB_OUTPUT}"
           cat "${GITHUB_OUTPUT}"
 
-  mi300-docker-cache:
+  # mi300-docker-cache:
+  #   if: github.repository_owner == 'pytorch'
+  #   needs: download-docker-builds-artifacts
+  #   uses: ./.github/workflows/docker-caching.yml
+  #   with:
+  #     download-docker-builds-artifacts: ${{ download-docker-builds-artifacts.outputs }}
+  #     directory: ~/pytorch-data/docker/
+  #     matrix: |
+  #       runner: [linux.rocm.gfx942.docker-cache]
+  #       docker-image: [
+  #         "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
+  #         "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
+  #         #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
+  #       ]
+  mi200-docker-cache:
     if: github.repository_owner == 'pytorch'
     needs: download-docker-builds-artifacts
     uses: ./.github/workflows/docker-caching.yml
     with:
       download-docker-builds-artifacts: ${{ download-docker-builds-artifacts.outputs }}
+      directory: /home/runner/docker-cache
       matrix: |
         runner: [linux.rocm.gfx942.docker-cache]
         docker-image: [
