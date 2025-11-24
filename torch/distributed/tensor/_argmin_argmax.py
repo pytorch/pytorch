@@ -54,10 +54,12 @@ def argmin_argmax_handler(
             torch.Size([1] * len(input_shape)) if keepdim else torch.Size([])
         )
     elif keepdim:
-        input_shape[dim] = 1
+        if len(input_shape):
+            input_shape[dim] = 1
         expected_shape = torch.Size(input_shape)
     else:
-        input_shape.pop(dim)
+        if len(input_shape):
+            input_shape.pop(dim)
         expected_shape = torch.Size(input_shape)
 
     shard_mesh_dims = []
@@ -70,7 +72,7 @@ def argmin_argmax_handler(
 
     if dim is None:
         local_max = val_op(local_tensor)
-        local_idx = (local_tensor.flatten() == local_max).nonzero().squeeze()
+        local_idx = op_call(local_tensor)
     else:
         local_max, local_idx = val_op(local_tensor, dim=dim, keepdim=True)
 
@@ -92,7 +94,7 @@ def argmin_argmax_handler(
         for i, offset in enumerate(global_offset):
             global_coord[i] += offset
         # compute with proper striding
-        gathered_idxs = torch.tensor(0)
+        gathered_idxs = torch.tensor(0, device=local_tensor.device, dtype=torch.long)
         for i, coord in enumerate(global_coord):
             gathered_idxs += coord * reduce(operator.mul, global_shape[i + 1 :], 1)
     else:
