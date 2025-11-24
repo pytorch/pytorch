@@ -89,6 +89,7 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
     return torch.randint(0, mx, size, dtype=dtype, device=device)
 
 
+@config.patch("combo_kernels", False)
 class TestCase(InductorTestCase):
     device = DEVICE
 
