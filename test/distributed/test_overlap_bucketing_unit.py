@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import unittest
+from unittest.mock import patch
 
 import torch
 import torch._dynamo
@@ -826,6 +827,16 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             exactly=True,
         ).run(graph_str)
 
+    @patch.object(
+        torch._inductor.config.aten_distributed_optimizations,
+        "split_matmul_reducescatter_split_cat",
+        True,
+    )
+    @patch.object(
+        torch._inductor.config.aten_distributed_optimizations,
+        "split_matmul_reducescatter_with_views",
+        True,
+    )
     def test_split_mm_cat_rs(self):
         # add_29: "bf16[2, 8192, 1024][8388608, 1024, 1]cuda:0"
         # permute_87: "bf16[3584, 8192][1, 3584]cuda:0"

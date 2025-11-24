@@ -266,7 +266,6 @@ class OverlapScheduler:
         collective_estimator: Literal["analytical", "benchmark"],
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
-        split_mm_rs_config: tuple[list[int], int] | None = None,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -278,21 +277,9 @@ class OverlapScheduler:
         self.insert_overlap_deps = insert_overlap_deps
         self.max_compute_pre_fetch = max_compute_pre_fetch
         self.collective_estimator = collective_estimator
-        self.split_mm_rs_config = split_mm_rs_config
 
         # Build structures
         stable_topological_sort(self.graph)
-        if split_mm_rs_config is not None:
-            from torch._inductor.fx_passes.decompose_mm import _split_mm_rs
-
-            num_chunks = split_mm_rs_config[0]
-            min_size_after_split = split_mm_rs_config[1]
-
-            _split_mm_rs(
-                self.gm,
-                num_chunks,
-                min_size_after_split,
-            )
         self.nodes = list(self.graph.nodes)
         self.node_idx = {n: i for i, n in enumerate(self.nodes)}
         self.node_ancestors: dict[fx.Node, OrderedSet[fx.Node]] = (
@@ -1196,7 +1183,6 @@ def schedule_overlap_bucketing(
     collective_estimator: Literal["analytical", "benchmark"] = "analytical",
     max_memory_increase_gb: float | None = 1.0,
     max_memory_increase_ratio: float | None = 0.05,
-    split_mm_rs_config: tuple[list[int], int] | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1219,12 +1205,6 @@ def schedule_overlap_bucketing(
         max_memory_increase_gb: Maximum GB increase above baseline memory (absolute cap). If None, no absolute limit.
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
             Uses minimum of absolute and ratio limits when both are specified.
-        split_mm_rs_config: If is not None, split matmul-reduce_scatter will be applied for
-            more fine grained overlapping.
-            This is tuple, that contains list of number of possible chunks and
-            minimal size of dimension after split.
-            E.g. ([2, 4, 8], 2048) means that greatest number from the list will be picked,
-            that makes split dimension not less than 2048.
     """
     return OverlapScheduler(
         gm,
@@ -1238,5 +1218,4 @@ def schedule_overlap_bucketing(
         collective_estimator=collective_estimator,
         max_memory_increase_gb=max_memory_increase_gb,
         max_memory_increase_ratio=max_memory_increase_ratio,
-        split_mm_rs_config=split_mm_rs_config,
     ).run()
