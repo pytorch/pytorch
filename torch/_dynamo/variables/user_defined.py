@@ -2021,8 +2021,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
     def __init__(self, value, dict_vt=None, **kwargs):
         super().__init__(value, **kwargs)
         self._dict_vt = dict_vt
@@ -2094,8 +2092,6 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     variable tracker. For everything else, it falls back to
     UserDefinedObjectVariable.
     """
-
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
     def __init__(self, value, set_vt=None, **kwargs):
         super().__init__(value, **kwargs)
@@ -2170,8 +2166,6 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
     def __init__(self, value, list_vt=None, **kwargs):
         super().__init__(value, **kwargs)
         self._list_vt = list_vt
@@ -2213,15 +2207,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
-    def __init__(
-        self,
-        value,
-        tuple_vt: Optional["TupleVariable"] = None,
-        init_args=None,
-        **kwargs,
-    ):
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
         super().__init__(value, init_args=init_args, **kwargs)
         if tuple_vt is None:
             assert self.source is None, (
@@ -2263,8 +2249,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
