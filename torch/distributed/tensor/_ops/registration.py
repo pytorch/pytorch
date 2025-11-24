@@ -5,12 +5,14 @@ from typing import Optional, TypeAlias, TypeVar, Union
 import torch
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._op_schema import (
+    ArgsType,
+    KwargsType,
     OpSchema,
     OutputSharding,
     RuntimeSchemaInfo,
     StrategyType,
 )
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor.placement_types import Placement, ShardingPlaceholder
 
 
 # convenient wrapper to register sharding propagation rules
@@ -89,8 +91,8 @@ def register_single_dim_strategy(
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
     schema_info: Optional[RuntimeSchemaInfo] = None,
 ) -> Callable[
-    [Callable[[OpSchema], list[list[Placement]]]],
-    Callable[[OpSchema], list[list[Placement]]],
+    [Callable[[ArgsType, KwargsType], list[list[Placement | ShardingPlaceholder]]]],
+    Callable[[ArgsType, KwargsType], list[list[Placement | ShardingPlaceholder]]],
 ]:
     """
     Registers a simplified op strategy that only considers a single mesh dim, taking care to expand it
