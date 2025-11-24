@@ -8700,6 +8700,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         actual_out = compiled_fn(view)
         self.assertEqual(reference_out.stride(), actual_out.stride())
 
+    @skipIfMPS
     def test_nonzero_static_stride(self):
         from torch._subclasses import FakeTensorMode
 
