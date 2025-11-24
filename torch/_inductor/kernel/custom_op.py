@@ -570,7 +570,7 @@ def _generate_dynamic_configs(
         fake_tensors = [ir_node_to_tensor(inp) for inp in tensor_inputs]
 
     # Only map tensor inputs to parameter names (skip non-tensor params at the end)
-    fake_tensors_dict = dict(zip(param_names[: len(fake_tensors)], fake_tensors))
+    fake_tensors_dict = dict(zip(param_names, fake_tensors))
 
     configs = config_generator(fake_tensors_dict)
 
