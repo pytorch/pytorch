@@ -114,6 +114,8 @@ if TYPE_CHECKING:
 _F = TypeVar("_F", bound=Callable[..., Any])
 CO_VARARGS = 0x04
 CO_VARKEYWORDS = 0x08
+_SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
+_TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
 
 
 # Module-level cache keyed by the function object
@@ -420,6 +422,15 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         *BaseUserFunctionVariable._nonvar_fields,
     }
 
+    _TREE_MAP_MODULES = frozenset(
+        {
+            "optree",
+            "optree.ops",
+            "torch.utils._pytree",
+            "torch.utils._cxx_pytree",
+        }
+    )
+
     @classmethod
     def create_with_source(cls, value: Any, source: Any) -> "UserFunctionVariable":
         install_guard(source.make_guard(GuardBuilder.CLOSURE_MATCH))
@@ -656,7 +667,189 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             ]:
                 with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
                     return super().call_function(tx, args, kwargs)
+
+        tree_map_result = self._maybe_call_tree_map_fastpath(tx, args, kwargs)
+        if tree_map_result is not None:
+            return tree_map_result
+
         return super().call_function(tx, args, kwargs)
+
+    def _maybe_call_tree_map_fastpath(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> Optional[VariableTracker]:
+        rewrite = self._rewrite_tree_map_only_call(tx, args, kwargs)
+        if rewrite is not None:
+            tree_map_fn, tree_map_args, tree_map_kwargs = rewrite
+        else:
+            tree_map_fn = self
+            tree_map_args = args
+            tree_map_kwargs = kwargs
+
+        if not (
+            isinstance(tree_map_fn, UserFunctionVariable)
+            and tree_map_fn._is_tree_map_function()
+            and not ({*tree_map_kwargs} - _SUPPORTED_TREE_MAP_KWARGS)
+            and len(tree_map_args) >= 2
+        ):
+            return None
+
+        map_fn = tree_map_args[0]
+        first_tree = tree_map_args[1]
+        rest = tree_map_args[2:]
+        return first_tree.call_tree_map(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+        )
+
+    def _is_tree_map_function(self) -> bool:
+        return (
+            getattr(self.fn, "__name__", None) == "tree_map"
+            and getattr(self.fn, "__module__", None) in self._TREE_MAP_MODULES
+        )
+
+    def _is_tree_map_only_function(self) -> bool:
+        return (
+            getattr(self.fn, "__name__", None) == "tree_map_only"
+            and getattr(self.fn, "__module__", None) in self._TREE_MAP_MODULES
+        )
+
+    def _rewrite_tree_map_only_call(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> Optional[
+        tuple[
+            "UserFunctionVariable",
+            Sequence[VariableTracker],
+            dict[str, VariableTracker],
+        ]
+    ]:
+        if not self._is_tree_map_only_function():
+            return None
+
+        if len(args) != 3:
+            return None
+        if {*kwargs} - _TREE_MAP_ONLY_SUPPORTED_KWARGS:
+            return None
+
+        type_selector, map_fn, tree_arg = args
+        allowed_types = self._extract_tree_map_only_types(type_selector)
+        if allowed_types is None:
+            return None
+
+        tree_map_callable = self._lookup_tree_map_function()
+        if tree_map_callable is None:
+            return None
+
+        wrapped_map_fn = TreeMapOnlyFunctionVariable(
+            allowed_types,
+            map_fn,
+            source=getattr(map_fn, "source", None),
+        )
+        tree_map_variable = variables.UserFunctionVariable(tree_map_callable)
+        return tree_map_variable, [wrapped_map_fn, tree_arg], dict(kwargs)
+
+    def _lookup_tree_map_function(self) -> Optional[types.FunctionType]:
+        module_name = getattr(self.fn, "__module__", None)
+        if not module_name:
+            return None
+        module = sys.modules.get(module_name)
+        if module is None:
+            return None
+        tree_map = getattr(module, "tree_map", None)
+        if isinstance(tree_map, types.FunctionType):
+            return tree_map
+        return None
+
+    def _extract_tree_map_only_types(
+        self, selector: VariableTracker
+    ) -> Optional[tuple[type, ...]]:
+        if not selector.is_python_constant():
+            return None
+        try:
+            raw_value = selector.as_python_constant()
+        except NotImplementedError:
+            return None
+
+        flattened = self._flatten_type_spec(raw_value)
+        if not flattened:
+            return None
+        if not all(isinstance(typ, type) for typ in flattened):
+            return None
+        return tuple(dict.fromkeys(flattened))
+
+    def _flatten_type_spec(self, value: Any) -> Optional[list[type]]:
+        if isinstance(value, type):
+            return [value]
+        if isinstance(value, tuple):
+            collected: list[type] = []
+            for entry in value:
+                flat = self._flatten_type_spec(entry)
+                if flat is None:
+                    return None
+                collected.extend(flat)
+            return collected
+        union_type = getattr(types, "UnionType", None)
+        if union_type is not None and isinstance(value, union_type):
+            collected = []
+            for entry in value.__args__:
+                flat = self._flatten_type_spec(entry)
+                if flat is None:
+                    return None
+                collected.extend(flat)
+            return collected
+        return None
+
+
+class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
+    _nonvar_fields = {
+        "allowed_types",
+        *BaseUserFunctionVariable._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        allowed_types: tuple[type, ...],
+        map_fn: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.allowed_types = allowed_types
+        self.map_fn = map_fn
+
+    def python_type(self) -> type:
+        return FunctionType
+
+    def _matches_allowed_type(self, node: VariableTracker) -> bool:
+        try:
+            node_type = node.python_type()
+        except NotImplementedError:
+            return False
+        return any(issubclass(node_type, allowed) for allowed in self.allowed_types)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if not args:
+            return self.map_fn.call_function(tx, args, kwargs)
+        leaf = args[0]
+        if self._matches_allowed_type(leaf):
+            return self.map_fn.call_function(tx, args, kwargs)
+        if len(args) != 1 or kwargs:
+            # Defer to the original map function so we fall back to normal
+            # tracing instead of triggering a graph break.
+            return self.map_fn.call_function(tx, args, kwargs)
+        return leaf
 
 
 class BuiltinMethodVariable(BaseUserFunctionVariable):
