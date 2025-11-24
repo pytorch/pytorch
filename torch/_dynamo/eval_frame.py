@@ -786,9 +786,6 @@ class _TorchDynamoContext:
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
-            from torch._functorch._aot_autograd.autograd_cache import (
-                in_aot_compile_context,
-            )
 
             if not self.fullgraph:
                 raise RuntimeError(
@@ -799,7 +796,8 @@ class _TorchDynamoContext:
                 raise RuntimeError("aot compile requires a callable dynamo callback.")
 
             assert self._hooks is not None
-            with in_aot_compile_context():
+
+            with torch._functorch.config.patch(strict_autograd_cache=True):
                 return aot_compile_fullgraph(
                     fn,
                     example_inputs,
