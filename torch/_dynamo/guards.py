@@ -3317,6 +3317,11 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
         return types.MethodType(func, base)
 
+    @staticmethod
+    def _unpickle_sdp_backend(name: str):
+        # Reconstruct from the Python-facing enum namespace
+        return getattr(torch.nn.attention.SDPBackend, name)
+
     @classmethod
     def _unpickle_cell(cls, val: Any) -> Any:
         def _() -> Any:
@@ -3456,6 +3461,9 @@ class GuardsStatePickler(pickle.Pickler):
         ):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("distributed_c10d.Work",)
+
+        if isinstance(obj, torch.nn.attention.SDPBackend):
+            return type(self)._unpickle_sdp_backend, (obj.name,)
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise torch._dynamo.exc.PackageError(
