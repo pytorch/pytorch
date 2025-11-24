@@ -2,14 +2,8 @@
 
 set -ex
 
-# Detect ROCM_PATH dynamically
-if command -v rocm-sdk &> /dev/null && python3 -m rocm_sdk path --root &> /dev/null; then
-    # theRock installation
-    ROCM_PATH="$(python3 -m rocm_sdk path --root)"
-else
-    # Traditional installation
-    ROCM_PATH="${ROCM_PATH:-/opt/rocm}"
-fi
+# Source common script to detect ROCM_PATH
+source "$(dirname "${BASH_SOURCE[0]}")/detect_rocm_path.sh"
 
 echo "Installing amdsmi from: ${ROCM_PATH}/share/amd_smi"
 cd ${ROCM_PATH}/share/amd_smi && pip install .

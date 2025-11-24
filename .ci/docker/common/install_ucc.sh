@@ -8,11 +8,12 @@ else
   with_cuda=no
 fi
 
-# Detect ROCm path dynamically
-if command -v rocm-sdk &> /dev/null && python3 -m rocm_sdk path --root &> /dev/null; then
-  with_rocm="$(python3 -m rocm_sdk path --root)"
-elif [[ -d "/opt/rocm" ]]; then
-  with_rocm=/opt/rocm
+# Source common script to detect ROCM_PATH
+source "$(dirname "${BASH_SOURCE[0]}")/detect_rocm_path.sh"
+
+# Use detected ROCM_PATH or set to "no" if not found
+if [[ -d "${ROCM_PATH}" ]]; then
+  with_rocm="${ROCM_PATH}"
 else
   with_rocm=no
 fi

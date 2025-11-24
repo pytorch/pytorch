@@ -98,12 +98,8 @@ if [ -n "$CUDA_VERSION" ]; then
 fi
 
 if [ -n "$ROCM_VERSION" ]; then
-  # Detect ROCM_PATH dynamically
-  if command -v rocm-sdk &> /dev/null && python3 -m rocm_sdk path --root &> /dev/null; then
-      ROCM_PATH="$(python3 -m rocm_sdk path --root)"
-  else
-      ROCM_PATH="/opt/rocm"
-  fi
+  # Source common script to detect ROCM_PATH
+  source "$(dirname "${BASH_SOURCE[0]}")/detect_rocm_path.sh"
   
   # ROCm compiler is hcc or clang. However, it is commonly invoked via hipcc wrapper.
   # hipcc will call either hcc or clang using an absolute path starting with $ROCM_PATH,
