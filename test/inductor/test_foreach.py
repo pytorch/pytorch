@@ -1045,7 +1045,10 @@ class ForeachTests(TestCase):
         for ref, act in zip(tree_flatten(ref_inps)[0], tree_flatten(inps)[0]):
             torch.allclose(ref.grad, act.grad)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        if torch._inductor.config.combo_kernels:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        else:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_gpu
     def test_foreach_map_input_mutation(self):

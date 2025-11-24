@@ -2069,6 +2069,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
                     "allow_buffer_reuse": False,
                     "test_configs.track_memory_lifecycle": "error",
                     "runtime_estimations_mms_benchmark": True,
+                    "combo_kernels": False,
                 }
             ),
             torch._inductor.config_comms.patch(
@@ -2088,52 +2089,36 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         # NOTE: The first return value should be the output of the first wait_tensor.
         # We want to make sure no unnecessary copy is made.
         if not torch._inductor.config.triton.native_matmul:
-            if torch._inductor.config.combo_kernels:
-                (
-                    FileCheck()
-                    .check("torch.ops._c10d_functional.reduce_scatter_tensor.default(")
-                    .check(
-                        "torch.ops._c10d_functional.all_gather_into_tensor_out.default("
-                    )
-                    .check("torch.ops._c10d_functional.reduce_scatter_tensor.default(")
-                    .check(
-                        "torch.ops._c10d_functional.all_gather_into_tensor_out.default("
-                    )
-                    .check("extern_kernels.mm")
-                    .check("extern_kernels.addmm")
-                    .run(code)
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
+                    count=2,
+                    exactly=True,
                 )
-            else:
-                (
-                    FileCheck()
-                    .check_count(
-                        "torch.ops._c10d_functional.all_gather_into_tensor_out.default(",
-                        count=2,
-                        exactly=True,
-                    )
-                    .check(
-                        "extern_kernels.mm",
-                    )
-                    .check(
-                        "extern_kernels.addmm",
-                    )
-                    .run(code)
+                .check(
+                    "extern_kernels.mm",
                 )
-                (
-                    FileCheck()
-                    .check_count(
-                        "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
-                        count=2,
-                        exactly=True,
-                    )
-                    .check(
-                        "extern_kernels.mm",
-                    )
-                    .check(
-                        "extern_kernels.addmm",
-                    )
-                    .run(code)
+                .check(
+                    "extern_kernels.addmm",
                 )
+                .run(code)
+            )
+            (
+                FileCheck()
+                .check_count(
+                    "torch.ops._c10d_functional.reduce_scatter_tensor.default(",
+                    count=2,
+                    exactly=True,
+                )
+                .check(
+                    "extern_kernels.mm",
+                )
+                .check(
+                    "extern_kernels.addmm",
+                )
+                .run(code)
+            )
         out = compiled(*inputs, **self.get_world_trs())
         correct = func(*inputs, **self.get_world_trs())
         assert same(out, correct), f"{out} va {correct}"

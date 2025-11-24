@@ -361,6 +361,7 @@ class TestDynamoTimed(TestCase):
         {
             "bundle_triton_into_fx_graph_cache": False,
             "bundled_autotune_remote_cache": False,
+            "combo_kernels": False,
         }
     )
     # We can't easily test that timing is actually accurate. Mock time to always
