@@ -850,7 +850,7 @@ def validate_args_and_maybe_create_graph_inputs(
             if set_subgraph_inputs == "automatic":
                 args.append(a)
                 continue
-            elif set_subgraph_inputs == "automatic_with_new_placeholder":
+            elif set_subgraph_inputs == "automatic_with_forced_inputs":
                 if isinstance(a, variables.TensorVariable):
                     node = a.maybe_fx_node()
                     example_value = node.meta["example_value"]
@@ -1217,7 +1217,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # automatic: relies on Dynamo to find the used tensors and lift them as
     # inputs.
     #
-    # automatic_with_new_placeholder: relies on the function arg names to create
+    # automatic_with_forced_inputs: relies on the function arg names to create
     # a new proxy. Also, it will always INSERT a tensor placeholder as input,
     # even though it might not be used in the graph and they will also be in the
     # same order as the original function (as opposed to automatic which will
@@ -1226,7 +1226,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # backward where we do need to account for all the inputs of the backwards
     # to be lifted as inputs for making the fwd-bwd graph consistent.
     set_subgraph_inputs: Literal[
-        "automatic", "automatic_with_new_placeholder", "flatten_manual", "manual"
+        "automatic", "automatic_with_forced_inputs", "flatten_manual", "manual"
     ] = "automatic",
     # Make default False
     restore_side_effects: bool = True,
@@ -1317,7 +1317,7 @@ def speculate_subgraph_with_auto_output_flattening(
 
     assert set_subgraph_inputs in {
         "automatic",
-        "automatic_with_new_placeholder",
+        "automatic_with_forced_inputs",
         "flatten_manual",
         "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
@@ -1543,7 +1543,7 @@ def speculate_subgraph(
 
     assert set_subgraph_inputs in {
         "automatic",
-        "automatic_with_new_placeholder",
+        "automatic_with_forced_inputs",
         "flatten_manual",
         "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
@@ -4001,7 +4001,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 return v.proxy.tracer is not fwd_tracer
             return True
 
-        # automatic_with_new_placeholder relies on the function arg names to
+        # automatic_with_forced_inputs relies on the function arg names to
         # create a new proxy. Also, it will always INSERT a tensor placeholder
         # as input, even though it might not be used in the graph. This allows
         # us to make a mapping for the backward graph.
@@ -4018,7 +4018,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         {},
                         "autograd.Function",
                         enable_grad=False,
-                        set_subgraph_inputs="automatic_with_new_placeholder",
+                        set_subgraph_inputs="automatic_with_forced_inputs",
                         restore_side_effects=False,
                         tracer=bwd_tracer,
                     )
@@ -4070,7 +4070,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                                 {},
                                 "autograd.Function",
                                 enable_grad=False,
-                                set_subgraph_inputs="automatic_with_new_placeholder",
+                                set_subgraph_inputs="automatic_with_forced_inputs",
                                 restore_side_effects=False,
                                 tracer=bwd_tracer,
                             )
@@ -4337,7 +4337,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # We use two facts:
         #   • `fwd_out` preserves the original forward output order.
         #   • Backward-graph inputs are also ordered according to the backward()
-        #     method signature, thanks to automatic_with_new_placeholder.
+        #     method signature, thanks to automatic_with_forced_inputs.
         #
         # For any forward output that is *not* a tensor, there is no
         # corresponding tensor placeholder in the backward graph. During tracing,
