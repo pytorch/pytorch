@@ -26,11 +26,12 @@ import inspect
 import itertools
 import re
 import types
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager, nullcontext
 from typing import Any, Optional, TYPE_CHECKING
-from collections.abc import Sequence
 
 import torch.nn
+from torch._guards import Source
 
 from .. import graph_break_hints, trace_rules, variables
 from ..exc import raise_observed_exception, unimplemented, UnspecializeRestartAnalysis
@@ -119,7 +120,7 @@ def initialize_lazy_module(
 
 @contextmanager
 def record_nn_module_stack(
-    module_key: str, source: Any, tx: "InstructionTranslator", mod: torch.nn.Module
+    module_key: str, source: Source, tx: "InstructionTranslator", mod: torch.nn.Module
 ) -> Any:
     fully_qualified_name = source.name()
     # Remove redundant namings
@@ -138,7 +139,9 @@ def record_nn_module_stack(
         del tx.nn_module_stack[module_key]
 
 
-def guard_to_detect_forward_monkeypatching(source: Any, mod: torch.nn.Module) -> None:
+def guard_to_detect_forward_monkeypatching(
+    source: Optional[Source], mod: torch.nn.Module
+) -> None:
     # Users sometimes patch the forward method of a nn module instance to
     # perform optimizations like quantization. Though this is not a good
     # software practice, but python allows this and Dynamo needs to detect
@@ -187,13 +190,18 @@ class NNModuleVariable(VariableTracker):
         self.module_type = module_type
         self.module_key = module_key
         self.value = value
-        assert self.source
+        # pyrefly: ignore[bad-override]
+        # NOTE: Don't remove this; better than adding suppressions
+        # everywhere else with asserts
+        self.source: Source = self.source
         self.nn_module_stack_source = self.source
 
-    def get_nn_module_stack_source(self) -> Any:
-        return self.nn_module_stack_source or self.source
+    def get_nn_module_stack_source(self) -> Source:
+        res = self.nn_module_stack_source or self.source
+        assert res
+        return res
 
-    def set_nn_module_stack_source(self, source: Any) -> None:
+    def set_nn_module_stack_source(self, source: Source) -> None:
         self.nn_module_stack_source = source
 
     def python_type(self) -> type:
@@ -202,8 +210,8 @@ class NNModuleVariable(VariableTracker):
     def _wrap_submodule(
         self,
         tx: "InstructionTranslator",
-        source: Any,
-        submod: Any,
+        source: Source,
+        submod: torch.nn.Module,
         *key_extra: Any,
         **options: Any,
     ) -> None:
@@ -228,7 +236,6 @@ class NNModuleVariable(VariableTracker):
         assert isinstance(
             base, (torch.nn.ModuleList, torch.nn.ParameterList, torch.nn.Sequential)
         ), typestr(base)
-        assert self.source
         for idx, submod in enumerate(base):
             result.append(
                 tx.output.register_attr_or_module(
@@ -246,7 +253,7 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         install_guard(
-            NNModuleSource(AttrSource(self.source, name)).make_guard(  # type: ignore[arg-type]
+            NNModuleSource(AttrSource(self.source, name)).make_guard(
                 GuardBuilder.HASATTR
             )
         )
@@ -294,7 +301,7 @@ class NNModuleVariable(VariableTracker):
         base: torch.nn.Module,
         tx: "InstructionTranslator",
         name: str,
-        obj_source: Any,
+        obj_source: Source,
     ) -> Optional[VariableTracker]:
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
@@ -334,6 +341,7 @@ class NNModuleVariable(VariableTracker):
             )
 
         options = {"source": AttrSource(obj_source, "__getattr__")}
+        # pyrefly: ignore[bad-argument-type]
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable.create(name)], {}
         )
@@ -344,7 +352,7 @@ class NNModuleVariable(VariableTracker):
         base = tx.output.get_submodule(self.module_key)
         base_dict = object.__getattribute__(base, "__dict__")
         object_member = True
-        all_class_attribute_names: set[str] = set()
+        all_class_attribute_names = set()
         for x in inspect.getmro(base.__class__):
             all_class_attribute_names.update(x.__dict__.keys())
 
@@ -418,7 +426,7 @@ class NNModuleVariable(VariableTracker):
                     # Get the getter function
                     source = AttrSource(source, "fget")
                 return variables.UserFunctionVariable(
-                    subobj.fget,
+                    subobj.fget,  # pyrefly: ignore[bad-argument-type]
                     source=source,
                 ).call_function(tx, [(self)], {})
             elif istype(subobj, classmethod):
@@ -429,7 +437,9 @@ class NNModuleVariable(VariableTracker):
                 )
             elif istype(subobj, staticmethod):
                 return variables.UserFunctionVariable(
-                    subobj.__get__(base), source=source
+                    # pyrefly: ignore[bad-argument-type]
+                    subobj.__get__(base),
+                    source=source,
                 )
             elif istype(subobj, types.FunctionType):
                 return variables.UserMethodVariable(subobj, self, source=source)
@@ -544,10 +554,6 @@ class NNModuleVariable(VariableTracker):
                     ),
                 )
             else:
-                assert self.source, (
-                    "Must provide a valid source in order to inline, "
-                    "since inlined function may have default args which must be guarded."
-                )
                 if isinstance(mod, torch.fx.GraphModule):
                     # TODO: do we want to support __call__ for GM's?
                     # If so at least some changes are needed, we don't allow inlining
@@ -564,6 +570,7 @@ class NNModuleVariable(VariableTracker):
                 else:
                     assert istype(fn, types.FunctionType)
                 return tx.inline_user_function_return(
+                    # pyrefly: ignore[bad-argument-type]
                     variables.UserFunctionVariable(fn, source=fn_source),
                     args,
                     kwargs,
@@ -646,7 +653,7 @@ class NNModuleVariable(VariableTracker):
                 submod,
                 key,
                 key,
-                source=NNModuleSource(GetItemSource(self.source, key)),  # type: ignore[arg-type]
+                source=NNModuleSource(GetItemSource(self.source, key)),
             )
 
         if constant:
@@ -677,7 +684,9 @@ class NNModuleVariable(VariableTracker):
             bound_args = bound_args.arguments
             return {k: bound_args[k] for k in names}
 
-        def wrap_values(items: Any) -> "variables.ListIteratorVariable":
+        def wrap_values(
+            items: Iterable[tuple[Any, Any]],
+        ) -> "variables.ListIteratorVariable":
             result = []
             for name, submod in items:
                 result.append(
@@ -705,7 +714,7 @@ class NNModuleVariable(VariableTracker):
                 ]
             )
 
-        def gen_source(source: Any, name: str) -> Any:
+        def gen_source(source: Source, name: str) -> Source:
             name_split = name.split(".")
             if name_split[0] == "":
                 return source
@@ -715,7 +724,7 @@ class NNModuleVariable(VariableTracker):
             return source
 
         if name == "named_children":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))  # type: ignore[arg-type]
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
             if args or kwargs:
                 raise_args_mismatch(
                     tx,
@@ -730,7 +739,7 @@ class NNModuleVariable(VariableTracker):
                 named_children, mutation_type=ValueMutationNew()
             )
         elif name == "named_parameters":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))  # type: ignore[arg-type]
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))
             named_parameters: list[VariableTracker] = []
             for name, param in module.named_parameters(
                 **get_kwargs("prefix", "recurse")
@@ -740,7 +749,7 @@ class NNModuleVariable(VariableTracker):
                 named_parameters, mutation_type=ValueMutationNew()
             )
         elif name == "named_buffers":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))  # type: ignore[arg-type]
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
             named_buffers: list[VariableTracker] = []
             for name, buffer in module.named_buffers(
                 **get_kwargs("prefix", "recurse", "remove_duplicate")
@@ -748,7 +757,7 @@ class NNModuleVariable(VariableTracker):
                 named_buffers.append(named_embed(name, buffer))
             return ListIteratorVariable(named_buffers, mutation_type=ValueMutationNew())
         elif name == "named_modules":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))  # type: ignore[arg-type]
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
             named_modules_list: list[VariableTracker] = []
             for name, submod in module.named_modules(
                 **get_kwargs("memo", "prefix", "remove_duplicate")
@@ -758,7 +767,7 @@ class NNModuleVariable(VariableTracker):
                 named_modules_list, mutation_type=ValueMutationNew()
             )
         elif name == "children":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))  # type: ignore[arg-type]
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
             if args or kwargs:
                 raise_args_mismatch(
                     tx,
@@ -768,13 +777,13 @@ class NNModuleVariable(VariableTracker):
                 )
             return wrap_values(module.named_children())
         elif name == "modules":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))  # type: ignore[arg-type]
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_modules"))
             return wrap_values(module.named_modules())
         elif name == "parameters":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))  # type: ignore[arg-type]
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_parameters"))
             return wrap_values(module.named_parameters(**get_kwargs("recurse")))
         elif name == "buffers":
-            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))  # type: ignore[arg-type]
+            tx.output.guard_on_key_order.add(AttrSource(self.source, "_buffers"))
             return wrap_values(module.named_buffers(**get_kwargs("recurse")))
         elif name == "keys":
             if args or kwargs:
@@ -785,8 +794,9 @@ class NNModuleVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
             result = []
-            for name in module:
-                result.append(ConstantVariable.create(name))
+            # pyrefly: ignore[not-iterable]
+            for tmp in module:
+                result.append(ConstantVariable.create(tmp))
             return ListIteratorVariable(result, mutation_type=ValueMutationNew())
         elif name == "values":
             if args or kwargs:
@@ -846,7 +856,7 @@ class NNModuleVariable(VariableTracker):
                 torch.nn.ParameterList.__getitem__,
                 torch.nn.Sequential.__getitem__,
             )
-
+            # pyrefly: ignore[missing-attribute]
             if type(module).__getitem__ not in builtin_supported:
                 if not (
                     isinstance(args[0], variables.ConstantVariable)
@@ -872,8 +882,6 @@ class NNModuleVariable(VariableTracker):
                     kwargs,
                 )
 
-            assert self.source
-
             if isinstance(args[0], SliceVariable):
                 # TODO(anijain2305,export-team) - Remove this if condition when inlining of inbuilt nn modules is
                 # enabled for export.
@@ -883,18 +891,16 @@ class NNModuleVariable(VariableTracker):
 
                     # Turn the slice into the list of integers
                     keys = list(range(len(module)))[args[0].as_python_constant()]  # type: ignore[arg-type]
-                    module_slice_result: list[VariableTracker] = []
-                    idx = 0
-                    submod = module
-                    key_int = keys[idx]
-                    src_item = NNModuleSource(GetItemSource(self.source, key_int))  # type: ignore[arg-type]
-                    module_slice_result.append(
-                        tx.output.register_attr_or_module(
-                            submod,
-                            key,
-                            source=src_item,
+                    for idx, submod in enumerate(module[args[0].as_python_constant()]):  # type: ignore[arg-type]
+                        key = keys[idx]
+                        src = NNModuleSource(GetItemSource(self.source, key))
+                        result.append(
+                            tx.output.register_attr_or_module(
+                                submod,
+                                key,
+                                source=src,
+                            )
                         )
-                    )
 
                     new_module = module[args[0].as_python_constant()]  # type: ignore[index]
                     new_module_variable = tx.output.register_attr_or_module(
@@ -1013,14 +1019,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         # nn_module_stack_source appropriately to resemble mod.linear.
         self.nn_module_stack_source = self.source
 
-    def _wrap_source(self, attr_source: Any) -> Any:
+    def _wrap_source(self, attr_source: Source) -> Source:
         # the vt is already wrapped with UnspecializedNNModuleSource
         return attr_source
 
-    def get_nn_module_stack_source(self) -> Any:
-        return self.nn_module_stack_source or self.source
+    def get_nn_module_stack_source(self) -> Source:
+        res = self.nn_module_stack_source or self.source
+        assert res
+        return res
 
-    def set_nn_module_stack_source(self, source: Any) -> None:
+    def set_nn_module_stack_source(self, source: Source) -> None:
         self.nn_module_stack_source = source
 
     @staticmethod
@@ -1095,22 +1103,14 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if isinstance(forward_method, types.FunctionType):
                 globals_vt = tx.nn_modules_globals_vt
                 if not (
-                    self.var_getattr(tx, "_backward_hooks")
-                    .realize()
-                    .call_method(tx, "__len__", [], {})
-                    .as_python_constant()
-                    or self.var_getattr(tx, "_backward_pre_hooks")
-                    .realize()
-                    .call_method(tx, "__len__", [], {})
-                    .as_python_constant()
-                    or self.var_getattr(tx, "_forward_hooks")
-                    .realize()
-                    .call_method(tx, "__len__", [], {})
-                    .as_python_constant()
-                    or self.var_getattr(tx, "_forward_pre_hooks")
-                    .realize()
-                    .call_method(tx, "__len__", [], {})
-                    .as_python_constant()
+                    self.var_getattr(tx, "_backward_hooks").realize().len()  # type: ignore[attr-defined]
+                    or self.var_getattr(tx, "_backward_pre_hooks").realize().len()  # type: ignore[attr-defined]
+                    or self.var_getattr(tx, "_forward_hooks").realize().len()  # type: ignore[attr-defined]
+                    or self.var_getattr(tx, "_forward_pre_hooks").realize().len()  # type: ignore[attr-defined]
+                    or globals_vt.var_getattr(tx, "_global_backward_pre_hooks").len()  # type: ignore[attr-defined]
+                    or globals_vt.var_getattr(tx, "_global_backward_hooks").len()  # type: ignore[attr-defined]
+                    or globals_vt.var_getattr(tx, "_global_forward_hooks").len()  # type: ignore[attr-defined]
+                    or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_backward_pre_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_backward_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_forward_hooks").len()  # type: ignore[attr-defined]
@@ -1341,7 +1341,7 @@ class UnspecializedBuiltinNNModuleVariable(UnspecializedNNModuleVariable):
     Differentiates between builtin nn modules (e.g. torch.nn.Linear) and user defined nn modules.
     """
 
-    def _wrap_source(self, attr_source: Any) -> Any:
+    def _wrap_source(self, attr_source: Source) -> Source:
         # vt is already wrapped with the UnspecializedBuiltinNNModuleSource
         return attr_source
 
