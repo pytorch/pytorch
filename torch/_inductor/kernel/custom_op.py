@@ -458,6 +458,7 @@ def autotune_custom_op(
         name=name,
         # pyrefly: ignore [bad-argument-type]
         decompositions=decompositions,
+        # pyrefly: ignore [no-matching-overload]
         input_nodes=list(inputs),
         non_tensor_args=non_tensor_args,
     )
@@ -470,6 +471,7 @@ def autotune_custom_op(
         # Skip if extern_kernel already registered to avoid duplicate registration error
         if not hasattr(extern_kernels, fallback_name):
             with V.fake_mode:
+                # pyrefly: ignore [no-matching-overload]
                 fake_inputs = [ir_node_to_tensor(inp) for inp in inputs]
                 fallback_kwargs = non_tensor_args[0] if non_tensor_args else {}
                 fake_output = op_overload(*fake_inputs, **fallback_kwargs)
@@ -585,19 +587,21 @@ def _generate_dynamic_configs(
     return list(configs)
 
 
-def _standard_lowering_fn(
-    processed_configs: list[CustomOpConfig],
-    default_impl: Callable[..., Any],
-    name: str,
-    op_overload: torch._ops.OpOverload,
-    input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]],
-    tensor_inputs: list[Any],
-    runtime_kwargs: dict[str, Any],
+def _prepare_configs_and_decompositions(
+    processed_configs: Optional[list[CustomOpConfig]],
     config_generator: Optional[
         Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
-    ] = None,
-) -> Any:
-    """Standard autotuning lowering function."""
+    ],
+    tensor_inputs: list[Any],
+    default_impl: Callable[..., Any],
+    runtime_kwargs: dict[str, Any],
+    name: str,
+) -> tuple[list[Callable], list[dict[str, Any]]]:
+    """Prepare decompositions and merged kwargs from configs.
+
+    Handles both static configs and dynamic config generation.
+    Merges config params with runtime kwargs (runtime takes precedence).
+    """
     # Get configs: either generate dynamically or use static configs
     if config_generator is not None:
         configs_to_use = _generate_dynamic_configs(
@@ -618,6 +622,31 @@ def _standard_lowering_fn(
         # Merge config params with runtime kwargs (runtime takes precedence)
         merged_kwargs = _merge_config_and_runtime_kwargs(cfg.params, runtime_kwargs)
         non_tensor_args.append(merged_kwargs)
+
+    return decompositions, non_tensor_args
+
+
+def _standard_lowering_fn(
+    processed_configs: list[CustomOpConfig],
+    default_impl: Callable[..., Any],
+    name: str,
+    op_overload: torch._ops.OpOverload,
+    input_gen_fns: Optional[dict[str, Callable[[torch.Tensor], torch.Tensor]]],
+    tensor_inputs: list[Any],
+    runtime_kwargs: dict[str, Any],
+    config_generator: Optional[
+        Callable[[dict[str, torch.Tensor]], list[CustomOpConfig]]
+    ] = None,
+) -> Any:
+    """Standard autotuning lowering function."""
+    decompositions, non_tensor_args = _prepare_configs_and_decompositions(
+        processed_configs,
+        config_generator,
+        tensor_inputs,
+        default_impl,
+        runtime_kwargs,
+        name,
+    )
 
     result = autotune_custom_op(
         name=name,
@@ -689,25 +718,14 @@ def _range_based_lowering_fn(
     log.info("=== Range-based Autotuning for %s ===", name)
     log.info("Dispatch on: %s[%d], Ranges: %s", tensor_name, dim_index, ranges)
 
-    if config_generator is not None:
-        configs_to_use = _generate_dynamic_configs(
-            tensor_inputs, config_generator, default_impl, name
-        )
-    else:
-        assert processed_configs is not None
-        configs_to_use = processed_configs
-
-    # Prepare decompositions and kwargs for autotuning
-    decompositions = []
-    non_tensor_args = []
-
-    for cfg in configs_to_use:
-        decomp = cfg.get_decomposition(default_impl=default_impl)
-        decompositions.append(decomp)
-
-        # Merge config params with runtime kwargs (runtime takes precedence)
-        merged_kwargs = _merge_config_and_runtime_kwargs(cfg.params, runtime_kwargs)
-        non_tensor_args.append(merged_kwargs)
+    decompositions, non_tensor_args = _prepare_configs_and_decompositions(
+        processed_configs,
+        config_generator,
+        tensor_inputs,
+        default_impl,
+        runtime_kwargs,
+        name,
+    )
 
     range_to_best_impl_map = {}
 
@@ -723,6 +741,7 @@ def _range_based_lowering_fn(
 
         range_name = f"{name}_range_{int(range_start)}_{int(range_end) if range_end != float('inf') else 'inf'}"
 
+        # pyrefly: ignore [not-iterable]
         autotuned_result, winning_choice = autotune_custom_op(
             name=range_name,
             decompositions=decompositions,
@@ -833,6 +852,7 @@ def _range_based_lowering_fn(
             for pred in predicates[1:]:
                 result = result | pred
 
+            # pyrefly: ignore [bad-return]
             return result
 
         def build_nested_cond(current_impl_index: int):
@@ -937,7 +957,9 @@ def _create_autotuning_lowering(
         return standard_lowering_wrapper
 
     # Range-based autotuning path
+    # pyrefly: ignore [not-iterable]
     tensor_name, dim_index = dispatch_on
+    # pyrefly: ignore [bad-argument-type]
     ranges = _split_points_to_ranges(split_points)
 
     @functools.wraps(op_overload)
@@ -985,10 +1007,12 @@ def register_custom_op_autotuning(
         name: Operation name (default: "{op_name}_autotuned")
         input_gen_fns: Custom input generators for benchmarking
 
-    Example:
+    Examples:
         # Static configs
         @torch.library.custom_op("mylib::attention", mutates_args=())
         def my_attention(query, key, value, head_dim=32):
+            ...
+
         register_custom_op_autotuning(
             my_attention,
             configs=[
@@ -1083,6 +1107,7 @@ def register_custom_op_autotuning(
 
     # Create and register the lowering function
     lowering_fn = _create_autotuning_lowering(
+        # pyrefly: ignore [bad-argument-type]
         processed_configs=static_configs,
         default_impl=default_impl,
         name=name,
