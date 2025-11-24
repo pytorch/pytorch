@@ -1145,6 +1145,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertEqual(y_ref, y_test)
 
+    # https://github.com/pytorch/pytorch/issues/168381
     def test_index_select_contiguous_with_compile(self):
         def fn(x):
             x = x.permute(1, 2, 0)
