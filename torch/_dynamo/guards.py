@@ -4306,7 +4306,6 @@ def get_guard_fail_reason_helper(
     scope.update(guard_manager.closure_vars)
     reasons: list[str] = []
 
-    # Check if there was a backend mismatch detected in C++
     if hasattr(guard_manager, "_backend_mismatch_reason"):
         backend_mismatch_reason = getattr(
             guard_manager, "_backend_mismatch_reason", None

@@ -162,11 +162,11 @@ void lookup(
         backend_match(cache_entry.backend.ptr(), backend);
 
     if (!valid) {
-      py::object backend_repr = py::repr(py::handle(backend));
-      py::object cached_backend_repr = py::repr(cache_entry.backend);
-      std::string reason = std::string("backend instance mismatch between ") +
-          py::cast<std::string>(cached_backend_repr) + std::string(" and ") +
-          py::cast<std::string>(backend_repr);
+      py::handle backend_hdl = py::handle(backend);
+      std::string reason = std::string("backend mismatch between ") +
+          py::cast<std::string>(cache_entry.backend.attr("compiler_name")) +
+          std::string(" and ") +
+          py::cast<std::string>(backend_hdl.attr("compiler_name"));
       cache_entry.guard_manager.attr("_backend_mismatch_reason") =
           py::str(reason);
     } else {

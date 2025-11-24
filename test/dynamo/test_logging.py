@@ -684,6 +684,30 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
                    ~~^~~""",
         )
 
+    @make_logging_test(recompiles=True)
+    def test_backend_recompiles(self, records):
+        def foo(x, y):
+            return x * y
+
+        cnt1 = torch._dynamo.testing.CompileCounter()
+        cnt2 = torch._dynamo.testing.CompileCounter()
+
+        _compiled_callable1 = torch.compile(foo, backend=cnt1)
+        _compiled_callable2 = torch.compile(foo, backend=cnt2)
+
+        # Create sample inputs
+        x = torch.tensor([1.0, 2.0, 3.0])
+        y = torch.tensor([4.0, 5.0, 6.0])
+
+        # Run the compiled callables
+        _compiled_callable1(x, y)
+        _compiled_callable2(x, y)
+        record_str = "\n".join(r.getMessage() for r in records)
+        self.assertIn(
+            "backend mismatch between",
+            record_str
+        )
+
     @make_logging_test(guards=True, recompiles=True)
     def test_guards_recompiles(self, records):
         def fn(x, ys, zs):
