@@ -130,6 +130,7 @@ from .source import (
     ChainedSource,
     ClosureSource,
     CodeSource,
+    CollectionsSource,
     ConstantSource,
     ConstDictKeySource,
     CurrentStreamSource,
@@ -1438,6 +1439,13 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, TorchSource):
             out = root_guard_manager.lambda_manager(
                 python_lambda=lambda _: torch,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, CollectionsSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: collections,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
@@ -3677,6 +3685,7 @@ class CheckFunctionManager:
                     self.guard_manager,
                     output_graph.local_scope,
                     CompileContext.current_compile_id(),
+                    backend=None,  # no need to set this because we are trying to find the offending guard entry
                 )
                 raise AssertionError(
                     "Guard failed on the same frame it was created. This is a bug - please create an issue."
@@ -4294,6 +4303,7 @@ def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
     compile_id: Optional[CompileId],
+    backend: Optional[Callable],
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -4305,6 +4315,10 @@ def get_guard_fail_reason_helper(
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
     reasons: list[str] = []
+
+    cache_entry_backend = None
+    if guard_manager.cache_entry:
+        cache_entry_backend = guard_manager.cache_entry.backend
 
     no_tensor_aliasing_check_failed = False
 
@@ -4328,6 +4342,24 @@ def get_guard_fail_reason_helper(
             else:
                 reasons = verbose_code_parts
                 verbose_code_parts = []
+    elif cache_entry_backend != backend:
+        # None of the guard entries failed - a backend match issue
+        reason = (
+            "BACKEND_MATCH failure: torch.compile detected different backend callables."
+            " If this is unexpected, wrap your backend in functools.partial (or reuse the"
+            " same cached backend) to avoid creating a new backend function each time."
+            " More details: https://github.com/pytorch/pytorch/issues/168373"
+        )
+        reasons.append(reason)
+    else:
+        # Unexpected recompilation - points to a bug
+        reason = (
+            "Unexpected recompilation: runtime guards failed even though they passed"
+            " during recompilation-reason analysis."
+            " Please open an issue with a minimal repro:"
+            " https://github.com/pytorch/pytorch"
+        )
+        reasons.append(reason)
 
     if no_tensor_aliasing_check_failed:
         reasons = recompilation_reason_for_no_tensor_aliasing_guard(
@@ -4364,11 +4396,14 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
+    backend: Callable,
     skip_logging: bool = False,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
         return f"{compile_id}: {guard_manager.invalidation_reason}"
-    reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
+    reason_str = get_guard_fail_reason_helper(
+        guard_manager, f_locals, compile_id, backend
+    )
     if skip_logging:
         return reason_str
     guard_failures[orig_code_map[code]].append(reason_str)
@@ -4389,6 +4424,7 @@ def get_guard_fail_reason(
 def get_and_maybe_log_recompilation_reasons(
     cache_entry: Optional[CacheEntry],
     frame: DynamoFrameType,
+    backend: Callable,
     skip_logging: bool = False,
 ) -> list[str]:
     """
@@ -4403,6 +4439,7 @@ def get_and_maybe_log_recompilation_reasons(
             cache_entry.code,
             frame.f_locals,
             cache_entry.compile_id,
+            backend,
             skip_logging,
         )
         if reason:
