@@ -1,3 +1,4 @@
+# blah
 set -ex
 uv venv
 source .venv/bin/activate
