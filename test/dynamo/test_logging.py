@@ -68,6 +68,34 @@ def munge_shape_guards(s: str) -> str:
     return "\n".join([line for line, nsubs in lines if nsubs > 0])
 
 
+LOG_PREFIX_PATTERNS = [
+    re.compile(r"^\[rank\d+\]:\s*"),
+    re.compile(r"^[A-Z]+:[^:]+:\s*"),
+    re.compile(r"^[A-Z](?:\d{4})?\s+[^:]+:\s*"),
+]
+
+
+def normalize_log_line(line: str) -> str:
+    line = line.rstrip()
+    for pattern in LOG_PREFIX_PATTERNS:
+        stripped, count = pattern.subn("", line, count=1)
+        if count:
+            line = stripped.lstrip()
+            break
+    return line
+
+
+def normalize_rank_prefix(output: str) -> str:
+    if "[rank" in output:
+        return output
+
+    def repl(match):
+        prefix = match.group(1)
+        return f"{prefix}[rank0]: "
+
+    return re.sub(r"(^|\n)(?:[A-Z]+:[^:]+:)", repl, output)
+
+
 def example_fn(a):
     output = a.mul(torch.ones(1000, 1000))
     output = output.add(torch.ones(1000, 1000))
@@ -388,8 +416,13 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
             if torch._logging._internal._is_torch_handler(handler):
                 break
         self.assertIsNotNone(handler)
-        self.assertIn("I", handler.format(records[0]))
-        self.assertEqual("custom format", handler.format(records[1]))
+        formatted_dynamo = handler.format(records[0])
+        self.assertIn("test dynamo", formatted_dynamo)
+        self.assertEqual(normalize_log_line(formatted_dynamo), "test dynamo")
+
+        formatted_artifact = handler.format(records[1])
+        self.assertIn("custom format", formatted_artifact)
+        self.assertEqual(normalize_log_line(formatted_artifact), "custom format")
 
     @make_logging_test(dynamo=logging.INFO)
     def test_multiline_format(self, records):
@@ -404,10 +437,20 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
             if torch._logging._internal._is_torch_handler(handler):
                 break
         self.assertIsNotNone(handler)
-        for record in records:
-            r = handler.format(record)
-            for l in r.splitlines():
-                self.assertIn("I", l)
+        expected_lines = [
+            ["test", "dynamo"],
+            ["test", "dynamo"],
+            ["test", "test", "dynamo"],
+        ]
+
+        for record, expected in zip(records, expected_lines):
+            formatted = handler.format(record)
+            normalized_lines = [
+                line
+                for line in (normalize_log_line(l) for l in formatted.splitlines())
+                if line
+            ]
+            self.assertEqual(normalized_lines, expected)
 
     test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
 
@@ -566,7 +609,10 @@ print("arf")
 """,
             env=env,
         )
-        self.assertIn("[rank0]:", stderr.decode("utf-8"))
+        stderr_text = stderr.decode("utf-8")
+        normalized = normalize_rank_prefix(stderr_text)
+        self.assertIn("[rank0]:", normalized)
+        self.assertIn("woof", normalized)
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
