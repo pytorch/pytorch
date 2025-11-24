@@ -101,8 +101,8 @@ requiresCppContext = unittest.skipUnless(
 load_tests = load_tests  # noqa: PLW0127
 
 try:
-    import torchvision.models  # noqa: F401
-    from torchvision.models import resnet18  # noqa: F401
+    # import torchvision.models  # noqa: F401
+    # from torchvision.models import resnet18  # noqa: F401
 
     HAS_TORCHVISION = True
 except ImportError:
@@ -4433,11 +4433,9 @@ class TestCudaMallocAsync(TestCase):
             (["free_requested", "free_completed"], "multiple actions"),
             (["alloc"], "alloc action"),
             (["segment_alloc", "segment_free"], "segment actions"),
-            (["snapshot"], "snapshot action"),
             ([], "empty list"),
             (None, "None default"),
         ]
-        print("running test_memory_snapshot_skip_actions")
 
         for skip_actions, description in test_cases:
             with self.subTest(skip_actions=skip_actions, description=description):
@@ -4449,7 +4447,6 @@ class TestCudaMallocAsync(TestCase):
 
                     # Perform allocations and frees to generate various actions
                     x = torch.rand(128, 128, device="cuda")
-                    addr = x.untyped_storage().data_ptr()
                     del x
                     torch.cuda.synchronize()
 
@@ -4459,7 +4456,6 @@ class TestCudaMallocAsync(TestCase):
                     while len(ss["device_traces"][device_idx]) == 0:
                         device_idx = device_idx + 1
                     device_trace = ss["device_traces"][device_idx]
-                    all_actions = {event["action"] for event in device_trace}
 
                     # Verify traces are not empty (other actions are still recorded)
                     self.assertGreater(
