@@ -21,7 +21,7 @@ try:
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
-    from extension_backends.triton.extension_triton_heuristics import ( # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_triton_heuristics  # noqa: B950
+    from extension_backends.triton.extension_triton_heuristics import (  # @manual=fbcode//caffe2/test/inductor/extension_backends:extension_triton_heuristics  # noqa: B950
         EXTENSION_TRITON_META_FIELD,
     )
 except ImportError:
@@ -50,8 +50,12 @@ from torch._inductor.codegen.common import (
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
 from torch._inductor.utils import get_triton_code, run_and_get_triton_code
 from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU_AND_TRITON
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CPU,
+    HAS_GPU_AND_TRITON,
+    TRITON_HAS_CPU,
+)
 
 
 try:
@@ -59,9 +63,18 @@ try:
 except ImportError:
     from test_extension_backend import BaseExtensionBackendTests
 
-if HAS_GPU_AND_TRITON:
+if TRITON_HAS_CPU or HAS_GPU_AND_TRITON:
     import triton
     import triton.language as tl
+
+    if TRITON_HAS_CPU:
+        TRITON_DEVICE_TYPE = "cpu"
+    else:
+        TRITON_DEVICE_TYPE = GPU_TYPE
+
+requires_triton_backend = unittest.skipUnless(
+    HAS_GPU_AND_TRITON or TRITON_HAS_CPU, "Requires Triton backend."
+)
 
 
 def mock_triton_hash_with_backend(*args, **kwargs):
@@ -189,9 +202,9 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
             device, ExtensionTritonScheduling, ExtensionPythonWrapperCodegen
         )
 
-    @requires_cuda_and_triton
+    @requires_triton_backend
     def test_codegen_with_custom_heuristics_module(self):
-        self._register_custom_backend_with_heuristics(GPU_TYPE)
+        self._register_custom_backend_with_heuristics(TRITON_DEVICE_TYPE)
 
         def add(x, y):
             return x + y
@@ -205,9 +218,9 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
             f"{EXTENSION_TRITON_META_FIELD}"
         ).check("@triton.jit").run(code)
 
-    @requires_cuda_and_triton
+    @requires_triton_backend
     def test_codegen_with_custom_heuristics_module_udtk(self):
-        self._register_custom_backend_with_heuristics(GPU_TYPE)
+        self._register_custom_backend_with_heuristics(TRITON_DEVICE_TYPE)
 
         @triton.jit
         def add_kernel(
@@ -247,5 +260,5 @@ class TritonExtensionBackendTests(BaseExtensionBackendTests):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if (HAS_CPU or HAS_GPU_AND_TRITON) and not IS_MACOS:
+    if HAS_CPU and not IS_MACOS:
         run_tests()
