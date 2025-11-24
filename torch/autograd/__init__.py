@@ -532,7 +532,7 @@ def grad(
         result = tuple(
             output
             if output is not None
-            else torch.zeros_like(input, requires_grad=True)
+            else torch.zeros_like(input, requires_grad=create_graph)
             for (output, input) in zip(result, inputs)
         )
     return result
