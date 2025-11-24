@@ -6,7 +6,7 @@
 
 namespace c10::xpu::XPUCachingAllocator {
 
-class XPUAllocator : DeviceAllocator {
+class XPUAllocator : public DeviceAllocator {
  public:
   virtual void* raw_alloc(size_t nbytes) = 0;
   virtual void raw_delete(void* ptr) = 0;
