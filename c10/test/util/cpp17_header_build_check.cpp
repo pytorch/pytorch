@@ -1,4 +1,4 @@
-// Compile-only test to verify that c10 headers mirrored 
+// Compile-only test to verify that c10 headers mirrored
 // to ExecuTorch build with C++17.
 
 #include <c10/macros/Export.h>
