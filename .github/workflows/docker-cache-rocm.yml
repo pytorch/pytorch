@@ -54,8 +54,9 @@ jobs:
   mi300-docker-cache:
     if: github.repository_owner == 'pytorch'
     needs: download-docker-builds-artifacts
-    uses: ./.github/.workflows/docker-caching.yml
+    uses: ./.github/workflows/docker-caching.yml
     with:
+      download-docker-builds-artifacts: ${{ download-docker-builds-artifacts.outputs }}
       matrix: |
         runner: [linux.rocm.gfx942.docker-cache]
         docker-image: [
