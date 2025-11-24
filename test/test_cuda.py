@@ -4452,7 +4452,7 @@ class TestCudaMallocAsync(TestCase):
                     addr = x.untyped_storage().data_ptr()
                     del x
                     torch.cuda.synchronize()
-                    
+
                     # Take snapshot to potentially generate snapshot event
                     ss = torch.cuda.memory._snapshot()
                     device_idx = 0
@@ -4460,27 +4460,30 @@ class TestCudaMallocAsync(TestCase):
                         device_idx = device_idx + 1
                     device_trace = ss["device_traces"][device_idx]
                     all_actions = {event["action"] for event in device_trace}
-                    
+
                     # Verify traces are not empty (other actions are still recorded)
                     self.assertGreater(
-                        len(device_trace), 0,
-                        f"Trace should not be empty for skip_actions={skip_actions}"
+                        len(device_trace),
+                        0,
+                        f"Trace should not be empty for skip_actions={skip_actions}",
                     )
-                    
+
                     if skip_actions:
                         all_actions = {event["action"] for event in device_trace}
-                        
+
                         # Verify skipped actions are not in traces
                         for sa in skip_actions:
                             self.assertNotIn(
-                                sa, all_actions,
-                                f"Action {sa} should be skipped with skip_actions={skip_actions}"
+                                sa,
+                                all_actions,
+                                f"Action {sa} should be skipped with skip_actions={skip_actions}",
                             )
                         # Check that we have actions that are NOT in the skip list
                         non_skipped_actions = all_actions - set(skip_actions)
                         self.assertGreater(
-                            len(non_skipped_actions), 0,
-                            f"Should have non-skipped actions for skip_actions={skip_actions}"
+                            len(non_skipped_actions),
+                            0,
+                            f"Should have non-skipped actions for skip_actions={skip_actions}",
                         )
 
                 finally:
