@@ -13,7 +13,7 @@ The following are aliases to their counterparts in ``torch.ao.nn.intrinsic.qat``
 .. currentmodule:: torch.ao.nn.intrinsic.qat.modules
 ```
 
-### conv_fused (Aliases)
+### torch.ao.nn.intrinsic.qat.modules.conv_fused (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -29,7 +29,7 @@ The following are aliases to their counterparts in ``torch.ao.nn.intrinsic.qat``
     conv_fused.ConvBnReLU3d
 ```
 
-### linear_fused (Aliases)
+### torch.ao.nn.intrinsic.qat.modules.linear_fused (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -40,7 +40,7 @@ The following are aliases to their counterparts in ``torch.ao.nn.intrinsic.qat``
     linear_fused.LinearBn1d
 ```
 
-### linear_relu (Aliases)
+### torch.ao.nn.intrinsic.qat.modules.linear_relu (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -58,7 +58,7 @@ The following are aliases to their counterparts in ``torch.ao.nn.intrinsic.qat``
 
 The following are aliases to their counterparts in ``torch.ao.nn.intrinsic.quantized`` in the ``torch.ao.nn.intrinsic.quantized.modules`` namespace.
 
-### conv_relu (Aliases)
+### torch.ao.nn.intrinsic.quantized.modules.conv_relu (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -71,7 +71,7 @@ The following are aliases to their counterparts in ``torch.ao.nn.intrinsic.quant
     conv_relu.ConvReLU3d
 ```
 
-### bn_relu (Aliases)
+### torch.ao.nn.intrinsic.quantized.modules.bn_relu (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -83,7 +83,7 @@ The following are aliases to their counterparts in ``torch.ao.nn.intrinsic.quant
     bn_relu.BNReLU3d
 ```
 
-### conv_add (Aliases)
+### torch.ao.nn.intrinsic.quantized.modules.conv_add (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -95,7 +95,7 @@ The following are aliases to their counterparts in ``torch.ao.nn.intrinsic.quant
     conv_add.ConvAddReLU2d
 ```
 
-### linear_relu (Aliases)
+### torch.ao.nn.intrinsic.quantized.modules.linear_relu (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -115,7 +115,7 @@ The following are aliases to their counterparts in ``torch.ao.nn.intrinsic.quant
 
 The following are aliases to their counterparts in the ``torch.ao.nn.intrinsic.quantized.dynamic`` namespace.
 
-### linear_relu (Aliases)
+### torch.ao.nn.intrinsic.quantized.dynamic.modules.linear_relu (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -132,7 +132,7 @@ The following are aliases to their counterparts in the ``torch.ao.nn.intrinsic.q
 ```
 The following are aliases to their counterparts in the ``torch.ao.nn.intrinsic`` namespace.
 
-### fused (Aliases)
+### torch.ao.nn.intrinsic.modules.fused (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -147,13 +147,13 @@ The following are aliases to their counterparts in the ``torch.ao.nn.intrinsic``
     fused.LinearTanh
 ```
 
-## torch.ao.nn.qat.modules
+## torch.ao.nn.intrinsic.modules.torch.ao.nn.qat.modules
 ```{eval-rst}
 .. currentmodule:: torch.ao.nn.qat.modules
 ```
 The following are aliases to their counterparts in the ``torch.ao.nn.qat`` namespace.
 
-### conv (Aliases)
+### torch.ao.nn.intrinsic.modules.conv (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -166,7 +166,7 @@ The following are aliases to their counterparts in the ``torch.ao.nn.qat`` names
     conv.Conv3d
 ```
 
-### embedding_ops (Aliases)
+### torch.ao.nn.intrinsic.modules.embedding_ops (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -178,7 +178,7 @@ The following are aliases to their counterparts in the ``torch.ao.nn.qat`` names
     embedding_ops.EmbeddingBag
 ```
 
-### linear (Aliases)
+### torch.ao.nn.intrinsic.modules.linear (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -195,7 +195,7 @@ The following are aliases to their counterparts in the ``torch.ao.nn.qat`` names
 
 The following are aliases to their counterparts in the ``torch.ao.nn.quantizable`` namespace.
 
-### activation (Aliases)
+### torch.ao.nn.quantizable.modules.activation (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -205,7 +205,7 @@ The following are aliases to their counterparts in the ``torch.ao.nn.quantizable
     activation.MultiheadAttention
 ```
 
-### rnn (Aliases)
+### torch.ao.nn.quantizable.modules.rnn (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -223,7 +223,7 @@ The following are aliases to their counterparts in the ``torch.ao.nn.quantizable
 
 The following are aliases to their counterparts in the ``torch.ao.nn.quantized.dynamic`` namespace.
 
-### conv (Aliases)
+### torch.ao.nn.quantized.dynamic.modules.conv (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -239,7 +239,7 @@ The following are aliases to their counterparts in the ``torch.ao.nn.quantized.d
     conv.ConvTranspose3d
 ```
 
-### linear (Aliases)
+### torch.ao.nn.quantized.dynamic.modules.linear (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
@@ -249,7 +249,7 @@ The following are aliases to their counterparts in the ``torch.ao.nn.quantized.d
     linear.Linear
 ```
 
-### rnn (Aliases)
+### torch.ao.nn.quantized.dynamic.modules.rnn (Aliases)
 ```{eval-rst}
 .. autosummary::
     :toctree: generated
