@@ -142,6 +142,7 @@ ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
 COPY --from=pytorch/llvm:9.0.1 /opt/llvm /opt/llvm
 
 # Copy and set entrypoint script to handle ROCm path detection
+COPY ./common/detect_rocm_path.sh /detect_rocm_path.sh
 COPY ./ubuntu-rocm/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 ENTRYPOINT ["/entrypoint.sh"]
