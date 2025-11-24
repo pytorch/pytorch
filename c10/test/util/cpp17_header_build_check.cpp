@@ -1,7 +1,6 @@
-// Compile-only test to verify that modified c10 headers build with C++17
-// This test ensures headers are C++17-compatible (not C++20-only)
+// Compile-only test to verify that c10 headers mirrored 
+// to ExecuTorch build with C++17.
 
-// c10 headers
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
@@ -15,7 +14,6 @@
 #include <c10/util/overflows.h>
 #include <c10/util/safe_numerics.h>
 
-// torch headeronly headers
 #include <torch/headeronly/macros/Export.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/BFloat16.h>

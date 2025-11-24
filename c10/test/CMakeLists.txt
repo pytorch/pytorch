@@ -19,7 +19,6 @@ if(BUILD_TEST)
 endif()
 
 # ---[ C++17 header compilation test
-# This test verifies that modified c10 headers compile with C++17 standard
 if(BUILD_TEST)
   add_executable(c10_cpp17_header_build_test util/cpp17_header_build_check.cpp)
   target_link_libraries(c10_cpp17_header_build_test ${C10_LIB})

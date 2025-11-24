@@ -265,7 +265,7 @@ command = [
 [[linter]]
 code = 'CLANGTIDY_EXECUTORCH_COMPATIBILITY'
 include_patterns = [
-    # c10 headers that must be C++17 compatible (mirrored to torch/headeronly)
+    # c10 headers that must be C++17 compatible
     'c10/macros/Export.h',
     'c10/macros/Macros.h',
     'c10/macros/cmake_macros.h',
