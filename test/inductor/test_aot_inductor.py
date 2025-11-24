@@ -21,6 +21,7 @@ from torch._dynamo import config as dynamo_config
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
+from torch._export.passes import ReplaceViewOpsWithViewCopyOpsPass
 from torch._inductor import config
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.cpp_builder import normalize_path_separator
@@ -2228,6 +2229,39 @@ class AOTInductorTestsTemplate:
             prepend_predicates(inputs),
             dynamic_shapes=dynamic_shapes,
         )
+
+    @requires_gpu
+    def test_cond_with_replace_view_ops(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class CondModelWithViewAndLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, cache, x):
+                def true_fn(cache, x):
+                    return cache + 1.0
+
+                def false_fn(cache, x):
+                    return self.linear(x).view(1, 2, 4, 4)
+
+                cache_is_initialized = (cache != 0).any()
+                return torch.cond(cache_is_initialized, false_fn, false_fn, [cache, x])
+
+        example_input = (
+            torch.zeros(1, 2, 4, 4, dtype=torch.float32, device=self.device),
+            torch.randn(8, 4, dtype=torch.float32, device=self.device),
+        )
+        model = CondModelWithViewAndLinear().to(device=self.device)
+        exported_program = torch.export.export(model, example_input)
+        program = exported_program.run_decompositions()
+        gm = ReplaceViewOpsWithViewCopyOpsPass()(program.graph_module).graph_module
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+        ):
+            _ = torch._inductor.aot_compile(gm, example_input)
 
     def test_cond_with_multiple_outputs(self):
         inputs = (
