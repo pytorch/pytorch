@@ -16,13 +16,13 @@ from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
 from torch._inductor import comms
-from torch._inductor.virtualized import ops
+from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, ir, pattern_matcher
+from .. import config, ir, pattern_matcher  # noqa: F401
 from ..codegen.common import custom_backend_passes
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -303,6 +303,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             "custom_runtime_estimation",
             "insert_overlap_deps",
             "collective_estimator",
+            "max_memory_increase_gb",
+            "max_memory_increase_ratio",
         )
         for key in config_keys:
             if (val := getattr(dist_opts, key)) is not None:
@@ -800,95 +802,6 @@ def is_valid_mm_plus_mm(match: Match):
         return False
 
     return True
-
-
-def scatter_upon_const_tensor_extra_check(m):
-    if not config.optimize_scatter_upon_const_tensor:
-        return False
-    full_shape = m.kwargs["shape"]
-    selector = m.kwargs["selector"]
-    dim = m.kwargs["dim"]
-    if dim < 0:
-        dim += len(full_shape)
-
-    selector_ft = selector.meta["val"]
-    assert selector_ft.dim() == len(full_shape)
-
-    for idx, select_sz, full_sz in zip(
-        itertools.count(), selector_ft.shape, full_shape
-    ):
-        if idx == dim:
-            continue
-
-        # TODO: the pattern can be updated to support the case that index tensor
-        # is shorter. But that will need a more complex condition expression
-        # especially for multi-dimensional tensors.
-        # Skip it for now.
-        if isinstance(full_sz, fx.Node):
-            full_sz = full_sz.meta["val"]
-        if select_sz < full_sz:
-            return False
-
-    # Actually we can support small size larger than 1. It would be a bit
-    # tedius. E.g., we load all the index values (not many) and compare
-    # them with the position in tensor to decide what value to return.
-    return selector_ft.size(dim) == 1
-
-
-@register_lowering_pattern(
-    CallFunction(
-        aten.scatter.value,
-        CallFunction(
-            aten.full,
-            KeywordArg("shape"),
-            KeywordArg("background_val"),
-            dtype=KeywordArg("dtype"),
-        ),
-        KeywordArg("dim"),
-        KeywordArg("selector"),
-        KeywordArg("val"),  # scalar value
-    ),
-    extra_check=scatter_upon_const_tensor_extra_check,
-)
-def scatter_upon_const_tensor(
-    match: Match, shape, background_val, dtype, dim, selector, val
-):
-    """
-    Match the pattern of full+scatter into a pointwise.
-
-    TODO: Right now the scatter value must be a scalar. But we could support it
-    when it is a tensor as well.
-    """
-    from torch._inductor import metrics
-
-    # Check if inputs are tensors instead of inductor IR nodes
-    if isinstance(selector, torch.Tensor):
-        # Return a fake tensor with the proper shape that this operator is intended to return
-        device = selector.device if hasattr(selector, "device") else torch.device("cpu")
-        return torch.empty(shape, dtype=dtype, device=device)
-
-    # pyrefly: ignore [bad-assignment]
-    metrics.num_matches_for_scatter_upon_const_tensor += 1
-
-    selector_loader = selector.make_loader()
-
-    def inner_fn(idx):
-        selector_idx = list(idx)
-        selector_idx[dim] = 0
-
-        selector = selector_loader(selector_idx)
-        return ops.where(
-            selector == ops.index_expr(idx[dim], torch.int64),
-            ops.constant(val, dtype),
-            ops.constant(background_val, dtype),
-        )
-
-    return ir.Pointwise.create(
-        device=selector.get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=shape,
-    )
 
 
 @register_lowering_pattern(
