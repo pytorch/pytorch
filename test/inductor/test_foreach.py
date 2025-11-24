@@ -766,7 +766,10 @@ class ForeachTests(TestCase):
 
         self.check_model_gpu(fn, args)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        if torch._inductor.config.combo_kernels:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        else:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     @requires_gpu
     def test_zero_elems(self):
@@ -1116,7 +1119,10 @@ class ForeachTests(TestCase):
         for ref, act in zip(ref_inp, inp):
             torch.allclose(ref.grad, act.grad)
 
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+        if torch._inductor.config.combo_kernels:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+        else:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
 
 if __name__ == "__main__":
