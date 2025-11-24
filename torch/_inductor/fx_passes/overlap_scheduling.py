@@ -1056,19 +1056,19 @@ class OverlapScheduler:
             # current compute node we are scheduling, then we are effectively exposing it.
             # similarly, dont schedule a wait of a collective that could be otherwise hidden,
             # thus forcing it to be exposed.
-            # however, if it is already hidden or it cannot be possible hidden,
-            # it's fine to schedule it
+            # however, if it is already hidden it's fine to schedule it
             if _schedulable_wait_node(node):
                 info = self.collective_info[self.wait_to_start[node]]
-                if info.hiding_nodes and curr_overlap_node not in info.hiding_nodes:
-                    why(
-                        "path blocked by wait node %s with different hiding compute",
-                        node.name,
-                    )
-                    return None
-                elif node not in self.potentially_hidden_waits:
-                    why("path blocked by wait node %s that could be hidden", node.name)
-                    return None
+                # Allow if fully hidden by other nodes
+                if not info.is_exposed and curr_overlap_node not in info.hiding_nodes:
+                    continue
+
+                why(
+                    "path blocked by wait node %s (exposed=%s, hiding_nodes=%s)",
+                    node.name,
+                    info.is_exposed,
+                    curr_overlap_node in info.hiding_nodes,
+                )
 
             # Skip c10 ops and dtensor shard ops - they should be scheduled via main loop
             target_str = str(node.target)
