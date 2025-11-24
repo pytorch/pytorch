@@ -822,6 +822,13 @@ class TestSharding(DTensorTestBase):
     def test_attention_shard_without_cp(self) -> None:
         """Test that sharding on sequence dimension without CP enabled is not supported."""
         from torch.distributed.tensor import distribute_tensor, Replicate, Shard
+        from torch.distributed.tensor.debug import (
+            _clear_fast_path_sharding_prop_cache,
+            _clear_python_sharding_prop_cache,
+        )
+
+        _clear_python_sharding_prop_cache()
+        _clear_fast_path_sharding_prop_cache()
 
         B = 2
         nheads = 4
@@ -853,7 +860,7 @@ class TestSharding(DTensorTestBase):
 
         # Verify the output is NOT sharded on sequence dimension (dim 2)
         # This proves that CP sharding rules were not used
-        self.assertNotEqual(out.placements[0], Shard(2))
+        self.assertNotEqual(out.placements[0], Shard(2), f"Placement {out.placements}")
         # The output should be replicated or sharded on batch head dimensions.
         self.assertIn(out.placements[0], [Replicate(), Shard(0), Shard(1)])
 
