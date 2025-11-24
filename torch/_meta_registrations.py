@@ -6362,7 +6362,7 @@ def _check_scaled_mm_sizes(
         lambda: f"Expected both inputs to be fp8 or fp4 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -6592,7 +6592,7 @@ def _check_scaled_mm_sizes_v2(
             SwizzleType.NO_SWIZZLE,
         ]
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1

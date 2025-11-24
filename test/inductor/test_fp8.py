@@ -1343,18 +1343,16 @@ class TestFP8Lowering(TestCase):
             return y
 
         linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
-
-        self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError if "cuda" in device else RuntimeError,
-            f"Expected self.size(1) to be divisible by 16, but got self.size(1)={K}"
-            if "cuda" in device
-            else f"Expected trailing dimension of mat1 to be divisible by 16 but got mat1 shape: \\({M}x{K}\\)\\.",
-            lambda: linear_compiled(
+        with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
+            linear_compiled(
                 x,
                 w_t_fp8,
                 w_inverse_scale,
                 bias,
-            ),
+            )
+        self.assertTrue(
+            f"Expected self.size(1) to be divisible by 16, but got self.size(1)={K}"
+            in str(cm.exception)
         )
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
@@ -1389,17 +1387,14 @@ class TestFP8Lowering(TestCase):
             return y
 
         linear_compiled = torch.compile(linear, backend="inductor", mode="max-autotune")
-
-        self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError if "cuda" in device else RuntimeError,
-            "Invalid scaling configuration.",
-            lambda: linear_compiled(
+        with self.assertRaises(torch._dynamo.exc.TorchRuntimeError) as cm:
+            linear_compiled(
                 x,
                 w_t_fp8,
                 w_inverse_scale,
                 bias,
-            ),
-        )
+            )
+        self.assertTrue("Invalid scaling configuration." in str(cm.exception))
 
 
 instantiate_device_type_tests(TestFP8Types, globals(), allow_xpu=True)
