@@ -13,6 +13,7 @@ import logging
 import os
 import pickle
 import shutil
+import threading
 import time
 import traceback
 from copy import copy
@@ -79,6 +80,26 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+
+
+# Thread-local storage to track if we're in an aot_compile context
+_aot_compile_context = threading.local()
+
+
+@contextlib.contextmanager
+def in_aot_compile_context():
+    """Context manager to mark that we're in an aot_compile context."""
+    old_value = getattr(_aot_compile_context, "active", False)
+    _aot_compile_context.active = True
+    try:
+        yield
+    finally:
+        _aot_compile_context.active = old_value
+
+
+def is_in_aot_compile_context() -> bool:
+    """Check if we're currently in an aot_compile context."""
+    return getattr(_aot_compile_context, "active", False)
 
 
 class BypassAOTAutogradCache(Exception):
@@ -680,6 +701,11 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             # of checking every single case, we safely catch the exception
             # in those cases.
             except Exception as e:
+                # If we're in an aot_compile context, we should eagerly error
+                # instead of bypassing the cache, since aot_compile requires caching
+                if is_in_aot_compile_context():
+                    raise e
+
                 cache_key = None
                 counters["aot_autograd"]["autograd_cache_bypass"] += 1
                 log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200

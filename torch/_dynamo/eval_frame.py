@@ -786,6 +786,9 @@ class _TorchDynamoContext:
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
+            from torch._functorch._aot_autograd.autograd_cache import (
+                in_aot_compile_context,
+            )
 
             if not self.fullgraph:
                 raise RuntimeError(
@@ -796,14 +799,15 @@ class _TorchDynamoContext:
                 raise RuntimeError("aot compile requires a callable dynamo callback.")
 
             assert self._hooks is not None
-            return aot_compile_fullgraph(
-                fn,
-                example_inputs,
-                hooks=self._hooks,
-                backend=innermost_fn(
-                    self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
-                ),
-            )
+            with in_aot_compile_context():
+                return aot_compile_fullgraph(
+                    fn,
+                    example_inputs,
+                    hooks=self._hooks,
+                    backend=innermost_fn(
+                        self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+                    ),
+                )
 
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
