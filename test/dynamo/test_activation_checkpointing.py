@@ -2005,7 +2005,7 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     def count_op(self, gm, target):
         return sum(1 for n in gm.graph.nodes if n.target == target)
 
-    def _compile_and_capture(self, fn, rematerialize_nodes_with_ac_annotations):
+    def _compile_and_capture(self, fn, rematerialize_nodes_with_ac_annotations, inputs):
         captured_gm = None
 
         def compiler(gm, example_inputs):
@@ -2022,19 +2022,17 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
         with torch._functorch.config.patch(
             rematerialize_nodes_with_ac_annotations=rematerialize_nodes_with_ac_annotations
         ):
-            compiled_fn = torch.compile(fn, backend=backend, fullgraph=False)
-            result = compiled_fn()
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            result = compiled_fn(*inputs)
 
         return result, captured_gm
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_rematerialize_simple_forward_backward(self):
-        x_data = torch.randn(4, 4)
-        y_data = torch.randn(4, 4)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
 
-        def simple_fwd_bwd():
-            x = x_data.detach().requires_grad_(True)
-            y = y_data.detach().requires_grad_(True)
+        def simple_fwd_bwd(x, y):
             z = torch.utils.checkpoint.checkpoint(
                 lambda a, b: torch.sigmoid(torch.matmul(a, b)),
                 x,
@@ -2048,8 +2046,8 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
 
             return dx.detach(), dy.detach()
 
-        (dx1, dy1), gm_without = self._compile_and_capture(simple_fwd_bwd, False)
-        (dx2, dy2), gm_with = self._compile_and_capture(simple_fwd_bwd, True)
+        (dx1, dy1), gm_without = self._compile_and_capture(simple_fwd_bwd, False, (x, y))
+        (dx2, dy2), gm_with = self._compile_and_capture(simple_fwd_bwd, True, (x, y))
 
         self.assertTrue(torch.allclose(dx1, dx2))
         self.assertTrue(torch.allclose(dy1, dy2))
@@ -2058,8 +2056,6 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
         mm_without = self.count_op(gm_without, torch.ops.aten.mm.default)
         sigmoid_with = self.count_op(gm_with, torch.ops.aten.sigmoid.default)
         sigmoid_without = self.count_op(gm_without, torch.ops.aten.sigmoid.default)
-        # With reordering: 4 mm (1 fwd + 2 bwd grad + 1 recompute), 2 sigmoid (1 fwd + 1 recompute)
-        # Without: 3 mm (1 fwd + 2 bwd grad), 1 sigmoid (1 fwd, saved)
         self.assertEqual(mm_with, 4, "mm should be recomputed in backward")
         self.assertEqual(mm_without, 3)
         self.assertEqual(sigmoid_with, 2, "sigmoid should be recomputed in backward")
@@ -2089,11 +2085,9 @@ def forward(self, arg0_1, arg1_1):
         )
 
     def test_ac_rematerialize_with_rng_ops_raises_error(self):
-        x_data = torch.randn(4, 4)
+        x = torch.randn(4, 4, requires_grad=True)
 
-        def fwd_bwd_with_rng():
-            x = x_data.detach().requires_grad_(True)
-
+        def fwd_bwd_with_rng(x):
             z = torch.utils.checkpoint.checkpoint(
                 lambda a: torch.sigmoid(a + torch.rand_like(a)), x, use_reentrant=False
             )
@@ -2108,15 +2102,12 @@ def forward(self, arg0_1, arg1_1):
             torch._dynamo.exc.BackendCompilerFailed,
             "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops in checkpointed regions.",
         ):
-            self._compile_and_capture(fwd_bwd_with_rng, True)
+            self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
 
     def test_ac_rematerialize_with_no_annotations_raises_error(self):
-        """Verify error is raised when RNG ops are in checkpointed regions."""
+        x = torch.randn(4, 4, requires_grad=True)
 
-        x_data = torch.randn(4, 4)
-
-        def fwd_bwd():
-            x = x_data.detach().requires_grad_(True)
+        def fwd_bwd(x):
             z = torch.utils.checkpoint.checkpoint(
                 lambda a: torch.sigmoid(a + 4), x, use_reentrant=False
             )
@@ -2127,12 +2118,12 @@ def forward(self, arg0_1, arg1_1):
             torch._dynamo.exc.BackendCompilerFailed,
             "We are trying to rematerialize AC nodes in the backward region",
         ):
-            self._compile_and_capture(fwd_bwd, True)
+            self._compile_and_capture(fwd_bwd, True, (x,))
 
     def test_ac_rematerialize_with_selective_checkpoint_policy(self):
-        x_data = torch.randn(4, 128)
-        weight1 = torch.randn(128, 128)
-        bias1 = torch.randn(128)
+        x = torch.randn(4, 128, requires_grad=True)
+        w1 = torch.randn(128, 128, requires_grad=True)
+        b1 = torch.randn(128, requires_grad=True)
 
         def policy_fn(ctx, op, *args, **kwargs):
             if op == torch.ops.aten.addmm.default:
@@ -2143,13 +2134,9 @@ def forward(self, arg0_1, arg1_1):
             torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
         )
 
-        def fwd_bwd_with_policy():
-            x = x_data.detach().requires_grad_(True)
-            w1 = weight1.detach().requires_grad_(True)
-            b1 = bias1.detach().requires_grad_(True)
-
+        def fwd_bwd_with_policy(x, w1, b1):
             def checkpoint_fn(inp, w, b):
-                linear = torch.nn.functional.linear(inp, w, b)  # addmm
+                linear = torch.nn.functional.linear(inp, w, b)
                 return torch.relu(linear)
 
             result = torch.utils.checkpoint.checkpoint(
@@ -2161,9 +2148,9 @@ def forward(self, arg0_1, arg1_1):
                 dx, dw, db = _grad(loss, (x, w1, b1))
             return dx, dw, db
 
-        result_with, gm_with = self._compile_and_capture(fwd_bwd_with_policy, True)
+        result_with, gm_with = self._compile_and_capture(fwd_bwd_with_policy, True, (x, w1, b1))
         result_without, gm_without = self._compile_and_capture(
-            fwd_bwd_with_policy, False
+            fwd_bwd_with_policy, False, (x, w1, b1)
         )
 
         torch.testing.assert_close(result_with[0], result_without[0])
@@ -2191,15 +2178,11 @@ def forward(self, arg0_1, arg1_1):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_ac_rematerialize_transitive_dependency_sorting(self):
-        x_data = torch.randn(4, 4)
-        y_data = torch.randn(4, 4)
-        z_data = torch.randn(4, 4)
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+        z = torch.randn(4, 4, requires_grad=True)
 
-        def fwd_bwd_with_transitive_deps():
-            x = x_data.detach().requires_grad_(True)
-            y = y_data.detach().requires_grad_(True)
-            z = z_data.detach().requires_grad_(True)
-
+        def fwd_bwd_with_transitive_deps(x, y, z):
             def _util_checkpoint(x, y, z):
                 a = x.clone()
                 b = y.clone()
@@ -2218,7 +2201,7 @@ def forward(self, arg0_1, arg1_1):
 
             return dx.detach()
 
-        _, captured_gm = self._compile_and_capture(fwd_bwd_with_transitive_deps, True)
+        _, captured_gm = self._compile_and_capture(fwd_bwd_with_transitive_deps, True, (x, y, z))
 
         # If we don't sort, we see following sequence:
         # clone_2_recomputed = torch.ops.aten.clone.default(arg2_1)
