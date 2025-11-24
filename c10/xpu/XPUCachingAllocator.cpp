@@ -403,6 +403,14 @@ void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   }
 }
 
+void deletePrimitive(void* ptr, BlockPool* pool) {
+  if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
+    pool->owner_PrivatePool->allocator()->raw_delete(ptr);
+  } else {
+    sycl::free(ptr, xpu::get_device_context());
+  }
+}
+
 } // anonymous namespace
 
 class DeviceCachingAllocator {
@@ -815,11 +823,7 @@ class DeviceCachingAllocator {
      */
     TORCH_INTERNAL_ASSERT(!block->expandable_segment);
     auto* pool = block->pool;
-    if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
-      pool->owner_PrivatePool->allocator()->raw_delete(block->ptr);
-    } else {
-      sycl::free(block->ptr, xpu::get_device_context());
-    }
+    deletePrimitive(block->ptr, pool);
 
     if (pool->owner_PrivatePool) {
       TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->allocation_count > 0);
@@ -1430,7 +1434,7 @@ class XPUAllocator : public DeviceAllocator {
     return &local_raw_delete;
   }
 
-  void* raw_alloc(size_t size) override {
+  void* raw_alloc(size_t size) {
     if (size == 0) {
       return nullptr;
     }
@@ -1450,7 +1454,7 @@ class XPUAllocator : public DeviceAllocator {
     return r;
   }
 
-  void raw_delete(void* ptr) override {
+  void raw_delete(void* ptr) {
     this->free(ptr);
   }
 
