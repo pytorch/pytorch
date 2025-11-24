@@ -52,8 +52,6 @@ inline void recordStream(const DataPtr& dataPtr, XPUStream stream) {
   get()->recordStream(dataPtr, stream);
 }
 
-C10_XPU_API void init(DeviceIndex device_count);
-
 C10_XPU_API void enablePeerAccess(
     c10::DeviceIndex dev,
     c10::DeviceIndex dev_to_access);
