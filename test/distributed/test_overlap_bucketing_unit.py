@@ -753,18 +753,6 @@ class TestCrossPGOverlap(InductorTestCase):
     def test_cross_pg_prefetch_during_exposed_wait(self):
         """
         Test that ag2 on PG2 gets prefetched during exposed wait of ag1 on PG1.
-
-        Original graph structure:
-        ag1 (pg1) -> wait1 (exposed) -> mm1
-        ag2 (pg2) -> wait2 -> mm2
-
-        Expected behavior:
-        - ag1 starts
-        - During wait1 (which is exposed), we should prefetch ag2
-        - This enables cross-PG overlap: ag2 runs while we wait for ag1
-
-        Expected schedule:
-        ag1 (pg1) -> ag2 (pg2, prefetched during wait1) -> wait1 -> mm1 -> wait2 -> mm2
         """
         pg1_name = self.pg1_name
         pg2_name = self.pg2_name
