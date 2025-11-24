@@ -35,6 +35,7 @@ from torch.distributed.tensor.experimental._context_parallel._cp_custom_ops impo
     flex_cp_allgather,
 )
 from torch.distributed.tensor.experimental._context_parallel._sharding_rules import (
+    register_cp_sharding_rules,
     unregister_cp_sharding_rules,
 )
 from torch.distributed.tensor.parallel import parallelize_module
@@ -831,7 +832,6 @@ class TestSharding(DTensorTestBase):
         seq_len = 256
         dim = 32
 
-        unregister_cp_sharding_rules()
         device_mesh = init_device_mesh(
             mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
         )
@@ -850,6 +850,10 @@ class TestSharding(DTensorTestBase):
         k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
         v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
 
+        register_cp_sharding_rules()
+        out = F.scaled_dot_product_attention(q_dt, k_dt, v_dt)
+
+        unregister_cp_sharding_rules()
         # Run SDPA with sequence-sharded tensors WITHOUT enabling CP
         # Without CP enabled, DTensor should select a different strategy
         # (not sequence-sharded) because Shard(2) strategy is only available with CP

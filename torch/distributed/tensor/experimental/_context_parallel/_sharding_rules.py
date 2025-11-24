@@ -7,7 +7,6 @@ a valid sharding for SDPA without CP enabled. This module provides utilities to
 dynamically install Shard(2) sharding rules when CP is activated.
 """
 
-import warnings
 from contextlib import contextmanager
 
 import torch
@@ -25,9 +24,6 @@ from torch.distributed.tensor.placement_types import Replicate, Shard
 aten = torch.ops.aten
 
 SEQ_DIM = 2
-
-# Flag to track if cache warning has been shown
-_cache_warning_shown = False
 
 
 @contextmanager
@@ -72,16 +68,14 @@ def _op_strategy_context(op_overload, strategy_func, schema_info=None):
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
 
-        # Warn about cache not being cleared (only once)
-        global _cache_warning_shown
-        if not _cache_warning_shown:
-            warnings.warn(
-                "Context Parallel sharding rules cache will not be cleared. "
-                "Shard(2) support will persist in the cache.",
-                UserWarning,
-                stacklevel=2,
-            )
-            _cache_warning_shown = True
+        # Clear the cache can cause performance degradation.
+        from torch.distributed.tensor.debug import (
+            _clear_fast_path_sharding_prop_cache,
+            _clear_python_sharding_prop_cache,
+        )
+
+        _clear_python_sharding_prop_cache()
+        _clear_fast_path_sharding_prop_cache()
 
 
 # ==================== Flash Attention Strategies ====================
@@ -404,15 +398,6 @@ def unregister_cp_sharding_rules():
     # Exit all context managers
     for ctx in _cp_strategy_contexts.values():
         ctx.__exit__(None, None, None)
-
-    # Clear the cache can cause performance degradation.
-    from torch.distributed.tensor.debug import (
-        _clear_fast_path_sharding_prop_cache,
-        _clear_python_sharding_prop_cache,
-    )
-
-    _clear_python_sharding_prop_cache()
-    _clear_fast_path_sharding_prop_cache()
 
     _cp_strategy_contexts = {}
     _original_strategies = {}
