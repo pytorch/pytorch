@@ -168,7 +168,6 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag2: mm2,  # mm2 hides ag2
         }
 
-        # Build collective info and scheduled
         collective_info = build_collective_info(traced.graph, hiding_annotations)
         scheduled = OrderedSet(traced.graph.nodes)
 
