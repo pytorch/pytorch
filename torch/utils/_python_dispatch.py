@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
+from __future__ import annotations
+
 import contextlib
 import functools
 import warnings
 from collections import deque
-from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import cast, Optional, overload, Protocol, Union
+from typing import cast, overload, Protocol, TYPE_CHECKING
 from typing_extensions import TypeIs
 
 import torch
@@ -18,6 +19,11 @@ from torch._C import (
     _push_on_torch_dispatch_stack,
     DispatchKey,
 )
+from torch._C._dynamo.guards import set_is_in_mode_without_ignore_compile_internals
+
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 # TODO: Limitations and things about enable_torch_dispatch_mode we should fix before exposing it:
@@ -81,7 +87,7 @@ class TorchDispatchMode:
     # Mode authors can implement how the mode interacts with higher order operators.
     supports_higher_order_operators = False
 
-    def __init__(self, _dispatch_key=None):
+    def __init__(self, _dispatch_key=None) -> None:
         if _dispatch_key is not None:
             if not isinstance(_dispatch_key, torch._C.DispatchKey):
                 raise AssertionError("_dispatch_key must be a torch._C.DispatchKey")
@@ -93,7 +99,7 @@ class TorchDispatchMode:
             deque()
         )
 
-    def _lazy_init_old_dispatch_mode_flags(self):
+    def _lazy_init_old_dispatch_mode_flags(self) -> None:
         if not hasattr(self, "old_dispatch_mode_flags"):
             self.old_dispatch_mode_flags: deque[bool] = deque()  # type: ignore[no-redef]
 
@@ -135,6 +141,9 @@ class TorchDispatchMode:
             _is_in_any_mode_without_ignore_compile_internals
             or not self.ignore_compile_internals()
         )
+        set_is_in_mode_without_ignore_compile_internals(
+            _is_in_any_mode_without_ignore_compile_internals
+        )
         _push_mode(self)
         return self
 
@@ -154,6 +163,9 @@ class TorchDispatchMode:
         _is_in_any_mode_without_ignore_compile_internals = (
             self.old_without_ignore_compile_internals_dispatch_mode_flags.pop()
         )
+        set_is_in_mode_without_ignore_compile_internals(
+            _is_in_any_mode_without_ignore_compile_internals
+        )
         _pop_mode(mb_dk_or_mode_key)
 
     @classmethod
@@ -166,11 +178,11 @@ class TorchDispatchMode:
         return instance
 
     @classmethod
-    def is_infra_mode(cls):
+    def is_infra_mode(cls) -> bool:
         return False
 
     @classmethod
-    def ignore_compile_internals(cls):
+    def ignore_compile_internals(cls) -> bool:
         """Ignore operators that are compiled via torch.compile.
 
         If ``True``, then this TorchDispatchMode ignores operators that
@@ -202,7 +214,7 @@ class TorchDispatchMode:
         return False
 
 
-def _get_current_dispatch_mode() -> Optional[TorchDispatchMode]:
+def _get_current_dispatch_mode() -> TorchDispatchMode | None:
     """
     Return the top user mode on the stack (the next one that would be
     executed) if there are any.
@@ -282,7 +294,7 @@ def _get_current_dispatch_mode_stack() -> list[TorchDispatchMode]:
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 
-def _push_mode(mode: TorchDispatchMode):
+def _push_mode(mode: TorchDispatchMode) -> None:
     k = mode._dispatch_key if hasattr(mode, "_dispatch_key") else None
     if k is not None and k != torch._C.DispatchKey.PreDispatch:
         raise AssertionError(
@@ -303,7 +315,7 @@ def _push_mode(mode: TorchDispatchMode):
     _set_mode_pre_dispatch(mode)
 
 
-def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = None):
+def _pop_mode(k: DispatchKey | torch._C._TorchDispatchModeKey | None = None):
     if k == torch._C.DispatchKey.PreDispatch:  # type: ignore[attr-defined]
         from torch._ops import _pop_mode_from_pre_dispatch
 
@@ -314,7 +326,7 @@ def _pop_mode(k: Optional[Union[DispatchKey, torch._C._TorchDispatchModeKey]] = 
 
 
 @contextlib.contextmanager
-def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
+def _pop_mode_temporarily(k: DispatchKey | None = None):
     old = _pop_mode(k)
     try:
         yield old
@@ -424,18 +436,18 @@ class TensorWithFlatten(Protocol):
         non_blocking: bool = False,
         copy: bool = False,
         *,
-        memory_format: Optional[torch.memory_format] = None,
+        memory_format: torch.memory_format | None = None,
     ) -> torch.Tensor: ...
 
     @overload
     def to(
         self,
-        device: Optional["torch._prims_common.DeviceLikeType"] = None,
-        dtype: Optional[torch.types._dtype] = None,
+        device: torch._prims_common.DeviceLikeType | None = None,
+        dtype: torch.types._dtype | None = None,
         non_blocking: bool = False,
         copy: bool = False,
         *,
-        memory_format: Optional[torch.memory_format] = None,
+        memory_format: torch.memory_format | None = None,
     ) -> torch.Tensor: ...
 
     @overload
@@ -445,7 +457,7 @@ class TensorWithFlatten(Protocol):
         non_blocking: bool = False,
         copy: bool = False,
         *,
-        memory_format: Optional[torch.memory_format] = None,
+        memory_format: torch.memory_format | None = None,
     ) -> torch.Tensor: ...
 
 
@@ -539,7 +551,7 @@ def transform_subclass(t, callback, outer_size=None, outer_stride=None):
     return sub
 
 
-def _correct_storage_aliasing(func, schema_info, args, outs):
+def _correct_storage_aliasing(func, schema_info, args, outs) -> None:
     """
     Given: an OpOverload, a SchemaInfo (cached information from torchgen about schema),
     and the inputs/outputs to the OpOverload,
@@ -558,7 +570,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
     if not isinstance(outs, (list, tuple)):
         raise AssertionError(f"outs must be a list or tuple, got {type(args)}")
 
-    def alias_non_inplace_storage(arg, ret):
+    def alias_non_inplace_storage(arg, ret) -> None:
         # This is hopefully a reasonable assert:
         # subclasses that rely on this API for output aliasing
         # should always return wrapper tensor subclasses for us to manually alias.
@@ -605,7 +617,7 @@ def _correct_storage_aliasing(func, schema_info, args, outs):
         alias_non_inplace_storage(args[arg_idx], outs[return_idx])
 
 
-def _get_write_alias(x) -> Optional[str]:
+def _get_write_alias(x) -> str | None:
     alias_set = x.alias_set
     if not alias_set or not x.is_write:
         return None
@@ -624,7 +636,7 @@ def _get_write_alias(x) -> Optional[str]:
 class AliasInfo:
     alias_set: set[str]
     is_write: bool
-    name: Optional[str]
+    name: str | None
 
 
 @dataclass
@@ -637,7 +649,7 @@ class SchemaInfo:
     # [_get_write_alias(x) for x in outs]. Guaranteed to contain no Nones; we coerce
     # all-Nones result to empty list instead, and we don't support
     # some-but-not-all-Nones.
-    outs_write_aliases: Optional[list[str]]
+    outs_write_aliases: list[str] | None
 
     # List of (arg_idx, return_idx) where args[arg_idx].alias_set &
     # outs[out_idx].alias_set is not empty, and not args[arg_idx].is_write.
@@ -721,12 +733,12 @@ def get_alias_info(func) -> SchemaInfo:
             if is_read_only_alias_match:
                 read_only_alias_match_indexes.append((arg_idx, return_idx))
 
-    outs_write_aliases_list: list[Optional[str]] = [
+    outs_write_aliases_list: list[str | None] = [
         _get_write_alias(r) for r in out_schemas
     ]
     non_nones = sum(x is not None for x in outs_write_aliases_list)
     if non_nones == 0:
-        outs_write_aliases: Optional[list[str]] = None
+        outs_write_aliases: list[str] | None = None
     elif non_nones != len(outs_write_aliases_list):
         # simplifying assumption: we don't have **any** ops with return types like "-> (Tensor(a!), Tensor)"
         raise RuntimeError("Unsupported schema: " + str(func._schema))
@@ -743,6 +755,61 @@ def get_alias_info(func) -> SchemaInfo:
         read_only_alias_match_indexes=read_only_alias_match_indexes,
     )
     return schema_info
+
+
+def autograd_would_have_decomposed(
+    func: torch._ops.OpOverload, flat_args: Sequence[torch.Tensor | object]
+) -> bool:
+    """
+    Suppose that an operator has CompositeImplicitAutograd decomp registered.
+    Would autograd have used this decomposition?  It will only use it if there
+    isn't an explicit backend registration for the device as well.  This function
+    will tell if this would have occurred.
+
+    Why do we need to apply these decompositions later?  When inference mode is
+    on, the autograd key is bypassed entirely, so a lower level mode cannot rely
+    on the decomposition have been applied.  It's easy to accidentally never apply
+    the decomposition, resulting in an operator showing up in a graph that
+    is unexpected.
+
+    Why do we need to AVOID applying the decomposition when autograd wouldn't
+    have decomposed?  If autograd doesn't decompose, this means in eager mode
+    we would have run the fused kernel.  It must be possible to trace this
+    fused kernel directly into the graph for fidelity with eager (NB: a user
+    has the option of then further decomposing at proxy tensor mode via
+    decomposition table, but we must preserve it to proxy mode to have the
+    choice.)
+
+    Why does functionalization need to also perform the test here?  This is
+    because some CompositeImplicitAutograd decompositions are not functional.
+    If we are eventually going to decompose, we need to do this while we can
+    still turn functionalization back on, so those decompositions get functionalized.
+    So an early decomposition in functionalization may still be necessary.  Note that
+    if proxy tensor decomposition process could turn functionalization back on, this
+    wouldn't be necessary, and maybe that is a useful thing to do anyway because
+    the decomposition table is user specified and a user could violate the functional
+    decomp requirement with a bad decomp.  If this happened, then you could always
+    pass through functionalization.
+    """
+    has_backend_registration = False
+    for a in flat_args:
+        if isinstance(a, torch.Tensor):
+            backend_key = torch._C._parse_dispatch_key(
+                torch._C._dispatch_key_for_device(a.device.type)
+            )
+            assert backend_key is not None
+            # TODO: use func.has_kernel_for_dispatch_key(backend_key)
+            # but this one checks py_impl and CompositeImplicitAutograd
+            # incorrectly shows up as has backend reg here
+            has_backend_registration = torch._C._dispatch_has_kernel_for_dispatch_key(
+                func.name(), backend_key
+            )
+
+            # in theory we should take all backend keys and take the highest priority one
+            # to properly mimic the dispatcher,
+            # this just grabs the first tensor and takes its device key
+            break
+    return not has_backend_registration
 
 
 def return_and_correct_aliasing(func, args, kwargs, out):

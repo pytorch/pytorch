@@ -391,7 +391,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # aot_export expect the return type to always be a tuple.
         assert out_spec is not None
         if out_spec.type not in (list, tuple):
-            out_spec = pytree.TreeSpec(tuple, None, [out_spec])
+            out_spec = pytree.treespec_tuple([out_spec])
 
         mod.graph._codegen = _PyTreeCodeGen(
             _PyTreeInfo(
@@ -817,7 +817,7 @@ def _common_getitem_elimination_pass(
             node_id: dict[torch.fx.Node, str] = {}
             getitems: dict[str, torch.fx.Node] = {}
             for node in list(module.graph.nodes):
-                if node.op == "call_function" and node.target == operator.getitem:
+                if node.op == "call_function" and node.target is operator.getitem:
                     source, idx = node.args
                     new_id = f"{node_id[source]}.{idx}"
                     if new_id in getitems:
@@ -1709,8 +1709,11 @@ def _convert_guards_to_code(graph_module):
     py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
         shape_env.var_to_sources, lambda s: s.name(), shape_env.var_to_sources
     )
-    return [
+    ret = [
         py_printer.doprint(guard.expr)
         for guard in shape_env.guards
         if guard.expr.free_symbols.issubset(local_vars)
     ]
+    # TODO Figure out how to resolve guards containing weight sizes.
+    # This is not a big deal as _guards_code is mostly empty today.
+    return [guard for guard in ret if "L['self']" not in guard]

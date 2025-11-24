@@ -253,7 +253,7 @@ using vec4 = vec<4u>;
 
 // uvec3 is the type representing tensor extents. Useful for debugging.
 inline std::ostream& operator<<(std::ostream& os, const uvec3& v) {
-  os << "(" << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ")";
+  os << '(' << v.data[0u] << ", " << v.data[1u] << ", " << v.data[2u] << ')';
   return os;
 }
 
