@@ -69,9 +69,7 @@ RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_
 # Set default ENV for traditional builds - will be overridden by entrypoint.sh for TheRock
 ENV ROCM_PATH /opt/rocm
 ENV PATH /opt/rocm/bin:$PATH
-ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
-ENV PATH /opt/rocm/opencl/bin:$PATH
 ENV PATH /opt/rocm/llvm/bin:$PATH
 ENV MAGMA_HOME /opt/rocm/magma
 ENV LANG C.UTF-8
