@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdint>
+#include <tuple>
 #include <type_traits>
 #include <c10/core/DynamicCast.h>
 #include <c10/util/Exception.h>
@@ -11,7 +12,6 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/thread_constants.h>
 
-#include <thrust/tuple.h>
 
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
@@ -106,10 +106,10 @@ struct multi_outputs_store_helper {
   C10_HOST_DEVICE static void apply(
       const data_t& data,
       const offsets_t& offsets,
-      thrust::tuple<Args...> ret) {
-    using T = typename thrust::tuple_element<current, thrust::tuple<Args...>>::type;
+      std::tuple<Args...> ret) {
+    using T = typename std::tuple_element<current, std::tuple<Args...>>::type;
     T *to = reinterpret_cast<T *>(data[current]) + offsets[current];
-    *to = thrust::get<current>(ret);
+    *to = std::get<current>(ret);
   }
 };
 
