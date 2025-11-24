@@ -315,8 +315,8 @@ class TestAOTInductorPackage(TestCase):
                 self.assertTrue(torch.allclose(actual, expected))
 
     @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 6),
-        "Test is only supported on CUDA 12.6+",
+        torch.version.hip is None and _get_torch_cuda_version() < (12, 8),
+        "Test is only supported on CUDA 12.8+",
     )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @skipIfXpu  # doesn't support multi-arch binary
