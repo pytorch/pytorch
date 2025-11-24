@@ -167,7 +167,7 @@ class TritonBundler:
     def put_static_autotuner(cls, key: str, kernel: "CachingAutotuner") -> None:  # type: ignore[name-defined] # noqa: F821
         from torch._inductor import config
 
-        assert config.use_static_cuda_launcher
+        assert config.use_static_triton_launcher
         if (entries := cls._static_autotuners) is not None:
             # Clear a bunch of unpicklable values and make a copy to save
             # for FXGraphCache
@@ -310,7 +310,7 @@ class TritonBundler:
                                 artifacts,
                             )
                         )
-                if config.use_static_cuda_launcher:
+                if config.use_static_triton_launcher:
                     static_autotuners, static_kernel_names = (
                         cls.collect_static_autotuners()
                     )
@@ -395,7 +395,7 @@ class TritonBundler:
                     except OSError:
                         log.warning("Directory %s is not empty - skipping!", tmp_dir)
 
-            if config.use_static_cuda_launcher:
+            if config.use_static_triton_launcher:
                 static_kernel_names = TritonBundler.load_autotuners(
                     bundle.static_autotuners
                 )
