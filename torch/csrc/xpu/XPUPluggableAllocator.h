@@ -38,6 +38,10 @@ struct TORCH_XPU_API XPUPluggableAllocator
   void raw_delete(void* ptr) override;
   bool initialized() override;
 
+  void set_init_fn(std::function<void(int)> init_fn);
+  void set_record_stream_fn(
+      std::function<void(void* ptr, sycl::queue* queue)> record_stream_fn);
+
  protected:
   std::function<void*(size_t, int, sycl::queue*)> alloc_fn_;
   std::function<void(void*, size_t, int, sycl::queue*)> free_fn_;
@@ -47,5 +51,17 @@ struct TORCH_XPU_API XPUPluggableAllocator
   // We do the bookkeeping here in order to simplify custom allocators
   std::unordered_map<void*, _AllocationMetadata> allocation_metadata_;
 };
+
+TORCH_XPU_API std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>
+getCurrentAllocator();
+
+TORCH_XPU_API std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>
+createCustomAllocator(
+    std::function<void*(size_t, int, sycl::queue*)> alloc_fn,
+    std::function<void(void*, size_t, int, sycl::queue*)> free_fn);
+
+TORCH_XPU_API void changeCurrentAllocator(
+    const std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>&
+        allocator);
 
 } // namespace torch::xpu::XPUPluggableAllocator

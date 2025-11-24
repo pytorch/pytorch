@@ -392,8 +392,8 @@ struct MempoolIdHash {
 };
 
 void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
-  if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool.allocator()) {
-    *ptr = p.pool->owner_PrivatePool.allocator()->raw_alloc(size);
+  if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
+    *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
   } else {
     *ptr = sycl::aligned_alloc_device(
         kDeviceAlignment,
