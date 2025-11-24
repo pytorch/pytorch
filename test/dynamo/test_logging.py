@@ -861,7 +861,7 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
     def test_logs_out(self):
         import tempfile
 
-        with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(delete=True) as tmp:
             file_path = _as_posix_path(tmp.name)
             """
             NamedTemporaryFile will include a file open operation.
@@ -888,10 +888,6 @@ fn(torch.randn(5))
                 file_path, encoding="utf-8"
             ) as fd:  # encoding file to UTF-8 for Windows.
                 lines = fd.read()
-                fd.close()
-                os.remove(
-                    file_path
-                )  # Delete temp file manually, due to setup NamedTemporaryFile as delete=False.
                 orig_maxDiff = unittest.TestCase.maxDiff
                 unittest.TestCase.maxDiff = None
                 try:
@@ -988,6 +984,7 @@ exclusions = {
     "hierarchical_compile",
     "compute_dependencies",
     "annotation",
+    "node_runtime_estimation",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

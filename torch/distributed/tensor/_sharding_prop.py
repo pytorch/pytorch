@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import threading
 from collections.abc import Callable, Sequence
 from functools import lru_cache
@@ -6,6 +7,7 @@ from itertools import chain
 from typing import cast, Optional, Union
 
 import torch
+from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
@@ -169,7 +171,16 @@ class ShardingPropagator:
         # these operators to be inserted in the fx graph.
         from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
-        with FakeTensorMode(), disable_proxy_modes_tracing():
+        # DTensor.dispatch runs fake tensor prop twice, once here, and once for the actual
+        # local tensor result. The result here is never surfaced to tracing, and so if
+        # the op is data-dependent, can result in PendingUnbackedSymbolNotFound errors.
+        fake_mode = detect_fake_mode() or FakeTensorMode()
+        suppress_fresh_symbols_ctx = (
+            fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            if fake_mode.shape_env
+            else contextlib.nullcontext()
+        )
+        with fake_mode, disable_proxy_modes_tracing(), suppress_fresh_symbols_ctx:
             fake_args = op_schema.gen_fake_args()
             fake_kwargs = op_schema.gen_fake_kwargs()
             fake_out = op_schema.op(*fake_args, **fake_kwargs)
@@ -264,14 +275,16 @@ class ShardingPropagator:
                     output_tensor_meta_i = output_tensor_meta[i]
                     if not isinstance(output_tensor_meta_i, TensorMeta):
                         # NOTE: aten.convolution_backward.default is an exception and it
-                        # needs extra handling because the first Tensor in the output
-                        # tuple can be `None` if the input Tensor to convolution op has
-                        # `requires_grad=False` (e.g. convolution layer is the first
-                        # layer in the model). We explicitly allow its corresponding
-                        # TensorMeta to be `None`.
+                        # needs extra handling because any Tensor in the output tuple
+                        # can be `None` depending on the output_mask parameter. This can
+                        # occur during double backpropagation or when certain gradients
+                        # are not needed (e.g., grad_input when input has requires_grad=False,
+                        # grad_weight/grad_bias when weight/bias have requires_grad=False,
+                        # or grad_bias when bias is None). We explicitly allow the
+                        # corresponding TensorMeta to be `None`.
                         if (
                             op == aten.convolution_backward.default
-                            and i == 0
+                            and i in (0, 1, 2)
                             and output_tensor_meta_i is None
                         ):
                             assert isinstance(output_specs, list)
@@ -332,6 +345,10 @@ class ShardingPropagator:
         )
 
     def propagate(self, op_info: OpInfo) -> None:
+        # NB: The logic here is duplicated in _propagate_op_sharding_dispatch_slow_path.
+        # Ideally, this function would be deleted, but there are a handful of
+        # one off call sites here that aren't cleaned up.
+
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
@@ -348,6 +365,10 @@ class ShardingPropagator:
         """
         Propagate the sharding for an operator given the op_schema.
         """
+        # no-op in OSS, logs API usage metrics in meta-internal runs
+        torch._C._log_api_usage_once(
+            "torch.distributed.tensor._sharding_prop.ShardingPropagator.propogate_op_sharding_non_cached"
+        )
         # special case op, we don't need to propagate for local
         # scalar. TODO: figure out a better way to handle this
         if op_schema.op is aten._local_scalar_dense.default:
@@ -639,7 +660,7 @@ class ShardingPropagator:
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
         expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
-            out_tensor_meta.shape, spec.mesh, spec.placements
+            out_tensor_meta.shape, spec.mesh, spec.placements, skip_offset=True
         )
 
         # adjust the stride arg for aten.new_empty_strided.default

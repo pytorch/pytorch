@@ -23,14 +23,14 @@ import functools
 import inspect
 import operator
 import types
-from collections.abc import Hashable as py_Hashable
+from collections.abc import Hashable as py_Hashable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch._subclasses.fake_tensor import is_fake
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
-from ..exc import raise_observed_exception, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import is_constant_source, is_from_local_source
 from ..utils import (
@@ -50,6 +50,8 @@ from .lists import ListIteratorVariable
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    from .functions import UserFunctionVariable
 
 
 # [Adding a new supported class within the keys of ConstDictVariable]
@@ -316,6 +318,56 @@ class ConstDictVariable(VariableTracker):
             and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
         )
 
+    def call_tree_map_branch(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        other_dicts: list[ConstDictVariable] = []
+        for candidate in rest:
+            candidate = candidate.realize()
+            if not isinstance(candidate, ConstDictVariable) or len(
+                candidate.items
+            ) != len(self.items):
+                return self._tree_map_fallback(
+                    tx, tree_map_fn, map_fn, rest, tree_map_kwargs
+                )
+            other_dicts.append(candidate)
+
+        new_items_hashed = type(self.items)()
+        for key_tracker, value in self.items.items():
+            sibling_leaves: list[VariableTracker] = []
+            for candidate in other_dicts:
+                try:
+                    sibling_leaves.append(candidate.items[key_tracker])
+                except KeyError:
+                    return self._tree_map_fallback(
+                        tx, tree_map_fn, map_fn, rest, tree_map_kwargs
+                    )
+            new_items_hashed[key_tracker] = value.call_tree_map(
+                tx,
+                tree_map_fn,
+                map_fn,
+                sibling_leaves,
+                tree_map_kwargs,
+            )
+
+        updated_original_items = {
+            key_tracker.vt: new_items_hashed[key_tracker]
+            for key_tracker in new_items_hashed
+        }
+
+        return self.clone(
+            items=new_items_hashed,
+            original_items=updated_original_items,
+            should_reconstruct_all=True,
+            source=None,
+            mutation_type=ValueMutationNew(),
+        )
+
     def len(self) -> int:
         return sum(
             not isinstance(x, variables.DeletedVariable) for x in self.items.values()
@@ -377,7 +429,7 @@ class ConstDictVariable(VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
             msg = f"Dictionary key {arg.value} not found during tracing"  # type: ignore[attr-defined]
-            unimplemented_v2(
+            unimplemented(
                 gb_type="key not found in dict",
                 context=f"Key {arg.value}",  # type: ignore[attr-defined]
                 explanation=msg,
@@ -802,11 +854,11 @@ class ConstDictVariable(VariableTracker):
 
     def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
         self.install_dict_keys_match_guard()
-        return [x.vt for x in self.items.keys()]
+        return [x.vt for x in self.items]
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         # dict not allow setting arbitrary attributes.  OrderedDict and
         # defaultdict allow arbitrary setattr, but not deletion of default attrs
         if any(
@@ -819,7 +871,7 @@ class ConstDictVariable(VariableTracker):
                 return ConstantVariable.create(False)
 
         msg = f"hasattr on {self.user_cls} is not supported"
-        unimplemented_v2(
+        unimplemented(
             gb_type="unsupported hasattr operation",
             context=f"Class {self.user_cls}",
             explanation=msg,
@@ -854,7 +906,7 @@ class MappingProxyVariable(VariableTracker):
                 f"Preexisting MappingProxyVariable (source: {self.source}) cannot be reconstructed "
                 "because the connection to the original dict will be lost."
             )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="mapping proxy cannot be reconstructed",
                 context=f"Source: {self.source}",
                 explanation=msg,
@@ -892,7 +944,7 @@ class MappingProxyVariable(VariableTracker):
                 "are trying to access a proxy object."
             )
 
-            unimplemented_v2(
+            unimplemented(
                 gb_type="mapping proxy affected by dictionary mutation",
                 context=f"Source: {self.source}, Dict mutation detected",
                 explanation=msg,
@@ -905,7 +957,7 @@ class MappingProxyVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         if self.python_type() is types.MappingProxyType:
             return ConstantVariable.create(name in types.MappingProxyType.__dict__)
         return super().call_obj_hasattr(tx, name)
@@ -1027,7 +1079,7 @@ class SetVariable(ConstDictVariable):
         if not self.items:
             return "set()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+            return "{" + ",".join(k.vt.debug_repr() for k in self.items) + "}"
 
     @property
     def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
@@ -1296,18 +1348,11 @@ class SetVariable(ConstDictVariable):
 
 
 class FrozensetVariable(SetVariable):
-    def __init__(
-        self,
-        items: list[VariableTracker],
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(items, **kwargs)
-
     def debug_repr(self) -> str:
         if not self.items:
             return "frozenset()"
         else:
-            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+            return "{" + ",".join(k.vt.debug_repr() for k in self.items) + "}"
 
     @property
     def set_items(self) -> set["ConstDictVariable._HashableTracker"]:
@@ -1360,21 +1405,12 @@ class FrozensetVariable(SetVariable):
 
 
 class DictKeySetVariable(SetVariable):
-    def __init__(
-        self,
-        items: list[VariableTracker],
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(items, **kwargs)
-
     def debug_repr(self) -> str:
         if not self.items:
             return "dict_keys([])"
         else:
             return (
-                "dict_keys(["
-                + ",".join(k.vt.debug_repr() for k in self.items.keys())
-                + "])"
+                "dict_keys([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
             )
 
     def install_dict_keys_match_guard(self) -> None:
@@ -1448,7 +1484,7 @@ class DictViewVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> ConstantVariable:
         assert self.kv is not None
         if name in self.python_type().__dict__:
             return ConstantVariable.create(True)

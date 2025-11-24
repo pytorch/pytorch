@@ -13,6 +13,7 @@ from torch.types import _dtype
 from torch.utils._exposed_in import exposed_in
 
 from . import autograd, utils
+from .effects import EffectType
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -470,6 +471,9 @@ class CustomOpDef:
         """
         self._abstract_fn = fn
         return fn
+
+    def register_effect(self, effect: Optional[EffectType]) -> None:
+        self._lib._register_effectful_op(self._qualname, effect)
 
     def register_torch_dispatch(
         self, torch_dispatch_class: Any, fn: Optional[Callable] = None, /

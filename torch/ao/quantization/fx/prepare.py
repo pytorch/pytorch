@@ -2,7 +2,7 @@
 import copy
 import warnings
 from dataclasses import asdict
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch._subclasses import FakeTensor
@@ -117,7 +117,7 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
 
 
 def _get_observer_kwargs(
-    quant_spec: Union[QuantizationSpec, FixedQParamsQuantizationSpec],
+    quant_spec: QuantizationSpec | FixedQParamsQuantizationSpec,
 ):
     kwargs_dict = asdict(quant_spec)
     return copy.deepcopy(kwargs_dict)
@@ -127,14 +127,14 @@ def _get_qspec_for_arg(
     arg: Node,
     input_qspec_map: dict[Node, QuantizationSpecBase],
     named_modules: dict[str, torch.nn.Module],
-) -> Optional[QuantizationSpecBase]:
+) -> QuantizationSpecBase | None:
     while _is_activation_post_process_node(arg, named_modules):
         arg = arg.args[0]  # type: ignore[assignment]
     return input_qspec_map.get(arg)
 
 
 def _create_obs_or_fq_from_qspec(
-    quantization_spec: Optional[QuantizationSpecBase],
+    quantization_spec: QuantizationSpecBase | None,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
 ):
@@ -249,8 +249,8 @@ def _is_activation_post_process_node(
 
 
 def _get_dtype_and_is_dynamic(
-    obs_or_fq: Optional[ObserverOrFakeQuantize],
-) -> tuple[Optional[torch.dtype], bool]:
+    obs_or_fq: ObserverOrFakeQuantize | None,
+) -> tuple[torch.dtype | None, bool]:
     """Given a constructor for observer or fake quant module, returns
     a Tuple of dtype and is_dynamic
     """
@@ -393,8 +393,8 @@ def _is_observer_in_same_graph(
 
 
 def _is_pattern_dtype_config_and_qconfig_supported_by_backend(
-    pattern: Optional[Pattern],
-    matched_node_pattern: Optional[list[Node]],
+    pattern: Pattern | None,
+    matched_node_pattern: list[Node] | None,
     qconfig: QConfigAny,
     backend_config: BackendConfig,
 ) -> bool:
@@ -437,10 +437,8 @@ def _get_standalone_module_configs(
     named_modules: dict[str, torch.nn.Module],
     prepare_custom_config: PrepareCustomConfig,
     parent_qconfig: QConfigAny,
-    parent_backend_config: Optional[BackendConfig],
-) -> tuple[
-    QConfigMapping, tuple[Any, ...], PrepareCustomConfig, Optional[BackendConfig]
-]:
+    parent_backend_config: BackendConfig | None,
+) -> tuple[QConfigMapping, tuple[Any, ...], PrepareCustomConfig, BackendConfig | None]:
     """
     Returns the standalone module QConfigMapping and PrepareCustomConfig
     for `node`, assuming that the module pointed to by `node` is
@@ -486,7 +484,7 @@ def _insert_obs_or_fq(
     model: torch.nn.Module,
     named_modules: dict[str, torch.nn.Module],
     graph: Graph,
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> Node:
     """
     Attaches `obs_or_fq` to `model`, and creates a node which calls
@@ -516,7 +514,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
     matched_node_pattern: NodePattern,
     last_node: Node,
     qconfig: QConfigAny,
-    qhandler: Optional[QuantizeHandler],
+    qhandler: QuantizeHandler | None,
     backend_config: BackendConfig,
     named_modules: dict[str, torch.nn.Module],
     cache_for_no_tensor_check: dict[Node, bool],
@@ -571,7 +569,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
 def _get_target_activation_dtype_for_node(
     node: Node,
     qconfig: QConfigAny,
-    qhandler: Optional[QuantizeHandler],
+    qhandler: QuantizeHandler | None,
     named_modules: dict[str, torch.nn.Module],
     backend_config: BackendConfig,
     cache_for_no_tensor_check: dict[Node, bool],
@@ -674,7 +672,7 @@ def _get_output_act_obs_or_fq(
     named_modules: dict[str, torch.nn.Module],
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-) -> Optional[ObserverOrFakeQuantize]:
+) -> ObserverOrFakeQuantize | None:
     """Get the constructor for observer or fake quant object for
     the argument in the original graph as the output of previous node,
     skipping inserted observers
@@ -745,7 +743,7 @@ def _get_arg_target_dtype_as_output(
     named_modules: dict[str, torch.nn.Module],
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-) -> Optional[torch.dtype]:
+) -> torch.dtype | None:
     arg_as_output_act_obs_or_fq = _get_output_act_obs_or_fq(
         arg, named_modules, obs_or_fq_map, is_qat
     )
@@ -761,7 +759,7 @@ def _get_arg_as_input_act_obs_or_fq(
     named_modules: dict[str, torch.nn.Module],
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-) -> Optional[ObserverOrFakeQuantize]:
+) -> ObserverOrFakeQuantize | None:
     """Get the observer or fake quant constructor for the Argument `arg`, as input
     to Node `node`
     """
@@ -809,18 +807,18 @@ def _get_arg_as_input_act_obs_or_fq(
 
 
 def _maybe_insert_input_observer_for_arg_or_kwarg(
-    node: Union[Node, Any],
+    node: Node | Any,
     arg: Argument,
     qconfig: QConfigAny,
     model: torch.nn.Module,
     named_modules: dict[str, torch.nn.Module],
     graph: Graph,
-    qhandler: Optional[QuantizeHandler],
+    qhandler: QuantizeHandler | None,
     prepare_custom_config: PrepareCustomConfig,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    backend_config: Optional[BackendConfig] = None,
-    model_device: Optional[torch.device] = None,
+    backend_config: BackendConfig | None = None,
+    model_device: torch.device | None = None,
 ) -> Argument:
     """
     Given a `node` and an `arg`, inserts an input observer between
@@ -987,12 +985,12 @@ def _maybe_insert_input_observers_for_node(
     model: torch.nn.Module,
     named_modules: dict[str, torch.nn.Module],
     graph: Graph,
-    qhandler: Optional[QuantizeHandler],
+    qhandler: QuantizeHandler | None,
     prepare_custom_config: PrepareCustomConfig,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-    backend_config: Optional[BackendConfig] = None,
-    model_device: Optional[torch.device] = None,
+    backend_config: BackendConfig | None = None,
+    model_device: torch.device | None = None,
 ) -> None:
     """
     If needed, inserts observers to the input args and kwargs of `node`.
@@ -1108,7 +1106,7 @@ def _maybe_insert_output_observer_for_node(
     graph: Graph,
     obs_or_fq_map: dict[EdgeOrNode, ObserverOrFakeQuantize],
     is_qat: bool,
-) -> Optional[Node]:
+) -> Node | None:
     """
     If `node` needs an output observer, creates it, inserts it into `graph`
     and returns it.
@@ -1286,7 +1284,7 @@ def _maybe_insert_observers_before_graph_output(
 
 def _maybe_propagate_dtype_for_node(
     node: Node,
-    target_dtype: Union[torch.dtype, type],
+    target_dtype: torch.dtype | type,
     node_name_to_match_result_with_qconfig: dict[str, _MatchResultWithQConfig],
 ) -> None:
     """
@@ -1490,7 +1488,7 @@ def insert_observers_for_model(
     backend_config: BackendConfig,
     observed_node_names: set[str],
     is_qat: bool,
-) -> Optional[Node]:
+) -> Node | None:
     """
     Inserts observers, using the following high level algorithm:
 
@@ -2023,13 +2021,13 @@ def _save_state(
 
 def prepare(
     model: GraphModule,
-    qconfig_mapping: Union[QConfigMapping, dict[str, Any]],
+    qconfig_mapping: QConfigMapping | dict[str, Any],
     is_qat: bool,
     node_name_to_scope: dict[str, tuple[str, type]],
     example_inputs: tuple[Any, ...],
-    prepare_custom_config: Union[PrepareCustomConfig, dict[str, Any], None] = None,
-    _equalization_config: Union[QConfigMapping, dict[str, Any], None] = None,
-    backend_config: Union[BackendConfig, dict[str, Any], None] = None,
+    prepare_custom_config: PrepareCustomConfig | dict[str, Any] | None = None,
+    _equalization_config: QConfigMapping | dict[str, Any] | None = None,
+    backend_config: BackendConfig | dict[str, Any] | None = None,
     is_standalone_module: bool = False,
 ) -> GraphModule:
     """standalone_module means it a submodule that is not inlined in

@@ -1597,7 +1597,7 @@ bool gemm_and_bias(
   }
 
   using opmath_t = at::opmath_type<Dtype>;
-  opmath_t beta_val = 0; // bias is added in epilogue
+  opmath_t beta_val = bias ? 0 : 1; // bias is added in epilogue unless nullptr
 
   cudaDataType_t abType = CUDA_R_32F;
   cudaDataType_t cType = CUDA_R_32F;
@@ -1686,15 +1686,22 @@ bool gemm_and_bias(
     _syncCurrentWithCarveoutStream(stream, true);
   }
 #endif
-  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
-  if (activation == GEMMAndBiasActivationEpilogue::RELU) {
-    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
-  } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
-    epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
-  }
+  const auto epilogue = [&]() -> cublasLtEpilogue_t {
+    // The cuBLAS documentation indicates that
+    // *_<ACTIVATION>_BIAS = *_<ACTIVATION>,
+    // but we keep it verbose here for clarity.
+    switch (activation) {
+      case GEMMAndBiasActivationEpilogue::RELU:
+        return bias ? CUBLASLT_EPILOGUE_RELU_BIAS : CUBLASLT_EPILOGUE_RELU;
+      case GEMMAndBiasActivationEpilogue::GELU:
+        return bias ? CUBLASLT_EPILOGUE_GELU_BIAS : CUBLASLT_EPILOGUE_GELU;
+      default:
+        return bias ? CUBLASLT_EPILOGUE_BIAS : CUBLASLT_EPILOGUE_DEFAULT;
+    }
+  }();
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
 
-  if (bias != nullptr) {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+  if (bias) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }
 
@@ -1990,6 +1997,10 @@ void scaled_gemm(
   // Note: alpha_val may change later depending on user-passed argument
   float alpha_val = 1.0;
   float beta_val = 0.0;
+#ifndef USE_ROCM
+  // Note: unused, but cublasLtMatmul requires a C pointer that is not result_ptr or nullptr
+  const void* dummy_C_ptr = mat1_ptr;
+#endif // ifndef USE_ROCM
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
@@ -2173,8 +2184,11 @@ void scaled_gemm(
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      // NOTE: always use result_ptr here, because cuBLASLt w/device beta=0 can't handle nullptr either
+#ifdef USE_ROCM
       result_ptr, // unused, since beta_val is 0, but hipblaslt can't handle nullptr
+#else
+      dummy_C_ptr, // also unused, but cuBLAS can't use nullptr or result_ptr
+#endif // ifdef USE_ROCM
       Cdesc.descriptor(),
       result_ptr,
       Ddesc.descriptor(),

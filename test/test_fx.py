@@ -2209,7 +2209,7 @@ class TestFX(JitTestCase):
         interp = Interpreter(symbolic_trace(rn18))
         inp = torch.rand(5, 3, 224, 224)
         out = interp.run(inp)
-        env_key_names = {n.name for n in interp.env.keys()}
+        env_key_names = {n.name for n in interp.env}
         self.assertEqual(env_key_names, {"output"})
 
     def test_interpreter_default_args(self):
@@ -3001,7 +3001,7 @@ class TestFX(JitTestCase):
         for node in traced.graph.nodes:
             if node.op == "placeholder":
                 ph = node
-            elif node.op == "call_function" and node.target == wrapped_named_tup:
+            elif node.op == "call_function" and node.target is wrapped_named_tup:
                 node.update_arg(0, Pair(ph, 1.2))
                 node.update_kwarg("p2", Pair(3.4, ph))
                 call_func = node
@@ -3164,7 +3164,7 @@ class TestFX(JitTestCase):
         mod_false = symbolic_trace(mod, concrete_args={"y": False})
         self.assertEqual(mod_true(3, True), 6)
         print(mod_true.code)
-        assert any(i.target == torch._assert for i in mod_true.graph.nodes)
+        assert any(i.target is torch._assert for i in mod_true.graph.nodes)
         with self.assertRaises(AssertionError):
             mod_true(3, False)
         self.assertEqual(mod_false(3, False), 3)
@@ -3471,12 +3471,12 @@ class TestFX(JitTestCase):
 
         def parameter_exists(gm: GraphModule, path: str) -> bool:
             return any(path == name for name, _ in gm.named_parameters()) and any(
-                path == name for name in gm.state_dict().keys()
+                path == name for name in gm.state_dict()
             )
 
         def buffer_exists(gm: GraphModule, path: str) -> bool:
             return any(path == name for name, _ in gm.named_buffers()) and any(
-                path == name for name in gm.state_dict().keys()
+                path == name for name in gm.state_dict()
             )
 
         # Test that we added the "dropout" submodule
@@ -4251,7 +4251,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @skipIfRocm
-    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_stack_trace_augmentation(self):
         """
         Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
@@ -4307,7 +4307,7 @@ event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @skipIfRocm
-    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_multiple_modules(self):
         """
         Test that multiple compiled modules under the same profiler session
@@ -4351,7 +4351,7 @@ event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @skipIfRocm
-    @torch._dynamo.config.patch("enrich_profiler_metadata", True)
+    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_nested_graph_modules(self):
         """
         Test that nested graph modules (e.g., graph modules calling subgraphs)
@@ -4783,7 +4783,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         self.assertEqual(len(gm.graph.nodes), 3)
         found = False
         for node in gm.graph.nodes:
-            if node.op == "call_function" and node.target == side_effect_func:
+            if node.op == "call_function" and node.target is side_effect_func:
                 found = True
         self.assertTrue(found)
 
@@ -5060,13 +5060,13 @@ class TestFunctionalTracing(JitTestCase):
         def no(*args, **kwargs):
             return False
 
-        for name in cls.TO_PATCH.keys():
+        for name in cls.TO_PATCH:
             cls.TO_PATCH[name] = getattr(torch.nn.functional, name)
             setattr(torch.nn.functional, name, no)
 
     @classmethod
     def tearDownClass(cls):
-        for name in cls.TO_PATCH.keys():
+        for name in cls.TO_PATCH:
             setattr(torch.nn.functional, name, cls.TO_PATCH[name])
 
 

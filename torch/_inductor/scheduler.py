@@ -219,6 +219,9 @@ class MixOrderReduction:
     # TODO add a cache
     @classmethod
     def can_fuse(cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode) -> bool:
+        """
+        Check whether we can fuse two reductions with mix loop orders.
+        """
         if not config.triton.mix_order_reduction:
             return False
 
@@ -246,24 +249,46 @@ class MixOrderReduction:
         nrow = sympy.Max(g1[0], g1[1])
         ncol = sympy.Min(g1[0], g1[1])
 
+        # the fused version has worse perf than non-fused version for
+        # small workload. When a workload is small enough, data can be
+        # fully cached by L2
+        size_thres = 5 * 2**20
+
+        # Call evaluate_expr rather than statically_known_geq since nrow can
+        # have dynamic shape in real models.
+        # Don't use hint directly since hint can be non-representative.
+        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
+            return False
+
         # We require more more row than columns since
         # 1, we prefer doing persistent reduction for each row
         # 2, we will split the reduction across the rows
-        if not V.graph.sizevars.statically_known_geq(nrow, ncol * 2):
+        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, ncol * 2)):
             return False
 
         # When nrow is small, ncol should also be small (due to the check
         # above). Thus the entire tensor should be well cached in L2.
         # Mix order reduction is less beneficial.
-        if not V.graph.sizevars.statically_known_geq(nrow, 4096):
+        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, 4096)):
             return False
 
         contiguous_node, other_node = (
             (node1, node2) if g1[1] == ncol else (node2, node1)
         )
 
+        # We previously only check the contiguous_node has contiguous
+        # access to common_reads. But that turns out to be not enough.
+        # The contiguous node may access a buffer that's node use by
+        # other_ndoe. If that ascess is non-contiugous, generating
+        # mix-order reduction can be inefficient especially when we
+        # force XBLOCK to be 1
+        # if not all(
+        #     cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
+        # ):
+        #     return False
         if not all(
-            cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
+            cls.is_contiguous_load(dep.name, contiguous_node)
+            for dep in contiguous_node.read_writes.reads
         ):
             return False
 
@@ -280,6 +305,8 @@ class MixOrderReduction:
             return False
 
         # rnumel so large that we will not generated persistent reduction
+        # We don't see real use cases with dynamic ncol. But if we do,
+        # we should call evaluete_expr here which adds guards.
         if not V.graph.sizevars.statically_known_leq(ncol, 1024 * 16):
             return False
 
@@ -306,7 +333,6 @@ class MixOrderReduction:
     def is_contiguous_load(cls, buf: str, parent_node: BaseSchedulerNode) -> bool:
         from torch._inductor.loop_body import MemoryUsageType
 
-        n_congituous_read = 0
         for node in parent_node.get_nodes():
             assert isinstance(node, SchedulerNode)
             loop_body = node._body
@@ -328,10 +354,11 @@ class MixOrderReduction:
                     var_symbols,
                     var_symbols,
                 )
-                n_congituous_read += stride_vars[-1] == 1
-                if n_congituous_read > 0:
-                    return True
-        return False
+
+                # stride==0 means a broadcast
+                if not (stride_vars[-1] == 0 or stride_vars[-1] == 1):
+                    return False
+        return True
 
 
 @dataclasses.dataclass
@@ -449,7 +476,6 @@ class SchedulerDonatedBuffer(SchedulerBuffer):
 
 class BaseSchedulerNode:
     ancestors: OrderedSet[str]
-    debug_device_str: Callable[[BaseSchedulerNode], list[str]]
     group: tuple[torch.device, tuple[tuple[sympy.Expr, ...], ...]]
     last_usage: OrderedSet[str]
     # .min_order and .max_order are only relevant for "grouped" nodes such as FusedSchedulerNode.
@@ -461,21 +487,26 @@ class BaseSchedulerNode:
     max_order: int
     mpi_node: MemoryPlanningInfoForNode
     mutation_renames: dict[str, str]
-    node: Optional[ir.Operation]
+    node: Optional[ir.Operation] = None
     outputs: list[SchedulerBuffer]
     outputs_by_name: dict[str, SchedulerBuffer]
     override_estimated_runtime: Optional[float] = None
     read_writes: dependencies.ReadWrites
     unmet_dependencies: OrderedSet[Dep]
+    written: bool = False
 
     def __init__(self, scheduler: Scheduler) -> None:
-        self.scheduler = scheduler
-        self.debug_device_str = lambda *args, **kwargs: []
+        self.scheduler: Scheduler = scheduler
+        self.debug_device_str: Callable[[BaseSchedulerNode], list[str]] = (
+            lambda *args, **kwargs: []
+        )
 
     def _init_from_node(self, node: ir.Operation) -> None:
         self.node = node
         self.ancestors = OrderedSet()
-        self.last_usage = OrderedSet()  # buffers that won't be used after this kernel
+        self.last_usage = OrderedSet[
+            str
+        ]()  # buffers that won't be used after this kernel
         self.written = False
         self.outputs = [
             SchedulerBuffer(
@@ -2643,6 +2674,12 @@ class Scheduler:
         if config._pre_fusion_custom_pass is not None:
             self.nodes = config._pre_fusion_custom_pass(self.nodes)
 
+        if config.distributed_max_autotune_gemm:
+            from . import distributed_autotune
+
+            distributed_autotune.schedule(self)
+            self.compute_ancestors()
+
         self.nodes = self.fuse_nodes(self.nodes)
         if config._post_fusion_custom_pass is not None:
             self.nodes = config._post_fusion_custom_pass(self.nodes)
@@ -2683,12 +2720,22 @@ class Scheduler:
             if (
                 used_non_deterministic_runtime_estimations()
                 and config_comms.runtime_estimations_align_across_all_distributed_ranks
-            ):
-                from .comms import (
-                    align_runtime_estimations_across_all_distributed_ranks,
+                and (
+                    config.runtime_estimations_mms_benchmark
+                    or config_comms.runtime_estimations_use_nccl_lib_estimations
                 )
+            ):
+                has_collectives = False
+                for node in self.nodes:
+                    if is_collective(node.node):
+                        has_collectives = True
+                        break
+                if has_collectives:
+                    from .comms import (
+                        align_runtime_estimations_across_all_distributed_ranks,
+                    )
 
-                align_runtime_estimations_across_all_distributed_ranks(self.nodes)
+                    align_runtime_estimations_across_all_distributed_ranks(self.nodes)
 
             from torch._logging import trace_structured
 
@@ -2711,8 +2758,12 @@ class Scheduler:
         self.process_grouped_nodes()
 
         if (
-            torch._inductor.config.graph_partition
-            and torch._inductor.config.triton.cudagraphs
+            # pyrefly: ignore[unbound-name]
+            config.graph_partition
+            # pyrefly: ignore[unbound-name]
+            and config.triton.cudagraphs
+            # pyrefly: ignore[unbound-name]
+            and config.triton.reorder_for_reducing_graph_partitions
         ):
             self.nodes = self.maybe_reorder_for_minimizing_partition(self.nodes)
             self.nodes = self.reorder_for_partition_with_simple_dependency(self.nodes)
@@ -2723,6 +2774,7 @@ class Scheduler:
             self.insert_memory_check_nodes()
 
         log_ir_post_fusion(self.nodes)
+        # pyrefly: ignore[unbound-name]
         V.debug.graph_diagram(self.nodes)
         self.debug_draw_graph()
 
@@ -2889,7 +2941,7 @@ class Scheduler:
                         list1 = name_to_users[buf1_name]
                         list2 = name_to_users[buf2_name]
                         combined = list1 + list2
-                        for key in name_to_users.keys():
+                        for key in name_to_users:
                             if (
                                 name_to_users[key] is list1
                                 or name_to_users[key] is list2
@@ -3160,6 +3212,9 @@ class Scheduler:
         """
         Remove any nodes without users
         """
+        if not config.use_dce:
+            return
+
         # self.nodes is in topological order, so by iterating in reverse order
         # we have visited (and potentially removed) all users before visiting a
         # given node.
@@ -3515,6 +3570,7 @@ class Scheduler:
 
         new_scheduler_node.min_order = node.min_order
         new_scheduler_node.max_order = node.max_order
+        new_scheduler_node.ancestors = node.ancestors
         new_scheduler_node.last_usage = node.last_usage
 
     def _any_atomic_add(self, node_list: Sequence[BaseSchedulerNode]) -> bool:

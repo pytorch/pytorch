@@ -4,7 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Callable
+from collections.abc import Callable
 
 
 """
@@ -162,8 +162,9 @@ activation_memory_budget = 1.0
 activation_memory_budget_runtime_estimator = "flops"
 
 # This controls the solver used for the 0-1 knapsack. By default we use a
-# quantized DP solution ("dp"). The other approaches are a "greedy" and a "ilp"
-# (which has a scipy dependency).
+# quantized DP solution ("dp"). The other approaches are a "greedy", a "ilp"
+# (which has a scipy dependency) and "dp_knapsack_sliding_hirschberg", which
+# used memory-efficient quantized DP solution
 activation_memory_budget_solver = "dp"
 
 # This dumps out a SVG visualization of the expected runtime vs. activation
@@ -373,6 +374,13 @@ saved_tensors_hooks_filtering_mode = "donated"
 
 # This callback is invoked on the joint graph before partitioning
 joint_custom_pass: Callable = None  # type: ignore[assignment]
+
+# Note [Selective Decomposition]
+# This config allows selective decomposition of certain operators in the graph.
+# When True, it does NOT decompose any nodes, except those nodes that users explicitly
+# annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
+# on to explicitly annotate. This is currently only used by inductor lite mode.
+selective_decompose: bool = False
 
 
 if TYPE_CHECKING:
