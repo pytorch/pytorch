@@ -266,12 +266,8 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
 
         # Create inputs with appropriate size (divisible by world_size)
         input_tensors = [
-            torch.full(
-                (4 * self.world_size, 3), fill_value=float(rank), device=device
-            ),
-            torch.full(
-                (2 * self.world_size, 2), fill_value=float(rank), device=device
-            ),
+            torch.full((4 * self.world_size, 3), fill_value=float(rank), device=device),
+            torch.full((2 * self.world_size, 2), fill_value=float(rank), device=device),
         ]
         scatter_dims = [0, 0]
 
@@ -436,10 +432,9 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             output, input_tensor, grad_outputs=grad_outputs
         )
         expected_grad_input = fcols.all_to_all_single(
-            grad_outputs, group=group_name
+            grad_outputs, None, None, group=group_name
         )
         self.assertEqual(grad_input, expected_grad_input)
-
 
     @parametrize("device", devices)
     def test_all_reduce_sum_invariant_backward(self, device):
@@ -586,7 +581,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             expected_grad = torch.ones_like(input_tensor)
             self.assertEqual(input_tensor.grad, expected_grad)
 
-
     # ============================================================
     # Phase 3: torch.library.opcheck Tests
     # ============================================================
@@ -724,7 +718,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             test_utils=test_utils,
         )
 
-
     # ============================================================
     # Phase 4: torch.compile Integration Tests
     # ============================================================
@@ -804,9 +797,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             return output.sum()
 
         # Input should be divisible by world_size
-        input_tensor = torch.randn(
-            4 * self.world_size, 3, requires_grad=True
-        )
+        input_tensor = torch.randn(4 * self.world_size, 3, requires_grad=True)
 
         loss = compiled_fn(input_tensor)
         loss.backward()
@@ -853,7 +844,6 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertIsNotNone(input_tensor.grad)
         expected_grad = torch.full((3, 3), fill_value=float(self.world_size))
         self.assertEqual(input_tensor.grad, expected_grad)
-
 
 
 if __name__ == "__main__":

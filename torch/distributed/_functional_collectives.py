@@ -389,6 +389,7 @@ def all_gather_into_tensor_coalesced(
         map(functools.partial(_maybe_wrap_tensor, enable_autograd=True), tensor_list)
     )
 
+
 def reduce_scatter_tensor_coalesced(
     inputs: list[torch.Tensor],
     reduceOp: str,
@@ -849,7 +850,7 @@ torch.library.register_autograd(
 )
 
 
-def all_reduce_coalesced_backward(ctx, *grad_outputs: torch.Tensor):
+def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
     """
     Backward for all_reduce_coalesced: all_reduce each gradient.
 
@@ -871,15 +872,13 @@ def all_reduce_coalesced_backward(ctx, *grad_outputs: torch.Tensor):
             f"all_reduce_coalesced backward only supports 'sum' reduction, got '{reduce_op}'"
         )
 
-    # Backward does all_reduce on each gradient
-    grad_inputs = []
-    for grad_output in grad_outputs:
-        output = torch.ops._c10d_functional.all_reduce(
-            grad_output.contiguous(), reduce_op, group_name
-        )
-        grad_inputs.append(wait_tensor(output))
-
-    return (*grad_inputs, None, None)
+    # Backward does all_reduce on list of gradients
+    grad_inputs = torch.ops._c10d_functional.all_reduce_coalesced(
+        [grad_output.contiguous() for grad_output in grad_outputs],
+        reduce_op,
+        group_name,
+    )
+    return (list(map(wait_tensor, grad_inputs)), None, None)
 
 
 def all_reduce_coalesced_setup_context(ctx, inputs, output):
@@ -903,7 +902,7 @@ torch.library.register_autograd(
 )
 
 
-def all_gather_into_tensor_coalesced_backward(ctx, *grad_outputs: torch.Tensor):
+def all_gather_into_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
     """
     Backward for all_gather_into_tensor_coalesced: reduce_scatter each gradient.
 
@@ -921,18 +920,14 @@ def all_gather_into_tensor_coalesced_backward(ctx, *grad_outputs: torch.Tensor):
     group_name = ctx.group_name
     group_size = ctx.group_size
 
-    # Backward is reduce_scatter on each gradient
-    grad_inputs = []
-    for grad_output in grad_outputs:
-        output = torch.ops._c10d_functional.reduce_scatter_tensor(
-            grad_output.contiguous(),
-            "sum",
-            group_size,
-            group_name,
-        )
-        grad_inputs.append(wait_tensor(output))
-
-    return (*grad_inputs, None, None)
+    # Backward does reduce_scatter on list of gradients
+    grad_inputs = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
+        [grad_output.contiguous() for grad_output in grad_outputs],
+        "sum",
+        group_size,
+        group_name,
+    )
+    return (list(map(wait_tensor, grad_inputs)), None, None)
 
 
 def all_gather_into_tensor_coalesced_setup_context(ctx, inputs, output):
@@ -956,7 +951,7 @@ torch.library.register_autograd(
 )
 
 
-def reduce_scatter_tensor_coalesced_backward(ctx, *grad_outputs: torch.Tensor):
+def reduce_scatter_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
     """
     Backward for reduce_scatter_tensor_coalesced: all_gather each gradient.
 
@@ -981,17 +976,13 @@ def reduce_scatter_tensor_coalesced_backward(ctx, *grad_outputs: torch.Tensor):
             f"reduce_scatter_tensor_coalesced backward only supports 'sum' reduction, got '{reduce_op}'"
         )
 
-    # Backward is all_gather on each gradient
-    grad_inputs = []
-    for grad_output in grad_outputs:
-        output = torch.ops._c10d_functional.all_gather_into_tensor(
-            grad_output.contiguous(),
-            group_size,
-            group_name,
-        )
-        grad_inputs.append(wait_tensor(output))
-
-    return (*grad_inputs, None, None, None)
+    # Backward does all_gather on list of gradients
+    grad_inputs = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
+        [grad_output.contiguous() for grad_output in grad_outputs],
+        group_size,
+        group_name,
+    )
+    return (list(map(wait_tensor, grad_inputs)), None, None, None)
 
 
 def reduce_scatter_tensor_coalesced_setup_context(ctx, inputs, output):
@@ -1507,7 +1498,7 @@ def _are_we_tracing() -> bool:
     return get_proxy_mode() is not None
 
 
-def _maybe_wrap_tensor(self, enable_autograd=True) -> torch.Tensor:
+def _maybe_wrap_tensor(self, enable_autograd=False) -> torch.Tensor:
     if _are_we_tracing():
         return wait_tensor(self)
     if enable_autograd:
