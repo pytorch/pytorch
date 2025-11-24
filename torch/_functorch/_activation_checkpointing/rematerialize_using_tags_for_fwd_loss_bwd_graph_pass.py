@@ -37,7 +37,7 @@ def _is_backward_node(node: fx.Node) -> bool:
     return node.meta.get("custom", {}).get("remat_pass_tag", None) == "is_backward"
 
 
-def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModule:
+def rematerialize_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModule:
     """
     Duplicate checkpointed nodes for backward use. DCE removes unused forward versions. We assume that
     you already annotated your backward region with fx.traceback.annotate({"remat_pass_tag": "is_backward"})
@@ -54,7 +54,7 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
         )
 
     # Use partitioner pass to normalize AC node tags.
-    gm = cleanup_recompute_tags(gm, is_default_partition=False)
+    gm = cleanup_recompute_tags(gm, is_default_partition=True)
 
     if not config.unsafe_allow_optimization_of_collectives:
         force_save_collectives(gm)

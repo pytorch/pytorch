@@ -18,6 +18,10 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
 from torch.distributed.tensor._ops._embedding_ops import MaskPartial
+from torch.distributed.tensor._ops.registration import (
+    register_op_strategy,
+    register_prop_rule,
+)
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -25,8 +29,6 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_evenly_shardable,
     is_tensor_partial,
     normalize_dim,
-    register_op_strategy,
-    register_prop_rule,
     shift_shard_dims_after_insert,
     shift_shard_dims_after_remove,
 )

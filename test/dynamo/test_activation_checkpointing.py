@@ -2005,7 +2005,7 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     def count_op(self, gm, target):
         return sum(1 for n in gm.graph.nodes if n.target == target)
 
-    def _compile_and_capture(self, fn, rematerialize_nodes_with_ac_annotations, inputs):
+    def _compile_and_capture(self, fn, remat_using_tags_for_fwd_loss_bwd_graph, inputs):
         captured_gm = None
 
         def compiler(gm, example_inputs):
@@ -2020,7 +2020,7 @@ class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
         )
 
         with torch._functorch.config.patch(
-            rematerialize_nodes_with_ac_annotations=rematerialize_nodes_with_ac_annotations
+            remat_using_tags_for_fwd_loss_bwd_graph=remat_using_tags_for_fwd_loss_bwd_graph
         ):
             compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
             result = compiled_fn(*inputs)
@@ -2178,56 +2178,6 @@ def forward(self, arg0_1, arg1_1):
         self.assertTrue(
             any("relu" in name for name in recomputed_nodes),
             f"Expected relu_recomputed but got: {recomputed_nodes}",
-        )
-
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_ac_rematerialize_transitive_dependency_sorting(self):
-        x = torch.randn(4, 4, requires_grad=True)
-        y = torch.randn(4, 4, requires_grad=True)
-        z = torch.randn(4, 4, requires_grad=True)
-
-        def fwd_bwd_with_transitive_deps(x, y, z):
-            def _util_checkpoint(x, y, z):
-                a = x.clone()
-                b = y.clone()
-                c = a + b
-                d = z.clone()
-                return c, d
-
-            c, d = torch.utils.checkpoint.checkpoint(
-                _util_checkpoint, x, y, z, use_reentrant=False
-            )
-
-            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
-                e = d + c
-                loss = e.sum()
-                dx = _grad(loss, x)[0]
-
-            return dx.detach()
-
-        _, captured_gm = self._compile_and_capture(
-            fwd_bwd_with_transitive_deps, True, (x, y, z)
-        )
-
-        # If we don't sort, we see following sequence:
-        # clone_2_recomputed = torch.ops.aten.clone.default(arg2_1)
-        # add_recomputed = torch.ops.aten.add.Tensor(clone, clone_1)
-        # clone_recomputed = torch.ops.aten.clone.default(arg0_1)
-        # clone_1_recomputed = torch.ops.aten.clone.default(arg1_1)
-        self.assertExpectedInline(
-            captured_gm.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    clone_recomputed = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    clone_1_recomputed = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    add_recomputed = torch.ops.aten.add.Tensor(clone_recomputed, clone_1_recomputed);  clone_recomputed = clone_1_recomputed = None
-    clone_2_recomputed = torch.ops.aten.clone.default(arg2_1);  arg2_1 = None
-    add_2 = torch.ops.aten.add.Tensor(clone_2_recomputed, add_recomputed);  clone_2_recomputed = add_recomputed = None
-    sum_1 = torch.ops.aten.sum.default(add_2);  add_2 = None
-    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
-    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
-    detach = torch.ops.aten.detach.default(expand);  expand = None
-    return (detach,)""",
         )
 
 

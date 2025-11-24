@@ -47,6 +47,7 @@ from . import config
 from ._activation_checkpointing.graph_info_provider import GraphInfoProvider
 from ._activation_checkpointing.knapsack import (
     dp_knapsack,
+    dp_knapsack_sliding_hirschberg,
     greedy_knapsack,
     ilp_knapsack,
 )
@@ -1120,6 +1121,8 @@ def default_partition(
 
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
+            continue
+        if node.target is torch.ops.aten._assert_scalar.default:
             continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
@@ -2365,6 +2368,8 @@ def _optimize_runtime_with_given_memory(
         return ilp_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
+    elif SOLVER == "dp_knapsack_sliding_hirschberg":
+        return dp_knapsack_sliding_hirschberg(memory, runtimes, max_memory)
     elif SOLVER == "dynamic_memory_budget_dp":
         log.warning(
             "dynamic_memory_budget_dp is an experimental solver. "
