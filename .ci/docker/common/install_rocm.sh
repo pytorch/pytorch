@@ -36,7 +36,7 @@ install_ubuntu() {
         rm -rf /opt/rocm
       fi
 
-      : "${THEROCK_NIGHTLY_INDEX_URL:=https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/}"
+      export THEROCK_NIGHTLY_INDEX_URL="${THEROCK_NIGHTLY_INDEX_URL:-https://rocm.nightlies.amd.com/v2/gfx94X-dcgpu/}"
       python3 -m pip install \
         --index-url "${THEROCK_NIGHTLY_INDEX_URL}" \
         "rocm[libraries,devel]"
