@@ -128,9 +128,13 @@ def rematerialize_nodes_with_ac_annotations(gm: fx.GraphModule) -> fx.GraphModul
     new_graph.node_copy(output_node, remat_input)
     new_gm = torch.fx.GraphModule(gm, new_graph)
 
+    print("CODE", new_gm.code)
+
     # DCE with custom is_impure_node (like default_partition)
     # Treats certain collectives as pure while delegating to default impurity logic
     new_gm.graph.eliminate_dead_code(is_impure_node=is_impure_node_for_dce)
+
+    print("CODE V2", new_gm.code)
 
     # raise_getitems pass for better memory (like default_partition)
     new_gm = raise_getitems(new_gm)

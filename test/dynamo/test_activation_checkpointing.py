@@ -2002,31 +2002,6 @@ class GraphModule(torch.nn.Module):
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
     """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
 
-    def _get_ac_nodes(self, gm):
-        """Get nodes tagged for AC recomputation."""
-        from torch.utils.checkpoint import CheckpointPolicy
-
-        ac_nodes = []
-        for node in gm.graph.nodes:
-            if node.meta.get("recompute") in [
-                CheckpointPolicy.MUST_RECOMPUTE,
-                CheckpointPolicy.PREFER_RECOMPUTE,
-            ]:
-                ac_nodes.append(node)
-        return ac_nodes
-
-    def _get_backward_nodes(self, gm):
-        """Get nodes tagged as backward."""
-        backward_nodes = []
-        for node in gm.graph.nodes:
-            if node.meta.get("custom", {}).get("backward") is not None:
-                backward_nodes.append(node)
-        return backward_nodes
-
-    def _get_node_order(self, gm):
-        """Get mapping from node to its position in graph."""
-        return {node: idx for idx, node in enumerate(gm.graph.nodes)}
-
     def _compile_and_capture(self, fn, rematerialize_nodes_with_ac_annotations):
         """Helper to compile a function and capture the graph."""
         captured_gm = None
@@ -2251,18 +2226,16 @@ def forward(self, arg0_1, arg1_1):
             y = y_data.detach().requires_grad_(True)
             z = z_data.detach().requires_grad_(True)
 
+            def util_checkpoint(x, y, z):
+                a = x.clone()
+                b = y.clone()
+                c = a + b
+                d = z.clone()
+                return c, d
+
             # Forward region - all checkpointed
-            a = torch.utils.checkpoint.checkpoint(
-                lambda t: t.clone(), x, use_reentrant=False
-            )
-            b = torch.utils.checkpoint.checkpoint(
-                lambda t: t.clone(), y, use_reentrant=False
-            )
-            c = torch.utils.checkpoint.checkpoint(
-                lambda t1, t2: t1 + t2, a, b, use_reentrant=False
-            )
-            d = torch.utils.checkpoint.checkpoint(
-                lambda t: t.clone(), z, use_reentrant=False
+            c, d = torch.utils.checkpoint.checkpoint(
+                util_checkpoint, x, y, z, use_reentrant=False
             )
 
             # Backward region: e = d + c
@@ -2276,14 +2249,18 @@ def forward(self, arg0_1, arg1_1):
 
         _, captured_gm = self._compile_and_capture(fwd_bwd_with_transitive_deps, True)
 
-        # clone and clone_1 are must_save so they are not recomputed
+        # If we don't sort, we see following sequence:
+        # clone_2_recomputed = torch.ops.aten.clone.default(arg2_1)
+        # add_recomputed = torch.ops.aten.add.Tensor(clone, clone_1)
+        # clone_recomputed = torch.ops.aten.clone.default(arg0_1)
+        # clone_1_recomputed = torch.ops.aten.clone.default(arg1_1)
         self.assertExpectedInline(
             captured_gm.code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    clone = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
-    clone_1 = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
-    add_recomputed = torch.ops.aten.add.Tensor(clone, clone_1);  clone = clone_1 = None
+    clone_recomputed = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+    clone_1_recomputed = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+    add_recomputed = torch.ops.aten.add.Tensor(clone_recomputed, clone_1_recomputed);  clone_recomputed = clone_1_recomputed = None
     clone_2_recomputed = torch.ops.aten.clone.default(arg2_1);  arg2_1 = None
     add_2 = torch.ops.aten.add.Tensor(clone_2_recomputed, add_recomputed);  clone_2_recomputed = add_recomputed = None
     sum_1 = torch.ops.aten.sum.default(add_2);  add_2 = None
