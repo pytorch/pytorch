@@ -103,12 +103,12 @@ _ref_test_ops = tuple(
 
 test_out_skips = defaultdict(dict)
 
+# Functionality issues with test_out, https://github.com/intel/torch-xpu-ops/issues/1951
 test_out_skips["xpu"] = {
     "_native_batch_norm_legit": {torch.float32},
     "addmv": {torch.float32},
     "cholesky_inverse": {torch.float32},
     "geqrf": {torch.float32},
-    "histc": {torch.float32},
     "mean": {torch.float32},
     "mv": {torch.float32},
     "narrow_copy": {torch.float32},
@@ -120,7 +120,7 @@ test_out_skips["xpu"] = {
 
 test_noncontiguous_samples_skips = defaultdict(dict)
 
-# Disable cases for https://github.com/intel/torch-xpu-ops/issues/2295
+# Stock PyTorch CI environment specific issue, https://github.com/intel/torch-xpu-ops/issues/2295
 test_noncontiguous_samples_skips["xpu"] = {
     "masked.amax": {torch.int64},
     "masked.amin": {torch.int64},
@@ -1619,7 +1619,6 @@ class TestCommon(TestCase):
 
     # Validates that each OpInfo specifies its forward and backward dtypes
     #   correctly for CPU and CUDA devices
-    @skipXPU
     @skipMeta
     @onlyNativeDeviceTypesAnd(["hpu"])
     @ops(ops_and_refs, dtypes=OpDTypes.none)
