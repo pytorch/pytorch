@@ -28,6 +28,21 @@ __all__ = ["Placement", "Shard", "Replicate", "Partial", "MaskPartial"]
 Placement.__module__ = "torch.distributed.tensor.placement_types"
 
 
+class ShardingPlaceholder:
+    """
+    Any type of sharding can be used.
+
+    TODO: how shall we opt shardings into this? hardcode in 'check' fn? subclass relationship?
+    TODO: express 'even' sharding requirement via placeholder?
+    """
+
+    def __init__(self, dim: int) -> None:
+        self.dim = dim
+
+    def __repr__(self) -> str:
+        return f"ShardingPlaceholder(dim={self.dim})"
+
+
 class Shard(torch._C._distributed.Shard):
     """
     The ``Shard(dim)`` placement describes the DTensor sharding on tensor dimension

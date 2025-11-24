@@ -167,8 +167,8 @@ void TritonKernel::computeInternal(ExecutionFrame& executionFrame) const {
 
   // todo: check if this is redundant
   auto out_t = out.toTensorList();
-  for (const auto& i : output_indices_) {
-    out_t[i] = input(i, executionFrame).toTensor();
+  for (const auto i : c10::irange(output_indices_.size())) {
+    out_t[i] = input(output_indices_[i], executionFrame).toTensor();
   }
 }
 
