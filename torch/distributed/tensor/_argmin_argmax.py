@@ -1,22 +1,21 @@
-import torch
-import torch.distributed.tensor._api as dtensor
-import torch.distributed._functional_collectives as funcol
 import operator
 from functools import reduce
-from torch.distributed.tensor.placement_types import Shard, Replicate, Partial
+
+import torch
+import torch.distributed._functional_collectives as funcol
+import torch.distributed.tensor._api as dtensor
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
+from torch.distributed.tensor.placement_types import Partial, Replicate, Shard
 
 
 _REDUCTION_OPS = {
     torch.ops.aten.argmax.default: torch.max,
-    torch.ops.aten.argmin.default: torch.min
+    torch.ops.aten.argmin.default: torch.min,
 }
 
 
 def argmin_argmax_handler(
-        op_call: torch._ops.OpOverload,
-        args: tuple[object, ...],
-        kwargs: dict[str, object]
+    op_call: torch._ops.OpOverload, args: tuple[object, ...], kwargs: dict[str, object]
 ):
     """
     Handles reduces on sharded dimensions locally to limit calls to replicate.
@@ -32,25 +31,28 @@ def argmin_argmax_handler(
     input_dtensor = args[0]
     if not isinstance(input_dtensor, dtensor.DTensor):
         raise NotImplementedError
-    
-    dim = args[1] if len(args) > 1 else None
+
+    dim: int | None = args[1] if len(args) > 1 else None  # type: ignore[assignment]
     keepdim = args[2] if len(args) > 2 else False
-    
+
     placements = input_dtensor.placements
 
     # check for partial placements and handle it as replicate.
     if any(isinstance(p, Partial) for p in placements):
-        target_placements = [Replicate() if isinstance(p, Partial) else p for p in placements]
+        target_placements = [
+            Replicate() if isinstance(p, Partial) else p for p in placements
+        ]
         input_dtensor = input_dtensor.redistribute(
-            device_mesh=input_dtensor.device_mesh,
-            placements=target_placements
+            device_mesh=input_dtensor.device_mesh, placements=target_placements
         )
         placements = input_dtensor.placements
     local_tensor = input_dtensor.to_local()
-    
+
     input_shape = list(local_tensor.shape)
     if dim is None:
-        expected_shape = torch.Size([1] * len(input_shape)) if keepdim else torch.Size([])
+        expected_shape = (
+            torch.Size([1] * len(input_shape)) if keepdim else torch.Size([])
+        )
     elif keepdim:
         input_shape[dim] = 1
         expected_shape = torch.Size(input_shape)
@@ -63,7 +65,7 @@ def argmin_argmax_handler(
         if isinstance(p, Shard):
             if dim is None or p.dim == (dim if dim >= 0 else local_tensor.ndim + dim):
                 shard_mesh_dims.append(mesh_dim)
-    
+
     device_mesh = input_dtensor.device_mesh
 
     if dim is None:
@@ -71,13 +73,17 @@ def argmin_argmax_handler(
         local_idx = (local_tensor.flatten() == local_max).nonzero().squeeze()
     else:
         local_max, local_idx = val_op(local_tensor, dim=dim, keepdim=True)
-    
-    if not len(shard_mesh_dims):
-        return dtensor.DTensor._op_dispatcher.wrap(local_idx.reshape(expected_shape), output_sharding.output_spec) 
+
+    if not shard_mesh_dims:
+        return dtensor.DTensor._op_dispatcher.wrap(
+            local_idx.reshape(expected_shape), output_sharding.output_spec
+        )
 
     # find the correct offset for sharded dim
     global_shape = input_dtensor.shape
-    _, global_offset = compute_local_shape_and_global_offset(global_shape, device_mesh, placements)
+    _, global_offset = compute_local_shape_and_global_offset(
+        global_shape, device_mesh, placements
+    )
     gathered_maxes = local_max
     if dim is None:
         local_coord = torch.unravel_index(local_idx, local_tensor.shape)
@@ -86,19 +92,25 @@ def argmin_argmax_handler(
         for i, offset in enumerate(global_offset):
             global_coord[i] += offset
         # compute with proper striding
-        gathered_idxs = 0
+        gathered_idxs = torch.tensor(0)
         for i, coord in enumerate(global_coord):
-            gathered_idxs += coord * reduce(operator.mul, global_shape[i + 1:], 1)
+            gathered_idxs += coord * reduce(operator.mul, global_shape[i + 1 :], 1)
     else:
         gather_dim = dim
         gathered_idxs = local_idx + global_offset[dim]
-    
+
     for mesh_dim in shard_mesh_dims:
-        gathered_maxes = funcol.all_gather_tensor(gathered_maxes, gather_dim=gather_dim, group=(device_mesh, mesh_dim))
-        gathered_idxs = funcol.all_gather_tensor(gathered_idxs, gather_dim=gather_dim, group=(device_mesh, mesh_dim))
+        gathered_maxes = funcol.all_gather_tensor(
+            gathered_maxes, gather_dim=gather_dim, group=(device_mesh, mesh_dim)
+        )
+        gathered_idxs = funcol.all_gather_tensor(
+            gathered_idxs, gather_dim=gather_dim, group=(device_mesh, mesh_dim)
+        )
 
     rank_winner = op_call(gathered_maxes, dim, True)
 
     final_idx = torch.gather(gathered_idxs, dim=gather_dim, index=rank_winner)
 
-    return dtensor.DTensor._op_dispatcher.wrap(final_idx.reshape(expected_shape), output_sharding.output_spec)
+    return dtensor.DTensor._op_dispatcher.wrap(
+        final_idx.reshape(expected_shape), output_sharding.output_spec
+    )

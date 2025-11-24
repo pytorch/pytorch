@@ -12,8 +12,8 @@ import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._argmin_argmax import argmin_argmax_handler
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -155,7 +155,7 @@ class OpDispatcher:
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
             aten.argmin.default: argmin_argmax_handler,
-            aten.argmax.default: argmin_argmax_handler
+            aten.argmax.default: argmin_argmax_handler,
         }
 
     # ********************************************************************************************
