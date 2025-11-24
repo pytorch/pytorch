@@ -14,7 +14,7 @@ struct TORCH_XPU_API XPUPluggableAllocator
   XPUPluggableAllocator(XPUPluggableAllocator&& other) = delete;
   XPUPluggableAllocator& operator=(const XPUPluggableAllocator& other) = delete;
   XPUPluggableAllocator& operator=(XPUPluggableAllocator&& other) = delete;
-  
+
   ~XPUPluggableAllocator() override = default;
 
   void* malloc(size_t size, c10::DeviceIndex device, cudaStream_t stream);
