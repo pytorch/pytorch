@@ -955,8 +955,7 @@ class OverlapScheduler:
         # 1. reduce_scatter operations (reduce memory pressure)
         # 2. Earlier domination index
         # 3. Original order for stability
-        candidates = sorted(
-            candidates,
+        candidates.sort(
             key=lambda n: (
                 not is_reduce_scatter(n),  # reduce_scatter first
                 self.compute_index_domination[n],
