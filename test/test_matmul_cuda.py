@@ -5,7 +5,7 @@ import time
 import unittest
 from itertools import product
 from functools import partial
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 
@@ -359,6 +359,29 @@ class TestMatmulCuda(InductorTestCase):
                 self.assertEqual(agrad, a.grad)
                 self.assertEqual(bgrad, b.grad)
 
+    @onlyCUDA
+    @skipIfRocm
+    @dtypes(torch.half, torch.bfloat16)
+    @unittest.skipIf(not SM100OrLater, "cuBLAS integration for batch invariance is only on Blackwell")
+    @serialTest()
+    def test_cublas_batch_invariance_blackwell(self, device, dtype):
+        orig_bf16 = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        orig_fp16 = torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (False, False)
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (False, False)
+        with blas_library_context('cublaslt'):
+            N = 2048
+            K = 6144
+            M_max = 32
+            x = torch.randn(M_max, K, device="cuda", dtype=torch.bfloat16)
+            w = torch.randn(N, K, device="cuda", dtype=torch.bfloat16).t()
+            full = x @ w
+            xx = x[:1]
+            out = xx @ w
+            self.assertEqual(full[:1], out, atol=0., rtol=0.)
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig_bf16
+        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = orig_fp16
+
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
     @parametrize("a_row_major", [False, True])
@@ -490,8 +513,6 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("b_row_major", [False, True])
     @dtypes(torch.bfloat16, torch.float32, torch.float16)
     def test_grouped_gemm_3d_2d(self, strided, a_row_major, b_row_major, dtype):
-        if TEST_WITH_ROCM and a_row_major and b_row_major and dtype in [torch.bfloat16, torch.float16]:
-            self.skipTest("failed using hipblaslt on rocm 6.4.2")
         device = "cuda"
         s_int = int(strided)
         m, n, k, n_groups = 16, 32, 64, 4

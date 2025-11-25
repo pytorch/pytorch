@@ -18,12 +18,31 @@ retry () {
     $*  || (sleep 1 && $*) || (sleep 2 && $*) || (sleep 4 && $*) || (sleep 8 && $*)
 }
 
+# Detect architecture first
+ARCH=$(uname -m)
+echo "Detected architecture: $ARCH"
+
 PLATFORM=""
 # TODO move this into the Docker images
 OS_NAME=$(awk -F= '/^NAME/{print $2}' /etc/os-release)
 if [[ "$OS_NAME" == *"AlmaLinux"* ]]; then
     retry yum install -q -y zip openssl
-    PLATFORM="manylinux_2_28_x86_64"
+    # Set platform based on architecture
+    case $ARCH in
+        x86_64)
+            PLATFORM="manylinux_2_28_x86_64"
+            ;;
+        aarch64)
+            PLATFORM="manylinux_2_28_aarch64"
+            ;;
+        s390x)
+            PLATFORM="manylinux_2_28_s390x"
+            ;;
+        *)
+            echo "Unsupported architecture: $ARCH"
+            exit 1
+            ;;
+    esac
 elif [[ "$OS_NAME" == *"Red Hat Enterprise Linux"* ]]; then
     retry dnf install -q -y zip openssl
 elif [[ "$OS_NAME" == *"Ubuntu"* ]]; then
@@ -37,6 +56,8 @@ else
     echo "Unknown OS: '$OS_NAME'"
     exit 1
 fi
+
+echo "Platform set to: $PLATFORM"
 
 # We use the package name to test the package by passing this to 'pip install'
 # This is the env variable that setup.py uses to name the package. Note that
@@ -299,8 +320,8 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
             # ROCm workaround for roctracer dlopens
             if [[ "$DESIRED_CUDA" == *"rocm"* ]]; then
                 patchedpath=$(fname_without_so_number $destpath)
-            # Keep the so number for XPU dependencies and libgomp.so.1 to avoid twice load
-            elif [[ "$DESIRED_CUDA" == *"xpu"* || "$filename" == "libgomp.so.1" ]]; then
+            # Keep the so number for XPU dependencies, libgomp.so.1, ACL libraries, and NVPL libraries to avoid twice load
+            elif [[ "$DESIRED_CUDA" == *"xpu"* || "$filename" == "libgomp.so.1" || "$filename" == libarm_compute* || "$filename" == libnvpl* || "$filename" == "libgfortran.so.5" ]]; then
                 patchedpath=$destpath
             else
                 patchedpath=$(fname_with_sha256 $destpath)
@@ -346,9 +367,22 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
     done
 
     # create Manylinux 2_28 tag this needs to happen before regenerate the RECORD
-    if [[ $PLATFORM == "manylinux_2_28_x86_64" && $GPU_ARCH_TYPE != "cpu-s390x" && $GPU_ARCH_TYPE != "xpu" ]]; then
+    # Support all architectures (x86_64, aarch64, s390x)
+    if [[ "$IS_MANYLINUX2_28" == "1" && $GPU_ARCH_TYPE != "xpu" ]]; then
         wheel_file=$(echo $(basename $pkg) | sed -e 's/-cp.*$/.dist-info\/WHEEL/g')
-        sed -i -e s#linux_x86_64#"${PLATFORM}"# $wheel_file;
+        echo "Updating wheel tag for $ARCH architecture"
+        # Replace linux_* with manylinux_2_28_* based on architecture
+        case $ARCH in
+            x86_64)
+                sed -i -e 's#linux_x86_64#manylinux_2_28_x86_64#g' $wheel_file
+                ;;
+            aarch64)
+                sed -i -e 's#linux_aarch64#manylinux_2_28_aarch64#g' $wheel_file
+                ;;
+            s390x)
+                sed -i -e 's#linux_s390x#manylinux_2_28_s390x#g' $wheel_file
+                ;;
+        esac
     fi
 
     # regenerate the RECORD file with new hashes

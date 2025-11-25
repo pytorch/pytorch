@@ -2015,6 +2015,26 @@ except RuntimeError as e:
             self.assertEqual(12345, batch[0])
             self.assertEqual(12345, batch[1])
 
+    @unittest.skipIf(
+        IS_WINDOWS or IS_MACOS,
+        "`ValueError: cannot find context for 'forkserver'` in Windows",
+    )
+    def test_worker_init_fn_forkserver(self):
+        def local_init_fn(worker_id):
+            torch.manual_seed(12345)
+
+        import multiprocessing as py_mp
+
+        py_mp.set_start_method("forkserver", force=True)
+
+        dataset = SeedDataset(4)
+        dataloader = self._get_data_loader(
+            dataset, batch_size=2, num_workers=2, worker_init_fn=local_init_fn
+        )
+        with self.assertWarnsRegex(UserWarning, "Got pickle error when"):
+            with self.assertRaises(Exception):
+                next(iter(dataloader))
+
     def test_get_worker_info(self):
         p = ErrorTrackingProcess(target=_test_get_worker_info)
         p.start()
@@ -3523,6 +3543,11 @@ class TestSetAffinity(TestCase):
             os.sched_setaffinity(0, [expected_affinity])
 
         dataset = SetAffinityDataset()
+
+        if not IS_WINDOWS and not IS_MACOS:
+            import multiprocessing as py_mp
+
+            py_mp.set_start_method("fork", force=True)
 
         dataloader = torch.utils.data.DataLoader(
             dataset, num_workers=2, worker_init_fn=worker_set_affinity

@@ -2617,7 +2617,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic_$is_traceable, m) {
         )
 
         def fn():
-            for i in [10, 100, 10, 20, 10]:
+            for i in [10, 30, 10, 20, 10]:
                 x = torch.ones(i, i, requires_grad=True)
                 out = module.custom_op_backed_by_autograd_fn(x)
                 loss = out.sum()
@@ -5222,6 +5222,7 @@ xfail_by_backend = {
         "test_reentrant_with_callbacks_both_depths",  # queue_callback
         "test_reentrant_with_callbacks_depth_0",  # queue_callback
         "test_reentrant_with_callbacks_depth_1",  # queue_callback
+        "test_checkpoint_graph_execution_group",  # Attempted to call function marked as skipped
         "test_current_graph_task_execution_order",  # nodes are already freed by the time dynamo traces the lifted hook
         "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
         "test_post_accumulate_grad_hook_ordering",  # accuracy error

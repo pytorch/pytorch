@@ -1781,6 +1781,14 @@ class TestTorchDeviceType(TestCase):
         self.assertEqual(b[0, :], d[0, :], atol=3e-5, rtol=3e-5)
         self.assertEqual(b[-1, :], d[-1, :], atol=3e-5, rtol=3e-5)
 
+    @onlyCUDA
+    @largeTensorTest('48GB')
+    def test_cumsum_outer_dim_64bit_indexing(self, device):
+        x = torch.zeros(309504, 1, 16384, device=device)
+        torch.exp(x)
+        cumsum = torch.cumsum(x, dim=1)
+        self.assertEqual(cumsum.max().item(), 0., atol=0., rtol=0.)
+
     @expectedFailureMeta  # expected a non-determinitic error, but it was not raised
     @onlyNativeDeviceTypes
     def test_nondeterministic_alert_put(self, device):
