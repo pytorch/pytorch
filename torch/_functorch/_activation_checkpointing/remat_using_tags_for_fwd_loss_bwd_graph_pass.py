@@ -37,7 +37,7 @@ def _is_backward_node(node: fx.Node) -> bool:
     return node.meta.get("custom", {}).get("remat_pass_tag", None) == "is_backward"
 
 
-def rematerialize_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModule:
+def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModule:
     """
     Duplicate checkpointed nodes for backward use. DCE removes unused forward versions. We assume that
     you already annotated your backward region with fx.traceback.annotate({"remat_pass_tag": "is_backward"})
