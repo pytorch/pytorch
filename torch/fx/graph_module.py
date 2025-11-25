@@ -868,6 +868,7 @@ class {module_name}(torch.nn.Module):
         python_code = self._graph.python_code(
             root_module="self",
             record_func=fx_experimental_config.enrich_profiler_metadata,
+            verbose=fx_experimental_config.dump_code_to_file or True
         )
         self._code = python_code.src
         self._lineno_map = python_code._lineno_map
@@ -876,6 +877,7 @@ class {module_name}(torch.nn.Module):
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
 
+        print(self._code)
         if fx_experimental_config.enrich_profiler_metadata:
             # Generate metadata and register for profiler augmentation
             node_metadata: dict[int, dict[str, Any]] = {}
@@ -917,7 +919,25 @@ class {module_name}(torch.nn.Module):
                 f"torch._C._profiler._RecordFunctionFast('## {filename} ##')",
             )
 
-        cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
+        # Dump code to file and run from file if config is enabled
+        if fx_experimental_config.dump_code_to_file:
+            # Hash the code to generate a unique filename
+            code_hash = hashlib.sha256(self._code.encode('utf-8')).hexdigest()
+            file_path = f"/tmp/{code_hash}.py"
+
+            # Write code to file
+            with open(file_path, 'w') as f:
+                f.write(self._code)
+
+            # Read code from file to ensure we're running from the file
+            with open(file_path, 'r') as f:
+                code_from_file = f.read()
+
+            # Use the file path in co_fields so the compiled code references the real file
+            co_fields = {"co_filename": file_path}
+            cls.forward = _forward_from_src(code_from_file, python_code.globals, co_fields)
+        else:
+            cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 
         # Determine whether this class explicitly defines a __call__ implementation
         # to wrap. If it does, save it in order to have wrapped_call invoke it.

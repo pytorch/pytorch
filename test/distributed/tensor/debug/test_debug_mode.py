@@ -471,6 +471,56 @@ class TestDTensorDebugMode(TestCase):
         self.assertTrue(
             "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
         )
+    
+    def test_debug_trace(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 4)
+                self.l2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.l2(self.l1(x))
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.abc = Foo()
+                self.xyz = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.xyz(self.abc(x))
+
+        mod = Bar()
+        inp = torch.randn(4, 4)
+
+    def test_debug_trace_with_compile(self):
+        torch.fx.experimental._config.dump_code_to_file = True
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 4)
+                self.l2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                y = self.l1(x)
+                return self.l2(y)
+
+        mod = Foo()
+        inp = torch.randn(4, 4)
+
+        # Compile the model to get <eval_with_key> in stack traces
+        compiled_mod = torch.compile(mod, backend="aot_eager")
+
+        # Run once to trigger compilation
+        _ = compiled_mod(inp)
+
+        # Now run with DebugMode
+        with DebugMode(record_stack_trace=True) as debug_mode:
+            _ = compiled_mod(inp)
+
+
+        print(debug_mode.debug_string(show_stack_trace=True))
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
