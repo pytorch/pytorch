@@ -99,6 +99,10 @@ class ReadItem:
 
     # Size of the hypercube to copy
     lengths: torch.Size
+    
+    # Number of shards for the same table
+    dest_num_shards: int = -1 # Invalid value for default 
+    stored_num_shards: int = -1 # Invalid value for default 
 
 
 @dataclass(frozen=True)
