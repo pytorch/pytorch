@@ -1479,6 +1479,9 @@ class SymNodeVariable(VariableTracker):
         else:
             return type(self.sym_num)
 
+    def is_symnode_like(self) -> bool:
+        return True
+
     def as_proxy(self):
         return self.proxy
 

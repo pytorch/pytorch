@@ -115,6 +115,9 @@ its type to `common_constant_types`.
     def is_python_constant(self) -> Literal[True]:
         return True
 
+    def is_symnode_like(self) -> bool:
+        return isinstance(self.value, (int, bool))
+
     @property
     def items(self) -> list[VariableTracker]:
         """

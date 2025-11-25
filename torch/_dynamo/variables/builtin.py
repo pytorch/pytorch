@@ -689,7 +689,7 @@ class BuiltinVariable(VariableTracker):
         def expand_list_like(
             tx: "InstructionTranslator", lst: VariableTracker, const: VariableTracker
         ) -> VariableTracker:
-            if lst.is_python_constant():
+            if not isinstance(lst, BaseListVariable) and lst.is_python_constant():
                 lst, const = const, lst
             try:
                 assert isinstance(lst, BaseListVariable)
@@ -3066,11 +3066,9 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
-        if a.is_python_constant() and b.is_python_constant():
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if (isinstance(a, SymNodeVariable) or a.is_python_constant()) and (
-            isinstance(b, SymNodeVariable) or b.is_python_constant()
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3111,11 +3109,9 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
-        if a.is_python_constant() and b.is_python_constant():
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if (isinstance(a, SymNodeVariable) or a.is_python_constant()) and (
-            isinstance(b, SymNodeVariable) or b.is_python_constant()
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3132,11 +3128,9 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
-        if a.is_python_constant() and b.is_python_constant():
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if (isinstance(a, SymNodeVariable) or a.is_python_constant()) and (
-            isinstance(b, SymNodeVariable) or b.is_python_constant()
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3152,11 +3146,9 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
-        if a.is_python_constant() and b.is_python_constant():
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if (isinstance(a, SymNodeVariable) or a.is_python_constant()) and (
-            isinstance(b, SymNodeVariable) or b.is_python_constant()
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3188,11 +3180,9 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker | None:
         # Rely on constant_handler
-        if a.is_python_constant() and b.is_python_constant():
+        if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if (isinstance(a, SymNodeVariable) or a.is_python_constant()) and (
-            isinstance(b, SymNodeVariable) or b.is_python_constant()
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(

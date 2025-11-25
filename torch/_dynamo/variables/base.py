@@ -377,6 +377,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError
 
+    def is_symnode_like(self) -> bool:
+        """Return True for values that can participate in SymNode operations"""
+        return False
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
