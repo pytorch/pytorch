@@ -7433,6 +7433,10 @@ class AOTInductorTestsTemplate:
             "RAIIAtenTensorHandle buf0(buf0_handle_restrided);"
         ).run(code)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "different behavior in fbcode",
+    )
     def test_codegen_int_array_var_fix_memory_leak(self):
         """
         Fix https://github.com/pytorch/pytorch/issues/167630
