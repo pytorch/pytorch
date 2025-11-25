@@ -28,6 +28,7 @@ import torch
 import torch.cuda._gpu_trace as gpu_trace
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
+from torch.ops import aten
 
 
 DEFAULT_STREAM_ID = 0
@@ -594,7 +595,7 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
             kwargs = {}
 
         # record_stream is not a kernel dispatch, skip it
-        if str(func) == "aten.record_stream.default":
+        if func is aten.record_stream.default:
             return func(*args, **kwargs)
 
         is_factory = bool(FACTORY_FUNCTION_REGEX.match(func._schema.name))
