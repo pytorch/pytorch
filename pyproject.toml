@@ -128,7 +128,7 @@ docstring-code-format = true
 quote-style = "double"
 
 [tool.ruff.lint]
-# NOTE: Synchoronize the ignores with .flake8
+# NOTE: Synchronize the ignores with .flake8
 external = [
     "B001",
     "B902",
@@ -374,6 +374,15 @@ keep-runtime-typing = true
     "S101"
 ]
 
+[tool.pylint]
+main.py-version = "3.10"
+main.extension-pkg-allow-list = ["torch._C"]
+imports.known-standard-library = ["typing_extensions"]
+messages-control.disable = ["all"]
+messages-control.enable = ["comparison-with-callable"]
+spelling.spelling-dict = "en_US"
+spelling.spelling-private-dict-file = "tools/linter/dictionary.txt"
+
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
 
@@ -393,10 +402,3 @@ package = 'torch'
     ".spin/cmds.py:regenerate_clangtidy_files",
     ".spin/cmds.py:regenerate_github_workflows",
 ]
-
-[tool.pylint]
-main.py-version = "3.10"
-main.extension-pkg-allow-list = ["torch._C"]
-imports.known-standard-library = ["typing_extensions"]
-messages-control.disable = ["all"]
-messages-control.enable = ["comparison-with-callable"]
