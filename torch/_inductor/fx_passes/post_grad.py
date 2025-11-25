@@ -34,6 +34,7 @@ from ..pattern_matcher import (
     CallFunctionVarArgs,
     filter_nodes,
     fwd_only,
+    gen_register_replacement,
     get_arg_value,
     get_mutation_region_id,
     Ignored,
@@ -689,6 +690,7 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
         raise AssertionError("scan is not lowered to while_loop")
 
 
+@functools.cache
 def register_addmm_activation_fusions():
     def is_valid_addmm_activation_fusion(match: Match) -> bool:
         if config.max_autotune_gemm:
@@ -709,25 +711,24 @@ def register_addmm_activation_fusions():
     args = [torch.empty(3), torch.empty(4, 2), torch.empty(2, 3)]
     beta_alpha_workaround = {"beta": 1.3, "alpha": 1.2}
 
-    patterns = (
-        lambda inp, m1, m2, beta, alpha: aten.relu(
-            aten.addmm(inp, m1, m2, beta=beta, alpha=alpha)
-        ),
-        lambda inp, m1, m2, beta, alpha: aten.gelu(
-            aten.addmm(inp, m1, m2, beta=beta, alpha=alpha), approximate="tanh"
-        ),
-    )
-    replacements = (
-        lambda inp, m1, m2, beta, alpha: aten._addmm_activation(
-            inp, m1, m2, beta=beta, alpha=alpha
-        ),
-        lambda inp, m1, m2, beta, alpha: aten._addmm_activation(
-            inp, m1, m2, beta=beta, alpha=alpha, use_gelu=True
-        ),
-    )
+    def addmm_relu_pattern(inp, m1, m2, beta, alpha):
+        return aten.relu(aten.addmm(inp, m1, m2, beta=beta, alpha=alpha))
 
+    def addmm_gelu_pattern(inp, m1, m2, beta, alpha):
+        return aten.gelu(aten.addmm(inp, m1, m2, beta=beta, alpha=alpha), approximate="tanh")
+
+    def addmm_relu_replacement(inp, m1, m2, beta, alpha):
+        return aten._addmm_activation(inp, m1, m2, beta=beta, alpha=alpha)
+
+    def addmm_gelu_replacement(inp, m1, m2, beta, alpha):
+        return aten._addmm_activation(inp, m1, m2, beta=beta, alpha=alpha, use_gelu=True)
+
+    patterns = (addmm_relu_pattern, addmm_gelu_pattern)
+    replacements = (addmm_relu_replacement, addmm_gelu_replacement)
     for pattern, replacement in zip(patterns, replacements):
-        register_replacement(
+        key = f"{pattern.__name__}"
+        gen_register_replacement(
+            key,
             # pyrefly: ignore [bad-argument-type]
             pattern,
             # pyrefly: ignore [bad-argument-type]
