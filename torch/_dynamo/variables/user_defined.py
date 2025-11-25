@@ -770,7 +770,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             # Modify mutability of namedtuple for sourcelesss instantiations.
             from .base import AttributeMutationNew
-            from .lists import NamedTupleVariable  # XXX Today come back to this
+            from .lists import NamedTupleVariable
 
             return NamedTupleVariable(
                 items, self.value, mutation_type=AttributeMutationNew()

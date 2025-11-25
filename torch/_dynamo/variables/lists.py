@@ -1435,7 +1435,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
     def fields(self) -> tuple[str, ...]:
         return namedtuple_fields(self.tuple_cls)
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> Any:
         if self.is_structseq():
             # StructSequenceType(iterable)
             result = self.python_type()([x.as_python_constant() for x in self.items])
@@ -1457,7 +1457,7 @@ class NamedTupleVariable(UserDefinedTupleVariable):
 
         return result
 
-    def as_proxy(self):
+    def as_proxy(self) -> Any:
         if self.is_structseq():
             return self.python_type()([x.as_proxy() for x in self._tuple_vt.items])
         return self.python_type()(*[x.as_proxy() for x in self._tuple_vt.items])
