@@ -99,7 +99,7 @@ class TestAutocast(TestCase):
             # add operation is not specially registered, should fallthrough
             result = torch.add(x, x)
             # fallthrough operations should preserve input type or use default behavior
-            self.assertIn(result.dtype, [torch.float32, torch.float16])
+            self.assertEqual(result.dtype, torch.float32)
 
     def test_autocast_with_requires_grad(self):
         """Test autocast interaction with requires_grad"""
