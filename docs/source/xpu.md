@@ -75,6 +75,7 @@
     :toctree: generated
     :nosignatures:
 
+     XPUPluggableAllocator
      change_current_allocator
      empty_cache
      get_per_process_memory_fraction
@@ -88,7 +89,6 @@
      reset_accumulated_memory_stats
      reset_peak_memory_stats
      set_per_process_memory_fraction
-     XPUPluggableAllocator
 ```
 
 ```{eval-rst}

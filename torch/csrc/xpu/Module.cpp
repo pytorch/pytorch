@@ -380,40 +380,16 @@ static void registerXpuPluggableAllocator(PyObject* module) {
       c10::xpu::XPUCachingAllocator::XPUAllocator,
       std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>>(
       m, "_xpu_XPUAllocator");
+
   m.def("_xpu_getAllocator", []() {
     return py::cast(torch::xpu::XPUPluggableAllocator::getCurrentAllocator());
   });
-
   m.def(
       "_xpu_changeCurrentAllocator",
       [](std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>
              allocator) {
         torch::xpu::XPUPluggableAllocator::changeCurrentAllocator(allocator);
       });
-  py::class_<
-      torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator,
-      c10::xpu::XPUCachingAllocator::XPUAllocator,
-      std::shared_ptr<
-          torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator>>(
-      m, "_XPUPluggableAllocator")
-      .def(
-          "set_init_fn",
-          [](torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator& self,
-             uint64_t func_ptr) {
-            using FuncType = void(int);
-            std::function<FuncType> func =
-                reinterpret_cast<FuncType*>(func_ptr);
-            self.set_init_fn(func);
-          })
-      .def(
-          "set_record_stream_fn",
-          [](torch::xpu::XPUPluggableAllocator::XPUPluggableAllocator& self,
-             uint64_t func_ptr) {
-            using FuncType = void(void*, sycl::queue*);
-            std::function<FuncType> func =
-                reinterpret_cast<FuncType*>(func_ptr);
-            self.set_record_stream_fn(func);
-          });
   m.def("_xpu_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
     using MallocFuncType = void*(size_t, int, sycl::queue*);
     using FreeFuncType = void(void*, size_t, sycl::queue*);
