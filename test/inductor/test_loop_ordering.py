@@ -812,7 +812,7 @@ class MemoryCoalescingTest(MockSchedulerTest):
             n0, n1 = list(fused_norm_read_writes.var_ranges.keys())
 
             # translation of above is n0 + 6 * n1
-            self.assertTrue((n0 + 6 * n1) in fused_norm_read_writes.reads.keys())
+            self.assertTrue((n0 + 6 * n1) in fused_norm_read_writes.reads)
 
             return nodes
 
