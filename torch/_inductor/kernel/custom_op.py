@@ -6,7 +6,6 @@ from collections.abc import Callable
 from typing import Any, Optional, Union
 
 import torch
-from torch._inductor import config
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, TensorBox
 from torch._inductor.lowering import lowerings, validate_ir
@@ -185,8 +184,12 @@ def _adapt_user_input_gen_fns(
 
             fake_tensor = ir_node_to_tensor(ir_buffer, guard_shape=False)
             # Convert to meta device for user function
-            fake_tensor_meta = fake_tensor.to(device="meta")
-            return user_function(fake_tensor_meta)
+            if fake_tensor is not None:
+                fake_tensor_meta = fake_tensor.to(device="meta")
+                return user_function(fake_tensor_meta)
+            raise RuntimeError(
+                f"ir_node_to_tensor returned None for argument {arg_name}"
+            )
 
         return internal_input_gen_fn
 
@@ -203,15 +206,7 @@ def _group_ranges_by_impl(
     range_to_best_impl: dict[tuple[int, Union[int, float]], tuple[Callable, dict, str]],
 ) -> list[tuple[list[tuple[int, Union[int, float]]], Callable, dict, str]]:
     """Group all ranges by their implementation, even if not adjacent.
-
-    This enables more aggressive optimization: ranges with the same impl are
-    grouped together and can use OR predicates in torch.cond.
-
-    Args:
-        range_to_best_impl: Mapping from range to (impl, kwargs, name)
-
-    Returns:
-        List of (ranges_list, impl, kwargs, name) tuples, sorted by first range start
+    Ranges with the same impl are grouped together and can use OR predicates in torch.cond.
 
     Example:
         Input: {
@@ -329,16 +324,7 @@ def _extract_winning_decomposition_index(
     decompositions: list[Callable],
 ) -> int:
     """Extract the decomposition index from winning SubgraphChoiceCaller's name.
-
-    The choice name format is: "{op_name}_range_{start}_{end}_{decomp_name}_{counter}"
     We parse it to find which decomposition won by matching decomp_name.
-
-    Args:
-        choice_name: Name of the winning SubgraphChoiceCaller
-        decompositions: List of decomposition functions
-
-    Returns:
-        Index into decompositions list (0-based)
     """
     if not choice_name:
         log.warning("Empty choice name, defaulting to first decomposition")
@@ -357,11 +343,6 @@ def _extract_winning_decomposition_index(
             return i
 
     # Fallback: could not determine, use first
-    log.warning(
-        "Could not determine winning decomposition from choice name '%s', "
-        "defaulting to first decomposition",
-        choice_name,
-    )
     return 0
 
 
@@ -555,7 +536,6 @@ def _generate_dynamic_configs(
             fake_tensor = ir_node_to_tensor(inp, guard_shape=False)
             fake_tensors.append(fake_tensor)
 
-    # Only map tensor inputs to parameter names (skip non-tensor params at the end)
     fake_tensors_dict = dict(zip(param_names, fake_tensors))
 
     configs = config_generator(fake_tensors_dict)
@@ -795,14 +775,7 @@ def _range_based_lowering_fn(
         def build_range_predicate(
             ranges_list: list[tuple[int, Union[int, float]]],
         ) -> torch.Tensor:
-            """Build OR predicate for multiple ranges.
-
-            Args:
-                ranges_list: List of (start, end) tuples
-
-            Returns:
-                SymBool: (dim in range1) OR (dim in range2) OR ...
-            """
+            """Build OR predicate for multiple ranges."""
             if len(ranges_list) == 1:
                 # Single range: start <= dim <= end
                 range_start, range_end = ranges_list[0]
