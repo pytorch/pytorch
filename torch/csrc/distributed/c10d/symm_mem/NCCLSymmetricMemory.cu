@@ -2,7 +2,7 @@
 #include <nccl.h>
 #include <torch/csrc/cuda/nccl.h>
 
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 7)
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 9)
 #define NCCL_HAS_SYMMEM_SUPPORT
 #endif
 
@@ -54,12 +54,11 @@ static __global__ void build_ptr_dev(
   void**       table,       // [world_size] pointer table (device memory)
   int          world_size)
 {
-    if (blockIdx.x == 0 && threadIdx.x == 0) {
-        for (int peer = 0; peer < world_size; ++peer) {
-            void* p = ncclGetLsaPointer(handle, offset, peer);
-            table[peer] = p;
-        }
-    }
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  for (int peer = tid; peer < world_size; peer += stride) {
+      table[peer] = ncclGetLsaPointer(handle, offset, peer);
+  }
 }
 
 class NCCLSymmetricMemory : public SymmetricMemory {
@@ -110,9 +109,9 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     signal_pads_dev_ = reinterpret_cast<void**>(
         c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
 
-    build_ptr_dev<<<1, 1>>>(buffer_handle, 0, buffers_dev_, world_size_);
-    build_ptr_dev<<<1, 1>>>(signal_handle, 0, signal_pads_dev_, world_size_);
-    cudaDeviceSynchronize();
+    int threads = std::min(128, world_size_);
+    build_ptr_dev<<<1, threads>>>(buffer_handle, 0, buffers_dev_, world_size_);
+    build_ptr_dev<<<1, threads>>>(signal_handle, 0, signal_pads_dev_, world_size_);
 
     rank_to_global_rank_dev_ = reinterpret_cast<int*>(
         c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
