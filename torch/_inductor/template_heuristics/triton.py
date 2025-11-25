@@ -422,8 +422,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(32, 256, 64, 6, 4),
             GemmConfig(64, 16, 256, 5, 4),
             GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(64, 128, 128, 2, 4),
             GemmConfig(64, 128, 128, 3, 4),
+            GemmConfig(128, 128, 128, 2, 4),
             GemmConfig(128, 256, 128, 4, 8),
+            GemmConfig(256, 128, 128, 2, 4),
+            GemmConfig(256, 128, 128, 2, 8),
         ]
 
         self.scaled_persistent_mm_configs: list[BaseConfig] = [
@@ -1945,6 +1949,29 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
             return False
         return True
+
+    # pyrefly: ignore [bad-override]
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        Filter out bad configs for specific hardware.
+        On AMD MI350X (GFX 9.5+), skip configs with BLOCK_K<=64 due to lack of corresponding MFMA instructions.
+        """
+
+        def should_skip_mi350x_config(config: BaseConfig) -> bool:
+            """Skip config if BLOCK_K<=64 on MI350X (GFX 9.5+)"""
+            try:
+                return (
+                    config.block_k <= 64
+                    and torch.version.hip is not None
+                    and torch.cuda.get_device_capability() >= (9, 5)
+                )
+            except RuntimeError:
+                # If no HIP GPUs are available, we can't check device capability
+                # so we don't skip any configs
+                return False
+
+        filtered_configs = [c for c in configs if not should_skip_mi350x_config(c)]
+        return super()._filter_configs(filtered_configs)
 
 
 # Scaled TMA-specific mixin for scaled MM templates with TMA

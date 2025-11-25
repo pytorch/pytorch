@@ -906,7 +906,7 @@ class HalideKernel(SIMDKernel):
             return self.dom_renames[prefix]
 
         renames = {}
-        for var in self.halide_vars.keys():
+        for var in self.halide_vars:
             if not self.inside_reduction and var in self.reduction_renames:
                 continue
             m = re.match(r"^h(\d+)$", var.name)
