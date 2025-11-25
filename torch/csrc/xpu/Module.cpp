@@ -392,7 +392,7 @@ static void registerXpuPluggableAllocator(PyObject* module) {
       });
   m.def("_xpu_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
     using MallocFuncType = void*(size_t, int, sycl::queue*);
-    using FreeFuncType = void(void*, size_t, sycl::queue*);
+    using FreeFuncType = void(void*, size_t, int, sycl::queue*);
     std::function<MallocFuncType> malloc_fn =
         reinterpret_cast<MallocFuncType*>(malloc_ptr);
     std::function<FreeFuncType> free_fn =
