@@ -717,14 +717,23 @@ class DeviceCachingAllocator {
     if (isRetry) {
       stats.num_alloc_retries += 1;
     }
+    bool active_pool =
+        p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator();
     if (set_fraction &&
         stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current +
                 size >
             allowed_memory_maximum) {
       return false;
     } else if (AcceleratorAllocatorConfig::use_expandable_segments()) {
+      TORCH_CHECK(
+          !active_pool,
+          "torch.xpu.MemPool doesn't currently support expandable_segments.");
       p.block =
           try_allocate_expandable_block(device, p.queue(), p.pool, p.size());
+      if (p.block && p.pool->owner_PrivatePool) {
+        // The block is used only for XPU graph's PrivatePool.
+        p.pool->owner_PrivatePool->allocation_count++;
+      }
       return bool(p.block);
     }
     void* ptr = sycl::aligned_alloc_device(
