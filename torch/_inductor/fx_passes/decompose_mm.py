@@ -1,4 +1,5 @@
 import dataclasses
+import math
 import operator
 
 import sympy
@@ -49,7 +50,7 @@ def _mm_split_cat_rs_fn(
     group_size: int,
     group_name: str,
     scatter_dim: int,
-    orig_split_num_chunks: int,
+    orig_split_num_chunks: int,  # unused
     post_mm_ops,
 ):
     assert isinstance(num_chunks, int)
@@ -198,7 +199,7 @@ def _find_matmul_node(input_node):
 
 
 def _extract_post_mm_ops(
-    intermediate_nodes,
+    intermediate_nodes, scatter_dim
 ) -> tuple[list["_PostMMOp"] | None, torch.fx.Node | None]:
     """Extract and validate operations between matmul and reduce-scatter.
 
@@ -239,7 +240,10 @@ def _extract_post_mm_ops(
             if not (
                 len(in_shape) == 2
                 and len(out_shape) == 3
-                and in_shape[-1] == out_shape[-1]
+                and (
+                    in_shape[-1] == out_shape[-1]
+                    or in_shape[0] == math.prod(out_shape[:-1])
+                )
             ):
                 return None, None
 
@@ -248,7 +252,7 @@ def _extract_post_mm_ops(
             if reshape_ops_count > 1:
                 return None, None
 
-            post_mm_ops.append(_ViewOp(node, chunk_dim=0))
+            post_mm_ops.append(_ViewOp(node, chunk_dim=0 if scatter_dim != 0 else -1))
             view3d_node = node
             continue
 
@@ -482,12 +486,12 @@ def _process_matmul_reduce_scatter(
         return
 
     # Find matmul node by walking backwards through the graph
-    mm_n, ns = _find_matmul_node(input_node)
+    mm_n, intermediate_nodes = _find_matmul_node(input_node)
     if mm_n is None:
         return
 
     # Validate and extract operations between matmul and reduce-scatter
-    post_mm_ops, view3d_n = _extract_post_mm_ops(ns)
+    post_mm_ops, view3d_n = _extract_post_mm_ops(intermediate_nodes, orig_scatter_dim)
     if post_mm_ops is None:
         return
 
@@ -499,7 +503,7 @@ def _process_matmul_reduce_scatter(
     _fn_to_trace = _mm_split_cat_rs_fn
 
     view3d_size_to_split = None
-    if view3d_n is not None:
+    if orig_scatter_dim != 0 and view3d_n is not None:
         _fn_to_trace = _mm_split_cat_rs_fn_view3d
         # dim0 of 3d reshape
         arg1 = view3d_n.args[1]
@@ -522,7 +526,7 @@ def _process_matmul_reduce_scatter(
     if view3d_size_to_split is not None:
 
         def _additional_check(n):
-            return view3d_size_to_split % n == 0
+            return statically_known_true(view3d_size_to_split % n == 0)
 
         additional_check = _additional_check
 
@@ -565,7 +569,7 @@ def _process_matmul_reduce_scatter(
     for n in reversed(reduce_scatter.match.nodes):
         if len(n.users) == 0:
             g.erase_node(n)
-    for n in reversed(ns):
+    for n in intermediate_nodes:
         assert len(n.users) == 0
         g.erase_node(n)
     assert len(mm_n.users) == 0
