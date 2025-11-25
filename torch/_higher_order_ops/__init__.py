@@ -24,6 +24,7 @@ from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
 from torch._higher_order_ops.local_map import local_map_hop
 from torch._higher_order_ops.map import map
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._higher_order_ops.print import print
 from torch._higher_order_ops.run_const_graph import run_const_graph
 from torch._higher_order_ops.scan import scan
 from torch._higher_order_ops.strict_mode import strict_mode
@@ -75,4 +76,5 @@ __all__ = [
     "map",
     "while_loop_stack_output",
     "local_map_hop",
+    "print",
 ]

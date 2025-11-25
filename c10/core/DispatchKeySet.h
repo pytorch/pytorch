@@ -15,6 +15,8 @@
 #include <string>
 #include <type_traits>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
+
 namespace c10 {
 
 struct FunctionalityOffsetAndMask {
@@ -966,3 +968,5 @@ using remove_DispatchKeySet_arg_from_func = guts::make_function_traits_t<
             1>,
         typename guts::infer_function_traits_t<FuncType>::parameter_types>>;
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

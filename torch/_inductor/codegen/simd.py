@@ -11,7 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, Union
+from typing import Any, Generic, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 
 import sympy
@@ -40,6 +40,8 @@ from ..dependencies import MemoryDep, StarDep, WeakDep
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..ir import IRNode
 
 from ..optimize_indexing import indexing_dtype_strength_reduction
@@ -591,6 +593,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
+
+    def create_constant_mask(self, entry) -> str:
+        x = entry.prefix
+        if entry.tensor_dim is None:
+            sizestr = self.dense_size_str()
+            return f"{x}mask = tl.full({sizestr}, True, tl.int1)"
+        sizes = ["None"] * self.triton_tensor_ndim()
+        sizes[entry.tensor_dim] = ":"
+        suffix = ", ".join(sizes)
+        out = f"{x}mask = tl.full([{x.upper()}BLOCK], True, tl.int1)[{suffix}]"
+        return out
 
     def dense_size_str(self) -> str:
         sizes = self.dense_size_list()
@@ -1618,6 +1631,7 @@ class SIMDScheduling(BaseScheduling):
 
         split_size = _pick_split_size()
 
+        # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
 
         assert V.graph.sizevars.statically_known_gt(
@@ -1645,7 +1659,11 @@ class SIMDScheduling(BaseScheduling):
         if (
             not torch._inductor.config.deterministic
             and config.triton.mix_order_reduction_split_size is None
-            and config.triton.mix_order_reduction_autotune_split_size
+            and (
+                config.triton.mix_order_reduction_autotune_split_size
+                or config.max_autotune
+                or config.coordinate_descent_tuning
+            )
         ):
 
             def _bench(candidate_split_size):
@@ -2049,7 +2067,7 @@ class SIMDScheduling(BaseScheduling):
 
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
 
-            for input_name in kernel.named_input_nodes.keys():
+            for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 # pyrefly: ignore [missing-attribute]
                 partial_code.finalize_hook(subgraph_name, strict=False)
@@ -2286,13 +2304,12 @@ class SIMDScheduling(BaseScheduling):
         for node_group in partitions:
             if len(node_group) == 0:
                 continue
-            fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ComboKernel(
                 enable_autotune=enable_autotune,
                 mixed_sizes=mixed_sizes,
             )
 
-            for pn, nodes in zip(node_group, fused_node_lists):
+            for pn in node_group:
                 self.codegen_node_schedule_with_kernel(
                     node_schedule_map[pn][0],
                     kernel.create_sub_kernel(subkernel_map[pn]),
@@ -2547,8 +2564,10 @@ class SIMDScheduling(BaseScheduling):
                 all_var_ranges = [*dep.ranges.items()]
                 pointwise_vars_numel = sympy.S.One
                 sizevars = V.graph.sizevars
-                for pointwise_end_idx, (var, numel) in enumerate(all_var_ranges):
+                pointwise_end_idx = 0
+                for idx, (_var, numel) in enumerate(all_var_ranges):
                     pointwise_vars_numel *= numel
+                    pointwise_end_idx = idx
                     if sizevars.statically_known_geq(
                         pointwise_vars_numel, pointwise_numel
                     ):
@@ -2800,6 +2819,8 @@ class SIMDScheduling(BaseScheduling):
         bad_size_additional_tiling_penalty = 1.025
         good_size_tiling_penalty = 1.005
 
+        total_uncoalesced = sum(coalesce_analysis.uncoalesced_addrs.values())
+
         def score_mod(t):
             score_factor = 1.0
             for tile_size in t[0].tiling.values():
@@ -2808,12 +2829,19 @@ class SIMDScheduling(BaseScheduling):
                 else:
                     score_factor = score_factor / good_size_tiling_penalty
 
-            return -t[0].score * score_factor
+            # Add uncoalesced memory score to prevent small coalesced benefits
+            # from dominating large amounts of uncoalesced memory
+            uncoalesced_penalty = total_uncoalesced * 0.05
+
+            return -(t[0].score + uncoalesced_penalty) * score_factor
 
         # apply penalty for longer tilings that dont increase score much
         for cand, tiling_score in sorted(tilings, key=score_mod):
-            if cls.tiling_is_compatible(
-                node_schedule, pointwise_numel, reduction_numel, cand.tiling
+            if (
+                cls.tiling_is_compatible(
+                    node_schedule, pointwise_numel, reduction_numel, cand.tiling
+                )
+                or cand.tiling == default_tiling
             ):
                 # we always include default reduction numel == 1, dont include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
