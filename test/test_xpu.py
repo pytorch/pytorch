@@ -704,11 +704,9 @@ if __name__ == "__main__":
     torch.xpu.memory.change_current_allocator(allocator)
     tensor = torch.randn(100, device='xpu')
     del tensor
-    alloc_lib = ctypes.CDLL(dummy_allocator)
-    called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
-    called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
-    assert called_dummy_alloc.value==123
-    assert called_dummy_free.value==321
+    allocator_lib = ctypes.CDLL(dummy_allocator)
+    called_dummy_alloc = ctypes.c_int.in_dll(allocator_lib, "called_dummy_alloc")
+    called_dummy_free = ctypes.c_int.in_dll(allocator_lib, "called_dummy_free")
     print(called_dummy_alloc.value, called_dummy_free.value)
 """
         rc = check_output(test_script).splitlines()[-1]
