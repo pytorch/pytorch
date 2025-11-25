@@ -247,6 +247,31 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
         foo()
 
+        out = symm_mem.empty(numel, dtype=dtype, device=self.device)
+        symm_mem.rendezvous(out, group=group_name)
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_collective(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # Need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+        symm_mem.enable_symm_mem_for_group(group_name)
+
+        dtype = torch.float
+        numel = 1024
+
+        def foo():
+            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
+            symm_mem.rendezvous(inp, group=group_name)
+
+        foo()
+
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         symm_mem.rendezvous(out, group=group_name)
         c10d.all_reduce(out)
@@ -257,8 +282,8 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
         inp = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         symm_mem.rendezvous(inp, group=group_name)
-        res = torch.ops.symm_mem.multimem_one_shot_all_reduce(inp, "sum", group_name)
-        # self.assertEqual(out, res)
+        res = torch.ops.symm_mem.one_shot_all_reduce(inp, "sum", group_name)
+        self.assertEqual(out, res)
 
 
 instantiate_device_type_tests(TestNCCL, globals(), only_for="cuda")
