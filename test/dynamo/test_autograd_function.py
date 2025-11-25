@@ -1817,6 +1817,189 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_nn_module_pytrees_as_inputs(self):
+        @dataclass
+        class InputData:
+            count: int
+            values: torch.Tensor
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 4
+                self.b = torch.randn(4, 4)
+
+        module = Mod()
+
+        # Create input dataclass
+        input_data = InputData(count=5, values=torch.randn(4, 4))
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(
+                ctx,
+                module: torch.nn.Module,
+                input_data: InputData,
+                x: torch.Tensor,
+            ) -> tuple[torch.Tensor, torch.Tensor]:
+                """
+                Process an nn.Module with dataclass input and return tensor + dataclass output.
+
+                Args:
+                    module: A neural network module
+                    input_data: Dataclass containing an integer and a tensor
+
+                Returns:
+                    A tuple of (tensor, OutputData dataclass with two tensors)
+                """
+                # Extract inputs
+                count = input_data.count
+                values = input_data.values
+
+                output_tensor = module.a + module.b * count * values
+
+                return output_tensor + x, values + x
+
+            @staticmethod
+            def backward(ctx, grad_output, output_data):
+                return grad_output * 4, None, grad_output * 2
+
+        def fn(input_data, x):
+            y, y_data = Foo.apply(module, input_data, x)
+            return x + y + y_data + y_data
+
+        # Call the function
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(input_data, x)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, fullgraph=True, backend=backend)
+        res = opt_fn(input_data, x)
+        self.assertEqual(ref, res)
+
+        # Must have `view_as`
+        self.assertExpectedInline(
+            torch._dynamo.testing.normalize_gm(
+                backend.graphs[0].print_readable(print_output=False)
+            ),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[4, 4]", L_module_b: "f32[4, 4]", L_input_data_values: "f32[4, 4]"):
+        l_x_ = L_x_
+        l_module_b = L_module_b
+        l_input_data_values = L_input_data_values
+
+        fwd_body_0 = self.fwd_body_0
+        bwd_body_0 = self.bwd_body_0
+        autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_module_b, l_input_data_values, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_module_b = l_input_data_values = None
+        getitem: "f32[4, 4]" = autograd_function_apply[0]
+        getitem_1: "f32[4, 4]" = autograd_function_apply[1];  autograd_function_apply = None
+
+        add: "f32[4, 4]" = l_x_ + getitem;  l_x_ = getitem = None
+        add_1: "f32[4, 4]" = add + getitem_1;  add = None
+        add_2: "f32[4, 4]" = add_1 + getitem_1;  add_1 = getitem_1 = None
+        return (add_2,)
+
+    class fwd_body_0(torch.nn.Module):
+        def forward(self, l_module_b: "f32[4, 4]", l_input_data_values: "f32[4, 4]", l_x_: "f32[4, 4]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            mul: "f32[4, 4]" = l_module_b * 5;  l_module_b = None
+            mul_1: "f32[4, 4]" = mul * l_input_data_values;  mul = None
+            output_tensor: "f32[4, 4]" = 4 + mul_1;  mul_1 = None
+
+            out: "f32[4, 4]" = output_tensor + l_x_;  output_tensor = None
+            out_1: "f32[4, 4]" = l_input_data_values + l_x_;  l_input_data_values = l_x_ = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return ((out, out_1), ())
+
+    class bwd_body_0(torch.nn.Module):
+        def forward(self, grad_output: "f32[4, 4]", output_data: "f32[4, 4]"):
+            _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
+            mul: "f32[4, 4]" = grad_output * 4;  mul = None
+            mul_1: "f32[4, 4]" = grad_output * 2;  grad_output = None
+
+            _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+            return (None, None, mul_1)
+""",
+        )
+
+    # Requires fixing issue - https://github.com/pytorch/pytorch/issues/168395
+    @unittest.expectedFailure
+    def test_nn_module_pytrees_as_io(self):
+        @dataclass
+        class InputData:
+            count: int
+            values: torch.Tensor
+
+        @dataclass
+        class OutputData:
+            result1: torch.Tensor
+            result2: torch.Tensor
+
+        # Create a simple linear module
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = 4
+                self.b = torch.randn(4, 4)
+
+        module = Mod()
+
+        # Create input dataclass
+        input_data = InputData(count=5, values=torch.randn(4, 4))
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(
+                ctx,
+                module: torch.nn.Module,
+                input_data: InputData,
+                x: torch.Tensor,
+            ) -> tuple[torch.Tensor, OutputData]:
+                """
+                Process an nn.Module with dataclass input and return tensor + dataclass output.
+
+                Args:
+                    module: A neural network module
+                    input_data: Dataclass containing an integer and a tensor
+
+                Returns:
+                    A tuple of (tensor, OutputData dataclass with two tensors)
+                """
+                # Extract inputs
+                count = input_data.count
+                values = input_data.values
+
+                output_tensor = module.a + module.b * count * values
+
+                output_data = OutputData(
+                    result1=output_tensor + count, result2=output_tensor * (count + 1)
+                )
+
+                return output_tensor + x, output_data
+
+            @staticmethod
+            def backward(ctx, grad_output, output_data):
+                return grad_output * 4, None, grad_output * 2
+
+        def fn(input_data, x):
+            # x = torch.sin(input_data.values)
+            y, y_data = Foo.apply(module, input_data, x)
+            return x + y + y_data.result1 + y_data.result2
+
+        # Call the function
+        x = torch.randn(4, 4, requires_grad=True)
+        ref = fn(input_data, x)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, fullgraph=True, backend=backend)
+        res = opt_fn(input_data, x)
+        self.assertEqual(ref, res)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
