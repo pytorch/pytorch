@@ -698,7 +698,12 @@ def linalg_vector_norm_impl(self: ComplexTensor, *args, **kwargs) -> torch.Tenso
 
 
 @register_force_test(aten.copy_)
-def copy__impl(self: ComplexTensor, src, *args, **kwargs):
+def copy__impl(
+    self: ComplexTensor | torch.Tensor,
+    src: ComplexTensor | torch.Tensor,
+    *args,
+    **kwargs,
+) -> ComplexTensor | torch.Tensor:
     if not self.dtype.is_complex:
         src_re, src_im = split_complex_arg(src)
         return self.copy_(src_re)
