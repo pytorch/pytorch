@@ -7507,7 +7507,6 @@ def with_effects(token, op, *args, **kwargs):
     assert len(V.graph.operations[operation_len:]) > 0, (
         f"No operation nodes were generated when lowering effectful operator {op}."
     )
-
     if effect_type:
         prev_effect_buffer = V.graph.effectful_ops.get(effect_type)
         for new_op in V.graph.operations[operation_len:]:
@@ -7521,10 +7520,7 @@ def with_effects(token, op, *args, **kwargs):
             new_op  # pyrefly: ignore[unsupported-operation]
         )
 
-    if isinstance(result, (list, tuple)):
-        return (token, *result)
-    else:
-        return (token, result)
+    return (token, result)
 
 
 from .comm_lowering import register_comm_lowerings
