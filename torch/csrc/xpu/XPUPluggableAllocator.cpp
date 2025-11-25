@@ -4,12 +4,7 @@ namespace torch::xpu::XPUPluggableAllocator {
 
 void custom_raw_deleter(void* ptr);
 
-static c10::device_index device_count_ = 0;
-
-XPUPluggableAllocator::XPUPluggableAllocator(
-    std::function<void*(size_t, int, sycl::queue)> alloc_fn,
-    std::function<void(void*, size_t, int, sycl::queue)> free_fn)
-    : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
+static c10::DeviceIndex device_count_ = 0;
 
 void XPUPluggableAllocator::set_init_fn(std::function<void(int)> init_fn) {
   init_fn_ = std::move(init_fn);
@@ -67,7 +62,7 @@ void XPUPluggableAllocator::raw_delete(void* ptr) {
   free_fn_(ptr, size, device_idx, queue);
 }
 
-void XPUPluggableAllocator::init(int device_count) {
+void XPUPluggableAllocator::init(c10::DeviceIndex device_count) {
   if (init_fn_) {
     init_fn_(device_count);
   }
@@ -82,11 +77,19 @@ bool XPUPluggableAllocator::initialized() {
       "If you need it, please file an issue describing your use case.");
 }
 
+void XPUPluggableAllocator::copy_data(
+    void* dest,
+    const void* src,
+    std::size_t count) const {
+  c10::xpu::getCurrentXPUStream().queue().memcpy(dest, src, count);
+}
+
 void XPUPluggableAllocator::recordStream(
     const c10::DataPtr& ptr,
-    c10::xpu::XPUStream stream) {
+    c10::Stream stream) {
   if (record_stream_fn_) {
-    record_stream_fn_(ptr.get(), &stream.queue());
+    auto xpu_stream = c10::xpu::XPUStream(stream);
+    record_stream_fn_(ptr.get(), &xpu_stream.queue());
   }
 }
 
@@ -95,15 +98,6 @@ void XPUPluggableAllocator::emptyCache(
   TORCH_CHECK(
       false,
       "XPUPluggableAllocator does not yet support emptyCache. "
-      "If you need it, please file an issue describing your use case.");
-}
-
-void XPUPluggableAllocator::recordStream(
-    const c10::DataPtr& ptr,
-    streamType stream) {
-  TORCH_CHECK(
-      false,
-      "XPUPluggableAllocator does not yet support recordStream. "
       "If you need it, please file an issue describing your use case.");
 }
 
