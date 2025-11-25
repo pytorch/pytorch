@@ -121,7 +121,6 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
                 raise SubgraphLoweringException(
                     f"{target} not supported in subgraph, (missing lowering)"
                 )
-
             return lowerings[target](*args, **kwargs)
 
     def output(self, target: str, args: tuple[Any], kwargs: dict[str, Any]) -> None:  # type: ignore[override]
