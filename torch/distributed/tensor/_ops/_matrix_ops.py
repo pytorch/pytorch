@@ -34,11 +34,11 @@ from torch.distributed.tensor._utils import (
     compute_local_stride,
 )
 from torch.distributed.tensor.placement_types import (
+    _ShardingPlaceholder,
     Partial,
     Placement,
     Replicate,
     Shard,
-    _ShardingPlaceholder,
 )
 
 

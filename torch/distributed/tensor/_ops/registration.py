@@ -12,7 +12,7 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     StrategyType,
 )
-from torch.distributed.tensor.placement_types import Placement, _ShardingPlaceholder
+from torch.distributed.tensor.placement_types import _ShardingPlaceholder, Placement
 
 
 # convenient wrapper to register sharding propagation rules
