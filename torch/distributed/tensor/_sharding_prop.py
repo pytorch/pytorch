@@ -36,7 +36,7 @@ from torch.distributed.tensor._utils import (
     compute_local_stride,
     try_find_mesh_from_args,
 )
-from torch.distributed.tensor.placement_types import Placement, _ShardingPlaceholder
+from torch.distributed.tensor.placement_types import _ShardingPlaceholder, Placement
 
 
 aten = torch.ops.aten
@@ -123,7 +123,7 @@ class ShardingPropagator:
         self,
         op_overload: OpOverload,
         strategy_func: Callable[
-            [ArgsType, KwargsType], list[list[Placement | ShardingPlaceholder]]
+            [ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
         ],
         schema_info: Optional[RuntimeSchemaInfo] = None,
     ):
