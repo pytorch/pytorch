@@ -23,7 +23,12 @@ from torch._inductor.comms import (
     sink_waits_iterative,
 )
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
-from torch._inductor.fx_passes.bucketing import is_all_gather_into_tensor
+from torch._inductor.fx_passes.bucketing import (
+    is_all_gather_into_tensor,
+    is_all_reduce_tensor,
+    is_all_to_all_tensor,
+    is_reduce_scatter_tensor,
+)
 from torch._inductor.scheduler import (
     _get_mm_like_fn,
     BaseSchedulerNode,
@@ -40,6 +45,7 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedSingleProcTestCase,
     MultiProcessTestCase,
     requires_accelerator_dist_backend,
+    requires_gloo,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -1773,16 +1779,10 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         inputs = [x, w, ar_0, ar_1]
         f(*inputs, **self.get_world_trs())
 
-        def _pass(g):
-            from torch._inductor.fx_passes.bucketing import bucket_all_reduce
-
-            bucket_all_reduce(g.owning_module, lambda _: 2000)
-
-        torch._inductor.config.post_grad_custom_post_pass = _pass
-
         with torch._inductor.config.patch(
             {
                 "reorder_for_compute_comm_overlap": False,
+                "bucket_all_reduces_fx": bucket_mode,
             }
         ):
             compiled = torch.compile(f)
@@ -2193,7 +2193,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         self.assertEqual(saved_values, [wt1])
 
     @skip_if_lt_x_gpu(2)
-    def test_comm_analysis(self):
+    def test_all_gather_comm_analysis(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         torch.cuda.set_device(self.rank)
         c10d.init_process_group(
@@ -2218,6 +2218,184 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
             return ag_1_wait
 
         gm = make_fx(func)(torch.ones(4, 4, device=self.device), group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_gather_into_tensor(n):
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                assert est_ms > 0
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                assert est_ms_nccl > 0
+
+    @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_comm_analysis(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(inp, group_size, group_name):
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                inp, "sum", group_size, group_name
+            )
+            rs_0_wait = torch.ops.c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                rs_0_wait, "sum", group_size, group_name
+            )
+            rs_1_wait = torch.ops.c10d_functional.wait_tensor(rs_1_out)
+            return rs_1_wait
+
+        gm = make_fx(func)(torch.ones(4, 4, device=self.device), group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_reduce_scatter_tensor(n):
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                assert est_ms > 0
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                assert est_ms_nccl > 0
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_reduce_comm_analysis(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(inp, group_size, group_name):
+            ar_0_out = torch.ops._c10d_functional.all_reduce(inp, "sum", group_name)
+            ar_0_wait = torch.ops.c10d_functional.wait_tensor(ar_0_out)
+            ar_1_out = torch.ops._c10d_functional.all_reduce(
+                ar_0_wait, "sum", group_name
+            )
+            ar_1_wait = torch.ops.c10d_functional.wait_tensor(ar_1_out)
+            return ar_1_wait
+
+        gm = make_fx(func)(torch.ones(4, 4, device=self.device), group_size, group_name)
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_reduce_tensor(n):
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                assert est_ms > 0
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                assert est_ms_nccl > 0
+
+    @skip_if_lt_x_gpu(2)
+    def test_all_to_all_comm_analysis(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(inp, group_size, group_name):
+            chunk = inp.numel() // self.world_size
+            split_sizes = [chunk] * self.world_size
+            a2a_0_out = torch.ops._c10d_functional.all_to_all_single(
+                inp,
+                split_sizes,
+                split_sizes,
+                group_name,
+            )
+            a2a_0_wait = torch.ops.c10d_functional.wait_tensor(a2a_0_out)
+            a2a_1_out = torch.ops._c10d_functional.all_to_all_single(
+                a2a_0_wait,
+                split_sizes,
+                split_sizes,
+                group_name,
+            )
+            a2a_1_wait = torch.ops.c10d_functional.wait_tensor(a2a_1_out)
+            return a2a_1_wait
+
+        gm = make_fx(func)(
+            torch.ones(group_size * 4, 1, device=self.device), group_size, group_name
+        )
+        g = gm.graph
+        for n in g.nodes:
+            if is_all_to_all_tensor(n):
+                from torch._inductor.comm_analysis import (
+                    estimate_nccl_collective_runtime_from_fx_node,
+                )
+
+                est_ms = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=False
+                )
+                assert est_ms > 0
+                est_ms_nccl = estimate_nccl_collective_runtime_from_fx_node(
+                    n, use_nccl_estimator=True
+                )
+                assert est_ms_nccl > 0
+
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_regression_use_nccl_estimate_with_gloo(self):
+        # Test checks that using nccl estimator option does not hard fail
+        # with backends that does not support runtime estimations, e.g. gloo
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(inp, group_size, group_name):
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                inp, group_size, group_name
+            )
+            ag_0_wait = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_wait, group_size, group_name
+            )
+            ag_1_wait = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+            return ag_1_wait
+
+        gm = make_fx(func)(torch.ones(4, 4), group_size, group_name)
         g = gm.graph
         for n in g.nodes:
             if is_all_gather_into_tensor(n):

@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     MI300_ARCH,
     parametrize as parametrize_test,
     run_tests,
+    serialTest,
     set_default_dtype,
     skipIfRocmArch,
     subtest,
@@ -3236,6 +3237,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @largeTensorTest("12GB")
+    @serialTest()
     def test_conv_large_nosplit(self, device):
         # Here we just test the convolution correctly route to the fallback implementation
         # that is, it does not crash. The correctness of fallback implementation should be
@@ -3296,6 +3298,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @largeTensorTest("12GB")
+    @serialTest()
     def test_conv_transposed_large(self, device):
         dtype = torch.half if self.device_type == "cuda" else torch.float
         conv = nn.ConvTranspose2d(1, 1, 1, 1, bias=False).to(device).to(dtype)
@@ -3340,6 +3343,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @largeTensorTest("12GB")
+    @serialTest()
     def test_conv_large(self, device):
         dtype = torch.half if self.device_type == "cuda" else torch.float
         conv = nn.Conv2d(2, 2, 8, 8, bias=False).to(device).to(dtype)
@@ -3373,6 +3377,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("60GB", "cuda")
+    @serialTest()
     def test_conv_large_batch_1(self, device):
         in_channels = 514
         dim = 2048
@@ -4186,6 +4191,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("40GB")
     @largeTensorTest("24GB", "cpu")
+    @serialTest()
     @tf32_on_and_off(0.005)
     def test_conv3d_64bit_indexing(self, device):
         x = torch.rand(1, 32, 512, 512, 256)
@@ -4196,7 +4202,8 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @skipCUDAIfRocm
     @onlyCUDA
-    @largeTensorTest("40GB", "cuda")
+    @largeTensorTest("48GB", "cuda")
+    @serialTest()
     def test_conv3d_cudnn_broken(self, device):
         for dtype in (torch.half, torch.bfloat16):
             x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device)
@@ -4219,6 +4226,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
+    @serialTest()
     # TODO(eqy): Remove this once it is fixed in cuDNN and we can dispatch to it again
     @xfailIf(_get_cudnn_version() is not None and _get_cudnn_version() > 91000)
     def test_depthwise_conv_64bit_indexing(self, device):

@@ -831,7 +831,9 @@ class AOTFxirTestCase(InductorTestCase):
             gm = torch._inductor.aot_compile(
                 ep.module(), inp, options={"fx_wrapper": True, **test_config}
             )
-            self.assertTrue(same(model(*inp), gm(*inp)))
+            # Flatten args for fx_wrapper gm
+            flat_args, _ = pytree.tree_flatten(inp)
+            self.assertTrue(same(model(*inp), gm(*flat_args)))
 
             for node in gm.graph.nodes:
                 if (
@@ -1181,6 +1183,38 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             compiled_out = compiled(*args)
             self.assertEqual(compiled_out.shape, shape)
+
+    def test_reshape_dynamic_ph(self):
+        """
+        Test dynamic scalars using SymInts placeholder
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x, shape):
+                return torch.reshape(x, shape) + 2
+
+        ds = {
+            "x": (torch.export.Dim.AUTO, torch.export.Dim.AUTO),
+            "shape": [torch.export.Dim.AUTO, torch.export.Dim.AUTO],
+        }
+        args = (torch.randn((12, 14), device=self.device), [6, 28])
+        self.check(TestModule(), args, ds)
+
+    def test_reshape_dynamic_tmd(self):
+        """
+        Test dynamic reshape using shape dependent information
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                new_shape = [x.shape[0] // 2, x.shape[1] * 2]
+                return torch.reshape(x, new_shape) + 2
+
+        ds = {
+            "x": (torch.export.Dim.AUTO, torch.export.Dim.AUTO),
+        }
+        args = (torch.randn((12, 14), device=self.device),)
+        self.check(TestModule(), args, ds)
 
 
 class TestReplaceFloorDiv(InductorTestCase):
