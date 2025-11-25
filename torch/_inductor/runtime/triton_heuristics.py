@@ -1623,6 +1623,11 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             if triton_meta.get("device_type") not in ("cuda", "xpu"):
                 raise CannotStaticallyLaunchKernel("Non-cuda//XPU device")
 
+            if triton_meta.get("device_type") == "xpu" and _IS_WINDOWS:
+                raise CannotStaticallyLaunchKernel(
+                    "Static XPU kernel launch not supported on Windows"
+                )
+
             if torch._inductor.config.cpp_wrapper:
                 # If we're running with cpp wrapper, it doesn't
                 # make sense to statically compile since everything

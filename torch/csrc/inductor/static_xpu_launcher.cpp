@@ -5,6 +5,8 @@
  **/
 
 #if defined(USE_XPU)
+// TODO: enable on Windows.
+#ifndef _WIN32
 #include <torch/csrc/utils/pythoncapi_compat.h>
 
 #include <ATen/Context.h>
@@ -564,4 +566,5 @@ bool StaticXpuLauncher_init(PyObject* module) {
   }
   return true;
 }
+#endif
 #endif
