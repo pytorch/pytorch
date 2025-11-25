@@ -1732,6 +1732,7 @@ class CppVecOverrides(CppOverrides):
                 V.kernel.compute,
                 code,
             )
+            result.is_vec = True
         elif result.is_vec:
             csevar = V.kernel.cse.generate(
                 V.kernel.compute, f"{mask} ? {body_code_vec} : {other_code_vec}"
@@ -3779,9 +3780,6 @@ class TilingSelect:
     Implement the heuristic to select the tiling factors and tiling indices.
     In the future, we can implement advanced heuristic in a subclass.
     """
-
-    def __init__(self):
-        super().__init__()
 
     def select_tiling(
         self,
