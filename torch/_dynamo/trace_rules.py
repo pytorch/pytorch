@@ -64,6 +64,8 @@ from .variables import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    PyTreeGetNodeTypeFunctionVariable,
+    PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
@@ -180,6 +182,7 @@ manual_torch_name_rule_map: dict[
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
+    "torch._check": TorchInGraphFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
     # are not aten operations and therefore they are completely ignored
@@ -377,6 +380,8 @@ manual_torch_name_rule_map: dict[
     f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
+    "torch.utils._pytree._get_node_type": PyTreeGetNodeTypeFunctionVariable,
+    "torch.utils._pytree.tree_is_leaf": PyTreeTreeIsLeafFunctionVariable,
 }
 
 
@@ -2319,6 +2324,8 @@ if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
 
+if sys.version_info >= (3, 13):
+    torch_c_binding_in_graph_functions["math.fma"] = TorchInGraphFunctionVariable
 
 # In graph functions (including constant folding) that are not C bindings
 # NOTE: [Cacheability of in-graph torch functions]
@@ -2343,7 +2350,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._check_type",
         "torch._check_value",
         "torch._check_with",
-        "torch._check",
         "torch._compile._disable_dynamo",
         "torch._functorch.apis.chunk_vmap",
         "torch._functorch.batch_norm_replacement.batch_norm_without_running_stats",

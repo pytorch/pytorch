@@ -1570,7 +1570,7 @@ class Tensor(torch._C.TensorBase):
             ... )  # It can be mapped to contiguous format
             (0, 1, 2, 3)
             >>> try:
-            ...     torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check="ILLEGAL")
+            ...     torch.empty((1, 2, 3, 4)).dim_order(ambiguity_check="ILLEGAL") # type: ignore[arg-type]
             ... except TypeError as e:
             ...     print(e)
             The ambiguity_check argument must be a bool or a list of memory formats.

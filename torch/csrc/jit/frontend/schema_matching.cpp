@@ -209,7 +209,7 @@ static Value* tryMatchArgument(
   value = tryConvertToType(loc, graph, concrete_type, value, allow_conversions);
   std::stringstream ss;
   if (!value->type()->isSubtypeOfExt(
-          *concrete_type, /*why_not=*/(failure_messages) ? &ss : nullptr)) {
+          *concrete_type, /*why_not=*/failure_messages ? &ss : nullptr)) {
     if (failure_messages) {
       auto& ostream = err()
           << arg.formatTypeMismatchMsg(value->type()->repr_str());
@@ -364,7 +364,7 @@ static std::optional<MatchedSchema> tryMatchSchema(
   }
 
   auto err = [&]() -> std::ostream& {
-    *failure_messages << "\n" << schema << ":\n";
+    *failure_messages << '\n' << schema << ":\n";
     return *failure_messages;
   };
 
@@ -679,7 +679,7 @@ Value* emitBuiltinCall(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     const std::optional<NamedValue>& self) {
-  const auto& variants = getAllOperatorsFor(name);
+  auto variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
   // first let's set the graph's version
@@ -751,7 +751,7 @@ Value* emitBuiltinCall(
     } else {
       error << "Here are some suggestions: \n";
       for (const auto& sym : close_symbols) {
-        error << "\t" << sym.toQualString() << "\n";
+        error << '\t' << sym.toQualString() << '\n';
       }
       error << "\nThe original call is";
     }

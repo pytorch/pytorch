@@ -1,6 +1,7 @@
 import contextlib
 import logging
-from typing import Any, Callable, cast, Optional, TypeVar
+from collections.abc import Callable
+from typing import Any, cast, Optional, TypeVar
 from unittest.mock import patch
 
 import torch

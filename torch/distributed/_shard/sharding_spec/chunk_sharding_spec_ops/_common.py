@@ -133,6 +133,7 @@ def _handle_col_wise_sharding_base(
                 inp,
                 local_shard,
                 offsets=gathered_offsets[i] if gathered_offsets is not None else None,
+                # pyrefly: ignore [bad-argument-type]
                 mode=mode,
                 per_sample_weights=gathered_per_sample_weights[i]
                 if gathered_per_sample_weights is not None
