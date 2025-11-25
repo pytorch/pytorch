@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Iterable, Iterator, Sequence, Sized
-from typing import Generic, TypeVar, Union
+from typing import Generic, TypeVar
 
 import torch
 
@@ -307,7 +307,7 @@ class BatchSampler(Sampler[list[int]]):
 
     def __init__(
         self,
-        sampler: Union[Sampler[int], Iterable[int]],
+        sampler: Sampler[int] | Iterable[int],
         batch_size: int,
         drop_last: bool,
     ) -> None:
