@@ -1563,40 +1563,26 @@ TORCH_IMPL_FUNC(heaviside_out) (
 
 static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
   const auto self_dtype = self.scalar_type();
-  // All integral types are promoted to float32
-  if (isIntegralType(self_dtype, true) || self_dtype == kFloat) {
+  // All integral and reduced floating types are promoted to float32
+  if (isIntegralType(self_dtype, true) || isReducedFloatingType(self_dtype) || self_dtype == kFloat) {
       return at::pow(2.0, other);
   }
-  // For double and reduced floating types do regular type promotion
+  // For double and complex do regular type promotion
   return at::full({}, 2.0, self.options()).pow(other);
 }
 
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
-  auto self_type = self.scalar_type();
-  auto other_type = other.scalar_type();
-  if ((isFloatingType(self_type) || isIntegralType(self_type, /*includeBool=*/false)) &&
-      (isFloatingType(other_type) || isIntegralType(other_type, /*includeBool=*/false))) {
-    auto log2_self_plus_other = at::log2(at::abs(self)).add(other);
-    auto pow2_result = _pow2(self, log2_self_plus_other);
-    auto sign_self = at::sign(self);
-    return at::mul_out(result, sign_self, pow2_result);
-  }
   return at::mul_out(result, self, _pow2(self, other));
 }
 
 Tensor ldexp(const Tensor& self, const Tensor& other) {
-  auto self_type = self.scalar_type();
-  auto other_type = other.scalar_type();
-  if ((isFloatingType(self_type) || isIntegralType(self_type, /*includeBool=*/false)) &&
-      (isFloatingType(other_type) || isIntegralType(other_type, /*includeBool=*/false))) {
-    // helps handle case when 2^other goes out of numerical limits (too large or too small),
-    // even if self*2^other is within the limits.
-    auto log2_self_plus_other = at::log2(at::abs(self)).add(other);
-    auto pow2_result = _pow2(self, log2_self_plus_other);
-    auto sign_self = at::sign(self);
-    return at::mul(sign_self, pow2_result);
+  ScalarType out_type = c10::promoteTypes(self.scalar_type(), other.scalar_type());
+  if (isIntegralType(out_type, /*includeBool=*/true)) {
+    // All integral types are promoted to float32
+    out_type = ScalarType::Float;
   }
-  return at::mul(self, _pow2(self, other));
+  Tensor result = at::empty(self.sizes(), self.options().dtype(out_type));
+  return at::ldexp_out(result, self, other);
 }
 
 Tensor& ldexp_(Tensor& self, const Tensor& other) {
