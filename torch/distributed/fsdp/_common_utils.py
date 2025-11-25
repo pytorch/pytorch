@@ -393,15 +393,14 @@ def _build_prefix_set(fqns: list[str]) -> set[str]:
     Returns:
         Set of all prefixes including the full FQNs themselves.
     """
-    prefix_set = set()
+    prefix_set: set[str] = set()
     for fqn in fqns:
-        # Add all intermediate prefixes
         parts = fqn.split(".")
-        for i in range(1, len(parts) + 1):
-            prefix = ".".join(parts[:i])
-            if i < len(parts):
-                prefix += "."
-            prefix_set.add(prefix)
+        for i in range(1, len(parts)):
+            # add prefixes ending with '.'
+            prefix_set.add(".".join(parts[:i]) + ".")
+        # add the full name without trailing '.'
+        prefix_set.add(fqn)
     return prefix_set
 
 
