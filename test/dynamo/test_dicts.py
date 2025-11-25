@@ -1361,11 +1361,12 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
     # ==, !=, |
 
     def setUp(self):
+        self._prev_trace_unittest = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
         super().setUp()
 
     def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = False
+        torch._dynamo.config.enable_trace_unittest = self._prev_trace_unittest
         return super().tearDown()
 
     def assertEqual(self, x, y):
@@ -1780,11 +1781,12 @@ class OrderedDictMethodsTests(DictMethodsTests):
 
 class OrderedDictSubclassOverload(torch._dynamo.test_case.TestCase):
     def setUp(self):
+        self._prev_trace_unittest = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_unittest = True
         super().setUp()
 
     def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = False
+        torch._dynamo.config.enable_trace_unittest = self._prev_trace_unittest
         return super().tearDown()
 
     def assertEqual(self, x, y):
