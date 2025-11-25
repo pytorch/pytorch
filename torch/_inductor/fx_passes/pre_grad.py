@@ -264,13 +264,14 @@ def _run_pre_dispatch_passes(
                 f"[Pre grad(predispatch IR)] Apply {pass_name} pass",
             )
 
-    # Remove noops at the end, which may be generated other passes.
-    pass_execution_and_save(
-        remove_noop_pass,
-        gm,
-        example_inputs,
-        "[Pre grad(predispatch IR)]Apply remove_noop pass",
-    )
+    if "remove_noop" not in remove_passes_list:
+        # Remove noops at the end, which may be generated other passes.
+        pass_execution_and_save(
+            remove_noop_pass,
+            gm,
+            example_inputs,
+            "[Pre grad(predispatch IR)]Apply remove_noop pass",
+        )
     shape_prop(gm)
 
 
@@ -737,7 +738,7 @@ def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 input_node = node.kwargs["input"]
             if (
                 input_node.op == "call_function"
-                and input_node.target == torch.nn.functional.linear
+                and input_node.target is torch.nn.functional.linear
             ):
                 normalized = NormalizedLinearNode(input_node)
                 input = normalized.get_input()

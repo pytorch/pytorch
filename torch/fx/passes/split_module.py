@@ -326,18 +326,18 @@ def split_module(
         instantiate_node_partition_mapping(node)
 
         if node.op == "call_function" and node.target in GLOBAL_STATE_NODES:
-            if node.target == torch._C._set_grad_enabled:
+            if node.target is torch._C._set_grad_enabled:
                 assert len(node.args) == 1
                 assert isinstance(node.args[0], bool)
                 active_grad = node
                 grad_regions[active_grad] = set({split_callback(node)})
-            elif node.target == torch.amp._enter_autocast:
+            elif node.target is torch.amp._enter_autocast:
                 # Should all be python constants
                 assert all(not isinstance(arg, Node) for arg in node.args)
                 active_autocasts.add(node)
                 autocast_regions[node] = set({split_callback(node)})
                 autocast_exits[node] = None
-            elif node.target == torch.amp._exit_autocast:
+            elif node.target is torch.amp._exit_autocast:
                 assert len(node.args) == 1
                 autocast_regions[node.args[0]].add(split_callback(node))
                 active_autocasts.remove(node.args[0])

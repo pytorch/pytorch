@@ -2,7 +2,8 @@
 # mypy: allow-untyped-defs
 import math as pymath
 import warnings
-from typing import Any, Callable, TypeVar
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 from .triton_compat import (  # noqa: F401
     _log2,

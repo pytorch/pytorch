@@ -10,7 +10,7 @@ Python polyfills for common builtins.
 
 import types
 from collections import OrderedDict
-from collections.abc import Callable, Hashable, Iterable, MutableMapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ne
 from typing import Any, TYPE_CHECKING
@@ -276,7 +276,7 @@ def getattr_and_trace(*args, **kwargs):
     return fn(*args[2:], **kwargs)
 
 
-def mapping_get(obj, key, value=None):
+def mapping_get(obj, key, value=None, /):
     try:
         return obj.__getitem__(key)
     except KeyError:
@@ -293,31 +293,45 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     return obj
 
 
-# Used with something like dict(obj)
-def construct_dict(cls, /, *args, **kwargs):
-    dst = cls.__new__(cls)
-
-    if args:
-        src = args[0]
-
-        if not isinstance(src, Iterable):
-            raise TypeError(f"{type(src)} object is not iterable")
-
-        # Ensure that the overridden __iter__ method is invoked
-        if isinstance(src, (dict, MutableMapping, types.MappingProxyType)):
-            for key in src:
-                # This will inline the __getitem__ of the src object
-                dst[key] = src[key]
-        else:
-            # likely a sequence like tuple of pairs
-            for key, value in src:
-                dst[key] = value
+def mutable_mapping_update(self, data=(), /, **kwargs):
+    if isinstance(data, Mapping):
+        # Merge standard mapping with PyMapping_Items
+        for key, value in data.items():
+            self[key] = value
+    # FIXME: Enabling the `elif`-branch below needs too many `VariableClass.call_obj_hasattr` changes.
+    #   >>> class Foo:
+    #   ...     def __init__(self):
+    #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method
+    #   ...
+    #   ...     def __getitem__(self, key):
+    #   ...         return 0
+    #   ...
+    #   >>> dict(Foo())
+    #   {'a': 0, 'b': 0, 'c': 0}
+    #
+    # > This is a rare case, so we comment it out for now.
+    #
+    # elif hasattr(data, "keys"):
+    #     # Merge mapping-like object with PyMapping_Keys + PyObject_GetItem
+    #     for key in data.keys():
+    #         self[key] = data[key]
+    else:
+        if not isinstance(data, Iterable):
+            raise TypeError(f"{type(data).__name__!r} object is not iterable")
+        # Likely a sequence of pairs
+        for key, value in data:
+            self[key] = value
 
     if kwargs:
-        for key in kwargs:
-            dst[key] = kwargs[key]
+        for key, value in kwargs.items():
+            self[key] = value
 
-    return dst
+
+# Used with something like dict(obj)
+def construct_dict(cls, data=(), /, **kwargs):
+    self = cls.__new__(cls)
+    mutable_mapping_update(self, data, **kwargs)
+    return self
 
 
 def foreach_map_fn(*args):

@@ -140,7 +140,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
         args: tuple[object, ...] = (),
         kwargs: Optional[dict[str, object]] = None,
     ) -> object:
-        if func == torch.Tensor.__getitem__:
+        if func is torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])
             if all(isinstance(x, torch.Tensor) for x in index_args):
                 return mod_index(args[0], index_args)

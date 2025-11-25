@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 """
 Constant and enum variable tracking in Dynamo.
 
@@ -8,14 +6,17 @@ values during compilation, ensuring proper handling of Python literals and
 maintaining type safety through the compilation process.
 """
 
+import enum
 import operator
-from typing import TYPE_CHECKING
+from collections.abc import Sequence
+from typing import Any, Literal, Optional, overload, TYPE_CHECKING, Union
+from typing_extensions import override
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
 
 from .. import graph_break_hints, variables
-from ..exc import raise_observed_exception, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented
 from ..utils import (
     cmp_name_to_op_mapping,
     common_constant_types,
@@ -29,6 +30,8 @@ from .base import ValueMutationNew, VariableTracker
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
+    from .functions import UserFunctionVariable
+
 
 class ConstantVariable(VariableTracker):
     """
@@ -39,8 +42,16 @@ class ConstantVariable(VariableTracker):
     nested collections.
     """
 
+    @overload
     @staticmethod
-    def create(value, **kwargs) -> VariableTracker:
+    def create(value: bool) -> "ConstantVariable": ...
+
+    @overload
+    @staticmethod
+    def create(value: Any, **kwargs: Any) -> VariableTracker: ...
+
+    @staticmethod
+    def create(value: Any, **kwargs: Any) -> VariableTracker:
         """
         Create a `ConstantVariable` based on the given value, and supports
         automatic routing for collection types like `tuple` (in which case we'd
@@ -54,10 +65,10 @@ class ConstantVariable(VariableTracker):
         # Routing for supported collection literals.
         if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.SetVariable(items, **kwargs)
+            return variables.SetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, frozenset):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.FrozensetVariable(items, **kwargs)
+            return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
             slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
@@ -76,7 +87,7 @@ class ConstantVariable(VariableTracker):
 
         return ConstantVariable(value, **kwargs)
 
-    def __init__(self, value, **kwargs) -> None:
+    def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         assert ConstantVariable.is_base_literal(value), f"""
 Cannot construct `ConstantVariable` for value of type {type(value)}.
@@ -92,48 +103,52 @@ its type to `common_constant_types`.
         else:
             self.value = value
 
-    def as_proxy(self):
+    def as_proxy(self) -> Any:
         return self.value
 
     def __repr__(self) -> str:
         return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> Any:
         return self.value
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> Literal[True]:
         return True
 
     @property
-    def items(self):
+    def items(self) -> list[VariableTracker]:
         """
         Need this when adding a BaseListVariable and a ConstantVariable together.
         Happens in detectron2.
         """
         return self.unpack_var_sequence(tx=None)
 
-    def getitem_const(self, tx: "InstructionTranslator", arg: VariableTracker):
+    def getitem_const(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker:
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
         )
 
     @staticmethod
-    def is_base_literal(obj):
+    def is_base_literal(obj: object) -> bool:
         return type(obj) in common_constant_types
 
     @staticmethod
-    def is_literal(obj):
+    def is_literal(obj: object) -> bool:
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
-            return all(ConstantVariable.is_literal(x) for x in obj)
+            return all(ConstantVariable.is_literal(x) for x in obj)  # type: ignore[attr-defined]
         return ConstantVariable.is_base_literal(obj)
 
-    def unpack_var_sequence(self, tx):
+    def unpack_var_sequence(
+        self, tx: Optional["InstructionTranslator"]
+    ) -> list[VariableTracker]:
         try:
             return [ConstantVariable.create(x) for x in self.as_python_constant()]
         except TypeError as e:
             raise NotImplementedError from e
 
-    def const_getattr(self, tx: "InstructionTranslator", name):
+    def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if not hasattr(self.value, name):
             raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
@@ -144,10 +159,10 @@ its type to `common_constant_types`.
     def call_method(
         self,
         tx: "InstructionTranslator",
-        name,
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
+        name: str,
+        args: list[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         from .tensor import SymNodeVariable
 
         if name == "format" and istype(self.value, str):
@@ -179,9 +194,9 @@ its type to `common_constant_types`.
 
         if any(isinstance(x, SymNodeVariable) for x in args):
             # Promote to SymNodeVariable for operations involving dynamic shapes.
-            return variables.SymNodeVariable(self.as_proxy(), self.value).call_method(
-                tx, name, args, kwargs
-            )
+            return variables.SymNodeVariable.create(
+                tx, self.as_proxy(), self.value
+            ).call_method(tx, name, args, kwargs)
 
         try:
             const_args = [a.as_python_constant() for a in args]
@@ -189,7 +204,7 @@ its type to `common_constant_types`.
         except NotImplementedError:
             return super().call_method(tx, name, args, kwargs)
 
-        if isinstance(self.value, str) and name in str.__dict__.keys():
+        if isinstance(self.value, str) and name in str.__dict__:
             method = getattr(self.value, name)
             try:
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
@@ -230,7 +245,7 @@ its type to `common_constant_types`.
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
             return ConstantVariable.create(method(*const_args, **const_kwargs))
-        elif type(self.value) is complex and name in complex.__dict__.keys():
+        elif type(self.value) is complex and name in complex.__dict__:
             method = getattr(self.value, name)
             try:
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
@@ -238,10 +253,12 @@ its type to `common_constant_types`.
                 raise_observed_exception(type(e), tx)
 
         if name == "__len__" and not (args or kwargs):
+            # pyrefly: ignore [bad-argument-type]
             return ConstantVariable.create(len(self.value))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
+                    # pyrefly: ignore [no-matching-overload]
                     round(self.value, args[0].as_python_constant())
                 )
             except Exception as e:
@@ -252,6 +269,7 @@ its type to `common_constant_types`.
             assert not kwargs
             search = args[0].as_python_constant()
             try:
+                # pyrefly: ignore [unsupported-operation]
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
@@ -260,9 +278,65 @@ its type to `common_constant_types`.
                 )
         return super().call_method(tx, name, args, kwargs)
 
+    def call_tree_map(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.value is None:
+            none_is_leaf_var = tree_map_kwargs.get("none_is_leaf")
+            if none_is_leaf_var is not None:
+                try:
+                    none_is_leaf = bool(none_is_leaf_var.as_python_constant())
+                except NotImplementedError:
+                    return self._tree_map_fallback(
+                        tx,
+                        tree_map_fn,
+                        map_fn,
+                        rest,
+                        tree_map_kwargs,
+                    )
+            else:
+                tree_map_module = getattr(
+                    getattr(tree_map_fn, "fn", None), "__module__", ""
+                )
+                # torch.utils._pytree and torch.utils._cxx_pytree treat None as a leaf
+                # by default, while optree keeps it as an internal node unless
+                # none_is_leaf=True is provided.
+                none_is_leaf = not tree_map_module.startswith("optree")
+            if none_is_leaf:
+                return map_fn.call_function(tx, [self, *rest], {})
+            else:
+                for other in rest:
+                    if not (
+                        other.is_python_constant()
+                        and other.as_python_constant() is None
+                    ):
+                        return self._tree_map_fallback(
+                            tx,
+                            tree_map_fn,
+                            map_fn,
+                            rest,
+                            tree_map_kwargs,
+                        )
+                return self.clone()
+        if isinstance(self.value, (int, float, bool, complex, str, bytes, torch.dtype)):
+            return map_fn.call_function(tx, [self, *rest], {})
+        return super().call_tree_map(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+        )
+
+    @override
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> "VariableTracker":
+    ) -> "ConstantVariable":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
@@ -274,17 +348,19 @@ class EnumVariable(VariableTracker):
     both standard Enum and IntEnum with proper value tracking and comparison.
     """
 
-    def __init__(self, value, **kwargs) -> None:
+    def __init__(self, value: Union[enum.Enum, enum.IntEnum], **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
     @classmethod
-    def create(cls, cls_type, value_vt, options):
+    def create(
+        cls, cls_type: Any, value_vt: VariableTracker, options: Any
+    ) -> "EnumVariable":
         if isinstance(value_vt, variables.ConstantVariable):
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
-        unimplemented_v2(
+        unimplemented(
             gb_type="Failed to construct Enum variable",
             context=f"value: {value_vt}, allowed enum values: {list(cls_type)}",
             explanation="Attempted to construct an Enum value that is non-constant (e.g. int, string) "
@@ -293,7 +369,7 @@ class EnumVariable(VariableTracker):
             hints=[*graph_break_hints.USER_ERROR, *graph_break_hints.SUPPORTABLE],
         )
 
-    def as_proxy(self):
+    def as_proxy(self) -> Union[enum.Enum, int]:
         if isinstance(self.value, int):
             return int(self.value)  # convert IntEnum to a normal int
         return self.value
@@ -301,10 +377,10 @@ class EnumVariable(VariableTracker):
     def __repr__(self) -> str:
         return f"EnumVariable({type(self.value)})"
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> Union[enum.Enum, enum.IntEnum]:
         return self.value
 
-    def var_getattr(self, tx: "InstructionTranslator", name):
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if not hasattr(self.value, name):
             raise NotImplementedError
         if name in cmp_name_to_op_mapping:

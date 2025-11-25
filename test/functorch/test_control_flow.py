@@ -742,7 +742,7 @@ def forward(self, pred_1, x_1):
 
     def test_cond_in_forloop(self):
         def for_loop_fake(x):
-            for i in range(3):
+            for _ in range(3):
                 x = x * x + 1
             return x
 
@@ -942,9 +942,7 @@ def forward(self, pred_1):
         b = torch.randn(4, requires_grad=True)
         c = torch.randn(4, requires_grad=True)
 
-        for pred, fn in zip(
-            [torch.tensor(False), torch.tensor(True)], [false_fn, true_fn]
-        ):
+        for pred in [torch.tensor(False), torch.tensor(True)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
                 "Cond doesn't work unless it is captured completely with torch.compile",
@@ -3066,13 +3064,9 @@ class GraphModule(torch.nn.Module):
         ).to(DEVICE)
 
         # Test 3 models: RNNScanList, RNNScanTensor, RNNLoop
-        models = [
-            ("ScanList", RNNScanList),
-            ("ScanTensor", RNNScanTensor),
-            ("Loop", RNNLoop),
-        ]
+        models = [RNNScanList, RNNScanTensor, RNNLoop]
 
-        for model_name, model_class in models:
+        for model_class in models:
             # Create uncompiled model
             model_uc = model_class().to(DEVICE)
             uncompiled_grads, uncompiled_loss = run_test_and_get_grads_loss(
@@ -3088,9 +3082,7 @@ class GraphModule(torch.nn.Module):
             )
 
             # Compare gradients for each layer
-            for i, (uncompiled_grad, compiled_grad) in enumerate(
-                zip(uncompiled_grads, compiled_grads)
-            ):
+            for uncompiled_grad, compiled_grad in zip(uncompiled_grads, compiled_grads):
                 self.assertEqual(
                     uncompiled_grad,
                     compiled_grad,
@@ -4194,13 +4186,13 @@ class GraphModule(torch.nn.Module):
 
         interleaved_5: "f32[3, 10, 2]" = torch.ops.aten.slice(interleaved_4, 0, 0, 3);  interleaved_4 = None
 
-        child_17: "f32[3, 10, 2]" = interleaved_1.flip([0]);  interleaved_1 = None
-        child_18: "f32[3, 10, 2]" = interleaved_3.flip([0]);  interleaved_3 = None
-        child_19: "f32[3, 10, 2]" = interleaved_5.flip([0]);  interleaved_5 = None
+        flip_3: "f32[3, 10, 2]" = interleaved_1.flip([0]);  interleaved_1 = None
+        flip_4: "f32[3, 10, 2]" = interleaved_3.flip([0]);  interleaved_3 = None
+        flip_5: "f32[3, 10, 2]" = interleaved_5.flip([0]);  interleaved_5 = None
 
-        movedim_3: "f32[3, 10, 2]" = torch.movedim(child_17, 0, 0);  child_17 = None
-        movedim_4: "f32[3, 10, 2]" = torch.movedim(child_18, 0, 0);  child_18 = None
-        movedim_5: "f32[3, 10, 2]" = torch.movedim(child_19, 0, 0);  child_19 = None
+        movedim_3: "f32[3, 10, 2]" = torch.movedim(flip_3, 0, 0);  flip_3 = None
+        movedim_4: "f32[3, 10, 2]" = torch.movedim(flip_4, 0, 0);  flip_4 = None
+        movedim_5: "f32[3, 10, 2]" = torch.movedim(flip_5, 0, 0);  flip_5 = None
         return (movedim_3, movedim_4, movedim_5)
 """,  # noqa: B950
         )
@@ -7540,7 +7532,7 @@ def forward(self, arg0_1, arg1_1):
 
         inps = (torch.ones(3, 4), torch.ones(3, 5), torch.ones(5, 4), torch.ones(5, 3))
         for inp in inps:
-            gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 4))
+            gm = make_fx(foo, tracing_mode="symbolic")(inp)
             self.assertExpectedInline(
                 gm.code.strip(),
                 """\
@@ -8603,7 +8595,7 @@ class GraphModule(torch.nn.Module):
         getitem_13: "Sym(u20)" = while_loop[5]
         getitem_14: "Sym(u21)" = while_loop[6]
 
-        child: "f32[2, 3]" = while_loop[7];  while_loop = None
+        getitem_7: "f32[2, 3]" = while_loop[7];  while_loop = None
 
         add: "Sym(u15 + 1)" = getitem_8 + 1
         add_1: "Sym(u16 + 1)" = getitem_9 + 1
@@ -8612,7 +8604,7 @@ class GraphModule(torch.nn.Module):
         add_4: "Sym(u19 + 1)" = getitem_12 + 1
         add_5: "Sym(u20 + 1)" = getitem_13 + 1
         add_6: "Sym(u21 + 1)" = getitem_14 + 1
-        add_7: "f32[2, 3]" = child + 1
+        add_7: "f32[2, 3]" = getitem_7 + 1
 
         add_8: "f32[2, 3]" = getitem_8 + l_t_;  getitem_8 = None
         add_9: "f32[2, 3]" = getitem_9 + l_t_;  getitem_9 = None
@@ -8621,7 +8613,7 @@ class GraphModule(torch.nn.Module):
         add_12: "f32[2, 3]" = getitem_12 + l_t_;  getitem_12 = None
         add_13: "f32[2, 3]" = getitem_13 + l_t_;  getitem_13 = None
         add_14: "f32[2, 3]" = getitem_14 + l_t_;  getitem_14 = None
-        add_15: "f32[2, 3]" = child + l_t_;  child = l_t_ = None
+        add_15: "f32[2, 3]" = getitem_7 + l_t_;  getitem_7 = l_t_ = None
         return (add, add_1, add_2, add_3, add_4, add_5, add_6, add_7, add_8, add_9, add_10, add_11, add_12, add_13, add_14, add_15)
 
     class cond_fn_0(torch.nn.Module):

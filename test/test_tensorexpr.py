@@ -891,7 +891,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         torch.manual_seed(0)
         for torch_fn, dev, data_type in fn_dev_dtype:
-            if torch_fn == test_lgamma and dev == "cuda":
+            if torch_fn is test_lgamma and dev == "cuda":
                 # lgamma_cuda does not support BF16
                 continue
             rand_a = torch.rand(1024, dtype=data_type, device=dev)
@@ -1216,7 +1216,7 @@ class TestTensorExprFuser(BaseTestClass):
         @torch.jit.script
         def test(x: torch.Tensor, y: torch.Tensor, z: int) -> torch.Tensor:
             b = y
-            for i in range(z):
+            for _ in range(z):
                 a = x + y
                 b = b + y
             return b

@@ -658,7 +658,7 @@ class TestDataFramesPipes(TestCase):
         ]
 
         actual_i = []
-        for i, j in df_numbers:
+        for i, _ in df_numbers:
             actual_i.append(i)
         self.assertEqual(expected_i, actual_i)
 
@@ -1136,7 +1136,7 @@ class TestFunctionalIterDataPipe(TestCase):
                     )
                 break
         with warnings.catch_warnings(record=True) as wa:
-            for i, (n1, n2) in enumerate(zip(dp1, dp2)):
+            for n1, n2 in zip(dp1, dp2):
                 output1.append(n1)
                 output2.append(n2)
             self.assertEqual(len(wa), 1)
@@ -2632,7 +2632,7 @@ class TestTyping(TestCase):
                 self.dp = dp
 
             def __iter__(self) -> Iterator[int]:
-                for a, b in self.dp:
+                for a, _ in self.dp:
                     yield a
 
         # Non-DataPipe input with DataPipe hint

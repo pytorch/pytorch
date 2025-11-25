@@ -86,6 +86,28 @@ struct zeta_functor {
   }
 };
 
+struct logaddexp_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::logaddexp(a, b);
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::logaddexp(float(a), float(b));
+  }
+};
+
+struct logaddexp2_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::logaddexp2(a, b);
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::logaddexp2(float(a), float(b));
+  }
+};
+
 struct xlog1py_functor {
   template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
   inline T operator()(const T a, const T b) {
@@ -377,6 +399,10 @@ REGISTER_FLOAT_BINARY_OP(fmin);
 REGISTER_FLOAT_BINARY_OP(nextafter);
 REGISTER_FLOAT_BINARY_OP(zeta);
 REGISTER_INT2FLOAT_BINARY_OP(zeta);
+REGISTER_FLOAT_BINARY_OP(logaddexp);
+REGISTER_INT2FLOAT_BINARY_OP(logaddexp);
+REGISTER_FLOAT_BINARY_OP(logaddexp2);
+REGISTER_INT2FLOAT_BINARY_OP(logaddexp2);
 REGISTER_FLOAT_BINARY_OP(xlog1py);
 REGISTER_INT2FLOAT_BINARY_OP(xlog1py);
 REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_t);
@@ -463,6 +489,8 @@ REGISTER_BINARY_OP(add, float2, float2);
 REGISTER_BINARY_OP(add, half2, half2);
 REGISTER_BINARY_OP(sub, float2, float2);
 REGISTER_BINARY_OP(sub, half2, half2);
+REGISTER_BINARY_OP(logaddexp, float2, float2);
+REGISTER_BINARY_OP(logaddexp, half2, half2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2, half2);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, float2, float2, float2);
