@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import itertools
 import math
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
@@ -415,21 +416,6 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     return tuple(result_pp)
 
 
-def update_ft(f, from_idx, from_size, from_group_dim, t, to_idx, to_size, to_group_shape):
-    nf = None
-    nt = None
-    new_from_idx = None
-    new_to_idx = None
-    if f < t:
-        nf = from_size[from_idx]
-        from_group_dim.append(from_idx)
-        new_from_idx = from_idx + 1
-    else:
-        nt = to_size[to_idx]
-        to_group_shape.append(nt)
-        new_to_idx = to_idx + 1
-    return nf, nt, new_from_idx, new_to_idx
-
 def include_singletons_in_from(f, from_idx, from_size, from_len, from_group_dim, t):
     new_from_idx = from_idx + 1
     while new_from_idx < from_len and from_size[new_from_idx] == 1:
@@ -437,6 +423,7 @@ def include_singletons_in_from(f, from_idx, from_size, from_len, from_group_dim,
         from_group_dim.append(from_idx)
         new_from_idx += 1
     return from_idx
+
 
 def dim_tile(ndim: int, dims: tuple[int, ...]) -> DimMap:
     if len(dims) < ndim:
@@ -610,7 +597,7 @@ def propagate_shape_and_sharding(
                 input_sharded = shard_mesh_dim is not None
                 if i > 0:
                     if strict_view and input_sharded:
-                        for x in range(0, dim.input_dim + 1):
+                        for x in range(dim.input_dim + 1):
                             shardable_dims[x] = [True] * mesh_ndim
                         sharded_dims.append(dim)
                 elif input_sharded:
@@ -642,8 +629,9 @@ def propagate_shape_and_sharding(
             in_dim = get_in_dim_to_shard(cmd.input_dim, shard_dim_map)
             out_size = cmd.group_shape[cmd.split_id]
             if in_dim is not None:
-                # fix (_StridedShard(dim=0, sf=6), _StridedShard(dim=0, sf=12))
-                num_of_shard_placements = len(shard_dim_map.values())
+                num_of_shard_placements = len(
+                    list(itertools.chain.from_iterable(shard_dim_map.values()))
+                )
                 shard_mesh_dim, input_src_placement = (
                     maybe_get_shard_mesh_dim_and_placement(
                         in_dim,
@@ -709,9 +697,6 @@ def propagate_shape_and_sharding(
     # for each output dim, find the corresponding input dim in terms of sharding prop
     shard_dim_map = {}
     for dim, cmd in enumerate(rule):
-        # if torch.distributed.get_rank() == 2:
-        #     import fbvscode
-        #     fbvscode.set_trace()
         in_dims = get_in_dim_to_shard(cmd, shard_dim_map)
         if isinstance(in_dims, list) and len(in_dims) > 0:
             for in_dim in in_dims:
