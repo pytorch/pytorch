@@ -2902,11 +2902,6 @@ if torch.xpu.is_available():
         aten.embedding_dense_backward, warn=False
     )  # (XPU-only and faster than decomp)
 
-if torch.mtia.is_available():
-    make_fallback(
-        aten.native_layer_norm, warn=False
-    )  # (MTIA-only and faster than decomp)
-
 
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
@@ -3923,15 +3918,6 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
 def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
     if may_realize:
 
-        def try_get_name(x):
-            if isinstance(x, ir.TensorBox):
-                x = x.data
-            if isinstance(x, ir.BaseView):
-                x = x.unwrap_view()
-            if isinstance(x, ir.StorageBox):
-                x = x.data
-            return x.get_name() if isinstance(x, ir.Buffer) else None
-
         def indice_slice_from_randperm(indice):
             # Refer to: https://github.com/pytorch/pytorch/pull/139366#discussion_r1825424660
             # For this specific pattern, indices is unique as coming from torch.randperm.
@@ -3946,7 +3932,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
                 )
             return False
 
-        if try_get_name(self) in values.get_read_names() and not all(
+        if ir.try_get_name(self) in values.get_read_names() and not all(
             indice_slice_from_randperm(indice) for indice in indices
         ):
             # Fix issue: https://github.com/pytorch/pytorch/issues/138908

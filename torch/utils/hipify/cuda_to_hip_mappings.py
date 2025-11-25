@@ -9454,6 +9454,8 @@ C10_MAPPINGS = collections.OrderedDict(
         ("C10_CUDA_IGNORE_ERROR", ("C10_HIP_IGNORE_ERROR", API_C10)),
         ("C10_CUDA_CLEAR_ERROR", ("C10_HIP_CLEAR_ERROR", API_C10)),
         ("c10::cuda", ("c10::hip", API_C10)),
+        ("cuda::CUDAEvent", ("hip::HIPEvent", API_C10)),
+        ("CUDAEvent", ("HIPEvent", API_C10)),
         ("cuda::CUDAStream", ("hip::HIPStream", API_C10)),
         ("CUDAStream", ("HIPStream", API_C10)),
         # This substitution is not permissible, because there's another copy of this
