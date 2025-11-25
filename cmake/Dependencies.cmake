@@ -15,7 +15,12 @@ set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
 # the rpath (per library?)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
- # UBSAN triggers when compiling protobuf, so we need to disable it.
+# pin hardware_destructive_interference_size for ABI stability with GCC.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+  add_compile_options($<$<COMPILE_LANGUAGE:CXX>:--param=destructive-interference-size=64>)
+endif()
+
+# UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
 
 macro(disable_ubsan)
