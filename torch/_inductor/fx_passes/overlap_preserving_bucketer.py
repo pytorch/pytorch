@@ -146,6 +146,7 @@ class OverlapPreservingBucketer:
         self.insert_overlap_deps = insert_overlap_deps
         self.bucket_mode = bucket_mode
         self.node_to_event: dict[fx.Node, PGEvent] = {}
+        self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
         # Compute ancestors including original graph edges and hiding interval dependencies
         self.node_ancestors = self._compute_node_ancestors()
@@ -154,7 +155,6 @@ class OverlapPreservingBucketer:
         # Build timelines and add constraints to aug_graph
         self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
         self._add_hiding_interval_constraints()
-        self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
     def _compute_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """
