@@ -1,11 +1,17 @@
 import collections
+import ctypes
 from typing import Any, Union
 
 import torch
+from torch._utils import _dummy_type
 from torch.types import Device
 
 from . import _get_device_index, _lazy_init, is_initialized
 
+
+if not hasattr(torch._C, "_xpu_XPUAllocator"):
+    # Define dummy base classes
+    torch._C.__dict__["_xpu_XPUAllocator"] = _dummy_type("_xpu_XPUAllocator")
 
 _device_t = Union[Device, str, int, None]
 
@@ -241,7 +247,64 @@ def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -
     torch._C._xpu_setMemoryFraction(fraction, device)
 
 
+class _XPUAllocator:
+    r"""Wrapper over internal XPU memory allocators."""
+
+    def __init__(self, allocator: torch._C._xpu_XPUAllocator):
+        self._allocator = allocator
+
+    def allocator(self):
+        return self._allocator
+
+
+class XPUPluggableAllocator(_XPUAllocator):
+    r"""XPU memory allocator loaded from a so file."""
+
+    def __init__(self, path_to_so_file: str, alloc_fn_name: str, free_fn_name: str):
+        r"""Memory allocators are compiled in .so files and loaded dynamically using ctypes.
+
+        To change the active allocator use the :func:`torch.memory.xpu.change_current_allocator` function.
+
+        Args:
+            path_to_so_file(str): Path in the filesystem to the `.so` file containing
+                the allocator functions
+            alloc_fn_name(str): Name of the function to perform the memory allocation
+                in the so file. The signature must be:
+                void* alloc_fn_name(ssize_t size, int device, sycl::queue* queue);
+            free_fn_name(str): Name of the function to perform the memory release
+                in the so file. The signature must be:
+                void free_fn_name(void* ptr, size_t size, sycl::queue* queue);
+
+        .. warning::
+            This is currently supported only in unix OSs
+        """
+        allocator = ctypes.CDLL(path_to_so_file)
+        alloc_fn = ctypes.cast(getattr(allocator, alloc_fn_name), ctypes.c_void_p).value
+        free_fn = ctypes.cast(getattr(allocator, free_fn_name), ctypes.c_void_p).value
+        assert alloc_fn is not None
+        assert free_fn is not None
+        self._allocator = torch._C._xpu_customAllocator(alloc_fn, free_fn)
+
+
+def change_current_allocator(allocator: _XPUAllocator) -> None:
+    r"""Change the currently used memory allocator to be the one provided.
+
+    If the current allocator has already been used/initialized, this function will error.
+
+
+    Args:
+        allocator (torch.xpu.memory._XPUAllocator): allocator to be set as the active one.
+    """
+    torch._C._xpu_changeCurrentAllocator(allocator.allocator())
+
+
+def _get_current_allocator() -> _XPUAllocator:
+    r"""Return the allocator being currently used."""
+    return _XPUAllocator(torch._C._xpu_getAllocator())
+
+
 __all__ = [
+    "change_current_allocator",
     "empty_cache",
     "get_per_process_memory_fraction",
     "max_memory_allocated",
@@ -254,4 +317,5 @@ __all__ = [
     "reset_accumulated_memory_stats",
     "reset_peak_memory_stats",
     "set_per_process_memory_fraction",
+    "XPUPluggableAllocator",
 ]
