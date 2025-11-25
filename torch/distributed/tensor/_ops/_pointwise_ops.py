@@ -29,7 +29,7 @@ from torch.distributed.tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
-    ShardingPlaceholder,
+    _ShardingPlaceholder,
 )
 from torch.utils._typing_utils import not_none
 
@@ -496,7 +496,7 @@ def linear_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
 
 def single_mesh_dim_pointwise_strategy(
     args_schema: ArgsType, kwargs_schema: KwargsType, linearity: int = -1
-) -> list[list[Placement | ShardingPlaceholder]]:
+) -> list[list[Placement | _ShardingPlaceholder]]:
     return single_mesh_dim_common_pointwise_strategy(args_schema, linearity)
 
 
@@ -512,16 +512,16 @@ def single_mesh_dim_common_pointwise_strategy(
     common_shape = torch.broadcast_shapes(
         *[arg.shape for arg in args_schema if isinstance(arg, TensorMeta)]
     )
-    placements_list: list[list[Placement | ShardingPlaceholder]] = []
+    placements_list: list[list[Placement | _ShardingPlaceholder]] = []
     for i in range(len(common_shape)):
         # Shard output dim i, and then shard the corresponding arguments if they have a corresponding (non broadcast) dim
-        shard_placements: list[Placement | ShardingPlaceholder] = [
-            ShardingPlaceholder(i)
+        shard_placements: list[Placement | _ShardingPlaceholder] = [
+            _ShardingPlaceholder(i)
         ]
         for arg in tensor_arg_strategies:
             common_dim_to_arg_dim = infer_broadcast_dims_map(common_shape, arg.shape)
             if common_dim_to_arg_dim[i] >= 0:
-                shard_placements.append(ShardingPlaceholder(common_dim_to_arg_dim[i]))
+                shard_placements.append(_ShardingPlaceholder(common_dim_to_arg_dim[i]))
             else:
                 shard_placements.append(Replicate())
 
