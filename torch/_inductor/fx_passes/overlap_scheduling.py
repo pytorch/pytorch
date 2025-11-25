@@ -516,6 +516,7 @@ class OverlapScheduler:
     ) -> None:
         import torch.utils._pytree as pytree
         from torch.utils._dtype_abbrs import dtype_abbrs
+        from torch._inductor.fx_utils import count_flops_fx
 
         def _node_summary(n):
             ret = str(n)
@@ -533,6 +534,7 @@ class OverlapScheduler:
             "Analytical Est(us)",
             "Diff(%)",
             "Diff(us)",
+            "Flops",
         ]
 
         rows = [
@@ -542,6 +544,7 @@ class OverlapScheduler:
                 est_a * 1e3,
                 (est_a / est_b),
                 (est_a - est_b) * 1e3,
+                count_flops_fx(node),
             ]
             for node, est_b, est_a in zip(
                 compute_nodes, benchmarked_estimations, analytical_estimations
