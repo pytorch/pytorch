@@ -283,9 +283,6 @@ class XPUPluggableAllocator(_XPUAllocator):
                 function must have the signature:
 
                     ``void free_fn(void* ptr, size_t size, sycl::queue* queue);``
-
-        .. note::
-            This feature is currently supported only on Unix-like operating systems.
         """
         allocator_lib = ctypes.CDLL(path_to_so_file)
 
