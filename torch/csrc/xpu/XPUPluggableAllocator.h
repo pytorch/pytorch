@@ -20,7 +20,8 @@ struct TORCH_XPU_API XPUPluggableAllocator
     : public c10::xpu::XPUCachingAllocator::XPUAllocator {
   XPUPluggableAllocator(
       std::function<void*(size_t, int, sycl::queue*)> alloc_fn,
-      std::function<void(void*, size_t, int, sycl::queue*)> free_fn);
+      std::function<void(void*, size_t, int, sycl::queue*)> free_fn)
+      : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
 
   XPUPluggableAllocator(XPUPluggableAllocator& other) = default;
   XPUPluggableAllocator(XPUPluggableAllocator&& other) = delete;
@@ -47,9 +48,13 @@ struct TORCH_XPU_API XPUPluggableAllocator
   void resetAccumulatedStats(c10::DeviceIndex device) override;
   void resetPeakStats(c10::DeviceIndex device) override;
 
-  void set_init_fn(std::function<void(int)> init_fn);
+  void set_init_fn(std::function<void(int)> init_fn) {
+    init_fn_ = std::move(init_fn);
+  }
   void set_record_stream_fn(
-      std::function<void(void* ptr, sycl::queue* queue)> record_stream_fn);
+      std::function<void(void* ptr, sycl::queue* queue)> record_stream_fn) {
+    record_stream_fn_ = std::move(record_stream_fn);
+  }
 
  protected:
   std::function<void*(size_t, int, sycl::queue*)> alloc_fn_;

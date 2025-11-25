@@ -6,20 +6,6 @@ void custom_raw_deleter(void* ptr);
 
 static c10::DeviceIndex device_count_ = 0;
 
-XPUPluggableAllocator::XPUPluggableAllocator(
-    std::function<void*(size_t, int, sycl::queue*)> alloc_fn,
-    std::function<void(void*, size_t, int, sycl::queue*)> free_fn)
-    : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
-
-void XPUPluggableAllocator::set_init_fn(std::function<void(int)> init_fn) {
-  init_fn_ = std::move(init_fn);
-}
-
-void XPUPluggableAllocator::set_record_stream_fn(
-    std::function<void(void* ptr, sycl::queue* queue)> record_stream_fn) {
-  record_stream_fn_ = std::move(record_stream_fn);
-}
-
 void* XPUPluggableAllocator::malloc(
     size_t size,
     c10::DeviceIndex device,
@@ -76,10 +62,7 @@ void XPUPluggableAllocator::init(c10::DeviceIndex device_count) {
 }
 
 bool XPUPluggableAllocator::initialized() {
-  TORCH_CHECK(
-      false,
-      "XPUPluggableAllocator does not yet support initialized. "
-      "If you need it, please file an issue describing your use case.");
+  return initialized_;
 }
 
 void XPUPluggableAllocator::copy_data(
