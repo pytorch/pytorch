@@ -43,7 +43,6 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import (
-    ACCELERATOR_DIST_BACKENDS,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
@@ -387,7 +386,7 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = dist.get_default_backend_for_device(DEVICE_TYPE)
+        backend = dist.get_default_backend_for_device(self.device_type)
         return backend
 
     def init_manual_seed_for_rank(self) -> None:
@@ -397,16 +396,13 @@ class DTensorTestBase(MultiProcessTestCase):
         return init_device_mesh(self.device_type, (self.world_size,))
 
     def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
-        if backend is None:
-            backend = self.backend
-
-        requires_gpu = any(
-            gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
-        )
-        if requires_gpu and torch.accelerator.device_count() < self.world_size:
+        if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
+
+        if backend is None:
+            backend = self.backend
 
         if backend not in [
             "nccl",
@@ -728,6 +724,9 @@ class LocalDTensorTestBase(DTensorTestBase):
         torch.autograd._enable_record_function(False)
 
     def tearDown(self) -> None:
+        from torch.distributed.tensor import _random as random
+
+        random._rng_tracker = None
         super().tearDown()
         torch.autograd._enable_record_function(True)
 
