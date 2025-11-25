@@ -4,9 +4,9 @@ As a leading deep learning framework PyTorch capabilities are regularly expanded
 
 ## Quality Levels
 
-Compute Platform is hardware and software environment where computations are executed. In this document compute platform is understood as a platform which consists of PyTorch backend implementation, underlying software stack (compilers, runtime libraries, drivers and other components) and hardware. Each compute platform can be assessed according to the scoring tables defined below in this document. Scoring covers requirements for platform hardware and software availability, maturity, support obligations, platform features, ci coverage, etc. Each requirement is marked with its relative priority (P0, P1 or P2) and the Score.
+Compute Platform is hardware and software environment where computations are executed. In this document the compute platform is understood as a platform which consists of PyTorch backend implementation, underlying software stack (compilers, runtime libraries, drivers and other components) and hardware. Each compute platform can be assessed according to the scoring tables defined below in this document. Scoring covers requirements for platform hardware and software availability, maturity, support obligations, platform features, ci coverage, etc. Each requirement is marked with its relative priority (P0, P1 or P2) and the Score.
 
-Compute Platforms quality levels are defines as follows:
+Compute Platforms quality levels are defined as follows:
 
 * **Engineering** compute platforms
 * **Unstable** compute platforms
@@ -26,7 +26,7 @@ Compute Platforms quality levels are defines as follows:
    * - **Unstable**
      - * Reach 70% overall score (92 points out of 132)
    * - **Engineering**
-     - * Less than 70% overeall score
+     - * Less than 70% overall score
 ```
 
 ## Documentation update guideline
