@@ -2444,6 +2444,13 @@ class _XpuDeviceProperties:
     type: str
     uuid: Any
 
+class _xpu_XPUAllocator:
+    ...
+
+def _xpu_customAllocator(alloc_fn: _int, free_fn: _int) -> _xpu_XPUAllocator: ...
+def _xpu_changeCurrentAllocator(allocator: _xpu_XPUAllocator) -> None: ...
+def _xpu_getAllocator() -> _xpu_XPUAllocator: ...
+
 # Defined in torch/csrc/xpu/Stream.cpp
 class _XpuStreamBase(Stream):
     stream_id: _int
