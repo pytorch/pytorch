@@ -1,3 +1,74 @@
+"""Coordinate-based sampling for PyTorch DataLoaders.
+
+This module provides samplers that yield floating-point coordinates instead
+of integer indices. This is useful for applications where data is naturally
+indexed by continuous coordinates, such as:
+
+- Geographic Information Systems (GIS)
+- Medical imaging (sub-pixel locations)
+- Scientific simulations
+- Satellite imagery
+- Computer graphics
+
+The coordinate samplers follow the same interface as standard PyTorch samplers
+but yield coordinate tuples (float, float) or (float, float, float) instead
+of integers.
+
+Example:
+    Basic usage with a coordinate-aware dataset::
+
+        >>> from torch.utils.data import DataLoader
+        >>> from torch.utils.data import CoordinateSampler
+        >>>
+        >>> # Define coordinates
+        >>> coords = [(lat, lon) for lat, lon in zip(latitudes, longitudes)]
+        >>>
+        >>> # Create sampler
+        >>> sampler = CoordinateSampler(coords, shuffle=True)
+        >>>
+        >>> # Use with DataLoader
+        >>> loader = DataLoader(
+        ...     dataset,  # Dataset.__getitem__ accepts (float, float)
+        ...     sampler=sampler,
+        ...     batch_size=32,
+        ...     collate_fn=custom_collate  # Handle coordinate batches
+        ... )
+
+    Grid-based sampling::
+
+        >>> # Sample on a regular grid
+        >>> sampler = GridCoordinateSampler(
+        ...     bounds=(0.0, 0.0, 100.0, 100.0),
+        ...     grid_size=(50, 50),
+        ...     mode='regular'
+        ... )
+
+    Weighted sampling::
+
+        >>> # Sample coordinates based on importance weights
+        >>> sampler = WeightedCoordinateSampler(
+        ...     coordinates=coords,
+        ...     weights=importance_scores,
+        ...     num_samples=1000,
+        ...     replacement=True
+        ... )
+
+    Distributed training::
+
+        >>> # Split coordinates across GPUs
+        >>> sampler = DistributedCoordinateSampler(
+        ...     coords,
+        ...     num_replicas=world_size,
+        ...     rank=rank
+        ... )
+        >>> # Remember to set epoch for proper shuffling
+        >>> sampler.set_epoch(epoch)
+
+Note:
+    When using coordinate samplers, your Dataset class must accept coordinate
+    tuples in its __getitem__ method instead of integer indices.
+"""
+
 import math
 from typing import Iterator, Tuple, List, Optional, TypeVar, Generic, Sequence, Union
 import torch
