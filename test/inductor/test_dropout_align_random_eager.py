@@ -16,13 +16,6 @@ from torch.testing._internal.inductor_utils import (
     requires_gpu,
 )
 
-# If not running on Linux+CUDA, skip the whole module under pytest.
-if not (IS_LINUX and HAS_CUDA_AND_TRITON):
-    pytest.skip(
-        "Inductor CUDA dropout alignment tests require Linux and CUDA",
-        allow_module_level=True,
-    )
-
 # ───────────────────────────────────────────────────────────────
 # Global config
 # ───────────────────────────────────────────────────────────────
@@ -32,13 +25,6 @@ FFN_DIM = 4096
 HIDDEN_DIM = 1024
 BATCH = 3
 SEQ_LEN = 2048
-
-config.triton.unique_kernel_names = True
-config.coordinate_descent_tuning = True
-config.freezing = True
-config.align_random_eager = True
-# config.fallback_random = True
-# config.max_autotune_pointwise = True
 
 
 # ───────────────────────────────────────────────────────────────
@@ -119,6 +105,11 @@ def _cuda_rng_u64_seed_off():
 # ───────────────────────────────────────────────────────────────
 # Test class (Inductor idioms)
 # ───────────────────────────────────────────────────────────────
+@pytest.mark.skipif(
+    not (IS_LINUX and HAS_CUDA_AND_TRITON),
+    reason="Inductor CUDA dropout alignment tests require Linux and CUDA",
+)
+@config.patch(align_random_eager=True)
 class TestDropoutAlignRandomEager(InductorTestCase):
     @requires_gpu()
     def test_linear_block_compile_parity_forward(self):
@@ -225,7 +216,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             )
 
     # ───────────────────────────────────────────────────────────
-    # New: multiple dropouts + multiple iterations
+    # multiple dropouts + multiple iterations
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
     def test_multi_dropout_multi_iterations_parity(self):
@@ -255,7 +246,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             )
 
     # ───────────────────────────────────────────────────────────
-    # New: dynamic shapes test (a)
+    # dynamic shapes test (a)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
     def test_dropout_parity_dynamic_shapes(self):
@@ -288,7 +279,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
             )
 
     # ───────────────────────────────────────────────────────────
-    # New: cudagraphs test via mode='reduce-overhead' (b)
+    # cudagraphs test via mode='reduce-overhead' (b)
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
     def test_dropout_parity_cudagraphs_reduce_overhead(self):
@@ -315,8 +306,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         )
 
     # ───────────────────────────────────────────────────────────
-    # New: codegen check using run_and_get_code + FileCheck
-    # (so those imports are actually used, following inductor idioms)
+    # Codegen sanity: run_and_get_code + FileCheck
     # ───────────────────────────────────────────────────────────
     @requires_gpu()
     def test_inductor_generated_code_contains_dropout(self):
@@ -333,7 +323,7 @@ class TestDropoutAlignRandomEager(InductorTestCase):
         _, codes = run_and_get_code(fn, x)
         assert codes, "Expected inductor to generate at least one kernel"
 
-        # Just a basic sanity check that the generated code mentions dropout.
+        # Minimal sanity check that generated code mentions dropout.
         FileCheck().check("dropout").run(codes[0])
 
     # ───────────────────────────────────────────────────────────

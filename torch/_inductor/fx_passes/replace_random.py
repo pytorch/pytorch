@@ -65,21 +65,18 @@ def _reserve_state(device: torch.device, used_offset: int) -> tuple[int, int]:
 def rand_eager_offset(offset: int, device: torch.device) -> torch.Tensor:
     seed, base = _reserve_state(device, int(offset))
     packed = (int(seed) << 32) | (int(base) & 0xFFFFFFFF)
-    out = torch.empty((), dtype=torch.int64, device=device)
-    out.fill_(packed)
+    out = torch.tensor([packed], dtype=torch.int64, device=device)
     return out
 
 
 @custom_op("custom_op::rand_eager_offsets", mutates_args={})
 def rand_eager_offsets(offsets: list[int], device: torch.device) -> torch.Tensor:
-    states = [ _reserve_state(device, int(off)) for off in offsets ]  # list[(seed, base)]
+    states = [_reserve_state(device, int(off)) for off in offsets]  # list[(seed, base)]
     packed = [
         (int(seed) << 32) | (int(base) & 0xFFFFFFFF)
         for seed, base in states
     ]
-    cpu = torch.tensor(packed, dtype=torch.int64).pin_memory()  # [N]
-    out = torch.empty_like(cpu, device=device)
-    out.copy_(cpu, non_blocking=True)
+    out = torch.tensor(packed, dtype=torch.int64, device=device)
     return out
 
 
