@@ -11,7 +11,9 @@
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/thread_constants.h>
 
+#ifndef USE_ROCM
 #include <cuda/std/tuple>
+#endif
 
 // References:
 // https://devblogs.nvidia.com/cuda-pro-tip-increase-performance-with-vectorized-memory-access/
@@ -106,10 +108,10 @@ struct multi_outputs_store_helper {
   C10_HOST_DEVICE static void apply(
       const data_t& data,
       const offsets_t& offsets,
-      ::cuda::std::tuple<Args...> ret) {
-    using T = typename ::cuda::std::tuple_element_t<current, ::cuda::std::tuple<Args...>>;
+      NO_ROCM(::cuda)::std::tuple<Args...> ret) {
+    using T = typename NO_ROCM(::cuda)::std::tuple_element_t<current, NO_ROCM(::cuda)::std::tuple<Args...>>;
     T *to = reinterpret_cast<T *>(data[current]) + offsets[current];
-    *to = ::cuda::std::get<current>(ret);
+    *to = NO_ROCM(::cuda)::std::get<current>(ret);
   }
 };
 
