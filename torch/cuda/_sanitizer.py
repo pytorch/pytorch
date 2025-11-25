@@ -79,18 +79,6 @@ class Access:
     is_output: bool
     stack_trace: traceback.StackSummary
 
-    def format(self, message: io.StringIO):
-        message.write(f"{self.operator}\n{self.type}")
-        if self.aliases:
-            message.write(" argument(s) " + ", ".join(self.aliases))
-            if self.is_output:
-                message.write(", and to")
-        if self.is_output:
-            message.write(" the output")
-        message.write(
-            f"\nWith stack trace:\n{''.join(self.stack_trace.format())}\n"
-        )
-
 
 class SynchronizationError(Exception):
     """Base class for errors detected by CUDA Sanitizer."""
@@ -112,6 +100,18 @@ class UnsynchronizedAccessError(SynchronizationError):
         self.previous_access = previous_access
 
     def __str__(self):
+        def format_access(access: Access):
+            message.write(f"{access.operator}\n{access.type}")
+            if access.aliases:
+                message.write(" argument(s) " + ", ".join(access.aliases))
+                if access.is_output:
+                    message.write(", and to")
+            if access.is_output:
+                message.write(" the output")
+            message.write(
+                f"\nWith stack trace:\n{''.join(access.stack_trace.format())}\n"
+            )
+
         with io.StringIO() as message:
             message.write(
                 textwrap.dedent(
@@ -122,12 +122,12 @@ class UnsynchronizedAccessError(SynchronizationError):
                     """
                 )
             )
-            self.current_access.format(message)
+            format_access(self.current_access)
 
             message.write(
                 f"Previous access by stream {self.previous_access.stream} during kernel:\n"
             )
-            self.previous_access.format(message)
+            format_access(self.previous_access)
 
             if self.allocation_stack_trace:
                 message.write(
@@ -136,30 +136,6 @@ class UnsynchronizedAccessError(SynchronizationError):
                 )
             else:
                 message.write("Trace for tensor allocation not found.")
-            return message.getvalue()
-
-
-class NullTensorAccessError(SynchronizationError):
-    """Stores information about an access of a Tensor without a valid data_ptr."""
-
-    def __init__(
-        self,
-        current_access: Access
-    ):
-        self.current_access = current_access
-
-    def __str__(self):
-        with io.StringIO() as message:
-            message.write(
-                textwrap.dedent(
-                    f"""\
-                    ============================
-                    CSAN detected a Tensor without a valid data_ptr
-                    Access by stream {self.current_access.stream} during kernel:
-                    """
-                )
-            )
-            self.current_access.format(message)
             return message.getvalue()
 
 
@@ -422,10 +398,6 @@ class EventHandler:
                 data_ptr, current_access, self.tensors_accessed.get_write(data_ptr)
             )
             self.tensors_accessed.add_read(data_ptr, current_access)
-            if not data_ptr:
-                error_list.append(
-                    NullTensorAccessError(current_access)
-                )
 
         for data_ptr in read_write:
             self.tensors_accessed.ensure_tensor_exists(data_ptr)
@@ -446,10 +418,6 @@ class EventHandler:
                     data_ptr, current_access, self.tensors_accessed.get_write(data_ptr)
                 )
             self.tensors_accessed.set_write(data_ptr, current_access)
-            if not data_ptr:
-                error_list.append(
-                    NullTensorAccessError(current_access)
-                )
 
         return error_list
 
