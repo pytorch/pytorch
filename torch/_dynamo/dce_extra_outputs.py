@@ -1,5 +1,5 @@
 """
-Dead Code Elimination pass for unused extra outputs in invoke_subgraph calls.
+DCE pass for unused extra outputs in HOP subgraphs.
 
 When enable_side_effects_with_extra_outputs is True, HOPs like invoke_subgraph
 return all intermediate tensors/symints as extra outputs to support side effects.
@@ -12,13 +12,13 @@ This pass removes unused extra outputs by:
 4. Updating getitem indices to account for removed outputs
 """
 
+import collections
 import operator
+
 import torch
-from torch import fx
-from typing import Dict, List, Set, Tuple
 
 
-def dce_invoke_subgraph_extra_outputs(gm: fx.GraphModule) -> bool:
+def dce_invoke_subgraph_extra_outputs(gm: torch.fx.GraphModule) -> bool:
     """
     Remove unused extra outputs from invoke_subgraph calls.
 
@@ -31,14 +31,30 @@ def dce_invoke_subgraph_extra_outputs(gm: fx.GraphModule) -> bool:
     modified = False
     graph = gm.graph
 
-    # Find all invoke_subgraph calls
+    # Group invoke_subgraph nodes by subgraph name
+    # Multiple invocations may share the same subgraph, so we need to check
+    # which indices are used across ALL invocations before removing any
+    subgraph_to_nodes: dict[str, list[torch.fx.Node]] = collections.defaultdict(list)
+
     for node in graph.nodes:
+        # TODO (can be added to other HOPs)
         if (
             node.op == "call_function"
             and node.target == torch.ops.higher_order.invoke_subgraph
         ):
-            if _dce_single_invoke_subgraph(gm, node):
-                modified = True
+            subgraph_attr = node.args[0]
+            if (
+                isinstance(subgraph_attr, torch.fx.Node)
+                and subgraph_attr.op == "get_attr"
+            ):
+                subgraph_name = subgraph_attr.target
+                assert isinstance(subgraph_name, str)
+                subgraph_to_nodes[subgraph_name].append(node)
+
+    # Process each unique subgraph
+    for subgraph_name, invoke_nodes in subgraph_to_nodes.items():
+        if _dce_subgraph(gm, subgraph_name, invoke_nodes):
+            modified = True
 
     if modified:
         graph.lint()
@@ -47,61 +63,41 @@ def dce_invoke_subgraph_extra_outputs(gm: fx.GraphModule) -> bool:
     return modified
 
 
-def _dce_single_invoke_subgraph(gm: fx.GraphModule, invoke_node: fx.Node) -> bool:
-    """
-    DCE unused outputs for a single invoke_subgraph node.
-
-    Args:
-        gm: The parent GraphModule
-        invoke_node: The invoke_subgraph call node
-
-    Returns:
-        True if modifications were made, False otherwise
-    """
-    # Get the subgraph module
-    subgraph_attr = invoke_node.args[0]
-    if not isinstance(subgraph_attr, fx.Node) or subgraph_attr.op != "get_attr":
-        return False
-
-    subgraph_name = subgraph_attr.target
+def _dce_subgraph(
+    gm: torch.fx.GraphModule, subgraph_name: str, invoke_nodes: list[torch.fx.Node]
+) -> bool:
     subgraph = getattr(gm, subgraph_name)
 
-    if not isinstance(subgraph, fx.GraphModule):
+    if not isinstance(subgraph, torch.fx.GraphModule):
         return False
 
-    # Find which outputs are used via getitem
-    used_indices: Set[int] = set()
-    getitem_nodes: List[fx.Node] = []
+    # Collect used indices across ALL invocations of this subgraph
+    used_indices: set[int] = set()
 
-    for user in invoke_node.users:
-        if user.op == "call_function" and user.target == operator.getitem:
-            idx = user.args[1]
-            if isinstance(idx, int):
-                used_indices.add(idx)
-                getitem_nodes.append(user)
+    for invoke_node in invoke_nodes:
+        for user in list(invoke_node.users):
+            if user.op == "call_function" and user.target == operator.getitem:
+                if len(list(user.users)) > 0:
+                    idx = user.args[1]
+                    assert isinstance(idx, int)
+                    used_indices.add(idx)
 
-    # Get the output node from subgraph
-    output_nodes = [n for n in subgraph.graph.nodes if n.op == "output"]
-    if len(output_nodes) != 1:
-        return False
-
-    output_node = output_nodes[0]
-    if not output_node.args or not isinstance(output_node.args[0], (tuple, list)):
-        return False
-
+    output_node = next(n for n in subgraph.graph.nodes if n.op == "output")
     old_outputs = list(output_node.args[0])
-    num_outputs = len(old_outputs)
 
-    # If all outputs are used, nothing to DCE
-    if len(used_indices) == num_outputs:
+    if len(used_indices) == len(old_outputs):
+        return False
+
+    # can still have side effect inside invoke subgraph, so we shouldn't kill it
+    if len(used_indices) == 0:
         return False
 
     # Build mapping from old indices to new indices
-    old_to_new: Dict[int, int] = {}
+    old_to_new: dict[int, int] = {}
     new_outputs = []
     new_idx = 0
 
-    for old_idx in range(num_outputs):
+    for old_idx in range(len(old_outputs)):
         if old_idx in used_indices:
             old_to_new[old_idx] = new_idx
             new_outputs.append(old_outputs[old_idx])
@@ -110,20 +106,23 @@ def _dce_single_invoke_subgraph(gm: fx.GraphModule, invoke_node: fx.Node) -> boo
     # Update subgraph output node
     output_node.args = (tuple(new_outputs),)
 
-    # Update getitem nodes to use new indices
-    for getitem_node in getitem_nodes:
-        old_idx = getitem_node.args[1]
-        if old_idx in old_to_new:
-            new_idx = old_to_new[old_idx]
-            getitem_node.args = (getitem_node.args[0], new_idx)
+    for invoke_node in invoke_nodes:
+        # Update getitem nodes to use new indices
+        for user in list(invoke_node.users):
+            if user.op == "call_function" and user.target == operator.getitem:
+                old_idx = user.args[1]
+                assert isinstance(old_idx, int)
+                if old_idx in old_to_new:
+                    new_idx = old_to_new[old_idx]
+                    user.args = (user.args[0], new_idx)
 
-    # Update example_value metadata on invoke_node
-    if "example_value" in invoke_node.meta:
-        old_example = invoke_node.meta["example_value"]
-        if isinstance(old_example, (tuple, list)):
+        # Update example_value metadata on invoke_node
+        if "example_value" in invoke_node.meta:
+            old_example = invoke_node.meta["example_value"]
+            assert isinstance(old_example, (tuple, list))
             new_example = tuple(
                 old_example[old_idx]
-                for old_idx in range(num_outputs)
+                for old_idx in range(len(old_outputs))
                 if old_idx in used_indices
             )
             invoke_node.meta["example_value"] = new_example

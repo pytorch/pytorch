@@ -279,9 +279,9 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_mod_buffers_buf_, l_x_, l_y_);  subgraph_1 = l_mod_buffers_buf_ = l_x_ = l_y_ = None
-        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        getitem_4: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
 
-        add: "f32[8]" = getitem + getitem_1;  getitem = getitem_1 = None
+        add: "f32[8]" = getitem + getitem_4;  getitem = getitem_4 = None
         return (add,)
 
     class subgraph_0(torch.nn.Module):
@@ -360,7 +360,8 @@ class GraphModule(torch.nn.Module):
             sin: "f32[8]" = torch.ops.aten.sin.default(mul);  mul = None
             mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(sin, 5);  sin = None
             mul_2: "f32[8]" = torch.ops.aten.mul.Tensor(mul_1, primals_2);  mul_1 = None
-            return (mul_2, primals_0, primals_1, primals_2)""",
+            return (mul_2, primals_0, primals_1, primals_2)
+            """,
             ignore_empty_lines=True,
         )
         self.assertExpectedInline(
@@ -388,7 +389,8 @@ class GraphModule(torch.nn.Module):
             mul_5: "f32[8]" = torch.ops.aten.mul.Tensor(mul_4, cos);  mul_4 = cos = None
             mul_6: "f32[8]" = torch.ops.aten.mul.Tensor(mul_5, primals_0);  primals_0 = None
             mul_7: "f32[8]" = torch.ops.aten.mul.Tensor(mul_5, primals_1);  mul_5 = primals_1 = None
-            return (mul_7, mul_6, None)""",
+            return (mul_7, mul_6, None)
+            """,
             ignore_empty_lines=True,
         )
 
@@ -671,7 +673,8 @@ class GraphModule(torch.nn.Module):
     class partitioned_fw_subgraph_1_0(torch.nn.Module):
         def forward(self, primals_0: "f32[8]"):
             sin: "f32[8]" = torch.ops.aten.sin.default(primals_0)
-            return (sin, primals_0)""",
+            return (sin, primals_0)
+                """,
                 ignore_empty_lines=True,
             )
 
@@ -1240,6 +1243,31 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Encountered aliasing during higher order op tracing",
+        ):
+            opt_fn(x)
+
+    def test_side_effect_with_aliased_intermediate(self):
+        captured_views = []
+
+        @nested_compile_region
+        def gn(x):
+            original = torch.sin(x)
+            view = original.view(1, 8)  # Aliases with original
+            captured_views.append(view)
+            return torch.sin(view)
+
+        def fn(x):
+            result = gn(x)
+            if captured_views:
+                return result + captured_views[0]
+            return result
+
+        x = torch.randn(8, requires_grad=False)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        # TODO: Improve error message to explain the aliasing/side-effect issue
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "does not belong to this Graph",
         ):
             opt_fn(x)
 
