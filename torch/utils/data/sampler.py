@@ -8,8 +8,12 @@ import torch
 from torch.utils.data.coordinate_sampler import (
     Coordinate2D,
     Coordinate3D,
+    CoordinateBatchSampler,
     CoordinateSampler,
     CoordinateSampler3D,
+    GridCoordinateSampler,
+    SpatialBatchSampler,
+    WeightedCoordinateSampler,
 )
 
 
@@ -21,12 +25,16 @@ from torch.utils.data.coordinate_sampler import (
 
 __all__ = [
     "BatchSampler",
+    "CoordinateBatchSampler",
     "CoordinateSampler",
     "CoordinateSampler3D",
+    "GridCoordinateSampler",
     "RandomSampler",
     "Sampler",
     "SequentialSampler",
+    "SpatialBatchSampler",
     "SubsetRandomSampler",
+    "WeightedCoordinateSampler",
     "WeightedRandomSampler",
 ]
 
