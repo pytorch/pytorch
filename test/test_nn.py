@@ -1038,13 +1038,13 @@ class TestNN(NNTestCase):
                 self.assertIs(modules[k1], module_dict[k2])
             for k in module_dict:
                 self.assertIs(module_dict[k], modules[k])
-            for k in module_dict.keys():
+            for k in module_dict:
                 self.assertIs(module_dict[k], modules[k])
             for k, v in module_dict.items():
                 self.assertIs(modules[k], v)
             for k1, m2 in zip(modules, module_dict.values()):
                 self.assertIs(modules[k1], m2)
-            for k in modules.keys():
+            for k in modules:
                 self.assertTrue(k in module_dict)
         check()
 
@@ -1245,13 +1245,13 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.assertIs(parameters[k1], parameter_dict[k2])
             for k in parameter_dict:
                 self.assertIs(parameter_dict[k], parameters[k])
-            for k in parameter_dict.keys():
+            for k in parameter_dict:
                 self.assertIs(parameter_dict[k], parameters[k])
             for k, v in parameter_dict.items():
                 self.assertIs(v, parameters[k])
             for k1, m2 in zip(parameters, parameter_dict.values()):
                 self.assertIs(parameters[k1], m2)
-            for k in parameters.keys():
+            for k in parameters:
                 self.assertTrue(k in parameter_dict)
 
         check()
@@ -2356,7 +2356,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertIn('bn.running_var', state_dict)
         self.assertIn('bn.running_mean', state_dict)
         self.assertIn('bn.num_batches_tracked', state_dict)
-        self.assertFalse(any(k.startswith('empty') for k in state_dict.keys()))
+        self.assertFalse(any(k.startswith('empty') for k in state_dict))
         for k, v in state_dict.items():
             param = net
             for component in k.split('.'):
@@ -4123,7 +4123,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         def compare_cpu_gpu(outputs_cpu, outputs_gpu):
             self.assertEqual(list(outputs_cpu.keys()), list(outputs_gpu.keys()))
-            for key in outputs_cpu.keys():
+            for key in outputs_cpu:
                 if key != 'weights':
                     self.assertEqual(outputs_cpu[key], outputs_gpu[key], atol=5e-5, rtol=0, msg=key)
 
@@ -7281,7 +7281,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(children[1].__class__, torch.nn.InstanceNorm1d)
 
         for layer, converted_layer in zip(comp_module.children(), sync_bn_module.children()):
-            for key in layer.state_dict().keys():
+            for key in layer.state_dict():
                 self.assertEqual(layer.state_dict()[key].device, converted_layer.state_dict()[key].device)
                 self.assertEqual(layer.state_dict()[key], converted_layer.state_dict()[key])
 
@@ -8525,6 +8525,30 @@ class TestNNDeviceType(NNTestCase):
         # reduce memory usage
         self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
 
+    @onlyCUDA
+    @largeTensorTest("24GB", "cpu")
+    @largeTensorTest("24GB", "cuda")
+    def test_large_max_pool_contig(self, device):
+        # test for https://github.com/pytorch/pytorch/issues/167253
+        size = [74, 32, 24300, 40]
+        out_size = [74, 32, 24300, 20]
+        inp = torch.rand(size, device=device, dtype=torch.bfloat16, requires_grad=True)
+        inp_cpu = inp.detach().cpu()
+        inp_cpu.requires_grad = True
+        o = torch.nn.functional.max_pool2d(
+            inp, kernel_size=(1, 2), stride=(1, 2), ceil_mode=False, padding=0
+        )
+        o_cpu = torch.nn.functional.max_pool2d(
+            inp_cpu, kernel_size=(1, 2), stride=(1, 2), ceil_mode=False, padding=0
+        )
+        o.sum().backward()
+        o_cpu.sum().backward()
+        self.assertEqual(o.shape, out_size)
+        self.assertEqual(o_cpu.shape, out_size)
+        # reduce memory usage
+        self.assertEqual(o.sum(), o_cpu.sum())
+        self.assertEqual(inp.grad.sum(), inp_cpu.grad.sum())
+
     @unittest.skipIf((not TEST_NUMPY) or (not TEST_SCIPY) or (scipy.__version__ < '1.0.0'),
                      "Scipy v1.0 and/or numpy not found")
     @skipIfRocmArch(MI300_ARCH)
@@ -9246,8 +9270,10 @@ class TestNNDeviceType(NNTestCase):
     @expectedFailureMPS   # Float64 is not supported
     @onlyNativeDeviceTypes
     def test_Transformer_empty(self, device):
-        for batch_first, src_shape, tgt_shape in [(True, (10, 0, 512), (20, 0, 512))]:
-            transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12, dtype=torch.double).to(device)
+        for batch_first, src_shape, tgt_shape in [(True, (0, 10, 512), (0, 20, 512)),
+                                                  (False, (10, 0, 512), (20, 0, 512))]:
+            transformer_model = nn.Transformer(nhead=16, num_encoder_layers=12, dtype=torch.double,
+                                               batch_first=batch_first).to(device)
             src = torch.rand(*src_shape, requires_grad=True, device=device, dtype=torch.double)
             tgt = torch.rand(*tgt_shape, requires_grad=True, device=device, dtype=torch.double)
             self._test_module_empty_inputs(transformer_model, [src, tgt])
@@ -13514,7 +13540,7 @@ if __name__ == '__main__':
 
         # Should warning when parameters generator exhausted
         params = l.parameters()
-        for p in params:
+        for _p in params:
             pass
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")

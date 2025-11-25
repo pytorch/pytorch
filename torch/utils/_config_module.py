@@ -11,7 +11,7 @@ import unittest
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import FunctionType, ModuleType
-from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated
 from unittest import mock
 
@@ -23,7 +23,7 @@ CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
 
 # Duplicated, because mypy needs these types statically
-T = TypeVar("T", bound=Union[int, float, bool, None, str, list, set, tuple, dict])
+T = TypeVar("T", bound=int | float | bool | None | str | list | set | tuple | dict)
 
 
 _UNSET_SENTINEL = object()
@@ -69,12 +69,12 @@ class _Config(Generic[T]):
             default behaviour. I.e. user overrides take preference.
     """
 
-    default: Union[T, object]
-    justknob: Optional[str] = None
-    env_name_default: Optional[list[str]] = None
-    env_name_force: Optional[list[str]] = None
-    value_type: Optional[type] = None
-    alias: Optional[str] = None
+    default: T | object
+    justknob: str | None = None
+    env_name_default: list[str] | None = None
+    env_name_force: list[str] | None = None
+    value_type: type | None = None
+    alias: str | None = None
 
     def __post_init__(self) -> None:
         self.env_name_default = _Config.string_or_list_of_string_to_list(
@@ -98,8 +98,8 @@ class _Config(Generic[T]):
 
     @staticmethod
     def string_or_list_of_string_to_list(
-        val: Optional[Union[str, list[str]]],
-    ) -> Optional[list[str]]:
+        val: str | list[str] | None,
+    ) -> list[str] | None:
         if val is None:
             return None
         if isinstance(val, str):
@@ -116,23 +116,23 @@ class _Config(Generic[T]):
 if TYPE_CHECKING:
 
     def Config(
-        default: Union[T, object] = _UNSET_SENTINEL,
-        justknob: Optional[str] = None,
-        env_name_default: Optional[Union[str, list[str]]] = None,
-        env_name_force: Optional[Union[str, list[str]]] = None,
-        value_type: Optional[type] = None,
-        alias: Optional[str] = None,
+        default: T | object = _UNSET_SENTINEL,
+        justknob: str | None = None,
+        env_name_default: str | list[str] | None = None,
+        env_name_force: str | list[str] | None = None,
+        value_type: type | None = None,
+        alias: str | None = None,
     ) -> T: ...
 
 else:
 
     def Config(
-        default: Union[T, object] = _UNSET_SENTINEL,
-        justknob: Optional[str] = None,
-        env_name_default: Optional[Union[str, list[str]]] = None,
-        env_name_force: Optional[Union[str, list[str]]] = None,
-        value_type: Optional[type] = None,
-        alias: Optional[str] = None,
+        default: T | object = _UNSET_SENTINEL,
+        justknob: str | None = None,
+        env_name_default: str | list[str] | None = None,
+        env_name_force: str | list[str] | None = None,
+        value_type: type | None = None,
+        alias: str | None = None,
     ) -> _Config[T]:
         return _Config(
             default=default,
@@ -144,7 +144,7 @@ else:
         )
 
 
-def _read_env_variable(name: str) -> Optional[Union[bool, str]]:
+def _read_env_variable(name: str) -> bool | str | None:
     value = os.environ.get(name)
     if value == "1":
         return True
@@ -165,8 +165,8 @@ def install_config_module(module: ModuleType) -> None:
         _bypass_keys = set({"_is_dirty", "_hash_digest", "__annotations__"})
 
     def visit(
-        source: Union[ModuleType, type],
-        dest: Union[ModuleType, SubConfigProxy],
+        source: ModuleType | type,
+        dest: ModuleType | SubConfigProxy,
         prefix: str,
     ) -> None:
         """Walk the module structure and move everything to module._config"""
@@ -175,7 +175,13 @@ def install_config_module(module: ModuleType) -> None:
             if (
                 key.startswith("__")
                 or isinstance(value, (ModuleType, FunctionType))
-                or (hasattr(value, "__module__") and value.__module__ == "typing")
+                or (
+                    hasattr(value, "__module__")
+                    and (
+                        value.__module__ == "typing"
+                        or value.__module__.startswith("collections.abc")
+                    )
+                )
                 # Handle from torch.utils._config_module import Config
                 or (isinstance(value, type) and issubclass(value, _Config))
             ):
@@ -275,7 +281,7 @@ class _ConfigEntry:
     # _UNSET_SENTINEL indicates the value is not set.
     user_override: Any = _UNSET_SENTINEL
     # The justknob to check for this config
-    justknob: Optional[str] = None
+    justknob: str | None = None
     # environment variables are read at install time
     env_value_force: Any = _UNSET_SENTINEL
     env_value_default: Any = _UNSET_SENTINEL
@@ -291,9 +297,9 @@ class _ConfigEntry:
     # call so the final state is correct. It's just very unintuitive.
     # upstream bug - python/cpython#126886
     hide: bool = False
-    alias: Optional[str] = None
+    alias: str | None = None
 
-    def __init__(self, config: _Config):
+    def __init__(self, config: _Config) -> None:
         self.default = config.default
         self.value_type = (
             config.value_type if config.value_type is not None else type(self.default)
@@ -341,7 +347,7 @@ class ConfigModule(ModuleType):
     _bypass_keys: set[str]
     _compile_ignored_keys: set[str]
     _is_dirty: bool
-    _hash_digest: Optional[bytes]
+    _hash_digest: bytes | None
 
     def __init__(self) -> None:
         raise NotImplementedError(
@@ -405,7 +411,7 @@ class ConfigModule(ModuleType):
 
     def _get_alias_module_and_name(
         self, entry: _ConfigEntry
-    ) -> Optional[tuple[ModuleType, str]]:
+    ) -> tuple[ModuleType, str] | None:
         alias = entry.alias
         if alias is None:
             return None
@@ -459,8 +465,8 @@ class ConfigModule(ModuleType):
 
     def _get_dict(
         self,
-        ignored_keys: Optional[list[str]] = None,
-        ignored_prefixes: Optional[list[str]] = None,
+        ignored_keys: list[str] | None = None,
+        ignored_prefixes: list[str] | None = None,
         skip_default: bool = False,
     ) -> dict[str, Any]:
         """Export a dictionary of current configuration keys and values.
@@ -536,7 +542,7 @@ class ConfigModule(ModuleType):
             if module_name:
                 imports.add(module_name)
 
-        def list_of_callables_to_string(v: Union[list, set]) -> list[str]:
+        def list_of_callables_to_string(v: list | set) -> list[str]:
             return [f"{get_module_name(item, True)}{item.__name__}" for item in v]
 
         def importable_callable(v: Any) -> bool:
@@ -609,7 +615,7 @@ class ConfigModule(ModuleType):
     def shallow_copy_dict(self) -> dict[str, Any]:
         return self.get_config_copy()
 
-    def load_config(self, maybe_pickled_config: Union[bytes, dict[str, Any]]) -> None:
+    def load_config(self, maybe_pickled_config: bytes | dict[str, Any]) -> None:
         """Restore from a prior call to save_config() or shallow_copy_dict()"""
         if not isinstance(maybe_pickled_config, dict):
             config = pickle.loads(maybe_pickled_config)
@@ -631,7 +637,7 @@ class ConfigModule(ModuleType):
 
     def patch(
         self,
-        arg1: Optional[Union[str, dict[str, Any]]] = None,
+        arg1: str | dict[str, Any] | None = None,
         arg2: Any = None,
         **kwargs: dict[str, Any],
     ) -> "ContextDecorator":
@@ -692,7 +698,7 @@ class ConfigModule(ModuleType):
                     raise AssertionError(
                         "prior should be empty when entering ConfigPatch"
                     )
-                for key in self.changes.keys():
+                for key in self.changes:
                     # KeyError on invalid entry
                     prior[key] = config.__getattr__(key)
                 for k, v in self.changes.items():
@@ -786,7 +792,7 @@ class SubConfigProxy:
     `config.triton.cudagraphs` maps to _config["triton.cudagraphs"]
     """
 
-    def __init__(self, config: object, prefix: str):
+    def __init__(self, config: object, prefix: str) -> None:
         # `super().__setattr__` to bypass custom `__setattr__`
         super().__setattr__("_config", config)
         super().__setattr__("_prefix", prefix)
@@ -810,7 +816,7 @@ def patch_object(obj: object, name: str, value: object) -> object:
     return mock.patch.object(obj, name, value)
 
 
-def get_tristate_env(name: str, default: Any = None) -> Optional[bool]:
+def get_tristate_env(name: str, default: Any = None) -> bool | None:
     value = os.environ.get(name)
     if value == "1":
         return True
