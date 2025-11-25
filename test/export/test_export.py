@@ -285,6 +285,28 @@ def get_hop_schema(ep: torch.export.ExportedProgram):
     return torch._library.utils.hop_schema_from_fx_node(hop_node)
 
 
+def cleanup_dynamo_metadata(ep: torch.export.ExportedProgram) -> None:
+    for node in ep.graph.nodes:
+        if "custom" in node.meta:
+            node.meta["custom"] = {
+                k: v
+                for k, v in node.meta["custom"].items()
+                if "_torchdynamo_disable" not in k
+            }
+
+
+def cleanup_dispatch_trace_metadata(mod: torch.export.ExportedProgram) -> None:
+    for node in mod.graph.nodes:
+        if (
+            "custom" not in node.meta
+            or "_torchdynamo_disable_method" not in node.meta["custom"]
+            or node.meta["custom"]["_torchdynamo_disable_method"]
+            not in ["dispatch_trace", "trace"]
+        ):
+            continue
+        del node.meta["custom"]
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
     def test_export_inline_constraints(self):
@@ -742,13 +764,7 @@ class TestExport(TestCase):
 
         # clean up _torchdynamo related meta data as it could vary depending on the caller
         # https://github.com/pytorch/pytorch/issues/167432
-        for node in ep.graph.nodes:
-            if "custom" in node.meta:
-                node.meta["custom"] = {
-                    k: v
-                    for k, v in node.meta["custom"].items()
-                    if "_torchdynamo_disable" not in k
-                }
+        cleanup_dynamo_metadata(ep)
 
         custom_metadata = torch.fx.traceback._get_custom_metadata(ep.module())
 
@@ -761,6 +777,79 @@ class TestExport(TestCase):
 ('call_function', '_assert_scalar_default', {'moo': 0})
 ('call_function', 'mul', {'moo': 0})""",
         )
+
+    def test_uplift_common_custom_meta(self) -> None:
+        class N(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                with torch.fx.traceback.annotate({"moo": 1}):
+                    z = self.n(x) + 1
+                return z @ y
+
+        inp = (torch.rand(2, 2), torch.rand(2, 2))
+        with torch.fx.traceback.preserve_node_meta():
+            ep = torch.export.export(M(), inp)
+        cleanup_dynamo_metadata(ep)
+        unf = unflatten(ep)
+        unf_node_map = {node.name: node for node in unf.graph.nodes}
+        self.assertTrue("custom" in unf_node_map["n"].meta)
+        self.assertEqual(unf_node_map["n"].meta["custom"], {"moo": 1})
+        for node in unf.n.graph.nodes:
+            self.assertTrue("custom" not in node.meta or not node.meta["custom"])
+
+    def test_uplift_common_custom_meta_with_multiple_calls(self) -> None:
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.randn(2, 2))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + self.buffer
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            @torch._dynamo.disable()
+            def foo1(self, x: torch.Tensor) -> torch.Tensor:
+                return self.n(x) @ x
+
+            def foo2(self, x: torch.Tensor) -> torch.Tensor:
+                return self.n(x) * x
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.foo1(x) + self.foo2(x) + self.foo1(x)
+
+        m = M()
+        x = (torch.randn(2, 2),)
+        with torch.fx.traceback.preserve_node_meta():
+            ep = torch.export.export(m, x)
+        cleanup_dispatch_trace_metadata(ep)
+        unf = torch.export.unflatten(ep)
+        unf_node_map = {node.name: node for node in unf.graph.nodes}
+        self.assertTrue("custom" in unf_node_map["n"].meta)
+        self.assertFalse("custom" in unf_node_map["n_1"].meta)
+        self.assertTrue("custom" in unf_node_map["n_2"].meta)
+        self.assertTrue("_torchdynamo_disable_method", unf_node_map["n"].meta["custom"])
+        self.assertTrue(
+            "_torchdynamo_disable_method", unf_node_map["n_2"].meta["custom"]
+        )
+        self.assertEqual(
+            unf_node_map["n"].meta["custom"]["_torchdynamo_disable_method"], "foo1"
+        )
+        self.assertEqual(
+            unf_node_map["n_2"].meta["custom"]["_torchdynamo_disable_method"], "foo1"
+        )
+        for node in unf.n.graph.nodes:
+            self.assertTrue("custom" not in node.meta or not node.meta["custom"])
 
     @requires_gpu
     def test_flex_attention_export(self):
