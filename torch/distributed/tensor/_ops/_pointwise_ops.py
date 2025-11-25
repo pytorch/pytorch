@@ -424,6 +424,96 @@ linear_pointwise_ops = {
     aten.copy_.default: 1,
 }
 
+pointwise_quantize_ops = {
+    aten.quantize_mx.default
+}
+
+def quantize_mx_strategy(
+    args_schema: Sequence[object],
+    followed_strategy: OpStrategy,
+) -> OpStrategy:
+    """
+    Strategy for quantize_mx operation.
+    
+    quantize_mx: (Tensor input, int block_size) -> (Tensor quantized, Tensor scale)
+    
+    - Single tensor input (no broadcasting needed)
+    - Two outputs with same sharding as input
+    - Scale has different shape but follows same placement pattern
+    - Non-linear operation (Partial -> Replicate)
+    """
+    quantize_strategy = OpStrategy([])
+    
+    for op_spec in followed_strategy.strategies:
+        spec_to_follow = op_spec.output_spec
+        
+        # Build output placements (same for both outputs)
+        out_placements: list[Placement] = []
+        for placement in spec_to_follow.placements:
+            if isinstance(placement, Shard):
+                # Keep shard placement as-is (no broadcasting to adjust)
+                out_placements.append(placement)
+            elif isinstance(placement, Partial):
+                # Quantization is non-linear, must reduce partials
+                out_placements.append(Replicate())
+            else:
+                # Replicate stays replicate
+                out_placements.append(placement)
+        
+        # Input spec (just follow the input as-is)
+        input_arg_spec = args_schema[0].strategies[0].output_spec
+        
+        input_target_spec = DTensorSpec(
+            mesh=followed_strategy.mesh,
+            placements=tuple(out_placements),
+            tensor_meta=input_arg_spec.tensor_meta,
+        )
+        
+        # Calculate resharding cost
+        redistribute_cost = generate_redistribute_costs(
+            args_schema[0], input_target_spec
+        )
+        
+        # Both outputs have same placement
+        quantized_spec = DTensorSpec(
+            mesh=followed_strategy.mesh,
+            placements=tuple(out_placements),
+        )
+        
+        scale_spec = DTensorSpec(
+            mesh=followed_strategy.mesh,
+            placements=tuple(out_placements),
+        )
+        
+        quantize_strategy.strategies.append(
+            OpSpec(
+                output_specs=(quantized_spec, scale_spec),  # Tuple for 2 outputs!
+                input_specs=[input_target_spec],
+                redistribute_cost=[redistribute_cost],
+            )
+        )
+    
+    return quantize_strategy
+
+
+
+def pointwise_quantize_mx(op_schema: OpSchema) -> OpStrategy:
+    """
+    Propagation rule for quantize_mx
+    """
+    # Get input strategy (first argument is the tensor)
+    input_strategy = op_schema.args_schema[0]
+    
+    # Use the custom strategy function
+    return quantize_mx_strategy(
+        op_schema.args_schema,
+        followed_strategy=input_strategy,
+)
+
+for op in pointwise_quantize_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+            pointwise_quantize_mx
+        )
 
 def pointwise_strategy(op_schema: OpSchema, linearity: int = -1) -> OpStrategy:
     followed_strategy_index = -1
