@@ -495,3 +495,197 @@ class SpatialBatchSampler(Sampler[List[Coordinate2D]]):
     def __len__(self) -> int:
         """Return number of batches."""
         return len(self.batches)
+
+
+class DistributedCoordinateSampler(Sampler[Coordinate2D]):
+    r"""Distributed sampler for coordinates.
+
+    Splits coordinates across distributed processes. Each process gets
+    a subset of coordinates, ensuring no overlap.
+
+    Args:
+        coordinates (List[Tuple[float, float]]): List of all coordinates
+        num_replicas (Optional[int]): Number of processes. Default: world_size
+        rank (Optional[int]): Rank of current process. Default: current rank
+        shuffle (bool): Shuffle coordinates each epoch. Default: ``True``
+        seed (int): Random seed for shuffling. Default: 0
+        drop_last (bool): Drop tail to make even split. Default: ``False``
+
+    Example:
+        >>> # In distributed training
+        >>> sampler = DistributedCoordinateSampler(
+        ...     coordinates,
+        ...     num_replicas=world_size,
+        ...     rank=rank
+        ... )
+        >>> loader = DataLoader(dataset, sampler=sampler)
+    """
+
+    def __init__(
+        self,
+        coordinates: List[Coordinate2D],
+        num_replicas: Optional[int] = None,
+        rank: Optional[int] = None,
+        shuffle: bool = True,
+        seed: int = 0,
+        drop_last: bool = False
+    ) -> None:
+        if num_replicas is None:
+            if not torch.distributed.is_available():
+                raise RuntimeError("Requires distributed package")
+            if not torch.distributed.is_initialized():
+                raise RuntimeError("Default process group not initialized")
+            num_replicas = torch.distributed.get_world_size()
+        if rank is None:
+            if not torch.distributed.is_available():
+                raise RuntimeError("Requires distributed package")
+            if not torch.distributed.is_initialized():
+                raise RuntimeError("Default process group not initialized")
+            rank = torch.distributed.get_rank()
+        if rank >= num_replicas or rank < 0:
+            raise ValueError(f"Invalid rank {rank}, should be in [0, {num_replicas})")
+
+        self.coordinates = coordinates
+        self.num_replicas = num_replicas
+        self.rank = rank
+        self.epoch = 0
+        self.drop_last = drop_last
+        self.shuffle = shuffle
+        self.seed = seed
+
+        # Calculate samples per replica
+        if self.drop_last and len(self.coordinates) % self.num_replicas != 0:
+            # Drop tail to make even split
+            self.num_samples = math.ceil(
+                (len(self.coordinates) - self.num_replicas) / self.num_replicas
+            )
+        else:
+            self.num_samples = math.ceil(len(self.coordinates) / self.num_replicas)
+
+        self.total_size = self.num_samples * self.num_replicas
+
+    def __iter__(self) -> Iterator[Coordinate2D]:
+        """Iterate over coordinates for this rank."""
+        if self.shuffle:
+            # Deterministic shuffling based on epoch
+            g = torch.Generator()
+            g.manual_seed(self.seed + self.epoch)
+            indices = torch.randperm(len(self.coordinates), generator=g).tolist()
+            coords = [self.coordinates[i] for i in indices]
+        else:
+            coords = self.coordinates[:]
+
+        # Add extra samples to make evenly divisible
+        if not self.drop_last:
+            padding_size = self.total_size - len(coords)
+            if padding_size > 0:
+                coords += coords[:padding_size]
+        else:
+            coords = coords[:self.total_size]
+
+        # Subsample for this rank
+        coords = coords[self.rank:self.total_size:self.num_replicas]
+
+        return iter(coords)
+
+    def __len__(self) -> int:
+        """Return number of samples for this rank."""
+        return self.num_samples
+
+    def set_epoch(self, epoch: int) -> None:
+        r"""Set epoch for shuffling.
+
+        Args:
+            epoch (int): Current epoch number
+
+        This should be called at the beginning of each epoch in distributed
+        training to ensure proper shuffling across epochs.
+        """
+        self.epoch = epoch
+
+
+def create_coordinate_sampler(
+    coordinates: Union[List[Coordinate2D], torch.Tensor],
+    sampler_type: str = 'random',
+    **kwargs
+) -> Sampler:
+    """Factory function to create coordinate samplers.
+
+    Args:
+        coordinates: List of coordinates or tensor of shape (N, 2)
+        sampler_type: Type of sampler ('random', 'sequential', 'grid', 'weighted')
+        **kwargs: Additional arguments for specific sampler
+
+    Returns:
+        Appropriate coordinate sampler instance
+
+    Example:
+        >>> coords = torch.rand(1000, 2) * 100  # Random coords in [0, 100]^2
+        >>> sampler = create_coordinate_sampler(
+        ...     coords, 'random', shuffle=True, seed=42
+        ... )
+    """
+    # Convert tensor to list of tuples if needed
+    if isinstance(coordinates, torch.Tensor):
+        if coordinates.dim() != 2 or coordinates.size(1) not in [2, 3]:
+            raise ValueError(f"Expected tensor of shape (N, 2) or (N, 3), got {coordinates.shape}")
+        coordinates = [tuple(coord.tolist()) for coord in coordinates]
+
+    if sampler_type == 'random':
+        return CoordinateSampler(coordinates, shuffle=True, **kwargs)
+    elif sampler_type == 'sequential':
+        return CoordinateSampler(coordinates, shuffle=False, **kwargs)
+    elif sampler_type == 'grid':
+        if 'bounds' not in kwargs or 'grid_size' not in kwargs:
+            raise ValueError("Grid sampler requires 'bounds' and 'grid_size'")
+        return GridCoordinateSampler(**kwargs)
+    elif sampler_type == 'weighted':
+        if 'weights' not in kwargs:
+            raise ValueError("Weighted sampler requires 'weights'")
+        return WeightedCoordinateSampler(coordinates, **kwargs)
+    else:
+        raise ValueError(f"Unknown sampler type: {sampler_type}")
+
+
+def coordinates_to_tensor(coords: List[Union[Coordinate2D, Coordinate3D]]) -> torch.Tensor:
+    """Convert list of coordinate tuples to tensor.
+
+    Args:
+        coords: List of coordinate tuples
+
+    Returns:
+        Tensor of shape (N, 2) or (N, 3)
+
+    Example:
+        >>> coords = [(1.0, 2.0), (3.0, 4.0)]
+        >>> tensor = coordinates_to_tensor(coords)
+        >>> print(tensor.shape)  # torch.Size([2, 2])
+    """
+    return torch.tensor(coords, dtype=torch.float32)
+
+
+def tensor_to_coordinates(
+    tensor: torch.Tensor
+) -> Union[List[Coordinate2D], List[Coordinate3D]]:
+    """Convert tensor to list of coordinate tuples.
+
+    Args:
+        tensor: Tensor of shape (N, 2) or (N, 3)
+
+    Returns:
+        List of coordinate tuples
+
+    Example:
+        >>> tensor = torch.rand(10, 2)
+        >>> coords = tensor_to_coordinates(tensor)
+        >>> print(len(coords))  # 10
+    """
+    if tensor.dim() != 2:
+        raise ValueError(f"Expected 2D tensor, got {tensor.dim()}D")
+
+    if tensor.size(1) == 2:
+        return [(float(row[0]), float(row[1])) for row in tensor]
+    elif tensor.size(1) == 3:
+        return [(float(row[0]), float(row[1]), float(row[2])) for row in tensor]
+    else:
+        raise ValueError(f"Expected tensor with 2 or 3 columns, got {tensor.size(1)}")
