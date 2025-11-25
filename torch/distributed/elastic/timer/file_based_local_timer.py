@@ -281,22 +281,21 @@ class FileTimerServer:
         #  2. We are running the watchdog loop in a separate daemon
         #     thread, which will not block the process to stop.
         try:
-            fd = open(self._file_path)
+            with open(self._file_path) as fd:
+                self._is_client_started = True
+                while not self._stop_signaled:
+                    try:
+                        run_once = self._run_once
+                        self._run_watchdog(fd)
+                        if run_once:
+                            break
+                        self._last_progress_time = int(time.time())
+                    except Exception:
+                        logger.exception("Error running watchdog")
+
         except Exception:
             logger.exception("Could not open the FileTimerServer pipe")
             raise
-
-        with fd:
-            self._is_client_started = True
-            while not self._stop_signaled:
-                try:
-                    run_once = self._run_once
-                    self._run_watchdog(fd)
-                    if run_once:
-                        break
-                    self._last_progress_time = int(time.time())
-                except Exception:
-                    logger.exception("Error running watchdog")
 
     def _run_watchdog(self, fd: io.TextIOWrapper) -> None:
         timer_requests = self._get_requests(fd, self._max_interval)
