@@ -958,9 +958,6 @@ class Loops(IRNode):
             + [f"origin_node={self.origin_node!r}"]
         )
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
-
     def __str__(self) -> str:
         return self._to_str(("ranges",))
 
@@ -8229,9 +8226,6 @@ class FallbackKernel(ExternKernelAlloc):
             packed.outputs = [outputs]
         # pyrefly: ignore [bad-return]
         return outputs
-
-    def apply_constraint(self) -> None:
-        return super().apply_constraint()
 
 
 @ir_dataclass(frozen=False)

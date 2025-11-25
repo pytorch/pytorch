@@ -1341,11 +1341,6 @@ class SetVariable(ConstDictVariable):
         # Already EQUALS_MATCH guarded
         pass
 
-    def install_dict_contains_guard(
-        self, tx: "InstructionTranslator", args: list[VariableTracker]
-    ) -> None:
-        super().install_dict_contains_guard(tx, args)
-
 
 class FrozensetVariable(SetVariable):
     def debug_repr(self) -> str:
