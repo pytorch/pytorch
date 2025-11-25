@@ -279,8 +279,7 @@ def _is_pytreespec_instance(
         # is an instance of the PyTorch Dynamo TreeSpec class.
         import torch._dynamo.polyfills.pytree as dynamo_pytree
 
-        if isinstance(obj, dynamo_pytree.PyTreeSpec):
-            return True
+        return isinstance(obj, dynamo_pytree.PyTreeSpec)
     return False
 
 

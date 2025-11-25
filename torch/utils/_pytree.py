@@ -1119,8 +1119,11 @@ class TreeSpec:
             num_leaves = 1
             num_children = 0
         else:
-            num_nodes = sum((spec.num_nodes for spec in self._children), start=1)
-            num_leaves = sum(spec.num_leaves for spec in self._children)
+            num_nodes = 1
+            num_leaves = 0
+            for child in self._children:
+                num_nodes += child.num_nodes
+                num_leaves += child.num_leaves
             num_children = len(self._children)
         object.__setattr__(self, "num_nodes", num_nodes)
         object.__setattr__(self, "num_leaves", num_leaves)
@@ -1388,8 +1391,7 @@ def _is_pytreespec_instance(
         # is an instance of the PyTorch Dynamo TreeSpec class.
         import torch._dynamo.polyfills.pytree as dynamo_pytree
 
-        if isinstance(obj, dynamo_pytree.PyTreeSpec):
-            return True
+        return isinstance(obj, dynamo_pytree.PyTreeSpec)
     return False
 
 
