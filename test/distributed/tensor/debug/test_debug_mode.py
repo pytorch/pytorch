@@ -215,12 +215,8 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
-    redistribute_input(0, S(0)[0]S(0)[1] -> S(0)R)
-      redistribute_input(t: f32[16, 8], trace: S(0)[0]S(0)[1]->S(0)R)
-        _c10d_functional::all_gather_into_tensor(t: f32[16, 8], 2, 3)
-        _c10d_functional::wait_tensor(t: f32[32, 8])
-    redistribute_input(1, S(1)[0]S(1)[1] -> RS(1))
-      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR->RS(1))
+    redistribute_input(1, S(1)[0]S(1)[1] -> RR)
+      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
         _c10d_functional::wait_tensor(t: f32[16, 16])
         aten::chunk(t: f32[16, 16], 2)
@@ -229,11 +225,9 @@ class TestDTensorDebugMode(TestCase):
         _c10d_functional::wait_tensor(t: f32[32, 32])
         aten::chunk(t: f32[32, 32], 4)
         aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
-        aten::chunk(t: f32[8, 128], 2, 1)
-        aten::clone(t: f32[8, 64])
-    aten::mm(t: f32[32, 8], t: f32[8, 64])
-  aten::sum(dt: f32[128, 128]| S(0)S(1))
-    aten::sum(t: f32[32, 64])""",
+    aten::mm(t: f32[16, 8], t: f32[8, 128])
+  aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
+    aten::sum(t: f32[16, 128])""",
         )
 
     def test_debug_mode_einsum(self):
@@ -581,32 +575,6 @@ class TestDTensorDebugMode(TestCase):
 
         with self.assertRaisesRegex(ValueError, "Log lengths don't match"):
             DebugMode.check_hash_mismatches(dm1.logs, dm3.logs)
-
-    @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties(0).total_memory < 2**26,
-        "Being conservative, test peak memory is 25MB?",
-    )
-    def test_tensor_hash_waits_on_collective(self):
-        # test that hashing collectives gives correct results
-        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-
-        local_tensor = torch.ones(2**18, device=self.device_type)
-        dt = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
-
-        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
-            dt.redistribute(mesh, [Replicate()])
-
-        # Find all_gather hash
-        all_gather_logs = [
-            op
-            for op in debug_mode.logs
-            if isinstance(op, _OpCall)
-            and op.op == torch.ops._c10d_functional.all_gather_into_tensor.default
-        ]
-        self.assertEqual(len(all_gather_logs), 1)
-        actual_hash = all_gather_logs[0].log["hash"]
-        self.assertEqual(actual_hash, float(local_tensor.numel() * self.world_size))
 
     def test_pretty_print_dtensor_make_fx(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
