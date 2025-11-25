@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from functools import wraps
 from logging import getLogger
-from typing import Optional, ParamSpec, TypeVar
+from typing import ParamSpec, TypeVar
 
 import torch
 from torch._utils_internal import signpost_event
@@ -53,7 +53,7 @@ def maybe_wrap_command_args_with_numa_binding(
     command_args: tuple[str, ...],
     *,
     gpu_index: int,
-    numa_options: Optional[NumaOptions],
+    numa_options: NumaOptions | None,
 ) -> tuple[str, ...]:
     """
     Wraps command arguments with numactl to apply NUMA CPU binding.
@@ -115,7 +115,7 @@ def maybe_wrap_with_numa_binding(
     func: Callable[_TParams, _TReturn],
     *,
     gpu_index: int,
-    numa_options: Optional[NumaOptions],
+    numa_options: NumaOptions | None,
 ) -> Callable[_TParams, _TReturn]:
     """
     Wraps a function to apply NUMA CPU binding before execution.

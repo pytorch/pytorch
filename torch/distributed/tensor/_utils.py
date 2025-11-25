@@ -1,3 +1,4 @@
+import threading
 from collections import defaultdict
 from collections.abc import Sequence
 from typing import cast, Optional
@@ -7,6 +8,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch._prims_common import ShapeType
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -16,6 +18,42 @@ from torch.distributed.tensor.placement_types import (
     Shard,
 )
 from torch.utils._typing_utils import not_none
+
+
+class ExplicitRedistributionContext:
+    """
+    Within this context manager, DTensor will refuse to perform implicit redistribution,
+    instead raising an error.  Manual calls to ``redistribute()`` are required wherever a redistribution
+    must occur to avoid erroring.  This can be used to ensure that the user is aware of all redistribution.
+
+    Note: it is easier to use this mode on just the forward pass of a typical DTensor program, as the backwards pass
+    may contain implicit redistribution calls that are not visible to the user and difficult to replace with manual
+    calls.  Redistribution during backward can be made explicit by writing `autograd.Function`s that are no-op
+    during forward and perform a manual redistribution during backwards.
+    """
+
+    _local = threading.local()
+
+    def __init__(self, enable: bool = True, strict: bool = False):
+        self._enable = enable
+        self._strict = strict
+
+    @classmethod
+    def is_redistribute_allowed(cls, src_spec: DTensorSpec, dst_spec: DTensorSpec):
+        if instance := getattr(cls._local, "_active", None):
+            if instance._enable:
+                if instance._strict:
+                    return False
+                return redistribute_cost(src_spec, dst_spec) <= 0
+        return True
+
+    def __enter__(self):
+        self._prev = getattr(ExplicitRedistributionContext._local, "_active", None)
+        ExplicitRedistributionContext._local._active = self
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        ExplicitRedistributionContext._local._active = self._prev
 
 
 def _explicit_order_placements(

@@ -1136,7 +1136,7 @@ class TestFunctionalIterDataPipe(TestCase):
                     )
                 break
         with warnings.catch_warnings(record=True) as wa:
-            for i, (n1, n2) in enumerate(zip(dp1, dp2)):
+            for n1, n2 in zip(dp1, dp2):
                 output1.append(n1)
                 output2.append(n2)
             self.assertEqual(len(wa), 1)

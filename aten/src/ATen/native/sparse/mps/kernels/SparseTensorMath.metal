@@ -313,7 +313,7 @@ INSTANTIATE_DENSE_SPARSE_MUL(float2);
       constant uint2&     dims_output   [[buffer(8)]],                       \
       uint3               gid           [[thread_position_in_grid]]);
 
-INSTANTIATE_FOR_FLOAT_TYPES(INSTANTIATE_FUSED_GATHER_MUL);
+INSTANTIATE_FOR_ALL_TYPES(INSTANTIATE_FUSED_GATHER_MUL);
 
 
 #define INSTANTIATE_SPMM_BMM_COO_ROWS_GROUPED(DTYPE)                         \

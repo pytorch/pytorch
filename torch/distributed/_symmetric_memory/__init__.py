@@ -465,6 +465,39 @@ lib.define(
     "_low_contention_reduce_scatter(Tensor tensor, str reduce_op, str group_name) -> Tensor"
 )
 
+lib.define("get_remote_tensors(Tensor x, str group_name) -> Tensor[]")
+"""
+Given a local tensor and a group name, return a tuple of tensors that are
+symmetric on other devices. The returned tensors are ordered by rank IDs. The
+length of the tuple equals to the size of the group.
+
+Note: this API works only when `world_within_direct_access()` returns True, i.e.
+only when the group is within NVLink domain or similar. It does not work across
+network interfaces.
+"""
+
+
+@torch.library.impl(lib, "get_remote_tensors", "CUDA")
+def _get_remote_tensors_default(
+    local: torch.Tensor, group_name: str
+) -> tuple[torch.Tensor, ...]:
+    hdl = rendezvous(local, group_name)
+    if hdl is None:
+        raise ValueError("Tensor is not allocated from Symmetric Memory")
+
+    return tuple(
+        hdl.get_remote_tensor(peer, local.size(), local.dtype)
+        for peer in range(hdl.world_size)
+    )
+
+
+@torch.library.impl(lib, "get_remote_tensors", "Meta")
+def _get_remote_tensors_meta(
+    local: torch.Tensor, group_name: str
+) -> tuple[torch.Tensor, ...]:
+    group = c10d._resolve_process_group(group_name)
+    return tuple(torch.empty_like(local) for _ in range(group.size()))
+
 
 class _ScaleMode(Enum):
     UNSCALED = "unscaled"

@@ -224,6 +224,7 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("code", &CacheEntry::code)
       .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
+      .def_readonly("backend", &CacheEntry::backend)
       .def_property_readonly("next", &CacheEntry::next)
       .def(
           "update_diff_guard_root_manager",
@@ -254,6 +255,7 @@ void initDynamoBindings(PyObject* torch) {
   m.def("_reset_precompile_entries", &_reset_precompile_entries);
   m.def("_load_precompile_entry", &_load_precompile_entry);
   m.def("_debug_get_precompile_entries", &_debug_get_precompile_entries);
+  m.def("_set_lru_cache", &_set_lru_cache);
   py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
   init_THPCaches();
   if (THP_PyOpcode_Caches != nullptr) {
