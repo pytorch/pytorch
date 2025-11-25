@@ -11,6 +11,7 @@ from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     ArgsType,
@@ -25,7 +26,9 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops.utils import (  # _args_schema_with_tensor_meta,; _expand_single_dim_strategy_to_mesh,
+from torch.distributed.tensor._ops.utils import (
+    _args_schema_with_tensor_meta,
+    _expand_single_dim_strategy_to_mesh,
     _find_lowest_cost_sharding,
 )
 from torch.distributed.tensor._utils import (
@@ -418,24 +421,31 @@ class ShardingPropagator:
 
             TODO: show example
             """
-            # # TODO: for now, just do the dumb thing, expand to generate the full set of strategy combinations, each one
-            # # with a redistribute cost, and then find the min strategy over those costs.
-            # # Later, replace this with a min-cost guided graph search, starting from the current input placements and taking
-            # # steps in the lowest-redistribution-cost direction until finding a valid strategy combination.
-            # single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
-            # mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
-            # assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
-            # _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-            #     mesh, op_schema, single_dim_strategy
-            # )
-
-            # args_schema, kwargs_schema = _args_schema_with_tensor_meta(
-            #     op_schema.args_schema, op_schema.kwargs_schema
-            # )
-            # strategy = _expanded_strategy_fn(args_schema, kwargs_schema)
             mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
             single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
-            strategy = _find_lowest_cost_sharding(mesh, op_schema, single_dim_strategy)
+            single_dim_expand_fully = False
+            if single_dim_expand_fully:
+                # TODO: this codepath was mainly for initial testing, it would be removed once the lowest-cost path
+                # is validated
+
+                # expand to generate the full set of strategy combinations, each one
+                # with a redistribute cost, and then find the min strategy over those costs.
+                # Later, replace this with a min-cost guided graph search, starting from the current input placements and taking
+                # steps in the lowest-redistribution-cost direction until finding a valid strategy combination.
+                mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
+                assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
+                _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                    mesh, op_schema, single_dim_strategy
+                )
+
+                args_schema, kwargs_schema = _args_schema_with_tensor_meta(
+                    op_schema.args_schema, op_schema.kwargs_schema
+                )
+                strategy = _expanded_strategy_fn(args_schema, kwargs_schema)
+            else:
+                strategy = _find_lowest_cost_sharding(
+                    mesh, op_schema, single_dim_strategy
+                )
             # TODO: prefer to rename vars to match typing, this is an OpSpec. But matching naming from elif block
             # for sanity for now
             assert isinstance(strategy, OpStrategy), "TupleStrategy for single-dim NYI"
