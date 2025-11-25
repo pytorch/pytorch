@@ -1631,13 +1631,17 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, variables.UserDefinedObjectVariable):
             repr_method = arg.value.__repr__
 
-            if type(arg.value).__repr__ is object.__repr__ or isinstance(
-                repr_method, types.MethodWrapperType
-            ):
+            if type(arg.value).__repr__ is object.__repr__:
                 # Default repr - build and trace it
                 fn_vt = VariableTracker.build(tx, repr_method)
                 return fn_vt.call_function(tx, [], {})
-
+            elif is_wrapper_or_member_descriptor(repr_method):
+                unimplemented(
+                    gb_type="Attempted to call repr() method implemented in C/C++",
+                    context="",
+                    explanation=f"{type(arg.value)} has a C/C++ based repr method. This is not supported.",
+                    hints=["Write the repr method in Python"],
+                )
             else:
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
