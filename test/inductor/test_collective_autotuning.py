@@ -103,12 +103,16 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         self._spawn_processes()
 
     @skip_if_lt_x_gpu(4)
-    def test_all_gather_4ranks(self):
-        """Test all_gather with 4 ranks"""
+    def test_vllm_style_allreduce(self):
+        """
+        Test vLLM-style custom allreduce with buffer copy pattern.
 
+        vLLM uses custom allreduce optimized for small tensors (<8MB).
+        Two implementations simulate vLLM's registered=False mode vs standard NCCL.
+        """
         dist.init_process_group(
             backend="nccl",
-            init_method=f"file:///tmp/test_collective_allgather_4ranks_{self.id()}",
+            init_method=f"file:///tmp/test_vllm_allreduce_{self.id()}",
             world_size=self.world_size,
             rank=self.rank,
         )
@@ -120,33 +124,36 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
 
         _register_process_group("default", dist.group.WORLD)
 
-        @torch.library.custom_op("test::my_allgather_4ranks", mutates_args=())
-        def my_allgather(x: torch.Tensor) -> torch.Tensor:
-            output = torch.ops._c10d_functional.all_gather_into_tensor(
-                x.contiguous(), self.world_size, "default"
-            )
-            return output
+        @torch.library.custom_op("test::vllm_allreduce", mutates_args=())
+        def vllm_allreduce(x: torch.Tensor) -> torch.Tensor:
+            result = x.clone()
+            return torch.ops._c10d_functional.all_reduce_(result, "sum", "default")
 
-        @my_allgather.register_fake
+        @vllm_allreduce.register_fake
         def _(x):
-            return torch.empty(
-                x.size(0) * self.world_size,
-                *x.size()[1:],
-                dtype=x.dtype,
-                device=x.device,
-            )
+            return torch.empty_like(x)
 
-        def allgather_impl(x):
-            output = torch.ops._c10d_functional.all_gather_into_tensor(
-                x.contiguous(), self.world_size, "default"
-            )
-            return output
+        def vllm_buffer_copy_allreduce(x: torch.Tensor) -> torch.Tensor:
+            """
+            vLLM registered=False: flatten -> copy to IPC buffer -> allreduce -> reshape
 
-        def allgather_impl2(x):
-            output = torch.ops._c10d_functional.all_gather_into_tensor(
-                x.contiguous(), self.world_size, "default"
+            vLLM code:
+                inp_size = inp.numel() * inp.element_size()
+                self.buffer_ptrs[self.rank][:inp_size].copy_(inp.view(-1))
+                ops.all_reduce(self._ptr, inp, out, self.buffer_ptrs[self.rank], self.max_size)
+            """
+            original_shape = x.shape
+            flat_x = x.contiguous().view(-1)
+            buffer_copy = flat_x.clone()
+            result = torch.ops._c10d_functional.all_reduce_(
+                buffer_copy, "sum", "default"
             )
-            return output
+            return result.view(original_shape)
+
+        def nccl_allreduce_direct(x: torch.Tensor) -> torch.Tensor:
+            """Standard NCCL allreduce without buffer copy."""
+            result = x.clone()
+            return torch.ops._c10d_functional.all_reduce_(result, "sum", "default")
 
         from torch._inductor.kernel.custom_op import (
             CustomOpConfig,
@@ -154,24 +161,24 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         )
 
         register_custom_op_autotuning(
-            my_allgather,
+            vllm_allreduce,
             configs=[
-                CustomOpConfig(allgather_impl),
-                CustomOpConfig(allgather_impl2),
+                CustomOpConfig(vllm_buffer_copy_allreduce),
+                CustomOpConfig(nccl_allreduce_direct),
             ],
         )
 
-        class GatherModel(torch.nn.Module):
+        class VLLMAllReduceModel(torch.nn.Module):
             def forward(self, x):
-                return my_allgather(x)
+                return vllm_allreduce(x)
 
-        model = torch.compile(GatherModel()).to(device)
+        model = torch.compile(VLLMAllReduceModel()).to(device)
 
-        x = torch.ones(32, 64, device=device) * (rank + 1)
+        torch.manual_seed(42 + rank)
+        x = torch.randn(64, 128, device=device)
+
         y = model(x)
-
-        expected_shape = (32 * 4, 64)
-        self.assertEqual(y.shape, expected_shape)
+        self.assertEqual(y.shape, x.shape)
 
         dist.destroy_process_group()
 
