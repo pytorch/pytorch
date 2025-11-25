@@ -2874,11 +2874,14 @@ class GuardBuilder(GuardBuilderBase):
                     "dtype",
                     "device",
                     "requires_grad",
-                    "ndimension()",
+                    "ndimension",
                 ]
 
                 for term in terms:
-                    real_value = self.get(AttrSource(guard.originating_source, term))
+                    term_src = AttrSource(guard.originating_source, term)
+                    if term == "ndimension":
+                        term_src = CallFunctionNoArgsSource(term_src)
+                    real_value = self.get(term_src)
                     if istype(real_value, (torch.device, torch.dtype)):
                         # copy pasted from EQUALS_MATCH
                         code.append(f"str({tensor_name}.{term}) == {str(real_value)!r}")
