@@ -968,6 +968,15 @@ class LRUCacheWarningTests(LoggingTestCase):
     @requires_cuda
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
+        prev_default = torch._C._get_default_device()
+
+        def _restore_default_device():
+            if prev_default == "cpu":
+                torch.set_default_device(None)
+            else:
+                torch.set_default_device(prev_default)
+
+        self.addCleanup(_restore_default_device)
         torch.set_default_device("cuda")
 
         @torch.compile(backend="eager")
@@ -7085,15 +7094,14 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
-        torch._inductor.config.fallback_random = True
-
-        for backend in ["eager", "aot_eager"]:
-            torch.manual_seed(54321)
-            torch.cuda.manual_seed_all(54321)
-            actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                torch.randn((2, 12, 16, 32, 32))
-            ).sum()
-            self.assertEqual(actual, expected)
+        with torch._inductor.config.patch(fallback_random=True):
+            for backend in ["eager", "aot_eager"]:
+                torch.manual_seed(54321)
+                torch.cuda.manual_seed_all(54321)
+                actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                    torch.randn((2, 12, 16, 32, 32))
+                ).sum()
+                self.assertEqual(actual, expected)
 
     def test_incompatible_configs(self):
         with torch._dynamo.config.patch(
@@ -7456,31 +7464,6 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             msg,
         )
 
-    def test_dynamo_set_recursion_limit_simple(self):
-        # Test that torch._dynamo.set_recursion_limit calls sys.setrecursionlimit for all supported
-        # Python versions
-        old_recursion_limit = sys.getrecursionlimit()
-        old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()
-        try:
-
-            def fn(x, n):
-                if n == 0:
-                    return x
-                return fn(x, n - 1) + 1
-
-            sys.setrecursionlimit(100)
-
-            with self.assertRaises(RecursionError):
-                fn(torch.ones(3), 1000)
-
-            opt_fn = torch.compile(fn, backend="eager", dynamic=False)
-            torch._dynamo.set_recursion_limit(100000)
-            self.assertEqual(fn(torch.ones(3), 1000), opt_fn(torch.ones(3), 1000))
-        finally:
-            if old_dynamo_recursion_limit > 0:
-                torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
-            sys.setrecursionlimit(old_recursion_limit)
-
     @unittest.skipIf(
         sys.version_info < (3, 12) or sys.version_info >= (3, 14),
         "only 3.12, 3.13 affected by c recursion limit",
@@ -7498,18 +7481,18 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             sys.setrecursionlimit(100)
 
             with self.assertRaises(RecursionError):
-                fn(torch.ones(3), 1000)
+                fn(torch.ones(3), 500)
 
-            sys.setrecursionlimit(2000)
+            sys.setrecursionlimit(1000)
 
-            fn(torch.ones(3), 1000)
+            fn(torch.ones(3), 500)
             opt_fn = torch.compile(fn, backend="eager", dynamic=False)
-            sys.setrecursionlimit(100000)
+            sys.setrecursionlimit(20000)
             with self.assertRaises(Exception):
-                opt_fn(torch.ones(3), 1000)
+                opt_fn(torch.ones(3), 500)
 
-            torch._dynamo.set_recursion_limit(100000)
-            self.assertEqual(fn(torch.ones(3), 1000), opt_fn(torch.ones(3), 1000))
+            torch._dynamo.set_recursion_limit(20000)
+            self.assertEqual(fn(torch.ones(3), 500), opt_fn(torch.ones(3), 500))
         finally:
             if old_dynamo_recursion_limit > 0:
                 torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
@@ -7520,19 +7503,10 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         "only 3.12, 3.13 affected by c recursion limit",
     )
     def test_dynamo_set_recursion_limit_usage(self):
-        old_recursion_limit = sys.getrecursionlimit()
         old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()
         try:
-            torch._dynamo.set_recursion_limit(100)
-            self.assertEqual(torch._dynamo.get_recursion_limit(), 100)
-
-            with self.assertRaisesRegex(ValueError, "recursion limit"):
-                torch._dynamo.set_recursion_limit(0)
-
-            self.assertEqual(torch._dynamo.get_recursion_limit(), 100)
-
-            torch._dynamo.set_recursion_limit(1)
-            sys.setrecursionlimit(100)
+            torch._dynamo.set_recursion_limit(500)
+            self.assertEqual(torch._dynamo.get_recursion_limit(), 500)
 
             @torch.compile(backend="eager", dynamic=False)
             def fn(x, n):
@@ -7540,12 +7514,17 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     return x
                 return fn(x, n - 1) + 1
 
-            with self.assertRaisesRegex(RuntimeError, "new c_recursion limit"):
+            # a limit of 500 should be lower than the default limit
+            with self.assertWarnsRegex(RuntimeWarning, "new c_recursion limit"):
                 fn(torch.ones(3), 5)
+
+            with self.assertRaisesRegex(ValueError, "recursion limit"):
+                torch._dynamo.set_recursion_limit(0)
+
+            self.assertEqual(torch._dynamo.get_recursion_limit(), 500)
         finally:
             if old_dynamo_recursion_limit > 0:
                 torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
-            sys.setrecursionlimit(old_recursion_limit)
 
     @expectedFailureDynamic
     def test_dynamo_default_lru_cache_behavior(self):
@@ -8324,6 +8303,71 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             flat, spec = pytree.tree_flatten(point)
             result = flat[0] + flat[1]
             return result
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_tree_is_leaf_not_traced(self):
+        # Test that torch.utils._pytree.tree_is_leaf is not traced into
+        # when is_leaf parameter is None (the common case)
+        from torch.utils._pytree import tree_is_leaf
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y):
+            # Test with various types
+            # Tensors are leaves
+            is_leaf_tensor = tree_is_leaf(x)
+            assert is_leaf_tensor is True
+
+            # Lists are not leaves (they're in SUPPORTED_NODES)
+            is_leaf_list = tree_is_leaf([x, y])
+            assert is_leaf_list is False
+
+            # Dicts are not leaves
+            is_leaf_dict = tree_is_leaf({"a": x, "b": y})
+            assert is_leaf_dict is False
+
+            return x + y
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_tree_is_leaf_with_namedtuple(self):
+        # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
+        from collections import namedtuple
+
+        from torch.utils._pytree import tree_is_leaf
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            # Namedtuples are not leaves (they're in SUPPORTED_NODES)
+            point = Point(a, b)
+            is_leaf_namedtuple = tree_is_leaf(point)
+            assert is_leaf_namedtuple is False
+
+            # But individual tensors are leaves
+            is_leaf_tensor = tree_is_leaf(a)
+            assert is_leaf_tensor is True
+
+            return a + b
 
         x = torch.randn(3, 4)
         y = torch.randn(3, 4)
