@@ -45,3 +45,30 @@ def aten_add_complex(self: TReal, other: TReal, alpha: float = 1.0) -> TReal:
     """add.Tensor(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor"""
 
     return aten_add(self, other, alpha=alpha)
+
+
+@onnx_impl(aten.unbind.int, trace_only=True)
+def aten_unbind(self: TReal, dim: int = 0) -> tuple[TReal, ...]:
+    """unbind.int(Tensor(a) self, int dim=0) -> Tensor(a)[]"""
+
+    # Get the size of the dimension to unbind
+    # At trace time, this should be a concrete integer value
+    num_outputs = self.shape[dim]
+
+    # Create individual slices along the specified dimension
+    # Each slice extracts one element along dim, then we squeeze it out
+    results = []
+    for i in range(num_outputs):
+        # Slice to get a single "slice" at position i along dim
+        # We use Slice op: Slice(data, starts, ends, axes, steps)
+        sliced = op.Slice(
+            self,
+            starts=op.Constant(value_ints=[i]),
+            ends=op.Constant(value_ints=[i + 1]),
+            axes=op.Constant(value_ints=[dim]),
+        )
+        # Squeeze to remove the dimension of size 1
+        squeezed = op.Squeeze(sliced, axes=op.Constant(value_ints=[dim]))
+        results.append(squeezed)
+
+    return tuple(results)
