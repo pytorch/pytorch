@@ -31,7 +31,7 @@ namespace sbtopk { // single_block_topk
 template <typename T>
 struct AddOp {
   __device__ __forceinline__ T operator()(T const &lhs, T const &rhs) {
-    return lhs + rhs;
+    return (lhs + rhs);
   }
 };
 
