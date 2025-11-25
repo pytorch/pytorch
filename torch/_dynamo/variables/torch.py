@@ -1609,6 +1609,23 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                     out_kwarg_vt.as_proxy().node.meta["example_value"].shape
                 )
 
+        from torch.utils._device import _device_constructors
+
+        # Check if we are calling a torch factory function which
+        # accepts device as a kwarg
+        if (
+            self.value in _device_constructors()
+            and tx.output.current_device is not None
+        ):
+            device_kwarg = kwargs.get("device")
+            # Check if the user provided a device kwarg
+            # other than None - if they did, honor their choice
+            if device_kwarg is None or (
+                isinstance(device_kwarg, ConstantVariable)
+                and device_kwarg.as_python_constant() is None
+            ):
+                kwargs["device"] = ConstantVariable.create(tx.output.current_device)
+
         tensor_variable = wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(
