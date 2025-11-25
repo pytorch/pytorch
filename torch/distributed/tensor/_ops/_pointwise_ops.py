@@ -25,11 +25,11 @@ from torch.distributed.tensor._ops.utils import (
     normalize_dim,
 )
 from torch.distributed.tensor.placement_types import (
+    _ShardingPlaceholder,
     Partial,
     Placement,
     Replicate,
     Shard,
-    _ShardingPlaceholder,
 )
 from torch.utils._typing_utils import not_none
 
@@ -504,7 +504,7 @@ def single_mesh_dim_common_pointwise_strategy(
     args_schema: ArgsType,
     linearity: int = -1,
     scalar_tensor_idx: Optional[int] = None,
-) -> list[list[Placement | ShardingPlaceholder]]:
+) -> list[list[Placement | _ShardingPlaceholder]]:
     # TODO rename
     tensor_arg_strategies: list[TensorMeta] = [
         arg for arg in args_schema if isinstance(arg, TensorMeta)

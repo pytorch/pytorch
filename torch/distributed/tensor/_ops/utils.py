@@ -22,12 +22,12 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _ShardingPlaceholder,
     _StridedShard,
     Partial,
     Placement,
     Replicate,
     Shard,
-    _ShardingPlaceholder,
 )
 
 
@@ -308,7 +308,7 @@ def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
     single_dim_strategy: Callable[
-        [ArgsType, KwargsType], list[list[Placement | ShardingPlaceholder]]
+        [ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
     ],
 ) -> Callable[[ArgsType, KwargsType], StrategyType]:
     """
@@ -349,7 +349,7 @@ def _expand_single_dim_strategy_to_mesh(
             ):
                 # Note: since we don't look at mesh dims inside single_dim_strategies, we can't tell if tensors are 'shardable'
                 # instead, we filter out unshardable strategies after mesh expansion
-                # TODO: make this more robust after adding ShardingPlaceholder, allowing us to say inside a single_dim_strategy
+                # TODO: make this more robust after adding _ShardingPlaceholder, allowing us to say inside a single_dim_strategy
                 # whether we care about even-sharding or other specific properties
                 continue
 
