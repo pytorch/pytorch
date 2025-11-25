@@ -652,7 +652,7 @@ if __name__ == "__main__":
         self.assertEqual(called_dummy_free.value, 0)
 
         with self.assertRaises(RuntimeError):
-            torch.xpu.change_current_allocator(allocator)
+            torch.xpu.memory.change_current_allocator(allocator)
 
         def check_output(script: str) -> str:
             return (
