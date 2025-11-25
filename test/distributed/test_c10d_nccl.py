@@ -2141,12 +2141,12 @@ class DistributedDataParallelTest(
         model = MixedModule().to(device)
         ref_model = MixedModule().to(device)
 
-        # 0.001 forces tiny buckets, stressing the group by dtype logic
+        # 100 forces large bucket, forcing the BucketKey mechanism to segregate buckets, testing bucket segregation by dtype
         ddp_model = DistributedDataParallel(
             model,
             device_ids=[device_id],
             process_group=process_group,
-            bucket_cap_mb=0.001,
+            bucket_cap_mb=100,
         )
 
         optimizer_ddp = torch.optim.SGD(ddp_model.parameters(), lr=0.01)
