@@ -497,7 +497,9 @@ class ArgumentHandler:
         is_output: bool = False,
     ) -> None:
         if isinstance(value, torch.Tensor) and value.is_cuda:
-            data_ptr = value.data_ptr()
+            # data_ptr() is preferred, but distinguish Tensors with null data_ptr()
+            # otherwise two empty Tensors could incorrectly match as a conflict
+            data_ptr = value.data_ptr() if value.data_ptr() else id(value)
             if is_write:
                 self.dataptrs_written.add(data_ptr)
             elif not metadata_only:
