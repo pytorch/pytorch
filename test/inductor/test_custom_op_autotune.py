@@ -626,13 +626,40 @@ class TestCustomOpAutoTune(TestCase):
                     msg=f"{impl_name} produced different result for {desc}",
                 )
 
-            # Test autotuning with compilation
-            self._run_autotune_test(
-                range_merge_op,
-                (test_x, test_weight),
-                expected,
-                f"RangeMerge_{seq_len}",
-            )
+        @torch.compile
+        def test_model(x, weight):
+            return range_merge_op(x, weight)
+
+        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends=autotune_backends,
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            for seq_len, desc in test_cases:
+                torch._dynamo.reset()
+                test_x = torch.randn(
+                    2, seq_len, 32, device=self.device, dtype=self.dtype
+                )
+                test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
+                expected = test_x + test_weight
+
+                compiled_result = test_model(test_x, test_weight)
+
+                self.assertEqual(
+                    compiled_result.shape,
+                    expected.shape,
+                    f"RangeMerge_{seq_len} shape mismatch",
+                )
+                torch.testing.assert_close(
+                    compiled_result,
+                    expected,
+                    rtol=1e-2,
+                    atol=1e-2,
+                    msg=f"RangeMerge_{seq_len} numerical mismatch",
+                )
 
 
 if __name__ == "__main__":
