@@ -15,7 +15,9 @@ _REDUCTION_OPS = {
 
 
 def argmin_argmax_handler(
-    op_call: torch._ops.OpOverload, args: tuple[object, ...], kwargs: dict[str, object]
+    op_call: torch._ops.OpOverload,
+    args: tuple["dtensor.DTensor", int] | tuple["dtensor.DTensor", int, bool],
+    kwargs: dict[str, object],
 ):
     """
     Handles reduces on sharded dimensions locally to limit calls to replicate.
