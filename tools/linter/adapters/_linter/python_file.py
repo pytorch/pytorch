@@ -19,8 +19,6 @@ if TYPE_CHECKING:
 
 
 class PythonFile:
-    contents: str
-    lines: list[str]
     path: Path | None
     linter_name: str
 

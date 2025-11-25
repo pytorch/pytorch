@@ -60,7 +60,9 @@ class MissingAnnotation:
 
     @cached_property
     def column(self) -> int:
-        return self.location["start"]["column"]
+        column = self.location["start"]["column"]
+        assert isinstance(column, int)
+        return column
 
     @cached_property
     def grandfather(self) -> str:
@@ -82,7 +84,9 @@ class MissingAnnotation:
 
     @cached_property
     def line(self) -> int:
-        return self.location["start"]["line"]
+        line = self.location["start"]["line"]
+        assert isinstance(line, int)
+        return line
 
     @cached_property
     def lint_result(self) -> LintResult:
@@ -159,6 +163,7 @@ class MissingTypeLinter(FileLinter):
     @cached_property
     def missing_annotations(self) -> dict[str, list[MissingAnnotation]]:
         def missing(i: int, pf: PythonFile) -> Iterator[MissingAnnotation]:
+            assert pf.path is not None
             if pf.path == BAD_FILE:
                 return
 
