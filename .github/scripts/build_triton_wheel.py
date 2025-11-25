@@ -72,9 +72,16 @@ def build_triton(
 
         triton_repo = "https://github.com/openai/triton"
         if device == "rocm":
-            if rocm_version:
-                version = f"{version}+rocm{rocm_version}"
             triton_pkg_name = "pytorch-triton-rocm"
+            # Set version suffix for Triton's setup.py to use
+            # Triton's setup.py generates: base_version + git_suffix + env_suffix
+            # For nightly: git_suffix = "+git{hash}", so we use ".rocm{ver}" → 3.5.1+gitXXX.rocm7.1
+            # For release: git_suffix = "", so we use "+rocm{ver}" → 3.5.1+rocm7.1
+            if rocm_version:
+                if release:
+                    env["TRITON_WHEEL_VERSION_SUFFIX"] = f"+rocm{rocm_version}"
+                else:
+                    env["TRITON_WHEEL_VERSION_SUFFIX"] = f".rocm{rocm_version}"
         elif device == "xpu":
             triton_pkg_name = "pytorch-triton-xpu"
             triton_repo = "https://github.com/intel/intel-xpu-backend-for-triton"

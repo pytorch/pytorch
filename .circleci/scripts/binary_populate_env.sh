@@ -89,7 +89,9 @@ if [[ "$PACKAGE_TYPE" =~ .*wheel.* && -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_B
     TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}+rocm${ROCM_VERSION}; ${TRITON_CONSTRAINT}"
     if [[ -n "$PYTORCH_BUILD_VERSION" && "$PYTORCH_BUILD_VERSION" =~ .*dev.* ]]; then
         TRITON_SHORTHASH=$(cut -c1-8 $PYTORCH_ROOT/.ci/docker/ci_commit_pins/triton.txt)
-        TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}+rocm${ROCM_VERSION}.git${TRITON_SHORTHASH}; ${TRITON_CONSTRAINT}"
+        # Triton's setup.py generates: base + git_suffix + env_suffix
+        # So nightly wheels are: 3.5.1+git{hash}.rocm{version}
+        TRITON_REQUIREMENT="pytorch-triton-rocm==${TRITON_VERSION}+git${TRITON_SHORTHASH}.rocm${ROCM_VERSION}; ${TRITON_CONSTRAINT}"
     fi
     if [[ -z "${PYTORCH_EXTRA_INSTALL_REQUIREMENTS:-}" ]]; then
         export PYTORCH_EXTRA_INSTALL_REQUIREMENTS="${TRITON_REQUIREMENT}"
