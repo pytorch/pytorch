@@ -2119,6 +2119,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
+@instantiate_parametrized_tests
 class TestSyncDecisionCrossRanks(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
@@ -2418,7 +2419,13 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         "split_matmul_reducescatter",
         ([2], 1),
     )
-    def test_split_mm_pw_rs(self):
+    @patch.object(
+        torch._inductor.config.aten_distributed_optimizations,
+        "split_matmul_reducescatter_with_views",
+        True,
+    )
+    @parametrize("with_view", [False, True])
+    def test_split_mm_pw_rs(self, with_view):
         store = c10d.FileStore(self.file_name, self.world_size)
         c10d.init_process_group(
             backend="nccl", store=store, rank=self.rank, world_size=self.world_size
@@ -2430,24 +2437,19 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         )
         group_size = group.size()
 
-        def func(permute_89, cat_33):
-            mm_57 = torch.ops.aten.mm.default(permute_89, cat_33)
-            convert_element_type_275 = torch.ops.prims.convert_element_type.default(
-                mm_57, torch.float32
+        def func(a, b):
+            mm = torch.ops.aten.mm.default(a, b)
+            if with_view:
+                mm = mm.reshape(16, 1024, -1)
+            mm = torch.ops.prims.convert_element_type.default(mm, torch.float32)
+            w = torch.ops._c10d_functional.reduce_scatter_tensor.default(
+                mm, "avg", group_size, group_name
             )
-            reduce_scatter_tensor_8 = (
-                torch.ops._c10d_functional.reduce_scatter_tensor.default(
-                    convert_element_type_275, "avg", group_size, group_name
-                )
-            )
-            wait_tensor_126 = torch.ops._c10d_functional.wait_tensor.default(
-                reduce_scatter_tensor_8
-            )
-            return wait_tensor_126
+            return torch.ops._c10d_functional.wait_tensor.default(w)
 
         def inps():
             return (
-                torch.randn(16032, 16384, dtype=torch.bfloat16, device=self.device),
+                torch.randn(16384, 16384, dtype=torch.bfloat16, device=self.device),
                 torch.randn(16384, 8192, dtype=torch.bfloat16, device=self.device),
             )
 
