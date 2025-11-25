@@ -114,6 +114,11 @@ class TORCH_API Store : public torch::CustomClassHolder {
     C10_THROW_ERROR(NotImplementedError, "queue support is not implemented.");
   }
 
+  virtual std::vector<std::string> listKeys() {
+    C10_THROW_ERROR(
+        NotImplementedError, "listKeys support is not implemented.");
+  }
+
  protected:
   std::chrono::milliseconds timeout_;
 };

@@ -56,6 +56,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import signpost_event
 from torch.export.dynamic_shapes import _ConstraintTarget
@@ -793,6 +794,7 @@ class OutputGraph(OutputGraphCommon):
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
+        self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GLOBAL_STATE))
         self.guards.add(
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
@@ -1526,37 +1528,6 @@ class OutputGraph(OutputGraphCommon):
 
         from .decorators import disable
 
-        if has_user_objects():
-            # NB: This is where we store possible user objects before running the graph
-            # index_to_user_object_weakref is the function used in the graph to translate
-            # the dynamo-generated index into the actual object passed to the compiled function.
-            # We generate bytecode to store all user objects at the proper index in the below
-            # call.
-            codegen = PyCodegen(
-                self.root_tx, root, overridden_sources=overridden_sources
-            )
-            codegen.add_push_null(
-                lambda: codegen.load_import_from(
-                    torch._dynamo.graph_bytecode_inputs.__name__,
-                    "store_user_object_weakrefs",
-                )
-            )
-            tmp_vars = []
-            for constructor in index_to_bytecode_constructor.values():
-                constructor(codegen)
-                var_name = (
-                    self.new_var()
-                )  # keep alive any temp objects for the rest of the frame
-                codegen.store(var_name)
-                tmp_vars.append(var_name)
-
-            for var_name in tmp_vars:
-                codegen.append_output(codegen.create_load(var_name))
-
-            codegen.call_function(len(index_to_bytecode_constructor), False)
-            codegen.pop_top()
-            self.add_output_instructions(codegen.get_instructions())
-
         # to handle random calls
         if len(self.random_calls) > 0:
             random_calls_instructions = []
@@ -1845,7 +1816,7 @@ class OutputGraph(OutputGraphCommon):
                 [create_instruction("DELETE_FAST", argval=graph_output_var)]
             )
 
-        if self.export:
+        if torch._dynamo.config.side_effect_replay_policy in ["warn", "error"]:
             from torch.export._trace import _ExportModuleSpecTrackerDict
 
             potential_side_effects = []
@@ -1881,10 +1852,16 @@ class OutputGraph(OutputGraphCommon):
             ]
 
             if side_effect_refs:
-                warnings.warn(
-                    f"While exporting, we found certain side effects happened in the model.forward. "
-                    f"Here are the list of potential sources you can double check: {side_effect_refs}"
-                )
+                if torch._dynamo.config.side_effect_replay_policy == "warn":
+                    warnings.warn(
+                        f"While compiling, we found certain side effects happened in the model.forward. "
+                        f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                    )
+                else:
+                    raise RuntimeError(
+                        f"While compiling, we found certain side effects happened in the model.forward. "
+                        f"Here are the list of potential sources you can double check: {side_effect_refs}"
+                    )
 
         return all_stack_locals_metas
 
@@ -1930,7 +1907,8 @@ class OutputGraph(OutputGraphCommon):
                 assert self.backward_state_var is not None
                 cg.append_output(cg.create_load(self.backward_state_var))
                 cg.store_attr(name)
-        self.side_effects.codegen_hooks(cg)
+        if config.replay_side_effects:
+            self.side_effects.codegen_hooks(cg)
 
         # TODO get debug_locals working for nested graph breaks
         # Return variables used for logging at the end
@@ -1945,7 +1923,8 @@ class OutputGraph(OutputGraphCommon):
         self.codegen_cells(tx, cg)
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
-        self.side_effects.codegen_update_mutated(cg)
+        if config.replay_side_effects:
+            self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self) -> None:
         """
@@ -2333,6 +2312,35 @@ class OutputGraph(OutputGraphCommon):
             assert self.root_tx is not None
             cg = PyCodegen(self.root_tx)
 
+            if has_user_objects():
+                # NB: This is where we store possible user objects before running the graph
+                # index_to_user_object_weakref is the function used in the graph to translate
+                # the dynamo-generated index into the actual object passed to the compiled function.
+                # We generate bytecode to store all user objects at the proper index in the below
+                # call.
+                cg.add_push_null(
+                    lambda: cg.load_import_from(
+                        torch._dynamo.graph_bytecode_inputs.__name__,
+                        "store_user_object_weakrefs",
+                    )
+                )
+
+                tmp_vars = []
+                for constructor in index_to_bytecode_constructor.values():
+                    constructor(cg)
+                    var_name = (
+                        self.new_var()
+                    )  # keep alive any user objects for the rest of the frame
+                    # TODO: we could omit this for objects we create but shouldn't be too much overhead for now
+                    cg.store(var_name)
+                    tmp_vars.append(var_name)
+
+                for var_name in tmp_vars:
+                    cg.append_output(cg.create_load(var_name))
+
+                cg.call_function(len(index_to_bytecode_constructor), False)
+                cg.pop_top()
+
             for idx, arg in enumerate(self.graphargs):
                 self.export_metadata.graph_input_idx_to_local_source[idx] = arg.source
 
@@ -2597,6 +2605,8 @@ class OutputGraph(OutputGraphCommon):
                                     fake_attr_val,
                                 )
                         continue
+                    if is_opaque_type(type(node.meta["grapharg"].example)):
+                        continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
@@ -2770,6 +2780,7 @@ class DynamoTracerOutput:
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
     closure: Optional[tuple[Any, ...]]
+    f_globals: dict[str, Any]
 
     def __init__(
         self, tracer: "InstructionTranslatorBase", error: Optional[Any] = None
@@ -2777,6 +2788,7 @@ class DynamoTracerOutput:
         self.error_on_graph_break = tracer.error_on_graph_break
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
         self.closure = tracer.closure
+        self.f_globals = tracer.f_globals
         if error:
             self.output_graph = None
         else:
@@ -2997,7 +3009,7 @@ class SubgraphTracer(fx.Tracer):
 
         self.tracked_tensor_or_symint_vt: OrderedSet[VariableTracker] = OrderedSet()
 
-    def record_tensor_or_symint_vt(self, vt):
+    def record_tensor_or_symint_vt(self, vt: VariableTracker):
         self.tracked_tensor_or_symint_vt.add(vt)
 
     # preserve original meta if it is available
