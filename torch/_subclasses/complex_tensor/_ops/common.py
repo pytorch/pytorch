@@ -299,6 +299,22 @@ def _as_interleaved(arg: ComplexTensor | Any) -> Tensor | Any:
     return arg
 
 
+class WrapComplexMode(TorchDispatchMode):
+    def __torch_dispatch__(
+        self,
+        func: OpOverload,
+        types: tuple[type],
+        args: tuple = (),
+        kwargs: dict[str, Any] | None = None,
+    ):
+        if kwargs is None:
+            kwargs = {}
+
+        args = tree_map(_as_complex_tensor, args)
+        kwargs = tree_map(_as_complex_tensor, kwargs)
+        return tree_map(_as_complex_tensor, func(*args, **kwargs))
+
+
 class ComplexTensorMode(TorchDispatchMode):
     _compile: bool
 
