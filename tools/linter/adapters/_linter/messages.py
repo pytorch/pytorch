@@ -69,7 +69,8 @@ class LintResult:
 
     def apply(self, lines: list[str]) -> None:
         if not (
-            self.char is None
+            self.is_recursive
+            or self.char is None
             or self.length is None
             or self.line is None
             or self.replacement is None
@@ -80,13 +81,16 @@ class LintResult:
             lines[self.line - 1] = f"{before}{self.replacement}{after}"
 
     def contains(self, r: LintResult) -> bool:
-        assert self.char is not None and self.line is not None
-        assert r.char is not None and r.line is not None
+        assert self.char is not None
+        assert self.line is not None
+        assert r.char is not None
+        assert r.line is not None
         return self.line == r.line and self.char <= r.char and self.end >= r.end
 
     @property
     def end(self) -> int:
-        assert self.char is not None and self.length is not None
+        assert self.char is not None
+        assert self.length is not None
         return self.char + self.length
 
     def as_message(self, code: str, path: str) -> LintMessage:

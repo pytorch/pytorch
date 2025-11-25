@@ -31,12 +31,25 @@ class PythonFile:
         contents: str | None = None,
     ) -> None:
         self.linter_name = linter_name
-        self.path = path and (path.relative_to(ROOT) if path.is_absolute() else path)
-        if contents is None and path is not None:
-            contents = path.read_text()
+        self.path = path.relative_to(ROOT) if path and path.is_absolute() else path
+        self._contents = contents
 
-        self.contents = contents or ""
-        self.lines = self.contents.splitlines(keepends=True)
+    @cached_property
+    def contents(self) -> str:
+        if self._contents is not None:
+            return self._contents
+        elif self.path is not None:
+            return self.path.read_text()
+        else:
+            return ""
+
+    @cached_property
+    def filename(self) -> str:
+        return str(self.path)
+
+    @cached_property
+    def lines(self) -> list[str]:
+        return self.contents.splitlines(keepends=True)
 
     @classmethod
     def make(cls, linter_name: str, pc: Path | str | None = None) -> Self:
@@ -157,6 +170,22 @@ class PythonFile:
         self.errors.update(res.errors)
         return res.blocks
 
+    @cached_property
+    def blocks_by_line_number(self) -> dict[int, Block]:
+        # Lines that don't appear are in the top-level scope
+        # Later blocks correctly overwrite earlier, parent blocks.
+        return {i: b for b in self.blocks for i in b.line_range}
+
+    def block_name(self, line: int) -> str:
+        block = self.blocks_by_line_number.get(line)
+        return block.full_name if block else ""
+
+    @cached_property
+    def python_parts(self) -> tuple[str, ...]:
+        assert self.path
+        parts = self.path.with_suffix("").parts
+        return parts[:-1] if parts[-1] == "__init__" else parts
+
 
 class OmittedLines:
     """Read lines textually and find comment lines that end in 'noqa {linter_name}'"""
@@ -181,3 +210,12 @@ class OmittedLines:
 
     def contains_lines(self, begin: int, end: int) -> bool:
         return bool(self.omitted.intersection(range(begin, end + 1)))
+
+
+if __name__ == "__main__":
+    import sys
+
+    for file in sys.argv[1:]:
+        print(file)
+        pbf = PythonFile("", Path(file)).blocks_by_line_number
+        print(*pbf)
