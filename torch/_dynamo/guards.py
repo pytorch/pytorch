@@ -1873,7 +1873,7 @@ class GuardBuilder(GuardBuilderBase):
         attr = source.member
 
         ref = self.arg_ref(base)
-        val = hasattr(self.get(base), attr)
+        val = hasattr(self.get(base_source), attr)
         code = None
         if val:
             code = f"hasattr({ref}, {attr!r})"
@@ -1884,7 +1884,7 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         self._set_guard_export_info(
-            guard, [code], provided_guarded_object=self.get(base)
+            guard, [code], provided_guarded_object=self.get(base_source)
         )
 
         base_manager = self.get_guard_manager_from_source(base_source)
@@ -1892,7 +1892,7 @@ class GuardBuilder(GuardBuilderBase):
             # Just install a getattr manager. GetAttrGuardAccessor itself
             # acts as hasattr guard.
             example_value = self.get(source)
-            base_example_value = self.get(base)
+            base_example_value = self.get(base_source)
             guard_manager_enum = self.get_guard_manager_type(source, example_value)
 
             # if the base value is nn.Module, check if we can speedup the
@@ -1957,7 +1957,8 @@ class GuardBuilder(GuardBuilderBase):
             guard._unserializable = True
 
         obj_id = self.id_ref(t, f"type({guard.name})")
-        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
+        type_repr = repr(t)
+        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})  # {type_repr}"
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_type_match_guard(
@@ -2877,7 +2878,7 @@ class GuardBuilder(GuardBuilderBase):
                 ]
 
                 for term in terms:
-                    real_value = self.get(AttrSource(guard, term))
+                    real_value = self.get(AttrSource(guard.originating_source, term))
                     if istype(real_value, (torch.device, torch.dtype)):
                         # copy pasted from EQUALS_MATCH
                         code.append(f"str({tensor_name}.{term}) == {str(real_value)!r}")
@@ -3697,6 +3698,7 @@ class CheckFunctionManager:
                     self.guard_manager,
                     output_graph.local_scope,
                     CompileContext.current_compile_id(),
+                    backend=None,  # no need to set this because we are trying to find the offending guard entry
                 )
                 raise AssertionError(
                     "Guard failed on the same frame it was created. This is a bug - please create an issue."
@@ -4314,6 +4316,7 @@ def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
     compile_id: Optional[CompileId],
+    backend: Optional[Callable],
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -4325,6 +4328,10 @@ def get_guard_fail_reason_helper(
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
     reasons: list[str] = []
+
+    cache_entry_backend = None
+    if guard_manager.cache_entry:
+        cache_entry_backend = guard_manager.cache_entry.backend
 
     no_tensor_aliasing_check_failed = False
 
@@ -4348,6 +4355,24 @@ def get_guard_fail_reason_helper(
             else:
                 reasons = verbose_code_parts
                 verbose_code_parts = []
+    elif cache_entry_backend != backend:
+        # None of the guard entries failed - a backend match issue
+        reason = (
+            "BACKEND_MATCH failure: torch.compile detected different backend callables."
+            " If this is unexpected, wrap your backend in functools.partial (or reuse the"
+            " same cached backend) to avoid creating a new backend function each time."
+            " More details: https://github.com/pytorch/pytorch/issues/168373"
+        )
+        reasons.append(reason)
+    else:
+        # Unexpected recompilation - points to a bug
+        reason = (
+            "Unexpected recompilation: runtime guards failed even though they passed"
+            " during recompilation-reason analysis."
+            " Please open an issue with a minimal repro:"
+            " https://github.com/pytorch/pytorch"
+        )
+        reasons.append(reason)
 
     if no_tensor_aliasing_check_failed:
         reasons = recompilation_reason_for_no_tensor_aliasing_guard(
@@ -4384,11 +4409,14 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
+    backend: Callable,
     skip_logging: bool = False,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
         return f"{compile_id}: {guard_manager.invalidation_reason}"
-    reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
+    reason_str = get_guard_fail_reason_helper(
+        guard_manager, f_locals, compile_id, backend
+    )
     if skip_logging:
         return reason_str
     guard_failures[orig_code_map[code]].append(reason_str)
@@ -4409,6 +4437,7 @@ def get_guard_fail_reason(
 def get_and_maybe_log_recompilation_reasons(
     cache_entry: Optional[CacheEntry],
     frame: DynamoFrameType,
+    backend: Callable,
     skip_logging: bool = False,
 ) -> list[str]:
     """
@@ -4423,6 +4452,7 @@ def get_and_maybe_log_recompilation_reasons(
             cache_entry.code,
             frame.f_locals,
             cache_entry.compile_id,
+            backend,
             skip_logging,
         )
         if reason:
