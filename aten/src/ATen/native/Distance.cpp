@@ -31,6 +31,7 @@
 #include <ATen/ops/pdist_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/result_type.h>
+#include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/zeros.h>
 #include <ATen/ops/zeros_like.h>
@@ -304,6 +305,7 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
 
   auto commonDtype = at::result_type(x1_, x2_);
   TORCH_CHECK(at::isFloatingType(commonDtype), "expected common dtype to be floating point, yet common dtype is ", commonDtype);
+  TORCH_CHECK(eps >= 0, "eps must be non-negative, got: ", eps);
 
   // We accept integral types (and bools lol) but vector_norm does not
   auto x1_is_int = c10::isIntegralType(x1_.scalar_type(), /*încludeBool=*/true);
@@ -320,10 +322,18 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   auto x1_norm = at::linalg_vector_norm(*x1, 2, /*dim=*/dim, /*keepdim=*/true).clone();
   auto x2_norm = at::linalg_vector_norm(*x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
 
+  // Convert eps to a scalar tensor to ensure consistent CPU/CUDA behavior when eps overflows the dtype.
+  // Use the higher precision dtype between x1_norm and x2_norm
+  // If eps is too large for the dtype, it will become inf, and subsequent operations will produce NaN
+  auto eps_options = at::isReducedFloatingType(x1_norm.scalar_type()) &&
+                     !at::isReducedFloatingType(x2_norm.scalar_type())
+                     ? x2_norm.options() : x1_norm.options();
+  auto eps_tensor = at::scalar_tensor(eps, eps_options);
+
   {
     at::NoGradGuard guard;
-    x1_norm.clamp_min_(eps);
-    x2_norm.clamp_min_(eps);
+    x1_norm.clamp_min_(eps_tensor);
+    x2_norm.clamp_min_(eps_tensor);
   }
 
   return ((*x1 / x1_norm) * (*x2 / x2_norm)).sum(dim);
