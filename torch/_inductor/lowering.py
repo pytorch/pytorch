@@ -7346,6 +7346,7 @@ def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
             output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
         else:
             assert node not in V.graph.env
+            # Track current node for error diagnostics; restore after run_node to handle nested calls correctly
             saved_current_node = V.graph.current_node
             try:
                 V.graph.current_node = node
