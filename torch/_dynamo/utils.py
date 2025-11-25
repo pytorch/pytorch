@@ -285,12 +285,6 @@ def get_hook_for_recompile_user_context() -> Optional[list[Callable[[], str]]]:
     return _recompile_user_contexts
 
 
-def reset_recompile_user_contexts() -> None:
-    """Clear any registered recompile user-context hooks (test helper)."""
-    global _recompile_user_contexts
-    _recompile_user_contexts = None
-
-
 op_count = 0
 
 
