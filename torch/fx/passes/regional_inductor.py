@@ -146,7 +146,6 @@ def _compile_fx_annotated_nodes_with_inductor(gm):
     gm.graph.set_codegen(_BoxedCodeGen())
     gm.recompile()
 
-    # Use a pickleable wrapper class that provides boxed calling convention
     return gm
 
 

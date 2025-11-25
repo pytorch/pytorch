@@ -28,7 +28,6 @@ import torch
 from torch._dynamo import disable
 from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.utils import counters, defake, flatten_graph_inputs
-from torch._functorch._aot_autograd.utils import call_func_at_runtime_with_args
 from torch._functorch.aot_autograd import (
     aot_module_simplified,
     SerializableAOTDispatchCompiler,
@@ -79,28 +78,25 @@ class AotAutograd:
                 # The two disables here:
                 # - stop TorchDynamo from trying to compile the bw_compiler function itself
                 # - stop TorchDynamo from trying to compile our the generated backwards pass bw_compiler produces
-                compiled_fn = disable(
-                    bw_compiler_fn, reason="do not trace backward compiler function"
-                )(*args, **kwargs)  # type: ignore[misc]
-
-                def runtime_fn(runtime_args):
-                    return call_func_at_runtime_with_args(
-                        compiled_fn, runtime_args, steal_args=True
-                    )
-
-                runtime_fn._boxed_call = True  # type: ignore[attr-defined]
 
                 return disable(
-                    runtime_fn,
+                    disable(
+                        bw_compiler_fn, reason="do not trace backward compiler function"
+                    )(*args, **kwargs),  # type: ignore[misc]
                     reason="do not trace generated backwards pass",
                 )
 
+            _wrapped_bw_compiler._is_wrapped_bw_compiler = (
+                True  # pyrefly: ignore [missing-attribute]
+            )
             return _wrapped_bw_compiler
 
         bw_compiler = self.kwargs.get("bw_compiler") or self.kwargs["fw_compiler"]
 
         if isinstance(bw_compiler, SerializableAOTDispatchCompiler):
             bw_compiler.compiler_fn = wrap_bw_compiler(bw_compiler.compiler_fn)
+        elif getattr(bw_compiler, "_is_wrapped_bw_compiler", False):
+            bw_compiler.compiler_fn = bw_compiler
         else:
             bw_compiler = wrap_bw_compiler(bw_compiler)
 
