@@ -1,5 +1,4 @@
 #include <c10/util/Exception.h>
-#include <c10/util/FileSystem.h>
 #include <c10/util/Logging.h>
 #include <c10/util/Type.h>
 
@@ -28,7 +27,7 @@ Error::Error(
     const void* caller)
     : Error(
           str("[enforce fail at ",
-              c10::filesystem::path(file).filename(),
+              detail::StripBasename(file),
               ":",
               line,
               "] ",

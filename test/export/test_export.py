@@ -968,7 +968,7 @@ def forward(self, x):
     view_3 = torch.ops.aten.view.default(linear_3, [2, 1, 128, 64]);  linear_3 = None
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(view_1, view_2, view_3, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  view_1 = view_2 = view_3 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
+    flex_attention = torch.ops.higher_order.flex_attention(view_1, view_2, view_3, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  view_1 = view_2 = view_3 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
     getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
@@ -3081,12 +3081,15 @@ def forward(self, x, y):
     foo = torch.ops.export.foo.default(x, y);  x = None
     sym_size_int = torch.ops.aten.sym_size.int(foo, 0)
     sym_size_int_1 = torch.ops.aten.sym_size.int(foo, 1)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int);  sym_constrain_range_for_size_default = None
     ge = sym_size_int >= 0;  sym_size_int = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
+    sym_constrain_range_for_size_default_1 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default_1 = None
     ge_1 = sym_size_int_1 >= 0;  sym_size_int_1 = None
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
     bar = torch.ops.export.bar.default(y);  y = None
     sym_size_int_2 = torch.ops.aten.sym_size.int(bar, 0)
+    sym_constrain_range_for_size_default_2 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_2);  sym_constrain_range_for_size_default_2 = None
     ge_2 = sym_size_int_2 >= 0;  sym_size_int_2 = None
     _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_default_2 = None
     return (foo, bar)""",
@@ -16139,8 +16142,6 @@ def forward(self, x):
                     # expected 3*..., but got 8
                     ep.module()(torch.randn(4, 2))
 
-    @testing.expectedFailureSerDer  # T195866111
-    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureStrictV2
     def test_hints_wrapper(self):
         strict = True
@@ -16480,7 +16481,7 @@ class GraphModule(torch.nn.Module):
 
         # Expect builtin round in the export graph
         round_nodes = [
-            n for n in ep.graph.nodes if n.op == "call_function" and n.target == round
+            n for n in ep.graph.nodes if n.op == "call_function" and n.target is round
         ]
         self.assertEqual(len(round_nodes), 1)
 
@@ -17740,6 +17741,7 @@ class TestExportCustomClass(TorchTestCase):
 def forward(self, x, mask):
     masked_select = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(masked_select, 0)
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
     ge = sym_size_int_1 >= 0
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
     le = sym_size_int_1 <= 1188864
