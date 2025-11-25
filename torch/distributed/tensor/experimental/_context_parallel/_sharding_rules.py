@@ -72,8 +72,9 @@ def _op_strategy_context(op_overload, strategy_func, schema_info=None):
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
 
-        _clear_python_sharding_prop_cache()
-        _clear_fast_path_sharding_prop_cache()
+        # Ideally, we should clear the cache, but it is too expensive.
+        # _clear_python_sharding_prop_cache()
+        # _clear_fast_path_sharding_prop_cache()
 
 
 # ==================== Flash Attention Strategies ====================
@@ -389,13 +390,17 @@ def register_cp_sharding_rules():
         _original_strategies[op_overload] = (orig_funcs, orig_schema)
 
 
-def unregister_cp_sharding_rules():
+def unregister_cp_sharding_rules(clear_the_cache=False):
     """Unregister Context Parallelism sharding rules and restore original strategies."""
     global _cp_strategy_contexts, _original_strategies
 
     # Exit all context managers
     for ctx in _cp_strategy_contexts.values():
         ctx.__exit__(None, None, None)
+
+    if clear_the_cache:
+        _clear_fast_path_sharding_prop_cache()
+        _clear_python_sharding_prop_cache()
 
     _cp_strategy_contexts = {}
     _original_strategies = {}

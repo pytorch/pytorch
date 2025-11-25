@@ -1005,14 +1005,14 @@ def _disable_cp_dtensor_dispatcher() -> None:
     # Restore original custom op handlers
     DTensor._op_dispatcher._custom_op_handlers = exitsing_custom_ops
 
-    # TODO: unregister_cp_sharding_rules() will cause all DTensor sharding
-    # propagation cache being invalidated. It is not easy to achieve
-    # selectively invalidating lru cache without rewriting the sharding
-    # propagation wrapper. Disable unregister_cp_sharding_rules() call
-    # for now.
+    # TODO: unregister_cp_sharding_rules(clear_the_cache=True) will cause
+    # all DTensor sharding propagation cache being invalidated. It is not
+    # easy to achieve selectively invalidating lru cache without rewriting
+    # the sharding propagation wrapper.
 
-    # from ._sharding_rules import unregister_cp_sharding_rules
-    # unregister_cp_sharding_rules()
+    from ._sharding_rules import unregister_cp_sharding_rules
+
+    unregister_cp_sharding_rules(clear_the_cache=False)
 
 
 def _enable_context_parallel_dispatcher_impl(seq_dim: int, mesh: DeviceMesh) -> None:

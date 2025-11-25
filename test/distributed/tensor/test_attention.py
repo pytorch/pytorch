@@ -853,7 +853,7 @@ class TestSharding(DTensorTestBase):
         register_cp_sharding_rules()
         out = F.scaled_dot_product_attention(q_dt, k_dt, v_dt)
 
-        unregister_cp_sharding_rules()
+        unregister_cp_sharding_rules(clear_the_cache=True)
         # Run SDPA with sequence-sharded tensors WITHOUT enabling CP
         # Without CP enabled, DTensor should select a different strategy
         # (not sequence-sharded) because Shard(2) strategy is only available with CP
