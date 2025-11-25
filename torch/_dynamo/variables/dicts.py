@@ -106,7 +106,7 @@ def is_hashable(x: VariableTracker) -> bool:
             "__hash__."
         )
         unimplemented(
-            gb_type="Dict look up with a User defined object key that overridden __hash__ method",
+            gb_type="Dictionary look up with a user defined object key that has an overridden __hash__ method",
             context=f"Unsupported Key is {x}",  # type: ignore[attr-defined]
             explanation=msg,
             hints=[
