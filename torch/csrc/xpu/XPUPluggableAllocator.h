@@ -9,19 +9,17 @@ struct _AllocationMetadata {
   _AllocationMetadata(
       size_t size,
       c10::DeviceIndex device_idx,
-      sycl::queue* queue)
-      : size(size), device_idx(device_idx), queue(queue) {};
-  size_t size{0};
-  c10::DeviceIndex device_idx{-1};
-  sycl::queue* queue{};
+      sycl::queue* queue);
+  size_t size;
+  c10::DeviceIndex device_idx;
+  sycl::queue* queue;
 };
 
 struct TORCH_XPU_API XPUPluggableAllocator
     : public c10::xpu::XPUCachingAllocator::XPUAllocator {
   XPUPluggableAllocator(
       std::function<void*(size_t, int, sycl::queue*)> alloc_fn,
-      std::function<void(void*, size_t, int, sycl::queue*)> free_fn)
-      : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
+      std::function<void(void*, size_t, int, sycl::queue*)> free_fn);
 
   XPUPluggableAllocator(XPUPluggableAllocator& other) = default;
   XPUPluggableAllocator(XPUPluggableAllocator&& other) = delete;
