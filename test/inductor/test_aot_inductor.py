@@ -245,8 +245,8 @@ class AOTInductorTestsTemplate:
     # failure on CI
     @common_utils.parametrize("embed_kernel_binary", [False])
     @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 6),
-        "Test is only supported on CUDA 12.6+",
+        torch.version.hip is None and _get_torch_cuda_version() < (12, 8),
+        "Test is only supported on CUDA 12.8+",
     )
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:

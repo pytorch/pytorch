@@ -1159,10 +1159,12 @@ class TestFP8Lowering(TestCase):
             f_c = torch.compile(fullgraph=True)(forward)
 
             _, code = run_and_get_code(f_c, A, B)
-
-            FileCheck().check(".run(").check(".run(").check("fake_scaled_mm").run(
-                code[0]
-            )
+            if config.combo_kernels:
+                FileCheck().check(".run(").check("fake_scaled_mm").run(code[0])
+            else:
+                FileCheck().check(".run(").check(".run(").check("fake_scaled_mm").run(
+                    code[0]
+                )
 
             for seed in range(5):
                 input_values.clear()
