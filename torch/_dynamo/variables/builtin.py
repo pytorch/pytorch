@@ -2556,18 +2556,6 @@ class BuiltinVariable(VariableTracker):
                         hints=[],
                     )
 
-        if tx.output.side_effects.has_pending_mutation_of_attr(obj, name):
-            return tx.output.side_effects.load_attr(obj, name)
-
-        if default is not None:
-            hasattr_var = self.call_hasattr(tx, obj, name_var)
-            if hasattr_var is not None:
-                assert hasattr_var.as_python_constant() in (True, False)
-                if not hasattr_var.as_python_constant():
-                    return default
-            else:
-                return default
-
         source = obj.source and AttrSource(obj.source, name)
         if name in {"__bases__", "__base__", "__flags__"}:
             try:
@@ -2585,6 +2573,10 @@ class BuiltinVariable(VariableTracker):
                         return VariableTracker.build(tx, value.__base__, source)
                     if name == "__flags__":
                         return ConstantVariable.create(value.__flags__)
+            except ObservedAttributeError:
+                if default is not None:
+                    return default
+                raise
             except NotImplementedError:
                 pass
 
