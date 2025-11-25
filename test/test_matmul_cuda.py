@@ -316,7 +316,6 @@ class TestMatmulCuda(TestCase):
                 self.assertEqual(agrad, a.grad)
                 self.assertEqual(bgrad, b.grad)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -355,7 +354,6 @@ class TestMatmulCuda(TestCase):
             start = offs_cpu[i]
         self.grouped_mm_helper(alist, blist, gO, agradlist, bgradlist, out)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -412,7 +410,6 @@ class TestMatmulCuda(TestCase):
             self.grouped_mm_helper(alist, b, gOlist, agradlist, bgradlist, outlist)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
@@ -447,7 +444,6 @@ class TestMatmulCuda(TestCase):
         out.backward(gO)
         self.grouped_mm_helper(a, b, gO, a.grad, b.grad, out)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
     @xfailIfSM120OrLater
     @unittest.skipIf(not SM80OrLater, "Grouped gemm supported only on SM80 or greater")
     @parametrize("strided", [False, True])
