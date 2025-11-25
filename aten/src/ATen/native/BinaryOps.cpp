@@ -18,7 +18,6 @@
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_test_serialization_subcmul_native.h>
 #include <ATen/ops/_to_copy.h>
-#include <ATen/ops/abs.h>
 #include <ATen/ops/add.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/add_ops.h>
@@ -73,7 +72,6 @@
 #include <ATen/ops/less_native.h>
 #include <ATen/ops/linalg_cross_native.h>
 #include <ATen/ops/linalg_cross_ops.h>
-#include <ATen/ops/log2.h>
 #include <ATen/ops/logaddexp2_native.h>
 #include <ATen/ops/logaddexp_native.h>
 #include <ATen/ops/logical_and.h>
@@ -107,7 +105,6 @@
 #include <ATen/ops/rshift_native.h>
 #include <ATen/ops/rsub_native.h>
 #include <ATen/ops/sigmoid_backward_native.h>
-#include <ATen/ops/sign.h>
 #include <ATen/ops/special_chebyshev_polynomial_t.h>
 #include <ATen/ops/special_chebyshev_polynomial_t_native.h>
 #include <ATen/ops/special_chebyshev_polynomial_u.h>
