@@ -36,7 +36,7 @@ from torch.distributed.tensor._utils import (
     compute_local_stride,
     try_find_mesh_from_args,
 )
-from torch.distributed.tensor.placement_types import Placement, ShardingPlaceholder
+from torch.distributed.tensor.placement_types import Placement, _ShardingPlaceholder
 
 
 aten = torch.ops.aten
@@ -74,7 +74,7 @@ class ShardingPropagator:
         self.op_single_dim_strategy_funcs: dict[
             OpOverload,
             Callable[
-                [ArgsType, KwargsType], list[list[Placement | ShardingPlaceholder]]
+                [ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
             ],
         ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or
