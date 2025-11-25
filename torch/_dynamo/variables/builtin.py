@@ -26,6 +26,7 @@ import itertools
 import logging
 import math
 import operator
+import sys
 import types
 import typing
 import unittest
@@ -2480,15 +2481,24 @@ class BuiltinVariable(VariableTracker):
         *seqs: VariableTracker,
         **kwargs: VariableTracker,
     ) -> VariableTracker:
+        strict = ConstantVariable.create(False)
         if kwargs:
-            if not (len(kwargs) == 1 and "strict" in kwargs):
+            if sys.version_info >= (3, 14):
+                if not (len(kwargs) == 1 and "strict" in kwargs):
+                    raise_args_mismatch(
+                        tx,
+                        "map",
+                        "1 kwargs (`strict`)",
+                        f"{len(kwargs)} kwargs",
+                    )
+                strict = kwargs.pop("strict", ConstantVariable.create(False))
+            else:
                 raise_args_mismatch(
                     tx,
                     "map",
-                    "1 kwargs (`strict`)",
+                    "0 kwargs",
                     f"{len(kwargs)} kwargs",
                 )
-        strict = kwargs.pop("strict", False)
 
         seq_list = [
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
@@ -2497,7 +2507,7 @@ class BuiltinVariable(VariableTracker):
         return variables.MapVariable(
             fn,
             seq_list,  # type: ignore[arg-type]
-            strict=strict,  # type: ignore[arg-type]
+            strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
 
