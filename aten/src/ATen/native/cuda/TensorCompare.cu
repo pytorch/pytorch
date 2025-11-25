@@ -58,6 +58,14 @@ void clamp_kernel_impl(TensorIteratorBase& iter) {
 void inline launch_clamp_scalar(TensorIteratorBase& iter, Scalar lim0, Scalar lim1, at::native::detail::ClampLimits minmax){
   AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.common_dtype(), "clamp_scalar_cuda", [&] {
     using opmath_t = at::opmath_type<scalar_t>;
+    // Check for overflow to scalar_t first to match CPU behavior.
+    // This ensures consistent error handling when values exceed the scalar type range.
+    // For reduced precision types (Half, BFloat16), opmath_t is float, so we need
+    // to check overflow to scalar_t before converting to opmath_t.
+    if constexpr (!std::is_same_v<scalar_t, opmath_t>) {
+      (void)lim0.to<scalar_t>();
+      (void)lim1.to<scalar_t>();
+    }
     auto lim0_val = lim0.to<opmath_t>();
     auto lim1_val = lim1.to<opmath_t>();
 
