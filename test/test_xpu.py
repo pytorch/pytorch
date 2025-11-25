@@ -580,6 +580,68 @@ if __name__ == "__main__":
                     torch.xpu.can_device_access_peer(peer, device),
                 )
 
+    def get_dummy_allocator(self, check_vars):
+        dummy_allocator_source_vars = """
+        #include <torch/extension.h>
+        #include <c10/xpu/XPUFunctions.h>
+
+        extern "C" {
+          C10_EXPORT int called_dummy_alloc = 0;
+          C10_EXPORT int called_dummy_free = 0;
+
+          C10_EXPORT void* dummy_alloc(size_t size, int device, sycl::queue* queue) {
+            called_dummy_alloc = 123;
+            auto& sycl_device = c10::xpu::get_raw_device(device);
+            void* ptr = sycl::malloc_shared(size, sycl_device, c10::xpu::get_device_context());
+            return ptr;
+          }
+
+          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, sycl::queue* queue) {
+            called_dummy_free = 321;
+            sycl::free(ptr, c10::xpu::get_device_context());
+          }
+        }
+        """
+        dummy_allocator_source_no_vars = """
+        #include <torch/extension.h>
+        #include <c10/xpu/XPUFunctions.h>
+
+        extern "C" {
+          C10_EXPORT void* dummy_alloc(size_t size, int device, sycl::queue* queue) {
+            auto& sycl_device = c10::xpu::get_raw_device(device);
+            void* ptr = sycl::malloc_shared(size, sycl_device, c10::xpu::get_device_context());
+            return ptr;
+          }
+
+          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, sycl::queue* queue) {
+            sycl::free(ptr, c10::xpu::get_device_context());
+          }
+        }
+        """
+
+        from torch.utils.cpp_extension import load_inline
+
+        dummy_allocator_libname = "dummy_allocator"
+        dummy_allocator = load_inline(
+            name=dummy_allocator_libname,
+            cpp_sources=dummy_allocator_source_vars
+            if check_vars
+            else dummy_allocator_source_no_vars,
+            is_python_module=False,
+            keep_intermediates=False,
+            verbose=True,
+            with_sycl=True,
+        )
+        allocator = torch.xpu.memory.XPUPluggableAllocator(
+            dummy_allocator,
+            "dummy_alloc",
+            "dummy_free",
+        )
+        return allocator, dummy_allocator
+
+    def test_xpu_pluggable_allocator(self):
+
+
     def test_torch_version_xpu(self):
         self.assertEqual(len(torch.version.xpu), 8)
         compiler_version = int(torch.version.xpu)
