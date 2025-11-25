@@ -7,10 +7,11 @@ import inspect
 import itertools
 import math
 import operator
+import typing
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple, TypeAlias
 
 import torch
 from torch import Tensor
@@ -82,6 +83,7 @@ __all__ = [
 
 _score_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor, Tensor], Tensor]
 _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
+_Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
 
 
 # pyrefly: ignore [invalid-inheritance]
@@ -219,12 +221,18 @@ class FlexKernelOptions(TypedDict, total=False):
     """ROCm-specific waves per execution unit."""
 
     # pyrefly: ignore [invalid-annotation]
-    force_flash: NotRequired[bool]
-    """ If True, forces use of the cute-dsl flash attention kernel.
+    BACKEND: NotRequired[_Backend]
+    """Selects a specific kernel backend.
 
-    Raises an error if flash attention cannot be used instead of falling back
-    to the default implementation. Useful for ensuring flash attention is used
-    when expected.
+    Options:
+        - "AUTO": Use current heuristics (typically Triton-based kernels with
+          automatic selection between flex_attention and flex_decoding)
+        - "TRITON": Standard Triton flex_attention kernel
+        - "TRITON_DECODE": Triton flex_decoding kernel, only available for short sequence lengths with specific configurations
+        - "FLASH": Experimental: Flash Attention kernel (cute-dsl), user needs to have flash installed
+
+    This option cannot be combined with legacy knobs such as ``FORCE_USE_FLEX_ATTENTION``.
+    Raises an error if the requested backend cannot be used. Default: "AUTO"
     """
 
 
@@ -1242,6 +1250,25 @@ def _apply_kernel_options(
 ):
     kernel_options = {} if kernel_options is None else dict(kernel_options)
 
+    if "BACKEND" in kernel_options and kernel_options.get(
+        "FORCE_USE_FLEX_ATTENTION", False
+    ):
+        # TODO: remove FORCE_USE_FLEX_ATTENTION once BACKEND is fully adopted.
+        raise RuntimeError(
+            "BACKEND cannot be combined with legacy FORCE_USE_FLEX_ATTENTION. "
+            "BACKEND supersedes the legacy knob; please drop FORCE_USE_FLEX_ATTENTION "
+            "and only specify the desired BACKEND."
+        )
+
+    if "BACKEND" in kernel_options:
+        valid_backends = typing.get_args(_Backend)
+        if kernel_options["BACKEND"] not in valid_backends:
+            raise ValueError(
+                f"Invalid BACKEND value '{kernel_options['BACKEND']}'. "
+                f"Must be one of {valid_backends}"
+            )
+
+    kernel_options.setdefault("BACKEND", "AUTO")
     kernel_options.setdefault("PRESCALE_QK", False)
     kernel_options.setdefault("ROWS_GUARANTEED_SAFE", False)
     kernel_options.setdefault("BLOCKS_ARE_CONTIGUOUS", False)
