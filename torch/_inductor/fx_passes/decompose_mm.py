@@ -7,7 +7,7 @@ import torch
 from torch._inductor.config import aten_distributed_optimizations as _config_dist
 from torch._inductor.fx_passes.bucketing import _insert_fn_trace_before_node
 from torch._logging import trace_structured
-from torch.fx.experimental.symbolic_shapes import size_hint
+from torch.fx.experimental.symbolic_shapes import size_hint, statically_known_true
 
 from ..pattern_matcher import (
     CallFunction,
@@ -184,7 +184,9 @@ def _select_optimal_chunk_count(
     for n in reversed(sorted_num_chunks):
         if additional_check is not None and not additional_check(n):
             continue
-        if size_before_split // n >= min_size_after_split:
+        if statically_known_true(size_before_split % n == 0) and statically_known_true(
+            size_before_split // n >= min_size_after_split
+        ):
             return n
     return None
 
@@ -233,8 +235,10 @@ def _extract_post_mm_ops(
     """
 
     def _is_pointwise(n):
-        return len(node.all_input_nodes) == 1 and torch.Tag.pointwise in getattr(
-            n.target, "tags", ()
+        return (
+            len(node.all_input_nodes) == 1
+            and len(node.users)
+            and torch.Tag.pointwise in getattr(n.target, "tags", ())
         )
 
     post_mm_ops: list[_PostMMOp] = []
@@ -292,7 +296,7 @@ def split_mm(
 
         size_before_split = 1
         for s in a_t.shape[:-1]:
-            size_before_split *= _size_hint(s)
+            size_before_split *= s
 
         n_split = _select_optimal_chunk_count(
             size_before_split, num_chunks, min_size_after_split
@@ -554,7 +558,6 @@ def _process_matmul_reduce_scatter(
     if not (_is_contiguous(cont_check_t) and _is_contiguous(rs_out_t)):
         return
 
-    # TODO: just use group_size?
     orig_split_num_chunks = -1
     if orig_scatter_dim != 0:
         orig_split_num_chunks = len(
