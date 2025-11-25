@@ -93,6 +93,28 @@ def build_collective_info(graph, hiding_annotations):
     return collective_info
 
 
+def compute_ancestors(graph):
+    """Compute ancestor sets for all nodes in the graph."""
+    node_ancestors = {}
+
+    for node in graph.nodes:
+        ancestors = OrderedSet()
+        stack = list(node.all_input_nodes)
+        visited = set()
+
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            ancestors.add(current)
+            stack.extend(current.all_input_nodes)
+
+        node_ancestors[node] = ancestors
+
+    return node_ancestors
+
+
 @requires_accelerator_dist_backend()
 @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
 @instantiate_parametrized_tests
@@ -168,8 +190,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag2: mm2,  # mm2 hides ag2
         }
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing
@@ -180,6 +203,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
         bucketer.bucket_collectives()
@@ -254,8 +278,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag2: mm2,  # mm2 hides ag2
         }
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing
@@ -266,6 +291,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
         bucketer.bucket_collectives()
@@ -355,8 +381,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         if final_mm_hidden:
             hiding_annotations[rs] = mm2
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing logic to find buckets (without applying them, which would require process groups)
@@ -367,6 +394,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
 
@@ -439,6 +467,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 
         # Build collective info
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing
@@ -449,6 +478,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
         bucketer.bucket_collectives()
@@ -520,8 +550,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag2: mm2,  # mm2 hides ag2
         }
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing with multidtype mode
@@ -532,6 +563,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
             bucket_mode="custom_ops_multidtype",
         )
@@ -603,8 +635,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag2: [mm2, mm3],  # ag2 is hidden by mm2 and mm3
         }
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Verify hiding_nodes are correctly set
@@ -623,6 +656,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
         bucketer.bucket_collectives()
@@ -695,8 +729,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag3: mm,
         }
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing
@@ -707,6 +742,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
         bucketer.bucket_collectives()
