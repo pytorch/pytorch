@@ -10,9 +10,9 @@ from torch.utils.data.datapipes.datapipe import IterDataPipe
 
 
 __all__ = [
+    "BoundaryMode",
     "TileInfo",
     "TileOrder",
-    "BoundaryMode",
     "TiledImageIterDataPipe",
 ]
 

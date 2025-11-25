@@ -64,9 +64,9 @@ __all__ = [
     "ShardingFilter",
     "Shuffler",
     "StreamReader",
-    "TiledImage",
     "TileInfo",
     "TileOrder",
+    "TiledImage",
     "UnBatcher",
     "Zipper",
 ]
