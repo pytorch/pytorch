@@ -306,11 +306,13 @@ struct NoOpDeviceGuardImpl : public DeviceGuardImplInterface {
     if constexpr (D == DeviceType::Meta) {
       cap.capability_bits = 0;
       // Meta only supports basic types for shape inference
-      // Byte(0), Char(1), Short(2), Int(3), Long(4), Float(6), Double(7),
-      // Bool(11), ComplexFloat(9), ComplexDouble(10)
-      cap.capability_bits = (1ULL << 0) | (1ULL << 1) | (1ULL << 2) |
-          (1ULL << 3) | (1ULL << 4) | (1ULL << 6) | (1ULL << 7) | (1ULL << 9) |
-          (1ULL << 10) | (1ULL << 11);
+      // Byte, Char, Short, Int, Long, Float, Double,
+      // Bool, ComplexFloat, ComplexDouble
+      cap.capability_bits = (1ULL << kIndex_Byte) | (1ULL << kIndex_Char) |
+          (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
+          (1ULL << kIndex_Long) | (1ULL << kIndex_Float) |
+          (1ULL << kIndex_Double) | (1ULL << kIndex_ComplexFloat) |
+          (1ULL << kIndex_ComplexDouble) | (1ULL << kIndex_Bool);
     }
     return cap;
   }

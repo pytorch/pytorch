@@ -11,6 +11,13 @@ constexpr size_t NUMBER_OF_DEVICE_CAPABILITIES = NumScalarTypes;
 // Generate bitfields for each scalar type
 #define DEFINE_SCALAR_TYPE(_1, n) unsigned int has_##n : 1;
 
+// Generate enum indices for each scalar type
+#define DEFINE_SCALAR_ENUM(_1, name) kIndex_##name,
+
+enum ScalarTypeIndex {
+  AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_ENUM)
+};
+
 /**
  * @brief DeviceCapability represents the the common capabilities that all
  * devices should support.
@@ -62,5 +69,6 @@ struct C10_API DeviceCapability {
   }
 };
 
+#undef DEFINE_SCALAR_ENUM
 #undef DEFINE_SCALAR_TYPE
 } // namespace c10
