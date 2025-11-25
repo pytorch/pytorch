@@ -115,7 +115,7 @@ def extract_info_from_keyword(source: str, kw: ast.keyword) -> Any:
         return clean_string(param_source)
 
 
-def find_unimplemented_v2_calls(
+def find_unimplemented_calls(
     path: str, dynamo_dir: Optional[str] = None
 ) -> list[dict[str, Any]]:
     results = []
@@ -135,15 +135,15 @@ def find_unimplemented_v2_calls(
                 for node in ast.walk(tree):
                     if isinstance(node, ast.FunctionDef):
                         if node.name in (
-                            "unimplemented_v2",
-                            "unimplemented_v2_with_warning",
+                            "unimplemented",
+                            "unimplemented_with_warning",
                         ):
                             continue
                     if (
                         isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Name)
                         and node.func.id
-                        in ("unimplemented_v2", "unimplemented_v2_with_warning")
+                        in ("unimplemented", "unimplemented_with_warning")
                     ):
                         info: dict[str, Any] = {
                             "gb_type": None,
@@ -180,7 +180,7 @@ def find_unimplemented_v2_calls(
 
 
 def create_registry(dynamo_dir: str, registry_path: str) -> None:
-    calls = find_unimplemented_v2_calls(dynamo_dir)
+    calls = find_unimplemented_calls(dynamo_dir)
     registry = {}
 
     gb_types = {}
@@ -224,7 +224,7 @@ def main() -> None:
         "--dynamo_dir",
         type=str,
         default=default_dynamo_dir,
-        help="Directory to search for unimplemented_v2 calls.",
+        help="Directory to search for unimplemented calls.",
     )
 
     parser.add_argument(

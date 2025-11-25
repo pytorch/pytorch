@@ -5,8 +5,8 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, Optional
 from unittest.mock import patch
 
 import sympy

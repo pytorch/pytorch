@@ -21,6 +21,10 @@ backends are ready, this list allows opt-in one at a time.
 PRESERVED_ATEN_CIA_OPS = {
     torch.ops.aten.upsample_bilinear2d.vec,
     torch.ops.aten.upsample_nearest2d.vec,
+    # NB: don't use the C++ decomp, because it is not functional!
+    torch.ops.aten.silu_backward.default,
+    torch.ops.aten.mish_backward.default,
+    torch.ops.aten._fused_rms_norm.default,
 }
 
 

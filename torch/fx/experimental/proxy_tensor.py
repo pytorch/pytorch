@@ -40,7 +40,9 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -63,6 +65,7 @@ from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
+    autograd_would_have_decomposed,
     TorchDispatchMode,
 )
 from torch.utils._stats import count
@@ -81,13 +84,14 @@ if TYPE_CHECKING:
 
     from torch._ops import OpOverload
     from torch.fx._symbolic_trace import PHBase
-    from torch.types import IntLikeType
+    from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 __all__ = [
     "PythonKeyTracer",
     "dispatch_trace",
     "make_fx",
     "DecompositionInterpreter",
+    "selective_decompose",
     "py_sym_types",
     "get_innermost_proxy_mode",
     "get_proxy_mode",
@@ -454,7 +458,7 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
 
 def _build_proxy_for_sym_expr(
     tracer: _ProxyTracer, expr: sympy.Expr, out: PySymType | None = None
-) -> PySymType | None:
+) -> IntLikeType | FloatLikeType | BoolLikeType | None:
     """
     Decompose `expr` and look for the pieces as inputs. If `out` is provided
     then that will be the resulting SymNode (and `out.expr` must be the same as
@@ -527,6 +531,13 @@ def _build_proxy_for_sym_expr(
     if (value := tracer.sympy_expr_tracker.get(expr)) is not None:
         assert not out
         return value.value
+
+    if isinstance(expr, (int, float, bool)):
+        return expr
+    if expr.is_Integer:
+        return int(expr)
+    if expr.is_Float:
+        return float(expr)
 
     args = []
     for arg in expr.args:
@@ -1031,11 +1042,16 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
-        torch.ops.aten.size.default,
-        torch.ops.aten.stride.default,
-        torch.ops.aten.storage_offset.default,
-    ]:
+    if (
+        not pre_dispatch
+        and func
+        not in [
+            torch.ops.aten.size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.storage_offset.default,
+        ]
+        and autograd_would_have_decomposed(func, flat_args_kwargs)
+    ):
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -1527,7 +1543,9 @@ ORIGINAL_ATEN: Optional[object] = None
 
 
 @contextmanager
-def set_original_aten_op(func: OpOverload) -> Generator[None, None, None]:
+def set_original_aten_op(
+    func: OpOverload | torch._ops.HigherOrderOperator,
+) -> Generator[None, None, None]:
     global ORIGINAL_ATEN
     if ORIGINAL_ATEN is None and fx_traceback.has_preserved_node_meta():
         ORIGINAL_ATEN = func
@@ -1872,6 +1890,93 @@ class DecompositionInterpreter(fx.Interpreter):
         # See: https://github.com/pytorch/pytorch/pull/82549#discussion_r934782025
         with decompose(self.decomposition_table), self.mode:
             return super().run(*args, **kwargs)  # type: ignore[arg-type]
+
+
+class _SelectiveDecomposeInterpreter(fx.Interpreter):
+    def __init__(
+        self,
+        module: fx.GraphModule,
+        should_decompose: Callable[[fx.Node], bool],
+        decomposition_table: Mapping[OpOverload, Callable],
+        **kwargs: object,
+    ) -> None:
+        """
+        For all nodes in `module`, selectively decompose if is `should_decompose`,
+        following the given `decomposition_table`.
+        """
+        super().__init__(module, **kwargs)  # type: ignore[arg-type]
+        self.should_decompose = should_decompose
+        self.decomposition_table = decomposition_table
+
+    @staticmethod
+    def recursive_wrap(
+        gm: fx.GraphModule,
+        should_decompose: Callable[[fx.Node], bool],
+        decomposition_table: Mapping[OpOverload, Callable],
+        **kwargs: object,
+    ) -> _SelectiveDecomposeInterpreter:
+        """
+        Recursively wrap gm and its sub graph modules. Specifically, HOP takes
+        sub graph module as args. We may not want to decompose all nodes within
+        these sub graph modules. So we also need to wrap these sub graph modules.
+        As a result:
+        - if should_decompose(hop) is True, we decompose all nodes within the hop.
+        - if should_decompose(hop) is False, we check each node within the hop
+            and decide whether decompose or not.
+        """
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and isinstance(
+                node.target, HigherOrderOperator
+            ):
+                new_args = []
+                for arg in node.args:
+                    if isinstance(arg, fx.GraphModule):
+                        new_arg = _SelectiveDecomposeInterpreter.recursive_wrap(
+                            arg, should_decompose, decomposition_table, **kwargs
+                        )
+                    else:
+                        new_arg = arg
+                    new_args.append(new_arg)
+                node.args = tuple(new_args)
+
+        return _SelectiveDecomposeInterpreter(
+            gm, should_decompose, decomposition_table, **kwargs
+        )
+
+    def run_node(self, n):
+        if self.should_decompose(n):
+            with decompose(self.decomposition_table):
+                result = super().run_node(n)
+        else:
+            result = super().run_node(n)
+        return result
+
+
+def selective_decompose(
+    joint_gm: fx.GraphModule,
+    *args,
+    decomposition,
+    should_decompose,
+    trace_joint_graph: bool,
+) -> fx.GraphModule:
+    """Retrace a joint graph module and selectively apply decomposition."""
+
+    if trace_joint_graph:
+        # the arg name, primals and tangents, are important.
+        # make_fx keeps the name in the traced graph and partitioner later relies
+        # on the name to partition joint graph correctly.
+        def wrap_fn(primals: list[Any], tangents: list[Any]):
+            return _SelectiveDecomposeInterpreter.recursive_wrap(
+                joint_gm, should_decompose, decomposition
+            ).run(*args)
+    else:
+
+        def wrap_fn(*args):
+            return _SelectiveDecomposeInterpreter.recursive_wrap(
+                joint_gm, should_decompose, decomposition
+            ).run(*args)
+
+    return make_fx(wrap_fn, decomposition_table={})(*args)
 
 
 def wrapper_and_args_for_make_fx(
@@ -2429,7 +2534,7 @@ class _MakefxTracer:
                         hint=x,
                         source=source,
                     )
-                elif isinstance(x, torch.ScriptObject):
+                elif isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
                     return torch._library.fake_class_registry.maybe_to_fake_obj(
                         self.fake_tensor_mode, x
                     )
