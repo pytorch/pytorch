@@ -959,7 +959,7 @@ def _bitwise_xor(a, b):
 
 
 reflectable_magic_methods = {
-    "add": _optimized_add,
+    "add": operator.add,
     "sub": operator.sub,
     "mul": operator.mul,
     "mod": _sympy_mod,
@@ -1398,7 +1398,7 @@ def _make_node_magic(method, func):
                     out = PythonMod(self.expr, other.expr)
             elif method == "add":
                 # see Note [optimized_summation]
-                (optimized_summation, out) = func(
+                (optimized_summation, out) = _optimized_add(
                     self.expr,
                     other.expr,
                     self._optimized_summation,
