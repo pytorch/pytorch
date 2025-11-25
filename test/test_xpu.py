@@ -593,7 +593,8 @@ if __name__ == "__main__":
           C10_EXPORT void* dummy_alloc(size_t size, int device, sycl::queue* queue) {
             called_dummy_alloc = 123;
             auto& sycl_device = c10::xpu::get_raw_device(device);
-            void* ptr = sycl::malloc_shared(size, sycl_device, c10::xpu::get_device_context());
+            auto& sycl_context = c10::xpu::get_device_context();
+            void* ptr = sycl::malloc_shared(size, sycl_device, sycl_context);
             return ptr;
           }
 
@@ -610,7 +611,8 @@ if __name__ == "__main__":
         extern "C" {
           C10_EXPORT void* dummy_alloc(size_t size, int device, sycl::queue* queue) {
             auto& sycl_device = c10::xpu::get_raw_device(device);
-            void* ptr = sycl::malloc_shared(size, sycl_device, c10::xpu::get_device_context());
+            auto& sycl_context = c10::xpu::get_device_context();
+            void* ptr = sycl::malloc_shared(size, sycl_device, sycl_context);
             return ptr;
           }
 
@@ -675,7 +677,8 @@ extern "C" {
   C10_EXPORT void* dummy_alloc(size_t size, int device, sycl::queue* queue) {
     called_dummy_alloc = 123;
     auto& sycl_device = c10::xpu::get_raw_device(device);
-    void* ptr = sycl::malloc_shared(size, sycl_device, c10::xpu::get_device_context());
+    auto& sycl_context = c10::xpu::get_device_context();
+    void* ptr = sycl::malloc_shared(size, sycl_device, sycl_context);
     return ptr;
   }
 
