@@ -24,7 +24,7 @@ inline void init(c10::DeviceIndex device_count) {
 }
 
 inline void emptyCache(MempoolId_t mempool_id = {0, 0}) {
-  get()->emptyCache();
+  get()->emptyCache(mempool_id);
 }
 
 inline void resetPeakStats(DeviceIndex device) {
