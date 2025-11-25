@@ -338,6 +338,8 @@ void ConcretePyInterpreterVTable::dispatch(
       nullptr,
       torch_api_function_overload.ptr(),
       nullptr,
+      &op,
+      &arguments,
       TorchFunctionName::TorchDispatch);
   pushPyOutToStack(
       op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");

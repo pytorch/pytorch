@@ -99,6 +99,7 @@ from .eval_frame import (
     always_optimize_code_objects,
     Constraint,
     dynamo_tls,
+    innermost_fn,
     skip_code,
     TorchPatcher,
 )
@@ -1574,7 +1575,9 @@ def _compile(
         # Check recompilations
         recompile_reason: Optional[str] = None
         if is_recompilation(cache_size) and frame:
-            reasons = get_and_maybe_log_recompilation_reasons(cache_entry, frame)
+            reasons = get_and_maybe_log_recompilation_reasons(
+                cache_entry, frame, innermost_fn(compiler_fn)
+            )
             recompile_reason = (
                 "Unable to find recompilation reasons" if not reasons else reasons[0]
             )
@@ -1582,7 +1585,7 @@ def _compile(
         inline_inbuilt_nn_modules_candidate = False
         if not config.inline_inbuilt_nn_modules and frame:
             inbuilt_nn_reasons = get_and_maybe_log_recompilation_reasons(
-                cache_entry, frame, skip_logging=True
+                cache_entry, frame, innermost_fn(compiler_fn), skip_logging=True
             )
             inbuilt_nn_recompile_reason = (
                 None if not inbuilt_nn_reasons else inbuilt_nn_reasons[0]
