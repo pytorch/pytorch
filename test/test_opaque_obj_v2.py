@@ -501,6 +501,40 @@ def forward(self, primals, tangents):
 
         self.assertEqual(compiled_fn(*inp), M()(*inp))
 
+    def test_invalid_schema(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "unknown type specifier",
+        ):
+            torch.library.define(
+                "_TestOpaqueObject::invalid_op1",
+                "(foo.bar.baz a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=self.lib,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"expected \) but found 'dots' here",
+        ):
+            torch.library.define(
+                "_TestOpaqueObject::invalid_op2",
+                "(......... a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=self.lib,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "unknown type specifier",
+        ):
+            torch.library.define(
+                "_TestOpaqueObject::invalid_op5",
+                "(MyNamespace..MyClass a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=self.lib,
+            )
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 
