@@ -147,7 +147,7 @@ pretty_node_names.update(
 
 
 class FrontendError(Exception):
-    def __init__(self, source_range, msg):
+    def __init__(self, source_range, msg) -> None:
         self.source_range = source_range
         self.msg = msg
 
@@ -155,7 +155,7 @@ class FrontendError(Exception):
         # call stack when the FrontendError was raised
         self.error_report = torch._C.ErrorReport(self.source_range)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.msg + self.error_report.what().lstrip()
 
 
@@ -164,7 +164,7 @@ class NotSupportedError(FrontendError):
 
 
 class UnsupportedNodeError(NotSupportedError):
-    def __init__(self, ctx, offending_node, reason=""):
+    def __init__(self, ctx, offending_node, reason="") -> None:
         # If we don't have a specific token, we default to length of 1
         node_type = type(offending_node)
         range_len = len(node_start_tokens.get(node_type, " "))
@@ -229,7 +229,7 @@ def get_class_properties(cls, self_name):
 def get_class_assigns(ctx, cls_ast):
     assigns = []
 
-    def maybe_build_assign(builder, entry):
+    def maybe_build_assign(builder, entry) -> None:
         nonlocal assigns
         try:
             assigns.append(builder(ctx, entry))
@@ -385,7 +385,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
 
 
 # TODO: more robust handling of recognizing ignore context manager
-def is_torch_jit_ignore_context_manager(stmt):
+def is_torch_jit_ignore_context_manager(stmt) -> bool:
     # checks if the statement is torch.jit.ignore context manager
     if isinstance(stmt.items[0].context_expr, ast.Call):
         # extract torch part
@@ -535,7 +535,7 @@ def build_ignore_context_manager(ctx, stmt):
                 outputs.append(OutputType(var_name, var_ann))
         return inputs, outputs
 
-    def create_unique_name_ext(ctx, stmt):
+    def create_unique_name_ext(ctx, stmt) -> str:
         # extension will be based on the full path filename plus
         # the line number of original context manager
         fn = re.sub(r"[^a-zA-Z0-9_]", "_", ctx.filename)
