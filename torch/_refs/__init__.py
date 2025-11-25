@@ -4914,6 +4914,10 @@ def take_along_dim(
         broadcast_shape = utils.infer_size_shapes(indices_sizes, a.size())
         self_broadcast = broadcast_to(a, broadcast_shape)
 
+        # wrap negative indices
+        dim_size = self_broadcast.size(dim)
+        indices_broadcast = indices_broadcast % dim_size
+
         return torch.gather(self_broadcast, dim, indices_broadcast)
 
 

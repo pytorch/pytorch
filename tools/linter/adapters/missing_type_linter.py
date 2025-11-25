@@ -51,6 +51,8 @@ class MissingAnnotation:
     location: dict[str, Any]
     param_name: str | None = None
 
+    is_fixer = False
+
     @cached_property
     def block_name(self) -> str:
         # Triggers a read and tokenize of the whole file the first time called
@@ -71,12 +73,12 @@ class MissingAnnotation:
 
     @cached_property
     def is_public(self) -> bool:
-        return is_public(*self.python_parts)
+        return is_public(self.grandfather)
 
     @cached_property
     def length(self) -> int | None:
         end = self.location["end"]
-        return 1 + end["column"] - self.column if self.line == end["line"] else None
+        return 1 + end["column"] - self.column if self.line == end["line"] else 0
 
     @cached_property
     def line(self) -> int:
@@ -111,7 +113,6 @@ class MissingTypeLinter(FileLinter):
 
         help = "The paths to check"
         add("--path", "-p", nargs="*", help=help)
-        # add("path", nargs="*", help=help)
 
         help = f"Set the grandfather list (default={GRANDFATHER})"
         add("--grandfather", "-g", default=GRANDFATHER, type=Path, help=help)
@@ -152,7 +153,8 @@ class MissingTypeLinter(FileLinter):
     @cached_property
     def grandfather(self) -> list[str]:
         annotations = self.missing_annotations.values()
-        return sorted(m.grandfather for v in annotations for m in v)
+        # TODO: investigate dupes
+        return sorted({m.grandfather for v in annotations for m in v})
 
     @cached_property
     def missing_annotations(self) -> dict[str, list[MissingAnnotation]]:
@@ -164,28 +166,23 @@ class MissingTypeLinter(FileLinter):
             functions = [f for f in functions if is_public(f["name"])]
 
             if self.args.verbose:
-                m = f"{i + 1:0{digits}d}:{len(functions):03d}:{pf.filename}"
-                _log(m)
+                msg = f"{i + 1:03d}:{len(functions):03d}:{pf.filename}"
+                _log(msg)
 
-            for func in functions:
-                make = partial(MissingAnnotation, python_file=pf, name=func["name"])
-                if not func["return_annotation"]:
-                    yield make(location=func["location"])
+            for f in functions:
+                if not f["return_annotation"]:
+                    yield MissingAnnotation(pf, f["name"], f["location"])
 
-                for p in func["parameters"]:
-                    if (
-                        not p["annotation"]
-                        and is_public(n := p["name"])
-                        and n != "self"
-                    ):
-                        yield make(location=p["location"], param_name=n)
+                for p in f["parameters"]:
+                    name = p["name"]
+                    if not p["annotation"] and is_public(name) and name != "self":
+                        yield MissingAnnotation(pf, f["name"], p["location"], name)
 
-        def public(ma: Iterator[MissingAnnotation]) -> list[MissingAnnotation]:
-            return [m for m in ma if m.is_public]
+        def public(it: Iterator[MissingAnnotation]) -> list[MissingAnnotation]:
+            return [i for i in it if i.is_public]
 
-        python_files = [self.make_file(Path(f)) for f in self.type_results]
-        python_files = [pf for pf in python_files if is_public(*pf.python_parts)]
-        digits = len(str(len(python_files) + 1))
+        it = (self.make_file(Path(f)) for f in self.type_results)
+        python_files = [pf for pf in it if is_public(*pf.python_parts)]
         if self.args.verbose:
             _log(len(python_files), "files")
 
@@ -210,7 +207,8 @@ class MissingTypeLinter(FileLinter):
 
 
 def is_public(*p: str) -> bool:
-    return not any(i.startswith("_") and i not in PUBLIC_NAMES for i in p)
+    it = (j for i in p for j in i.split("."))
+    return not any(i.startswith("_") and i not in PUBLIC_NAMES for i in it)
 
 
 if __name__ == "__main__":
