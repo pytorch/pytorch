@@ -22,7 +22,10 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#ifndef USE_ROCM
 #include <cuda/std/utility>
+#endif
+
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/gather.h>
@@ -89,7 +92,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   );
 
   // this forces device-host synchronization!
-  ::cuda::std::pair<thrust_ptr, thrust_ptr> newEnd = thrust::unique_by_key(policy,
+  NO_ROCM(::cuda)::std::pair<thrust_ptr, thrust_ptr> newEnd = thrust::unique_by_key(policy,
     indicesIter, indicesIter + nnz,
     uniqueOffsetsIter
   );

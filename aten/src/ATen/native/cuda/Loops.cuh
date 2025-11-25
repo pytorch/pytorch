@@ -8,8 +8,11 @@
 #include <ATen/native/cuda/thread_constants.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
+#ifndef USE_ROCM
 #include <cuda/std/tuple>
 #include <cuda/std/utility>
+#endif
+
 #include <tuple>
 
 
@@ -261,7 +264,7 @@ namespace { // functions for `gpu_kernel_multiple_outputs`.
 // check the return type is `cuda::std::tuple`, not `std::tuple`.
 template <typename T> struct is_tuple: std::false_type {};
 
-template <typename ...T> struct is_tuple<::cuda::std::tuple<T...>>: std::true_type {};
+template <typename ...T> struct is_tuple<NO_ROCM(::cuda)::std::tuple<T...>>: std::true_type {};
 
 template <int num_outputs, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
@@ -284,7 +287,7 @@ void gpu_kernel_multiple_outputs_impl(TensorIteratorBase& iter, const func_t& f)
   using traits = function_traits<func_t>;
   using output_t = typename traits::result_type;
   static_assert(is_tuple<output_t>::value, "f's return type must be `cuda::std::tuple`");
-  constexpr int num_outputs = ::cuda::std::tuple_size_v<output_t>;
+  constexpr int num_outputs = NO_ROCM(::cuda)::std::tuple_size_v<output_t>;
   constexpr int num_inputs = traits::arity;
   constexpr int ntensors = num_outputs + num_inputs;
 
