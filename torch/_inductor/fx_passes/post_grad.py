@@ -54,8 +54,8 @@ from ..utils import (
     get_all_devices,
     get_gpu_type,
     has_uses_tagged_as,
-    is_pointwise_use,
     is_gpu,
+    is_pointwise_use,
     OPTIMUS_EXCLUDE_POST_GRAD,
 )
 from ..virtualized import V
@@ -715,13 +715,17 @@ def register_addmm_activation_fusions():
         return aten.relu(aten.addmm(inp, m1, m2, beta=beta, alpha=alpha))
 
     def addmm_gelu_pattern(inp, m1, m2, beta, alpha):
-        return aten.gelu(aten.addmm(inp, m1, m2, beta=beta, alpha=alpha), approximate="tanh")
+        return aten.gelu(
+            aten.addmm(inp, m1, m2, beta=beta, alpha=alpha), approximate="tanh"
+        )
 
     def addmm_relu_replacement(inp, m1, m2, beta, alpha):
         return aten._addmm_activation(inp, m1, m2, beta=beta, alpha=alpha)
 
     def addmm_gelu_replacement(inp, m1, m2, beta, alpha):
-        return aten._addmm_activation(inp, m1, m2, beta=beta, alpha=alpha, use_gelu=True)
+        return aten._addmm_activation(
+            inp, m1, m2, beta=beta, alpha=alpha, use_gelu=True
+        )
 
     patterns = (addmm_relu_pattern, addmm_gelu_pattern)
     replacements = (addmm_relu_replacement, addmm_gelu_replacement)
