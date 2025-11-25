@@ -1062,6 +1062,7 @@ if sys.version_info >= (3, 12):
         typing.TypeVar,
         typing.TypeVarTuple,
         typing.TypeAliasType,
+        typing.Union,
     )
 
 
