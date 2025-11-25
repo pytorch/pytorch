@@ -13,7 +13,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, List, Optional, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -669,6 +669,7 @@ class DistributedDataParallel(Module, Joinable):
         mixed_precision: _MixedPrecision | None = None,
         device_mesh=None,
         skip_all_reduce_unused_params=False,
+        bucket_cap_mb_list: Optional[List[int]] = None,
     ):
         super().__init__()
         Joinable.__init__(self)
@@ -823,14 +824,23 @@ class DistributedDataParallel(Module, Joinable):
                 )
         # used for intra-node param sync and inter-node sync as well
         self.broadcast_bucket_size = 250 * 1024 * 1024
+        self.bucket_bytes_cap_list = []
 
         # reduction bucket size
-        if bucket_cap_mb is None:
+        if bucket_cap_mb is None and not bucket_cap_mb_list:
             # default case (bucket cap is 25 MiB)
             bucket_cap_mb = 25
             self.bucket_bytes_cap_default = True
         else:
             self.bucket_bytes_cap_default = False
+        if bucket_cap_mb_list:
+            assert (
+                not self._use_python_reducer
+            ), "when using list of cap, python reducer is not supported"
+            self.bucket_bytes_cap_list = [
+                int(bucket_cap_mb * 1024 * 1024) for bucket_cap_mb in bucket_cap_mb_list
+            ]
+            bucket_cap_mb = max(bucket_cap_mb_list)
         self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
 
         # Whether to perform input tensor CPU to GPU copies on a side-stream
@@ -1196,16 +1206,24 @@ class DistributedDataParallel(Module, Joinable):
         # because "bucket rebuild" bucketizes parameters based on its real execution order in backward graph.
 
         # Can remove this branching once #73732 is landed.
-        if static_graph is True or self.find_unused_parameters is False:
-            bucket_size_limits = [sys.maxsize]
+        if self.bucket_bytes_cap_list:
+            bucket_size_limits = self.bucket_bytes_cap_list
+            # When bucket_cap_mb_list is provided, use it for rebuilding buckets
+            bucket_size_limits_for_rebuilding = self.bucket_bytes_cap_list
         else:
-            if self.bucket_bytes_cap_default:
-                bucket_size_limits = [
-                    dist._DEFAULT_FIRST_BUCKET_BYTES,
-                    self.bucket_bytes_cap,
-                ]
+            if static_graph is True or self.find_unused_parameters is False:
+                bucket_size_limits = [sys.maxsize]
             else:
-                bucket_size_limits = [self.bucket_bytes_cap]
+                if self.bucket_bytes_cap_default:
+                    bucket_size_limits = [
+                        dist._DEFAULT_FIRST_BUCKET_BYTES,
+                        self.bucket_bytes_cap,
+                    ]
+                else:
+                    bucket_size_limits = [self.bucket_bytes_cap]
+            # When bucket_cap_mb_list is not provided, pass empty list
+            # to let C++ Reducer use the original logic (first_bucket_bytes_cap_ and bucket_bytes_cap_)
+            bucket_size_limits_for_rebuilding = []
         (
             bucket_indices,
             per_bucket_size_limits,
@@ -1248,6 +1266,7 @@ class DistributedDataParallel(Module, Joinable):
             ),
             self.skip_all_reduce_unused_params,
             self._use_python_reducer,
+            bucket_size_limits_for_rebuilding,
         )
 
         self.logger = dist.Logger(self.reducer)

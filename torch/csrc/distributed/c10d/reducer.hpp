@@ -59,7 +59,8 @@ class TORCH_API Reducer {
       std::unordered_map<size_t, std::string> param_names,
       int64_t first_bucket_bytes_cap,
       bool skip_all_reduce_unused_params,
-      bool use_python_reducer);
+      bool use_python_reducer,
+      std::vector<int64_t> bucket_size_limits_for_rebuilding);
 
   ~Reducer() noexcept(false);
 
@@ -566,6 +567,8 @@ class TORCH_API Reducer {
   // Python reducer keeps C++ reducer initialized. To remove this flag,
   // we need to refactor the DDP wrapper's initialization.
   bool use_python_reducer_;
+
+  const std::vector<int64_t> bucket_size_limits_for_rebuilding_;
 
   // Cached bucket index to model parameter mapping. Populated after buckets
   // are rebuilt after which this mapping is static.

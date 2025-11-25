@@ -98,7 +98,8 @@ Reducer::Reducer(
     std::unordered_map<size_t, std::string> param_names,
     int64_t first_bucket_bytes_cap,
     bool skip_all_reduce_unused_params,
-    bool use_python_reducer)
+    bool use_python_reducer,
+    std::vector<int64_t> bucket_size_limits_for_rebuilding)
     : params_(std::move(params)),
       process_group_(std::move(process_group)),
       expect_sparse_gradients_(std::move(expect_sparse_gradients)),
@@ -123,7 +124,9 @@ Reducer::Reducer(
       ddp_debug_level_(debug_level()),
       param_names_(std::move(param_names)),
       first_bucket_bytes_cap_(first_bucket_bytes_cap),
-      use_python_reducer_(use_python_reducer) {
+      use_python_reducer_(use_python_reducer),
+      bucket_size_limits_for_rebuilding_(
+          std::move(bucket_size_limits_for_rebuilding)) {
   C10_LOG_API_USAGE_ONCE("torch.distributed.ddp.reducer");
   TORCH_INTERNAL_ASSERT(!params_.empty(), "Expected at least one parameter.");
 
@@ -191,21 +194,21 @@ Reducer::Reducer(
           grad_accumulator->add_post_hook(std::make_unique<
                                           torch::autograd::utils::
                                               LambdaPostHook>(
-              [this, variable_index](
-                  const torch::autograd::variable_list& outputs,
-                  const torch::autograd::variable_list& /* unused */) {
+                  [this, variable_index](
+                      const torch::autograd::variable_list& outputs,
+                      const torch::autograd::variable_list& /* unused */) {
 #ifndef _WIN32
-                this->rpc_context_.set(
-                    ThreadLocalDistAutogradContext::getContextPtr());
+                    this->rpc_context_.set(
+                        ThreadLocalDistAutogradContext::getContextPtr());
 #endif
-                this->autograd_hook(variable_index);
-                return outputs;
-              },
-              [this](torch::autograd::CompiledNodeArgs& args) {
-                TORCH_CHECK(
-                    this->use_python_reducer_,
-                    "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
-              })),
+                    this->autograd_hook(variable_index);
+                    return outputs;
+                  },
+                  [this](torch::autograd::CompiledNodeArgs& args) {
+                    TORCH_CHECK(
+                        this->use_python_reducer_,
+                        "Compiled autograd is not compatible with C++ DDP Reducer, please use torch._dynamo.config.optimize_ddp=\"python_reducer\".");
+                  })),
           grad_accumulator);
 
       // Map raw function pointer to parameter index.
@@ -1862,9 +1865,20 @@ bool Reducer::rebuild_buckets() {
           params_.size(),
           " versus rebuilt params size of: ",
           rebuilt_param_indices_.size()));
+
+  // Use bucket_size_limits_for_rebuilding_ if provided (non-empty),
+  // otherwise fall back to the original logic using first_bucket_bytes_cap_
+  // and bucket_bytes_cap_ to preserve backward compatibility
   std::vector<size_t> bucket_size_limits;
-  bucket_size_limits.push_back(first_bucket_bytes_cap_);
-  bucket_size_limits.push_back(bucket_bytes_cap_);
+  if (!bucket_size_limits_for_rebuilding_.empty()) {
+    bucket_size_limits.assign(
+    bucket_size_limits_for_rebuilding_.begin(),
+    bucket_size_limits_for_rebuilding_.end());
+  } else {
+    bucket_size_limits.push_back(first_bucket_bytes_cap_);
+    bucket_size_limits.push_back(bucket_bytes_cap_);
+  }
+
   auto ddp_set_last_bucket_as_small =
       (getCvarString({"DDP_SET_LAST_BUCKET_CAP"}, "N/A") == "1");
 
