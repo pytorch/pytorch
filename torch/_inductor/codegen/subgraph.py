@@ -76,6 +76,16 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         gm_original_output_strides(self.gm)
 
         self.sym_inputs = get_symbolic_inputs(self.input_nodes)
+        # Cached decomposition info for range-based dispatch (set via cache_decomposition)
+        self.decomposition: Callable[..., Any] | None = None
+        self.decomposition_kwargs: dict[str, Any] = {}
+
+    def cache_decomposition(
+        self, decomposition: Callable[..., Any], kwargs: dict[str, Any]
+    ) -> None:
+        """Cache decomposition function and kwargs for range-based dispatch lookup."""
+        self.decomposition = decomposition
+        self.decomposition_kwargs = kwargs
 
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
@@ -342,6 +352,8 @@ class SubgraphTemplate(KernelTemplate):
                 make_fx_graph=make_fx_graph,
                 description=f"CustomOp {decomp.__name__}",
             )
+            # Cache decomposition info for range-based dispatch
+            choice.cache_decomposition(decomp, decomp_kwargs)
             choices.append(choice)
 
         return choices

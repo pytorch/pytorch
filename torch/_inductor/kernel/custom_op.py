@@ -333,33 +333,6 @@ def _create_range_input_gen_fn(
     return constrained_gen_fn
 
 
-def _extract_winning_decomposition_index(
-    choice_name: str,
-    decompositions: list[Callable],
-) -> int:
-    """Extract the decomposition index from winning SubgraphChoiceCaller's name.
-    We parse it to find which decomposition won by matching decomp_name.
-    """
-    if not choice_name:
-        log.warning("Empty choice name, defaulting to first decomposition")
-        return 0
-
-    # Try to match decomposition by name
-    for i, decomp in enumerate(decompositions):
-        decomp_name = decomp.__name__
-        if decomp_name in choice_name:
-            log.debug(
-                "Matched choice '%s' to decomposition[%d] '%s'",
-                choice_name,
-                i,
-                decomp_name,
-            )
-            return i
-
-    # Fallback: could not determine, use first
-    return 0
-
-
 def _create_fallback_choice(
     name: str,
     default_impl: Callable[..., Any],
@@ -729,12 +702,8 @@ def _range_based_lowering_fn(
             return_choice=True,
         )
 
-        winning_impl_idx = _extract_winning_decomposition_index(
-            winning_choice.name, decompositions
-        )
-        winning_impl = decompositions[winning_impl_idx]
-        winning_kwargs = non_tensor_args[winning_impl_idx]
-
+        winning_impl = winning_choice.decomposition
+        winning_kwargs = winning_choice.decomposition_kwargs
         range_to_best_impl_map[(range_start, range_end)] = (
             winning_impl,
             winning_kwargs,
@@ -844,16 +813,17 @@ def _range_based_lowering_fn(
 
             next_branch_fn = build_nested_cond(current_impl_index + 1)
 
+            # Pass ranges_list as default argument to avoid closure capture issues
             @torch._dynamo.dont_skip_tracing
-            def cond_wrapper(*ops):
+            def cond_wrapper(*ops, _ranges_list=ranges_list):
                 # Compute predicate INSIDE cond_wrapper to avoid closure capture
                 # This prevents SymBool from being added to operands
-                group_pred = build_range_predicate(ranges_list)
+                group_pred = build_range_predicate(_ranges_list)
                 return torch.cond(
                     pred=group_pred,
                     true_fn=current_group_fn,
                     false_fn=next_branch_fn,
-                    operands=list(ops),
+                    operands=ops,
                 )
 
             return cond_wrapper
