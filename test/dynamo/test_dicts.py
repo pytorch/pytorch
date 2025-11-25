@@ -19,6 +19,7 @@ import torch._dynamo.testing
 import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.testing import same
 from torch._dynamo.utils import dict_items
 from torch.testing._internal.common_utils import (
@@ -1745,6 +1746,50 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_user_defined_object(self):
+        class A:
+            def __init__(self):
+                self.x = {}
+                REF[self] = {}
+
+        REF = {}
+
+        def f(a, x):
+            REF[a]["foo"] = x
+            return x + 1
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        self.assertTrue(same(f(A(), x), opt_f(A(), x)))
+
+    def test_custom_hash(self):
+        class HashedObject:
+            def __init__(self, value):
+                self.value = value
+
+            def __eq__(self, other):
+                return isinstance(other, HashedObject) and self.value == other.value
+
+            def __hash__(self):
+                return hash(self.value) * 31  # simple custom hash formula
+
+        def fn(x):
+            new_dict = {}
+            obj = HashedObject(10)
+            new_dict[obj] = 5
+            return x * new_dict[obj]
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        with self.assertRaisesRegex(Unsupported, "__hash__"):
+            opt_fn(x)
+
+        torch.compiler.reset()
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=False)
+        self.assertTrue(same(fn(x), opt_fn(x)))
 
 
 class DictSubclassMethodsTests(DictMethodsTests):

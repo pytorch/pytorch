@@ -57,8 +57,8 @@ if TYPE_CHECKING:
 # - (perhaps) Define how it is compared in _HashableTracker._eq_impl
 
 
-def was_instancecheck_override(obj: Any) -> bool:
-    return type(obj).__dict__.get("__instancecheck__", False)
+def was_method_overridden(obj: Any, name) -> bool:
+    return type(obj).__dict__.get(name, False)
 
 
 def raise_unhashable(
@@ -96,12 +96,39 @@ def is_hashable(x: VariableTracker) -> bool:
         return all(is_hashable(e) for e in x.items)
     elif isinstance(x, variables.FrozenDataClassVariable):
         return all(is_hashable(e) for e in x.fields.values())
+    elif isinstance(x, variables.UserDefinedObjectVariable) and was_method_overridden(
+        x.value, "__hash__"
+    ):
+        msg = (
+            "TorchDynamo encountered a dictionary whose key is a user-defined "
+            "object with a custom __hash__ implementation. TorchDynamo does not "
+            "currently support tracing dictionary lookups that use keys with overridden "
+            "__hash__."
+        )
+        unimplemented(
+            gb_type="Dict look up with a User defined object key that overridden __hash__ method",
+            context=f"Unsupported Key is {x}",  # type: ignore[attr-defined]
+            explanation=msg,
+            hints=[
+                "Consider replacing the key with a built-in hashable type or removing the custom __hash__ method.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
     elif (
         isinstance(x, variables.UserDefinedObjectVariable)
-        and not was_instancecheck_override(x.value)
+        and not was_method_overridden(x.value, "__eq__")
+        and not was_method_overridden(x.value, "__hash__")
+    ):
+        # CPython uses id(obj) as the key here
+        return isinstance(x.value, py_Hashable)
+    elif (
+        isinstance(x, variables.UserDefinedObjectVariable)
+        and not was_method_overridden(x.value, "__instancecheck__")
         and inspect.getattr_static(x.value, "__hash__") is int.__hash__
         and isinstance(x.value, int)
     ):
+        # Support int.__hash__ methods because we can directly simulate them w/o
+        # triggering any user code
         return isinstance(x.value, py_Hashable)
     elif isinstance(x, variables.FunctoolsPartialVariable):
         return (
@@ -190,6 +217,13 @@ class ConstDictVariable(VariableTracker):
                 return variables.FrozenDataClassVariable.HashWrapper(
                     self.vt.python_type(), fields_values
                 )
+            elif (
+                isinstance(self.vt, variables.UserDefinedObjectVariable)
+                and not was_method_overridden(self.vt.value, "__eq__")
+                and not was_method_overridden(self.vt.value, "__hash__")
+            ):
+                # Python uses id(obj) as the key here
+                return self.vt.value
             elif isinstance(self.vt, variables.UserDefinedObjectVariable):
                 # The re module in Python 3.13+ has a dictionary (_cache2) with
                 # an object as key (`class _ZeroSentinel(int): ...`):

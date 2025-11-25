@@ -3667,5 +3667,16 @@
         "Use custom operators instead of direct attribute/method access."
       ]
     }
+  ],
+  "GB0363": [
+    {
+      "Gb_type": "Dict look up with a User defined object key that overridden __hash__ method",
+      "Context": "Unsupported Key is {x}",
+      "Explanation": "msg",
+      "Hints": [
+        "Consider replacing the key with a built-in hashable type or removing the custom __hash__ method.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
