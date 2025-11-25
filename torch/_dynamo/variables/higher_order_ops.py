@@ -1251,10 +1251,11 @@ def trace_hop_function(
     subtracer,
     enable_grad,
     restore_side_effects,
-    enable_side_effects_with_extra_outputs,
     args,
     sub_kwargs,
 ):
+    enable_side_effects_with_extra_outputs = not restore_side_effects
+
     autograd_ctx = (
         dynamo_enable_grad(tx, enable_grad)
         if enable_grad is not None
@@ -1343,7 +1344,6 @@ def speculate_subgraph_with_auto_output_flattening(
     ] = "automatic",
     # Make default False
     restore_side_effects: bool = True,
-    enable_side_effects_with_extra_outputs: bool = False,
     # Controls whether to filter aliased intermediates when collecting extra outputs.
     # - True: Filter out intermediates that alias with inputs or outputs (strict, for invoke_subgraph)
     # - False: Allow aliased intermediates (for checkpoint/autograd.Function which get desugared/inlined)
@@ -1432,6 +1432,10 @@ def speculate_subgraph_with_auto_output_flattening(
     if sub_kwargs is None:
         sub_kwargs = {}
 
+    # Compute enable_side_effects_with_extra_outputs from restore_side_effects.
+    # When restore_side_effects is False, we allow side effects by returning extra outputs.
+    enable_side_effects_with_extra_outputs = not restore_side_effects
+
     assert set_subgraph_inputs in {
         "automatic",
         "semi_automatic",
@@ -1468,7 +1472,6 @@ def speculate_subgraph_with_auto_output_flattening(
                 subtracer,
                 enable_grad,
                 restore_side_effects,
-                enable_side_effects_with_extra_outputs,
                 args,
                 sub_kwargs,
             )
@@ -1646,7 +1649,6 @@ def speculate_subgraph(
     # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
     # const outputs from the subgraph output.
     remove_consts_from_outputs=True,
-    enable_side_effects_with_extra_outputs=False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation=True,
     supports_aliasing=True,
@@ -1693,7 +1695,6 @@ def speculate_subgraph(
                 subtracer,
                 enable_grad,
                 restore_side_effects,
-                enable_side_effects_with_extra_outputs,
                 args,
                 sub_kwargs,
             )
@@ -2983,7 +2984,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description,
             source_target=self.value,
             restore_side_effects=self.restore_side_effects,
-            enable_side_effects_with_extra_outputs=not self.restore_side_effects,
             filter_aliased_intermediates=getattr(
                 self, "filter_aliased_intermediates", True
             ),
