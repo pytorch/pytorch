@@ -279,9 +279,9 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_mod_buffers_buf_, l_x_, l_y_);  subgraph_1 = l_mod_buffers_buf_ = l_x_ = l_y_ = None
-        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        getitem_4: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
 
-        add: "f32[8]" = getitem + getitem_1;  getitem = getitem_1 = None
+        add: "f32[8]" = getitem + getitem_4;  getitem = getitem_4 = None
         return (add,)
 
     class subgraph_0(torch.nn.Module):
@@ -361,7 +361,7 @@ class GraphModule(torch.nn.Module):
             mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(sin, 5);  sin = None
             mul_2: "f32[8]" = torch.ops.aten.mul.Tensor(mul_1, primals_2);  mul_1 = None
             return (mul_2, primals_0, primals_1, primals_2)
-""",
+            """,
             ignore_empty_lines=True,
         )
         self.assertExpectedInline(
@@ -380,7 +380,6 @@ class GraphModule(torch.nn.Module):
         add_1: "f32[8]" = torch.ops.aten.add.Tensor(getitem_2, getitem_6);  getitem_2 = getitem_6 = None
         add_2: "f32[8]" = torch.ops.aten.add.Tensor(getitem_3, getitem_7);  getitem_3 = getitem_7 = None
         return (add_1, add_2, None)
-
     class partitioned_bw_subgraph_0_0(torch.nn.Module):
         def forward(self, primals_0: "f32[8]", primals_1: "f32[8]", primals_2: "f32[8]", tangents_0: "f32[8]"):
             mul_3: "f32[8]" = torch.ops.aten.mul.Tensor(tangents_0, primals_2);  tangents_0 = primals_2 = None
@@ -391,7 +390,7 @@ class GraphModule(torch.nn.Module):
             mul_6: "f32[8]" = torch.ops.aten.mul.Tensor(mul_5, primals_0);  primals_0 = None
             mul_7: "f32[8]" = torch.ops.aten.mul.Tensor(mul_5, primals_1);  mul_5 = primals_1 = None
             return (mul_7, mul_6, None)
-""",
+            """,
             ignore_empty_lines=True,
         )
 
@@ -659,28 +658,23 @@ class GraphModule(torch.nn.Module):
         invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_1_0, 'partitioned_fw_subgraph_1_0', primals_1);  partitioned_fw_subgraph_1_0 = primals_1 = None
         getitem_8: "f32[8]" = invoke_subgraph_6[1]
         getitem_1: "f32[8]" = invoke_subgraph_6[0];  invoke_subgraph_6 = None
-
         add: "f32[8]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return (add, getitem_7, getitem_6, getitem_8)
-
     class partitioned_fw_subgraph_0_0(torch.nn.Module):
         def forward(self, primals_0: "f32[8]"):
             sin: "f32[8]" = torch.ops.aten.sin.default(primals_0)
-
             inductor_seeds_default: "i64[1]" = torch.ops.prims.inductor_seeds.default(1, device(type='cpu'))
-
             inductor_lookup_seed_default: "i64[]" = torch.ops.prims.inductor_lookup_seed.default(inductor_seeds_default, 0);  inductor_seeds_default = None
             inductor_random_default: "f32[8]" = torch.ops.prims.inductor_random.default([8], inductor_lookup_seed_default, 'rand');  inductor_lookup_seed_default = None
             gt: "b8[8]" = torch.ops.aten.gt.Scalar(inductor_random_default, 0.5);  inductor_random_default = None
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(gt, sin);  sin = None
             mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(mul, 2.0);  mul = None
             return (mul_1, primals_0, gt)
-
     class partitioned_fw_subgraph_1_0(torch.nn.Module):
         def forward(self, primals_0: "f32[8]"):
             sin: "f32[8]" = torch.ops.aten.sin.default(primals_0)
             return (sin, primals_0)
-""",
+                """,
                 ignore_empty_lines=True,
             )
 
@@ -710,19 +704,16 @@ class <lambda>(torch.nn.Module):
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', arg0_1);  repeated_subgraph0 = arg0_1 = None
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
         return (getitem,)
-
     class repeated_subgraph0(torch.nn.Module):
         def forward(self, arg0_1: "f32[8]"):
             inductor_seeds_default: "i64[1]" = torch.ops.prims.inductor_seeds.default(1, device(type='cpu'))
-
             inductor_lookup_seed_default: "i64[]" = torch.ops.prims.inductor_lookup_seed.default(inductor_seeds_default, 0);  inductor_seeds_default = None
             inductor_random_default: "f32[8]" = torch.ops.prims.inductor_random.default([8], inductor_lookup_seed_default, 'rand');  inductor_lookup_seed_default = None
             gt: "b8[8]" = torch.ops.aten.gt.Scalar(inductor_random_default, 0.5);  inductor_random_default = None
             sin: "f32[8]" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
             mul: "f32[8]" = torch.ops.aten.mul.Tensor(gt, sin);  gt = sin = None
             mul_1: "f32[8]" = torch.ops.aten.mul.Tensor(mul, 2.0);  mul = None
-            return (mul_1,)
-""",
+            return (mul_1,)""",
                 ignore_empty_lines=True,
             )
 
@@ -893,8 +884,8 @@ class GraphModule(torch.nn.Module):
         a: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
         subgraph_1 = self.subgraph_1
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', a, l_y_);  subgraph_1 = a = l_y_ = None
-        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        return (getitem_1,)
+        getitem_2: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        return (getitem_2,)
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_x_: "f32[8]", l_y_: "f32[8]"):
@@ -910,7 +901,6 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    @unittest.expectedFailure
     def test_nonlocal_list_mutation_hidden(self):
         """Test that nonlocal list mutation inside nested_compile_region is handled correctly."""
 
@@ -1015,17 +1005,17 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem, l_y_);  subgraph_1 = getitem = None
-        getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
+        getitem_5: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         subgraph_2 = self.subgraph_0
-        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_2, 'subgraph_0', getitem_1, l_y_);  subgraph_2 = getitem_1 = None
-        getitem_2: "f32[8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
+        invoke_subgraph_2 = torch.ops.higher_order.invoke_subgraph(subgraph_2, 'subgraph_0', getitem_5, l_y_);  subgraph_2 = getitem_5 = None
+        getitem_10: "f32[8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
         subgraph_3 = self.subgraph_0
-        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(subgraph_3, 'subgraph_0', getitem_2, l_y_);  subgraph_3 = getitem_2 = None
-        getitem_3: "f32[8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
+        invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(subgraph_3, 'subgraph_0', getitem_10, l_y_);  subgraph_3 = getitem_10 = None
+        getitem_15: "f32[8]" = invoke_subgraph_3[0];  invoke_subgraph_3 = None
         subgraph_4 = self.subgraph_0
-        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(subgraph_4, 'subgraph_0', getitem_3, l_y_);  subgraph_4 = getitem_3 = l_y_ = None
-        getitem_4: "f32[8]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
-        return (getitem_4,)
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(subgraph_4, 'subgraph_0', getitem_15, l_y_);  subgraph_4 = getitem_15 = l_y_ = None
+        getitem_20: "f32[8]" = invoke_subgraph_4[0];  invoke_subgraph_4 = None
+        return (getitem_20,)
 
     class subgraph_0(torch.nn.Module):
         def forward(self, l_x_: "f32[8]", l_y_: "f32[8]"):
@@ -1253,6 +1243,31 @@ class GraphModule(torch.nn.Module):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
             "Encountered aliasing during higher order op tracing",
+        ):
+            opt_fn(x)
+
+    def test_side_effect_with_aliased_intermediate(self):
+        captured_views = []
+
+        @nested_compile_region
+        def gn(x):
+            original = torch.sin(x)
+            view = original.view(1, 8)  # Aliases with original
+            captured_views.append(view)
+            return torch.sin(view)
+
+        def fn(x):
+            result = gn(x)
+            if captured_views:
+                return result + captured_views[0]
+            return result
+
+        x = torch.randn(8, requires_grad=False)
+        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
+        # TODO: Improve error message to explain the aliasing/side-effect issue
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            "does not belong to this Graph",
         ):
             opt_fn(x)
 
