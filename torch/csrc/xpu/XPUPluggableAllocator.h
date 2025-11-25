@@ -5,14 +5,15 @@
 namespace torch::xpu::XPUPluggableAllocator {
 
 struct _AllocationMetadata {
-  _AllocationMetadata();
+  _AllocationMetadata() {}
   _AllocationMetadata(
       size_t size,
       c10::DeviceIndex device_idx,
-      sycl::queue* queue);
-  size_t size;
-  c10::DeviceIndex device_idx;
-  sycl::queue* queue;
+      sycl::queue* queue)
+      : size(size), device_idx(device_idx), queue(queue) {}
+  size_t size{0};
+  c10::DeviceIndex device_idx{-1};
+  sycl::queue* queue{};
 };
 
 struct TORCH_XPU_API XPUPluggableAllocator
