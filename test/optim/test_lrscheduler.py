@@ -2678,6 +2678,251 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+    def test_lr_scheduler_repr(self):
+        """Test that LR schedulers have meaningful __repr__ output."""
+        # Test StepLR repr contains expected components
+        scheduler = StepLR(self.opt, step_size=30, gamma=0.1)
+        repr_str = repr(scheduler)
+        self.assertIn("StepLR", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+        # Test CosineAnnealingLR repr
+        scheduler = CosineAnnealingLR(self.opt, T_max=10, eta_min=0.001)
+        repr_str = repr(scheduler)
+        self.assertIn("CosineAnnealingLR", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+        # Test OneCycleLR repr
+        scheduler = OneCycleLR(
+            self.opt, max_lr=0.1, total_steps=100, pct_start=0.3
+        )
+        repr_str = repr(scheduler)
+        self.assertIn("OneCycleLR", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+        # Test ReduceLROnPlateau repr
+        scheduler = ReduceLROnPlateau(self.opt, mode="min", factor=0.5, patience=5)
+        repr_str = repr(scheduler)
+        self.assertIn("ReduceLROnPlateau", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+
+        # Test that repr works after stepping
+        scheduler = StepLR(self.opt, step_size=5, gamma=0.1)
+        self.opt.step()
+        scheduler.step()
+        self.opt.step()
+        scheduler.step()
+        repr_str = repr(scheduler)
+        self.assertIn("last_epoch: 2", repr_str)
+
+    def test_lambda_lr_repr(self):
+        """Test LambdaLR extra_repr contains lr_lambdas."""
+        scheduler = LambdaLR(self.opt, lr_lambda=lambda epoch: 0.95**epoch)
+        repr_str = repr(scheduler)
+        self.assertIn("LambdaLR", repr_str)
+        self.assertIn("lr_lambdas:", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_multiplicative_lr_repr(self):
+        """Test MultiplicativeLR extra_repr contains lr_lambdas."""
+        scheduler = MultiplicativeLR(self.opt, lr_lambda=lambda epoch: 0.95)
+        repr_str = repr(scheduler)
+        self.assertIn("MultiplicativeLR", repr_str)
+        self.assertIn("lr_lambdas:", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_step_lr_repr(self):
+        """Test StepLR extra_repr contains step_size and gamma."""
+        scheduler = StepLR(self.opt, step_size=30, gamma=0.1)
+        repr_str = repr(scheduler)
+        self.assertIn("StepLR", repr_str)
+        self.assertIn("step_size: 30", repr_str)
+        self.assertIn("gamma: 0.1", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_multi_step_lr_repr(self):
+        """Test MultiStepLR extra_repr contains milestones and gamma."""
+        scheduler = MultiStepLR(self.opt, milestones=[30, 80], gamma=0.1)
+        repr_str = repr(scheduler)
+        self.assertIn("MultiStepLR", repr_str)
+        self.assertIn("milestones:", repr_str)
+        self.assertIn("30", repr_str)
+        self.assertIn("80", repr_str)
+        self.assertIn("gamma: 0.1", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_constant_lr_repr(self):
+        """Test ConstantLR extra_repr contains factor and total_iters."""
+        scheduler = ConstantLR(self.opt, factor=0.5, total_iters=10)
+        repr_str = repr(scheduler)
+        self.assertIn("ConstantLR", repr_str)
+        self.assertIn("factor: 0.5", repr_str)
+        self.assertIn("total_iters: 10", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_linear_lr_repr(self):
+        """Test LinearLR extra_repr contains start_factor, end_factor, and total_iters."""
+        scheduler = LinearLR(self.opt, start_factor=0.1, end_factor=1.0, total_iters=10)
+        repr_str = repr(scheduler)
+        self.assertIn("LinearLR", repr_str)
+        self.assertIn("start_factor: 0.1", repr_str)
+        self.assertIn("end_factor: 1.0", repr_str)
+        self.assertIn("total_iters: 10", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_exponential_lr_repr(self):
+        """Test ExponentialLR extra_repr contains gamma."""
+        scheduler = ExponentialLR(self.opt, gamma=0.9)
+        repr_str = repr(scheduler)
+        self.assertIn("ExponentialLR", repr_str)
+        self.assertIn("gamma: 0.9", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_polynomial_lr_repr(self):
+        """Test PolynomialLR extra_repr contains total_iters and power."""
+        scheduler = PolynomialLR(self.opt, total_iters=10, power=2.0)
+        repr_str = repr(scheduler)
+        self.assertIn("PolynomialLR", repr_str)
+        self.assertIn("total_iters: 10", repr_str)
+        self.assertIn("power: 2.0", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_cosine_annealing_lr_repr(self):
+        """Test CosineAnnealingLR extra_repr contains T_max and eta_min."""
+        scheduler = CosineAnnealingLR(self.opt, T_max=50, eta_min=0.001)
+        repr_str = repr(scheduler)
+        self.assertIn("CosineAnnealingLR", repr_str)
+        self.assertIn("T_max: 50", repr_str)
+        self.assertIn("eta_min: 0.001", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_cosine_annealing_warm_restarts_repr(self):
+        """Test CosineAnnealingWarmRestarts extra_repr contains T_0, T_mult, and eta_min."""
+        scheduler = CosineAnnealingWarmRestarts(self.opt, T_0=10, T_mult=2, eta_min=0.001)
+        repr_str = repr(scheduler)
+        self.assertIn("CosineAnnealingWarmRestarts", repr_str)
+        self.assertIn("T_0: 10", repr_str)
+        self.assertIn("T_mult: 2", repr_str)
+        self.assertIn("eta_min: 0.001", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_reduce_lr_on_plateau_repr(self):
+        """Test ReduceLROnPlateau extra_repr contains mode, factor, patience, etc."""
+        scheduler = ReduceLROnPlateau(
+            self.opt,
+            mode="min",
+            factor=0.5,
+            patience=5,
+            threshold=0.01,
+            threshold_mode="rel",
+            cooldown=2,
+            min_lr=1e-6,
+            eps=1e-9,
+        )
+        repr_str = repr(scheduler)
+        self.assertIn("ReduceLROnPlateau", repr_str)
+        self.assertIn("mode: min", repr_str)
+        self.assertIn("factor: 0.5", repr_str)
+        self.assertIn("patience: 5", repr_str)
+        self.assertIn("threshold: 0.01", repr_str)
+        self.assertIn("threshold_mode: rel", repr_str)
+        self.assertIn("cooldown: 2", repr_str)
+        self.assertIn("min_lrs:", repr_str)
+        self.assertIn("eps:", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+
+    def test_cyclic_lr_repr(self):
+        """Test CyclicLR extra_repr contains key parameters."""
+        scheduler = CyclicLR(
+            self.opt,
+            base_lr=0.001,
+            max_lr=0.1,
+            step_size_up=10,
+            mode="triangular",
+            gamma=0.99,
+            cycle_momentum=False,
+        )
+        repr_str = repr(scheduler)
+        self.assertIn("CyclicLR", repr_str)
+        self.assertIn("max_lrs:", repr_str)
+        self.assertIn("total_size:", repr_str)
+        self.assertIn("step_ratio:", repr_str)
+        self.assertIn("mode: triangular", repr_str)
+        self.assertIn("gamma: 0.99", repr_str)
+        self.assertIn("scale_mode:", repr_str)
+        self.assertIn("cycle_momentum: False", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_cyclic_lr_with_momentum_repr(self):
+        """Test CyclicLR extra_repr includes momentum params when cycle_momentum=True."""
+        scheduler = CyclicLR(
+            self.opt,
+            base_lr=0.001,
+            max_lr=0.1,
+            step_size_up=10,
+            cycle_momentum=True,
+            base_momentum=0.8,
+            max_momentum=0.9,
+        )
+        repr_str = repr(scheduler)
+        self.assertIn("CyclicLR", repr_str)
+        self.assertIn("cycle_momentum: True", repr_str)
+        self.assertIn("base_momentums:", repr_str)
+        self.assertIn("max_momentums:", repr_str)
+
+    def test_one_cycle_lr_repr(self):
+        """Test OneCycleLR extra_repr contains total_steps and cycle_momentum."""
+        scheduler = OneCycleLR(
+            self.opt,
+            max_lr=0.1,
+            total_steps=100,
+            cycle_momentum=False,
+        )
+        repr_str = repr(scheduler)
+        self.assertIn("OneCycleLR", repr_str)
+        self.assertIn("total_steps: 100", repr_str)
+        self.assertIn("cycle_momentum: False", repr_str)
+        self.assertIn("last_epoch:", repr_str)
+        self.assertIn("base_lrs:", repr_str)
+
+    def test_sequential_lr_repr(self):
+        """Test SequentialLR extra_repr contains milestones and schedulers."""
+        scheduler1 = ConstantLR(self.opt, factor=0.1, total_iters=5)
+        scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = SequentialLR(
+            self.opt,
+            schedulers=[scheduler1, scheduler2],
+            milestones=[5],
+        )
+        repr_str = repr(scheduler)
+        self.assertIn("SequentialLR", repr_str)
+        self.assertIn("milestones:", repr_str)
+        self.assertIn("5", repr_str)
+        self.assertIn("schedulers:", repr_str)
+
+    def test_chained_scheduler_repr(self):
+        """Test ChainedScheduler extra_repr contains schedulers."""
+        scheduler1 = ConstantLR(self.opt, factor=0.1, total_iters=5)
+        scheduler2 = ExponentialLR(self.opt, gamma=0.9)
+        scheduler = ChainedScheduler([scheduler1, scheduler2], optimizer=self.opt)
+        repr_str = repr(scheduler)
+        self.assertIn("ChainedScheduler", repr_str)
+        self.assertIn("schedulers:", repr_str)
+
 
 instantiate_parametrized_tests(TestLRScheduler)
 
