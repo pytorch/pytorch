@@ -724,6 +724,9 @@ class LocalDTensorTestBase(DTensorTestBase):
         torch.autograd._enable_record_function(False)
 
     def tearDown(self) -> None:
+        from torch.distributed.tensor import _random as random
+
+        random._rng_tracker = None
         super().tearDown()
         torch.autograd._enable_record_function(True)
 
