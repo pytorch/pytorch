@@ -3671,7 +3671,7 @@
   "GB0363": [
     {
       "Gb_type": "Dictionary look up with a user defined object key that has an overridden __hash__ method",
-      "Context": "Unsupported Key is {x}",
+      "Context": "Unsupported key is {x}",
       "Explanation": "msg",
       "Hints": [
         "Consider replacing the key with a built-in hashable type or removing the custom __hash__ method.",
