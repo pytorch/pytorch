@@ -386,5 +386,123 @@ def register_graphsafe_run_with_rng_state_op():
 graphsafe_run_with_rng_state = register_graphsafe_run_with_rng_state_op()
 
 
+def register_run_with_start_end_rng_state_op():
+    class RunWithStartEndRngState(HigherOrderOperator):
+        def __init__(self):
+            super().__init__("run_with_start_end_rng_state")
+
+        def __call__(self, start_rng_state, end_rng_state, op, *args, **kwargs):
+            return super().__call__(start_rng_state, end_rng_state, op, *args, **kwargs)
+
+    run_with_start_end_rng_state = RunWithStartEndRngState()
+
+    run_with_start_end_rng_state.py_impl(DispatchKey.Autograd)(
+        autograd_not_implemented(run_with_start_end_rng_state, deferred_error=True)
+    )
+
+    @run_with_start_end_rng_state.py_impl(DispatchKey.CUDA)
+    def impl_cuda(start_rng_state, end_rng_state, op, *args, **kwargs):
+        device = start_rng_state.device
+        with torch.random.fork_rng(devices=[device], device_type="cuda"):
+            torch.cuda.set_rng_state(start_rng_state.cpu())
+            out = op(*args, **kwargs)
+        torch.cuda.set_rng_state(end_rng_state.cpu())
+        return out
+
+    @run_with_start_end_rng_state.py_impl(DispatchKey.CPU)
+    def impl_cpu(start_rng_state, end_rng_state, op, *args, **kwargs):
+        with torch.random.fork_rng():
+            torch.set_rng_state(start_rng_state)
+            out = op(*args, **kwargs)
+        torch.set_rng_state(end_rng_state)
+        return out
+
+    @run_with_start_end_rng_state.py_impl(DispatchKey.HPU)
+    def impl_hpu(start_rng_state, end_rng_state, op, *args, **kwargs):
+        if hasattr(torch, "hpu"):
+            device = start_rng_state.device
+            # HPU requires setting the philox RNG context
+            torch.hpu.set_rng_ctx("philox")
+            try:
+                with torch.random.fork_rng(devices=[device], device_type="hpu"):
+                    torch.hpu.set_rng_state(start_rng_state)
+                    out = op(*args, **kwargs)
+                torch.hpu.set_rng_state(end_rng_state)
+            finally:
+                torch.hpu.unset_rng_ctx("philox")
+            return out
+        raise RuntimeError("functionalize a hpu RNG operator is not supported.")
+
+    @run_with_start_end_rng_state.py_impl(DispatchKey.XPU)
+    def impl_xpu(start_rng_state, end_rng_state, op, *args, **kwargs):
+        device = start_rng_state.device
+        with torch.random.fork_rng(devices=[device], device_type="xpu"):
+            torch.xpu.set_rng_state(start_rng_state)
+            out = op(*args, **kwargs)
+        torch.xpu.set_rng_state(end_rng_state)
+        return out
+
+    @run_with_start_end_rng_state.py_impl(ProxyTorchDispatchMode)
+    def impl_proxy_dispatch_mode(
+        mode, start_rng_state, end_rng_state, op, *args, **kwargs
+    ):
+        with disable_proxy_modes_tracing():
+            out = run_with_start_end_rng_state(
+                start_rng_state, end_rng_state, op, *args, **kwargs
+            )
+        proxy_args = pytree.tree_map(
+            mode.tracer.unwrap_proxy, (start_rng_state, end_rng_state, op, *args)
+        )
+        proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+        out_proxy = mode.tracer.create_proxy(
+            "call_function", run_with_start_end_rng_state, proxy_args, proxy_kwargs
+        )
+        return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
+
+    @run_with_start_end_rng_state.py_impl(DispatchKey.BackendSelect)
+    def impl_backend_select(start_rng_state, end_rng_state, op, *args, **kwargs):
+        impl_map = {
+            "cuda": impl_cuda,
+            "cpu": impl_cpu,
+            "hpu": impl_hpu,
+            "xpu": impl_xpu,
+        }
+        device = get_device(args, kwargs)
+        assert device in impl_map, f"Backend not supported for {device}"
+        impl = impl_map[device]
+        return impl(start_rng_state, end_rng_state, op, *args, **kwargs)
+
+    @run_with_start_end_rng_state.py_impl(FakeTensorMode)
+    def impl_fake_tensor_mode(
+        mode, start_rng_state, end_rng_state, op, *args, **kwargs
+    ):
+        # Skip setting the set_rng_state as it does not work well with fake tensors.
+        # And it does not matter for the fake tensor mode.
+        with mode:
+            return op(*args, **kwargs)
+
+    @run_with_start_end_rng_state.py_functionalize_impl
+    def impl_functional(ctx, start_rng_state, end_rng_state, op, *args, **kwargs):
+        unwrapped_start_rng_state = ctx.unwrap_tensors(start_rng_state)
+        unwrapped_end_rng_state = ctx.unwrap_tensors(end_rng_state)
+        unwrapped_args = ctx.unwrap_tensors(args)
+        unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+
+        with ctx.redispatch_to_next():
+            out = run_with_start_end_rng_state(
+                unwrapped_start_rng_state,
+                unwrapped_end_rng_state,
+                op,
+                *unwrapped_args,
+                **unwrapped_kwargs,
+            )
+            return ctx.wrap_tensors(out)
+
+    return run_with_start_end_rng_state
+
+
+run_with_start_end_rng_state = register_run_with_start_end_rng_state_op()
+
+
 def register_rng_prims():
     register_philox_rand()
