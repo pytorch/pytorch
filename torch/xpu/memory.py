@@ -286,18 +286,15 @@ class XPUPluggableAllocator(_XPUAllocator):
         """
         allocator_lib = ctypes.CDLL(path_to_so_file)
 
-        # Obtain raw function pointers from the shared library.
         alloc_fn_ptr = getattr(allocator_lib, alloc_fn_name)
         free_fn_ptr = getattr(allocator_lib, free_fn_name)
 
-        # Cast to integer addresses (PyTorch C++ API expects raw pointer values)
         alloc_fn_addr = ctypes.cast(alloc_fn_ptr, ctypes.c_void_p).value
         free_fn_addr = ctypes.cast(free_fn_ptr, ctypes.c_void_p).value
 
         if alloc_fn_addr is None or free_fn_addr is None:
             raise RuntimeError("Failed to load allocator symbols from the .so file.")
 
-        # Register allocator with PyTorch backend
         self._allocator = torch._C._xpu_customAllocator(alloc_fn_addr, free_fn_addr)
 
 
