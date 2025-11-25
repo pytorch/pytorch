@@ -16,6 +16,7 @@ from torch.distributed.tensor._ops._pointwise_ops import (
 from torch.distributed.tensor._ops.utils import (
     _args_schema_with_tensor_meta,
     _expand_single_dim_strategy_to_mesh,
+    _find_lowest_cost_sharding,
 )
 
 
@@ -139,6 +140,9 @@ tests = {
 }
 
 repeats = 10
+# if False, use the optimized 'find_lowest_cost_sharding' function instead of the
+# fully expanded version
+single_dim_benchmark_fully_expanded = False
 
 
 def time_fn(mesh, test, key):
@@ -151,16 +155,24 @@ def time_fn(mesh, test, key):
             test["dim_maps"],
             wrap_op_strategy=False,
         )
-        fn = _expand_single_dim_strategy_to_mesh(
-            mesh, op_schema, test["single_dim_strategy"]
-        )
-        args_schema, kwargs_schema = _args_schema_with_tensor_meta(
-            op_schema.args_schema, op_schema.kwargs_schema
-        )
+        if single_dim_benchmark_fully_expanded:
+            fn = _expand_single_dim_strategy_to_mesh(
+                mesh, op_schema, test["single_dim_strategy"]
+            )
+            args_schema, kwargs_schema = _args_schema_with_tensor_meta(
+                op_schema.args_schema, op_schema.kwargs_schema
+            )
 
-        def f():
-            nonlocal strategies
-            strategies = fn(args_schema, kwargs_schema)
+            def f():
+                nonlocal strategies
+                strategies = fn(args_schema, kwargs_schema)
+        else:
+
+            def f():
+                nonlocal strategies
+                strategies = _find_lowest_cost_sharding(
+                    mesh, op_schema, test["single_dim_strategy"]
+                )
     else:
         op_schema = _op_schema(
             mesh,
