@@ -576,13 +576,13 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
     int32_t co = 0;
 
     #define CALL_DNNL_GEMM(gemm_func, a_ptr_type, a_data_ptr) \
-    gemm_func(                                            \
-      transa, transb, offsetc, m, n, k,                \
-      alpha,                                            \
-      static_cast<a_ptr_type>(a_data_ptr), lda, ao,    \
-      static_cast<int8_t*>(mat2.data_ptr()), ldb, bo,  \
-      beta,                                             \
-      static_cast<int32_t*>(result.data_ptr()), ldc, &co)
+      gemm_func(                                              \
+        transa, transb, offsetc, m, n, k,                     \
+        alpha,                                                \
+        static_cast<a_ptr_type>(a_data_ptr), lda, ao,         \
+        static_cast<int8_t*>(mat2.data_ptr()), ldb, bo,       \
+        beta,                                                 \
+        static_cast<int32_t*>(result.data_ptr()), ldc, &co)
 
     if (self.scalar_type() == at::kByte) { //uint8
       CALL_DNNL_GEMM(dnnl::gemm_u8s8s32, uint8_t*, self.data_ptr());
