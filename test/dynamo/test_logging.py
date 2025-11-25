@@ -71,6 +71,7 @@ def munge_shape_guards(s: str) -> str:
 LOG_PREFIX_PATTERNS = [
     re.compile(r"^\[rank\d+\]:\s*"),
     re.compile(r"^[A-Z]+:[^:]+:\s*"),
+    re.compile(r"^[A-Z]\d{2,4}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+\d+\s+[^\]]+\]\s*"),
     re.compile(r"^[A-Z](?:\d{4})?\s+[^:]+:\s*"),
 ]
 
@@ -419,6 +420,10 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
         formatted_dynamo = handler.format(records[0])
         self.assertIn("test dynamo", formatted_dynamo)
         self.assertEqual(normalize_log_line(formatted_dynamo), "test dynamo")
+        ci_style_line = (
+            "I1124 19:43:23.879000 4928 dynamo/test_logging.py:410] test dynamo"
+        )
+        self.assertEqual(normalize_log_line(ci_style_line), "test dynamo")
 
         formatted_artifact = handler.format(records[1])
         self.assertIn("custom format", formatted_artifact)
