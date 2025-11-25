@@ -3780,9 +3780,6 @@ class TilingSelect:
     In the future, we can implement advanced heuristic in a subclass.
     """
 
-    def __init__(self):
-        super().__init__()
-
     def select_tiling(
         self,
         fn_list,

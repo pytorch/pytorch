@@ -3007,6 +3007,14 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
     yield SampleInput(
         make_arg((S, S)), gather_variable((S, S // 2), 0, S, True, device=device))
 
+    # Negative indices sample — guarded against python_ref
+    if not kwargs.get('is_python_ref', False):
+        neg_idx = gather_variable((S, S), 1, S, True, device=device) - S
+        yield SampleInput(
+            make_arg((S, S)),
+            neg_idx,
+            1)
+
 
 def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
 
@@ -6185,6 +6193,9 @@ def sample_inputs_std_var(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(tensor_nd(), dim=(1,), correction=S // 2)
     yield SampleInput(tensor_nd(), dim=None, correction=0, keepdim=True)
     yield SampleInput(tensor_nd(), dim=None, correction=None)
+    yield SampleInput(tensor_nd(), dim=None, correction=-1)
+    yield SampleInput(tensor_nd(), dim=None, correction=-5)
+    yield SampleInput(tensor_nd(), correction=0.5, keepdim=True)
     yield SampleInput(tensor_nd(), correction=0, keepdim=True)
     yield SampleInput(make_tensor(3, 4, 5, device=device, dtype=dtype, requires_grad=requires_grad), dim=-3)
 
@@ -11701,11 +11712,11 @@ def reference_mse_loss(input, target, reduction="mean"):
         return se
 
 
-def reference_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int], weight=None, bias=None, eps=1e-5):
+def reference_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weight=None, bias=None, eps=1e-5):
     return reference_native_layer_norm(inp, normalized_shape, weight, bias, eps)[0]
 
 
-def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int], weight, bias, eps):
+def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weight, bias, eps):
     feature_size = np.prod(normalized_shape)
     inp_view = inp.reshape(-1, feature_size)  # type: ignore[call-overload]
     mean = inp_view.mean(axis=-1, keepdims=True)
@@ -11722,7 +11733,7 @@ def reference_native_layer_norm(inp: npt.NDArray, normalized_shape: tuple[int], 
     return Y.reshape(*inp.shape), mean.reshape(stat_shape), (1.0 / np.sqrt(var + eps)).reshape(stat_shape)
 
 
-def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int], weight=None, eps=None):
+def reference_rms_norm(inp: npt.NDArray, normalized_shape: tuple[int, ...], weight=None, eps=None):
     if eps is None:
         eps = torch.finfo(numpy_to_torch_dtype(inp.dtype)).eps
     feature_size = np.prod(normalized_shape)
@@ -14264,15 +14275,11 @@ op_db: list[OpInfo] = [
                     ], ),
     BinaryUfuncInfo('logaddexp',
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
-                    dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
+                    dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.complex32),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_rhs_python_scalar=False,
-                    skips=(
-                        # TODO: FIXME: RuntimeError: not implemented for 'ComplexFloat'
-                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
-                    )),
+                    supports_rhs_python_scalar=False),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
@@ -23643,10 +23650,12 @@ python_ref_db = [
         torch_opinfo_name="logaddexp",
         skips=(
             # failure due to mismatch in edge cases, which boils down to what torch.exp(inf + infj) should be
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='cpu',
-                         dtypes=(torch.complex64, torch.complex128)),
-            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='cpu',
-                         dtypes=(torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
+                         dtypes=(torch.complex32, torch.complex64, torch.complex128)),
         ),
     ),
     PythonRefInfo(
