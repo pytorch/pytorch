@@ -18,6 +18,10 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+from torch.distributed.tensor.debug import (
+    _clear_fast_path_sharding_prop_cache,
+    _clear_python_sharding_prop_cache,
+)
 from torch.distributed.tensor.placement_types import Replicate, Shard
 
 
@@ -67,12 +71,6 @@ def _op_strategy_context(op_overload, strategy_func, schema_info=None):
                 del propagator.op_to_schema_info[op_overload]
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
-
-        # Clear the cache can cause performance degradation.
-        from torch.distributed.tensor.debug import (
-            _clear_fast_path_sharding_prop_cache,
-            _clear_python_sharding_prop_cache,
-        )
 
         _clear_python_sharding_prop_cache()
         _clear_fast_path_sharding_prop_cache()
