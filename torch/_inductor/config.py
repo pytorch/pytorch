@@ -303,9 +303,6 @@ _post_fusion_custom_pass: Optional[
     ]
 ] = None
 
-# Deprecated
-split_cat_fx_passes = True
-
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
 efficient_conv_bn_eval_fx_passes = False
 
@@ -1210,6 +1207,13 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
 
 enable_autograd_for_aot: bool = False
+
+_debug_cpu_to_tpu_pallas: bool = Config(
+    env_name_force="PALLAS_TARGET_TPU", default=False
+)
+pallas_take_first_jax_device_only: bool = Config(
+    env_name_force="PALLAS_TAKE_FIRST_JAX_DEVICE_ONLY", default=True
+)
 
 
 def get_worker_log_path() -> Optional[str]:
