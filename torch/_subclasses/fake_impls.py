@@ -228,6 +228,34 @@ def _async_error(fake_mode, func, msg: str):
     pass
 
 
+# Legacy profiler ops return Tensors but don't follow tensor constructor patterns
+# They take string arguments and should not have device/dtype parameters added
+@register_op_impl(torch.ops.profiler._record_function_enter.default)
+def _record_function_enter(fake_mode, func, name: str, args=None):
+    # Call the real implementation to get a real handle tensor
+    with in_kernel_invocation_manager(fake_mode):
+        real_handle = func(name, args)
+    # Create a meta tensor with the same properties as the real handle
+    meta_handle = torch.empty_like(real_handle, device="meta")
+    # Wrap it as a FakeTensor
+    return FakeTensor(fake_mode, meta_handle, torch.device("cpu"))
+
+
+@register_op_impl(torch.ops.profiler._record_function_exit.default)
+def _record_function_exit(fake_mode, func, handle):
+    # Exit doesn't return anything and doesn't need to do anything for fake tensors
+    # Just return None (the actual return type is void)
+    pass
+
+
+@register_op_impl(torch.ops.profiler._record_function_enter_new.default)
+def _record_function_enter_new(fake_mode, func, name: str, args=None):
+    # Call the real implementation - returns a custom class, not a tensor
+    # Just pass through without wrapping
+    with in_kernel_invocation_manager(fake_mode):
+        return func(name, args)
+
+
 @register_op_impl(aten.to.prim_Device)
 @register_op_impl(aten.to.device)
 def non_kwarg_to(fake_mode, func, *args, **kwargs):
