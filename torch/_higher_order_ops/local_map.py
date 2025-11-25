@@ -334,6 +334,13 @@ def create_hop_fw_bw(
                 static_lifetime_input_indices=[],
             )
 
+        # Fix tags because min-cut does not respect fw/bw boundary, breaking
+        # default partitioner's assumptions.
+        for node in new_fw_gm.graph.nodes:
+            node.meta["partitioner_tag"] = "is_forward"
+        for node in new_bw_gm.graph.nodes:
+            node.meta["partitioner_tag"] = "is_backward"
+
         # Propagate meta onto fw/bw graphs, later will be set on proxied nodes
         new_fw_gm.meta["local_map_kwargs"] = local_map_kwargs
         new_bw_gm.meta["local_map_kwargs"] = {**local_map_kwargs}
