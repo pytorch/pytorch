@@ -304,14 +304,14 @@ namespace {
 // ROCm-specific 2D backward kernel for grid_sample
 // - The default kernel launches N*H*W threads and loops over C.
 // - On MI300X / MI325X that "the loop over C + 4 atomics per C" is the bottleneck.
-// - Here we launch N*C*H*W threads, give each thread exactly 1 channel, and let channel-0 do the grid-gradient reduction, so we keep semantics and try to avoid precision issues.
-// - Signature is kept identical to the original kernel so the launcher can pick either one.
-// TODO (further optimization leveraging LDS privatization that really hurt me during my first attemp at optimization)
+// - Here we launch N*C*H*W threads, give each thread exactly 1 channel, and let channel-0 do the grid-gradient reduction, so we keep semantics and try to avoid accuracy issues.
+// - Lane-major loop over channels; one block per (n, h, w).
 #ifdef USE_ROCM
   template <typename scalar_t, typename index_t>
   C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_2d_backward_kernel_rocm(
-      const index_t nthreads,
+      //const index_t nthreads,
+      const index_t nblocks_nhw,  // N * out_H * out_W
       TensorInfo<const scalar_t, index_t> grad_output,
       TensorInfo<const scalar_t, index_t> input,
       TensorInfo<const scalar_t, index_t> grid,
@@ -360,31 +360,33 @@ namespace {
     const index_t gGrid_sW = grad_grid.strides[2];
     const index_t gGrid_sCoor = grad_grid.strides[3];
 
-    CUDA_KERNEL_LOOP_TYPE(linear_idx, nthreads, index_t) {
-      // Flatten (n, c, h, w) to decompose N*C*H*W
-      index_t temp = linear_idx;
-      const index_t w = temp % out_W;
-      temp /= out_W;
-      const index_t h = temp % out_H;
-      temp /= out_H;
-      const index_t c = temp % C;
-      const index_t n = temp / C;
+    // One (n, h, w) per block, and lanes stride over channels.
+    const index_t nhw = blockIdx.x;
+    if (nhw >= nblocks_nhw) return;
+    const index_t w =  nhw % out_W;
+    const index_t h = (nhw / out_W) % out_H;
+    const index_t n =  nhw / (out_W * out_H);
 
-      const index_t grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
+    const index_t grid_off = n * grid_sN + h * grid_sH + w * grid_sW;
+    scalar_t x, y;
+    // Lane 0 loads grid coords ONCE, and then broadcast.
+    // Remove the redundant grid loads and computation.
+    if ((threadIdx.x & (warpSize - 1)) == 0) {
+      x = grid.data[grid_off];
+      y = grid.data[grid_off + grid_sCoor];
+    }
+    // Broadcast via warp shuffles.
+    x = __shfl(x, 0);
+    y = __shfl(y, 0);
 
-      // Corresponding input coords (x, y) from grid
-      scalar_t x = grid.data[grid_offset];
-      scalar_t y = grid.data[grid_offset + grid_sCoor];
-
+    // Lane over channels with striding if C > blockDim.
+    for (index_t c = threadIdx.x; c < C; c += blockDim.x) {
       scalar_t gix_mult, giy_mult;
       scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
       scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
 
-      // No looping over channels at all
       // grad_output is [N, C, H, W] - per-everything thread for computation
       const scalar_t gOut = grad_output.data[n * gOut_sN + c * gOut_sC + h * gOut_sH + w * gOut_sW];
-      // input is [N, C, H, W] - per-everything thread for computation
-      const scalar_t* inp_ptr_NC = input.data + n * inp_sN + c * inp_sC;
 
       if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
         // Neighbor pixels (NW, NE, SW, SE) from (x, y)
@@ -428,7 +430,7 @@ namespace {
 
         // Only one thread per (n, h, w) with channel 0 does the grid reduction,
         // in the hope that there would be no precision isses.
-        if (c == 0) {
+        if (threadIdx.x == 0) {
           scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
 
           const scalar_t* gOut_ptr_NHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
@@ -478,7 +480,7 @@ namespace {
           safe_add_2d(grad_input.data, iy_nearest, ix_nearest, gInp_sH, gInp_sW, inp_H, inp_W, gOut, NC_offset, grad_input_memory_span);
 #endif
         }
-        if (c == 0) {
+        if (threadIdx.x == 0) {
           //scalar_t* gGrid_ptr = grad_grid.data + (n * out_H * out_W + h * out_W + w) * gGrid_sW;
           // Write grad_grid[n, h, w, *] — no channel dim.
           // Using standard stride-based index calculation for better robustness than the packed form.
@@ -538,7 +540,7 @@ namespace {
           gGrid_ptr[1] = giy_mult * giy;
         }
       }
-    }
+    }  // for c += blockDim.x
   }
 #endif  // USE_ROCM
 
@@ -1102,16 +1104,19 @@ void launch_grid_sampler_2d_backward_kernel(
   // ROCm path: parallelize across channels as well.
 #ifdef USE_ROCM
   const auto C = input.size(1);
-  const int64_t count = N * C * H * W;
-  if (count > 0) {
+  // One block per (n, h, w); lanes over channels (power of two up to 256)
+  const index_t nblocks_nhw = static_cast<index_t>(N) * static_cast<index_t>(H) * static_cast<index_t>(W);
+  if (nblocks_nhw > 0) {
+    int lanes = 1;
+    while (lanes < static_cast<int>(C) && lanes < 256) lanes <<= 1;
     AT_DISPATCH_FLOATING_TYPES_AND2(
         ScalarType::Half, ScalarType::BFloat16,
         input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(grad_output)) {
         grid_sampler_2d_backward_kernel_rocm<scalar_t, int>
-            <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
-                static_cast<int>(count),
+            <<<nblocks_nhw, lanes, 0, at::cuda::getCurrentCUDAStream()>>>(
+                nblocks_nhw,
                 getTensorInfo<const scalar_t, int>(grad_output),
                 getTensorInfo<const scalar_t, int>(input),
                 getTensorInfo<const scalar_t, int>(grid),
@@ -1124,9 +1129,8 @@ void launch_grid_sampler_2d_backward_kernel(
                 input_requires_grad);
       } else {
         grid_sampler_2d_backward_kernel_rocm<scalar_t, int64_t>
-            <<<GET_BLOCKS(count, 256), 256, 0,
-               at::cuda::getCurrentCUDAStream()>>>(
-                count,
+            <<<nblocks_nhw, lanes, 0, at::cuda::getCurrentCUDAStream()>>>(
+                nblocks_nhw,
                 getTensorInfo<const scalar_t, int64_t>(grad_output),
                 getTensorInfo<const scalar_t, int64_t>(input),
                 getTensorInfo<const scalar_t, int64_t>(grid),
