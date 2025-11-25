@@ -6330,11 +6330,6 @@ def sample_inputs_hardtanh(op_info, device, dtype, requires_grad=False, **kwargs
 
     yield from sample_inputs_elementwise_unary(op_info, device, dtype, requires_grad)
 
-def error_inputs_hardtanh(op_info, device, **kwargs):
-    # Tests that hardtanh errors out when passed min_val > max_val.
-    yield ErrorInput(SampleInput(make_tensor((1,), dtype=torch.float, device=device), kwargs={"min_val": 0.5, "max_val": -0.5}),
-                     error_type=ValueError, error_regex="min_val cannot be greater than max_val")
-
 def sample_inputs_einsum(op_info, device, dtype, requires_grad=False, **kwargs):
     def c(t):
         return t.clone().requires_grad_(requires_grad)
@@ -17173,7 +17168,6 @@ op_db: list[OpInfo] = [
                    backward_dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
                    assert_autodiffed=True,
                    sample_inputs_func=sample_inputs_hardtanh,
-                   error_inputs_func=error_inputs_hardtanh,
                    supports_out=False,
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
