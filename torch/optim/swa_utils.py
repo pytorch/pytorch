@@ -35,7 +35,25 @@ PARAM_LIST = Union[tuple[Tensor, ...], list[Tensor]]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
-    """Get the function applying exponential moving average (EMA) across multiple params."""
+    """Get the function applying exponential moving average (EMA) across multiple params.
+    Returns a function that computes the Exponential Moving Average (EMA) of a list of parameters.
+
+    The EMA is computed as:
+
+    .. math::
+        \text{EMA}_{t+1} = \text{EMA}_t \cdot \text{decay} + \text{Model}_t \cdot (1 - \text{decay})
+
+    where :math:`\text{decay}` is the decay factor and :math:`\text{Model}_t` is the current parameter value.
+    This implementation uses :func:`torch.lerp` for floating point and complex tensors for efficiency.
+
+    Args:
+        decay (float): The decay factor for the moving average. Must be between 0 and 1. 
+            Default: 0.999
+
+    Returns:
+        function: A function that takes ``(ema_param_list, current_param_list, num_averaged)``
+        and updates ``ema_param_list`` in-place.
+    """
 
     if decay < 0.0 or decay > 1.0:
         raise ValueError(
