@@ -24,7 +24,13 @@ from collections.abc import Callable
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch import device as device_type
-from torch._guards import ChainedSource, dataclass_with_cached_hash, Guard, GuardSource, Source
+from torch._guards import (
+    ChainedSource,
+    dataclass_with_cached_hash,
+    Guard,
+    GuardSource,
+    Source,
+)
 
 from . import utils
 from .bytecode_transformation import (
