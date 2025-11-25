@@ -27,7 +27,7 @@ from torch.distributed.tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
-    ShardingPlaceholder,
+    _ShardingPlaceholder,
 )
 
 
@@ -67,7 +67,7 @@ def _find_lowest_cost_sharding(
     mesh: DeviceMesh,
     op_schema: OpSchema,
     single_dim_strategy: Callable[
-        [ArgsType, KwargsType], list[list[Placement | ShardingPlaceholder]]
+        [ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
     ],
 ) -> StrategyType:
     """
@@ -247,15 +247,15 @@ def _fill_single_dim_strategy_placeholders(
     mesh: DeviceMesh,
     op_schema: OpSchema,
     single_dim_strategies_with_placeholders: list[
-        list[Placement | ShardingPlaceholder]
+        list[Placement | _ShardingPlaceholder]
     ],
 ) -> list[list[Placement]]:
     """
-    Replace any ShardingPlaceholder with the specific Sharding types used by the inputs in op_schema.
+    Replace any _ShardingPlaceholder with the specific Sharding types used by the inputs in op_schema.
     Supports implicit replication.
 
     Example:
-    single_dim_strategies_with_placeholders = [[Partial(), ShardingPlaceholder(1), ShardingPlaceholder(0)]]
+    single_dim_strategies_with_placeholders = [[Partial(), _ShardingPlaceholder(1), _ShardingPlaceholder(0)]]
     input0: Shard(0)
     input1: StridedShard(1, split_factor=2)
     returns: [
@@ -282,12 +282,12 @@ def _fill_single_dim_strategy_placeholders(
     # to all possible combinations of placements
     expanded_strategies_over_one_mesh_dim: list[list[Placement]] = []
     for s in single_dim_strategies_with_placeholders:
-        if not any(isinstance(p, ShardingPlaceholder) for p in s):
+        if not any(isinstance(p, _ShardingPlaceholder) for p in s):
             continue
         for shard_builder in shard_builders.values():
             expanded_strategy: list[Placement] = []
             for maybe_placeholder in s:
-                if isinstance(maybe_placeholder, ShardingPlaceholder):
+                if isinstance(maybe_placeholder, _ShardingPlaceholder):
                     # we combine the tensor dim to shard from the placeholder
                     # with other metadata (e.g. split_factor) from the sharding class
                     expanded_strategy.append(shard_builder(maybe_placeholder.dim))
