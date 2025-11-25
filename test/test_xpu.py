@@ -640,7 +640,7 @@ if __name__ == "__main__":
         return allocator, dummy_allocator
 
     def test_xpu_pluggable_allocator(self):
-
+        pass
 
     def test_torch_version_xpu(self):
         self.assertEqual(len(torch.version.xpu), 8)
