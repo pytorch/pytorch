@@ -10,9 +10,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
-    TEST_CUDA,
-    TEST_HPU,
-    TEST_XPU,
 )
 
 
@@ -24,14 +21,8 @@ if not dist.is_available():
 # Determine available devices
 DEVICE = "cuda"
 devices = ["cpu"]
-if TEST_HPU:
-    devices.append("hpu")
-    DEVICE = "hpu"
-elif TEST_XPU:
-    devices.append("xpu")
-    DEVICE = "xpu"
-elif TEST_CUDA:
-    devices.append("cuda")
+if acc := torch.accelerator.current_accelerator(True):
+    devices += [acc.type]
 
 
 @instantiate_parametrized_tests
@@ -45,7 +36,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self._spawn_threads()
 
     # ============================================================
-    # Phase 1: Forward Correctness Tests
+    # Forward Correctness Tests
     # ============================================================
 
     @parametrize("device", devices)
@@ -93,14 +84,11 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
         self.assertEqual(list(output.shape), expected_shape)
 
         # Verify output contains all ranks' data
-        # For gather_dim=0, check each chunk contains the correct rank value
-        if gather_dim == 0:
-            for r in range(self.world_size):
-                chunk = output[r * 3 : (r + 1) * 3, :, :]
-                expected_chunk = torch.full(
-                    (3, 3, 3), fill_value=float(r), device=device
-                )
-                self.assertEqual(chunk, expected_chunk)
+        # Check each chunk along gather_dim contains the correct rank value
+        for r in range(self.world_size):
+            chunk = output.narrow(gather_dim, r * 3, 3)
+            expected_chunk = torch.full((3, 3, 3), fill_value=float(r), device=device)
+            self.assertEqual(chunk, expected_chunk)
 
     @parametrize("device", devices)
     @parametrize("scatter_dim", [0, 1])
@@ -248,7 +236,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             self.assertEqual(output, expected)
 
     # ============================================================
-    # Phase 2: Backward Correctness Tests
+    # Backward Correctness Tests
     # ============================================================
 
     @parametrize("device", devices)
@@ -485,7 +473,7 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             self.assertEqual(input_tensor.grad, expected_grad)
 
     # ============================================================
-    # Phase 3: torch.library.opcheck Tests
+    # torch.library.opcheck Tests
     # ============================================================
 
     test_utils = [

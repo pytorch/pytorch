@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import contextlib
-import functools
 import sys
 import warnings
 from typing import Any, cast, Optional, TYPE_CHECKING, Union
@@ -151,7 +150,7 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     return _maybe_wrap_tensor(tensor)
 
 
-def all_reduce(input: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
+def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = ""):
     """
     Reduces the tensor data across all machines in such a way that all get
     the final result.
@@ -169,9 +168,8 @@ def all_reduce(input: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str =
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     group_name = _resolve_group_name(group, tag)
-
-    output = torch.ops._c10d_functional.all_reduce(input, reduceOp.lower(), group_name)
-    return _maybe_wrap_tensor(output, enable_autograd=True)
+    tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp.lower(), group_name)
+    return _maybe_wrap_tensor(tensor)
 
 
 def all_gather_tensor(
@@ -203,7 +201,7 @@ def all_gather_tensor(
     tensor = torch.ops._c10d_functional.all_gather_into_tensor(
         self, group_size, group_name
     )
-    res = _maybe_wrap_tensor(tensor, enable_autograd=True)
+    res = _maybe_wrap_tensor(tensor)
     # TODO this should be done inside AsyncCollectiveTensor to delay the wait() call
     if gather_dim != 0:
         # torch.cat access the data so we already need to wait here, first do wait
@@ -286,7 +284,7 @@ def reduce_scatter_tensor(
         group_size,
         group_name,  # type: ignore[possibly-undefined]
     )
-    res = _maybe_wrap_tensor(tensor, enable_autograd=True)
+    res = _maybe_wrap_tensor(tensor)
     return res
 
 
@@ -355,9 +353,7 @@ def all_reduce_coalesced(
         reduceOp.lower(),
         group_name,
     )
-    return list(
-        map(functools.partial(_maybe_wrap_tensor, enable_autograd=True), tensor_list)
-    )
+    return list(map(_maybe_wrap_tensor, tensor_list))
 
 
 def all_gather_into_tensor_coalesced(
@@ -386,9 +382,7 @@ def all_gather_into_tensor_coalesced(
         group_size,
         group_name,
     )
-    return list(
-        map(functools.partial(_maybe_wrap_tensor, enable_autograd=True), tensor_list)
-    )
+    return list(map(_maybe_wrap_tensor, tensor_list))
 
 
 def reduce_scatter_tensor_coalesced(
@@ -436,9 +430,7 @@ def reduce_scatter_tensor_coalesced(
         group_name,  # type: ignore[possibly-undefined]
     )
 
-    return list(
-        map(functools.partial(_maybe_wrap_tensor, enable_autograd=True), tensor_list)
-    )
+    return list(map(_maybe_wrap_tensor, tensor_list))
 
 
 # This is a bit unsafe: it checks if the first argument in the schema reports as a non-mutable alias.
@@ -509,7 +501,7 @@ def all_to_all_single(
         input_split_sizes,
         group_name,
     )
-    return _maybe_wrap_tensor(tensor, enable_autograd=True)
+    return _maybe_wrap_tensor(tensor)
 
 
 def all_to_all_single_autograd(
@@ -1321,13 +1313,10 @@ def _are_we_tracing() -> bool:
     return get_proxy_mode() is not None
 
 
-def _maybe_wrap_tensor(self, enable_autograd=False) -> torch.Tensor:
+def _maybe_wrap_tensor(self) -> torch.Tensor:
     if _are_we_tracing():
         return wait_tensor(self)
-    if enable_autograd:
-        return _wrap_tensor_autograd(self)
-    res = AsyncCollectiveTensor(self)
-    return cast(torch.Tensor, res)
+    return _wrap_tensor_autograd(self)
 
 
 @contextlib.contextmanager

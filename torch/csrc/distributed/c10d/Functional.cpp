@@ -542,34 +542,6 @@ at::Tensor all_gather_into_tensor_autograd(
   return AllGatherIntoTensor::apply(input, group_size, group_name);
 }
 
-at::Tensor all_reduce_sum_invariant(
-    const at::Tensor& input,
-    const std::string& group_name) {
-  // Clone to ensure functional usage (all_reduce is in-place in C++)
-  auto output = input.clone();
-
-  // Call the regular all_reduce op
-  auto result = c10::Dispatcher::singleton()
-                    .findSchemaOrThrow("_c10d_functional::all_reduce", "")
-                    .typed<decltype(c10d::all_reduce)>()
-                    .call(output, "sum", group_name);
-
-  // Wait for completion
-  result = c10::Dispatcher::singleton()
-               .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
-               .typed<decltype(c10d::wait_tensor)>()
-               .call(result);
-
-  return result;
-}
-
-at::Tensor mark_varying(
-    const at::Tensor& input,
-    const std::string& group_name) {
-  // Forward is identity - just return input unchanged
-  return input;
-}
-
 } // namespace
 
 TORCH_LIBRARY(_c10d_functional_autograd, m) {
@@ -598,24 +570,6 @@ TORCH_LIBRARY(_c10d_functional_autograd, m) {
       torch::dispatch(
           c10::DispatchKey::Autograd, ::all_gather_into_tensor_autograd),
       {at::Tag::pt2_compliant_tag});
-}
-
-TORCH_LIBRARY(_c10d_functional_differentiable, m) {
-  m.def(
-      "all_reduce_sum_invariant("
-      "Tensor input, "
-      "str group_name) -> Tensor",
-      {at::Tag::pt2_compliant_tag});
-  m.def(
-      "mark_varying("
-      "Tensor input, "
-      "str group_name) -> Tensor",
-      {at::Tag::pt2_compliant_tag});
-}
-
-TORCH_LIBRARY_IMPL(_c10d_functional_differentiable, Autograd, m) {
-  m.impl("all_reduce_sum_invariant", &::all_reduce_sum_invariant);
-  m.impl("mark_varying", &::mark_varying);
 }
 
 namespace {
