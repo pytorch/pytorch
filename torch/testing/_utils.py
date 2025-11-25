@@ -36,7 +36,7 @@ def freeze_rng_state():
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
         elif torch.xpu.is_available():
-            cuda_rng_state = torch.xpu.get_rng_state()
+            xpu_rng_state = torch.xpu.get_rng_state()
     try:
         yield
     finally:
@@ -52,5 +52,5 @@ def freeze_rng_state():
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
             elif torch.xpu.is_available():
-                torch.xpu.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+                torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
             torch.set_rng_state(rng_state)
