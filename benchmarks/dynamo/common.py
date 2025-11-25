@@ -3778,7 +3778,7 @@ def setup_determinism_for_accuracy_test(args):
         # some of the models do not support use_deterministic_algorithms
         torch.use_deterministic_algorithms(True)
     if args.devices == ["rocm"]:
-        torch.use_deterministic_algorithms(True)
+        torch.use_deterministic_algorithms(True, warn_only=True)
     if args.devices == ["xpu"]:
         torch.use_deterministic_algorithms(True, warn_only=True)
 
