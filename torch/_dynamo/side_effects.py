@@ -231,6 +231,13 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
         )
 
+    def should_allow_side_effects_with_extra_outputs(self) -> bool:
+        output_graph = self.output_graph_weakref()
+        return bool(
+            output_graph
+            and output_graph.current_tx.output.current_tracer.allow_side_effects_with_extra_outputs
+        )
+
     def is_reconstructing_generator(self) -> bool:
         output_graph = self.output_graph_weakref()
 
@@ -249,6 +256,8 @@ class SideEffects:
         if self.should_allow_externally_visible_side_effects_in_subtracer():
             return True
         if self.should_allow_side_effects_under_checkpoint():
+            return True
+        if self.should_allow_side_effects_with_extra_outputs():
             return True
         if self.is_reconstructing_generator():
             # This is missing the case where one mutates a tensor. See

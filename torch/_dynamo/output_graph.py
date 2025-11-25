@@ -2142,6 +2142,10 @@ class OutputGraph(OutputGraphCommon):
 
             gm = _make_graph_module(root, self.graph)
 
+            from .dce_extra_outputs import dce_invoke_subgraph_extra_outputs
+
+            dce_invoke_subgraph_extra_outputs(gm)
+
             # Saved tensors hooks are not used by the graph.
             # GraphModule by default only copies used in the graph submodules.
             # Copying them into the result graph manually.
@@ -2976,6 +2980,7 @@ class SubgraphTracer(fx.Tracer):
         # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
         # Note: Externally visible side-effects are allowed if this flag OR the above flag is True.
         self.unsafe_allow_externally_visible_side_effects = False
+        self.allow_side_effects_with_extra_outputs = False
 
         # True if this tracer is currently tracing (reconstructing) into a Python generator
         self.is_reconstructing_generator = False

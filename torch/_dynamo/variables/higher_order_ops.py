@@ -204,6 +204,16 @@ def dynamo_under_activation_checkpoint(tx: "InstructionTranslator"):
         tx.output.current_tracer.under_activation_checkpoint = orig_val
 
 
+@contextlib.contextmanager
+def dynamo_allow_side_effects_with_extra_outputs(tx: "InstructionTranslator"):
+    orig_val = tx.output.current_tracer.allow_side_effects_with_extra_outputs
+    try:
+        tx.output.current_tracer.allow_side_effects_with_extra_outputs = True
+        yield
+    finally:
+        tx.output.current_tracer.allow_side_effects_with_extra_outputs = orig_val
+
+
 def find_mismatched_vars(var, types, allow_none=False):
     """
     Recursively finds variables whose type is not an instance of the specified types.
@@ -1110,6 +1120,7 @@ def trace_hop_function(
     enable_grad,
     under_activation_checkpoint,
     restore_side_effects,
+    enable_side_effects_with_extra_outputs,
     args,
     sub_kwargs,
 ):
@@ -1121,6 +1132,11 @@ def trace_hop_function(
     checkpoint_ctx = (
         dynamo_under_activation_checkpoint(tx)
         if under_activation_checkpoint
+        else contextlib.nullcontext()
+    )
+    side_effects_ctx = (
+        dynamo_allow_side_effects_with_extra_outputs(tx)
+        if enable_side_effects_with_extra_outputs
         else contextlib.nullcontext()
     )
 
@@ -1142,7 +1158,7 @@ def trace_hop_function(
     if restore_side_effects:
         prev_side_effects = tx.output.side_effects.clone()
 
-    with autograd_ctx, checkpoint_ctx:
+    with autograd_ctx, checkpoint_ctx, side_effects_ctx:
         output = f.call_function(tx, args, sub_kwargs)
 
     if restore_side_effects:
@@ -1202,6 +1218,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # Make default False
     restore_side_effects: bool = True,
     under_activation_checkpoint: bool = False,
+    enable_side_effects_with_extra_outputs: bool = False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
@@ -1323,6 +1340,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 enable_grad,
                 under_activation_checkpoint,
                 restore_side_effects,
+                enable_side_effects_with_extra_outputs,
                 args,
                 sub_kwargs,
             )
@@ -1400,7 +1418,7 @@ def speculate_subgraph_with_auto_output_flattening(
             # want this to be supported for other Hops as well, specifically
             # nested_compile_region and autograd.Function. Today, its safe
             # because we error out on seeing a side-effect.
-            if under_activation_checkpoint:
+            if enable_side_effects_with_extra_outputs:
                 extra_outputs = []
                 for out in subtracer.tracked_tensor_or_symint_vt:
                     if out not in set(graph_output_vts):
@@ -1549,6 +1567,7 @@ def speculate_subgraph(
                 enable_grad,
                 under_activation_checkpoint,
                 restore_side_effects,
+                enable_side_effects_with_extra_outputs,
                 args,
                 sub_kwargs,
             )
@@ -2840,6 +2859,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             source_target=self.value,
             restore_side_effects=self.restore_side_effects,
             under_activation_checkpoint=under_activation_checkpoint,
+            enable_side_effects_with_extra_outputs=getattr(
+                self, "enable_side_effects_with_extra_outputs", False
+            ),
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
         )
@@ -3298,10 +3320,11 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # If side effects are allowed under checkpoint, we should not restore
-        # the side effects after speculate subgraph.
         self.restore_side_effects = (
             not torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
+        )
+        self.enable_side_effects_with_extra_outputs = (
+            torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
         )
 
     def _call_function(
@@ -4168,6 +4191,7 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     supports_input_mutation = True
     supports_aliasing = False
     restore_side_effects = False
+    enable_side_effects_with_extra_outputs = True
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
