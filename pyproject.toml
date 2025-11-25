@@ -382,14 +382,21 @@ package = 'torch'
 
 [tool.spin.commands]
 "Build" = [
-  ".spin/cmds.py:lint",
-  ".spin/cmds.py:fixlint",
-  ".spin/cmds.py:quicklint",
-  ".spin/cmds.py:quickfix",
+    ".spin/cmds.py:lint",
+    ".spin/cmds.py:fixlint",
+    ".spin/cmds.py:quicklint",
+    ".spin/cmds.py:quickfix",
 ]
 "Regenerate" = [
-  ".spin/cmds.py:regenerate_version",
-  ".spin/cmds.py:regenerate_type_stubs",
-  ".spin/cmds.py:regenerate_clangtidy_files",
-  ".spin/cmds.py:regenerate_github_workflows",
+    ".spin/cmds.py:regenerate_version",
+    ".spin/cmds.py:regenerate_type_stubs",
+    ".spin/cmds.py:regenerate_clangtidy_files",
+    ".spin/cmds.py:regenerate_github_workflows",
 ]
+
+[tool.pylint]
+main.py-version = "3.10"
+main.extension-pkg-allow-list = ["torch._C"]
+imports.known-standard-library = ["typing_extensions"]
+messages-control.disable = ["all"]
+messages-control.enable = ["comparison-with-callable"]
