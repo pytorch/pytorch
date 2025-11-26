@@ -885,9 +885,7 @@ class BuiltinVariable(VariableTracker):
                         if (left.exc_type is not right.exc_type) or (
                             len(left.args) != len(right.args)
                         ):
-                            return ConstantVariable.create(
-                                False if op is operator.is_ else True
-                            )
+                            return ConstantVariable.create(op is not operator.is_)
                         # They cannot be the same object if the arguments are different
                         m = BuiltinVariable(operator.eq).call_function
                         eq_nargs = len(left.args) == len(right.args)
@@ -898,9 +896,7 @@ class BuiltinVariable(VariableTracker):
                                 for a, b in zip(left.args, right.args)
                             )
                         ):
-                            return ConstantVariable.create(
-                                False if op is operator.is_ else True
-                            )
+                            return ConstantVariable.create(op is not operator.is_)
 
                 result.append(((VariableTracker, VariableTracker), handle_is))  # type: ignore[arg-type]
 

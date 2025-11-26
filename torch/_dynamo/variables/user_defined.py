@@ -582,6 +582,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
         elif (
+            # https://github.com/python/cpython/blob/33efd7178e269cbd04233856261fd0aabbf35447/Lib/contextlib.py#L475-L477
             self.value is types.MethodType
             and len(args) == 2
             and isinstance(args[0], variables.UserFunctionVariable)

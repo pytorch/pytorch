@@ -949,11 +949,9 @@ class ListVariable(CommonListMethodsVariable):
                     key=operator.itemgetter(1, 2),
                     reverse=reverse,
                 )
+                self.items[:] = [x for x, *_ in sorted_items_with_keys]
             except Exception as e:
-                raise_observed_exception(
-                    type(e), tx, args=[ConstantVariable(a) for a in e.args]
-                )
-            self.items[:] = [x for x, *_ in sorted_items_with_keys]
+                raise_observed_exception(type(e), tx, args=list(e.args))
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
