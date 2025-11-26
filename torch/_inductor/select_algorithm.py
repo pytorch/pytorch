@@ -3549,7 +3549,7 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             work = dist.all_reduce(
                 time_tensor,
-                op=dist.ReduceOp.AVG,
+                op=dist.ReduceOp.MAX,
                 group=process_group,
                 async_op=True,
             )
