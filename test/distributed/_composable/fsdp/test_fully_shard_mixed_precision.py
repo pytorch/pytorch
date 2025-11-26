@@ -620,6 +620,67 @@ class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
         loss = model(inp).sum()
         loss.backward()
 
+    @skip_if_lt_x_gpu(1)
+    @requires_nccl_version((2, 10), "Need NCCL 2.10+ for bf16 collectives")
+    def test_activation_checkpoint_with_mixed_precision(self):
+        class TransformerBlock(nn.Module):
+            def __init__(self, dim=64):
+                super().__init__()
+                self.ln1 = nn.LayerNorm(dim)
+                self.attn = nn.Linear(dim, dim)
+                self.ln2 = nn.LayerNorm(dim)
+                self.mlp = nn.Sequential(
+                    nn.Linear(dim, dim * 4),
+                    nn.GELU(),
+                    nn.Linear(dim * 4, dim),
+                )
+
+            def forward(self, x):
+                x = x + self.attn(self.ln1(x))
+                x = x + self.mlp(self.ln2(x))
+                return x
+
+        class Model(nn.Module):
+            def __init__(self, n_layers=3, dim=64):
+                super().__init__()
+                self.blocks = nn.ModuleList(
+                    [TransformerBlock(dim) for _ in range(n_layers)]
+                )
+
+            def forward(self, x):
+                for block in self.blocks:
+                    x = block(x)
+                return x
+
+        model = Model(n_layers=3, dim=64).to(device_type)
+
+        from torch.distributed._composable.checkpoint_activation import checkpoint
+
+        for block in model.blocks:
+            checkpoint(block)
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16,
+            cast_forward_inputs=True,
+        )
+
+        for block in model.blocks:
+            fully_shard(block, mp_policy=mp_policy)
+
+        fully_shard(model, mp_policy=mp_policy)
+
+        x = torch.randn(2, 16, 64, device=device_type.type, requires_grad=True)
+        output = model(x)
+
+        self.assertEqual(output.dtype, torch.bfloat16)
+        self.assertEqual(output.shape, torch.Size([2, 16, 64]))
+
+        loss = output.sum()
+        loss.backward()
+
+        for param in model.parameters():
+            self.assertIsNotNone(param.grad)
+
 
 if __name__ == "__main__":
     run_tests()
