@@ -341,7 +341,7 @@ void Reducer::check_grad_layout(
         grad.sizes(),
         ", strides() = ",
         grad.strides(),
-        "\n",
+        '\n',
         "bucket_view.sizes() = ",
         bucket_view.sizes(),
         ", strides() = ",
@@ -615,8 +615,8 @@ void Reducer::delay_all_reduce() {
           param_name != param_names_.end(),
           "Expected to find parameter name from unused parameters map in debug mode.");
       // Add the param_name
-      unused_params_stream << "{" << param_name->second << "," << unused_index
-                           << "}";
+      unused_params_stream << '{' << param_name->second << ',' << unused_index
+                           << '}';
     }
 
     // Each rank prints out all the unused parameters detected

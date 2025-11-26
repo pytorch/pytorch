@@ -42,7 +42,7 @@ class RAdam(Optimizer):  # noqa: D101
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -270,7 +270,7 @@ def _single_tensor_radam(
     maximize: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -377,7 +377,7 @@ def _multi_tensor_radam(
     maximize: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
@@ -586,7 +586,7 @@ def radam(
     lr: float,
     weight_decay: float,
     eps: float,
-):
+) -> None:
     r"""Functional API that performs RAdam algorithm computation.
 
     See :class:`~torch.optim.RAdam` for details.
