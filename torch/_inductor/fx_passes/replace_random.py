@@ -115,6 +115,18 @@ def replace_random_passes(gm: torch.fx.GraphModule):
     return count
 
 
+@custom_op("custom_op::cpu_barrier", mutates_args="unknown")
+@dynamo.disable
+def cpu_barrier(x: torch.Tensor) -> torch.Tensor:
+    return x.clone()
+
+@cpu_barrier.register_fake
+def _(x: torch.Tensor):
+    return x.clone()
+
+make_fallback(torch.ops.custom_op.cpu_barrier.default)
+
+
 def fuse_offset_creation_pass(graph: torch.fx.Graph):
     """
     Here offset node means seed << 32 + offset, will unpacked in lowering.py:inductor_random()
@@ -137,6 +149,12 @@ def fuse_offset_creation_pass(graph: torch.fx.Graph):
 
     for device, offsets in device_offsets.items():
         with graph.inserting_before(offsets[0]):
+            cond = graph.call_function(torch.ops.aten.scalar_tensor, (True,))
+            with V.fake_mode:
+                cond.meta["val"] = torch.tensor(True)
+                cond.meta["tensor_meta"] = _extract_tensor_metadata(cond.meta["val"])
+            _ = graph.call_function(torch.ops.custom_op.cpu_barrier.default, (cond,))
+
             offs = [n.args[0] for n in offsets]
             combined = graph.call_function(torch.ops.custom_op.rand_eager_offsets.default, (offs, device))
             with V.fake_mode:
