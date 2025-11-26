@@ -4148,6 +4148,31 @@ if HAS_CUDA_AND_TRITON:
                         "def triton_poi_fused_add_", 1, exactly=True
                     ).run(code[0])
 
+        @config.patch("graph_partition", True)
+        def test_graph_partition_user_defined_triton_kernel_reuse(self):
+            from torch.testing._internal.triton_utils import add_kernel
+
+            def foo(x, y):
+                # partition 1
+                output1 = torch.empty_like(x)
+                add_kernel[(4,)](x, y, output1, n_elements=128, BLOCK_SIZE=16)
+                output1_cpu = output1.cpu() + 1
+                # partition 2 should reuse the user-defined kernel
+                x2 = output1_cpu.to("cuda")
+                output2 = torch.empty_like(x)
+                add_kernel[(4,)](x2, y, output2, n_elements=128, BLOCK_SIZE=16)
+                return output1, output2
+
+            compiled_foo = torch.compile(foo)
+            x = torch.randn(128, device="cuda")
+            y = torch.randn(128, device="cuda")
+            eager_out = foo(x, y)
+            compiled_out, code = run_and_get_code(compiled_foo, x, y)
+            self.assertEqual(eager_out, compiled_out)
+            FileCheck().check_count(
+                "async_compile.triton('add_kernel',", 1, exactly=True
+            ).run(code[0])
+
         def test_meta_tensor(self):
             def foobar(x, y):
                 return x * 2, y * 3
