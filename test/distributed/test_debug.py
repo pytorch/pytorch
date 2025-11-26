@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import shutil
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -67,6 +68,10 @@ class TestDebug(TestCase):
             out = fetch("/tcpstore")
             self.assertIn("test: b'value'", out)
             self.assertIn("test2: b'" + "a" * 95 + "...", out)
+
+        with self.subTest("pyspy"):
+            if shutil.which("py-spy"):
+                self.assertIn("test_all", fetch("/pyspy_dump_native"))
 
         stop_debug_server()
 

@@ -148,6 +148,7 @@ templates = {
 
     <a href="/">Home</a> <!--@lint-ignore-->
     <a href="/stacks">Python Stack Traces</a> <!--@lint-ignore-->
+    <a href="/pyspy_dump_native">py-spy Stacks</a> <!--@lint-ignore-->
     <a href="/fr_trace">FlightRecorder CPU</a> <!--@lint-ignore-->
     <a href="/fr_trace_json">(JSON)</a> <!--@lint-ignore-->
     <a href="/fr_trace_nccl">FlightRecorder NCCL</a> <!--@lint-ignore-->
@@ -342,6 +343,7 @@ class FrontendServer:
         self._routes = {
             "/": self._handle_index,
             "/stacks": self._handle_stacks,
+            "/pyspy_dump_native": self._handle_pyspy_dump_native,
             "/fr_trace": self._handle_fr_trace,
             "/fr_trace_json": self._handle_fr_trace_json,
             "/fr_trace_nccl": self._handle_fr_trace_nccl,
@@ -365,6 +367,7 @@ class FrontendServer:
             target=self._serve,
             args=(),
             daemon=True,
+            name="distributed.debug.FrontendServer",
         )
         self._thread.start()
 
@@ -409,6 +412,15 @@ class FrontendServer:
         addrs, resps = fetch_all("dump_traceback")
         return self._render_template(
             "raw_resp.html", title="Stacks", addrs=addrs, resps=resps
+        )
+
+    def _handle_pyspy_dump_native(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("pyspy_dump_native")
+        return self._render_template(
+            "raw_resp.html",
+            title="py-spy Native Stack Traces",
+            addrs=addrs,
+            resps=resps,
         )
 
     def _render_fr_trace(self, addrs: list[str], resps: list[Response]) -> bytes:

@@ -91,6 +91,32 @@ RegisterHandler waitCounterHandler{
 }();
 #endif
 
+RegisterHandler pyspyHandler{
+    "pyspy_dump_native",
+    [](const Request&, Response& res) {
+      pid_t target = getpid();
+      std::string cmd =
+          "py-spy dump --pid " + std::to_string(target) + " --native 2>&1";
+      std::array<char, 4096> buf{};
+      std::string output;
+      FILE* pipe = popen(cmd.c_str(), "r");
+      if (!pipe) {
+        throw std::runtime_error("Failed to start py-spy, not installed?");
+      }
+      while (fgets(buf.data(), buf.size(), pipe)) {
+        output.append(buf.data());
+      }
+      int rc = pclose(pipe);
+
+      // Get all wait counter values from our tracking backend
+      res.setContent(std::move(output), "text/plain");
+      if (rc != 0) {
+        res.setStatus(500);
+      } else {
+        res.setStatus(200);
+      }
+    }};
+
 } // namespace
 
 void registerHandler(const std::string& name, HandlerFunc f) {
