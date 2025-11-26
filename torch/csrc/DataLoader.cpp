@@ -61,8 +61,8 @@ static void setSignalHandler(
       sigaction(signal, &sa, old_sa_ptr) != 0) {
     std::ostringstream oss;
     oss << "An error occurred while setting handler for " << strsignal(signal)
-        << ".";
-    throw std::runtime_error(oss.str());
+        << '.';
+    TORCH_CHECK(false, oss.str());
   }
 }
 
@@ -141,29 +141,32 @@ static PyObject* THPModule_errorIfAnyWorkerFails(
         continue;
       if (infop.si_code == CLD_EXITED &&
           infop.si_status != EXIT_SUCCESS) { // exit with error
-        std::ostringstream oss;
-        oss << "DataLoader worker (pid " << worker_pid << ") exited "
-            << "unexpectedly with exit code " << infop.si_status << ". "
-            << "Details are lost due to multiprocessing. Rerunning with "
-            << "num_workers=0 may give better error trace.";
+        auto error_msg = fmt::format(
+            "DataLoader worker (pid {}) exited unexpectedly with exit code {}. "
+            "Details are lost due to multiprocessing. Rerunning with "
+            "num_workers=0 may give better error trace.",
+            worker_pid,
+            infop.si_status);
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set.clear();
-        throw std::runtime_error(oss.str());
+        TORCH_CHECK(false, error_msg);
       } else if (
           infop.si_code == CLD_KILLED ||
           infop.si_code == CLD_DUMPED) { // killed by signal
-        std::ostringstream oss;
-        oss << "DataLoader worker (pid " << worker_pid << ") is killed "
-            << "by signal: " << strsignal(infop.si_status) << ". ";
+        auto error_msg = fmt::format(
+            "DataLoader worker (pid {}) is killed by signal: {}. ",
+            worker_pid,
+            strsignal(infop.si_status));
         if (infop.si_status == SIGBUS) {
-          oss << "It is possible that dataloader's workers are out of shared memory. "
-              << "Please try to raise your shared memory limit.";
+          error_msg +=
+              "It is possible that dataloader's workers are out of shared memory. "
+              "Please try to raise your shared memory limit.";
         }
         // This is necessary. Otherwise, the runtime error will kill the other
         // workers, and trigger this again.
         pid_set.clear();
-        throw std::runtime_error(oss.str());
+        TORCH_CHECK(false, error_msg);
       }
     }
   }

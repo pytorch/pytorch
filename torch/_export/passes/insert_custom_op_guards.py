@@ -54,12 +54,10 @@ def get_op_profiles(
 
     def _get_op_profile(node: torch.fx.Node) -> OpProfile:
         args_profile = tuple(
-            [
-                TensorMetadata.maybe_from_tensor(arg.meta.get("val"))
-                if isinstance(arg, torch.fx.Node)
-                else None
-                for arg in (*node.args, *node.kwargs.values())
-            ]
+            TensorMetadata.maybe_from_tensor(arg.meta.get("val"))
+            if isinstance(arg, torch.fx.Node)
+            else None
+            for arg in (*node.args, *node.kwargs.values())
         )
 
         out_profile = None
@@ -68,7 +66,7 @@ def get_op_profiles(
         if isinstance(meta, torch.Tensor):
             out_profile = TensorMetadata.maybe_from_tensor(meta)
         elif isinstance(meta, (list, tuple)):
-            out_profile = tuple([TensorMetadata.maybe_from_tensor(m) for m in meta])  # type: ignore[assignment]
+            out_profile = tuple(TensorMetadata.maybe_from_tensor(m) for m in meta)  # type: ignore[assignment]
         assert out_profile is not None
 
         return OpProfile(args_profile, out_profile)  # type: ignore[arg-type]

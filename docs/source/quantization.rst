@@ -35,7 +35,6 @@ and supported quantized modules and functions.
 
     quantization-support
 
-
 .. torch.ao is missing documentation. Since part of it is mentioned here, adding them here for now.
 .. They are here for tracking purposes until they are more permanently fixed.
 .. py:module:: torch.ao
@@ -110,7 +109,6 @@ and supported quantized modules and functions.
 .. py:module:: torch.ao.quantization.backend_config.executorch
 .. py:module:: torch.ao.quantization.backend_config.fbgemm
 .. py:module:: torch.ao.quantization.backend_config.native
-.. py:module:: torch.ao.quantization.backend_config.observation_type
 .. py:module:: torch.ao.quantization.backend_config.onednn
 .. py:module:: torch.ao.quantization.backend_config.qnnpack
 .. py:module:: torch.ao.quantization.backend_config.tensorrt
@@ -136,7 +134,6 @@ and supported quantized modules and functions.
 .. py:module:: torch.ao.quantization.fx.utils
 .. py:module:: torch.ao.quantization.observer
 .. py:module:: torch.ao.quantization.pt2e.duplicate_dq_pass
-.. py:module:: torch.ao.quantization.pt2e.export_utils
 .. py:module:: torch.ao.quantization.pt2e.graph_utils
 .. py:module:: torch.ao.quantization.pt2e.port_metadata_pass
 .. py:module:: torch.ao.quantization.pt2e.prepare
@@ -160,7 +157,6 @@ and supported quantized modules and functions.
 .. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer
 .. py:module:: torch.ao.quantization.quantizer.xnnpack_quantizer_utils
 .. py:module:: torch.ao.quantization.stubs
-.. py:module:: torch.ao.quantization.utils
 .. py:module:: torch.nn.intrinsic.modules.fused
 .. py:module:: torch.nn.intrinsic.qat.modules.conv_fused
 .. py:module:: torch.nn.intrinsic.qat.modules.linear_fused

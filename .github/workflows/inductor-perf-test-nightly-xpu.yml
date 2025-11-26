@@ -1,0 +1,148 @@
+name: inductor-perf-nightly-xpu
+
+on:
+  push:
+    tags:
+      - ciflow/inductor-perf-test-nightly-xpu/*
+  schedule:
+    - cron: 30 17 * * *
+  workflow_dispatch:
+    inputs:
+      training:
+        description: Run training (on by default)?
+        required: false
+        type: boolean
+        default: true
+      inference:
+        description: Run inference (on by default)?
+        required: false
+        type: boolean
+        default: true
+      default:
+        description: Run inductor_default?
+        required: false
+        type: boolean
+        default: false
+      dynamic:
+        description: Run inductor_dynamic_shapes?
+        required: false
+        type: boolean
+        default: false
+      cppwrapper:
+        description: Run inductor_cpp_wrapper?
+        required: false
+        type: boolean
+        default: false
+      cudagraphs:
+        description: Run inductor_cudagraphs?
+        required: false
+        type: boolean
+        default: false
+      freezing_cudagraphs:
+        description: Run inductor_cudagraphs with freezing for inference?
+        required: false
+        type: boolean
+        default: false
+      aotinductor:
+        description: Run aot_inductor for inference?
+        required: false
+        type: boolean
+        default: false
+      maxautotune:
+        description: Run inductor_max_autotune?
+        required: false
+        type: boolean
+        default: false
+      benchmark_configs:
+        description: The list of configs used the benchmark
+        required: false
+        type: string
+        default: inductor_huggingface_perf,inductor_timm_perf,inductor_torchbench_perf,cachebench
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions: read-all
+
+jobs:
+  get-label-type:
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  xpu-n-py3_10-inductor-benchmark-build:
+    name: xpu-n-py3.10-inductor-benchmark
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-noble-xpu-n-py3.10
+      docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3-inductor-benchmarks
+      runner: linux.c7i.12xlarge
+      test-matrix: |
+        { include: [
+          { config: "inductor_huggingface_perf_xpu", shard: 1, num_shards: 5, runner: "linux.idc.xpu" },
+          { config: "inductor_huggingface_perf_xpu", shard: 2, num_shards: 5, runner: "linux.idc.xpu" },
+          { config: "inductor_huggingface_perf_xpu", shard: 3, num_shards: 5, runner: "linux.idc.xpu" },
+          { config: "inductor_huggingface_perf_xpu", shard: 4, num_shards: 5, runner: "linux.idc.xpu" },
+          { config: "inductor_huggingface_perf_xpu", shard: 5, num_shards: 5, runner: "linux.idc.xpu" },
+          { config: "inductor_timm_perf_xpu", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_timm_perf_xpu", shard: 2, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_timm_perf_xpu", shard: 3, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_timm_perf_xpu", shard: 4, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_timm_perf_xpu", shard: 5, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_timm_perf_xpu", shard: 6, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_torchbench_perf_xpu", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_torchbench_perf_xpu", shard: 2, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_torchbench_perf_xpu", shard: 3, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_torchbench_perf_xpu", shard: 4, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_torchbench_perf_xpu", shard: 5, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "inductor_torchbench_perf_xpu", shard: 6, num_shards: 6, runner: "linux.idc.xpu" },
+        ]}
+    secrets: inherit
+
+  xpu-n-py3_10-inductor-benchmark-test-nightly:
+    permissions:
+      id-token: write
+      contents: read
+    if: github.event_name != 'workflow_dispatch'
+    name: xpu-n-py3.10-inductor-benchmark
+    uses: ./.github/workflows/_xpu-test.yml
+    needs: xpu-n-py3_10-inductor-benchmark-build
+    with:
+      build-environment: linux-noble-xpu-n-py3.10
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-false-cppwrapper-true-aotinductor-true-freezing_cudagraphs-false-cudagraphs_low_precision-false
+      docker-image: ${{ needs.xpu-n-py3_10-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.xpu-n-py3_10-inductor-benchmark-build.outputs.test-matrix }}
+      timeout-minutes: 720
+      # Disable monitor in perf tests for more investigation
+      disable-monitor: true
+      monitor-log-interval: 10
+      monitor-data-collect-interval: 2
+    secrets: inherit
+
+  xpu-n-py3_10-inductor-benchmark-test:
+    permissions:
+      id-token: write
+      contents: read
+    if: github.event_name == 'workflow_dispatch'
+    name: xpu-n-py3.10-inductor-test
+    uses: ./.github/workflows/_xpu-test.yml
+    needs: xpu-n-py3_10-inductor-benchmark-build
+    with:
+      build-environment: linux-noble-xpu-n-py3.10
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
+      docker-image: ${{ needs.xpu-n-py3_10-inductor-benchmark-build.outputs.docker-image }}
+      test-matrix: ${{ needs.xpu-n-py3_10-inductor-benchmark-build.outputs.test-matrix }}
+      timeout-minutes: 720
+      disable-monitor: false
+      monitor-log-interval: 15
+      monitor-data-collect-interval: 4
+    secrets: inherit

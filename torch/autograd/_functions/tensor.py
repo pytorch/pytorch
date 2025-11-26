@@ -15,12 +15,14 @@ class Type(Function):
         "please use `torch.tensor.to(dtype=dtype)` instead.",
         category=FutureWarning,
     )
+    # pyrefly: ignore [bad-override]
     def forward(ctx, i, dest_type):
         ctx.input_type = type(i)
         ctx.input_device = -1 if not i.is_cuda else i.get_device()
         return i.type(dest_type)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         if ctx.input_device == -1:
             return grad_output.type(ctx.input_type), None
@@ -32,6 +34,7 @@ class Type(Function):
 # TODO: deprecate this
 class Resize(Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx, tensor, sizes):
         ctx.sizes = sizes
         ctx.numel = reduce(operator.mul, sizes, 1)
@@ -60,6 +63,10 @@ class Resize(Function):
             return tensor.contiguous().view(*sizes)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
-        assert grad_output.numel() == ctx.numel
+        if grad_output.numel() != ctx.numel:
+            raise AssertionError(
+                f"Expected grad_output to have {ctx.numel} elements, but got {grad_output.numel()}"
+            )
         return grad_output.contiguous().view(ctx.input_sizes), None

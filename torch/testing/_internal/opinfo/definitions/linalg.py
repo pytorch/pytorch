@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     skipIfSlowGradcheckEnv,
     slowTest,
     TEST_WITH_ROCM,
+    TEST_XPU,
 )
 from torch.testing._internal.opinfo.core import (
     clone_sample,
@@ -292,7 +293,7 @@ def sample_inputs_linalg_multi_dot(op_info, device, dtype, requires_grad, **kwar
 
     for sizes in test_cases:
         tensors = []
-        for size in zip(sizes[:-1], sizes[1:]):
+        for size in itertools.pairwise(sizes):
             t = make_tensor(
                 size, dtype=dtype, device=device, requires_grad=requires_grad
             )
@@ -321,7 +322,7 @@ def sample_inputs_linalg_matrix_norm(op_info, device, dtype, requires_grad, **kw
 def sample_inputs_linalg_norm(
     op_info, device, dtype, requires_grad, *, variant=None, **kwargs
 ):
-    if variant is not None and variant not in ("subgradient_at_zero",):
+    if variant is not None and variant != "subgradient_at_zero":
         raise ValueError(
             f"Unsupported variant, expected variant to be 'subgradient_at_zero' but got: {variant}"
         )
@@ -381,9 +382,6 @@ def sample_inputs_linalg_norm(
                 elif is_matrix_norm:
                     dims_to_check = {
                         None: (0,),
-                        np.inf: (0,),
-                        2: (0, 1),
-                        1: (1,),
                         -1: (1,),
                         -2: (0, 1),
                         -np.inf: (0,),
@@ -392,6 +390,18 @@ def sample_inputs_linalg_norm(
                     if any(test_size[d] == 0 for d in dims_to_check):
                         # IndexError: amax(): Expected reduction dim {dim} to
                         # have non-zero size.
+                        continue
+
+                    no_grad_dims_to_check = {
+                        np.inf: (0,),
+                        2: (0, 1),
+                        1: (1,),
+                    }.get(ord, ())
+
+                    if (
+                        any(test_size[d] == 0 for d in no_grad_dims_to_check)
+                        and requires_grad
+                    ):
                         continue
 
                 if variant == "subgradient_at_zero":
@@ -1766,7 +1776,12 @@ op_db: list[OpInfo] = [
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
             # linalg.lu_factor: LU without pivoting is not implemented on the CPU
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_compare_cpu",
+                active_if=(not TEST_XPU),
+            ),
         ),
     ),
     OpInfo(
@@ -1782,7 +1797,12 @@ op_db: list[OpInfo] = [
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
             # linalg.lu_factor: LU without pivoting is not implemented on the CPU
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_compare_cpu",
+                active_if=(not TEST_XPU),
+            ),
         ),
     ),
     OpInfo(
@@ -1799,7 +1819,12 @@ op_db: list[OpInfo] = [
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
             # linalg.lu_factor: LU without pivoting is not implemented on the CPU
-            DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_compare_cpu",
+                active_if=(not TEST_XPU),
+            ),
         ),
     ),
     OpInfo(

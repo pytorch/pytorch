@@ -2,8 +2,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/Copy.h>
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -14,7 +12,6 @@
 #include <ATen/ops/_copy_from_and_resize.h>
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/acosh_native.h>
-#include <ATen/ops/angle_native.h>
 #include <ATen/ops/asin_native.h>
 #include <ATen/ops/asinh_native.h>
 #include <ATen/ops/atan_native.h>
@@ -184,7 +181,6 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
 
 REGISTER_MPS_UNARY_STUB(ceil, ceil);
 REGISTER_MPS_UNARY_STUB(floor, floor);
-REGISTER_MPS_UNARY_STUB(round, round);
 REGISTER_MPS_UNARY_STUB(trunc, truncate);
 
 #define CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                         \
@@ -205,23 +201,6 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
     return [mpsGraph notWithTensor:inputTensor name:nil];
   });
   return output;
-}
-
-Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
-  mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    auto realPart = [mpsGraph realPartOfTensor:inputTensor name:nil];
-    auto imagPart = [mpsGraph imaginaryPartOfTensor:inputTensor name:nil];
-    return [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:realPart name:nil];
-  });
-  return output;
-}
-
-Tensor angle_mps(const Tensor& self) {
-  const auto float_type = c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)
-      ? c10::typeMetaToScalarType(c10::get_default_dtype())
-      : c10::toRealValueType(self.scalar_type());
-  Tensor result = at::empty({0}, self.options().dtype(float_type));
-  return angle_out_mps(self, result);
 }
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
@@ -418,6 +397,7 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
 
 Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
   TORCH_CHECK(self.is_complex());
+  TORCH_CHECK(self.dtype() != at::kComplexDouble);
   mps::unary_op(self, result, "conj", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
     return [mpsGraph conjugateWithTensor:inputTensor name:nil];
   });
