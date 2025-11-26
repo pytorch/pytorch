@@ -3,7 +3,7 @@ from collections.abc import Sequence
 from typing import cast, Optional
 
 import torch
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
@@ -443,12 +443,12 @@ def quantize_mx_strategy(
     - Non-linear operation (Partial -> Replicate)
     """
     quantize_strategy = OpStrategy([])
-    
+
     for op_spec in followed_strategy.strategies:
         spec_to_follow = op_spec.output_spec
-        
         # Build output placements (same for both outputs)
         out_placements: list[Placement] = []
+        
         for placement in spec_to_follow.placements:
             if isinstance(placement, Shard):
                 # Keep shard placement as-is (no broadcasting to adjust)
@@ -462,7 +462,6 @@ def quantize_mx_strategy(
         
         # Input spec (just follow the input as-is)
         input_arg_spec = args_schema[0].strategies[0].output_spec
-        
         input_target_spec = DTensorSpec(
             mesh=followed_strategy.mesh,
             placements=tuple(out_placements),
@@ -478,11 +477,22 @@ def quantize_mx_strategy(
         quantized_spec = DTensorSpec(
             mesh=followed_strategy.mesh,
             placements=tuple(out_placements),
+            tensor_meta=input_arg_spec.tensor_meta,
         )
         
+        scale_shape = list(input_arg_spec.tensor_meta.shape)
+        dim = args_schema[1]
+        scale_shape[dim] = scale_shape[dim] // 32
+        scale_meta = TensorMeta(
+            shape=tuple(scale_shape),
+            stride=None,  # Let PyTorch infer
+            dtype=torch.float8_e8m0fnu, 
+        )
+
         scale_spec = DTensorSpec(
             mesh=followed_strategy.mesh,
             placements=tuple(out_placements),
+            tensor_meta=scale_meta,  
         )
         
         quantize_strategy.strategies.append(
