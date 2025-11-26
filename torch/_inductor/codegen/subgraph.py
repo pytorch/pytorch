@@ -139,7 +139,14 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         """
         Regular benchmarking: compile and use benchmarker with warmup/rep.
         """
-        mod, sym_inputs = self._compile_for_benchmarking(*args)
+        if self._compiled_module is None:
+            mod, sym_inputs = self._compile_for_benchmarking(*args)
+            self._compiled_module = mod
+            self._compiled_sym_inputs = sym_inputs
+        else:
+            mod = self._compiled_module
+            sym_inputs = self._compiled_sym_inputs
+            assert sym_inputs is not None  # Type narrowing
 
         bm_func = mod.call
         if config.profile_bandwidth_with_do_bench_using_profiling:

@@ -2359,8 +2359,7 @@ class ExternKernelCaller(ChoiceCaller):
         if self.has_out_variant:
             algo(*args, out=out)
         else:
-            out_new = algo(*args)
-            out.copy_(out_new)
+            algo(*args)
 
         return 0.0
 
@@ -3468,19 +3467,20 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         import torch.distributed as dist
 
+        # Barrier once to ensures all ranks are ready to benchmark the same choice
+        work = dist.barrier(group=process_group, async_op=True)
+        if not work.wait(timeout):
+            raise TimeoutError(
+                f"Barrier timeout before {'warmup' if is_warmup else 'benchmark'} for choice {getattr(choice, 'name', '<unknown>')}"
+            )
+
+        torch.cuda.synchronize()
+
         total_time = 0.0
 
         for i in range(nruns):
             if not is_warmup:
                 log.debug("Benchmark run %d/%d", i + 1, nruns)
-
-            # Barrier before each run
-            # If any rank times out here, all ranks will time out naturally
-            work = dist.barrier(group=process_group, async_op=True)
-            if not work.wait(timeout):
-                raise TimeoutError(
-                    f"Barrier timeout during {'warmup' if is_warmup else 'benchmark'}"
-                )
 
             torch.cuda.synchronize()
 
@@ -3530,7 +3530,9 @@ class AlgorithmSelectorCache(PersistentCache):
         process_group = None
         rank = dist.get_rank(process_group)
 
-        benchmark_tensors = autotune_args.get_benchmark_tensors(cls._is_extern(choice))
+        benchmark_tensors: BenchmarkTensors = autotune_args.get_benchmark_tensors(
+            cls._is_extern(choice)
+        )
         inputs, output = benchmark_tensors.unpack()
         output.zero_()
 
