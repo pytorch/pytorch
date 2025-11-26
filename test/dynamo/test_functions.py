@@ -153,7 +153,7 @@ def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
 
 
-class FunctionTests(torch._dynamo.test_case.TestCase):
+class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -2363,6 +2363,34 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(output, expected))
         assert cnt.frame_count == 1
 
+    @unittest.skipIf(sys.version_info < (3, 13), "math.fma introduced in python 3.13")
+    def test_math_fma(self):
+        def fma_func(a, b, c):
+            return math.fma(a, b, c)
+
+        # Test with scalar constants (constant folding path)
+        cnt = torch._dynamo.testing.CompileCounter()
+        cfma_scalars = torch._dynamo.optimize_assert(cnt)(fma_func)
+
+        assert cnt.frame_count == 0
+        expected = fma_func(2.0, 3.0, 4.0)
+        output = cfma_scalars(2.0, 3.0, 4.0)
+        self.assertEqual(output, expected)
+        assert cnt.frame_count == 0
+
+        # Test with tensors (Inductor path)
+        cnt2 = torch._dynamo.testing.CompileCounter()
+        cfma_tensors = torch._dynamo.optimize_assert(cnt2)(fma_func)
+
+        assert cnt2.frame_count == 0
+        x = torch.tensor(2.0)
+        y = torch.tensor(3.0)
+        z = torch.tensor(4.0)
+        expected_tensors = x * y + z
+        output_tensors = cfma_tensors(x, y, z)
+        torch.testing.assert_close(output_tensors, expected_tensors)
+        assert cnt2.frame_count == 1
+
     @make_test
     def test_numpy_meshgrid(x, y):
         r1, r2 = np.meshgrid(x.numpy(), y.numpy())
@@ -4193,7 +4221,7 @@ class WrapperModule(torch.nn.Module):
         return self.m()
 
 
-class DefaultsTests(torch._dynamo.test_case.TestCase):
+class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_func_default_tensor_args(self):
         """
         Tests that we indeed reference (and mutate) "the one" default tensor arg
@@ -4721,7 +4749,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             x = x.clone()
             for y, z in zip(ys, zs, strict=True):
                 x += y * z
-            return x
+            return x, zip(ys, zs)
 
         opt_fn = torch.compile(fn, backend="eager")
         nopython_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -4730,7 +4758,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ys = [1.0, 2.0, 3.0]
         zs = [2.0, 5.0, 8.0]
 
-        self.assertEqual(opt_fn(x, ys, zs), fn(x, ys, zs))
+        ref = fn(x, ys, zs)
+        res = opt_fn(x, ys, zs)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(list(ref[1]), list(res[1]))
+        self.assertIsInstance(res[1], zip)
 
         # If nopython, should raise UserError
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):

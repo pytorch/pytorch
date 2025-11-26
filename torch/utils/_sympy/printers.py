@@ -34,6 +34,9 @@ class ExprPrinter(StrPrinter):
     def _print_BitwiseFn_bitwise_or(self, expr: sympy.Expr) -> str:
         return self.stringify(expr.args, " | ", PRECEDENCE["BitwiseOr"])
 
+    def _print_BitwiseFn_bitwise_xor(self, expr: sympy.Expr) -> str:
+        return self.stringify(expr.args, " ^ ", PRECEDENCE["BitwiseXor"])
+
     # NB: this is OK to put here, because Mod is only defined for positive
     # numbers, and so across C/Python its behavior is consistent
     def _print_Mod(self, expr: sympy.Expr) -> str:

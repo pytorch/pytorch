@@ -57,7 +57,7 @@ bool is_nvshmem_available() {
     // Open the shared library, RTLD_LAZY defers symbol resolution until needed
     handle = dlopen("libnvshmem_host.so.3", RTLD_LAZY);
     if (!handle) {
-      std::cerr << dlerror() << "\n";
+      std::cerr << dlerror() << '\n';
       is_available = 0;
     } else {
       is_available = 1;

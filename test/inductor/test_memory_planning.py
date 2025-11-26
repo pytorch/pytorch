@@ -3,7 +3,7 @@
 import sys
 import unittest
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfXpu
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -82,7 +82,6 @@ class TestMemoryPlanning(TestCase):
         ).run(code)
         self.assertTrue(same(f(*args), result))
 
-    @skipIfXpu(msg="aoti doesn't work on XPU")
     def test_aoti(self):
         f, args = self._generate(device=GPU_TYPE)
         dim0_x = Dim("dim0_x", min=1, max=2048)

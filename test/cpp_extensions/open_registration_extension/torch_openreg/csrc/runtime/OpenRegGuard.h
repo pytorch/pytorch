@@ -11,6 +11,7 @@
 
 namespace c10::openreg {
 
+// LITERALINCLUDE START: OPENREG DEVICE MGMT GUARD IMPL EXAMPLE
 struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = c10::DeviceType::PrivateUse1;
 
@@ -58,6 +59,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     set_device(d.index());
   }
+// LITERALINCLUDE END: OPENREG DEVICE MGMT GUARD IMPL EXAMPLE
 
   /**
    * Set the current device to c10::Device, without checking for errors

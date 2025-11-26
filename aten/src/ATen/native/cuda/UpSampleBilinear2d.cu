@@ -806,7 +806,7 @@ static void upsample_gen2d_aa_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = input.packed_accessor64<const scalar_t, 4>();
-        auto odata = output_c.packed_accessor64<scalar_t, 4>();
+        auto odata = output_c.template packed_accessor64<scalar_t, 4>();
 
         const accscalar_t height_scale = area_pixel_compute_scale<accscalar_t>(
             input_height, output_height, align_corners, scales_h);

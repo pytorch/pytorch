@@ -2,7 +2,6 @@
 """Defines bias subclasses that work with scaled_dot_product_attention"""
 
 from enum import auto, IntEnum
-from typing import Optional
 from warnings import warn
 
 import torch
@@ -155,7 +154,7 @@ class CausalBias(torch.Tensor):
         )
 
     # pyrefly: ignore [bad-return]
-    def _materialize(self, device: Optional[torch.device] = None) -> torch.Tensor:
+    def _materialize(self, device: torch.device | None = None) -> torch.Tensor:
         """
         Materializes the causal bias into a tensor form.
 
@@ -183,7 +182,7 @@ class CausalBias(torch.Tensor):
         attn_mask: "CausalBias",
         dropout_p: float = 0.0,
         is_causal: bool = False,
-        scale: Optional[float] = None,
+        scale: float | None = None,
         enable_gqa: bool = False,
     ) -> torch.Tensor:
         r"""

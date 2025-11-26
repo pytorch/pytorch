@@ -354,7 +354,7 @@ struct Symbolizer {
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    entry.comm->out() << (void*)libaddress << "\n";
+    entry.comm->out() << (void*)libaddress << '\n';
     // we need to make sure we don't write more than 64k bytes to
     // a pipe before reading the results. Otherwise the buffer may
     // get filled and block before we read the results.

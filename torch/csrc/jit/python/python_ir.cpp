@@ -61,7 +61,7 @@ static std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
     // tuple.__str__; this doesn't work because Python doesn't allow
     // monkeypatching methods of built-in types.
     auto pytuple = pyobj.cast<py::tuple>();
-    out << "(";
+    out << '(';
     size_t i = 0;
     for (const auto& o : pytuple) {
       if (i > 0) {
@@ -72,9 +72,9 @@ static std::ostream& printPyObject(std::ostream& out, const THPObjectPtr& obj) {
       i++;
     }
     if (i == 1) {
-      out << ",";
+      out << ',';
     }
-    out << ")";
+    out << ')';
     return out;
   } else {
     return out << THPUtils_unpackString(py::str(pyobj).ptr());
@@ -154,14 +154,14 @@ std::optional<THPObjectPtr> ConcretePythonOp::autogradFunction() const {
 }
 
 void ConcretePythonOp::writeScalars(std::ostream& out) const {
-  out << "(";
+  out << '(';
   int i = 0;
   for (auto& scalar : scalar_args) {
     if (i++ > 0)
       out << ", ";
     printPyObject(out, scalar);
   }
-  out << ")";
+  out << ')';
 }
 
 void ConcretePythonOp::lint_python() const {
@@ -506,7 +506,7 @@ void initPythonIRBindings(PyObject* module_) {
           "__repr__",
           [](Value& n) {
             std::stringstream ss;
-            ss << n.debugName() << " defined in (" << *n.node() << ")";
+            ss << n.debugName() << " defined in (" << *n.node() << ')';
             return ss.str();
           })
       .VS(type)

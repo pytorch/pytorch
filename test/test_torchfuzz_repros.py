@@ -423,6 +423,156 @@ class TestFuzzerCompileIssues(TestCase):
         out_compiled.sum().backward()
         print("Compile Success! ✅")
 
+    @pytest.mark.xfail(reason="Issue #167937")
+    def test_fuzzer_issue_167937(self):
+        torch.manual_seed(1251149731)
+        torch.set_default_device("cuda")
+
+        def fuzzed_program(
+            arg_0,
+            arg_1,
+            arg_2,
+            arg_3,
+            arg_4,
+            arg_5,
+            arg_6,
+            arg_7,
+            arg_8,
+            arg_9,
+            sentinel,
+        ):
+            var_node_3 = arg_0  # size=(27, 28, 7), stride=(196, 7, 1), dtype=bfloat16, device=cuda
+            var_node_4 = (
+                arg_1  # size=(27, 7, 6), stride=(42, 6, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_2 = torch.matmul(
+                var_node_3.to(torch.bfloat16), var_node_4.to(torch.bfloat16)
+            )  # size=(27, 28, 6), stride=(168, 6, 1), dtype=bfloat16, device=cuda
+            var_node_6 = (
+                arg_2  # size=(27, 6, 9), stride=(54, 9, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_7 = torch.full(
+                (27, 9, 1), -0.310546875, dtype=torch.bfloat16
+            )  # size=(27, 9, 1), stride=(9, 1, 1), dtype=bfloat16, device=cuda
+            var_node_5 = torch.matmul(
+                var_node_6.to(torch.bfloat16), var_node_7.to(torch.bfloat16)
+            )  # size=(27, 6, 1), stride=(6, 1, 1), dtype=bfloat16, device=cuda
+            var_node_1 = torch.matmul(
+                var_node_2.to(torch.bfloat16), var_node_5.to(torch.bfloat16)
+            )  # size=(27, 28, 1), stride=(28, 1, 1), dtype=bfloat16, device=cuda
+            var_node_8 = arg_3  # size=(27, 28, 1), stride=(28, 1, 1), dtype=bfloat16, device=cuda
+            var_node_9 = torch.full(
+                (27, 28, 1), 0.76953125, dtype=torch.bfloat16
+            )  # size=(27, 28, 1), stride=(28, 1, 1), dtype=bfloat16, device=cuda
+            var_node_12 = (
+                arg_4  # size=(3, 4), stride=(4, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_13 = (
+                arg_5  # size=(4, 15), stride=(15, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_11 = torch.matmul(
+                var_node_12.to(torch.bfloat16), var_node_13.to(torch.bfloat16)
+            )  # size=(3, 15), stride=(15, 1), dtype=bfloat16, device=cuda
+            var_node_15 = (
+                arg_6  # size=(15, 12), stride=(12, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_16 = (
+                arg_7  # size=(12, 1), stride=(1, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_14 = torch.matmul(
+                var_node_15.to(torch.bfloat16), var_node_16.to(torch.bfloat16)
+            )  # size=(15, 1), stride=(1, 1), dtype=bfloat16, device=cuda
+            var_node_10 = torch.matmul(
+                var_node_11.to(torch.bfloat16), var_node_14.to(torch.bfloat16)
+            )  # size=(3, 1), stride=(1, 1), dtype=bfloat16, device=cuda
+            var_node_19 = (
+                arg_8  # size=(1, 8), stride=(8, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_20 = (
+                arg_9  # size=(8, 2), stride=(2, 1), dtype=bfloat16, device=cuda
+            )
+            var_node_18 = torch.matmul(
+                var_node_19.to(torch.bfloat16), var_node_20.to(torch.bfloat16)
+            )  # size=(1, 2), stride=(2, 1), dtype=bfloat16, device=cuda
+            var_node_21 = torch.full(
+                (2, 1), 0.000762939453125, dtype=torch.bfloat16
+            )  # size=(2, 1), stride=(1, 1), dtype=bfloat16, device=cuda
+            var_node_17 = torch.matmul(
+                var_node_18.to(torch.bfloat16), var_node_21.to(torch.bfloat16)
+            )  # size=(1, 1), stride=(1, 1), dtype=bfloat16, device=cuda
+            var_node_0, _ = torch.nn.functional.multi_head_attention_forward(
+                var_node_1.to(torch.bfloat16),
+                var_node_8.to(torch.bfloat16),
+                var_node_9.to(torch.bfloat16),
+                1,
+                1,
+                var_node_10.to(torch.bfloat16),
+                None,  # in_proj_bias
+                None,  # bias_k
+                None,  # bias_v
+                False,  # add_zero_attn
+                0.0,  # dropout_p (no dropout for testing)
+                var_node_17.to(torch.bfloat16),
+                None,  # out_proj_bias
+                training=False,  # Use eval mode for deterministic behavior
+                need_weights=False,  # Don't compute attention weights for performance
+            )  # size=(27, 28, 1), stride=(28, 1, 1), dtype=bfloat16, device=cuda
+            # Ensure gradient computation by multiplying with sentinel and taking real part
+            result = var_node_0 * sentinel
+            if result.is_complex():
+                result = result.real
+            return result
+
+        try:
+            # Sentinel tensor to ensure gradient computation
+            sentinel = torch.tensor(1.0, requires_grad=True)
+            arg_0 = torch.as_strided(
+                torch.randn(5292).to(torch.bfloat16), (27, 28, 7), (196, 7, 1)
+            )
+            arg_1 = torch.as_strided(
+                torch.randn(1134).to(torch.bfloat16), (27, 7, 6), (42, 6, 1)
+            )
+            arg_2 = torch.as_strided(
+                torch.randn(1458).to(torch.bfloat16), (27, 6, 9), (54, 9, 1)
+            )
+            arg_3 = torch.as_strided(
+                torch.randn(756).to(torch.bfloat16), (27, 28, 1), (28, 1, 1)
+            )
+            arg_4 = torch.as_strided(torch.randn(12).to(torch.bfloat16), (3, 4), (4, 1))
+            arg_5 = torch.as_strided(
+                torch.randn(60).to(torch.bfloat16), (4, 15), (15, 1)
+            )
+            arg_6 = torch.as_strided(
+                torch.randn(180).to(torch.bfloat16), (15, 12), (12, 1)
+            )
+            arg_7 = torch.as_strided(
+                torch.randn(12).to(torch.bfloat16), (12, 1), (1, 1)
+            )
+            arg_8 = torch.as_strided(torch.randn(8).to(torch.bfloat16), (1, 8), (8, 1))
+            arg_9 = torch.as_strided(torch.randn(16).to(torch.bfloat16), (8, 2), (2, 1))
+            args = (
+                arg_0,
+                arg_1,
+                arg_2,
+                arg_3,
+                arg_4,
+                arg_5,
+                arg_6,
+                arg_7,
+                arg_8,
+                arg_9,
+            ) + (sentinel,)
+
+            out_eager = fuzzed_program(*args)
+            out_eager.sum().backward()
+            print("Eager Success! ✅")
+            compiled_foo = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
+            out_compiled = compiled_foo(*args)
+            out_compiled.sum().backward()
+            print("Compile Success! ✅")
+        finally:
+            torch.set_default_device(None)
+
 
 if __name__ == "__main__":
     run_tests()

@@ -220,7 +220,7 @@ Tensor _embedding_bag_dense_backward_mps(const Tensor& output_grad,
   auto num_threads = (params.mode == EmbeddingBagMode::MAX) ? output_grad.numel() : num_indices * params.feature_size;
   MPSStream* stream = getCurrentMPSStream();
 
-  mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
       auto pipeline_state = lib.getPipelineStateForFunc(fmt::format("embedding_bag_backward_{}_{}",
@@ -273,7 +273,7 @@ Tensor _embedding_bag_per_sample_weights_backward_mps(const Tensor& output_grad,
   auto num_threads = num_indices * feature_size;
   MPSStream* stream = getCurrentMPSStream();
 
-  mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = stream->commandEncoder();
       auto pipeline_state = lib.getPipelineStateForFunc(fmt::format("embedding_bag_per_sample_weights_backward_{}_{}",

@@ -456,8 +456,8 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
           *why_not << "Method on class '" << repr_str()
                    << "' (1) is not compatible with interface '"
                    << rhs.repr_str() << "' (2)\n"
-                   << "  (1) " << self_method->getSchema() << "\n"
-                   << "  (2) " << schema << "\n";
+                   << "  (1) " << self_method->getSchema() << '\n'
+                   << "  (2) " << schema << '\n';
         }
         return false;
       }

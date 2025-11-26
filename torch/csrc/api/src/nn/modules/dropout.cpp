@@ -19,7 +19,7 @@ Tensor DropoutImpl::forward(Tensor input) {
 
 void DropoutImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha << "torch::nn::Dropout(p=" << options.p()
-         << ", inplace=" << options.inplace() << ")";
+         << ", inplace=" << options.inplace() << ')';
 }
 
 // ============================================================================
@@ -31,7 +31,7 @@ Tensor Dropout2dImpl::forward(Tensor input) {
 
 void Dropout2dImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha << "torch::nn::Dropout2d(p=" << options.p()
-         << ", inplace=" << options.inplace() << ")";
+         << ", inplace=" << options.inplace() << ')';
 }
 
 // ============================================================================
@@ -43,7 +43,7 @@ Tensor Dropout3dImpl::forward(Tensor input) {
 
 void Dropout3dImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha << "torch::nn::Dropout3d(p=" << options.p()
-         << ", inplace=" << options.inplace() << ")";
+         << ", inplace=" << options.inplace() << ')';
 }
 
 // ============================================================================
@@ -55,7 +55,7 @@ Tensor AlphaDropoutImpl::forward(const Tensor& input) {
 
 void AlphaDropoutImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha << "torch::nn::AlphaDropout(p=" << options.p()
-         << ", inplace=" << options.inplace() << ")";
+         << ", inplace=" << options.inplace() << ')';
 }
 
 // ============================================================================
@@ -67,7 +67,7 @@ Tensor FeatureAlphaDropoutImpl::forward(const Tensor& input) {
 
 void FeatureAlphaDropoutImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha << "torch::nn::FeatureAlphaDropout(p=" << options.p()
-         << ", inplace=" << options.inplace() << ")";
+         << ", inplace=" << options.inplace() << ')';
 }
 
 } // namespace torch::nn

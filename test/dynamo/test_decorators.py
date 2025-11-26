@@ -1313,12 +1313,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         B = torch.tensor(B_list, dtype=torch.int32)
         torch._dynamo.decorators.mark_static(B, 0)
 
-        torch._dynamo.config.capture_scalar_outputs = True
-        torch._dynamo.config.capture_dynamic_output_shape_ops = True
-
-        self.assertEqual(
-            fn(B), torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B)
-        )
+        with torch._dynamo.config.patch(
+            capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+        ):
+            self.assertEqual(
+                fn(B),
+                torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B),
+            )
 
     def test_assume_constant_result_on_computation_with_graph_input(self):
         @torch._dynamo.assume_constant_result

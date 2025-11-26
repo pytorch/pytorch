@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from enum import auto, Enum
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -194,7 +193,7 @@ class _Orthogonal(Module):
 def orthogonal(
     module: Module,
     name: str = "weight",
-    orthogonal_map: Optional[str] = None,
+    orthogonal_map: str | None = None,
     *,
     use_trivialization: bool = True,
 ) -> Module:
@@ -317,7 +316,7 @@ def orthogonal(
 class _WeightNorm(Module):
     def __init__(
         self,
-        dim: Optional[int] = 0,
+        dim: int | None = 0,
     ) -> None:
         super().__init__()
         if dim is None:
@@ -532,7 +531,7 @@ def spectral_norm(
     name: str = "weight",
     n_power_iterations: int = 1,
     eps: float = 1e-12,
-    dim: Optional[int] = None,
+    dim: int | None = None,
 ) -> Module:
     r"""Apply spectral normalization to a parameter in the given module.
 
