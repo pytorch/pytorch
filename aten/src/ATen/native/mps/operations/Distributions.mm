@@ -57,12 +57,6 @@ Tensor& random_mps_impl(Tensor& self,
   if (self.numel() == 0) {
     return self;
   }
-  if (mean_opt.has_value()) {
-    TORCH_INTERNAL_ASSERT(mean_opt->scalar_type() == self.scalar_type());
-  }
-  if (std_opt.has_value()) {
-    TORCH_INTERNAL_ASSERT(std_opt->scalar_type() == self.scalar_type());
-  }
   at::assert_no_internal_overlap(self);
   // MPS random is broken for 5D+ tensors, see https://github.com/pytorch/pytorch/issues/147624
   const auto need_reshape = self.ndimension() > 4;
@@ -190,6 +184,9 @@ static Tensor& normal_mps_impl(Tensor& self,
     TORCH_CHECK(!std_t.is_complex(), op_name, " expects standard deviation to be non-complex");
     if (mean_t.defined())
       TORCH_CHECK(mean_t.numel() == std_t.numel(), op_name, ": mean and std must have same number of elements")
+  }
+  if (mean_t.defined()) {
+    TORCH_CHECK(!mean_t.is_complex(), op_name, " expects mean to be non-complex");
   }
 
   RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
