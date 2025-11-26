@@ -32,7 +32,7 @@ using ITreeMapNoReturnFn =
 using IValueApplyFn =
     void (*)(ITreeMapNoReturnFn, const c10::IValue&, const ITreeSpec&);
 
-nlohmann::json defaultContextLoadFn(std::string_view);
+nlohmann::json defaultContextLoadFn(std::string_view /*context*/);
 
 struct NodeDef {
   ITreeFlattenFn flattenFn;

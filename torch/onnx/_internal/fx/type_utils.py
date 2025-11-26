@@ -14,7 +14,7 @@ from torch._subclasses import fake_tensor
 
 
 if TYPE_CHECKING:
-    import onnx.defs  # noqa: TCH004
+    import onnx.defs
 
 
 # Enable both TorchScriptTensor and torch.Tensor to be tested
@@ -164,7 +164,7 @@ _TORCH_DTYPE_TO_ABBREVIATION = {
 
 SYM_VALUE_TYPE = Union[torch.SymInt, torch.SymFloat, torch.SymBool]
 META_VALUE_TYPE = Union[fake_tensor.FakeTensor, SYM_VALUE_TYPE, int, float, bool]
-# NOTE: Belows are from torch/fx/node.py
+# NOTE: Below are from torch/fx/node.py
 BaseArgumentTypes = Union[
     str,
     int,

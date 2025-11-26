@@ -6,7 +6,8 @@ of checkpointer instances by automatically handling component initialization
 and configuration with reasonable defaults.
 """
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch.distributed as dist
 

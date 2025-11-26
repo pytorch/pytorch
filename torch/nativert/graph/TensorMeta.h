@@ -64,6 +64,11 @@ class TensorMeta {
     return device_;
   }
 
+  // override device according to placement
+  void setDevice(c10::Device device) {
+    device_ = device;
+  }
+
   c10::TensorOptions asTensorOptions() const {
     return c10::TensorOptions().dtype(dtype_).layout(layout_).requires_grad(
         requiresGrad_);

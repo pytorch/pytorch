@@ -24,8 +24,7 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 import itertools
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Literal, Optional, overload, Union
-from typing_extensions import TypeAlias
+from typing import Any, Literal, Optional, overload, TypeAlias, Union
 
 import sympy
 
@@ -65,7 +64,18 @@ class TypedExpr:
 
     def __post_init__(self):
         if _is_constant(self.expr):
-            self.expr = dtype_to_type(self.dtype)(self.expr)
+            expr = self.expr
+            if isinstance(expr, sympy.Expr):
+                expr = expr.expand(identity=True)
+            expr = dtype_to_type(self.dtype)(expr)
+            if is_integer_dtype(self.dtype):
+                bits = torch.iinfo(self.dtype).bits
+                if self.dtype.is_signed:
+                    expr = expr + 2 ** (bits - 1)
+                expr = expr % 2**bits
+                if self.dtype.is_signed:
+                    expr = expr - 2 ** (bits - 1)
+            self.expr = expr
 
 
 class SymPyOps:
@@ -322,6 +332,7 @@ class IndexPropagation(DefaultHandler):
                 for k, v in self.indirect_var_ranges.items()
             ),
         )
+        # pyrefly: ignore [bad-argument-type]
         return statically_known_true(self.shape_env, e, self.axioms, var_to_range)
 
     def indirect_indexing(

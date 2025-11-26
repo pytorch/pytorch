@@ -264,7 +264,7 @@ TEST_F(ParallelTest, DataParallelNumericalEquivalence_MultiCUDA) {
     input += i;
     input_dp += i;
 
-    // non-prallel training
+    // non-parallel training
     torch::optim::SGD optim(model->parameters(), torch::optim::SGDOptions(0.1));
     auto output = model->forward(input);
     auto loss = torch::mse_loss(output, torch::zeros_like(output));

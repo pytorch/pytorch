@@ -7,7 +7,7 @@ import contextlib
 import torch._logging
 import torch._logging._internal
 from contextlib import AbstractContextManager
-from typing import Callable
+from collections.abc import Callable
 from torch._dynamo.utils import LazyString
 from torch._inductor import config as inductor_config
 import logging
@@ -228,11 +228,11 @@ def multiple_logs_to_string(module: str, *log_options: str) -> tuple[list[io.Str
     def tmp_redirect_logs():
         loggers = [torch._logging.getArtifactLogger(module, option) for option in log_options]
         try:
-            for logger, handler in zip(loggers, handlers):
+            for logger, handler in zip(loggers, handlers, strict=True):
                 logger.addHandler(handler)
             yield
         finally:
-            for logger, handler in zip(loggers, handlers):
+            for logger, handler in zip(loggers, handlers, strict=True):
                 logger.removeHandler(handler)
 
     def ctx_manager() -> AbstractContextManager[None]:
