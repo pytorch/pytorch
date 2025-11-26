@@ -122,9 +122,33 @@ inline bool check_flash_attention_layout(sdp_params const& params, bool debug) {
   return sycltla::check_flash_attention_layout(params, debug);
 }
 
+inline bool check_flash_causal_non_square_seqlens(
+    sdp_params const& params,
+    bool debug) {
+  // FlashAttention 2 updated the default mask meaning for causal in this PR:
+  // 9e5e8bc91e it is now aligned to lower_right which would be a BC break
+  // for non-square masks. We will not support non-square masks for causal w/
+  // FAV2
+  if (params.is_causal && !params.query.is_nested() &&
+      !params.key.is_nested() &&
+      params.query.sym_size(-2) != params.key.sym_size(-2)) {
+    if (debug) {
+      TORCH_WARN(
+          "Flash attention XPU does not support the is_causal flag when seqlen_q != seqlen_k. ",
+          "Got seqlen_q: ",
+          params.query.sym_size(-2),
+          " seqlen_k: ",
+          params.key.sym_size(-2),
+          ". If you would like to use causal attention with non-square masks, please see CausalAttnMask.");
+    }
+    return false;
+  }
+  return true;
+}
+
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
   constexpr auto constraints =
-      std::array<bool (*)(sdp_params const&, bool), 12>{
+      std::array<bool (*)(sdp_params const&, bool), 13>{
           is_flash_attention_available,
           check_flash_attention_hardware_support,
           check_for_attn_mask,
@@ -134,6 +158,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
           check_batch_size_and_num_heads_dense<true /*supports GQA*/>,
           check_nonzero_sequence_lengths_dense,
           check_last_dim_stride_equals_1_dense<false /*ignore_singleton_dim*/>,
+          check_flash_causal_non_square_seqlens,
           check_flash_attention_datatype,
           check_flash_attention_head_dim_size,
           check_flash_attention_layout};
