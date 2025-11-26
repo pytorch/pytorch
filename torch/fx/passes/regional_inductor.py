@@ -176,4 +176,7 @@ def regional_inductor(gm, *example_args):
     # fuser utils create new nodes using create_proxy which retains the seq_nr
     # metadata and cause issues
     with torch.fx.traceback.preserve_node_meta(enable=False):
-        return _recursive_compile_fx_annotated_nodes_with_inductor(gm)
+        compiled_gm = _recursive_compile_fx_annotated_nodes_with_inductor(gm)
+        return torch._dynamo.backends.debugging.boxed_nop(
+            compiled_gm, example_inputs=[]
+        )
