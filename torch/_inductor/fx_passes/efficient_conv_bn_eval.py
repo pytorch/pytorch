@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
+import inspect
 import torch.nn as nn
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
@@ -148,7 +149,12 @@ def efficient_conv_bn_eval_decomposed(
 def efficient_conv_bn_eval_graph_transform_inlined(match: Match, *args, **kwargs):
     bn_node = match.nodes[0]
     graph = match.graph
-    assert len(bn_node.args) == 8
+    # assert len(bn_node.args) == 8
+    sig = inspect.signature(bn_node.target)
+    bound = sig.bind(*bn_node.args, **bn_node.kwargs)
+    bound.apply_defaults()
+    bn_node.args = bound.args
+    bn_node.kwargs = bound.kwargs
 
     # We can only use efficient conv-bn for eval mode with track_running_stats
     # bn_node.args is `training`
