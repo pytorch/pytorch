@@ -3487,6 +3487,10 @@ class AlgorithmSelectorCache(PersistentCache):
 
             total_time += start_evt.elapsed_time(end_evt)
 
+        work = dist.barrier(group=process_group, async_op=True)
+        if not work.wait(timeout):
+            raise TimeoutError(f"Barrier timeout after completing {nruns} runs")
+
         return total_time
 
     @classmethod
