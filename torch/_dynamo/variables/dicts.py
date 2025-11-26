@@ -1153,6 +1153,7 @@ class SetVariable(ConstDictVariable):
             self.items.clear()
             self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
             return variables.constant_none
+        elif name == "add":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
