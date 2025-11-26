@@ -43,11 +43,6 @@ class TestViewOps(DTensorTestBase):
         return 6
 
     def test_view_groups(self):
-        # result = view_groups([3, 4, 1, 5], [12, 5])
-        # self.assertEqual(
-        #     result,
-        #     (Flatten((InputDim(0), InputDim(1), InputDim(2))), InputDim(3))
-        # )
         self.assertEqual(
             view_groups([2, 3], [3, 2]),
             (
@@ -55,7 +50,6 @@ class TestViewOps(DTensorTestBase):
                 Split(Flatten((InputDim(0), InputDim(1))), (3, 2), 1),
             ),
         )
-        view_groups([3, 4, 5], [12, 5])
         self.assertEqual(
             view_groups([3, 4, 5], [12, 5]),
             (Flatten((InputDim(0), InputDim(1))), InputDim(2)),
@@ -642,10 +636,20 @@ class TestViewOps(DTensorTestBase):
     def test_dtensor_flatten_1d(self):
         mesh: DeviceMesh = init_device_mesh(self.device_type, (self.world_size,))
         batch_size, dim = 2, 3
-        for seq_len in [self.world_size - 1, self.world_size, self.world_size + 1]:
-            self._test_dtensor_flatten_1d(mesh, batch_size, seq_len, dim)
+        for seq_len in [
+            2 * self.world_size - 1,
+            2 * self.world_size,
+            2 * self.world_size + 1,
+        ]:
+            self._test_dtensor_flatten_1d_success(mesh, batch_size, seq_len, dim)
 
-    def _test_dtensor_flatten_1d(self, mesh, batch_size, seq_len, dim):
+        batch_size, dim1, dim2 = 2, 3, 3
+        for seq_len in [2 * self.world_size - 1, 2 * self.world_size + 1]:
+            pass
+            # expect to fail
+            # self._test_dtensor_flatten_1d_fail(mesh, batch_size, seq_len, dim1, dim2)
+
+    def _test_dtensor_flatten_1d_success(self, mesh, batch_size, seq_len, dim):
         global_inps: Tensor = torch.arange(batch_size * seq_len * dim).view(
             batch_size, seq_len, dim
         )
@@ -668,30 +672,60 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
+    def _test_dtensor_flatten_1d_fail(self, mesh, batch_size, seq_len, dim1, dim2):
+        global_inps: Tensor = torch.arange(batch_size * seq_len * dim1 * dim2).view(
+            batch_size, seq_len, dim1, dim2
+        )
+        global_inps_replicate: DTensor = distribute_tensor(
+            global_inps, mesh, (Replicate(),)
+        )
+        inps = global_inps_replicate.redistribute(mesh, (Shard(1),))
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            inps_viewed = inps.view(batch_size * seq_len * dim1, dim2)
+        expected_placements = (_StridedShard(dim=0, split_factor=batch_size),)
+        expected_local_tensor = (
+            distribute_tensor(
+                global_inps.view(batch_size * seq_len * dim1, dim2),
+                mesh,
+                (Replicate(),),
+            )
+            .redistribute(mesh, expected_placements)
+            ._local_tensor
+        )
+        self.assertEqual(inps_viewed.placements, expected_placements)
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
     @with_comms
     def test_dtensor_flatten_2d(self):
-        assert self.world_size == 6
         mesh: DeviceMesh = init_device_mesh(self.device_type, (3, 2))
         batch_size, dim2 = 2, 3
         # seq_len must be divisible by mesh size 3
-        for seq_len in [3, 6]:
-            # dim1 can be unven
-            for dim1 in [2, 2 + 1]:
-                self._test_dtensor_flatten_2d(mesh, batch_size, seq_len, dim1, dim2)
+        for seq_len in [2 * mesh.size(0)]:
+            for dim1 in [2 * mesh.size(1) - 1, 2 * mesh.size(1), 2 * mesh.size(1) + 1]:
+                self._test_dtensor_flatten_2d_SS(mesh, batch_size, seq_len, dim1, dim2)
+                self._test_dtensor_flatten_2d_SR(mesh, batch_size, seq_len, dim1, dim2)
+
+        # uneven seq_len or dim1 for R, S
+        for seq_len in [2 * mesh.size(0) - 1, 2 * mesh.size(0) + 1]:
+            for dim1 in [2 * mesh.size(1) - 1, 2 * mesh.size(1) + 1]:
+                self._test_dtensor_flatten_2d_RS(mesh, batch_size, seq_len, dim1, dim2)
 
         # error on uneven seq_len
-        for seq_len in [2, 5]:
-            for dim1 in [2]:
+        for seq_len in [2 * mesh.size(0) - 1, 2 * mesh.size(0) + 1]:
+            for dim1 in [2 * mesh.size(1)]:
                 pass
+                # self._test_dtensor_flatten_2d_SR(mesh, batch_size, seq_len, dim1, dim2)
                 # self._test_dtensor_flatten_2d(mesh, batch_size, seq_len, dim1, dim2)
 
         # error on local shape 1
-        for seq_len in [6]:
+        for seq_len in [2 * mesh.size(0)]:
             for dim1 in [1]:
                 pass
                 # self._test_dtensor_flatten_2d(mesh, batch_size, seq_len, dim1, dim2)
 
-    def _test_dtensor_flatten_2d(self, mesh, batch_size, seq_len, dim1, dim2):
+    def _test_dtensor_flatten_2d_SS(self, mesh, batch_size, seq_len, dim1, dim2):
         # S1, S2
         global_inps = torch.arange(batch_size * seq_len * dim1 * dim2).view(
             batch_size, seq_len, dim1, dim2
@@ -703,6 +737,56 @@ class TestViewOps(DTensorTestBase):
         expected_placements = (
             _StridedShard(dim=0, split_factor=batch_size),
             _StridedShard(dim=0, split_factor=(batch_size * seq_len) // mesh.size(0)),
+        )
+        expected_local_tensor = (
+            distribute_tensor(
+                global_inps.view(batch_size * seq_len * dim1, dim2),
+                mesh,
+                (Replicate(), Replicate()),
+            )
+            .redistribute(mesh, expected_placements)
+            ._local_tensor
+        )
+        self.assertEqual(inps_viewed.placements, expected_placements)
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    def _test_dtensor_flatten_2d_RS(self, mesh, batch_size, seq_len, dim1, dim2):
+        global_inps = torch.arange(batch_size * seq_len * dim1 * dim2).view(
+            batch_size, seq_len, dim1, dim2
+        )
+        inps = distribute_tensor(global_inps, mesh, (Replicate(), Shard(2)))
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            inps_viewed = inps.view(batch_size * seq_len * dim1, dim2)
+        expected_placements = (
+            Replicate(),
+            _StridedShard(dim=0, split_factor=batch_size * seq_len),
+        )
+        expected_local_tensor = (
+            distribute_tensor(
+                global_inps.view(batch_size * seq_len * dim1, dim2),
+                mesh,
+                (Replicate(), Replicate()),
+            )
+            .redistribute(mesh, expected_placements)
+            ._local_tensor
+        )
+        self.assertEqual(inps_viewed.placements, expected_placements)
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    def _test_dtensor_flatten_2d_SR(self, mesh, batch_size, seq_len, dim1, dim2):
+        global_inps = torch.arange(batch_size * seq_len * dim1 * dim2).view(
+            batch_size, seq_len, dim1, dim2
+        )
+        inps = distribute_tensor(global_inps, mesh, (Shard(1), Replicate()))
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            inps_viewed = inps.view(batch_size * seq_len * dim1, dim2)
+        expected_placements = (
+            _StridedShard(dim=0, split_factor=batch_size),
+            Replicate(),
         )
         expected_local_tensor = (
             distribute_tensor(
@@ -1009,9 +1093,11 @@ TestViewOpsWithLocalTensor = create_local_tensor_test_class(
     skipped_tests=[
         # Comparing data pointers is not supported for local tensor
         "test_dtensor_view_op_uneven",
-        "test_dtensor_flatten_1d",
-        "test_dtensor_flatten_2d",
     ],
+)
+
+TestViewOps3DWithLocalTensor = create_local_tensor_test_class(
+    TestViewOps3D,
 )
 
 if __name__ == "__main__":

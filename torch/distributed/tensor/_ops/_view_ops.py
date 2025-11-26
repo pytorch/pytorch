@@ -752,10 +752,13 @@ def propagate_shape_and_sharding(
             tgt_shard_dims = shard_dim_map[p.dim]
             tgt_shard_dim = tgt_shard_dims.pop(0)
             if tgt_shard_dim > 0:
+                # unfaltten from SS to S
                 return Shard(tgt_shard_dim)
             else:
+                # existing code path
                 return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
         else:
+            # flatten from S to S/SS
             tgt_shard_dim = shard_dim_map[p.dim]
             assert len(tgt_shard_dim) == 1
             tgt_shard_dim = tgt_shard_dim[0]
