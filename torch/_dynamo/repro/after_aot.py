@@ -355,6 +355,20 @@ isolate_fails_code_str = None
 {maybe_fbcode_instructions()}
      """
     )
+    model_str += textwrap.dedent(
+        """
+if "__compile_source__" in globals():
+    import inspect as __after_aot_inspect
+    import linecache as __after_aot_linecache
+    __after_aot_filename = __after_aot_inspect.currentframe().f_code.co_filename
+    __after_aot_linecache.cache[__after_aot_filename] = (
+        len(__compile_source__),
+        None,
+        __compile_source__.splitlines(True),
+        __after_aot_filename,
+    )
+"""
+    )
     if not stable_output:
         model_str += f"# torch version: {torch.version.__version__}\n"
         if hasattr(torch.version, "cuda"):
@@ -405,6 +419,7 @@ isolate_fails_code_str = None
                 # pyrefly: ignore [missing-attribute]
                 kernel._fn_name
                 if isinstance(kernel, JITFunction)
+                # pyrefly: ignore  # missing-attribute
                 else kernel.fn._fn_name
             )
             fn_name = fn_name.split(".")[-1]

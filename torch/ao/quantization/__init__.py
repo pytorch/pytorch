@@ -43,7 +43,7 @@ else:
     from typing import TypeAliasType
 
     ObserverOrFakeQuantize = TypeAliasType(
-        "ObserverOrFakeQuantize", Union[ObserverBase, FakeQuantizeBase]
+        "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
     )
 
 for _f in [
@@ -219,10 +219,10 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         derive_qparams_fn: Callable[
             [list[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]
         ],
-        quant_min: Optional[int] = None,
-        quant_max: Optional[int] = None,
-        qscheme: Optional[torch.qscheme] = None,
-        ch_axis: Optional[int] = None,
+        quant_min: int | None = None,
+        quant_max: int | None = None,
+        qscheme: torch.qscheme | None = None,
+        ch_axis: int | None = None,
     ):
         super().__init__(dtype)
         self.obs_or_fqs = obs_or_fqs

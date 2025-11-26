@@ -14,6 +14,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.nn import functional as F
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -204,14 +205,16 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertTrue(b_dt.grad is not None)
         self.assertTrue(x_dt.grad is None)
 
-    def _run_single_arg_fwd(self, model, arg) -> tuple[torch.Tensor, torch.Tensor]:
+    def _run_single_arg_fwd(
+        self, model, arg, placements=None
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Given model and arg, runs fwd model local and distbuted given device_mesh"""
         device_mesh = self.build_device_mesh()
         model_copy = copy.deepcopy(model).to(device=self.device_type)
         dist_model = distribute_module(model, device_mesh, _conv_fn)
-        arg_dt = DTensor.from_local(arg, device_mesh, [Replicate()])
+        arg_dt = DTensor.from_local(arg, device_mesh, placements)
         out_dt = dist_model(arg_dt.to(device=self.device_type))
-        out = model_copy(arg)
+        out = model_copy(arg_dt.full_tensor())
         return (out_dt.full_tensor(), out)
 
     @with_comms
@@ -219,25 +222,120 @@ class DistConvolutionOpsTest(DTensorTestBase):
         model = nn.Conv1d(64, 64, 3, padding=1)
         x = torch.randn(1, 64, 8, device=self.device_type)
         out_dt, out = self._run_single_arg_fwd(model, x)
-        self.assertEqual(out_dt.shape, out.shape)
+        self.assertEqual(out_dt, out)
 
     @with_comms
     def test_conv3d(self):
         model = nn.Conv3d(64, 64, 3, padding=1)
         x = torch.randn(1, 64, 8, 8, 8, device=self.device_type)
-        out_dt, out = self._run_single_arg_fwd(model, x)
-        self.assertEqual(out_dt.shape, out.shape)
+        out_dt, out = self._run_single_arg_fwd(model, x, [Shard(0)])
+        self.assertEqual(out_dt, out)
+
+    @with_tf32_off
+    @with_comms
+    def test_conv2d_no_bias_compile(self):
+        """Test Conv2d with bias=False in compile mode (Issue #167091)
+
+        Regression test: Previously this would fail during torch.compile
+        tracing with AssertionError when bias_spec was None.
+        """
+        device_mesh = self.build_device_mesh()
+
+        def conv_fn(x, w):
+            return F.conv2d(x, w, bias=None, padding=1)
+
+        compiled_fn = torch.compile(conv_fn)
+
+        # Create tensors
+        x = torch.randn(1, 4, 5, 5, device=self.device_type)
+        w = torch.randn(8, 4, 3, 3, device=self.device_type)
+
+        # Distribute tensors
+        x_dt = distribute_tensor(x, device_mesh, [Replicate()])
+        w_dt = distribute_tensor(w, device_mesh, [Replicate()])
+
+        # Test eager mode for comparison
+        result_eager = conv_fn(x_dt, w_dt)
+
+        # Test compiled mode - this should not crash
+        result_compiled = compiled_fn(x_dt, w_dt)
+
+        # Verify shape is correct (the key regression test)
+        self.assertEqual(result_compiled.shape, torch.Size([1, 8, 5, 5]))
+
+        # Verify numerical correctness
+        self.assertEqual(result_compiled.to_local(), result_eager.to_local())
+
+    @with_comms
+    def test_conv2d_no_bias_backward(self):
+        """Test Conv2d backward pass with bias=False (Issue #167091)
+
+        Regression test: Previously backward pass would fail when
+        grad_bias_spec was None.
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Create tensors with requires_grad
+        x = torch.randn(1, 4, 5, 5, device=self.device_type)
+        w = torch.randn(8, 4, 3, 3, device=self.device_type, requires_grad=True)
+
+        # Distribute tensors
+        x_dt = distribute_tensor(x, device_mesh, [Replicate()])
+        w_dt = torch.nn.Parameter(distribute_tensor(w, device_mesh, [Replicate()]))
+
+        # Forward pass
+        result = F.conv2d(x_dt, w_dt, bias=None, padding=1)
+
+        # Backward pass - this should not crash
+        grad_output = torch.randn_like(result)
+        result.backward(grad_output)
+
+        # Check weight gradient exists (the key regression test)
+        self.assertIsNotNone(w_dt.grad)
+        self.assertEqual(w_dt.grad.shape, torch.Size([8, 4, 3, 3]))
+
+    @with_comms
+    def test_conv2d_module_no_bias(self):
+        """Test nn.Conv2d module with bias=False (Issue #167091)
+
+        Regression test: Ensures nn.Conv2d with bias=False works with DTensor.
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Create model with bias=False
+        model = nn.Conv2d(4, 8, kernel_size=3, padding=1, bias=False).to(
+            self.device_type
+        )
+        nn.init.ones_(model.weight)
+
+        # Distribute model
+        model_dt = distribute_module(model, device_mesh, _conv_fn)
+
+        # Create input
+        x = torch.randn(1, 4, 5, 5, device=self.device_type)
+        x_dt = distribute_tensor(x, device_mesh, [Replicate()])
+
+        # Forward pass - this should not crash
+        output_dt = model_dt(x_dt)
+
+        # Check outputs shape is correct
+        self.assertEqual(output_dt.shape, torch.Size([1, 8, 5, 5]))
+
+        # Check that model.bias is None
+        self.assertIsNone(model.bias)
 
 
 DistConvolutionOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistConvolutionOpsTest,
     # Send / recv ops are not supported
     skipped_tests=[
-        "test_conv1d",
-        "test_conv3d",
         "test_conv_backward_none_grad_inp",
         "test_depthwise_convolution",
         "test_downsampling_convolution",
+        # New tests for Issue #167091 - use send/recv via tp_convolution
+        "test_conv2d_no_bias_compile",
+        "test_conv2d_no_bias_backward",
+        "test_conv2d_module_no_bias",
     ],
 )
 

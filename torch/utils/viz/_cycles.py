@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import gc
 import sys
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 import types
 import weakref
 import json
@@ -15,14 +15,14 @@ logger = logging.getLogger(__name__)
 def observe_garbage(observer):
     enabled = True
 
-    def disable():
+    def disable() -> None:
         # when GC runs during exit, things like `sys` will already be unloaded
         # so we have to disable the callback to avoid hitting errors.
         nonlocal enabled
         enabled = False
     atexit.register(disable)
 
-    def gc_callback(phase, info):
+    def gc_callback(phase, info) -> None:
         nonlocal enabled
         if not enabled:
             return
@@ -66,7 +66,7 @@ def observe_garbage(observer):
     gc.callbacks.append(gc_callback)
 
     # provide a way to disarm the callback
-    def remove():
+    def remove() -> None:
         gc.callbacks.remove(gc_callback)
     return remove
 
@@ -103,15 +103,15 @@ def annotated_references(obj):
     """
     references: dict[int, list[str]] = {}
 
-    def add_reference(name, obj):
+    def add_reference(name, obj) -> None:
         references.setdefault(id(obj), []).append(name)
 
-    def add_attrs(*attrs):
+    def add_attrs(*attrs) -> None:
         for attr in attrs:
             if hasattr(obj, attr):
                 add_reference(attr, getattr(obj, attr))
 
-    def add_cell_references():
+    def add_cell_references() -> None:
         try:
             add_attrs("cell_contents")
         except ValueError:
@@ -121,7 +121,7 @@ def annotated_references(obj):
             # annotate
             pass
 
-    def add_function_references():
+    def add_function_references() -> None:
         add_attrs("__defaults__",
                   "__closure__",
                   "__globals__",
@@ -134,23 +134,23 @@ def annotated_references(obj):
                   "__kwdefaults__")
 
 
-    def add_sequence_references():
+    def add_sequence_references() -> None:
         for position, item in enumerate(obj):
             add_reference(f"[{position}]", item)
 
-    def add_dict_references():
+    def add_dict_references() -> None:
         for key, value in obj.items():
             add_reference("key", key)
             add_reference(f"[{repr(key)}]", value)
 
-    def add_set_references():
+    def add_set_references() -> None:
         for elt in obj:
             add_reference("element", elt)
 
-    def add_bound_method_references():
+    def add_bound_method_references() -> None:
         add_attrs("__self__", "__func__", "im_class")
 
-    def add_weakref_references():
+    def add_weakref_references() -> None:
         # For subclasses of weakref, we can't reliably distinguish the
         # callback (if any) from other attributes.
         if type(obj) is weakref.ref:
@@ -160,7 +160,7 @@ def annotated_references(obj):
                 add_reference("__callback__", target)
 
 
-    def add_frame_references():
+    def add_frame_references() -> None:
         f_locals = obj.f_locals
         add_attrs("f_back", "f_code", "f_builtins", "f_globals", "f_trace", "f_locals")
         # Some badly-behaved code replaces the f_locals dict with
@@ -170,7 +170,7 @@ def annotated_references(obj):
             for name, local in obj.f_locals.items():
                 add_reference(f"local {name}", local)
 
-    def add_getset_descriptor_references():
+    def add_getset_descriptor_references() -> None:
         add_attrs("__objclass__", "__name__", "__doc__")
 
     type_based_references = {
@@ -249,6 +249,8 @@ def object_annotation(obj):
         if len(filename) > FRAME_FILENAME_LIMIT:
             filename = "..." + filename[-(FRAME_FILENAME_LIMIT - 3):]
         return f"frame\n{filename}:{obj.f_lineno}"
+    elif is_cuda_tensor(obj):
+        return f"object\n{type(obj).__module__}.{type(obj).__name__} ({obj.shape})"
     else:
         return f"object\n{type(obj).__module__}.{type(obj).__name__}"
 
@@ -256,7 +258,7 @@ def object_annotation(obj):
 
 class Node(NamedTuple):
     label: str
-    context: Optional[str]
+    context: str | None
     root: bool
     referrents: list[tuple[str, int]]
 
@@ -473,7 +475,7 @@ def to_html(nodes):
 def observe_tensor_cycles(callback):
     torch.cuda.memory._record_memory_history(max_entries=100000)
 
-    def observer(garbage):
+    def observer(garbage) -> None:
         if garbage:
             if not any(is_cuda_tensor(obj) for obj in garbage):
                 logger.info("No CUDA Tensors found in garbage")
@@ -497,8 +499,8 @@ def warn_tensor_cycles():
     """
     logger.info("Watching Python reference cycles for CUDA Tensors.")
 
-    def write_and_log(html):
-        with NamedTemporaryFile('w', suffix='.html', delete=False) as f:
+    def write_and_log(html) -> None:
+        with NamedTemporaryFile('w', suffix='.html') as f:
             f.write(html)
             logger.warning('Reference cycle includes a CUDA Tensor see visualization of cycle %s', f.name)
     return observe_tensor_cycles(write_and_log)

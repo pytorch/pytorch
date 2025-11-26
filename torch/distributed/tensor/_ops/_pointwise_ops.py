@@ -12,12 +12,12 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
     map_placements_after_broadcast,
     normalize_dim,
-    register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -618,7 +618,7 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
-for op in linear_pointwise_ops.keys():
+for op in linear_pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         linear_pointwise_strategy
     )
