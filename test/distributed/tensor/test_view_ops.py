@@ -641,15 +641,26 @@ class TestViewOps(DTensorTestBase):
             2 * self.world_size,
             2 * self.world_size + 1,
         ]:
-            self._test_dtensor_flatten_1d_success(mesh, batch_size, seq_len, dim)
+            self._test_dtensor_flatten_1d_last_dim(mesh, batch_size, seq_len, dim)
 
         batch_size, dim1, dim2 = 2, 3, 3
         for seq_len in [2 * self.world_size - 1, 2 * self.world_size + 1]:
             pass
             # expect to fail
-            # self._test_dtensor_flatten_1d_fail(mesh, batch_size, seq_len, dim1, dim2)
+            # self._test_dtensor_flatten_1d_extra_dim(mesh, batch_size, seq_len, dim1, dim2)
 
-    def _test_dtensor_flatten_1d_success(self, mesh, batch_size, seq_len, dim):
+        for batch_size in [2 * self.world_size]:
+            for seq_len in [2 * self.world_size]:
+                self._test_dtensor_flatten_1d_on_batch_size(mesh, batch_size, seq_len, dim)
+
+        for batch_size in [2 * self.world_size]:
+            for seq_len in [2 * self.world_size]:
+                pass
+                # expect error
+                # self._test_dtensor_flatten_1d_on_batch_size(mesh, batch_size, seq_len, dim)
+
+
+    def _test_dtensor_flatten_1d_last_dim(self, mesh, batch_size, seq_len, dim):
         global_inps: Tensor = torch.arange(batch_size * seq_len * dim).view(
             batch_size, seq_len, dim
         )
@@ -672,7 +683,30 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
-    def _test_dtensor_flatten_1d_fail(self, mesh, batch_size, seq_len, dim1, dim2):
+    def _test_dtensor_flatten_1d_on_batch_size(self, mesh, batch_size, seq_len, dim):
+        global_inps: Tensor = torch.arange(batch_size * seq_len * dim).view(
+            batch_size, seq_len, dim
+        )
+        global_inps_replicate: DTensor = distribute_tensor(
+            global_inps, mesh, (Replicate(),)
+        )
+        inps = global_inps_replicate.redistribute(mesh, (Shard(0),))
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            inps_viewed = inps.view(batch_size * seq_len, dim)
+        expected_placements = (Shard(0),)
+        expected_local_tensor = (
+            distribute_tensor(
+                global_inps.view(batch_size * seq_len, dim), mesh, (Replicate(),)
+            )
+            .redistribute(mesh, expected_placements)
+            ._local_tensor
+        )
+        self.assertEqual(inps_viewed.placements, expected_placements)
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    def _test_dtensor_flatten_1d_extra_dim(self, mesh, batch_size, seq_len, dim1, dim2):
         global_inps: Tensor = torch.arange(batch_size * seq_len * dim1 * dim2).view(
             batch_size, seq_len, dim1, dim2
         )
