@@ -23,7 +23,7 @@ def _perform_local_step(
     bucket: dist.GradBucket,
     zero: ZeroRedundancyOptimizer,
     rank: int,
-):
+) -> None:
     r"""
     Perform a local optimizer step using the gradients provided by ``bucket``.
 
@@ -67,7 +67,7 @@ def _perform_local_step(
 def _broadcast_bucket(
     bucket_index: int,
     zero: ZeroRedundancyOptimizer,
-):
+) -> None:
     r"""
     Broadcasts a bucket's parameters.
 
@@ -104,7 +104,7 @@ def _broadcast_bucket(
 def _save_ddp_bucket_info(
     bucket: dist.GradBucket,
     zero: ZeroRedundancyOptimizer,
-):
+) -> None:
     r"""
     Save :class:`DistributedDataParallel` gradient bucket information for :class:`ZeroRedundancyOptimizer` instance ``zero``.
 
@@ -136,7 +136,7 @@ def _hook_with_zero_step_setup(
     ddp_ref: weakref.ReferenceType,
     zero: ZeroRedundancyOptimizer,
     bucket: dist.GradBucket,
-):
+) -> None:
     r"""
     Encapsulate the setup logic for :func:`hook_with_zero_step` and :func:`hook_with_zero_step_interleaved`.
 

@@ -110,7 +110,7 @@ class SyncCheckpointer(Checkpointer):
         self,
         writer: CheckpointWriter,
         reader: CheckpointReader,
-    ):
+    ) -> None:
         """
         Initialize a synchronous checkpointer.
 
@@ -225,7 +225,7 @@ class AsyncCheckpointer(Checkpointer):
         checkpoint_stager: CheckpointStager,
         checkpoint_process: CheckpointProcess,
         reader: CheckpointReader,
-    ):
+    ) -> None:
         """
         Initialize an asynchronous checkpointer.
 

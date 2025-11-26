@@ -87,7 +87,7 @@ class _DistWrapper:
         group: Optional[dist.ProcessGroup],
         use_dist: bool,
         coordinator_rank: int,
-    ):
+    ) -> None:
         self.group = group
         self.use_dist = use_dist
         self.coordinator_rank = coordinator_rank
@@ -383,7 +383,7 @@ def _element_wise_sub(a: Sequence[int], b: Sequence[int]) -> list[int]:
 
 
 class _ReaderView(io.IOBase):
-    def __init__(self, base_stream: io.IOBase, offset: int, len: int):
+    def __init__(self, base_stream: io.IOBase, offset: int, len: int) -> None:
         super().__init__()
         self.offset = offset
         self.len = len

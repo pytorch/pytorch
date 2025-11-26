@@ -16,7 +16,7 @@ __all__ = ["PowerSGDState", "powerSGD_hook", "batched_powerSGD_hook"]
 logger = logging.getLogger(__name__)
 
 
-def _orthogonalize(matrices, epsilon=0):
+def _orthogonalize(matrices, epsilon=0) -> None:
     """
     Decide between Gram-Schmidt or QR factorization to orthogonalize a batch of matrices.
 
@@ -41,7 +41,7 @@ def _orthogonalize(matrices, epsilon=0):
         )
 
 
-def _orthogonalize_gram_schmidt(matrices, epsilon=0):
+def _orthogonalize_gram_schmidt(matrices, epsilon=0) -> None:
     """
     Apply Gram-Schmidt procedure to orthogonalize a batch of matrices.
 
@@ -103,7 +103,7 @@ def _should_compress(
     )
 
 
-def _report_compression_stats(bucket, state):
+def _report_compression_stats(bucket, state) -> None:
     """Report compression stats at frequency of ``compression_stats_logging_frequency`` specified in PowerSGD state."""
     if bucket.is_last() and state.iter >= state.next_stats_report:
         stats = state.compression_stats()
@@ -188,7 +188,7 @@ class PowerSGDState:
         random_seed=0,
         compression_stats_logging_frequency=10_000,
         batch_tensors_with_same_shape: bool = False,
-    ):
+    ) -> None:
         logger.info(
             "PowerSGD config: matrix_approximation_rank = %s; start_powerSGD_iter = %s; "
             "min_compression_rate = %s; orthogonalization_epsilon = %s; use_error_feedback = %s; warm_start = %s; "
@@ -302,7 +302,7 @@ class PowerSGDState:
         for slot, value in state.items():
             setattr(self, slot, value)
 
-    def maybe_increase_iter(self, bucket):
+    def maybe_increase_iter(self, bucket) -> None:
         """Track iterations and trigger log message at start of local SGD."""
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.

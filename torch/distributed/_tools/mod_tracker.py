@@ -55,7 +55,7 @@ class ModTracker:
     A Set containing the fqn for each module currently running their forward
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.parents = {"Global"}
         self._active_module_cnt = {}
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
@@ -67,7 +67,7 @@ class ModTracker:
         self._user_pre_bw_hook = None
         self._user_post_bw_hook = None
 
-    def _maybe_set_engine_callback(self):
+    def _maybe_set_engine_callback(self) -> None:
         # This assumes no concurrent calls to backward
         if self._has_callback:
             return
@@ -76,7 +76,7 @@ class ModTracker:
             torch.autograd.Variable._execution_engine.queue_callback(post_bw_callback)
         self._post_bw_callbacks_to_enqueue.clear()
 
-        def callback():
+        def callback() -> None:
             self.parents = {"Global"}
             self._has_callback = False
 
@@ -102,7 +102,7 @@ class ModTracker:
         post_fw_hook: Optional[Callable] = None,
         pre_bw_hook: Optional[Callable] = None,
         post_bw_hook: Optional[Callable] = None,
-    ):
+    ) -> None:
         """
         Registers user-specified hooks to be called before/after the forward/backward pass for each
         module tracked by the ``ModTracker``. One or more can be ``None``.
@@ -149,7 +149,7 @@ class ModTracker:
             post_bw_hook, self._user_post_bw_hook, "post_bw_hook"
         )
 
-    def clear_user_hooks(self):
+    def clear_user_hooks(self) -> None:
         """
         Clears the user specified hooks registered with ``register_user_hooks``
         """
@@ -170,12 +170,14 @@ class ModTracker:
         return mod_name
 
     def _get_append_fn(self, w_mod, name, is_bw):
-        def fn(*args):
+        def fn(*args) -> None:
             if is_bw:
                 self._maybe_set_engine_callback()
             if name in self.parents and not self.is_bw:
 
-                def custom_formatwarning(msg, category, filename, lineno, line=None):
+                def custom_formatwarning(
+                    msg, category, filename, lineno, line=None
+                ) -> str:
                     return f"{filename}:{lineno}: {category.__name__}: {msg} \n"
 
                 # pyrefly: ignore [bad-assignment]
@@ -197,7 +199,7 @@ class ModTracker:
         return fn
 
     def _get_pop_fn(self, w_mod, name, is_bw):
-        def fn(*args):
+        def fn(*args) -> None:
             if self._user_post_bw_hook is not None and is_bw:
                 self._user_post_bw_hook(w_mod(), args)
             if name in self.parents:
@@ -213,7 +215,7 @@ class ModTracker:
 
         return fn
 
-    def _fw_pre_hook(self, mod, input):
+    def _fw_pre_hook(self, mod, input) -> None:
         name = self._get_mod_name(mod)
         w_mod = weakref.ref(mod)
         self._get_append_fn(w_mod, name, False)()
@@ -229,7 +231,7 @@ class ModTracker:
                     self._get_pop_fn(w_mod, name, True)
                 )
 
-    def _fw_post_hook(self, mod, input, output):
+    def _fw_post_hook(self, mod, input, output) -> None:
         name = self._get_mod_name(mod)
         w_mod = weakref.ref(mod)
         if self._user_post_fw_hook is not None:

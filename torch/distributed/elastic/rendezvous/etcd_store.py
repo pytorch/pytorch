@@ -23,7 +23,7 @@ except ModuleNotFoundError:
 
 # Delay (sleep) for a small random amount to reduce CAS failures.
 # This does not affect correctness, but will reduce requests to etcd server.
-def cas_delay():
+def cas_delay() -> None:
     time.sleep(random.uniform(0, 0.1))
 
 
@@ -41,7 +41,7 @@ class EtcdStore(Store):
         etcd_store_prefix,
         # Default timeout same as in c10d/Store.hpp
         timeout: Optional[datetime.timedelta] = None,
-    ):
+    ) -> None:
         super().__init__()  # required for pybind trampoline.
 
         self.client = etcd_client
@@ -53,7 +53,7 @@ class EtcdStore(Store):
         if not self.prefix.endswith("/"):
             self.prefix += "/"
 
-    def set(self, key, value):
+    def set(self, key, value) -> None:
         """
         Write a key/value pair into ``EtcdStore``.
 
@@ -121,7 +121,7 @@ class EtcdStore(Store):
             except etcd.EtcdCompareFailed:
                 cas_delay()
 
-    def wait(self, keys, override_timeout: Optional[datetime.timedelta] = None):
+    def wait(self, keys, override_timeout: Optional[datetime.timedelta] = None) -> None:
         """
         Wait until all of the keys are published, or until timeout.
 

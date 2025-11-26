@@ -55,7 +55,9 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         >>>    opt.step()
     """
 
-    def __init__(self, optim: torch.optim.Optimizer, averager: averagers.ModelAverager):
+    def __init__(
+        self, optim: torch.optim.Optimizer, averager: averagers.ModelAverager
+    ) -> None:
         self.optim = optim
         self.param_groups = self.optim.param_groups
         self.averager = averager
@@ -64,7 +66,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
     def state(self):  # type: ignore[override]
         return self.optim.state
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.optim.__repr__()
 
     def state_dict(self):
@@ -77,7 +79,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         optim_state_dict["step"] = self.averager.step
         return optim_state_dict
 
-    def load_state_dict(self, state_dict):
+    def load_state_dict(self, state_dict) -> None:
         r"""
         This is the same as :class:`torch.optim.Optimizer` :meth:`load_state_dict`,
         but also restores model averager's step value to the one
@@ -97,15 +99,15 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
             )
             self.averager.step = 0
 
-    def step(self):  # type: ignore[override]
+    def step(self) -> None:  # type: ignore[override]
         r"""
         Performs a single optimization step (parameter update).
         """
         self.optim.step()
         self.averager.average_parameters(params=self.param_groups)
 
-    def zero_grad(self, set_to_none: bool = True):  # type: ignore[override]
+    def zero_grad(self, set_to_none: bool = True) -> None:  # type: ignore[override]
         self.optim.zero_grad(set_to_none=set_to_none)
 
-    def add_param_group(self, param_group):
+    def add_param_group(self, param_group) -> None:
         self.optim.add_param_group(param_group)

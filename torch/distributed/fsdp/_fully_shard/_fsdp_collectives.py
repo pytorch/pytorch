@@ -60,7 +60,7 @@ class DefaultAllocMixin:
 
 
 class ProcessGroupAllocMixin:
-    def __init__(self, group: dist.ProcessGroup, *args: Any, **kwargs: Any):
+    def __init__(self, group: dist.ProcessGroup, *args: Any, **kwargs: Any) -> None:
         self._group = group
         super().__init__(*args, **kwargs)
 

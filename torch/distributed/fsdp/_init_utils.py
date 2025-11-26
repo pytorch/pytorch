@@ -632,7 +632,7 @@ def _init_param_handle_from_params(
     state: _FSDPState,
     params: list[nn.Parameter],
     fully_sharded_module: nn.Module,
-):
+) -> None:
     if len(params) == 0:
         return
     handle = FlatParamHandle(
@@ -905,7 +905,7 @@ def _materialize_meta_module(
     device_from_device_id: Optional[torch.device],
     ignored_modules: set[nn.Module],
     device_handle: _FSDPDeviceHandle,
-):
+) -> None:
     # Run default meta device initialization
     materialization_device = device_from_device_id or torch.device(
         device_handle.current_device()
@@ -1046,7 +1046,7 @@ def _move_states_to_device(
         _warn_cpu_init()
 
 
-def _warn_cpu_init():
+def _warn_cpu_init() -> None:
     warnings.warn(
         "The passed-in `module` is on CPU and will thus have FSDP's sharding "
         "initialization run on CPU, which may be slower than on GPU. We "

@@ -52,7 +52,7 @@ def get_arg_return_types_from_interface(module_interface):
 
 
 class _StringLoader(importlib.abc.SourceLoader):
-    def __init__(self, data):
+    def __init__(self, data) -> None:
         self.data = data
 
     def get_source(self, fullname):

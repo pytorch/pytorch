@@ -55,7 +55,7 @@ def print_params(stage, model_1, model_2, optim_1, optim_2):
     )
 
 
-def run_fsdp_checkpoint_example(rank, world_size):
+def run_fsdp_checkpoint_example(rank, world_size) -> None:
     # Set up world pg
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"

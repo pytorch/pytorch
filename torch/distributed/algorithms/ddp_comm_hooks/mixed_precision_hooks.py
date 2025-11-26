@@ -60,7 +60,7 @@ def _reducer_allreduce_and_upcast_hook(
             p.grad.data = p.grad.to(p.data.dtype)
 
     # enqueue a callback to wait for this stream at end of backward
-    def wait_for_stream_cb():
+    def wait_for_stream_cb() -> None:
         torch.accelerator.current_stream().wait_stream(stream)
         # Remove post-backward hooks since they are re-installed in next
         # iteration, similar to FSDP.

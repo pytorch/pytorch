@@ -27,8 +27,7 @@ except Exception:
         stacklevel=2,
     )
 
-    def is_torchdynamo_compiling():  # type: ignore[misc]
-        return False
+    def is_torchdynamo_compiling() -> bool:  # type: ignore[misc]
         return False
 
 

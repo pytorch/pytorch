@@ -22,7 +22,7 @@ def _is_wrapped_exception(obj: Any) -> bool:
 class CheckpointException(BaseException):
     """Exception raised if failure was detected as part of a checkpoint load or save."""
 
-    def __init__(self, msg: str, failures: dict[int, WRAPPED_EXCEPTION]):
+    def __init__(self, msg: str, failures: dict[int, WRAPPED_EXCEPTION]) -> None:
         super().__init__(msg, failures)
         self._failures = failures
 

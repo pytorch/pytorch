@@ -31,7 +31,7 @@ __all__ = [
 def _post_order_apply(
     root_module: nn.Module,
     fn: Callable[[nn.Module], Optional[nn.Module]],
-):
+) -> None:
     """
     This applies ``fn`` to every module in the module tree of ``root_module``
     following a post-order traversal. If ``fn`` returns an :class:`nn.Module`,
@@ -46,7 +46,7 @@ def _post_order_apply(
         module: nn.Module,
         module_name: str,
         parent_module: Optional[nn.Module],
-    ):
+    ) -> None:
         for child_module_name, child_module in module.named_children():
             if child_module not in visited_modules:
                 visited_modules.add(child_module)
@@ -181,7 +181,7 @@ class ModuleWrapPolicy(_Policy):
     passing in the kwargs given to the root.
     """
 
-    def __init__(self, module_classes: Iterable[type[nn.Module]]):
+    def __init__(self, module_classes: Iterable[type[nn.Module]]) -> None:
         module_classes_set = set(module_classes)
         self._module_classes = module_classes_set
         self._module_classes_str = str(module_classes_set)
@@ -237,7 +237,9 @@ class CustomPolicy(_Policy):
         >>> fsdp_model = FSDP(model, auto_wrap_policy=policy)
     """
 
-    def __init__(self, lambda_fn: Callable[[nn.Module], Union[bool, dict[str, Any]]]):
+    def __init__(
+        self, lambda_fn: Callable[[nn.Module], Union[bool, dict[str, Any]]]
+    ) -> None:
         self._lambda_fn = lambda_fn
 
     def _run_policy(
@@ -575,7 +577,7 @@ class _ConfigAutoWrap:
     wrapper_cls: Optional[Callable] = None  # The wrapper class
     kwargs: dict[str, Any] = {}  # Wrapper's args
 
-    def __init__(self, **kwargs: dict[str, Any]):
+    def __init__(self, **kwargs: dict[str, Any]) -> None:
         self.kwargs = kwargs
 
     @staticmethod

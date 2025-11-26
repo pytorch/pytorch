@@ -34,7 +34,7 @@ class _CheckpointRequestIdentifier:
     checkpoint_id: Union[str, os.PathLike, None]
     uuid: str
 
-    def __init__(self, checkpoint_id: Union[str, os.PathLike, None]):
+    def __init__(self, checkpoint_id: Union[str, os.PathLike, None]) -> None:
         self.checkpoint_id = checkpoint_id
         self.uuid = str(uuid4())
 
@@ -58,7 +58,7 @@ class _ProcessGroupInitInfo:
     tcp_store_master_port: int
     use_prefix_store: bool
 
-    def __init__(self, process_group: Optional[dist.ProcessGroup] = None):
+    def __init__(self, process_group: Optional[dist.ProcessGroup] = None) -> None:
         self.local_rank = dist.get_node_local_rank(fallback_rank=0)
         self.global_rank = dist.get_rank(process_group)
         self.world_size = dist.get_world_size(process_group)
@@ -103,7 +103,7 @@ class _AsyncCheckpointProcess:
     def __init__(
         self,
         pg_init_info: _ProcessGroupInitInfo,
-    ):
+    ) -> None:
         self.ctx = mp.get_context("spawn")
         self._process_pipe, child_end = self.ctx.Pipe()
 

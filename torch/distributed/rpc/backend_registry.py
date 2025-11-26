@@ -185,7 +185,7 @@ def _tensorpipe_exchange_and_check_all_device_maps(
 
 def _validate_device_maps(
     all_names, all_device_counts, all_device_maps, all_devices, is_static_group=True
-):
+) -> None:
     for node in all_names:
         devices = all_devices[node]
         if len(set(devices)) != len(devices):
@@ -284,7 +284,7 @@ def _get_device_infos():
     return device_count, opts.device_maps, opts.devices
 
 
-def _set_devices_and_reverse_device_map(agent):
+def _set_devices_and_reverse_device_map(agent) -> None:
     from . import TensorPipeAgent
 
     agent = cast(TensorPipeAgent, agent)

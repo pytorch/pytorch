@@ -92,7 +92,7 @@ class ShardingPropagator:
         op_overload: OpOverload,
         rule_func: Callable[[OpSchema], OutputSharding],
         schema_info: Optional[RuntimeSchemaInfo] = None,
-    ):
+    ) -> None:
         """
         Register a sharding propagation rule for an operator.
         """
@@ -105,7 +105,7 @@ class ShardingPropagator:
         op_overload: OpOverload,
         strategy_func: Callable[[OpSchema], StrategyType],
         schema_info: Optional[RuntimeSchemaInfo] = None,
-    ):
+    ) -> None:
         """
         Register a :class:`OpStrategy` generator for an operator.
 

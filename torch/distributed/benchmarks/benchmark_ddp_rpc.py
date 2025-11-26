@@ -46,7 +46,7 @@ class HybridModel(torch.nn.Module):
     servers.
     """
 
-    def __init__(self, emb_rref_list, device):
+    def __init__(self, emb_rref_list, device) -> None:
         super().__init__()
         self.emb_rref_list = emb_rref_list
         fc1 = torch.nn.Linear(512, 256)
@@ -85,7 +85,7 @@ def _retrieve_embedding_parameters(emb_rref):
     return [RRef(p) for p in emb_rref.local_value().parameters()]
 
 
-def _print_header():
+def _print_header() -> None:
     _print_cont("\n")
     _print_cont(" " * 10)
     for _ in [50, 75, 90, 95]:
@@ -93,7 +93,7 @@ def _print_header():
     _print_cont("\n")
 
 
-def _print_benchmark(prefix, nelem, measurements):
+def _print_benchmark(prefix, nelem, measurements) -> None:
     measurements = sorted(measurements)
     _print_cont(f"{prefix:8s}:")
     for p in [50, 75, 90, 95]:
@@ -102,7 +102,7 @@ def _print_benchmark(prefix, nelem, measurements):
     _print_cont("\n")
 
 
-def _print_cont(msg):
+def _print_cont(msg) -> None:
     print(msg, end="", flush=True)
 
 
@@ -201,7 +201,7 @@ def _run_trainer(emb_rref_list, rank):
     return rank, measurements, batch_size  # type: ignore[possibly-undefined]
 
 
-def run_worker(rank, world_size):
+def run_worker(rank, world_size) -> None:
     r"""
     Initialize RPC, calls the function, and shuts down RPC.
     """

@@ -18,7 +18,7 @@ from torch.distributed.nn.functional import (
 )
 
 
-def _chunk_sharding_spec_check(spec, op):
+def _chunk_sharding_spec_check(spec, op) -> None:
     """
     For the given op implementation check if the sharding spec is ChunkShardingSpec.
     """
@@ -30,7 +30,7 @@ def _chunk_sharding_spec_check(spec, op):
 
 def _register_sharded_op_on_local_tensor(
     op, early_stop_func=None, extra_check=None, customized_func=None
-):
+) -> None:
     """
     Handles ``__torch_function__`` dispatch for ops which are performed on
     the single local tensor of the sharded tensor such as op like

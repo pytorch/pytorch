@@ -80,7 +80,7 @@ def shard_parameter(
     sharding_spec: ShardingSpec,
     src_rank=0,
     process_group=None,
-):
+) -> None:
     """
     Given a :class:`torch.nn.Module`, a ``param_name`` for a parameter in that
     module, it shards that parameter according to the provided
@@ -223,7 +223,9 @@ def _collect_local_shard(module: torch.nn.Module) -> torch.nn.Module:
     return module
 
 
-def shard_module(module: nn.Module, plan: ShardingPlan, src_rank=0, process_group=None):
+def shard_module(
+    module: nn.Module, plan: ShardingPlan, src_rank=0, process_group=None
+) -> None:
     """
     Shards a given module according to the provided sharding `plan`. This method
     first shards all the parameters according to the given sharding `plan`. Then if

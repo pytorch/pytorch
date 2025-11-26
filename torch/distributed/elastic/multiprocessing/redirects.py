@@ -87,7 +87,7 @@ def redirect(std: str, to_file: str):
     python_std = _python_std(std)
     std_fd = python_std.fileno()
 
-    def _redirect(dst):
+    def _redirect(dst) -> None:
         libc.fflush(c_std)
         python_std.flush()
         os.dup2(dst.fileno(), std_fd)

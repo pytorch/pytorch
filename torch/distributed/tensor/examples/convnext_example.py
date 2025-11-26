@@ -28,7 +28,9 @@ ITER_TIME = 20
 
 
 class LayerNorm(nn.Module):
-    def __init__(self, normalized_shape, eps=1e-6, data_format=torch.contiguous_format):
+    def __init__(
+        self, normalized_shape, eps=1e-6, data_format=torch.contiguous_format
+    ) -> None:
         super().__init__()
         self.weight = nn.Parameter(torch.ones(normalized_shape))
         self.bias = nn.Parameter(torch.zeros(normalized_shape))
@@ -47,7 +49,7 @@ class LayerNorm(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, dim, drop_path=0.0, layer_scale_init_value=1e-6):
+    def __init__(self, dim, drop_path=0.0, layer_scale_init_value=1e-6) -> None:
         super().__init__()
         self.dwconv = nn.Conv2d(
             dim, dim, kernel_size=7, padding=3, groups=dim
@@ -85,7 +87,7 @@ class Block(nn.Module):
 
 
 class DownSampling(nn.Module):
-    def __init__(self, dim_in=3, dim_out=2, down_scale=4, norm_first=False):
+    def __init__(self, dim_in=3, dim_out=2, down_scale=4, norm_first=False) -> None:
         super().__init__()
         self.norm_first = norm_first
         if norm_first:
@@ -109,7 +111,7 @@ class DownSampling(nn.Module):
 
 
 @torch.no_grad()
-def init_weights(m):
+def init_weights(m) -> None:
     if type(m) is nn.Conv2d or type(m) is nn.Linear:
         nn.init.ones_(m.weight)
         if m.bias is not None:
@@ -126,7 +128,7 @@ class ConvNeXt(nn.Module):
         drop_path_rate=0.0,
         layer_scale_init_value=1e-6,
         head_init_scale=1.0,
-    ):
+    ) -> None:
         super().__init__()
 
         self.downsample_layers = nn.ModuleList()
@@ -180,7 +182,7 @@ def _conv_fn(
         module.register_parameter(name, dist_param)
 
 
-def train_convnext_example():
+def train_convnext_example() -> None:
     device_type = "cuda"
     world_size = int(os.environ["WORLD_SIZE"])
     mesh = init_device_mesh(device_type, (world_size,))

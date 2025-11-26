@@ -3,7 +3,9 @@ import torch
 from torch.distributed._tools import MemoryTracker
 
 
-def run_one_model(net: torch.nn.Module, input: torch.Tensor, device: str = "cuda"):
+def run_one_model(
+    net: torch.nn.Module, input: torch.Tensor, device: str = "cuda"
+) -> None:
     net.to(device)
     input = input.to(device)
 

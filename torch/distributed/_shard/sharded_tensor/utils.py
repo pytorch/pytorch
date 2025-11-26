@@ -91,7 +91,7 @@ def _flatten_tensor_size(size) -> torch.Size:
     return torch.Size(dims)
 
 
-def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True):
+def _raise_if_mismatch(expected, actual, prop_name, ranks, is_local=True) -> None:
     if is_local:
         assert isinstance(ranks, int)
         if expected != actual:

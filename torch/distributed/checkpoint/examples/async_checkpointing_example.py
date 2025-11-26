@@ -66,7 +66,7 @@ def _init_model(rank, world_size):
     return model, optim
 
 
-def _print(msg):
+def _print(msg) -> None:
     if dist.get_rank() == 0:
         print(msg)
 
@@ -80,7 +80,7 @@ def _input():
     return x, y
 
 
-def run(rank, world_size):
+def run(rank, world_size) -> None:
     # Set up world pg
     os.environ["MASTER_ADDR"] = "localhost"
     os.environ["MASTER_PORT"] = "12355"

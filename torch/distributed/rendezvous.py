@@ -23,7 +23,7 @@ _rendezvous_handlers: dict[str, Callable[..., Iterator[tuple[Store, int, int]]]]
 __all__ = ["register_rendezvous_handler", "rendezvous"]
 
 
-def register_rendezvous_handler(scheme, handler):
+def register_rendezvous_handler(scheme, handler) -> None:
     """
     Register a new rendezvous handler.
 

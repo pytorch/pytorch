@@ -29,16 +29,16 @@ class LocalTimerClient(TimerClient):
     GPU devices.
     """
 
-    def __init__(self, mp_queue):
+    def __init__(self, mp_queue) -> None:
         super().__init__()
         self._mp_queue = mp_queue
 
-    def acquire(self, scope_id, expiration_time):
+    def acquire(self, scope_id, expiration_time) -> None:
         pid = os.getpid()
         acquire_request = TimerRequest(pid, scope_id, expiration_time)
         self._mp_queue.put(acquire_request)
 
-    def release(self, scope_id):
+    def release(self, scope_id) -> None:
         pid = os.getpid()
         release_request = TimerRequest(pid, scope_id, -1)
         self._mp_queue.put(release_request)
@@ -49,7 +49,7 @@ class MultiprocessingRequestQueue(RequestQueue):
     A ``RequestQueue`` backed by python ``multiprocessing.Queue``
     """
 
-    def __init__(self, mp_queue: mp.Queue):
+    def __init__(self, mp_queue: mp.Queue) -> None:
         super().__init__()
         self._mp_queue = mp_queue
 
@@ -86,7 +86,7 @@ class LocalTimerServer(TimerServer):
 
     def __init__(
         self, mp_queue: mp.Queue, max_interval: float = 60, daemon: bool = True
-    ):
+    ) -> None:
         super().__init__(MultiprocessingRequestQueue(mp_queue), max_interval, daemon)
         self._timers: dict[tuple[Any, str], TimerRequest] = {}
 

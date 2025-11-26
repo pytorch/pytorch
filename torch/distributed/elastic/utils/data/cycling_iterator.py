@@ -36,7 +36,7 @@ class CyclingIterator(Iterator[_T]):
         n: int,
         generator_fn: Callable[[int], Iterator[_T]],
         start_epoch: int = 0,
-    ):
+    ) -> None:
         self._n = n
         self._epoch = start_epoch
         self._generator_fn = generator_fn

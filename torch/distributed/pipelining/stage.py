@@ -68,7 +68,7 @@ class _RootArgPlaceholder:
     Placeholder for model-level inputs.
     """
 
-    def __init__(self, tensor):
+    def __init__(self, tensor) -> None:
         self.meta = tensor.to("meta")
 
 
@@ -82,7 +82,7 @@ class _RecvInfo:
         input_name: str,
         source: int,
         buffer: torch.Tensor,
-    ):
+    ) -> None:
         # Name of this input
         self.input_name = input_name
         # Stage index of the source of this input
@@ -90,7 +90,7 @@ class _RecvInfo:
         # Buffer to receive the input into.
         self.buffer = buffer
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={self.buffer.size()})"
 
 
@@ -128,7 +128,7 @@ class _PipelineStageBase(ABC):
         device: torch.device,
         group: Optional[dist.ProcessGroup] = None,
         dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
-    ):
+    ) -> None:
         """
         Args:
             submodule (torch.nn.Module): The module to be executed in this stage.
@@ -212,7 +212,7 @@ class _PipelineStageBase(ABC):
         return self._has_backward
 
     @has_backward.setter
-    def has_backward(self, has_backward: bool):
+    def has_backward(self, has_backward: bool) -> None:
         self._has_backward = has_backward
 
     @property
@@ -229,7 +229,7 @@ class _PipelineStageBase(ABC):
         """
         return self.stage_index == self.num_stages - 1
 
-    def _check_chunk_id(self, chunk_id: int):
+    def _check_chunk_id(self, chunk_id: int) -> None:
         if self.chunks is None:
             raise RuntimeError(
                 "Attempted to access chunk_id before chunks have been configured."
@@ -239,7 +239,7 @@ class _PipelineStageBase(ABC):
                 f"Chunk id {chunk_id} is out of range [0, {self.chunks})"
             )
 
-    def _configure_outputs_meta(self, outputs_meta: tuple[torch.Tensor, ...]):
+    def _configure_outputs_meta(self, outputs_meta: tuple[torch.Tensor, ...]) -> None:
         """
         Track the output shapes/dtype of this stage since they determine the send operation(s) which must match
         recv operations of the next stage.  The next stage _will_ be freezing its recv buffers based on its initial
@@ -292,7 +292,7 @@ class _PipelineStageBase(ABC):
     ) -> tuple[Any, ...]:
         raise NotImplementedError
 
-    def _prepare_backward_infra(self, num_microbatches: int):
+    def _prepare_backward_infra(self, num_microbatches: int) -> None:
         # TODO: this is needed for backward_maybe_with_nosync
         self.chunks = num_microbatches
 
@@ -733,7 +733,7 @@ class _PipelineStageBase(ABC):
         loss=None,
         full_backward: bool = True,
         last_backward=False,
-    ):
+    ) -> None:
         """
         Perform backward pass on the module.
         This should only be called once per microbatch.
@@ -837,7 +837,7 @@ class _PipelineStageBase(ABC):
 
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
-    def backward_weight_one_chunk(self, bwd_chunk_id: int, last_backward=False):
+    def backward_weight_one_chunk(self, bwd_chunk_id: int, last_backward=False) -> None:
         # skip backward computation if backward is not enabled
         if not self.has_backward:
             return
@@ -880,7 +880,7 @@ class _PipelineStageBase(ABC):
                     "full", bwd_kwargs, last_backward=last_backward
                 )
 
-    def _validate_fwd_input(self, args, kwargs):
+    def _validate_fwd_input(self, args, kwargs) -> None:
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
 
         if self.is_first:
@@ -911,7 +911,7 @@ class _PipelineStageBase(ABC):
             f"Stage {self.stage_index} forward inputs", expected_tensors_meta, args
         )
 
-    def _validate_fwd_outputs(self, outputs: tuple[torch.Tensor, ...]):
+    def _validate_fwd_outputs(self, outputs: tuple[torch.Tensor, ...]) -> None:
         """Raises a RuntimeError if this stage produces an output of unexpected shape/dtype.
         Most likely, this could be cause either by incorrect user specification of output shapes, or because
         shape inference was done on the original model but then at runtime the model is wrapped with something like
@@ -978,7 +978,7 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def perform_reduce_grad(self, grad_scale_factor: int):
+    def perform_reduce_grad(self, grad_scale_factor: int) -> None:
         """
         Called as a part of schedule IR.
         REDUCE_GRAD action is scheduled after all microbatches W, B actions.
@@ -1020,7 +1020,7 @@ class _PipelineStage(_PipelineStageBase):
         pipe_info: PipeInfo,
         device: torch.device,
         group: Optional[dist.ProcessGroup] = None,
-    ):
+    ) -> None:
         """
         Create a pipeline stage given a stage_module to be wrapped by this stage
         and a `pipe_info` describing the stage relationship of the pipeline.
@@ -1069,7 +1069,7 @@ class _PipelineStage(_PipelineStageBase):
         # Cast submodule to device
         self._move_submod_to_device()
 
-    def _move_submod_to_device(self):
+    def _move_submod_to_device(self) -> None:
         # Move submodule to indicated device if possible
         # Note: we cannot move meta module to real devices because meta tensors
         # do not support to() method. One needs to do an in-place tensor swap in
@@ -1351,7 +1351,7 @@ class PipelineStage(_PipelineStageBase):
         output_args: Optional[Union[torch.Tensor, tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
         dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
-    ):
+    ) -> None:
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
         self.inputs: Optional[list[torch.Tensor]] = None
         self.inputs_meta: Optional[tuple[torch.Tensor, ...]] = None

@@ -47,7 +47,7 @@ class ElasticDistributedSampler(DistributedSampler[T]):
         num_replicas: Optional[int] = None,
         rank: Optional[int] = None,
         start_index: int = 0,
-    ):
+    ) -> None:
         super().__init__(dataset=dataset, num_replicas=num_replicas, rank=rank)
         if not isinstance(dataset, Sized):
             raise TypeError("Dataset must be an instance of collections.abc.Sized")

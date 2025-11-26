@@ -677,7 +677,7 @@ class CommDebugModeExample:
         """
 
         class Foo(torch.nn.Module):
-            def __init__(self, n_layers: int, dim: int, use_ac: bool = False):
+            def __init__(self, n_layers: int, dim: int, use_ac: bool = False) -> None:
                 super().__init__()
                 self.linears = torch.nn.ModuleList()
                 self.use_ac = use_ac

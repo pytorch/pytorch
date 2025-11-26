@@ -208,7 +208,7 @@ class DynamicMetaLoadPlanner(DefaultLoadPlanner):
 def dcp_to_torch_save(
     dcp_checkpoint_dir: Union[str, os.PathLike],
     torch_save_path: Union[str, os.PathLike],
-):
+) -> None:
     """
     Given a directory containing a DCP checkpoint, this function will convert it into a
     Torch save file.
@@ -233,7 +233,7 @@ def dcp_to_torch_save(
 def torch_save_to_dcp(
     torch_save_path: Union[str, os.PathLike],
     dcp_checkpoint_dir: Union[str, os.PathLike],
-):
+) -> None:
     """
     Given the location of a torch save file, converts it into a DCP checkpoint.
 

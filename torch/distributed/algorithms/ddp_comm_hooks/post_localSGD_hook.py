@@ -38,7 +38,7 @@ class PostLocalSGDState:
         subgroup,
         start_localSGD_iter,
         post_local_gradient_allreduce=True,
-    ):
+    ) -> None:
         """Initialize state object with given parameters and log when localSGD start."""
         logger.info(
             "Local SGD will be started after %s iterations", start_localSGD_iter
@@ -55,7 +55,7 @@ class PostLocalSGDState:
         # Iteration/step in the training loop.
         self.iter = 0
 
-    def maybe_increase_iter(self, bucket):
+    def maybe_increase_iter(self, bucket) -> None:
         """Track iterations and trigger log message at start of local SGD."""
         # Since bucket 0 is the last bucket to allreduce in an iteration.
         # Only increase `iter` when bucket 0 is processed.

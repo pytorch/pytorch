@@ -33,7 +33,7 @@ class _FunctionalAdamax:
         foreach: bool = False,
         maximize: bool = False,
         _allow_empty_param_list: bool = False,
-    ):
+    ) -> None:
         _scripted_functional_optimizer_deprecation_warning(stacklevel=2)
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -64,7 +64,7 @@ class _FunctionalAdamax:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]) -> None:
         params = self.param_group["params"]
         params_with_grad = []
         grads = []

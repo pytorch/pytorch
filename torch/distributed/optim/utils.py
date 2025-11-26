@@ -28,7 +28,7 @@ functional_optim_map = {
 }
 
 
-def register_functional_optim(key, optim):
+def register_functional_optim(key, optim) -> None:
     """
     Interface to insert a new functional optimizer to functional_optim_map
     ``fn_optim_key`` and ``fn_optimizer`` are user defined. The optimizer and key

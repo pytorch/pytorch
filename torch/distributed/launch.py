@@ -180,7 +180,7 @@ def parse_args(args):
     return parser.parse_args(args)
 
 
-def launch(args):
+def launch(args) -> None:
     if args.no_python and not args.use_env:
         raise ValueError(
             "When using the '--no-python' flag, you must also set the '--use-env' flag."
@@ -198,7 +198,7 @@ def launch(args):
     "further instructions\n",
     category=FutureWarning,
 )
-def main(args=None):
+def main(args=None) -> None:
     args = parse_args(args)
     launch(args)
 

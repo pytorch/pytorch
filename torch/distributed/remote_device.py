@@ -22,7 +22,7 @@ class _remote_device:
                     and "cuda:1", just represent local devices.
     """
 
-    def __init__(self, remote_device: Union[str, torch.device]):
+    def __init__(self, remote_device: Union[str, torch.device]) -> None:
         PARSE_ERROR = (
             f"Could not parse remote_device: {remote_device}. The valid format is "
             "'<workername>/<device>' or 'rank:<rank>/<device>' or '<device>'"
@@ -73,7 +73,7 @@ class _remote_device:
                 raise ValueError(PARSE_ERROR)
 
     @staticmethod
-    def _is_valid_local_device(device):
+    def _is_valid_local_device(device) -> bool | None:
         # Check for torch.device
         try:
             torch.device(device)
@@ -96,7 +96,7 @@ class _remote_device:
         """Return the local device on the remote worker."""
         return self._device  # type: ignore[return-value]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if self._device is not None:
             if self._worker_name is not None:
                 return f"{self._worker_name}/{self._device}"

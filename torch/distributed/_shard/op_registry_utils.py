@@ -11,7 +11,7 @@ and PartialTensor.
 """
 
 
-def _register_op(op, func, op_table):
+def _register_op(op, func, op_table) -> None:
     """
     Performs basic validation and registers the provided op in the given
     op_table.

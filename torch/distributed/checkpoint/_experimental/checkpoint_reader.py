@@ -32,7 +32,7 @@ class CheckpointReader:
     def __init__(
         self,
         rank_info: RankInfo,
-    ):
+    ) -> None:
         """
         Initialize a CheckpointReader.
 

@@ -176,7 +176,7 @@ def stage_backward_input(
         for i, intermediate in enumerate(param_group["intermediates"]):
 
             def get_hook(param_group, i):
-                def hook(grad_inputs):
+                def hook(grad_inputs) -> None:
                     if param_group.get("grads", None) is None:
                         param_group["grads"] = [None] * len(
                             param_group["intermediates"]
@@ -310,7 +310,7 @@ def stage_backward(
             grad_val,
             # Don't delete me- see [Note: ref cycle]
             extract_tensors_with_grads,
-        ):
+        ) -> None:
             if isinstance(output_val, torch.Tensor):
                 if not output_val.requires_grad and output_val.grad_fn is None:
                     return

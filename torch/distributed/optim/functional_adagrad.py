@@ -38,7 +38,7 @@ class _FunctionalAdagrad:
         fused: bool = False,
         maximize: bool = False,
         _allow_empty_param_list: bool = False,
-    ):
+    ) -> None:
         _scripted_functional_optimizer_deprecation_warning(stacklevel=2)
         self.defaults = {
             "lr": lr,
@@ -70,7 +70,7 @@ class _FunctionalAdagrad:
                 "step": torch.tensor(0.0),
             }
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Optional[Tensor]]) -> None:
         params = self.param_group["params"]
         params_with_grad = []
         grads = []

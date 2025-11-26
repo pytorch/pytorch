@@ -74,7 +74,7 @@ class CheckpointProcess:
         subprocess_init_args: tuple[Any, ...],
         checkpoint_writer_init_fn: Callable[..., CheckpointWriter],
         checkpoint_writer_init_args: dict[str, Any],
-    ):
+    ) -> None:
         self._executor = ThreadPoolExecutor(max_workers=1)
         self._rank_info = rank_info
         self._config = config

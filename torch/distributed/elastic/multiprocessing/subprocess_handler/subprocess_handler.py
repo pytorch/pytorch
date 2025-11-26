@@ -42,7 +42,7 @@ class SubprocessHandler:
         stderr: Optional[str],
         local_rank_id: int,
         numa_options: Optional[NumaOptions],
-    ):
+    ) -> None:
         self._stdout = open(stdout, "w") if stdout else None
         self._stderr = open(stderr, "w") if stderr else None
         # inherit parent environment vars

@@ -120,7 +120,7 @@ def _broadcast_object(
 
 
 class _ZeROJoinHook(JoinHook):
-    def __init__(self, zero):
+    def __init__(self, zero) -> None:
         assert isinstance(zero, ZeroRedundancyOptimizer), (
             "ZeRO join hook requires passing in a ZeroRedundancyOptimizer "
             "instance as the state"
@@ -128,7 +128,7 @@ class _ZeROJoinHook(JoinHook):
         self.zero = zero
         super().__init__()
 
-    def main_hook(self):
+    def main_hook(self) -> None:
         """
         Perform an optimizer step.
 
@@ -164,7 +164,7 @@ class _DDPBucketAssignment:
         bucket_index: int,
         parameters: list[torch.Tensor],
         offset: int,
-    ):
+    ) -> None:
         self.bucket_index = bucket_index
         self.parameters = parameters
         self.offset = offset
@@ -381,7 +381,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         parameters_as_bucket_view: bool = False,
         overlap_with_ddp: bool = False,
         **defaults: Any,
-    ):
+    ) -> None:
         r"""Init."""
         # Perform type and assumption checks on the input parameters
         params = self._verify_and_init_params(params)
@@ -807,7 +807,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 )
         return handles
 
-    def _sync_params(self):
+    def _sync_params(self) -> None:
         r"""
         Sync all parameter shards across the ranks.
 
@@ -1598,7 +1598,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         )
         return bucket_index % self.world_size
 
-    def _check_overlap_initialized(self):
+    def _check_overlap_initialized(self) -> None:
         r"""
         Check the delayed initialization depending on the value of ``overlap_with_ddp``.
 
