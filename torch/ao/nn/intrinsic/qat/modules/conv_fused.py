@@ -261,10 +261,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
 
         return conv_bn
 
-    def extra_repr(self):
-        # TODO(jerryzh): extend
-        return super().extra_repr()
-
     def forward(self, input):
         return self._forward(input)
 
