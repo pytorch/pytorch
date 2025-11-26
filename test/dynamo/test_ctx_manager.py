@@ -2484,7 +2484,7 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(Unsupported):
+        with self.assertRaises(InternalTorchDynamoError):
             torch.compile(fn, backend="eager", fullgraph=False)(x)
 
     def test_disable___exit__(self):
