@@ -2270,10 +2270,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         optimize_mask=True,
         fixed_config: Optional[FixedTritonConfig] = None,
         hint_override: Optional[int] = None,
+        is_combo_kernel: bool = False,
         **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
+        self.is_combo_kernel: bool = is_combo_kernel
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
@@ -2801,7 +2803,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
             if (
-                self.fixed_config or self._is_combo_kernel()
+                self.fixed_config or self.is_combo_kernel
             ) and not self._has_constant_xmask():
                 mask_vars = OrderedSet(["xmask"])
             else:
@@ -5485,23 +5487,17 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return False
 
     def _has_constant_xmask(self) -> bool:
-        if self._is_combo_kernel():
+        if self.is_combo_kernel:
             xtree = next(
                 (tree for tree in self.range_trees if tree.prefix == "x"), None
             )
+            # when there's no xtree, there's no output iteration to mask
             if xtree is None:
                 return True
         else:
             xtree = self.range_trees[0]
             assert xtree.prefix == "x"
         return self._has_constant_mask(xtree)
-
-    def _is_combo_kernel(self) -> bool:
-        """Returns True if this kernel is a sub-kernel within a combo kernel."""
-        return any(
-            tree.pid_cache.get("tl.program_id(0)") == "pid_offset"
-            for tree in self.range_trees
-        )
 
     def filter_masks(self, mask_vars: OrderedSet[str]) -> None:
         for tree in self.range_trees:
