@@ -9,7 +9,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/cuda/CUDAStream.h>
-#include <torch/csrc/inductor/static_cuda_launcher.h>
+#include <torch/csrc/inductor/static_launcher/cuda/static_cuda_launcher.h>
 #include <cstdint>
 #include <stdexcept>
 
@@ -34,7 +34,7 @@
   of triton kernels have less than 10 args, this seems unlikely to be
   expensive.
 
-  This launcher is paired with StaticallyLaunchedCudaKernel in
+  This launcher is paired with StaticallyLaunchedTritonKernel in
   triton_heuristics.py.
 
   TODO:
