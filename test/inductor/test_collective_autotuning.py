@@ -117,6 +117,8 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
             rank=self.rank,
         )
 
+        dist.barrier()
+
         rank = dist.get_rank()
         device = f"cuda:{rank}"
 
@@ -179,7 +181,7 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
 
         y = model(x)
         self.assertEqual(y.shape, x.shape)
-
+        dist.barrier()
         dist.destroy_process_group()
 
 
