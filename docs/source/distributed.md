@@ -395,6 +395,10 @@ an opaque group handle that can be given as a `group` argument to all collective
 ```
 
 ```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.shrink_group
+```
+
+```{eval-rst}
 .. autofunction:: get_group_rank
 ```
 
@@ -982,6 +986,24 @@ For fine-grained control of the debug level during runtime the functions {func}`
 In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `TORCH_SHOW_CPP_STACKTRACES=1` to log the entire callstack when a collective desynchronization is detected. These
 collective desynchronization checks will work for all applications that use `c10d` collective calls backed by process groups created with the
 {func}`torch.distributed.init_process_group` and {func}`torch.distributed.new_group` APIs.
+
+
+### torch.distributed.debug HTTP Server
+
+The `torch.distributed.debug` module provides a HTTP server that can be used to debug distributed applications. The server can
+be started by calling {func}`torch.distributed.debug.start_debug_server`. This
+allows users to collect data across all workers at runtime.
+
+```{eval-rst}
+.. automodule:: torch.distributed.debug
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :special-members: __init__
+    :member-order: bysource
+
+```
+
 
 ## Logging
 
