@@ -122,7 +122,7 @@ GEMM_TEMPLATE_INIT_BLOCKING_EXTENDED = r"""
 """
 
 GEMM_TEMPLATE_MULTI_THREADS_PARAMS = r"""
-const int tid = omp_get_thread_num();
+
 const int64_t k_group_id = tid / num_Kt_blocks;
 const int64_t k_slice_id = tid % num_Kt_blocks;
 const int64_t n_group_id = k_group_id / num_Nt_blocks;
@@ -207,8 +207,8 @@ GEMM_TEMPLATE = r"""
 {%- endif %}
 
 {%- if num_threads > 1 %}
-    #pragma omp parallel num_threads({{num_threads}})
-    {
+    #pragma omp parallel for num_threads({{num_threads}})
+    for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
         {{ template.codegen_multi_threads_params()|indent(8, false) }}
 {%- else %}
     {
