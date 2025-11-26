@@ -16,6 +16,12 @@
 #include <ATen/ops/_sparse_coo_tensor_unsafe.h>
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/cat.h>
+#include <ATen/ops/softmax_native.h>
+#include <ATen/ops/log_softmax.h>
+#include <ATen/ops/_sparse_log_softmax_native.h>
+#include <ATen/ops/_sparse_softmax_native.h>
+#include <ATen/ops/_sparse_softmax_backward_data_native.h>
+#include <ATen/ops/_sparse_log_softmax_backward_data_native.h>
 #include <ATen/ops/add_native.h>
 #include <ATen/ops/mul_native.h>
 #include <ATen/ops/empty_native.h>
@@ -1108,6 +1114,237 @@ Tensor sparse_sparse_matmul_mps(const Tensor& mat1_, const Tensor& mat2_) {
   }
   return result;
 }
+
+static Tensor softmax_sparse_mps_impl(
+    const Tensor& input_,
+    const int64_t dim_,
+    const bool half_to_float,
+    const bool logsoftmax
+) {
+    auto stream = getCurrentMPSStream();
+
+    auto input = input_.coalesce();
+    auto values = input._values();
+    auto indices = input._indices();
+
+    if (half_to_float && values.scalar_type() == kHalf) {
+        values = values.to(kFloat);
+    }
+
+    auto sparse_dim = input.sparse_dim();
+    auto dim = at::maybe_wrap_dim(dim_, input.dim());
+    auto nnz = input._nnz();
+    if (nnz == 0) return input_.clone();
+
+    if (dim >= sparse_dim) {
+        auto output_values = logsoftmax
+            ? log_softmax(values, dim - sparse_dim + 1, values.scalar_type())
+            : softmax(values, dim - sparse_dim + 1, values.scalar_type());
+        return at::_sparse_coo_tensor_unsafe(indices, output_values, input.sizes(), input.options().dtype(output_values.scalar_type()))._coalesced_(true);
+    }
+
+    auto sizes = input.sizes();
+    std::vector<int64_t> strides(sparse_dim, 1);
+    for (int i = sparse_dim - 2; i >= 0; i--) strides[i] = strides[i+1] * sizes[i+1];
+    strides[dim] = 0;
+
+    auto pool_indices = at::zeros({nnz}, indices.options().dtype(kLong));
+    for (auto i = 0; i < sparse_dim; i++) {
+        if (i != dim) pool_indices.add_(indices.select(0, i), strides[i]);
+    }
+
+    auto sort_order = at::argsort(pool_indices);
+    auto sorted_pool_indices = pool_indices.index_select(0, sort_order);
+    auto sorted_values = values.index_select(0, sort_order);
+
+    auto mask = at::empty({nnz}, sorted_pool_indices.options().dtype(kInt));
+    auto nnz_u = static_cast<uint32_t>(nnz);
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+        auto pso = lib.getPipelineStateForFunc("mark_segments");
+        auto enc = stream->commandEncoder();
+        [enc setComputePipelineState:pso];
+        mtl_setArgs(enc, sorted_pool_indices, mask, nnz_u);
+
+        auto gridSize = MTLSizeMake(nnz, 1, 1);
+        auto threadGroupSize = MTLSizeMake(std::min<uint64_t>(nnz, pso.maxTotalThreadsPerThreadgroup), 1, 1);
+        [enc dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+    });
+
+    auto scan = at::cumsum(mask, 0, kInt);
+
+    auto offsets = at::empty({nnz}, mask.options());
+    auto counts = at::empty({nnz}, mask.options());
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+        auto pso = lib.getPipelineStateForFunc("compute_offsets_and_counts");
+        auto enc = stream->commandEncoder();
+        [enc setComputePipelineState:pso];
+        mtl_setArgs(enc, scan, offsets, counts, nnz_u);
+
+        auto gridSize = MTLSizeMake(nnz, 1, 1);
+        auto threadGroupSize = MTLSizeMake(std::min<uint64_t>(nnz, pso.maxTotalThreadsPerThreadgroup), 1, 1);
+        [enc dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+    });
+
+    auto output_sorted = at::empty_like(sorted_values);
+    auto nvalues = static_cast<uint32_t>(values.numel() / nnz);
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+        auto pso = lib.getPipelineStateForFunc("softmax_sparse_forward_" + mps::scalarToMetalTypeString(values));
+        auto enc = stream->commandEncoder();
+        [enc setComputePipelineState:pso];
+        mtl_setArgs(enc, sorted_values, output_sorted, offsets, counts, scan,
+                    std::array<uint32_t, 2>{nnz_u, nvalues}, logsoftmax);
+        auto gridSize = MTLSizeMake(nnz, 1, 1);
+        auto threadGroupSize = MTLSizeMake(std::min<uint64_t>(nnz, pso.maxTotalThreadsPerThreadgroup), 1, 1);
+        [enc dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+    });
+
+    auto inv_sort_order = at::empty_like(sort_order);
+    inv_sort_order.scatter_(0, sort_order, at::arange(sort_order.size(0), sort_order.options()));
+    auto final_values = output_sorted.index_select(0, inv_sort_order);
+
+    auto result = at::_sparse_coo_tensor_unsafe(
+        indices, final_values, input.sizes(), input.options().dtype(final_values.scalar_type())
+    );
+    return result._coalesced_(true);
+}
+
+static Tensor softmax_backward_sparse_mps_impl(
+    const Tensor& grad_,
+    const Tensor& output_,
+    int64_t dim_,
+    const Tensor& input_,
+    bool logsoftmax
+) {
+    auto stream = getCurrentMPSStream();
+
+    auto output = output_.coalesce();
+    auto grad = grad_.sparse_mask(output);
+
+    auto indices = output._indices();
+    auto output_values = output._values();
+    auto grad_values = grad._values();
+    auto indices_safe = indices.contiguous().clone();
+
+    bool is_half = (output_values.scalar_type() == kHalf);
+    if (is_half) {
+        output_values = output_values.to(kFloat);
+        grad_values = grad_values.to(kFloat);
+    }
+
+    const auto sparse_dim = output.sparse_dim();
+    const auto dim = at::maybe_wrap_dim(dim_, output.dim());
+    const auto nnz = output._nnz();
+
+    if (dim >= sparse_dim) {
+        const auto dense_dim_idx = dim - sparse_dim + 1;
+        Tensor grad_input_values;
+        if (logsoftmax) {
+            auto sum_grad = grad_values.sum({dense_dim_idx}, true);
+            grad_input_values = grad_values.sub(output_values.exp().mul_(sum_grad));
+        } else {
+            auto term = output_values.mul(grad_values);
+            auto sum_term = term.sum({dense_dim_idx}, true);
+            grad_input_values = output_values.mul(grad_values.sub(sum_term));
+        }
+        if (is_half) grad_input_values = grad_input_values.to(kHalf);
+        return at::_sparse_coo_tensor_unsafe(indices_safe, grad_input_values, output.sizes(), output.options().dtype(grad_input_values.scalar_type()))._coalesced_(true);
+    }
+
+    if (nnz == 0) return at::empty_like(output_);
+
+    auto pool_indices = at::zeros({nnz}, indices.options().dtype(kLong));
+    auto sizes = output.sizes();
+    std::vector<int64_t> strides(sparse_dim, 1);
+    for (int i = static_cast<int>(sparse_dim) - 2; i >= 0; --i) strides[i] = strides[i + 1] * sizes[i + 1];
+
+    for (int64_t i = 0; i < sparse_dim; ++i) {
+        if (i == dim) continue;
+        if (strides[i] > 0) pool_indices.add_(indices.select(0, i), strides[i]);
+    }
+
+    auto sort_order = at::argsort(pool_indices);
+    auto sorted_pool_indices = pool_indices.index_select(0, sort_order);
+    auto sorted_output_values = output_values.index_select(0, sort_order);
+    auto sorted_grad_values = grad_values.index_select(0, sort_order);
+
+    auto nnz_u = static_cast<uint32_t>(nnz);
+    auto mask = at::empty({nnz}, sorted_pool_indices.options().dtype(kInt));
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+        auto pso = lib.getPipelineStateForFunc("mark_segments");
+        auto enc = stream->commandEncoder();
+        [enc setComputePipelineState:pso];
+        mtl_setArgs(enc, sorted_pool_indices, mask, nnz_u);
+        auto gridSize = MTLSizeMake(nnz, 1, 1);
+        auto threadGroupSize = MTLSizeMake(std::min<uint64_t>(nnz, pso.maxTotalThreadsPerThreadgroup), 1, 1);
+        [enc dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+    });
+
+    auto scan = at::cumsum(mask, 0, kInt);
+
+    auto offsets = at::empty({nnz}, mask.options());
+    auto counts = at::empty({nnz}, mask.options());
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+        auto pso = lib.getPipelineStateForFunc("compute_offsets_and_counts");
+        auto enc = stream->commandEncoder();
+        [enc setComputePipelineState:pso];
+        mtl_setArgs(enc, scan, offsets, counts, nnz_u);
+
+        auto gridSize = MTLSizeMake(nnz, 1, 1);
+        auto threadGroupSize = MTLSizeMake(std::min<uint64_t>(nnz, pso.maxTotalThreadsPerThreadgroup), 1, 1);
+        [enc dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+    });
+
+    auto sorted_grad_input = at::empty_like(sorted_output_values);
+
+    int64_t nvalues = 1;
+    if (output_values.dim() > 1) nvalues = output_values.numel() / output_values.size(0);
+    auto nval_u = static_cast<uint32_t>(nvalues);
+
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
+        auto pso = lib.getPipelineStateForFunc("softmax_sparse_backward_" + mps::scalarToMetalTypeString(sorted_grad_values));
+        auto enc = stream->commandEncoder();
+        [enc setComputePipelineState:pso];
+        mtl_setArgs(enc, sorted_grad_values, sorted_output_values, sorted_grad_input,
+                    offsets, counts, scan,
+                    std::array<uint32_t, 2>{nnz_u, nval_u}, logsoftmax);
+
+        auto gridSize = MTLSizeMake(nnz, 1, 1);
+        auto threadGroupSize = MTLSizeMake(std::min<uint64_t>(nnz, pso.maxTotalThreadsPerThreadgroup), 1, 1);
+        [enc dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
+    });
+
+    auto inv_sort_order = at::argsort(sort_order);
+    auto grad_input_values = sorted_grad_input.index_select(0, inv_sort_order);
+    if (is_half) {
+        grad_input_values = grad_input_values.to(kHalf);
+    }
+    return at::_sparse_coo_tensor_unsafe(
+        indices_safe, grad_input_values, output.sizes(),
+        output.options().dtype(grad_input_values.scalar_type())
+    )._coalesced_(true);
+}
+
+Tensor softmax_sparse_mps(const Tensor& input, const int64_t dim, const bool half_to_float) {
+  return softmax_sparse_mps_impl(input, dim, half_to_float, false);
+}
+
+Tensor log_softmax_sparse_mps(const Tensor& input, const int64_t dim, const bool half_to_float) {
+  return softmax_sparse_mps_impl(input, dim, half_to_float, true);
+}
+
+Tensor softmax_backward_sparse_mps(const Tensor& grad, const Tensor& output, int64_t dim, const Tensor& input) {
+    return softmax_backward_sparse_mps_impl(grad, output, dim, input, false);
+}
+
+Tensor log_softmax_backward_sparse_mps(const Tensor& grad, const Tensor& output, int64_t dim, const Tensor& input) {
+  return softmax_backward_sparse_mps_impl(grad, output, dim, input, true);
+}
+
 
 REGISTER_MPS_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_mps_kernel);
 REGISTER_MPS_DISPATCH(sparse_mask_projection_out_stub, &sparse_mask_projection_out_mps_kernel);
