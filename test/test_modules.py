@@ -194,13 +194,13 @@ class TestModule(TestCase):
                         elif isinstance(objs, dict):
                             return {name: _to_device1(item) for name, item in objs.items()}
                         elif isinstance(objs, torch.Tensor):
-                            return objs.to(f"{device_type}:1")
+                            return objs.to(1)
                         else:
                             return objs
                     input_device_1_args = _to_device1(input_device_args)
                     input_device_1_kwargs = _to_device1(input_device_kwargs)
 
-                    m.to(f"{device_type}:1")
+                    m.to(1)
                     with torch.device(f"{device_type}:1"):
                         m(*input_device_1_args, **input_device_1_kwargs)
                     self._assert_module_parameters_and_buffer_are(m, torch.device(f"{device_type}:1"), dtype)
@@ -450,7 +450,7 @@ class TestModule(TestCase):
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
                                                        requires_grad=True, training=training)
         if "xpu" in device and module_info.name == "nn.MultiheadAttention":
-            self.skipTest("https://github.com/intel/torch-xpu-ops/issues/2356")
+            self.skipTest("GradcheckError issue in MultiheadAttention, https://github.com/intel/torch-xpu-ops/issues/2356")
         # === Set nondet tol for gradcheck to user-defined value if on CUDA and cudNN is enabled
         gradcheck_nondet_tol = 0.0
         if (torch.device(device).type == 'cuda' and torch.backends.cudnn.enabled) or device_type == "xpu":
