@@ -1,8 +1,8 @@
+import asyncio
 import json
 import logging
 import socket
 import threading
-import asyncio
 from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -17,7 +17,7 @@ from torch.distributed.debug._store import get_world_size, tcpstore_client
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-@dataclass
+@dataclass(slots=True)
 class Response:
     status_code: int
     text: str
