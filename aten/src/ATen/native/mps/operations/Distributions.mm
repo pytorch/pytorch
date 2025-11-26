@@ -57,6 +57,12 @@ Tensor& random_mps_impl(Tensor& self,
   if (self.numel() == 0) {
     return self;
   }
+  if (mean_opt.has_value()) {
+    TORCH_INTERNAL_ASSERT(mean_opt->scalar_type() == self.scalar_type());
+  }
+  if (std_opt.has_value()) {
+    TORCH_INTERNAL_ASSERT(std_opt->scalar_type() == self.scalar_type());
+  }
   at::assert_no_internal_overlap(self);
   // MPS random is broken for 5D+ tensors, see https://github.com/pytorch/pytorch/issues/147624
   const auto need_reshape = self.ndimension() > 4;
@@ -178,9 +184,6 @@ static Tensor& normal_mps_impl(Tensor& self,
                                std::string op_name) {
   const Tensor& std_t = *(at::borrow_from_optional_tensor(std_opt));
   const Tensor& mean_t = *(at::borrow_from_optional_tensor(mean_opt));
-
-  TORCH_CHECK_NOT_IMPLEMENTED(
-      !c10::isComplexType(self.scalar_type()), op_name, " for MPS does not support complex inputs");
 
   TORCH_CHECK(std_s >= 0.0, op_name, " expects std >= 0.0, but found std ", std_s);
   if (std_t.defined()) {
