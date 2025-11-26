@@ -80,7 +80,9 @@ def rand_eager_offsets(offsets: list[int], device: torch.device) -> torch.Tensor
         (int(seed) << 32) | (int(base) & 0xFFFFFFFF)
         for seed, base in states
     ]
-    out = torch.tensor(packed, dtype=torch.int64, device=device)
+    cpu = torch.tensor(packed, dtype=torch.int64).pin_memory()
+    out = torch.empty_like(cpu, device=device)
+    out.copy_(cpu, non_blocking=True)
     return out
 
 
