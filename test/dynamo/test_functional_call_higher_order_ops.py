@@ -1,7 +1,8 @@
+# Owner(s): ["module: dynamo"]
 import torch
 import torch.nn as nn
 from torch.func import functional_call
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import TestCase, run_tests
 
 
 class TestFunctionalCallHigherOrderOps(TestCase):
@@ -18,9 +19,9 @@ class TestFunctionalCallHigherOrderOps(TestCase):
         def run_logic(pred, x):
             return torch.cond(
                 pred,
-                step_fn,       # True branch: calls functional_call
-                lambda x: x,   # False branch: identity
-                [x]            # Operands
+                step_fn,  # True branch: calls functional_call
+                lambda x: x,  # False branch: identity
+                [x],  # Operands
             )
 
         # Should not raise UncapturedHigherOrderOpError
@@ -50,7 +51,7 @@ class TestFunctionalCallHigherOrderOps(TestCase):
         xs = torch.randn(5, 10)  # 5 steps
 
         def run_scan(xs):
-            return scan(combine_fn, init, xs, additional_inputs=())
+            return scan(combine_fn, init, xs, dim=0)
 
         # Should not raise UncapturedHigherOrderOpError
         fn = torch.compile(run_scan, fullgraph=True)
@@ -74,3 +75,7 @@ class TestFunctionalCallHigherOrderOps(TestCase):
         # Compare with eager
         expected = functional_call(mod, (params, buffers), (x,))
         self.assertTrue(torch.allclose(result, expected))
+
+
+if __name__ == "__main__":
+    run_tests()
