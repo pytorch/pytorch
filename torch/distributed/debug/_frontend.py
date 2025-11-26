@@ -1,13 +1,14 @@
+import asyncio
 import json
 import logging
 import socket
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-import requests
 from jinja2 import DictLoader, Environment
 
 from torch.distributed.debug._store import get_world_size, tcpstore_client
@@ -16,16 +17,54 @@ from torch.distributed.debug._store import get_world_size, tcpstore_client
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def fetch_all(
-    endpoint: str, args: str = ""
-) -> tuple[list[str], Iterator[requests.Response]]:
+@dataclass(slots=True)
+class Response:
+    status_code: int
+    text: str
+
+
+def fetch_thread_pool(urls: list[str]) -> Iterable[Response]:
+    # late import for optional dependency
+    import requests
+
+    max_workers = 20
+
+    def get(url: str) -> Response:
+        resp = requests.post(url)
+        return Response(resp.status_code, resp.text)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        resps = executor.map(get, urls)
+
+    return resps
+
+
+def fetch_aiohttp(urls: list[str]) -> Iterable[Response]:
+    # late import for optional dependency
+    import aiohttp
+
+    async def fetch(session: aiohttp.ClientSession, url: str) -> Response:
+        async with session.post(url) as resp:
+            text = await resp.text()
+            return Response(resp.status, text)
+
+    async def gather(urls: list[str]) -> Iterable[Response]:
+        async with aiohttp.ClientSession() as session:
+            return await asyncio.gather(*[fetch(session, url) for url in urls])
+
+    return asyncio.run(gather(urls))
+
+
+def fetch_all(endpoint: str, args: str = "") -> tuple[list[str], Iterable[Response]]:
     store = tcpstore_client()
     keys = [f"rank{r}" for r in range(get_world_size())]
     addrs = store.multi_get(keys)
     addrs = [f"{addr.decode()}/handler/{endpoint}?{args}" for addr in addrs]
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        resps = executor.map(requests.post, addrs)
+    try:
+        resps = fetch_aiohttp(addrs)
+    except ImportError:
+        resps = fetch_thread_pool(addrs)
 
     return addrs, resps
 
@@ -97,6 +136,7 @@ templates = {
     <a href="/fr_trace_nccl">FlightRecorder NCCL</a> <!--@lint-ignore-->
     <a href="/profile">torch profiler</a> <!--@lint-ignore-->
     <a href="/wait_counters">Wait Counters</a> <!--@lint-ignore-->
+    <a href="/tcpstore">TCPStore</a> <!--@lint-ignore-->
 </nav>
 
 <section class="content">
@@ -211,6 +251,19 @@ Hi
     {% endfor %}
 {% endblock %}
     """,
+    "tcpstore.html": """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}TCPStore Keys{% endblock %}</h1>
+{% endblock %}
+{% block content %}
+    <pre>
+    {% for k, v in zip(keys, values) -%}
+{{ k }}: {{ v | truncate(100) }}
+    {% endfor %}
+    </pre>
+{% endblock %}
+    """,
 }
 
 
@@ -259,6 +312,7 @@ class FrontendServer:
             "/fr_trace_nccl": self._handle_fr_trace_nccl,
             "/profile": self._handle_profiler,
             "/wait_counters": self._handle_wait_counters,
+            "/tcpstore": self._handle_tcpstore,
         }
 
         # Create HTTP server
@@ -353,6 +407,13 @@ class FrontendServer:
         return self._render_template(
             "json_resp.html", title="Wait Counters", addrs=addrs, resps=resps
         )
+
+    def _handle_tcpstore(self, req: HTTPRequestHandler) -> bytes:
+        store = tcpstore_client(prefix="")
+        keys = store.list_keys()
+        keys.sort()
+        values = [repr(v) for v in store.multi_get(keys)]
+        return self._render_template("tcpstore.html", keys=keys, values=values)
 
 
 def main(port: int) -> None:
