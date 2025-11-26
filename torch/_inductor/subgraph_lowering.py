@@ -2,10 +2,10 @@
 
 import functools
 import operator
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -87,8 +87,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
 
     def register_buffer(self, buffer: ir.Buffer, *, set_name: bool = False) -> str:
         if self._approved_mutator():
-            name = self.qualify_name(f"buf{len(self.buffers)}")
-            self.buffers.append(buffer)
+            name = self.root_graph.register_buffer(buffer, set_name=set_name)
             return name
         else:
             raise SubgraphLoweringException(
@@ -122,7 +121,6 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
                 raise SubgraphLoweringException(
                     f"{target} not supported in subgraph, (missing lowering)"
                 )
-
             return lowerings[target](*args, **kwargs)
 
     def output(self, target: str, args: tuple[Any], kwargs: dict[str, Any]) -> None:  # type: ignore[override]

@@ -1,32 +1,33 @@
-# mypy: allow-untyped-defs
+"""
+This file contains the list of tests that are known to fail under Dynamo
+
+We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
+We generate skipIfTorchDynamo* for all tests in `dynamo_skips`
+We generate runWithoutCompiledAutograd for all tests in `compiled_autograd_skips`
+
+For an easier-than-manual way of generating and updating these lists,
+see scripts/compile_tests/update_failures.py
+
+If you're adding a new test, and it's failing PYTORCH_TEST_WITH_DYNAMO=1,
+either add the appropriate decorators to your test or add skips for them
+via test/dynamo_skips and test/dynamo_expected_failures.
+
+*These are not exactly unittest.expectedFailure and unittest.skip. We'll
+always execute the test and then suppress the signal, if necessary.
+If your tests crashes, or is slow, please use @skipIfTorchDynamo instead.
+
+The expected failure and skip files are located in test/dynamo_skips and
+test/dynamo_expected_failures. They're individual files rather than a list so
+git will merge changes easier.
+"""
+
 import logging
 import os
 import sys
+from typing import Optional
 
 
-# NOTE: [dynamo_test_failures.py]
-#
-# We generate xFailIfTorchDynamo* for all tests in `dynamo_expected_failures`
-# We generate skipIfTorchDynamo* for all tests in `dynamo_skips`
-# We generate runWithoutCompiledAutograd for all tests in `compiled_autograd_skips`
-#
-# For an easier-than-manual way of generating and updating these lists,
-# see scripts/compile_tests/update_failures.py
-#
-# If you're adding a new test, and it's failing PYTORCH_TEST_WITH_DYNAMO=1,
-# either add the appropriate decorators to your test or add skips for them
-# via test/dynamo_skips and test/dynamo_expected_failures.
-#
-# *These are not exactly unittest.expectedFailure and unittest.skip. We'll
-# always execute the test and then suppress the signal, if necessary.
-# If your tests crashes, or is slow, please use @skipIfTorchDynamo instead.
-#
-# The expected failure and skip files are located in test/dynamo_skips and
-# test/dynamo_expected_failures. They're individual files rather than a list so
-# git will merge changes easier.
-
-
-def find_test_dir():
+def find_test_dir() -> Optional[str]:
     # Find the path to the dynamo expected failure and skip files.
     from os.path import abspath, basename, dirname, exists, join, normpath
 

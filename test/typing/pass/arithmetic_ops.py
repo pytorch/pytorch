@@ -1,5 +1,5 @@
-from typing import Union
-from typing_extensions import assert_type, TypeAlias
+from typing import TypeAlias, Union
+from typing_extensions import assert_type
 
 from torch import randn, Tensor
 
@@ -19,7 +19,7 @@ assert_type(-TENSOR, Tensor)
 assert_type(~TENSOR, Tensor)
 
 #
-# Binary ops that return a bolean
+# Binary ops that return a boolean
 #
 
 # Operator ==

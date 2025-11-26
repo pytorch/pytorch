@@ -97,8 +97,8 @@ class TORCH_API KernelFunction final {
   KernelFunction();
   ~KernelFunction();
 
-  KernelFunction(const KernelFunction&) = default;
-  KernelFunction& operator=(const KernelFunction&) = default;
+  KernelFunction(const KernelFunction& other);
+  KernelFunction& operator=(const KernelFunction& other);
 
   KernelFunction(KernelFunction&&) noexcept = default;
 
@@ -229,7 +229,7 @@ class TORCH_API KernelFunction final {
    * &unboxed_func>();
    */
   template <class FuncPtr, bool AllowLegacyTypes = false>
-  static KernelFunction makeFromUnboxedFunction(FuncPtr);
+  static KernelFunction makeFromUnboxedFunction(FuncPtr /*func_ptr*/);
 
   /**
    * Create a KernelFunction from an unboxed function.
@@ -271,14 +271,10 @@ class TORCH_API KernelFunction final {
 
   std::string dumpState() const;
   // For testing internal invariants only
-  bool _equalsBoxedAndUnboxed(const KernelFunction&) const;
+  bool _equalsBoxedAndUnboxed(const KernelFunction& /*other*/) const;
 
   // Register a token to be invalidated when this KernelFunction is destroyed
   void registerToken(std::weak_ptr<KernelToken> token) const;
-
-  // List of tokens that need to be invalidated when this KernelFunction is
-  // destroyed
-  mutable std::vector<std::weak_ptr<KernelToken>> tokens_;
 
  private:
   explicit KernelFunction(
@@ -294,6 +290,9 @@ class TORCH_API KernelFunction final {
   BoxedKernel boxed_kernel_func_;
   void* unboxed_kernel_func_;
   void* sym_unboxed_kernel_func_;
+  // List of tokens that need to be invalidated when this KernelFunction is
+  // destroyed (lazy allocation to save memory when empty)
+  mutable std::unique_ptr<std::vector<std::weak_ptr<KernelToken>>> tokens_;
 };
 
 // Token held by SafeKernelFunction that gets invalidated when KernelFunction is

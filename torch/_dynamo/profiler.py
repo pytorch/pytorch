@@ -12,6 +12,8 @@ The profiler helps measure and optimize the performance of Dynamo-compiled code
 by tracking both captured and total operations, timing, and graph statistics.
 """
 
+from __future__ import annotations
+
 import dataclasses
 import os
 from typing import Any
@@ -35,7 +37,7 @@ class ProfileMetrics:
         self.fusions += other.fusions
         return self
 
-    def __add__(self, other: "ProfileMetrics") -> "ProfileMetrics":
+    def __add__(self, other: ProfileMetrics) -> ProfileMetrics:
         assert isinstance(other, ProfileMetrics)
         return ProfileMetrics(
             self.microseconds + other.microseconds,
@@ -43,12 +45,15 @@ class ProfileMetrics:
             self.fusions + other.fusions,
         )
 
-    def __truediv__(self, other: Any) -> "ProfileMetrics":
+    def __truediv__(self, other: Any) -> ProfileMetrics:
         if isinstance(other, int):
             other = ProfileMetrics(other, other, other)
         return ProfileMetrics(
+            # pyrefly: ignore [no-matching-overload]
             self.microseconds / max(1, other.microseconds),
+            # pyrefly: ignore [bad-argument-type]
             self.operators / max(1, other.operators),
+            # pyrefly: ignore [bad-argument-type]
             self.fusions / max(1, other.fusions),
         )
 

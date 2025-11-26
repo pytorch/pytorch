@@ -436,8 +436,8 @@ class IntTestCases(__TestCase):
             int('0', 5.0)
 
     def test_int_base_indexable(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
+            with torch._dynamo.error_on_graph_break(False):
                 class MyIndexable(object):
                     def __init__(self, value):
                         self.value = value
@@ -458,7 +458,7 @@ class IntTestCases(__TestCase):
         # Test possible non-numeric types for the argument x, including
         # subclasses of the explicitly documented accepted types.
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class CustomStr(str): pass
             class CustomBytes(bytes): pass
             class CustomByteArray(bytearray): pass
@@ -503,28 +503,28 @@ class IntTestCases(__TestCase):
 
     def test_intconversion(self):
         # Test __int__()
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class ClassicMissingMethods:
                 pass
         self.assertRaises(TypeError, int, ClassicMissingMethods())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MissingMethods(object):
                 pass
         self.assertRaises(TypeError, int, MissingMethods())
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Foo0:
                 def __int__(self):
                     return 42
 
         self.assertEqual(int(Foo0()), 42)
 
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class Classic:
                 pass
         for base in (object, Classic):
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.error_on_graph_break(False):
                 class IntOverridesTrunc(base):
                     def __int__(self):
                         return 42
@@ -532,14 +532,14 @@ class IntTestCases(__TestCase):
                         return -12
             self.assertEqual(int(IntOverridesTrunc()), 42)
 
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.error_on_graph_break(False):
                 class JustTrunc(base):
                     def __trunc__(self):
                         return 42
             with self.assertWarns(DeprecationWarning):
                 self.assertEqual(int(JustTrunc()), 42)
 
-            with torch._dynamo.set_fullgraph(fullgraph=False):
+            with torch._dynamo.error_on_graph_break(False):
                 class ExceptionalTrunc(base):
                     def __trunc__(self):
                         1 / 0
@@ -548,7 +548,7 @@ class IntTestCases(__TestCase):
                 int(ExceptionalTrunc())
 
             for trunc_result_base in (object, Classic):
-                with torch._dynamo.set_fullgraph(fullgraph=False):
+                with torch._dynamo.error_on_graph_break(False):
                     class Index(trunc_result_base):
                         def __index__(self):
                             return 42
@@ -559,7 +559,7 @@ class IntTestCases(__TestCase):
                 with self.assertWarns(DeprecationWarning):
                     self.assertEqual(int(TruncReturnsNonInt()), 42)
 
-                with torch._dynamo.set_fullgraph(fullgraph=False):
+                with torch._dynamo.error_on_graph_break(False):
                     class Intable(trunc_result_base):
                         def __int__(self):
                             return 42
@@ -570,7 +570,7 @@ class IntTestCases(__TestCase):
                 with self.assertWarns(DeprecationWarning):
                     self.assertEqual(int(TruncReturnsNonInt()), 42)
 
-                with torch._dynamo.set_fullgraph(fullgraph=False):
+                with torch._dynamo.error_on_graph_break(False):
                     class NonIntegral(trunc_result_base):
                         def __trunc__(self):
                             # Check that we avoid infinite recursion.
@@ -590,7 +590,7 @@ class IntTestCases(__TestCase):
                     self.fail("Failed to raise TypeError with %s" %
                               ((base, trunc_result_base),))
 
-                with torch._dynamo.set_fullgraph(fullgraph=False):
+                with torch._dynamo.error_on_graph_break(False):
                     # Regression test for bugs.python.org/issue16060.
                     class BadInt(trunc_result_base):
                         def __int__(self):
@@ -605,7 +605,7 @@ class IntTestCases(__TestCase):
                     int(TruncReturnsBadInt())
 
     def test_int_subclass_with_index(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyIndex(int):
                 def __index__(self):
                     return 42
@@ -621,7 +621,7 @@ class IntTestCases(__TestCase):
         self.assertEqual(int(BadIndex()), 0)
 
     def test_int_subclass_with_int(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class MyInt(int):
                 def __int__(self):
                     return 42
@@ -639,7 +639,7 @@ class IntTestCases(__TestCase):
         self.assertRaises(TypeError, int, my_int)
 
     def test_int_returns_int_subclass(self):
-        with torch._dynamo.set_fullgraph(fullgraph=False):
+        with torch._dynamo.error_on_graph_break(False):
             class BadIndex:
                 def __index__(self):
                     return True

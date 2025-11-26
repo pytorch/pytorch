@@ -3,17 +3,24 @@
 from __future__ import annotations
 
 import functools
-from typing import Any, Callable, cast, TypeVar
+from typing import TYPE_CHECKING, TypeVar
+from typing_extensions import ParamSpec
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 _is_onnx_exporting = False
 
-TCallable = TypeVar("TCallable", bound=Callable[..., Any])
+# Use ParamSpec to preserve parameter types instead of erasing to Any
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
-def set_onnx_exporting_flag(func: TCallable) -> TCallable:
+def set_onnx_exporting_flag(func: Callable[_P, _R]) -> Callable[_P, _R]:
     @functools.wraps(func)
-    def wrapper(*args: Any, **kwargs: Any) -> Any:
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         global _is_onnx_exporting
         _is_onnx_exporting = True
         try:
@@ -22,4 +29,4 @@ def set_onnx_exporting_flag(func: TCallable) -> TCallable:
             # Ensure it resets even if an exception occurs
             _is_onnx_exporting = False
 
-    return cast(TCallable, wrapper)
+    return wrapper

@@ -96,7 +96,7 @@ class SparseActivationCSR(torch.nn.Module):
 )
 class TestSparseProp(TestCase):
     def setUp(self):
-        TestCase.setUp(self)
+        super().setUp()
 
     def assertEqualMeta(self, x, y):
         self.assertIsInstance(x, FakeTensor)
