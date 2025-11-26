@@ -185,6 +185,7 @@ def aot_compile_fullgraph(
     with (
         get_metrics_context(),
         dynamo_timed("fullgraph_capture"),
+        torch._functorch.config.patch(strict_autograd_cache=True),
     ):
         capture_output = convert_frame.fullgraph_capture(model, args, kwargs)
         graph_capture_output = capture_output.graph_capture_output

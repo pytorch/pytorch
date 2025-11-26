@@ -7,6 +7,7 @@ import sympy  # noqa: TC002
 
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._pallas import has_tpu_pallas
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -886,6 +887,17 @@ class PallasKernel(SIMDKernel):
 
         kernel_name = name or "<KERNEL_NAME>"
         interpret_is_cpu = V.graph.get_current_device_or_throw().type == "cpu"
+        is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
+        if is_tpu:
+            if not torch._inductor.config.pallas_take_first_jax_device_only:
+                raise RuntimeError(
+                    "Pallas backend currently only supports using the first JAX device."
+                )
+            if not has_tpu_pallas():
+                raise RuntimeError(
+                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                    "Please make sure that you have a TPU available and that JAX is configured correctly."
+                )
         interpret_literal = "True" if interpret_is_cpu else "False"
 
         # For GPU (Triton backend), import pltriton for masked loads/stores
@@ -1065,19 +1077,38 @@ class PallasKernel(SIMDKernel):
             if alias_params:
                 code.writeline("# Convert Torch -> JAX for donated outputs")
                 for alias_name in alias_params:
-                    code.writeline(
-                        f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
-                    )
+                    # TODO: The `jax.device_put` path is a temporary workaround for a Mosaic compiler bug
+                    # that occurs with DLPack. Once TorchTPU provides a direct method for placing a
+                    # `torch.Tensor` on a TPU device, this should be reverted to use the
+                    #  `jax.dlpack.from_dlpack` path.
+                    if is_tpu:
+                        code.writeline(
+                            f"{alias_name}_jax = jax.device_put({alias_name}.cpu().numpy(), device=jax.devices('tpu')[0])"
+                        )
+                    else:
+                        code.writeline(
+                            f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
+                        )
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in pointer_tail:
                 if ptr.startswith("in_out_ptr"):
-                    code.writeline(f"{ptr}_jax = jax.dlpack.from_dlpack({ptr})")
+                    if is_tpu:
+                        code.writeline(
+                            f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
+                        )
+                    else:
+                        code.writeline(f"{ptr}_jax = jax.dlpack.from_dlpack({ptr})")
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in pointer_tail:
                 if ptr.startswith("in_ptr"):
-                    code.writeline(
-                        f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous())"
-                    )
+                    if is_tpu:
+                        code.writeline(
+                            f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
+                        )
+                    else:
+                        code.writeline(
+                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous())"
+                        )
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
             code.writeline(
@@ -1116,9 +1147,15 @@ class PallasKernel(SIMDKernel):
                 )
                 for idx in copy_output_indices:
                     name = output_params[idx]
-                    code.writeline(
-                        f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
-                    )
+                    if is_tpu:
+                        code.writeline(
+                            f"res_cpu = jax.device_get(result_values[{idx}])"
+                        )
+                        code.writeline(f"{name}.copy_(torch.from_dlpack(res_cpu))")
+                    else:
+                        code.writeline(
+                            f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                        )
 
         return code.getvalue()
 
