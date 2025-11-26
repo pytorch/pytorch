@@ -37,6 +37,9 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "Background_Matting",
                 "mnasnet1_0",
                 "repvgg_a2",
+                "resnet152",
+                "resnet18",
+                "resnet50",
                 "stable_diffusion_unet",
                 # LLM
                 "google/gemma-2-2b",
