@@ -17,6 +17,7 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -25,7 +26,6 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_evenly_shardable_on_dim,
     normalize_dim,
     normalize_dims,
-    register_op_strategy,
 )
 from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
@@ -73,17 +73,19 @@ class _NormPartial(Partial):
 
     norm_type: Union[int, float, str] = 2
 
-    def __post_init__(self):
-        """Set the appropriate reduce op based on the norm type."""
-        # Use `object.__setattr__` to bypass frozen checks
-        if self.norm_type in (float("inf"), "inf"):
-            object.__setattr__(self, "reduce_op", "max")
-        elif self.norm_type in (float("-inf"), "-inf"):
-            object.__setattr__(self, "reduce_op", "min")
-        elif isinstance(self.norm_type, (int, float)):
-            object.__setattr__(self, "reduce_op", "sum")
+    def __init__(self, norm_type: Union[int, float, str] = 2):
+        reduce_op = None
+        if norm_type in (float("inf"), "inf"):
+            reduce_op = "max"
+        elif norm_type in (float("-inf"), "-inf"):
+            reduce_op = "min"
+        elif isinstance(norm_type, (int, float)):
+            reduce_op = "sum"
         else:
-            raise NotImplementedError(f"Unsupported norm type: {self.norm_type}")
+            raise NotImplementedError(f"Unsupported norm type: {norm_type}")
+
+        super().__init__(reduce_op)
+        object.__setattr__(self, "norm_type", norm_type)
 
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
@@ -138,7 +140,7 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 return tensor**self.norm_type
         return tensor
 
@@ -149,7 +151,7 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 
@@ -160,6 +162,16 @@ class _NormPartial(Partial):
 
     def __hash__(self) -> int:
         return 1 + hash(self.norm_type)
+
+    def __repr__(self) -> str:
+        """
+        machine readable representation of the _NormPartial placement
+        """
+        return f"_NormPartial(reduce_op={self.reduce_op}, norm_type={self.norm_type})"
+
+    def __str__(self) -> str:
+        """human readable representation of the _NormPartial placement"""
+        return f"_NormP({self.reduce_op}, {self.norm_type})"
 
 
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[list[int]]:
@@ -291,6 +303,13 @@ def common_reduction_strategy(
                     reduction_linear = False
                     break
 
+        for p in op_spec.output_spec.placements:
+            # when the partial reduction op matches the global reduction op,
+            # we can delay redistribution (i.e max, max)
+            if isinstance(p, Partial) and p.reduce_op != reduction_op:
+                reduction_linear = False
+                break
+
         if not reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
             # on the reduction dimension
@@ -326,8 +345,8 @@ def common_reduction_strategy(
 
 
 LINEAR_REDUCTION_OP_MAP = {
-    aten.all.default: "sum",
-    aten.all.dim: "sum",
+    aten.all.default: "product",
+    aten.all.dim: "product",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
     aten.any.default: "sum",
@@ -396,10 +415,15 @@ def cumsum_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [aten.var.correction, aten.var.correction_out],
+    [
+        aten.std.correction,
+        aten.std.correction_out,
+        aten.var.correction,
+        aten.var.correction_out,
+    ],
     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
 )
-def var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
+def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     if not isinstance(input_strategy, OpStrategy):

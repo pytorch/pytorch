@@ -29,6 +29,8 @@
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
+
 namespace torch {
 namespace jit {
 struct Function;
@@ -1501,7 +1503,7 @@ struct C10_EXPORT ivalue::Object final : c10::intrusive_ptr_target {
   // However, the CompilationUnit holds ownership of the type's graphs, so
   // inserting a constant object into a Graph would create a reference cycle if
   // that constant object held a shared_ptr to its CU. For these objects we
-  // instatiate them with non-owning references to its CU
+  // instantiate them with non-owning references to its CU
   Object(WeakOrStrongTypePtr type, size_t numSlots) : type_(std::move(type)) {
     slots_.resize(numSlots);
   }
@@ -2567,3 +2569,5 @@ TypePtr IValue::type() const {
 }
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()

@@ -131,17 +131,17 @@ std::shared_ptr<AccessInfo> AccessInfo::cloneWithHiddenInfo(
 }
 
 void AccessInfo::print() const {
-  std::cout << "Access: " << *buf_ << "{";
+  std::cout << "Access: " << *buf_ << '{';
   for (const auto& i : indices_) {
-    std::cout << *i << " ";
+    std::cout << *i << ' ';
   }
   std::cout << "} stores: " << stores_.size() << " (" << *store_cost_ << ") -";
-  std::cout << " loads: " << loads_.size() << " (" << *load_cost_ << ")";
+  std::cout << " loads: " << loads_.size() << " (" << *load_cost_ << ')';
   if (conditionId_) {
     std::cout << " cond: " << conditionId_;
   }
 
-  std::cout << "\n";
+  std::cout << '\n';
 }
 
 // Scope

@@ -4,6 +4,8 @@
 import importlib
 from typing import TYPE_CHECKING
 
+import torch.utils._pytree as python_pytree
+
 from .. import polyfills, trace_rules
 
 
@@ -19,12 +21,14 @@ POLYFILLED_MODULE_NAMES: tuple[str, ...] = (
     "itertools",
     "operator",
     "os",
-    "pytree",
     "struct",
     "sys",
     "fx",
     "tensor",
 )
+if python_pytree._cxx_pytree_dynamo_traceable:
+    POLYFILLED_MODULE_NAMES += ("pytree",)
+
 POLYFILLED_MODULES: tuple["ModuleType", ...] = tuple(
     importlib.import_module(f".{submodule}", package=polyfills.__name__)
     for submodule in POLYFILLED_MODULE_NAMES

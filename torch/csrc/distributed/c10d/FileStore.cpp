@@ -225,7 +225,7 @@ class File {
     while (count > 0) {
       auto rv = syscall([this, buf, count] { return ::read(fd_, buf, count); });
       SYSASSERT(rv, "read");
-      buf = (uint8_t*)buf + rv;
+      buf = static_cast<uint8_t*>(buf) + rv;
       count -= rv;
     }
   }
@@ -490,6 +490,19 @@ void FileStore::wait(
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
+}
+
+std::vector<std::string> FileStore::listKeys() {
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
+  File file(path_, O_RDONLY, timeout_);
+  auto lock = file.lockShared();
+  pos_ = refresh(file, pos_, cache_, deletePrefix_);
+  std::vector<std::string> keys;
+  keys.reserve(cache_.size());
+  for (const auto& kv : cache_) {
+    keys.push_back(kv.first.substr(regularPrefix_.size()));
+  }
+  return keys;
 }
 
 } // namespace c10d

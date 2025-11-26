@@ -10,6 +10,7 @@ from typing_extensions import override, Self
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
+from torch._inductor.standalone_compile import AOTCompiledArtifact
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor
 from torch._subclasses.meta_utils import (
     MetaConverter,
@@ -66,7 +67,7 @@ class GraphPickler(pickle.Pickler):
         self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
 
     @override
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def reducer_override(
         self, obj: object
     ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
@@ -203,7 +204,7 @@ class _SymNodePickleData:
     ]:
         args = (cls(obj.node), pickler._unpickle_state)
         if isinstance(obj, torch.SymInt):
-            # pyrefly: ignore  # bad-return
+            # pyrefly: ignore [bad-return]
             return _SymNodePickleData.unpickle_sym_int, args
         else:
             raise NotImplementedError(f"Unhandled SymNode type {type(obj)}")
@@ -280,7 +281,7 @@ class _TensorPickleData:
                 return FakeTensor(
                     unpickle_state.fake_mode,
                     make_meta_t(),
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     device,
                 )
 
@@ -333,9 +334,9 @@ class _TorchNumpyPickleData:
         if not (name := getattr(np, "__name__", None)):
             return None
 
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         assert np == getattr(importlib.import_module(mod), name)
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         return cls(mod, name)
 
 
@@ -422,7 +423,14 @@ class _OpPickleData:
         if isinstance(op, str):
             return _OpStrPickleData(op)
 
+        if isinstance(getattr(op, "__wrapped__", None), AOTCompiledArtifact):
+            assert hasattr(op, "__wrapped__")
+            artifact = op.__wrapped__
+            assert isinstance(artifact, AOTCompiledArtifact)
+            return _OpPrecompiledPickleData(artifact)
+
         name = torch.fx.Node._pretty_print_target(op)
+
         if isinstance(op, torch._ops.OpOverload):
             return cls._pickle_op(name, _OpOverloadPickleData, options)
         elif isinstance(op, torch._ops.OpOverloadPacket):
@@ -501,6 +509,21 @@ class _OpOverloadPacketPickleData(_OpPickleData):
         obj = self._lookup_global_by_name(self.name)
         assert isinstance(obj, torch._ops.OpOverloadPacket)
         return obj
+
+
+class _OpPrecompiledPickleData(_OpPickleData):
+    def __init__(self, artifact: AOTCompiledArtifact) -> None:
+        self.contents = artifact.serialize()
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> object:
+        precompiled_artifact = AOTCompiledArtifact.deserialize(self.contents)
+        import functools
+
+        @functools.wraps(precompiled_artifact)
+        def wrapped(*args: Any) -> Any:
+            return precompiled_artifact(*args)
+
+        return wrapped
 
 
 class _OpFunctionPickleData(_OpPickleData):

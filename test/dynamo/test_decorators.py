@@ -2,6 +2,7 @@
 import functools
 import operator
 import os
+import re
 import unittest.mock as mock
 from unittest.mock import patch
 
@@ -1312,12 +1313,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         B = torch.tensor(B_list, dtype=torch.int32)
         torch._dynamo.decorators.mark_static(B, 0)
 
-        torch._dynamo.config.capture_scalar_outputs = True
-        torch._dynamo.config.capture_dynamic_output_shape_ops = True
-
-        self.assertEqual(
-            fn(B), torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B)
-        )
+        with torch._dynamo.config.patch(
+            capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+        ):
+            self.assertEqual(
+                fn(B),
+                torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B),
+            )
 
     def test_assume_constant_result_on_computation_with_graph_input(self):
         @torch._dynamo.assume_constant_result
@@ -1471,6 +1473,30 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(out1, inp + 2)
         self.assertEqual(out2, inp + 2)
+
+    def test_fail_on_recompile_shows_guard_details(self):
+        @torch.compile(backend="eager", dynamic=False)
+        def f(x):
+            return x + 1
+
+        f(torch.ones(4))
+        f(torch.ones(5))
+
+        def post_munge(s):
+            return re.sub(r"line number: \d+", "line number: N", s)
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            f(torch.ones(4))
+            self.assertExpectedInlineMunged(
+                RuntimeError,
+                lambda: f(torch.ones(7)),
+                """\
+Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: 'test_decorators.py', function name: 'f', line number: N
+    triggered by the following guard failure(s):
+    - 0/0: tensor 'x' size mismatch at index 0. expected 4, actual 7
+    - 0/1: tensor 'x' size mismatch at index 0. expected 5, actual 7""",  # noqa: B950
+                post_munge=post_munge,
+            )
 
     def test_set_stance_fail_on_recompile_with_disable(self):
         @torch.compiler.disable
@@ -2039,6 +2065,23 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(f(), 1)
 
+    def test_error_on_graph_break_nonempty_checkpoint(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnts)
+        def fn(x):
+            x = x + 1
+            x = x + 1
+            x = x + 1
+            with torch._dynamo.error_on_graph_break(True):
+                torch._dynamo.graph_break()
+            return x + 1
+
+        with self.assertRaises(Unsupported):
+            fn(torch.ones(3))
+
+        self.assertEqual(cnts.frame_count, 0)
+
     def test_nested_compile_fullgraph(self):
         # Test that fullgraph=True cannot be toggled back by fullgraph=False
         inp = torch.ones(3)
@@ -2066,6 +2109,89 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaises(Unsupported):
             outer_f2(inp)
+
+    def test_disable_recursive_flags(self):
+        class SimpleLinear(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer0 = torch.nn.Linear(4, 4)
+
+            def forward(self, inp):
+                return self.layer0(torch.sigmoid(inp))
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer0 = SimpleLinear()
+                self.layer1 = torch.nn.Linear(4, 4)
+
+            def forward(self, inp):
+                z = self.layer0(torch.sin(inp))
+                return self.layer1(z)
+
+        for recursive_flag in [True, False]:
+            model = SimpleModel()
+            other_model = SimpleModel()
+
+            model.forward = torch._dynamo.disable(
+                model.forward,
+                recursive=recursive_flag,
+            )
+            self.assertEqual(
+                torch._dynamo.is_dynamo_disable_recursive(model.forward),
+                recursive_flag,
+            )
+
+            other_model = torch._dynamo.disable(other_model, recursive=recursive_flag)
+            self.assertEqual(
+                torch._dynamo.is_dynamo_disable_recursive(
+                    other_model.forward
+                    if isinstance(other_model, torch.nn.Module)
+                    else other_model
+                ),
+                recursive_flag,
+            )
+
+            # check the model is compilable
+            torch.compile(model)
+            torch.compile(other_model)
+
+    def test_dynamo_disable_annotations(self):
+        class SimpleModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buffer", torch.rand(2, 2))
+
+            @torch._dynamo.disable()
+            def f1(self, x) -> torch.Tensor:
+                return x + self.buffer + 1
+
+            @torch._dynamo.disable()
+            def f2(self, x) -> torch.Tensor:
+                return x + self.buffer + 2
+
+            def forward(self, x) -> torch.Tensor:
+                return self.f1(x) + self.f2(x)
+
+        model = SimpleModel()
+        inp = torch.rand(2, 2)
+        with torch.fx.traceback.preserve_node_meta():
+            exported_model = torch.export.export(model, (inp,))
+        graph = exported_model.graph_module.graph
+        found_f1 = False
+        found_f2 = False
+        for node in graph.nodes:
+            if "custom" in node.meta:
+                if "_torchdynamo_disable_method" in node.meta["custom"]:
+                    if node.meta["custom"]["_torchdynamo_disable_method"] == "f1":
+                        found_f1 = True
+                    elif node.meta["custom"]["_torchdynamo_disable_method"] == "f2":
+                        found_f2 = True
+        self.assertTrue(found_f1)
+        self.assertTrue(found_f2)
+        model.forward = torch._dynamo.disable(model.forward, recursive=False)
+        with self.assertRaises(RuntimeError):
+            exported_model = torch.export.export(model, (inp,))
 
 
 if __name__ == "__main__":

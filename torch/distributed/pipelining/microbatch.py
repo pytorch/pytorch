@@ -249,8 +249,12 @@ def _shard_dict_of_args(
     )
     assert args_chunk_spec is not None  # Should have been set by caller
 
-    values, tree_spec = tree_flatten(args_dict)
-    chunk_specs, _ = tree_flatten(args_chunk_spec)
+    values, tree_spec = tree_flatten(
+        args_dict, is_leaf=lambda x: isinstance(x, BlockMask)
+    )
+    chunk_specs, _ = tree_flatten(
+        args_chunk_spec, is_leaf=lambda x: isinstance(x, BlockMask)
+    )
 
     # First check and find the actual number of chunks
     split_sizes = []
@@ -290,7 +294,6 @@ def _shard_dict_of_args(
                 f"Unsupported chunk spec: {spec} and value: {v} combination."
             )
 
-        # pyrefly: ignore  # no-matching-overload
         for _flat_split_result, _v_split in zip(
             flat_split_results, v_splits, strict=True
         ):
@@ -370,10 +373,14 @@ def split_args_kwargs_into_chunks(
             return _Replicate()
 
     if args_chunk_spec is None:
-        args_chunk_spec = tree_map(default_spec, args)
+        args_chunk_spec = tree_map(
+            default_spec, args, is_leaf=lambda v: isinstance(v, BlockMask)
+        )
 
     if kwargs_chunk_spec is None:
-        kwargs_chunk_spec = tree_map(default_spec, kwargs)
+        kwargs_chunk_spec = tree_map(
+            default_spec, kwargs, is_leaf=lambda v: isinstance(v, BlockMask)
+        )
 
     args_split_dict = _shard_dict_of_args(
         dict(enumerate(args)),
@@ -502,7 +509,9 @@ def merge_chunks(
                 values_to_cat = []
                 chunk_start_idx = 0
                 assert len(partial_values) == len(meta_chunks)
-                for partial_value, meta_chunk in zip(partial_values, meta_chunks):
+                for partial_value, meta_chunk in zip(
+                    partial_values, meta_chunks, strict=True
+                ):
                     chunk_end_idx = chunk_start_idx + meta_chunk.size(arg.split_dim)
 
                     slice_indices = [slice(None, None, None)] * partial_value.ndim

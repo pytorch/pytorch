@@ -587,7 +587,9 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu());
+      TORCH_INTERNAL_ASSERT(
+          tensor.device().is_cpu() ||
+          (tensor._is_zerotensor() && tensor.dim() == 0));
       auto py_tensor = py::cast(tensor);
       if (PyObject_HasAttrString(py_tensor.ptr(), "_wrapped_number")) {
         return py_tensor.attr("_wrapped_number");
@@ -595,17 +597,27 @@ py::object toPyObject(IValue ivalue) {
       auto scalar_type = tensor.scalar_type();
       switch (scalar_type) {
         case at::ScalarType::Bool:
-          return py::cast(*tensor.const_data_ptr<bool>());
+          return (tensor._is_zerotensor())
+              ? py::cast(false)
+              : py::cast(*tensor.const_data_ptr<bool>());
         case at::ScalarType::Long:
-          return py::cast(*tensor.const_data_ptr<int64_t>());
+          return (tensor._is_zerotensor())
+              ? py::cast(int64_t(0))
+              : py::cast(*tensor.const_data_ptr<int64_t>());
         case at::ScalarType::UInt64:
-          return py::cast(*tensor.const_data_ptr<uint64_t>());
+          return (tensor._is_zerotensor())
+              ? py::cast(uint64_t(0))
+              : py::cast(*tensor.const_data_ptr<uint64_t>());
         case at::ScalarType::Double:
-          return py::cast(*tensor.const_data_ptr<double>());
+          return (tensor._is_zerotensor())
+              ? py::cast(0.0)
+              : py::cast(*tensor.const_data_ptr<double>());
         case at::ScalarType::ComplexDouble:
           // TODO: https://github.com/pytorch/pytorch/issues/77134
-          return py::cast(static_cast<std::complex<double>>(
-              *tensor.const_data_ptr<c10::complex<double>>()));
+          return (tensor._is_zerotensor())
+              ? py::cast(std::complex<double>(0.0, 0.0))
+              : py::cast(static_cast<std::complex<double>>(
+                    *tensor.const_data_ptr<c10::complex<double>>()));
         default:
           TORCH_CHECK(
               false,
@@ -874,10 +886,27 @@ std::optional<py::object> _maybe_handle_torch_function(
   std::vector<PyObject*> overloaded_args;
   const auto args_size = args.size();
   size_t total_arg_num = args_size + kwargs.size();
+  PyObject* const args_ptr = args.ptr();
   for (const auto i : c10::irange(args_size)) {
-    is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
+    // Because pybind object indexing is implemented generically for
+    // all objects, operator[] returns py::object instead of
+    // py::handle, so args[i].ptr() would cause a reference count
+    // round trip. This has enough overhead that I noticed it while
+    // profiling and came here to fix it. In contrast,
+    // PyTuple_GetItem returns a borrowed reference, so no counting
+    // overhead.
+    static_assert(
+        std::is_base_of_v<py::tuple, std::decay_t<decltype(args)>>,
+        "Use of PyTuple_GetItem below requires that args is a tuple!");
+
+    // Using PyTuple_GetItem instead of PyTuple_GET_ITEM out of an
+    // abundance of caution and for robustness under maintenance. If
+    // you're here looking for further performance improvements, you
+    // can probably switch to PyTuple_GET_ITEM.
+    auto* const args_i_ptr = PyTuple_GetItem(args_ptr, i);
+    is_tensor_and_append_overloaded(args_i_ptr, &overloaded_args);
     is_tensor_list_and_append_overloaded(
-        args[i].ptr(),
+        args_i_ptr,
         &overloaded_args,
         static_cast<int>(total_arg_num),
         false /* throw_error */);

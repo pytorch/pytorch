@@ -696,7 +696,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   } else {
     LOG(WARNING)
         << "You are using an outdated version of the pt2 archive which do not have a prefix in front of each filename. Example: \n"
-        << found_filenames[0] << "\n"
+        << found_filenames[0] << '\n'
         << found_filenames[1];
   }
 
@@ -824,7 +824,7 @@ AOTIModelPackageLoader::AOTIModelPackageLoader(
   runner_ = registered_aoti_runner[device_key](
       so_path, num_runners, device.str(), cubin_dir, run_single_threaded);
 
-  if (weight_blob_filename != "") {
+  if (!weight_blob_filename.empty()) {
     runner_->update_constant_buffer_from_blob(weight_blob_filename);
   }
 }

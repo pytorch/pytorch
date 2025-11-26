@@ -563,7 +563,7 @@ class TestFreezing(JitTestCase):
         self.assertTrue(mf.hasattr("sub1"))
         self.assertTrue(mf.sub1.hasattr("a"))
         self.assertFalse(mf.sub1.hasattr("b"))
-        # sub2 is fully folded becasue self.sub1 and self.sub2.sub are not alias (Scripting bug)
+        # sub2 is fully folded because self.sub1 and self.sub2.sub are not alias (Scripting bug)
         self.assertFalse(mf.hasattr("sub2"))
         input = torch.randn(2, 2)
         output = m.forward(input)

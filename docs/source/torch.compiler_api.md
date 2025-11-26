@@ -30,5 +30,6 @@ For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
      skip_guard_on_all_nn_modules_unsafe
      keep_tensor_guards_unsafe
      skip_guard_on_globals_unsafe
+     skip_all_guards_unsafe
      nested_compile_region
 ```

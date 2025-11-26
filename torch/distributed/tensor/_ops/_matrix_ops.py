@@ -15,6 +15,7 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -22,7 +23,6 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_shardable,
     map_placements_after_broadcast,
     prod,
-    register_op_strategy,
 )
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
@@ -256,7 +256,7 @@ def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(aten.baddbmm.default)
-def baddmm_strategy(op_schema: OpSchema) -> OpStrategy:
+def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
@@ -1094,9 +1094,9 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
             )
             return TensorMeta(torch.Size(local_shape), local_stride, meta.dtype)
 
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         mat1_meta = local_meta(mat1_strategy.strategies[0], input_specs[0].placements)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         mat2_meta = local_meta(mat2_strategy.strategies[0], input_specs[1].placements)
 
         def check_valid_strides(meta: TensorMeta) -> bool:

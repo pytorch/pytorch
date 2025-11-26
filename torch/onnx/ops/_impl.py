@@ -1,3 +1,10 @@
+"""Implementations of ONNX operators as native Torch ops.
+
+NOTE: Fake implementations:
+    Refer to https://docs.pytorch.org/docs/stable/library.html#torch.library.register_fake
+    for more details on how to create fake kernels.
+"""
+
 # flake8: noqa: B950
 import math
 from collections.abc import Callable
@@ -25,7 +32,7 @@ _ATTENTION_23_ALLOWED_INTERMEDIATE_PRECISIONS = frozenset(
 
 
 def _onnx_op(
-    op_type: str, opset_version: int
+    op_type: str, opset_version: int, fake_impl: Callable[_P, _R]
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Decorator to register an ONNX operator with a custom implementation."""
 
@@ -37,15 +44,27 @@ def _onnx_op(
         ONNX_ATEN_DECOMP_TABLE[getattr(getattr(torch.ops.onnx, op_type), overload)] = (
             func  # type: ignore[assignment]
         )
-        # Use the same implementation for the fake implementation
-        # This is possible because we use pure aten ops to implement ONNX ops
-        torch_op.register_fake(func)
+        torch_op.register_fake(fake_impl)
         return torch_op  # type: ignore[return-value]
 
     return decorator
 
 
-@_onnx_op("RotaryEmbedding", 23)
+def _rotary_embedding_23_fake_impl(
+    x: torch.Tensor,
+    cos_cache: torch.Tensor,
+    sin_cache: torch.Tensor,
+    position_ids: Optional[torch.Tensor] = None,
+    *,
+    interleaved: bool = False,
+    num_heads: int = 0,
+    rotary_embedding_dim: int = 0,
+) -> torch.Tensor:
+    """Fake implementation for RotaryEmbedding-23 for torch.compile purposes."""
+    return x.clone()
+
+
+@_onnx_op("RotaryEmbedding", 23, _rotary_embedding_23_fake_impl)
 def rotary_embedding_23(
     x: torch.Tensor,
     cos_cache: torch.Tensor,
@@ -249,7 +268,91 @@ def _compute_qk_output_for_mode_0(
     return torch.matmul(Q_scaled, K_scaled.transpose(-2, -1))
 
 
-@_onnx_op("Attention", 23)
+def _attention_23_fake_impl(
+    Q: torch.Tensor,
+    K: torch.Tensor,
+    V: torch.Tensor,
+    attn_mask: Optional[torch.Tensor] = None,
+    past_key: Optional[torch.Tensor] = None,
+    past_value: Optional[torch.Tensor] = None,
+    *,
+    is_causal: bool = False,
+    kv_num_heads: int = 0,
+    q_num_heads: int = 0,
+    qk_matmul_output_mode: int = 0,
+    scale: Optional[float] = None,
+    softcap: float = 0.0,
+    softmax_precision: Optional[int] = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fake implementation for Attention-23 for torch.compile purposes."""
+    batch_size = Q.shape[0]
+
+    # Handle 3D vs 4D input shapes
+    if len(Q.shape) == 3:
+        # 3D input: (batch_size, sequence_length, hidden_size)
+        q_sequence_length = Q.shape[1]
+        output_shape = Q.shape  # Same shape as Q for 3D output
+
+        # For present_key and present_value, we need 4D shapes
+        if past_key is not None:
+            present_key_shape = (
+                batch_size,
+                kv_num_heads,
+                past_key.shape[2] + K.shape[1],  # Combined sequence length
+                K.shape[2] // kv_num_heads,  # head_size
+            )
+        else:
+            present_key_shape = (
+                batch_size,
+                kv_num_heads,
+                K.shape[1],  # sequence_length
+                K.shape[2] // kv_num_heads,  # head_size
+            )
+        present_value_shape = present_key_shape  # Same shape as present_key
+
+        # QK output shape for 3D input (reshaped to 4D internally)
+        qk_output_shape = (
+            batch_size,
+            q_num_heads,
+            q_sequence_length,
+            present_key_shape[2],  # kv_sequence_length
+        )
+    else:
+        # 4D input: (batch_size, num_heads, sequence_length, head_size)
+        q_sequence_length = Q.shape[2]
+        # Same shape as Q for 4D output
+        output_shape = Q.shape  # type: ignore[assignment]
+
+        # Handle past key/value concatenation
+        if past_key is not None:
+            present_key_shape = (
+                K.shape[0],  # batch_size
+                K.shape[1],  # num_heads
+                past_key.shape[2] + K.shape[2],  # Combined sequence length
+                K.shape[3],  # head_size
+            )
+        else:
+            present_key_shape = K.shape  # type: ignore[assignment]
+        present_value_shape = present_key_shape  # Same shape as present_key
+
+        # QK output shape
+        qk_output_shape = (
+            Q.shape[0],  # batch_size
+            Q.shape[1],  # q_num_heads
+            Q.shape[2],  # q_sequence_length
+            present_key_shape[2],  # kv_sequence_length
+        )
+
+    # Create fake tensors with correct shapes and dtypes
+    output = torch.empty(output_shape, dtype=Q.dtype, device=Q.device)
+    present_key = torch.empty(present_key_shape, dtype=K.dtype, device=K.device)
+    present_value = torch.empty(present_value_shape, dtype=V.dtype, device=V.device)
+    qk_output = torch.empty(qk_output_shape, dtype=Q.dtype, device=Q.device)
+
+    return output, present_key, present_value, qk_output
+
+
+@_onnx_op("Attention", 23, _attention_23_fake_impl)
 def attention_23(
     Q: torch.Tensor,
     K: torch.Tensor,
@@ -327,18 +430,11 @@ def attention_23(
 
     if can_use_sdpa:
         # Use PyTorch's optimized scaled_dot_product_attention
-
-        # Prepare attention mask for SDPA
-        sdpa_attn_mask = None
-        if attn_mask is not None:
-            # Convert boolean mask: True means participate, SDPA expects True to mask out
-            sdpa_attn_mask = ~attn_mask if attn_mask.dtype == torch.bool else attn_mask
-
         output = torch.nn.functional.scaled_dot_product_attention(
             Q,
             K,
             V,
-            attn_mask=sdpa_attn_mask,
+            attn_mask=attn_mask,
             dropout_p=0.0,
             is_causal=is_causal,
             scale=scale,

@@ -528,11 +528,11 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
         if t == -1:
             var, counter = gen_dvar(counter)
             t2_type.append(var)
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             num_constraints.append(BinConstraintD(var, Dyn, op_neq))
 
         else:
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             num_constraints.append(BinConstraintD(t, Dyn, op_neq))
             t2_type.append(t)  # type: ignore[arg-type]
 
@@ -1050,9 +1050,9 @@ def gen_broadcasting_constraints(e1, e2, symbols, counter, output_var):
 @register_inference_rule(operator.add)
 def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
     op_code = None
-    if n.target == operator.add or n.target == torch.add:
+    if n.target is operator.add or n.target is torch.add:
         op_code = op_add
-    elif n.target == operator.mul:
+    elif n.target is operator.mul:
         op_code = op_mul
 
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
@@ -1477,7 +1477,7 @@ class ConstraintGenerator:
 
         all_constraints = []
 
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         for n in graph.nodes:
             (constraints, counter) = self.generate_constraints_node(n, counter)
             all_constraints += constraints
