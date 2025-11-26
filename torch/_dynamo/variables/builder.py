@@ -79,6 +79,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.nn.utils._expanded_weights import ExpandedWeight
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
@@ -845,6 +846,19 @@ class VariableBuilder:
             ]
             result = SetVariable(items, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
+        elif isinstance(value, OrderedSet):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            L = list(value)
+            items = [
+                LazyVariableTracker.create(
+                    v, source=NonSerializableSetGetItemSource(self.source, i)
+                )
+                for i, v in enumerate(L)
+            ]
+            result = SetVariable(items, source=self.source)
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, frozenset) and all(
             (
                 # For DBR quantization, we could get a frozenset of torch funcs.
@@ -911,6 +925,21 @@ class VariableBuilder:
                 keywords_source.make_guard(GuardBuilder.DICT_KEYS_MATCH),
                 args_source.make_guard(GuardBuilder.SEQUENCE_LENGTH),
             )
+            if len(args) > 0:
+                set_source = []
+                for arg in args:
+                    if isinstance(arg, SetVariable):
+                        set_source.append(arg.source)
+                guards_list = list(self.tx.output.guards)
+                for guard in guards_list:
+                    if (
+                        len(set_source) > 0
+                        and isinstance(
+                            guard.originating_source, NonSerializableSetGetItemSource
+                        )
+                        and guard.originating_source.base in set_source
+                    ):
+                        self.tx.output.guards.inner.remove(guard)
             return FunctoolsPartialVariable(func_obj, args, keywords)
         elif is_typing(value):
             # typing.List, typing.Mapping, etc.

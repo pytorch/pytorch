@@ -302,6 +302,47 @@ from user code:
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(res, fn(x, s))
 
+    def test_set_guard_with_functools_partial(self):
+        import functools
+
+        from torch.utils.checkpoint import (
+            checkpoint,
+            CheckpointPolicy,
+            create_selective_checkpoint_contexts,
+        )
+
+        cnts = CompileCounter()
+
+        def policy(compute_heavy_ops, ctx, func, *args, **kwargs):
+            if func in compute_heavy_ops:
+                return CheckpointPolicy.MUST_SAVE
+            return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def g(x):
+            return torch.mm(x, x).sin().exp()
+
+        @torch.compile(fullgraph=True, backend=cnts)
+        def f(x, policy):
+            return checkpoint(g, x, use_reentrant=False, context_fn=policy)
+
+        x = torch.randn(4, 4, requires_grad=True)
+        f(
+            x,
+            functools.partial(
+                create_selective_checkpoint_contexts,
+                functools.partial(policy, {torch.ops.aten.mm.default, False}),
+            ),
+        )
+        self.assertEqual(cnts.frame_count, 1)
+        f(
+            x,
+            functools.partial(
+                create_selective_checkpoint_contexts,
+                functools.partial(policy, {torch.ops.aten.mm.default, True}),
+            ),
+        )
+        self.assertEqual(cnts.frame_count, 1)
+
 
 class _FrozensetBase:
     # Frozenset methods
