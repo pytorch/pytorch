@@ -526,7 +526,7 @@ class ConstDictVariable(VariableTracker):
             )
             tx.output.side_effects.mutation(self)
             self.items.update(temp_dict_vt.items)  # type: ignore[attr-defined]
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "__getitem__":
             # Key guarding - Nothing to do. LazyVT for value will take care.
             if len(args) != 1:
@@ -601,13 +601,13 @@ class ConstDictVariable(VariableTracker):
                 )
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "__delitem__" and arg_hashable and self.is_mutable():
             self.install_dict_keys_match_guard()
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.__delitem__(Hashable(args[0]))
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "get":
             if len(args) not in (1, 2):
                 raise_args_mismatch(tx, name, "1 or 2 args", f"{len(args)} args")
@@ -619,7 +619,7 @@ class ConstDictVariable(VariableTracker):
                 self.install_dict_contains_guard(tx, args)
                 if len(args) == 1:
                     # if default is not given, return None
-                    return ConstantVariable.create(None)
+                    return variables.constant_none
                 return args[1]
             # Key guarding - Nothing to do.
             return self.getitem_const(tx, args[0])
@@ -681,7 +681,7 @@ class ConstDictVariable(VariableTracker):
             self.should_reconstruct_all = True
             tx.output.side_effects.mutation(self)
             self.items.clear()
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "update" and self.is_mutable():
             # In general, this call looks like `a.update(b, x=1, y=2, ...)`.
             # Either `b` or the kwargs is omittable, but not both.
@@ -706,7 +706,7 @@ class ConstDictVariable(VariableTracker):
                         for k, v in kwargs.items()
                     }
                     self.items.update(kwargs_hashable)
-                return ConstantVariable.create(None)
+                return variables.constant_none
             else:
                 return super().call_method(tx, name, args, kwargs)
         elif name == "__contains__":
@@ -749,7 +749,7 @@ class ConstDictVariable(VariableTracker):
                 return value
             else:
                 if len(args) == 1:
-                    x = ConstantVariable.create(None)
+                    x = variables.constant_none
                 else:
                     x = args[1]
                 tx.output.side_effects.mutation(self)
@@ -774,7 +774,7 @@ class ConstDictVariable(VariableTracker):
 
             key = Hashable(args[0])
             self.items.move_to_end(key, last=last)
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "__eq__" and istype(
             self, ConstDictVariable
         ):  # don't let Set use this function
@@ -866,9 +866,9 @@ class ConstDictVariable(VariableTracker):
             for t in (dict, collections.OrderedDict, collections.defaultdict)
         ):
             if hasattr(self.user_cls, name):
-                return ConstantVariable.create(True)
+                return variables.constant_true
             if self.user_cls is dict:
-                return ConstantVariable.create(False)
+                return variables.constant_false
 
         msg = f"hasattr on {self.user_cls} is not supported"
         unimplemented(
@@ -1088,7 +1088,7 @@ class SetVariable(ConstDictVariable):
     @staticmethod
     def _default_value() -> VariableTracker:
         # Variable to fill in he keys of the dictionary
-        return ConstantVariable.create(None)
+        return variables.constant_none
 
     def as_proxy(self) -> Any:
         return {k.vt.as_proxy() for k in self.set_items}
@@ -1152,7 +1152,7 @@ class SetVariable(ConstDictVariable):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             self.items.update(temp_set_vt.items)  # type: ignore[attr-defined]
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name == "add":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -1321,12 +1321,12 @@ class SetVariable(ConstDictVariable):
             return self
         elif name == "__eq__":
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
-                return ConstantVariable.create(False)
+                return variables.constant_false
             r = self.call_method(tx, "symmetric_difference", args, kwargs)
             return ConstantVariable.create(len(r.set_items) == 0)  # type: ignore[attr-defined]
         elif name in cmp_name_to_op_mapping:
             if not isinstance(args[0], (SetVariable, variables.UserDefinedSetVariable)):
-                return ConstantVariable.create(NotImplemented)
+                return variables.constant_NotImplemented
             return ConstantVariable.create(
                 cmp_name_to_op_mapping[name](self.set_items, args[0].set_items)  # type: ignore[attr-defined]
             )
@@ -1387,7 +1387,7 @@ class FrozensetVariable(SetVariable):
             #
             # In[3]: s
             # frozenset({1, 2})
-            return ConstantVariable.create(None)
+            return variables.constant_none
         elif name in (
             "copy",
             "difference",
@@ -1481,9 +1481,11 @@ class DictViewVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         assert self.kv is not None
-        if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
+        return (
+            variables.constant_true
+            if name in self.python_type().__dict__
+            else variables.constant_false
+        )
 
     def call_method(
         self,
@@ -1541,7 +1543,7 @@ class DictKeysVariable(DictViewVariable):
             return SetVariable(r)
         if name in cmp_name_to_op_mapping:
             if not isinstance(args[0], (SetVariable, DictKeysVariable)):
-                return ConstantVariable.create(NotImplemented)
+                return variables.constant_NotImplemented
             return ConstantVariable.create(
                 cmp_name_to_op_mapping[name](self.set_items, args[0].set_items)  # type: ignore[attr-defined]
             )
