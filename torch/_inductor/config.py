@@ -234,7 +234,12 @@ allow_buffer_reuse = True
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
-use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
+use_fast_math = (
+    os.environ.get(
+        "TORCHINDUCTOR_USE_FAST_MATH", "1" if torch.xpu.is_available() else "0"
+    )
+    == "1"
+)
 
 # Enable bfloat16 atomic adds (fbcode only until upstreamed to triton)
 bfloat16_atomic_adds_enabled = True
