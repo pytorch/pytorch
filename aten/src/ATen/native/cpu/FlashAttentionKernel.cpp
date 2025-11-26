@@ -17,6 +17,15 @@
 #else
 #include <ATen/ops/empty.h>
 #endif
+
+#if AT_ZENDNN_ENABLED()
+#include <zendnnl.hpp>
+#include <ATen/cpu/Utils.h>
+#include <ATen/native/zendnn/ZenDNN_utils.hpp>
+
+
+using namespace zendnnl::lowoha;
+#endif
 namespace at::native {
 
 namespace {
@@ -440,7 +449,29 @@ void cpu_flash_attention(
   accum_t* buf_data = buf.data_ptr<accum_t>();
   scalar_t* buf_reduced_data = is_reduced_type ? buf_reduced.data_ptr<scalar_t>() : nullptr;
 
-  // Buffer to store padding query and packing key/value
+  bool enable_zen_matmul = false;
+
+#if AT_ZENDNN_ENABLED()
+  enable_zen_matmul = at::cpu::is_amd_cpu()
+                      && at::cpu::is_avx512_supported()
+                      && output.scalar_type() == kBFloat16;
+  data_type_t out_type = get_zendnn_dtype(buf);
+  data_type_t inp_dtype = get_zendnn_dtype(query);
+  data_type_t wgt_dtype = get_zendnn_dtype(key);
+
+  data_types matmul_dtype;
+  matmul_dtype.src = inp_dtype;
+  matmul_dtype.wei = wgt_dtype;
+  matmul_dtype.dst = out_type;
+  matmul_dtype.bias = data_type_t::none;
+  matmul_dtype.compute = data_type_t::none;
+
+  lowoha_params params;
+  params.dtypes = matmul_dtype;
+  params.lowoha_algo= matmul_algo_t::libxsmm;
+#endif
+
+ // Buffer to store padding query and packing key/value
   scalar_t* key_reorder_ptr = nullptr;
   scalar_t* value_reorder_ptr = nullptr;
   scalar_t* query_padding_ptr = nullptr;
@@ -575,22 +606,55 @@ void cpu_flash_attention(
                 qk_data);
           }
         } else {
-          cpublas::gemm(
-            TransposeType::Transpose,
-            TransposeType::NoTranspose,
-            kvBlockSize,
-            qBlockSize,
-            headSize,
-            static_cast<accum_t>(1),
-            k_data + i * kStrideB + kv_j * kStrideH +
-                n * kStrideN,
-            kStrideN,
-            q_data + i * qStrideB + j * qStrideH +
+
+          if(enable_zen_matmul)
+          {
+#if AT_ZENDNN_ENABLED()
+            // Limit OpenMP nesting to prevent over-subscription and
+            // ensure optimal thread performance
+            omp_set_max_active_levels(1);
+            zendnnl::lowoha::matmul_direct(
+                'r',    // row major
+                false,  // transA
+                true,   // trasnsB
+                qBlockSize,
+                kvBlockSize,
+                headSize,
+                static_cast<accum_t>(1),   // alpha
+                q_data + i * qStrideB + j * qStrideH +
                 m * qStrideM,
-            qStrideM,
-            static_cast<accum_t>(0),
-            qk_data,
-            kvBlockSize);
+                qStrideM,
+                k_data + i * kStrideB + kv_j * kStrideH +
+                n * kStrideN,
+                kStrideN,
+                nullptr,
+                static_cast<accum_t>(0),   // beta
+                qk_data,
+                kvBlockSize,
+                params,
+                1,  // batch size 1
+                1); // batch size 1
+#endif
+          }
+          else
+          {
+            cpublas::gemm(
+              TransposeType::Transpose,
+              TransposeType::NoTranspose,
+              kvBlockSize,
+              qBlockSize,
+              headSize,
+              static_cast<accum_t>(1),
+              k_data + i * kStrideB + kv_j * kStrideH +
+                  n * kStrideN,
+              kStrideN,
+              q_data + i * qStrideB + j * qStrideH +
+                  m * qStrideM,
+              qStrideM,
+              static_cast<accum_t>(0),
+              qk_data,
+              kvBlockSize);
+          }
         }
         // Apply causal mask, fill unused with -inf
         if (is_causal && num_keys - n <= kvSplitSize) {
@@ -706,21 +770,52 @@ void cpu_flash_attention(
                   dst_data);
           }
         } else {
-          cpublas::gemm(
-            TransposeType::NoTranspose,
-            TransposeType::NoTranspose,
-            headSize,
-            qBlockSize,
-            kvBlockSize,
-            static_cast<accum_t>(1),
-            v_data + i * vStrideB + kv_j * vStrideH +
-                n * vStrideN,
-            vStrideN,
-            conditional_data_ptr(qk_data, qk_reduced_data),
-            kvBlockSize,
-            n == 0 ? static_cast<accum_t>(0) : static_cast<accum_t>(1),
-            dst_data,
-            headSize);
+              if(enable_zen_matmul)
+              {
+#if AT_ZENDNN_ENABLED()
+            // Limit OpenMP nesting to prevent over-subscription and
+            // ensure optimal thread performance
+                omp_set_max_active_levels(1);
+                zendnnl::lowoha::matmul_direct(
+                    'r',   // row major
+                    false,  // transA
+                    false,  // transB
+                    qBlockSize,
+                    headSize,
+                    kvBlockSize,
+                    static_cast<accum_t>(1),  // alpha
+                    conditional_data_ptr(qk_data, qk_reduced_data),
+                    kvBlockSize,
+                    v_data + i * vStrideB + kv_j * vStrideH +
+                    n * vStrideN,
+                    vStrideN,
+                    nullptr,
+                    n == 0 ? static_cast<accum_t>(0) : static_cast<accum_t>(1), // beta
+                    dst_data,
+                    headSize,
+                    params,
+                    1,  // batch size 1
+                    1); // batch size 1
+#endif
+              }
+              else
+              {
+                cpublas::gemm(
+                  TransposeType::NoTranspose,
+                  TransposeType::NoTranspose,
+                  headSize,
+                  qBlockSize,
+                  kvBlockSize,
+                  static_cast<accum_t>(1),
+                  v_data + i * vStrideB + kv_j * vStrideH +
+                      n * vStrideN,
+                  vStrideN,
+                  conditional_data_ptr(qk_data, qk_reduced_data),
+                  kvBlockSize,
+                  n == 0 ? static_cast<accum_t>(0) : static_cast<accum_t>(1),
+                  dst_data,
+                  headSize);
+              }
         }
       }
 
