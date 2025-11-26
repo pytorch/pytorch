@@ -3380,7 +3380,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @onlyOn(["cuda", "xpu"])
     @largeTensorTest("20GB", "cpu")
-    @largeTensorTest("60GB", device_type.type)
+    @largeTensorTest("60GB", device_type)
     @serialTest()
     def test_conv_large_batch_1(self, device):
         in_channels = 514
