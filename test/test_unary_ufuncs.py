@@ -18,7 +18,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
     ops,
     precisionOverride,
@@ -63,6 +62,10 @@ if TEST_SCIPY:
 # Filter operators for which the reference function
 # is available in the current environment (for reference_numerics tests).
 reference_filtered_ops = list(filter(lambda op: op.ref is not None, unary_ufuncs))
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 # Tests for unary "universal functions (ufuncs)" that accept a single
 # tensor and have common properties like:
@@ -562,7 +565,7 @@ class TestUnaryUfuncs(TestCase):
         x = torch.tensor(0.0 - 1.0e20j, dtype=dtype, device=device)
         self.compare_with_numpy(torch.sqrt, np.sqrt, x)
         # acos test reference: https://github.com/pytorch/pytorch/issues/42952
-        if not (dtype == torch.cdouble and "cuda" in device):
+        if not (dtype == torch.cdouble and device_type in device):
             self.compare_with_numpy(torch.acos, np.arccos, x)
 
         x = torch.tensor(
@@ -773,7 +776,7 @@ class TestUnaryUfuncs(TestCase):
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
-    @onlyCUDA
+    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
     @dtypes(torch.complex64)
     def test_tan_complex_cuda_matches_numpy(self, device, dtype):
         # Focused accuracy check for complex tan on CUDA against NumPy reference
@@ -806,7 +809,7 @@ class TestUnaryUfuncs(TestCase):
         z = torch.complex(real, imag).to(dtype)
         self.compare_with_numpy(torch.tan, np.tan, z)
 
-    @onlyCUDA
+    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
     @dtypes(torch.complex64)
     def test_tanh_complex_cuda_matches_numpy(self, device, dtype):
         # Focused accuracy check for complex tanh on CUDA against NumPy reference
@@ -862,78 +865,78 @@ class TestUnaryUfuncs(TestCase):
         ints = torch.randint(-100, 100, (2 * sz,), device=device)
         unary_mem_overlap_cases = [
             ("abs", doubles, True, True, "cpu"),
-            ("abs", doubles, True, True, "cuda"),
+            ("abs", doubles, True, True, device_type.type),
             ("acos", doubles, True, True, "cpu"),
-            ("acos", doubles, True, True, "cuda"),
+            ("acos", doubles, True, True, device_type.type),
             ("asin", doubles, True, True, "cpu"),
-            ("asin", doubles, True, True, "cuda"),
+            ("asin", doubles, True, True, device_type.type),
             ("atan", doubles, True, True, "cpu"),
-            ("atan", doubles, True, True, "cuda"),
+            ("atan", doubles, True, True, device_type.type),
             ("acosh", doubles, True, True, "cpu"),
-            ("acosh", doubles, True, True, "cuda"),
+            ("acosh", doubles, True, True, device_type.type),
             ("asinh", doubles, True, True, "cpu"),
-            ("asinh", doubles, True, True, "cuda"),
+            ("asinh", doubles, True, True, device_type.type),
             ("atanh", doubles, True, True, "cpu"),
-            ("atanh", doubles, True, True, "cuda"),
+            ("atanh", doubles, True, True, device_type.type),
             ("bitwise_not", ints, True, True, "cpu"),
-            ("bitwise_not", ints, True, True, "cuda"),
+            ("bitwise_not", ints, True, True, device_type.type),
             ("ceil", doubles, True, True, "cpu"),
-            ("ceil", doubles, True, True, "cuda"),
+            ("ceil", doubles, True, True, device_type.type),
             ("cos", doubles, True, True, "cpu"),
-            ("cos", doubles, True, True, "cuda"),
+            ("cos", doubles, True, True, device_type.type),
             ("cosh", doubles, True, True, "cpu"),
-            ("cosh", doubles, True, True, "cuda"),
+            ("cosh", doubles, True, True, device_type.type),
             ("digamma", doubles, True, True, "cpu"),
             ("erf", doubles, True, True, "cpu"),
-            ("erf", doubles, True, True, "cuda"),
+            ("erf", doubles, True, True, device_type.type),
             ("erfc", doubles, True, True, "cpu"),
-            ("erfc", doubles, True, True, "cuda"),
+            ("erfc", doubles, True, True, device_type.type),
             ("erfinv", doubles, True, True, "cpu"),
-            ("erfinv", doubles, True, True, "cuda"),
+            ("erfinv", doubles, True, True, device_type.type),
             ("exp", doubles, True, True, "cpu"),
-            ("exp", doubles, True, True, "cuda"),
+            ("exp", doubles, True, True, device_type.type),
             ("exp2", doubles, True, True, "cpu"),
-            ("exp2", doubles, True, True, "cuda"),
+            ("exp2", doubles, True, True, device_type.type),
             ("expm1", doubles, True, True, "cpu"),
-            ("expm1", doubles, True, True, "cuda"),
+            ("expm1", doubles, True, True, device_type.type),
             ("floor", doubles, True, True, "cpu"),
-            ("floor", doubles, True, True, "cuda"),
+            ("floor", doubles, True, True, device_type.type),
             ("frac", doubles, True, True, "cpu"),
-            ("frac", doubles, True, True, "cuda"),
+            ("frac", doubles, True, True, device_type.type),
             ("i0", doubles, True, True, "cpu"),
-            ("i0", doubles, True, True, "cuda"),
+            ("i0", doubles, True, True, device_type.type),
             ("log", positives, True, True, "cpu"),
-            ("log", positives, True, True, "cuda"),
+            ("log", positives, True, True, device_type.type),
             ("log10", positives, True, True, "cpu"),
-            ("log10", positives, True, True, "cuda"),
+            ("log10", positives, True, True, device_type.type),
             ("log1p", positives, True, True, "cpu"),
-            ("log1p", positives, True, True, "cuda"),
+            ("log1p", positives, True, True, device_type.type),
             ("log2", positives, True, True, "cpu"),
-            ("log2", positives, True, True, "cuda"),
+            ("log2", positives, True, True, device_type.type),
             ("neg", doubles, True, True, "cpu"),
-            ("neg", doubles, True, True, "cuda"),
+            ("neg", doubles, True, True, device_type.type),
             ("reciprocal", doubles, True, True, "cpu"),
-            ("reciprocal", doubles, True, True, "cuda"),
+            ("reciprocal", doubles, True, True, device_type.type),
             ("round", doubles, True, True, "cpu"),
-            ("round", doubles, True, True, "cuda"),
+            ("round", doubles, True, True, device_type.type),
             ("rsqrt", positives, True, True, "cpu"),
-            ("rsqrt", positives, True, True, "cuda"),
+            ("rsqrt", positives, True, True, device_type.type),
             ("sin", doubles, True, True, "cpu"),
-            ("sin", doubles, True, True, "cuda"),
+            ("sin", doubles, True, True, device_type.type),
             ("sinh", doubles, True, True, "cpu"),
-            ("sinh", doubles, False, True, "cuda"),
+            ("sinh", doubles, False, True, device_type.type),
             ("sigmoid", doubles, True, True, "cpu"),
-            ("sigmoid", doubles, True, True, "cuda"),
+            ("sigmoid", doubles, True, True, device_type.type),
             ("logit", doubles, True, True, "cpu"),
-            ("logit", doubles, True, True, "cuda"),
+            ("logit", doubles, True, True, device_type.type),
             ("sqrt", doubles, True, True, "cpu"),
-            ("sqrt", doubles, False, True, "cuda"),
+            ("sqrt", doubles, False, True, device_type.type),
             ("tan", doubles, True, True, "cpu"),
-            ("tan", doubles, True, True, "cuda"),
+            ("tan", doubles, True, True, device_type.type),
             ("tanh", doubles, True, True, "cpu"),
-            ("tanh", doubles, True, True, "cuda"),
+            ("tanh", doubles, True, True, device_type.type),
             ("trunc", doubles, True, True, "cpu"),
-            ("trunc", doubles, True, True, "cuda"),
+            ("trunc", doubles, True, True, device_type.type),
         ]
 
         for (
@@ -1546,7 +1549,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertGreater(math.copysign(1.0, v), 0.0)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
-    @onlyCUDA
+    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
     @dtypes(torch.float, torch.double)
     def test_abs_zero(self, device, dtype):
         # Both abs(0.0) and abs(-0.0) should result in 0.0
@@ -1554,7 +1557,7 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @onlyCUDA
+    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
     @dtypes(torch.bool, torch.int8)
     def test_narrow_dtypes(self, device, dtype):
         x_int = torch.randint(2, (8 * 1024,), device=device, dtype=torch.int)
@@ -1610,7 +1613,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    @onlyCUDA
+    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
     @dtypes(torch.int8)
     @largeTensorTest("8GB")
     @skipIfRocm(msg="ROCM tries to allocate 60GB")
@@ -1770,7 +1773,7 @@ class TestUnaryUfuncs(TestCase):
             ),
         )
 
-    @onlyCUDA
+    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
     def test_nonzero_static_large(self, device):
         # large enough to have multiple iters per SM even on H100
         # with 132 sms
@@ -1788,7 +1791,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(out[: size_inp // 4], sorted[: size_inp // 4])
         self.assertEqual(
             out[size_inp // 4 :],
-            torch.tensor(10, device="cuda").expand_as(out[size_inp // 4 :]),
+            torch.tensor(10, device=device_type).expand_as(out[size_inp // 4 :]),
         )
         # correct fill for 2d
         x = x.view(2, size_inp // 2)
@@ -1798,7 +1801,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(ref, res[: size_inp // 2])
         self.assertEqual(
             res[size_inp // 2 :],
-            torch.tensor(-1, device="cuda").expand_as(res[size_inp // 2 :]),
+            torch.tensor(-1, device=device_type).expand_as(res[size_inp // 2 :]),
         )
 
     # TODO: rationalize with exp OpInfo
