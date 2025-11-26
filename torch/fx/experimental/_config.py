@@ -108,5 +108,11 @@ enrich_profiler_metadata: bool = Config(  # type: ignore[var-annotated]
     env_name_default="TORCH_ENRICH_RPOFILER_STACK_TRACE",
 )
 
+# Experimental: Save FX-generated code to /tmp/fx_codegen/ with hash-based naming
+save_fx_code_to_disk: bool = Config(  # type: ignore[var-annotated]
+    default=False,
+    env_name_default="FX_SAVE_CODE_TO_DISK",
+)
+
 
 install_config_module(sys.modules[__name__])
