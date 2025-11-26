@@ -753,6 +753,15 @@ Tensor scaled_dot_product_attention(
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 735));
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
+      } else if (query_device_type == DeviceType::XPU) {
+        c10::SymInt og_size = query_.sym_size(-1);
+        Tensor query_padded = pad_last_dim<64, false>(query_);
+        Tensor key_padded = pad_last_dim<64, false>(key);
+        Tensor value_padded = pad_last_dim<64, false>(value);
+        auto og_scale = sdp::calculate_scale(query_, scale);
+        auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
+            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 763));
+        return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
       // For the CPU case we do not need to pad the last dim
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
