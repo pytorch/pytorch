@@ -391,7 +391,7 @@ test_lazy_tensor_meta_reference_disabled() {
 
 test_dynamo_core() {
   time python test/run_test.py \
-    --include-dynamo-core-tests \
+    --dynamo-core-tests \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -462,7 +462,7 @@ test_inductor_distributed() {
 
 test_inductor_core() {
   time python test/run_test.py \
-    --include-inductor-core-tests \
+    --inductor-core-tests \
     --exclude inductor/test_benchmark_fusion \
               inductor/test_cutlass_backend \
               inductor/test_flex_attention \
