@@ -3007,6 +3007,14 @@ def sample_inputs_take_along_dim(op_info, device, dtype, requires_grad, **kwargs
     yield SampleInput(
         make_arg((S, S)), gather_variable((S, S // 2), 0, S, True, device=device))
 
+    # Negative indices sample — guarded against python_ref
+    if not kwargs.get('is_python_ref', False):
+        neg_idx = gather_variable((S, S), 1, S, True, device=device) - S
+        yield SampleInput(
+            make_arg((S, S)),
+            neg_idx,
+            1)
+
 
 def error_inputs_aminmax_amax_amin(op_info, device, is_ref=False, **kwargs):
 
