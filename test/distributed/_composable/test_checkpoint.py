@@ -10,8 +10,11 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable import checkpoint
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
 from torch.utils.checkpoint import CheckpointError
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class MemoryDelta(ContextDecorator):
@@ -22,16 +25,16 @@ class MemoryDelta(ContextDecorator):
 
     def __enter__(self):
         self.active_memory_enter = (
-            torch.cuda.memory_stats()["active_bytes.all.current"]
-            if self.device.type == "cuda"
+            torch.accelerator.memory_stats()["active_bytes.all.current"]
+            if self.device.type == "cuda" or self.device.type == "xpu"
             else 0
         )
         return self
 
     def __exit__(self, *exc):
         self.active_memory_exit = (
-            torch.cuda.memory_stats()["active_bytes.all.current"]
-            if self.device.type == "cuda"
+            torch.accelerator.memory_stats()["active_bytes.all.current"]
+            if self.device.type == "cuda" or self.device.type == "xpu"
             else 0
         )
 
@@ -126,7 +129,7 @@ class TestCheckpoint(TestCase):
             loss2 = net2(x2).sum()
         loss2.backward()
 
-        if x.is_cuda:
+        if x.is_cuda or x.is_xpu:
             self.assertTrue(mem2.delta() < mem1.delta())
 
         for p1, p2 in zip(net1.parameters(), net2.parameters()):
@@ -137,10 +140,10 @@ class TestCheckpoint(TestCase):
         net = ToyModel()
         self._test_tensor_only(net, x)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "no cuda/xpu")
     def test_tensor_only_gpu(self):
-        x = torch.randn(20, 100, device="cuda:0")
-        net = ToyModel().to("cuda:0")
+        x = torch.randn(20, 100, device=f"{device_type}:0")
+        net = ToyModel().to(f"{device_type}:0")
         self._test_tensor_only(net, x)
 
     def test_random_cpu(self):

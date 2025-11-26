@@ -38,10 +38,12 @@ if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
 :: Update CMake
+:: TODO: Investigate why this helps MKL detection, even when CMake from choco is not used
 call choco upgrade -y cmake --no-progress --installargs 'ADD_CMAKE_TO_PATH=System' --apply-install-arguments-to-dependencies --version=3.27.9
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 
+:: TODO: Move to .ci/docker/requirements-ci.txt
 call pip install mkl==2024.2.0 mkl-static==2024.2.0 mkl-include==2024.2.0
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
@@ -130,14 +132,14 @@ if "%USE_CUDA%"=="1" (
 :: Print all existing environment variable for debugging
 set
 
-python setup.py bdist_wheel
+python -m build --wheel --no-isolation
 if errorlevel 1 goto fail
 if not errorlevel 0 goto fail
 sccache --show-stats
 python -c "import os, glob; os.system('python -mpip install --no-index --no-deps ' + glob.glob('dist/*.whl')[0])"
 (
   if "%BUILD_ENVIRONMENT%"=="" (
-    echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_PARENT_DIR%\Miniconda3\Scripts\activate.bat %CONDA_PARENT_DIR%\Miniconda3` in Command Prompt before running Git Bash.
+    echo NOTE: To run `import torch`, please make sure to activate the conda environment by running `call %CONDA_ROOT_DIR%\Scripts\activate.bat %CONDA_ROOT_DIR%\envs\py_tmp` in Command Prompt before running Git Bash.
   ) else (
     copy /Y "dist\*.whl" "%PYTORCH_FINAL_PACKAGE_DIR%"
 

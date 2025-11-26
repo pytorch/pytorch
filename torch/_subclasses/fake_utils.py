@@ -2,7 +2,8 @@
 
 import functools
 import warnings
-from typing import Any, Callable, Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -126,7 +127,7 @@ def try_convert_fake_to_real(
     key_to_real_storage = {v: k for k, v in desc.lookup_storage.items()}
     out = []
     for t in ten_list:
-        if not isinstance(t, FakeTensor) or not t.layout == torch.strided:
+        if not isinstance(t, FakeTensor) or t.layout != torch.strided:
             out.append(t)
             continue
 

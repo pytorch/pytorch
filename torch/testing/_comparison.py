@@ -3,8 +3,8 @@ import abc
 import cmath
 import collections.abc
 import contextlib
-from collections.abc import Collection, Sequence
-from typing import Any, Callable, NoReturn, Optional, Union
+from collections.abc import Callable, Collection, Sequence
+from typing import Any, NoReturn, Optional, Union
 from typing_extensions import deprecated
 
 import torch
@@ -92,7 +92,9 @@ def default_tolerances(
                 f"Expected a torch.Tensor or a torch.dtype, but got {type(input)} instead."
             )
     dtype_precisions = dtype_precisions or _DTYPE_PRECISIONS
-    rtols, atols = zip(*[dtype_precisions.get(dtype, (0.0, 0.0)) for dtype in dtypes])
+    rtols, atols = zip(
+        *[dtype_precisions.get(dtype, (0.0, 0.0)) for dtype in dtypes], strict=True
+    )
     return max(rtols), max(atols)
 
 
@@ -241,6 +243,7 @@ def make_scalar_mismatch_msg(
             Defaults to "Scalars".
     """
     abs_diff = abs(actual - expected)
+    # pyrefly: ignore [bad-argument-type]
     rel_diff = float("inf") if expected == 0 else abs_diff / abs(expected)
     return _make_mismatch_msg(
         default_identifier="Scalars",
@@ -484,6 +487,7 @@ class BooleanPair(Pair):
     def _supported_types(self) -> tuple[type, ...]:
         cls: list[type] = [bool]
         if HAS_NUMPY:
+            # pyrefly: ignore [missing-attribute]
             cls.append(np.bool_)
         return tuple(cls)
 
@@ -499,6 +503,7 @@ class BooleanPair(Pair):
     def _to_bool(self, bool_like: Any, *, id: tuple[Any, ...]) -> bool:
         if isinstance(bool_like, bool):
             return bool_like
+        # pyrefly: ignore [missing-attribute]
         elif isinstance(bool_like, np.bool_):
             return bool_like.item()
         else:
@@ -578,6 +583,7 @@ class NumberPair(Pair):
     def _supported_types(self) -> tuple[type, ...]:
         cls = list(self._NUMBER_TYPES)
         if HAS_NUMPY:
+            # pyrefly: ignore [missing-attribute]
             cls.append(np.number)
         return tuple(cls)
 
@@ -593,6 +599,7 @@ class NumberPair(Pair):
     def _to_number(
         self, number_like: Any, *, id: tuple[Any, ...]
     ) -> Union[int, float, complex]:
+        # pyrefly: ignore [missing-attribute]
         if HAS_NUMPY and isinstance(number_like, np.number):
             return number_like.item()
         elif isinstance(number_like, self._NUMBER_TYPES):
@@ -1115,6 +1122,7 @@ def originate_pairs(
     mapping_types: tuple[type, ...] = (collections.abc.Mapping,),
     id: tuple[Any, ...] = (),
     **options: Any,
+    # pyrefly: ignore [bad-return]
 ) -> list[Pair]:
     """Originates pairs from the individual inputs.
 
@@ -1213,6 +1221,7 @@ def originate_pairs(
     else:
         for pair_type in pair_types:
             try:
+                # pyrefly: ignore [bad-instantiation]
                 return [pair_type(actual, expected, id=id, **options)]
             # Raising an `UnsupportedInputs` during origination indicates that the pair type is not able to handle the
             # inputs. Thus, we try the next pair type.
@@ -1310,7 +1319,9 @@ def not_close_error_metas(
     # would not get freed until cycle collection, leaking cuda memory in tests.
     # We break the cycle by removing the reference to the error_meta objects
     # from this frame as it returns.
+    # pyrefly: ignore [bad-assignment]
     error_metas = [error_metas]
+    # pyrefly: ignore [bad-return]
     return error_metas.pop()
 
 

@@ -138,7 +138,7 @@ c10::IValue IValueUnpickler::readArchive(
 
   auto read_record = [&](const std::string& name) {
     std::stringstream ss;
-    ss << archive_name << "/" << name;
+    ss << archive_name << '/' << name;
     return std::get<0>(reader_->getRecord(ss.str()));
   };
 

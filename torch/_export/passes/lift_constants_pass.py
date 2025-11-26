@@ -142,6 +142,10 @@ def _unused_constant(node: torch.fx.Node) -> Optional[list[torch.fx.Node]]:
     if len(lift_fresh_node.users) > 1:
         return None
 
+    # Case 1: lift node is not used anywhere
+    if len(lift_fresh_node.users) == 0:
+        return [lift_fresh_node, node]
+
     detach_node = next(iter(lift_fresh_node.users.keys()))
     if not (
         detach_node.op == "call_function"
@@ -156,6 +160,7 @@ def _unused_constant(node: torch.fx.Node) -> Optional[list[torch.fx.Node]]:
     if len(detach_node.users) > 0:
         return None
     else:
+        # Case 2: Lift node's child is not used anywhere
         return [detach_node, lift_fresh_node, node]
 
 

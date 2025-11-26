@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     skip_unless_torch_gpu,
     with_comms,
@@ -411,10 +412,6 @@ class DistMatrixOpsTest(DTensorTestBase):
             requires_grad=True,
         )
 
-        dist_query = distribute_tensor(query, device_mesh, [Shard(1)])
-        dist_key = distribute_tensor(key, device_mesh, [Shard(1)])
-        dist_value = distribute_tensor(value, device_mesh, [Shard(1)])
-
         from torch.nn.attention import sdpa_kernel, SDPBackend
 
         available_backends = []
@@ -431,7 +428,13 @@ class DistMatrixOpsTest(DTensorTestBase):
         if torch.backends.cuda.can_use_efficient_attention(params, debug=False):
             available_backends.append(SDPBackend.EFFICIENT_ATTENTION)
 
-        for backend in available_backends:
+        placement_specs = [(Replicate(),), (Shard(0),), (Shard(1),)]
+        for backend, input_placements in itertools.product(
+            available_backends, placement_specs
+        ):
+            dist_query = distribute_tensor(query, device_mesh, input_placements)
+            dist_key = distribute_tensor(key, device_mesh, input_placements)
+            dist_value = distribute_tensor(value, device_mesh, input_placements)
             with sdpa_kernel(backends=[backend]):
                 out = F.scaled_dot_product_attention(
                     query, key, value, dropout_p=dropout_p, is_causal=is_causal
@@ -445,19 +448,22 @@ class DistMatrixOpsTest(DTensorTestBase):
                         is_causal=is_causal,
                     )
                     self.assertEqual(comm_mode.get_total_counts(), 0)
-                    self.assertTrue(dist_out.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_out.placements, input_placements)
                     self.assertEqual(dist_out.full_tensor(), out)
 
                 out.sum().backward()
                 with comm_mode:
                     dist_out.sum().backward()
                     self.assertEqual(comm_mode.get_total_counts(), 0)
-                    self.assertTrue(dist_query.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_query.grad.placements, input_placements)
                     self.assertEqual(dist_query.grad.full_tensor(), query.grad)
-                    self.assertTrue(dist_key.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_key.grad.placements, input_placements)
                     self.assertEqual(dist_key.grad.full_tensor(), key.grad)
-                    self.assertTrue(dist_value.grad.placements[0].is_shard(dim=1))
+                    self.assertEqual(dist_value.grad.placements, input_placements)
                     self.assertEqual(dist_value.grad.full_tensor(), value.grad)
+                    query.grad.zero_()
+                    key.grad.zero_()
+                    value.grad.zero_()
 
     @skip_unless_torch_gpu
     @with_comms()
@@ -543,7 +549,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         ],
     )
     def test_grouped_mm(self, kwargs):
-        # TODO: torch._grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
+        # TODO: torch.nn.functional.grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
         # More tests need to be added.
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
@@ -568,8 +574,8 @@ class DistMatrixOpsTest(DTensorTestBase):
         )
         offs = torch.tensor([16, 64], device=self.device_type, dtype=torch.int32)
 
-        h = torch._grouped_mm(inp, w1, offs=offs)
-        out = torch._grouped_mm(h, w2, offs=offs)
+        h = F.grouped_mm(inp, w1, offs=offs)
+        out = F.grouped_mm(h, w2, offs=offs)
 
         dist_inp = distribute_tensor(inp, device_mesh, kwargs["inp_placements"])
         # colwise sharded
@@ -579,8 +585,8 @@ class DistMatrixOpsTest(DTensorTestBase):
         dist_offs = distribute_tensor(offs, device_mesh, [Replicate()])
 
         with comm_mode:
-            dist_h = torch._grouped_mm(dist_inp, dist_w1, offs=dist_offs)
-            dist_out = torch._grouped_mm(dist_h, dist_w2, offs=dist_offs)
+            dist_h = F.grouped_mm(dist_inp, dist_w1, offs=dist_offs)
+            dist_out = F.grouped_mm(dist_h, dist_w2, offs=dist_offs)
             self.assertEqual(
                 comm_mode.get_total_counts(), kwargs["expected_comm_counts_fwd"]
             )
@@ -608,6 +614,10 @@ class DistMatrixOpsTest(DTensorTestBase):
 
 
 instantiate_parametrized_tests(DistMatrixOpsTest)
+
+DistMatrixOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistMatrixOpsTest,
+)
 
 if __name__ == "__main__":
     run_tests()

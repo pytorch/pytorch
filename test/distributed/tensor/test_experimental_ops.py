@@ -7,6 +7,7 @@ import torch.distributed as dist
 from torch.distributed.tensor import distribute_tensor, Replicate
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     with_comms,
 )
@@ -187,6 +188,12 @@ class DistOtherOpsTest(DTensorTestBase):
                 f"Too large relative mse for gradient, expected less equal 1e-6, got {grad_mse_rel}",
             )
 
+
+DistOtherOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistOtherOpsTest,
+    # Send / recv ops are not supported
+    skipped_tests=["test_bernoulli"],
+)
 
 if __name__ == "__main__":
     run_tests()
