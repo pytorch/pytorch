@@ -7465,7 +7465,7 @@ def with_effects(token, op, *args, **kwargs):
     We lower the operator directly, and then we add StarDep dependencies to all
     the newly created nodes in the graph.
     """
-    from torch._higher_order_ops.effects import _get_effect
+    from torch._higher_order_ops.effects import _get_effect, _get_schema
 
     # Get effect type
     effect_type = _get_effect(op)
@@ -7520,7 +7520,13 @@ def with_effects(token, op, *args, **kwargs):
             new_op  # pyrefly: ignore[unsupported-operation]
         )
 
-    return (token, result)
+    schema = _get_schema(op, args, kwargs)
+    if len(schema.returns) == 0:
+        return (token, result)
+    elif len(schema.returns) == 1:
+        return (token, result)
+    else:
+        return (token, *result)
 
 
 from .comm_lowering import register_comm_lowerings
