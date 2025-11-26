@@ -4783,7 +4783,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             x = x.clone()
             for y, z in map(lambda a, b: (a, b), ys, zs, strict=True):
                 x += y * z
-            return x, map(lambda a, b: a + b, ys, zs)
+            return x, map(lambda a, b: a + b, ys, zs, strict=True)
 
         opt_fn = torch.compile(fn, backend="eager")
         nopython_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -4804,6 +4804,9 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(list(ref[1]), list(res[1]))
         self.assertIsInstance(res[1], map)
+        # Check strict is set, (cls, (fn, iter, iter), strict)
+        self.assertEqual(len(ref[1].__reduce__()), len(res[1].__reduce__()))
+        self.assertTrue(res[1].__reduce__()[2])
 
         # If nopython, should raise UserError
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
@@ -4818,6 +4821,27 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
         with self.assertRaisesRegex(ValueError, "map()"):
             opt_fn(x, ys, zs[:1])
+
+    @unittest.skipIf(sys.version_info < (3, 14), "strict requires Python 3.14+")
+    def test_map_strict_with_graph_break(self):
+        def f(a):
+            a += 1
+
+            def g(x, y):
+                nonlocal a
+                a += 1
+                return x + y
+
+            m = map(g, [1, 2, 3, 4, 5], [1, 2, 3, 4, 5], strict=True)
+            a += next(m)  # won't graph break
+            torch._dynamo.graph_break()
+            a += next(m)  # will graph break
+            return a
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnts)
+        self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
+        self.assertEqual(cnts.frame_count, 3)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_gpu_current_device(self):

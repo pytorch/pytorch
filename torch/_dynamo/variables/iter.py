@@ -14,6 +14,7 @@ handling of iterator operations during code transformation and optimization.
 """
 
 import itertools
+import sys
 from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING, Union
 
@@ -524,6 +525,7 @@ class MapVariable(ZipVariable):
         self.reconstruct_items(codegen)
         codegen.append_output(create_build_tuple(len(self.iterables) + 1))
         if self.strict:
+            assert sys.version_info >= (3, 14), "map(strict=True) requires Python 3.14+"
             codegen.extend_output(
                 [
                     codegen.create_load_const("strict"),
