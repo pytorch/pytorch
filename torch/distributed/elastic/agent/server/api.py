@@ -48,7 +48,8 @@ logger = get_logger(__name__)
 
 @dataclass
 class WorkerSpec:
-    """Blueprint information about a particular type of worker.
+    """
+    Blueprint information about a particular type of worker.
 
     For a given role, there must only exist a single worker spec.
     Worker spec is expected to be homogeneous across all nodes (machine),
@@ -79,6 +80,10 @@ class WorkerSpec:
                                  that match _any_ of the filter strings.
         duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
                                  that match _any_ of the filter strings.
+        virtual_local_rank: Enable virtual local rank mode for workers (defaults to False).
+                            When enabled, LOCAL_RANK is set to 0 for all workers and
+                            CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
+                            assigned GPU at device index 0.
     """
 
     role: str
@@ -97,6 +102,7 @@ class WorkerSpec:
     numa_options: Optional[NumaOptions] = None
     duplicate_stdout_filters: Optional[list[str]] = None
     duplicate_stderr_filters: Optional[list[str]] = None
+    virtual_local_rank: bool = False
 
     def __post_init__(self):
         assert self.local_world_size > 0

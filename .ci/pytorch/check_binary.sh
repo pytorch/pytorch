@@ -237,7 +237,8 @@ if [[ "$OSTYPE" == "msys" ]]; then
 fi
 
 # Test that CUDA builds are setup correctly
-if [[ "$DESIRED_CUDA" != 'cpu' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'cpu-cxx11-abi' && "$DESIRED_CUDA" != *"rocm"* && "$(uname -m)" != "s390x" ]]; then
+# Skip CUDA hardware checks for aarch64 as they run on CPU-only runners
+if [[ "$DESIRED_CUDA" != 'cpu' && "$DESIRED_CUDA" != 'xpu' && "$DESIRED_CUDA" != 'cpu-cxx11-abi' && "$DESIRED_CUDA" != *"rocm"* && "$(uname -m)" != "s390x" && "$(uname -m)" != "aarch64" ]]; then
   if [[ "$PACKAGE_TYPE" == 'libtorch' ]]; then
     build_and_run_example_cpp check-torch-cuda
   else
@@ -276,7 +277,9 @@ fi # if cuda
 if [[ "$PACKAGE_TYPE" != 'libtorch' ]]; then
   pushd "$(dirname ${BASH_SOURCE[0]})/smoke_test"
   python -c "from smoke_test import test_linalg; test_linalg()"
-  if [[ "$DESIRED_CUDA" == *cuda* ]]; then
+  # Skip CUDA linalg test for aarch64 as they run on CPU-only runners
+  # TODO: Remove this once CUDA ARM runner is available
+  if [[ "$DESIRED_CUDA" == *cuda* && "$(uname -m)" != "aarch64" ]]; then
     python -c "from smoke_test import test_linalg; test_linalg('cuda')"
   fi
   popd

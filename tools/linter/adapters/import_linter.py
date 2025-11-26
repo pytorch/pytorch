@@ -68,6 +68,7 @@ _MODULE_NAME_ALLOW_LIST.update(
         "torchrec",
         "numpy",
         "torch_xla",
+        "annotationlib",  # added in python 3.14
     ]
 )
 

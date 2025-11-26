@@ -89,7 +89,7 @@ def evaluate_platform_supports_green_context():
     driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
     if driver_version is None:
         return False
-    return int(driver_version.split('.')[0]) >= 550
+    return int(driver_version.split('.')[0]) >= 570
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())

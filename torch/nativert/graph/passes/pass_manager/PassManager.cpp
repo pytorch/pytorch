@@ -35,7 +35,7 @@ bool GraphPassManager::run_pass(Graph* graph, const GraphPassIdentifier& name) {
 
 bool GraphPassManager::pass_pre_run_hook(Graph* graph, const GraphPass& pass) {
   if (opts_.logGraphBetweenPasses()) {
-    LOG(INFO) << "Before pass: " << pass.name() << "\n"
+    LOG(INFO) << "Before pass: " << pass.name() << '\n'
               << graph->toString() << "-------------------------";
   }
   return false;
@@ -43,7 +43,7 @@ bool GraphPassManager::pass_pre_run_hook(Graph* graph, const GraphPass& pass) {
 
 bool GraphPassManager::pass_post_run_hook(Graph* graph, const GraphPass& pass) {
   if (opts_.logGraphBetweenPasses()) {
-    LOG(INFO) << "After pass: " << pass.name() << "\n"
+    LOG(INFO) << "After pass: " << pass.name() << '\n'
               << graph->toString() << "-------------------------";
   }
   return false;

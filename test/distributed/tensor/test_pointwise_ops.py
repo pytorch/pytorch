@@ -148,6 +148,30 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         d_3 = d_1 + d_2
         self.assertTrue(d_3._spec.placements[0].is_partial())
 
+    def test_partial_replicate_add(self):
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        for reduce_op in ("sum", "avg"):
+            d_1 = DTensor.from_local(
+                torch.rand(2, 2),
+                device_mesh,
+                [Partial(reduce_op=reduce_op)],
+            )
+            d_2 = DTensor.from_local(
+                torch.rand(2, 1),
+                device_mesh,
+                [Replicate()],
+                run_check=True,
+            )
+
+            with comm_mode:
+                d_3 = d_1 + d_2
+
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(d_3.placements, (Partial(reduce_op=reduce_op),))
+            self.assertEqual(d_3.full_tensor(), d_1.full_tensor() + d_2.full_tensor())
+
     def test_activations(self):
         device_mesh = self.build_device_mesh()
         self._run_sharded_elementwise_ops(
@@ -247,6 +271,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
             ),
         )
 
+    @skip_unless_torch_gpu
     def test_dropout_errors(self):
         device_mesh = self.build_device_mesh()
         with self.assertRaisesRegex(RuntimeError, "supported"):
@@ -330,6 +355,25 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         z = d_input * d_other
         self.assertEqual(z.placements, (Replicate(),))
         self.assertEqual(z.to_local(), input)
+
+    def test_inplace_op_partial_to_replicate(self):
+        # test that in-place operations that require redistribution raise an error
+        # to preserve aliasing semantics (issue #163374)
+        device_mesh = self.build_device_mesh()
+
+        input_tensor = torch.tensor(64.0, device=self.device_type)
+        partial_dt = DTensor.from_local(
+            input_tensor, device_mesh, placements=(Partial(),)
+        )
+
+        self.assertTrue(partial_dt.placements[0].is_partial())
+
+        # Inplace ops that require placement changes (Partial -> Replicate) should error
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "in-place operations that require placement changes are not supported",
+        ):
+            partial_dt.clamp_(max=10)
 
 
 if __name__ == "__main__":

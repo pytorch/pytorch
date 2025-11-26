@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import logging
-from typing import Optional
 
 import torch
 import torch.nn
@@ -27,7 +26,7 @@ def _validate_sdpa_input(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
     dropout_p=0.0,
     is_causal=False,
     scale=None,
@@ -668,8 +667,8 @@ def _autocast(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor],
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
+    attn_mask: torch.Tensor | None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
     """
     [Autocasting SDPA for NJT]
 
@@ -714,7 +713,7 @@ def jagged_scaled_dot_product_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
-    attn_mask: Optional[torch.Tensor] = None,
+    attn_mask: torch.Tensor | None = None,
     dropout_p=0.0,
     is_causal=False,
     scale=None,

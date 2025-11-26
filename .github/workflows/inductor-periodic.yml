@@ -37,8 +37,8 @@ jobs:
     needs: get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm86
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '8.0;8.6'
       test-matrix: |
         { include: [
@@ -76,7 +76,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: periodic-dynamo-benchmarks-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm86
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm86
       docker-image: ${{ needs.periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets: inherit
@@ -138,8 +138,8 @@ jobs:
       - get-default-label-prefix
     with:
       runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
@@ -153,7 +153,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-smoke-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm80
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
       docker-image: ${{ needs.inductor-smoke-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-smoke-build.outputs.test-matrix }}
     secrets: inherit

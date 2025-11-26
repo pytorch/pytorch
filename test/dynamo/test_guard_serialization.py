@@ -1214,7 +1214,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         x = torch.randn(3, 2)
         with torch.enable_grad():
-            ref, loaded = self._test_serialization("GRAD_MODE", fn, x)
+            ref, loaded = self._test_serialization("GLOBAL_STATE", fn, x)
         with torch.no_grad():
             self._test_check_fn(ref, loaded, {"x": x}, False)
         with torch.enable_grad():
@@ -1226,7 +1226,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         x = torch.randn(3, 2)
         with torch.enable_grad():
-            ref, _ = self._test_serialization("GRAD_MODE", fn, x)
+            ref, _ = self._test_serialization("GLOBAL_STATE", fn, x)
         with torch.no_grad():
             # Ensure guards state loading is not affected by the current global grad mode.
             guards_state = pickle.loads(self._cached_guards_state)
@@ -1246,7 +1246,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         try:
             x = torch.randn(3, 2)
             torch.use_deterministic_algorithms(True)
-            ref, loaded = self._test_serialization("DETERMINISTIC_ALGORITHMS", fn, x)
+            ref, loaded = self._test_serialization("GLOBAL_STATE", fn, x)
             torch.use_deterministic_algorithms(False)
             self._test_check_fn(ref, loaded, {"x": x}, False)
             torch.use_deterministic_algorithms(True)
@@ -1270,6 +1270,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
             self._test_check_fn(ref, loaded, {"x": x}, True)
         self._test_check_fn(ref, loaded, {"x": x}, False)
+        with GlobalTorchFunctionMode():
+            ref, loaded = self._test_serialization("GLOBAL_STATE", fn, x)
+            self._test_check_fn(ref, loaded, {"x": x}, True)
         with GlobalTorchFunctionMode():
             with torch._C.DisableTorchFunction():
                 self._test_check_fn(ref, loaded, {"x": x}, False)
@@ -1306,7 +1309,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x = torch.randn(3, 2)
 
         with torch.enable_grad():
-            ref, loaded = self._test_serialization("FSDP_TRAINING_STATE", fn, x)
+            ref, loaded = self._test_serialization("GLOBAL_STATE", fn, x)
         with torch.no_grad():
             self._test_check_fn(ref, loaded, {"x": x}, False)
         with torch.enable_grad():
@@ -1689,6 +1692,38 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(
             ref, loaded, {"x": x, "d": ModWithDict({"b": 1e-9, "a": 1e9})}, False
         )
+
+    def test_global_state_guard_filter(self):
+        def foo(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+
+        with torch.no_grad():
+            compiled_fn = torch.compile(
+                foo, options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe}
+            )
+            compiled_fn(x)
+
+        # Check global guards are gone.
+        with torch.enable_grad(), torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), foo(x))
+
+    def test_torch_function_state_filter(self):
+        def foo(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+
+        with GlobalTorchFunctionMode():
+            compiled_fn = torch.compile(
+                foo, options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe}
+            )
+            compiled_fn(x)
+
+        # Check global guards are gone.
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), foo(x))
 
 
 class SimpleModule(torch.nn.Module):

@@ -34,6 +34,9 @@ python3 torch/utils/data/datapipes/gen_pyi.py
 # Also check generated pyi files
 find torch -name '*.pyi' -exec git add --force -- "{}" +
 
+# Print current environment
+python3 -m pip freeze
+
 RC=0
 # Run lintrunner on all files
 if ! lintrunner --force-color --tee-json=lint.json ${ADDITIONAL_LINTRUNNER_ARGS} 2> /dev/null; then

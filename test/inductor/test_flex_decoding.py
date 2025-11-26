@@ -31,7 +31,6 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton_tma_device
 
 
@@ -59,22 +58,21 @@ TEST_ON_CUDA = (
 )
 TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
 
-if HAS_GPU:
-    if TEST_ON_CUDA:
-        test_device = ("cuda",)
-        test_dtypes = (
-            [torch.float32, torch.bfloat16, torch.float16]
-            if PLATFORM_SUPPORTS_BF16
-            else [torch.float16, torch.float32]
-        )
-        test_dtypes_fast = [torch.float16]
-        SKIP_UT_ON_CPU = False
-    elif TEST_ON_XPU:
-        torch._C._set_onednn_allow_tf32(True)
-        test_device = ("xpu",)
-        test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
-        test_dtypes_fast = [torch.float16]
-        SKIP_UT_ON_CPU = False
+if TEST_ON_CUDA:
+    test_device = ("cuda",)
+    test_dtypes = (
+        [torch.float32, torch.bfloat16, torch.float16]
+        if PLATFORM_SUPPORTS_BF16
+        else [torch.float16, torch.float32]
+    )
+    test_dtypes_fast = [torch.float16]
+    SKIP_UT_ON_CPU = False
+elif TEST_ON_XPU:
+    torch._C._set_onednn_allow_tf32(True)
+    test_device = ("xpu",)
+    test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
+    test_dtypes_fast = [torch.float16]
+    SKIP_UT_ON_CPU = False
 else:
     test_device = ("cpu",)
     torch_config_string = torch.__config__.show()

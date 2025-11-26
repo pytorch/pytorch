@@ -93,9 +93,9 @@ struct Tree : c10::intrusive_ptr_target {
     if (trees().size() < expected_subtrees ||
         (!allow_more && trees().size() != expected_subtrees)) {
       std::stringstream ss;
-      ss << filename << ":" << lineno << ": expected at least "
+      ss << filename << ':' << lineno << ": expected at least "
          << expected_subtrees << " subtrees, but found only " << trees().size()
-         << "\n";
+         << '\n';
       range().highlight(ss);
       TORCH_CHECK(false, ss.str());
     }
@@ -184,11 +184,11 @@ struct pretty_tree {
         out << t->stringValue();
         break;
       default:
-        out << "(" << kindToString(t->kind());
+        out << '(' << kindToString(t->kind());
         for (const auto& e : t->trees()) {
-          out << " " << get_flat(e);
+          out << ' ' << get_flat(e);
         }
-        out << ")";
+        out << ')';
         break;
     }
     auto it_ = flat_strings.emplace(t, out.str());
@@ -201,12 +201,12 @@ struct pretty_tree {
       return;
     }
     std::string k = kindToString(t->kind());
-    out << "(" << k;
+    out << '(' << k;
     for (const auto& e : t->trees()) {
-      out << "\n" << std::string(indent + 2, ' ');
+      out << '\n' << std::string(indent + 2, ' ');
       print(out, e, indent + 2);
     }
-    out << ")";
+    out << ')';
   }
 };
 

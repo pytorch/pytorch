@@ -2262,10 +2262,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
     tma_compatibility_checker_cls = TMACompatibilityChecker
-    block_ptr_options_cls: type[BlockPtrOptions] = BlockPtrOptions
-    tensor_descriptor_options_cls: type[TensorDescriptorOptions] = (
-        TensorDescriptorOptions
-    )
 
     def __init__(
         self,
@@ -2731,9 +2727,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.filter_masks(mask_vars)
 
                 options_class = (
-                    self.block_ptr_options_cls
+                    BlockPtrOptions
                     if config.triton.use_block_ptr
-                    else self.tensor_descriptor_options_cls
+                    else TensorDescriptorOptions
                 )
                 nonlocal tma_compatibility_checker
                 if config.triton.use_block_ptr:
@@ -2757,7 +2753,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     can_lift=can_lift,
                     transpose_contiguous=transpose_contiguous,
                 )
-                if isinstance(options_class, TensorDescriptorOptions):
+                if options_class == TensorDescriptorOptions:
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )

@@ -83,8 +83,18 @@ find_package_and_print_version(HIP 1.0 MODULE)
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
   find_package_and_print_version(hip REQUIRED CONFIG)
+  if(HIP_VERSION)
+    # Check if HIP_VERSION contains a dash (e.g., "7.1.25421-32f9fa6ca5")
+    # and strip everything after it to get clean numeric version
+    string(FIND "${HIP_VERSION}" "-" DASH_POS)
+    if(NOT DASH_POS EQUAL -1)
+      string(SUBSTRING "${HIP_VERSION}" 0 ${DASH_POS} HIP_VERSION_CLEAN)
+      set(HIP_VERSION "${HIP_VERSION_CLEAN}")
+  endif()
+  message("HIP version: ${HIP_VERSION}")
+endif()
 
-  # The rocm-core package was only introduced in ROCm 6.4, so we make it optional.
+# The rocm-core package was only introduced in ROCm 6.4, so we make it optional.
   find_package(rocm-core CONFIG)
 
   # Some old consumer HIP SDKs do not distribute rocm_version.h, so we allow

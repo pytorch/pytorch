@@ -3755,6 +3755,44 @@ as the input tensor excluding its innermost dimension'):
         with ctx:
             self.assertEqual(torch.mean(t), expected)
 
+    def test_scalar_tensor_as_dim_argument(self):
+        """Tests that scalar tensors work correctly as dimension arguments.
+
+        This tests the fix for the PythonArgParser bug where scalar Tensors
+        passed to IntList/SymIntList parameters would be incorrectly handled.
+        """
+        x = torch.ones(1, 2, 3, 4, 5)
+
+        # Scalar tensors should work correctly (same as passing an int)
+        result_tensor = x.sum(dim=torch.tensor(3))
+        result_int = x.sum(dim=3)
+        self.assertEqual(result_tensor.shape, result_int.shape)
+        self.assertEqual(result_tensor.shape, torch.Size([1, 2, 3, 5]))
+
+        # Test with different integer dtypes
+        for dtype in [torch.int32, torch.int64, torch.int16, torch.int8]:
+            dim_tensor = torch.tensor(1, dtype=dtype)
+            result = x.sum(dim=dim_tensor)
+            expected = x.sum(dim=1)
+            self.assertEqual(result.shape, expected.shape)
+
+    @skipIfTorchDynamo("Test uses random.randint which creates FakeTensors")
+    def test_scalar_tensor_dim_compiled_mode(self):
+        """Tests that scalar FakeTensors from random.randint work correctly in compiled mode."""
+        def foo():
+            x = torch.ones(2, 2, 2)
+            return x.sum(dim=random.randint(0, 0))
+
+        @torch.compile
+        def foo_compile():
+            x = torch.ones(2, 2, 2)
+            return x.sum(dim=random.randint(0, 0))
+
+        result_eager = foo()
+        result_compiled = foo_compile()
+        self.assertEqual(result_eager.shape, result_compiled.shape)
+        self.assertEqual(result_eager.shape, torch.Size([2, 2]))
+
 instantiate_device_type_tests(TestReductions, globals())
 
 if __name__ == '__main__':

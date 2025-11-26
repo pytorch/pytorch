@@ -66,6 +66,12 @@ void initAOTIRunnerBindings(PyObject* module) {
            int,
            const std::string&,
            const std::string&>())
+      .def(py::init<
+           const std::string&,
+           int,
+           const std::string&,
+           const std::string&,
+           const bool>())
       .def(
           "run",
           &AOTIModelContainerRunnerCuda::run,

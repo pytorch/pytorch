@@ -5,7 +5,6 @@
 
 #include <cmath>
 
-#include <thrust/tuple.h>
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>

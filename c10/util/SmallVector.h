@@ -1412,13 +1412,13 @@ inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
 template <typename T, unsigned N>
 std::ostream& operator<<(std::ostream& out, const SmallVector<T, N>& list) {
   int i = 0;
-  out << "[";
+  out << '[';
   for (auto e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;
   }
-  out << "]";
+  out << ']';
   return out;
 }
 

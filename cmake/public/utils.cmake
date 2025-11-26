@@ -478,6 +478,7 @@ function(torch_update_find_cuda_flags)
 endfunction()
 
 include(CheckCXXCompilerFlag)
+include(CheckCCompilerFlag)
 include(CheckLinkerFlag)
 
 ##############################################################################
@@ -495,6 +496,24 @@ function(append_cxx_flag_if_supported flag outputvar)
       set(new_flag ${flag})
     endif()
     check_cxx_compiler_flag("${new_flag}" ${_FLAG_NAME})
+    if(${_FLAG_NAME})
+        string(APPEND ${outputvar} " ${flag}")
+        set(${outputvar} "${${outputvar}}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+function(append_c_flag_if_supported flag outputvar)
+    string(TOUPPER "HAS${flag}" _FLAG_NAME)
+    string(REGEX REPLACE "[=-]" "_" _FLAG_NAME "${_FLAG_NAME}")
+
+    # GCC silences unknown -Wno-XXX flags, so test the corresponding -WXXX.
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU")
+        string(REGEX REPLACE "^Wno-" "W" new_flag "${flag}")
+    else()
+        set(new_flag "${flag}")
+    endif()
+
+    check_c_compiler_flag("${new_flag}" ${_FLAG_NAME})
     if(${_FLAG_NAME})
         string(APPEND ${outputvar} " ${flag}")
         set(${outputvar} "${${outputvar}}" PARENT_SCOPE)

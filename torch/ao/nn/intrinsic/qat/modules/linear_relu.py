@@ -1,12 +1,16 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import TYPE_CHECKING
 
 import torch
 import torch.ao.nn.intrinsic as nni
 import torch.ao.nn.qat as nnqat
 import torch.nn.functional as F
 from torch.ao.nn.intrinsic.modules.fused import _FusedModule
+
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import QConfigAny
 
 
 __all__ = ["LinearReLU"]
@@ -44,7 +48,7 @@ class LinearReLU(nnqat.Linear, _FusedModule):
         in_features: int,
         out_features: int,
         bias: bool = True,
-        qconfig: Optional[object] = None,
+        qconfig: QConfigAny = None,
     ) -> None:
         super().__init__(in_features, out_features, bias, qconfig)
 
