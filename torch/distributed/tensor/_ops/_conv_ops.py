@@ -26,18 +26,15 @@ def convolution_rules(op_schema: OpSchema) -> OutputSharding:
 
     assert isinstance(input_spec, DTensorSpec)
     assert isinstance(weight_spec, DTensorSpec)
-    # bias_spec can be None (optional parameter in aten.convolution schema)
-    if bias_spec is not None:
-        assert isinstance(bias_spec, DTensorSpec)
+    assert isinstance(bias_spec, DTensorSpec)
     assert input_spec.tensor_meta is not None
     assert weight_spec.tensor_meta is not None
     in_shape = input_spec.tensor_meta.shape
     weight_shape = weight_spec.tensor_meta.shape
-    assert isinstance(stride, list), f"stride must be list, got {type(stride)}"
-    assert isinstance(padding, list), f"padding must be list, got {type(padding)}"
-    assert isinstance(dilation, list), f"dilation must be list, got {type(dilation)}"
-    # weight_shape might not be torch.Size in all cases (e.g., SymIntArrayRef during tracing)
-    # so we don't assert its type, just use it
+    assert isinstance(stride, list)
+    assert isinstance(padding, list)
+    assert isinstance(dilation, list)
+    assert isinstance(weight_shape, torch.Size)
     out_conv_shape = [
         (d + 2 * padding[i] - dilation[i] * (weight_shape[i + 1] - 1) - 1) // stride[i]
         + 1
@@ -85,21 +82,14 @@ def convolution_backward_rules(op_schema: OpSchema) -> OutputSharding:
     assert isinstance(grad_output_spec, DTensorSpec)
     assert isinstance(input_spec, DTensorSpec)
     assert isinstance(weight_spec, DTensorSpec)
-    # bias_shape_opt can be None (optional parameter in aten.convolution_backward schema)
-    if bias_shape_opt is not None:
-        assert isinstance(bias_shape_opt, list)
+    assert isinstance(bias_shape_opt, list)
     assert input_spec.tensor_meta is not None
     weight_tensor_meta = weight_spec.tensor_meta
-
-    # Only create bias_tensor_meta if bias_shape_opt is not None
-    if bias_shape_opt is not None:
-        bias_tensor_meta = TensorMeta(
-            torch.Size(bias_shape_opt),
-            (1,),
-            input_spec.tensor_meta.dtype,
-        )
-    else:
-        bias_tensor_meta = None
+    bias_tensor_meta = TensorMeta(
+        torch.Size(bias_shape_opt),
+        (1,),
+        input_spec.tensor_meta.dtype,
+    )
 
     grad_input_spec = input_spec
     grad_weight_spec = DTensorSpec.from_dim_map(
@@ -108,18 +98,12 @@ def convolution_backward_rules(op_schema: OpSchema) -> OutputSharding:
         [0],
         tensor_meta=weight_tensor_meta,
     )
-
-    # Only create grad_bias_spec if we have bias_tensor_meta
-    if bias_tensor_meta is not None:
-        grad_bias_spec = DTensorSpec.from_dim_map(
-            input_spec.mesh,
-            [-1],
-            [0],
-            tensor_meta=bias_tensor_meta,
-        )
-    else:
-        grad_bias_spec = None
-
+    grad_bias_spec = DTensorSpec.from_dim_map(
+        input_spec.mesh,
+        [-1],
+        [0],
+        tensor_meta=bias_tensor_meta,
+    )
     # TODO: actually the output_mask is not respected here, we should
     # set the corresponding spec to `None` if the output_mask is not `False`
     # for a certain output Tensor. This also applies to the conv handler

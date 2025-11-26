@@ -40,14 +40,14 @@ bool PythonCallbackWork::wait(std::chrono::milliseconds timeout) {
     }
 
     return success;
-  } catch (py::error_already_set&) {
+  } catch (py::error_already_set& e) {
     // Capture the Python exception and store it
     finish(std::current_exception());
     if (!future_->completed()) {
       future_->setErrorIfNeeded(std::current_exception());
     }
     throw;
-  } catch (const std::exception&) {
+  } catch (const std::exception& e) {
     // Capture any C++ exception and store it
     finish(std::current_exception());
     if (!future_->completed()) {

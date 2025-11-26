@@ -1192,16 +1192,14 @@ class TestTiling(TestCase):
         """Test broadcast variable detection for tiling improvements."""
         from torch._inductor import tiling_utils
 
-        i, j, k = sympy.symbols("i j k", integer=True)
+        i, j = sympy.symbols("i j", integer=True)
 
         # Test broadcast pattern detection: FloorDiv creates broadcast
-        result = tiling_utils.find_broadcast_var(
-            FloorDiv(i, 10), {i: 100, j: 50, k: 20}
-        )
+        result = tiling_utils.find_broadcast_var(FloorDiv(i, 10), {i: 100, j: 50})
         self.assertEqual(result, i)
 
         # Test non-broadcast: linear access pattern
-        result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8, k: 20})
+        result = tiling_utils.find_broadcast_var(i + j * 10, {i: 10, j: 8})
         self.assertEqual(result, None)
 
 

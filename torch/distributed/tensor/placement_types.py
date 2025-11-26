@@ -684,13 +684,12 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
     def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
         return len(sharded_indices[rank])
 
-    # delete pyre-ignore once separating _StridedShard from Shard
-    def _local_shard_size_and_offset(  # pyre-ignore[bad-override]
+    def _local_shard_size_and_offset(
         self,
         curr_local_size: int,
         num_chunks: int,
         rank: int,
-    ) -> tuple[int, list[int]]:
+    ) -> tuple[int, Optional[int]]:
         # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
         # so that we can reuse self._split_tensor which splits on self.dim
         shape = [1] * self.dim + [curr_local_size]
@@ -708,9 +707,9 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
         local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
-        offsets = sharded_indices[rank].tolist()
 
-        return local_shard_size, offsets
+        # offsets from _StridedShard is never used
+        return local_shard_size, None
 
 
 class Replicate(torch._C._distributed.Replicate):
@@ -817,18 +816,14 @@ class Partial(torch._C._distributed.Partial):
         # Partial placement contract #3:
         # _partition_value: partition the value of a replicated tensor on the mesh dimension
 
-        # _partition_value is the conjugate operation of _reduce_value, e.g.
-        # - _partition_value on a sum reduce op is just a division operation
-        # - _reduce_value on a sum reduce op would just be a sum(allreduce) operation
+        # _partition_value is the conjugate operation of _reduce_value
+        # - i.e. _partition_value on a sum reduce op is just a division operation
+        # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
+        # TODO: if the reduce_op is min/max, etc. the _partition_value should be a
+        # different operation
+        assert self.reduce_op == "sum", "only support replicate to PartialSUM for now!"
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-        if self.reduce_op == "sum":
-            return tensor / num_chunks
-        elif self.reduce_op in ("avg", "min", "max"):
-            return tensor
-        else:
-            raise ValueError(
-                f"Replicate to Partial({self.reduce_op}) conversion is not supported."
-            )
+        return tensor / num_chunks
 
     def __hash__(self) -> int:
         return 1 + hash(self.reduce_op)
@@ -843,7 +838,7 @@ class Partial(torch._C._distributed.Partial):
         """
         human readable representation of the Partial placement
         """
-        return f"P({self.reduce_op})"
+        return "P"
 
 
 # We keep the old _Partial name for a while for BC reason
@@ -987,10 +982,10 @@ class MaskPartial(Partial):
         """
         machine readable representation of the MaskPartial placement
         """
-        return f"MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
+        return f"MaskPartial(offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
 
     def __str__(self) -> str:
         """
         human readable representation of the MaskPartial placement
         """
-        return f"MaskP({self.reduce_op}, {self.offset_shape}, {self.offset_dim})"
+        return "MaskP"
