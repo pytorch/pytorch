@@ -1,4 +1,4 @@
-from typing import Callable
+from collections.abc import Callable
 
 from torch import Tensor
 from torch._dynamo.compiled_autograd import AutogradCompilerInstance

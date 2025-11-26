@@ -34,7 +34,7 @@ struct MemEvent {
 bool overlaps(const MemBlock& a, const MemBlock& b) {
   // two blocks dont overlap if
   // |---a--------|--------------b--------|
-  // strat_a     end_a <= start_b       end_b
+  // start_a     end_a <= start_b       end_b
   return !(
       (a.end_offset <= b.start_offset) || (b.end_offset <= a.start_offset));
 }

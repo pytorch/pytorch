@@ -1,5 +1,6 @@
 import enum
-from typing import Any, Callable, NamedTuple, Union
+from collections.abc import Callable
+from typing import Any, NamedTuple, Union
 
 from torch.fx.graph import Node
 

@@ -6,7 +6,7 @@ from functorch.experimental import control_flow
 from torch import Tensor
 from torch._dynamo.eval_frame import is_dynamo_supported
 from torch._export.verifier import SpecViolationError, Verifier
-from torch.export import export_for_training
+from torch.export import export
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
@@ -20,7 +20,7 @@ class TestVerifier(TestCase):
 
         f = Foo()
 
-        ep = export_for_training(f, (torch.randn(100), torch.randn(100)), strict=True)
+        ep = export(f, (torch.randn(100), torch.randn(100)), strict=True)
 
         verifier = Verifier()
         verifier.check(ep)
@@ -47,7 +47,7 @@ class TestVerifier(TestCase):
 
         f = Foo()
 
-        ep = export_for_training(
+        ep = export(
             f, (torch.randn(100), torch.randn(100)), strict=True
         ).run_decompositions({})
         for node in ep.graph.nodes:
@@ -72,7 +72,7 @@ class TestVerifier(TestCase):
 
         f = Foo()
 
-        ep = export_for_training(f, (torch.randn(3, 3), torch.randn(3, 3)), strict=True)
+        ep = export(f, (torch.randn(3, 3), torch.randn(3, 3)), strict=True)
 
         verifier = Verifier()
         verifier.check(ep)
@@ -91,7 +91,7 @@ class TestVerifier(TestCase):
 
         f = Foo()
 
-        ep = export_for_training(
+        ep = export(
             f, (torch.randn(3, 3), torch.randn(3, 3)), strict=True
         ).run_decompositions({})
         for node in ep.graph_module.true_graph_0.graph.nodes:
@@ -111,7 +111,7 @@ class TestVerifier(TestCase):
             def forward(self, x: Tensor) -> Tensor:
                 return self.linear(x)
 
-        ep = export_for_training(M(), (torch.randn(10, 10),), strict=True)
+        ep = export(M(), (torch.randn(10, 10),), strict=True)
         ep.validate()
 
     def test_ep_verifier_invalid_param(self) -> None:
@@ -125,7 +125,7 @@ class TestVerifier(TestCase):
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 return x + y + self.a
 
-        ep = export_for_training(M(), (torch.randn(100), torch.randn(100)), strict=True)
+        ep = export(M(), (torch.randn(100), torch.randn(100)), strict=True)
 
         # Parameter doesn't exist in the state dict
         ep.graph_signature.input_specs[0] = InputSpec(
@@ -150,7 +150,7 @@ class TestVerifier(TestCase):
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 return x + y + self.a
 
-        ep = export_for_training(M(), (torch.randn(100), torch.randn(100)), strict=True)
+        ep = export(M(), (torch.randn(100), torch.randn(100)), strict=True)
 
         # Buffer doesn't exist in the state dict
         ep.graph_signature.input_specs[0] = InputSpec(
@@ -182,9 +182,7 @@ class TestVerifier(TestCase):
                 self.my_buffer2.add_(1.0)
                 return output
 
-        ep = export_for_training(
-            M(), (torch.tensor(5.0), torch.tensor(6.0)), strict=True
-        )
+        ep = export(M(), (torch.tensor(5.0), torch.tensor(6.0)), strict=True)
         ep.validate()
 
     def test_ep_verifier_invalid_output(self) -> None:
@@ -207,9 +205,7 @@ class TestVerifier(TestCase):
                 self.my_buffer2.add_(1.0)
                 return output
 
-        ep = export_for_training(
-            M(), (torch.tensor(5.0), torch.tensor(6.0)), strict=True
-        )
+        ep = export(M(), (torch.tensor(5.0), torch.tensor(6.0)), strict=True)
 
         output_node = list(ep.graph.nodes)[-1]
         output_node.args = (

@@ -148,7 +148,7 @@ inline void checkInputsSolver(const Tensor& A,
 
 inline bool is_row_or_column_contiguous(const Tensor& t) {
   // This could be made more general, similar to how it's checked in matmul, which would allow to
-  // ellide the copy with strides such as (6, 12, 1, 3) or (3, 1, 9), but this is quite tricky.
+  // elide the copy with strides such as (6, 12, 1, 3) or (3, 1, 9), but this is quite tricky.
   // We choose to be conservative for simplicity
   return t.is_contiguous() || t.transpose(-2, -1).is_contiguous();
 }

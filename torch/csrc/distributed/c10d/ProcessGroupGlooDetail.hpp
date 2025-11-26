@@ -232,8 +232,8 @@ void setInput(O& opts, at::Tensor& tensor, std::vector<int64_t>& counts) {
 }
 
 template <typename T, typename O>
-void setOutputs(O& opts, std::vector<at::Tensor>& tensors) {
-  opts.setOutputs(getDataPointers<T>(tensors), tensors[0].numel());
+void setOutputs(O& opts, std::vector<at::Tensor>& tensors, int64_t count) {
+  opts.setOutputs(getDataPointers<T>(tensors), count);
 }
 
 template <typename T, typename O>
@@ -284,17 +284,28 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
         reduceOp(std::move(reduceOp)),
         tag(tag) {}
 
-  std::vector<at::Tensor> inputs{};
+  std::vector<at::Tensor> inputs;
   const ReduceOp reduceOp;
   const uint32_t tag;
 
   void allreduce(std::vector<at::Tensor>& tensors) {
-    const auto& scalarType = tensors[0].scalar_type();
+    auto tensor = tensors[0];
+    if (tensor.is_complex()) {
+      TORCH_CHECK(
+          c10d::isComplexViewAsRealAllowed(reduceOp),
+          "all_reduce does not support",
+          reduceOp,
+          "on complex tensors");
+      tensor = at::view_as_real(tensor);
+    }
     gloo::AllreduceOptions opts(context_);
+    const auto& scalarType = tensor.scalar_type();
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
     opts.setTag(tag);
     opts.setTimeout(timeout_);
-    GENERATE_ALL_TYPES(scalarType, setOutputs, opts, tensors);
+    // Use tensor.numel() instead of tensors[0].numel() to
+    // get the right number of elements when tensors[0] is complex
+    GENERATE_ALL_TYPES(scalarType, setOutputs, opts, tensors, tensor.numel());
     gloo::allreduce(opts);
 
     // Gloo doesn't support AVG so we use SUM + division.
@@ -388,7 +399,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
         inputs(inputs),
         tag(tag) {}
 
-  std::vector<at::Tensor> inputs{};
+  std::vector<at::Tensor> inputs;
   const uint32_t tag;
 
   // We share dimensionality about the sparse tensors before collecting

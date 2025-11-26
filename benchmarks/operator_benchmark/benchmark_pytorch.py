@@ -4,6 +4,15 @@ import time
 import torch
 
 
+# Import the C++ extension to register the _consume operator
+try:
+    import benchmark_cpp_extension  # noqa: F401
+except ImportError as err:
+    # If the extension isn't built, the script must raise an error
+    raise ImportError(
+        "Failed to import C++ extension, please build it using \ncd pt_extension \npython -m pip install ."
+    ) from err
+
 """PyTorch performance microbenchmarks.
 
 This module contains PyTorch-specific functionalities for performance
@@ -71,6 +80,16 @@ class TorchBenchmarkBase(torch.nn.Module):
         for _ in range(iters):
             torch.ops.operator_benchmark._consume(self.forward_impl())
 
+    def forward_impl_eager(self):
+        # This is to supply the inputs to the forward function which
+        # will be called in both the eager and compile mode of local runs
+        return self.forward(*self.get_inputs())
+
+    def forward_consume_eager(self, iters: int):
+        # Eager version of forward_consume without decorators (compilation handled by torch.compile)
+        for _ in range(iters):
+            torch.ops.operator_benchmark._consume(self.forward_impl_eager())
+
     def module_name(self):
         """this is used to label the operator being benchmarked"""
         if self.user_given_name:
@@ -94,10 +113,48 @@ class TorchBenchmarkBase(torch.nn.Module):
             value = kargs[key]
             test_name_str.append(
                 ("" if key in skip_key_list else key)
-                + str(value if type(value) != bool else int(value))
+                + str(value if type(value) is not bool else int(value))
             )
         name = (self.module_name() + "_" + "_".join(test_name_str)).replace(" ", "")
         return name
+
+    def get_memory_traffic_bytes(self):
+        """Return the number of bytes read/written by this operator.
+
+        Override this method in subclasses for operations with non-standard memory patterns
+        (e.g., matmul which is compute-bound rather than memory-bound).
+
+        The framework will use this value along with execution time to compute
+        and report memory bandwidth in GB/s.
+
+        Default implementation assumes a pointwise-like operation:
+        - Reads: all input tensors
+        - Writes: output tensor (estimated as size of largest input)
+
+        This default works correctly for:
+        - Element-wise operations (add, mul, relu, etc.)
+        - Activations (gelu, sigmoid, etc.)
+        - Optimizers (SGD, Adam, etc.)
+        - Reductions (sum, mean, etc. - may underestimate writes)
+
+        Returns:
+            int or None: Total bytes transferred (reads + writes), or None if not applicable
+        """
+        if not hasattr(self, "inputs") or not self.inputs:
+            return None
+
+        input_tensors = [v for v in self.inputs.values() if isinstance(v, torch.Tensor)]
+        if not input_tensors:
+            return None
+
+        # Calculate total bytes read from all inputs
+        bytes_read = sum(t.numel() * t.element_size() for t in input_tensors)
+
+        # Estimate output size as the largest input (common for pointwise ops)
+        largest_input = max(input_tensors, key=lambda t: t.numel())
+        bytes_written = largest_input.numel() * largest_input.element_size()
+
+        return bytes_read + bytes_written
 
 
 class PyTorchOperatorTestCase:
@@ -117,17 +174,33 @@ class PyTorchOperatorTestCase:
         self.framework = "PyTorch"
         self.time_series = []
         self._jit_forward_graph = None
+        self._compile_forward_graph = None
 
     def _generate_jit_forward_graph(self):
         """generate a graph for the forward function via scripting"""
         scripted_op_bench = torch.jit.script(self.op_bench)
         return scripted_op_bench.forward_consume
 
+    def _generate_compile_forward_graph(self):
+        """generate a compiled graph for the forward function via torch.compile"""
+        compiled_forward_consume = torch.compile(
+            self.op_bench.forward_consume_eager, backend="inductor"
+        )
+        return compiled_forward_consume
+
     def run_jit_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
         """Run the forward path of an op with JIT mode"""
         if self._jit_forward_graph is None:
             self._jit_forward_graph = self._generate_jit_forward_graph()
         self._jit_forward_graph(num_runs)
+
+    def run_compile_forward(self, num_runs, print_per_iter=False, cuda_sync=False):
+        """Run the forward path of an op with compile mode"""
+        if self._compile_forward_graph is None:
+            self._compile_forward_graph = self._generate_compile_forward_graph()
+        self._compile_forward_graph(num_runs)
+        if cuda_sync:
+            torch.cuda.synchronize(torch.cuda.current_device())
 
     def _print_per_iter(self):
         # print last 50 values
@@ -150,14 +223,14 @@ class PyTorchOperatorTestCase:
         if print_per_iter:
             for _ in range(num_runs):
                 start_time = time.time()
-                self.output = self.op_bench.forward_impl()
+                self.output = self.op_bench.forward_impl_eager()
                 if cuda_sync:
                     torch.cuda.synchronize(torch.cuda.current_device())
                 end_time = time.time()
                 self.time_series.append((end_time - start_time) * 1e3)
         else:
             for _ in range(num_runs):
-                self.output = self.op_bench.forward_impl()
+                self.output = self.op_bench.forward_impl_eager()
             if cuda_sync:
                 torch.cuda.synchronize(torch.cuda.current_device())
 

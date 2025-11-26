@@ -466,6 +466,14 @@ at::Tensor LazyNativeFunctions::linalg_pinv(
       linalg_pinv, atol_rtol_tensor)>::call(self, atol, rtol, hermitian);
 }
 
+std::tuple<at::Tensor, at::Tensor, at::Tensor> LazyNativeFunctions::svd(
+    const at::Tensor& self,
+    bool some,
+    bool compute_uv) {
+  return at::functionalization::functionalize_aten_op<ATEN_OP(svd)>::call(
+      self, some, compute_uv);
+}
+
 // functionalize_aten_op can't handle out= ops directly.
 // Instead, we can call the composite kernel from core, and copy and mutations
 // back to the inputs.
