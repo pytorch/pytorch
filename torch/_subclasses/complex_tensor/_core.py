@@ -17,10 +17,9 @@ if TYPE_CHECKING:
 class ComplexTensor(Tensor):
     """A class that decomposes all ops on complex Tensors into their real and imaginary parts."""
 
-    _re: Tensor
-    _im: Tensor
+    _data: Tensor
 
-    def __new__(cls, real: Tensor, imag: Tensor) -> Self:
+    def __new__(cls, real: Tensor, imag: Tensor | None = None) -> Self:
         """Initialize a ComplexTensor from its real and imaginary parts."""
         from ._ops.common import REAL_TO_COMPLEX
 
@@ -29,8 +28,19 @@ class ComplexTensor(Tensor):
 
         # TODO (hameerabbasi): `torch.compile` sometimes fails here without making these
         # contiguous. Why?
-        real = real.contiguous()
-        imag = imag.contiguous()
+        real = real
+        if imag is None:
+            if real.dtype.is_complex:
+                data = torch.view_as_real(real)
+            else:
+                assert real.shape[-1] == 2
+                data = real
+
+        else:
+            data = torch.stack([real, imag], dim=-1)
+
+        real = data[..., 0]
+        imag = data[..., 1]
 
         # TODO (hameerabbasi):
         # What should we do with dtype?
@@ -80,18 +90,19 @@ class ComplexTensor(Tensor):
             layout=layout,
             requires_grad=False,
         )
-        res._re = real.clone().detach()
-        res._im = imag.clone().detach()
+        res._data = data.detach()
+        # res._re = real.detach()
+        # res._im = imag.detach()
 
         return res
 
     @property
     def re(self) -> Tensor:
-        return self._re
+        return self._data[..., 0]
 
     @property
     def im(self) -> Tensor:
-        return self._im
+        return self._data[..., 1]
 
     @classmethod
     def __torch_dispatch__(  # type: ignore[bad-override]
@@ -113,12 +124,10 @@ class ComplexTensor(Tensor):
 
     @staticmethod
     def from_interleaved(t: Tensor) -> ComplexTensor:
-        t_real = torch.real(t)
-        t_imag = torch.imag(t) if t.dtype.is_complex else torch.zeros_like(t_real)
-        return Complex.apply(t_real, t_imag)
+        return Complex.apply(t)
 
     def as_interleaved(self) -> Tensor:
-        return torch.complex(self.real, self.imag)
+        return torch.view_as_complex(torch.view_as_real(self))
 
     @staticmethod
     def __tensor_unflatten__(
@@ -127,13 +136,12 @@ class ComplexTensor(Tensor):
         outer_size: tuple[int, ...],
         outer_stride: tuple[int, ...],
     ) -> ComplexTensor:
-        if meta is not None:
-            raise AssertionError(f"meta must be None, got {meta}")
-        re, im = inner_tensors["re"], inner_tensors["im"]
-        return ComplexTensor(re, im)
+        assert meta is None
+        data = inner_tensors["_data"]
+        return ComplexTensor(data[..., 0], data[..., 1])
 
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
-        return ["re", "im"], None
+        return ["_data"], None
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
         return f"ComplexTensor(real={self.re!r}, imag={self.im!r})"
@@ -144,7 +152,7 @@ class ComplexTensor(Tensor):
 
 class Complex(Function):
     @staticmethod
-    def forward(ctx: FunctionCtx, real: Tensor, imag: Tensor) -> ComplexTensor:  # type: ignore[bad-override]
+    def forward(ctx: FunctionCtx, real: Tensor, imag: Tensor|None = None) -> ComplexTensor:  # type: ignore[bad-override]
         return ComplexTensor(real, imag)
 
     @staticmethod
