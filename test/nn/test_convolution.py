@@ -2053,7 +2053,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             check_forward_ad=check_forward_ad,
             nondet_tol=1e-5,
         )
-        if torch.device(device).type != device_type.type:
+        if torch.device(device).type != device_type:
             # https://github.com/pytorch/pytorch/issues/70702
             gradgradcheck(
                 lambda x, y: F.conv3d(x, y, padding="same", dilation=2),
@@ -2079,7 +2079,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
             check_forward_ad=check_forward_ad,
             nondet_tol=1e-5,
         )
-        if torch.device(device).type != device_type.type:
+        if torch.device(device).type != device_type:
             # https://github.com/pytorch/pytorch/issues/70702
             gradgradcheck(
                 lambda x, y: F.conv3d(x, y, padding="same"),
@@ -3215,7 +3215,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         )
         inp = torch.randn(0, 4, 4, 4, device=device)
         _test_module_empty_input(self, mod, inp, check_size=False)
-        if self.device_type == device_type.type and self.has_cudnn():
+        if self.device_type == device_type and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 _test_module_empty_input(self, mod, inp, check_size=False)
 
@@ -3225,7 +3225,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         ).to(device)
         inp = torch.randn(0, 4, 4, 4, device=device)
         _test_module_empty_input(self, mod, inp, check_size=False)
-        if self.device_type == device_type.type and self.has_cudnn():
+        if self.device_type == device_type and self.has_cudnn():
             with torch.backends.cudnn.flags(enabled=False):
                 _test_module_empty_input(self, mod, inp, check_size=False)
 
