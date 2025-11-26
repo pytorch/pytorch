@@ -610,7 +610,7 @@ autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") ==
 
 # Number of benchmark runs for collective operations
 collective_benchmark_nruns = int(
-    os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_NRUNS", "10")
+    os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_NRUNS", "30")
 )
 
 # Timeout in seconds for collective benchmarking

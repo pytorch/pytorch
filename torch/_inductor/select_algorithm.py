@@ -3457,7 +3457,6 @@ class AlgorithmSelectorCache(PersistentCache):
         nruns: int,
         process_group,
         timeout,
-        is_warmup: bool = False,
     ) -> float:
         """
         Single function for benchmarking collective operations.
@@ -3467,38 +3466,26 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         import torch.distributed as dist
 
-        # Barrier once to ensures all ranks are ready to benchmark the same choice
         work = dist.barrier(group=process_group, async_op=True)
         if not work.wait(timeout):
-            raise TimeoutError(
-                f"Barrier timeout before {'warmup' if is_warmup else 'benchmark'} for choice {getattr(choice, 'name', '<unknown>')}"
-            )
+            raise TimeoutError("Barrier timeout before benchmarking")
 
         torch.cuda.synchronize()
 
         total_time = 0.0
 
         for i in range(nruns):
-            if not is_warmup:
-                log.debug("Benchmark run %d/%d", i + 1, nruns)
-
             torch.cuda.synchronize()
 
-            if is_warmup:
-                # Warmup: just run the operation without timing
-                choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
-                torch.cuda.synchronize()
-            else:
-                # Benchmarking: time the operation
-                start_evt = torch.cuda.Event(enable_timing=True)
-                end_evt = torch.cuda.Event(enable_timing=True)
+            start_evt = torch.cuda.Event(enable_timing=True)
+            end_evt = torch.cuda.Event(enable_timing=True)
 
-                start_evt.record()
-                choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
-                end_evt.record()
-                end_evt.synchronize()
+            start_evt.record()
+            choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
+            end_evt.record()
+            end_evt.synchronize()
 
-                total_time += start_evt.elapsed_time(end_evt)
+            total_time += start_evt.elapsed_time(end_evt)
 
         return total_time
 
@@ -3541,12 +3528,12 @@ class AlgorithmSelectorCache(PersistentCache):
         try:
             # Do n warmups
             cls._run_collective_benchmark(
-                choice, inputs, output, nwarmup, process_group, timeout, is_warmup=True
+                choice, inputs, output, nwarmup, process_group, timeout
             )
 
             # Do n actual benchmarking runs
             total_time = cls._run_collective_benchmark(
-                choice, inputs, output, nruns, process_group, timeout, is_warmup=False
+                choice, inputs, output, nruns, process_group, timeout
             )
 
             avg_time = total_time / nruns
@@ -3558,7 +3545,7 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             work = dist.all_reduce(
                 time_tensor,
-                op=dist.ReduceOp.MAX,
+                op=dist.ReduceOp.AVG,
                 group=process_group,
                 async_op=True,
             )
