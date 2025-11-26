@@ -1419,12 +1419,12 @@ static PyObject* pop_torch_dispatch_stack(
         c10::impl::to_string(mode_key.value()),
         ", but there wasn't one active.");
     auto mode = maybe_mode.value();
-    r = mode->ptr(getPyInterpreter());
+    r = mode->release();
   } else {
     auto mode = c10::impl::TorchDispatchModeTLS::pop_stack();
-    r = mode->ptr(getPyInterpreter());
+    r = mode->release();
   }
-  Py_INCREF(r);
+  // No Py_INCREF needed - release() transfers ownership from SafePyObject to Python
   return r;
   END_HANDLE_TH_ERRORS
 }

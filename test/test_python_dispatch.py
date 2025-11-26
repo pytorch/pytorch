@@ -70,6 +70,22 @@ class TestPythonRegistration(TestCase):
         if hasattr(torch.ops, self.test_ns):
             del torch.ops._test_python_registration
 
+    def test_global_enter(self):
+        try:
+            v = LoggingTensorMode()
+            v_ref = weakref.ref(v)
+
+            v.__enter__()
+            # The bug trigger when the C++ stack is the only
+            # owner of the mode object.
+            del v
+
+            # Does not segfault
+            str(torch.rand(2))
+
+        finally:
+            v_ref().__exit__()
+
     def test_fallback(self) -> None:
         test_key = "TESTING_ONLY_GenericMode"
         test_keyset = torch._C.DispatchKeySet(test_key)
