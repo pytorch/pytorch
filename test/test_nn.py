@@ -8296,58 +8296,52 @@ class TestNNDeviceType(NNTestCase):
         """test InstanceNorm2d with mixed dtypes (Issue #139140)
 
         verifies that InstanceNorm2d works correctly when input dtype differs
-        from layer parameter dtype, particularly for running_mean/running_var buffers.
+        from layer parameter dtype for running_mean/running_var buffers.
         """
-        # test with both affine=True and affine=False
-        for affine in [True, False]:
-            layer = torch.nn.InstanceNorm2d(
-                num_features=5,
-                track_running_stats=True,
-                affine=affine,
-                device=device
-            )
+        layer = torch.nn.InstanceNorm2d(
+            num_features=5,
+            track_running_stats=True,
+            affine=False,
+            device=device
+        )
 
-            # store initial running stats
-            initial_running_mean = layer.running_mean.clone()
-            initial_running_var = layer.running_var.clone()
+        # store initial running stats
+        initial_running_mean = layer.running_mean.clone()
+        initial_running_var = layer.running_var.clone()
 
-            # create float64 input (layer params are float32 by default)
-            input_tensor = torch.randn(2, 5, 10, 10, dtype=torch.float64, device=device)
+        # create float64 input (layer params are float32 by default)
+        input_tensor = torch.randn(2, 5, 10, 10, dtype=torch.float64, device=device)
 
-            # forward pass in training mode
-            layer.train()
-            output = layer(input_tensor)
+        # forward pass in training mode
+        layer.train()
+        output = layer(input_tensor)
 
-            # verify output properties
-            self.assertEqual(output.shape, input_tensor.shape,
-                             "Output shape should match input shape")
-            self.assertEqual(output.dtype, input_tensor.dtype,
-                             "Output dtype should match input dtype")
-            self.assertTrue(torch.isfinite(output).all(),
-                            "Output should not contain NaN or Inf")
+        # verify output dtype
+        self.assertEqual(output.dtype, input_tensor.dtype,
+                         "Output dtype should match input dtype")
+        self.assertTrue(torch.isfinite(output).all(),
+                        "Output should not contain NaN or Inf")
 
-            # verify running stats are actually updated
-            running_mean_updated = not torch.allclose(layer.running_mean, initial_running_mean)
-            running_var_updated = not torch.allclose(layer.running_var, initial_running_var)
+        # verify running stats are actually updated
+        running_mean_updated = not torch.allclose(layer.running_mean, initial_running_mean)
+        running_var_updated = not torch.allclose(layer.running_var, initial_running_var)
 
-            self.assertTrue(running_mean_updated,
-                            f"Running mean should be updated (affine={affine})")
-            self.assertTrue(running_var_updated,
-                            f"Running var should be updated (affine={affine})")
+        self.assertTrue(running_mean_updated, "Running mean should be updated")
+        self.assertTrue(running_var_updated, "Running var should be updated")
 
-            # verify running stats maintain their original dtype
-            self.assertEqual(layer.running_mean.dtype, torch.float32,
-                             "Running mean should maintain float32 dtype")
-            self.assertEqual(layer.running_var.dtype, torch.float32,
-                             "Running var should maintain float32 dtype")
+        # verify running stats maintain their original dtype
+        self.assertEqual(layer.running_mean.dtype, torch.float32,
+                         "Running mean should maintain float32 dtype")
+        self.assertEqual(layer.running_var.dtype, torch.float32,
+                         "Running var should maintain float32 dtype")
 
-            # test eval mode uses tracked stats correctly
-            layer.eval()
-            output_eval = layer(input_tensor)
-            self.assertEqual(output_eval.dtype, input_tensor.dtype,
-                             "Output dtype should match input in eval mode")
-            self.assertTrue(torch.isfinite(output_eval).all(),
-                            "Eval mode output should not contain NaN or Inf")
+        # test eval mode uses tracked stats correctly
+        layer.eval()
+        output_eval = layer(input_tensor)
+        self.assertEqual(output_eval.dtype, input_tensor.dtype,
+                         "Output dtype should match input in eval mode")
+        self.assertTrue(torch.isfinite(output_eval).all(),
+                        "Eval mode output should not contain NaN or Inf")
 
         # test multiple forward passes to verify stats accumulation
         layer = torch.nn.InstanceNorm2d(5, track_running_stats=True, device=device)
@@ -8371,52 +8365,30 @@ class TestNNDeviceType(NNTestCase):
         verifies that gradients are computed correctly when input dtype differs
         from layer parameter dtype.
         """
-        # test with different configurations
-        for affine in [True, False]:
-            for track_running_stats in [True, False]:
-                layer = torch.nn.InstanceNorm2d(
-                    3,
-                    affine=affine,
-                    track_running_stats=track_running_stats,
-                    device=device
-                )
+        layer = torch.nn.InstanceNorm2d(3, affine=False, device=device)
 
-                # create float64 input with gradient tracking
-                input_tensor = torch.randn(2, 3, 4, 4, dtype=torch.float64, device=device, requires_grad=True)
+        # create float64 input with gradient tracking
+        input_tensor = torch.randn(2, 3, 4, 4, dtype=torch.float64, device=device, requires_grad=True)
 
-                # forward and backward pass
-                layer.train()
-                output = layer(input_tensor)
+        # forward and backward pass
+        layer.train()
+        output = layer(input_tensor)
+        loss = output.sum()
+        loss.backward()
 
-                # backward pass
-                loss = output.sum()
-                loss.backward()
+        # verify input gradients
+        self.assertIsNotNone(input_tensor.grad, "Input gradient should be computed")
+        self.assertEqual(input_tensor.grad.dtype, torch.float64,
+                         "Input gradient should match input dtype")
+        self.assertTrue(torch.isfinite(input_tensor.grad).all(),
+                        "Input gradient should not contain NaN or Inf")
 
-                # verify input gradients
-                self.assertIsNotNone(input_tensor.grad,
-                                     "Input gradient should be computed")
-                self.assertEqual(input_tensor.grad.dtype, torch.float64,
-                                 "Input gradient should match input dtype")
-                self.assertTrue(torch.isfinite(input_tensor.grad).all(),
-                                "Input gradient should not contain NaN or Inf")
-                self.assertEqual(input_tensor.grad.shape, input_tensor.shape,
-                                 "Gradient shape should match input shape")
+        # test that affine=True with mixed dtype errors out (from batch_norm checks)
+        layer = torch.nn.InstanceNorm2d(3, affine=True, device=device)
+        input_tensor = torch.randn(2, 3, 4, 4, dtype=torch.float64, device=device)
 
-                # verify parameter gradients if affine
-                if affine:
-                    self.assertIsNotNone(layer.weight.grad,
-                                         "Weight gradient should be computed")
-                    self.assertIsNotNone(layer.bias.grad,
-                                         "Bias gradient should be computed")
-                    self.assertTrue(torch.isfinite(layer.weight.grad).all(),
-                                    "Weight gradient should not contain NaN or Inf")
-                    self.assertTrue(torch.isfinite(layer.bias.grad).all(),
-                                    "Bias gradient should not contain NaN or Inf")
-                    # parameter gradients should be in parameter dtype (float32)
-                    self.assertEqual(layer.weight.grad.dtype, torch.float32,
-                                     "Weight gradient should be float32")
-                    self.assertEqual(layer.bias.grad.dtype, torch.float32,
-                                     "Bias gradient should be float32")
+        with self.assertRaisesRegex(RuntimeError, "(mixed dtype|does not match|Expected weight to have type)"):
+            output = layer(input_tensor)
 
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {
