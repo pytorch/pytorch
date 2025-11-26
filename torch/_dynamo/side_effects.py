@@ -59,7 +59,7 @@ from .variables.user_defined import FrozenDataClassVariable
 if TYPE_CHECKING:
     from torch._dynamo.output_graph import OutputGraph
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._dynamo.variables.functions import LocalGeneratorFunctionVariable
+    from torch._dynamo.variables.functions import LocalGeneratorObjectVariable
     from torch._dynamo.variables.lists import ListVariable
 
 
@@ -135,7 +135,7 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
-        self.local_generators: list[LocalGeneratorFunctionVariable] = []
+        self.local_generators: list[LocalGeneratorObjectVariable] = []
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
@@ -233,10 +233,10 @@ class SideEffects:
             and output_graph.current_tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
         )
 
-    def track_generator(self, gen: "LocalGeneratorFunctionVariable") -> None:
+    def track_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
         self.local_generators.append(gen)
 
-    def untrack_generator(self, gen: "LocalGeneratorFunctionVariable") -> None:
+    def untrack_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
         self.local_generators.remove(gen)
 
     def close_local_generators(self) -> None:
@@ -248,6 +248,7 @@ class SideEffects:
             with temporarely_allow_writes_to_output_graph(tx):
                 for gen in self.local_generators:
                     if not gen._is_generator_exhausted():
+                        # pyrefly: ignore[bad-argument-type]
                         gen.call_method(tx, "close", [], {})
 
     def is_reconstructing_generator(self) -> bool:
