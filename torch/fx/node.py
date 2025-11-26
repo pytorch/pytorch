@@ -755,6 +755,13 @@ class Node(_NodeBase):
                 # between eager and compiled execution, regardless of generator usage
                 return True
 
+            if isinstance(self.target, torch._ops.HigherOrderOperator):
+                if self.target in (
+                    torch.ops.higher_order.auto_functionalized,
+                    torch.ops.higher_order.auto_functionalized_v2,
+                ):
+                    return self.args[0] in _side_effectful_functions
+
             return self.target in _side_effectful_functions
 
         # Check if an impure module.

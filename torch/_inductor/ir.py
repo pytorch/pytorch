@@ -62,7 +62,7 @@ from torch.fx.experimental.symbolic_shapes import (
     ShapeEnv,
     SymTypes,
 )
-from torch.fx.node import Node
+from torch.fx.node import _side_effectful_functions, Node
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
@@ -7884,7 +7884,10 @@ class FallbackKernel(ExternKernelAlloc):
     def has_side_effects(self) -> bool:
         if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
             return False
-        return get_schema_info(self.op_overload).is_mutable()
+        return (
+            get_schema_info(self.op_overload).is_mutable()
+            or self.op_overload in _side_effectful_functions
+        )
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         assert isinstance(
