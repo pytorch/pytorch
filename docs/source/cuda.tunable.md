@@ -69,14 +69,6 @@
 ```
 
 ```{eval-rst}
-.. autofunction:: write_file_on_exit
-```
-
-```{eval-rst}
-.. autofunction:: write_file
-```
-
-```{eval-rst}
 .. autofunction:: read_file
 ```
 
@@ -94,4 +86,8 @@
 
 ```{eval-rst}
 .. autofunction:: get_rotating_buffer_size
+```
+
+```{eval-rst}
+.. autofunction:: set_numerical_check_tolerances
 ```

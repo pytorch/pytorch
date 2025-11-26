@@ -520,7 +520,7 @@ cpu_adaptive_avg_pool3d_channels_last(
       scalar_t* out = output_data + i * channels;
       int64_t size = channels;
 
-      // Note: For oridinary usage scenario, each out lane should
+      // Note: For ordinary usage scenario, each out lane should
       //   fit in L1 cache; otherwise consider block dim C.
       // Pass I: zero the out lane
       int64_t d1 = 0;

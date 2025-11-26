@@ -916,7 +916,7 @@ class TestViewOps(TestCase):
         assert_is_nonview(t, nv)
 
         # flatten returns the original object if start_dim=end_dim
-        t = t = torch.ones(2, 2, device=device)
+        t = torch.ones(2, 2, device=device)
         nv = t.flatten(1, 1)
         self.assertTrue(t is nv)
 
@@ -1183,6 +1183,8 @@ class TestOldViewOps(TestCase):
         self.assertEqual(x.data_ptr(), x.reshape(1, 9, 1).data_ptr())
         self.assertEqual(torch.reshape(x, (9,)), x.reshape(9))
         self.assertRaises(RuntimeError, lambda: x.reshape(-1, -1))
+        # ensure reshape() throws an error if extra positional arguments are given.
+        self.assertRaises(TypeError, lambda: x.reshape((9,), torch.float32))
 
         y = torch.randn(4, 4, 4, device=device)[:, 0, :]
         # .data_ptr() on meta tensors is always 0 so they are equal regardless of the reshape
@@ -1559,7 +1561,7 @@ class TestOldViewOps(TestCase):
             self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
 
     def _test_atleast_dim(self, torch_fn, np_fn, device, dtype):
-        for ndims in range(0, 5):
+        for ndims in range(5):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
             for _ in range(ndims + 1):
                 for with_extremal in [False, True]:
@@ -1656,7 +1658,7 @@ class TestOldViewOps(TestCase):
         inputs_with_neg_vals = [[1, 1, -12], [-1, 1], [-11]]
         for integral_inputs_with_neg_vals in inputs_with_neg_vals:
             with self.assertRaisesRegex(
-                RuntimeError, "Trying to create tensor with negative dimension"
+                ValueError, "Attempting to broadcast a dimension with negative length!"
             ):
                 torch.broadcast_shapes(*integral_inputs_with_neg_vals)
 
@@ -1664,20 +1666,21 @@ class TestOldViewOps(TestCase):
         for error_input in integral_inputs_error_case:
             with self.assertRaisesRegex(
                 RuntimeError,
-                "Shape mismatch: objects cannot be broadcast to a single shape",
+                ".*expected shape should be broadcastable to*",
             ):
                 torch.broadcast_shapes(*error_input)
 
         negative_inputs = [(-1,), (1, -12), (4, -11), (-4, 1), (1, 1, -2)]
         for s0 in negative_inputs:
             with self.assertRaisesRegex(
-                RuntimeError, "Trying to create tensor with negative dimension"
+                ValueError, "Attempting to broadcast a dimension with negative length!"
             ):
                 torch.broadcast_shapes(s0)
 
             for s1 in negative_inputs:
                 with self.assertRaisesRegex(
-                    RuntimeError, "Trying to create tensor with negative dimension"
+                    ValueError,
+                    "Attempting to broadcast a dimension with negative length!",
                 ):
                     torch.broadcast_shapes(s0, s1)
 
@@ -1725,6 +1728,9 @@ class TestOldViewOps(TestCase):
                     r"must match the existing size \(\d\)",
                 ):
                     torch.broadcast_to(t, s1)
+        # ensure broadcast_to() throws an error when extra positional arguments are given.
+        t = torch.tensor([1, 2, 3])
+        self.assertRaises(TypeError, lambda: t.broadcast_to((3, 3), torch.float32))
 
     def test_view(self, device):
         tensor = torch.rand(15, device=device)
@@ -1810,6 +1816,11 @@ class TestOldViewOps(TestCase):
         self.assertEqual(tensor.view(-1, 1), contig_tensor.view(-1, 1))
         self.assertEqual(tensor.view(6, 2, 1), contig_tensor.view(6, 2, 1))
         self.assertEqual(tensor.view(1, 6, 2, 1), contig_tensor.view(1, 6, 2, 1))
+
+        # ensure view() throws an error if extra positional arguments are given.
+        self.assertRaises(
+            TypeError, lambda: tensor.view((tensor.numel(),), torch.float32)
+        )
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_reshape_view_semantics(self, device, dtype):

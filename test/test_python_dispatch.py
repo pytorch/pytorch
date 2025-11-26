@@ -299,8 +299,12 @@ class TestPythonRegistration(TestCase):
         lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
         lib.define("foo123(Tensor x) -> Tensor")
 
-        # 1 for `lib`, 1 for sys.getrefcount
-        self.assertEqual(sys.getrefcount(lib), 2)
+        # 1 for `lib`, 1 for sys.getrefcount' for previous python version (<=3.12)
+        # In Python 3.13+, sys.getrefcount() was optimized to not create
+        # a temporary reference, so expected counts are 1 less than before
+        expected_refcount = 1 if sys.version_info >= (3, 14) else 2
+        self.assertEqual(sys.getrefcount(lib), expected_refcount)
+
         # We gained an additional reference that gets cleared when the finalizer runs
         self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt + 1)
         # 1 for `lib`
@@ -318,7 +322,7 @@ class TestPythonRegistration(TestCase):
         saved_op_impls = lib._op_impls
 
         # del will definitely work if the following passes
-        self.assertEqual(sys.getrefcount(lib), 2)
+        self.assertEqual(sys.getrefcount(lib), expected_refcount)
         del lib
 
         # 1 for saved_op_impls
@@ -326,7 +330,7 @@ class TestPythonRegistration(TestCase):
         # This function should be the last user of lib._op_impls:
         # - lib should not have a reference anymore (it was del'ed)
         # - lib's finalizer should not have a reference anymore
-        self.assertEqual(sys.getrefcount(saved_op_impls), 2)
+        self.assertEqual(sys.getrefcount(saved_op_impls), expected_refcount)
 
         self.assertTrue(key not in torch.library._impls)
 
@@ -587,6 +591,47 @@ class TestPythonRegistration(TestCase):
             with self.assertRaisesRegex(ValueError, "reserved namespace"):
                 my_lib1 = Library("prim", kind)  # noqa: TOR901
 
+    def test_dispatcher_error_filenames(self) -> None:
+        # Test that dispatcher errors report correct Python filenames and line numbers
+        # when defining duplicate libraries (which triggers the filename tracking)
+        import linecache
+        import re
+
+        # Create first library
+        # NOTE: Using Library directly instead of _scoped_library because this test
+        # specifically verifies filename tracking in error messages, and _scoped_library
+        # would report library.py locations instead of the actual test file locations
+        lib1 = Library(self.test_ns, "DEF")  # FIRST_LIB_MARKER  # noqa: TOR901
+        try:
+            lib1.define("duplicate_op(Tensor x) -> Tensor")
+
+            # Try to create another library with same namespace - this should trigger error
+            with self.assertRaises(RuntimeError) as cm:
+                lib2 = Library(self.test_ns, "DEF")  # SECOND_LIB_MARKER  # noqa: TOR901
+        finally:
+            lib1._destroy()
+
+        error_msg = str(cm.exception)
+
+        # The error should NOT contain /dev/null (the old placeholder)
+        self.assertNotIn("/dev/null", error_msg)
+        # The error should contain the test file name for both registrations
+        self.assertIn("test_python_dispatch.py", error_msg)
+        # Extract line numbers from the error message and verify they point to the right lines
+        line_matches = re.findall(r"test_python_dispatch\.py:(\d+)", error_msg)
+        self.assertEqual(
+            len(line_matches), 2, "Should have exactly 2 line number references"
+        )
+
+        # Get the actual source lines and verify they contain our markers
+        first_line_num, second_line_num = sorted([int(x) for x in line_matches])
+        first_line = linecache.getline(__file__, first_line_num).strip()
+        second_line = linecache.getline(__file__, second_line_num).strip()
+
+        # Verify the lines contain our expected markers
+        self.assertIn("FIRST_LIB_MARKER", first_line)
+        self.assertIn("SECOND_LIB_MARKER", second_line)
+
     def test_returning_symint(self) -> None:
         shape_env = ShapeEnv()
         fake_tensor_mode = FakeTensorMode(shape_env=shape_env)
@@ -809,7 +854,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])""",
             lambda: A(torch.zeros(1)).detach(),
         )
 
-    def test_detach_appears_twice_when_called_once(self) -> None:
+    def test_detach_appears_once_when_called_once(self) -> None:
         with capture_logs() as logs:
             x = LoggingTensor(torch.tensor([3.0]), requires_grad=True)
             log_input("x", x)
@@ -822,8 +867,7 @@ $1: f32[] = torch._ops.my_lib.weird.default(['None', '$0'])""",
             "\n".join(logs),
             """\
 $0: f32[1] = input('x')
-$1: f32[1] = torch._ops.aten.detach.default($0)
-$2: f32[1] = torch._ops.aten.detach.default($1)""",
+$1: f32[1] = torch._ops.aten.detach.default($0)""",
         )
 
     def test_storage(self) -> None:
@@ -1958,6 +2002,8 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.is_contiguous:
                         return contiguous_data.is_contiguous()
+                    if func.overloadpacket == torch.ops.aten.sym_is_contiguous:
+                        return torch.ops.aten.sym_is_contiguous(contiguous_data)
                     return NotImplemented
 
             class ExampleTensor3(torch.Tensor):
@@ -1971,6 +2017,8 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
                 def __torch_dispatch__(cls, func, types, args, kwargs):
                     if func.overloadpacket == torch.ops.aten.is_contiguous:
                         return not_contiguous_data.is_contiguous()
+                    if func.overloadpacket == torch.ops.aten.sym_is_contiguous:
+                        return torch.ops.aten.sym_is_contiguous(not_contiguous_data)
                     return NotImplemented
 
             err_msg = "Multiple dispatch failed for 'torch.ops.aten.is_contiguous'"
@@ -2003,6 +2051,7 @@ $0: f32[] = torch._ops.aten.empty.memory_format([], device=device(type='cpu'), p
             @classmethod
             def __torch_dispatch__(cls, func, types, args, kwargs):
                 if func in [
+                    torch.ops.aten.sym_is_contiguous.default,
                     torch.ops.aten.is_contiguous.default,
                     torch.ops.aten.is_contiguous.memory_format,
                     torch.ops.aten.is_strides_like_format.default,
@@ -2475,7 +2524,7 @@ def forward(self, x_1):
                 self.last_args = args
                 return func(*args, **kwargs)
 
-        # Value that could not be intepreted as signed int64
+        # Value that could not be interpreted as signed int64
         uarg = 2**63 + 1
         with DummyMode() as m:
             a = torch.full((3, 3), uarg, dtype=torch.uint64)

@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <c10/util/Exception.h>
 #include <c10/util/SmallVector.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/jit/frontend/lexer.h>
@@ -37,10 +38,10 @@ struct Tree : c10::intrusive_ptr_target {
     return true;
   }
   virtual const SourceRange& range() const {
-    throw std::runtime_error("is an Atom");
+    TORCH_CHECK(false, "is an Atom");
   }
   virtual const std::string& stringValue() const {
-    throw std::runtime_error("stringValue can only be called on TK_STRING");
+    TORCH_CHECK(false, "stringValue can only be called on TK_STRING");
   }
   virtual const TreeList& trees() const {
     static const TreeList empty_trees = {};
@@ -79,21 +80,24 @@ struct Tree : c10::intrusive_ptr_target {
       int lineno,
       size_t expected_subtrees,
       bool allow_more) const {
-    if (kind() != k) {
-      std::stringstream ss;
-      ss << filename << ":" << lineno << ": expecting kind '" << kindToString(k)
-         << "' but found '" << kindToString(kind()) << "'\n";
-      range().highlight(ss);
-      throw std::runtime_error(ss.str());
-    }
+    TORCH_CHECK(
+        kind() == k,
+        filename,
+        ":",
+        lineno,
+        ": expecting kind '",
+        kindToString(k),
+        "' but found '",
+        kindToString(kind()),
+        "'\n");
     if (trees().size() < expected_subtrees ||
         (!allow_more && trees().size() != expected_subtrees)) {
       std::stringstream ss;
-      ss << filename << ":" << lineno << ": expected at least "
+      ss << filename << ':' << lineno << ": expected at least "
          << expected_subtrees << " subtrees, but found only " << trees().size()
-         << "\n";
+         << '\n';
       range().highlight(ss);
-      throw std::runtime_error(ss.str());
+      TORCH_CHECK(false, ss.str());
     }
   }
   ~Tree() override = default;
@@ -180,11 +184,11 @@ struct pretty_tree {
         out << t->stringValue();
         break;
       default:
-        out << "(" << kindToString(t->kind());
+        out << '(' << kindToString(t->kind());
         for (const auto& e : t->trees()) {
-          out << " " << get_flat(e);
+          out << ' ' << get_flat(e);
         }
-        out << ")";
+        out << ')';
         break;
     }
     auto it_ = flat_strings.emplace(t, out.str());
@@ -197,12 +201,12 @@ struct pretty_tree {
       return;
     }
     std::string k = kindToString(t->kind());
-    out << "(" << k;
+    out << '(' << k;
     for (const auto& e : t->trees()) {
-      out << "\n" << std::string(indent + 2, ' ');
+      out << '\n' << std::string(indent + 2, ' ');
       print(out, e, indent + 2);
     }
-    out << ")";
+    out << ')';
   }
 };
 

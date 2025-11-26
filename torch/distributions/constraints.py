@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 
 r"""

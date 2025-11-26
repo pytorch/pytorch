@@ -28,9 +28,9 @@ class _LazyModule:
 # NOTE: Add additional used imports here.
 if TYPE_CHECKING:
     import onnx
-    import onnx_ir  # type: ignore[import-untyped]
+    import onnx_ir  # type: ignore[import-untyped, import-not-found]
     import onnxscript
-    import onnxscript._framework_apis.torch_2_8 as onnxscript_apis
+    import onnxscript._framework_apis.torch_2_9 as onnxscript_apis
 
     onnxscript_ir = onnx_ir
 
@@ -38,4 +38,4 @@ else:
     onnx = _LazyModule("onnx")
     onnxscript = _LazyModule("onnxscript")
     onnxscript_ir = _LazyModule("onnx_ir")
-    onnxscript_apis = _LazyModule("onnxscript._framework_apis.torch_2_8")
+    onnxscript_apis = _LazyModule("onnxscript._framework_apis.torch_2_9")

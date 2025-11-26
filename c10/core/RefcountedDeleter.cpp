@@ -20,7 +20,8 @@ void maybeApplyRefcountedDeleter(const c10::Storage& storage) {
   std::lock_guard<std::mutex> guard(replace_data_ptr_mutex);
   c10::DataPtr& data_ptr = storage.mutable_data_ptr();
 
-  if ((void*)data_ptr.get_deleter() == (void*)&c10::refcounted_deleter) {
+  if (reinterpret_cast<const void*>(data_ptr.get_deleter()) ==
+      reinterpret_cast<const void*>(&c10::refcounted_deleter)) {
     // Data pointer is already shared
     return;
   }
