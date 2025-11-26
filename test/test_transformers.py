@@ -4603,6 +4603,20 @@ class TestSDPAXpuOnly(NNTestCase):
                 F.scaled_dot_product_attention(q, k, v)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_XPU_FLASH_ATTENTION, "XPU Flash Attention is not supported")
+    def test_flash_attention_fail_with_non_square_causal_attention(self, device):
+        dtype = torch.bfloat16
+        q_shape = SdpaShape(1, 1, 8, 16)
+        kv_shape = SdpaShape(1, 1, 12, 16)
+        make_q = partial(torch.rand, q_shape, device=device, dtype=dtype)
+        make_kv = partial(torch.rand, kv_shape, device=device, dtype=dtype)
+        q, k, v = make_q(), make_kv(), make_kv()
+        warning_str = "Flash attention XPU does not support the is_causal flag when seqlen_q != seqlen_k."
+        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            with self.assertWarnsRegex(UserWarning, warning_str):
+                self.assertRaises(RuntimeError, lambda: torch.nn.functional.scaled_dot_product_attention(
+                    q, k, v, None, 0.0, is_causal=True))
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_XPU_FLASH_ATTENTION, "XPU Flash Attention is not supported")
     @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION])
     @parametrize("dtype", [torch.half, torch.bfloat16])
     @parametrize("batch_size", [1, 2, 4])
@@ -4629,10 +4643,8 @@ class TestSDPAXpuOnly(NNTestCase):
         layout,
         enable_gqa,
     ):
-        if mask_type == "causal" and q_size > kv_size:
-            self.skipTest(
-                    "Lower right causal mask will produce NaNs in the output when seq_len_q > seq_len_kv!"
-                )
+        if mask_type == "causal" and q_size != kv_size:
+            self.skipTest("Flash Attention V2 does not accept is_causal when seq_len_q != seq_len_k")
 
         tol = Tolerances(1e-5, 5e-6)
         if dtype is torch.bfloat16:
@@ -4710,7 +4722,6 @@ class TestSDPAXpuOnly(NNTestCase):
             self.assertEqual(grad_q_actual, grad_q_ref, atol=tol.atol, rtol=tol.rtol)
             self.assertEqual(grad_k_actual, grad_k_ref, atol=tol.atol, rtol=tol.rtol)
             self.assertEqual(grad_v_actual, grad_v_ref, atol=tol.atol, rtol=tol.rtol)
-
 
 class TestAttnBias(NNTestCase):
 
