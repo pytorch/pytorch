@@ -22,6 +22,7 @@ aten = torch.ops.aten
 
 from torch.library import custom_op
 from torch._inductor.lowering import make_fallback
+from torch._utils import _get_device_index
 
 def _shape_to_offset(size, device: torch.device) -> int:
     nelem = 1
@@ -50,15 +51,18 @@ def _shape_to_offset(size, device: torch.device) -> int:
 
 
 def _reserve_state(device: torch.device, used_offset: int) -> tuple[int, int]:
-    if device.type == "cuda":
-        dev_index = device.index if isinstance(device, torch.device) else int(device)
-        gen = torch.cuda.default_generators[dev_index]
-        seed = int(gen.initial_seed())
-        old_off = int(gen.get_offset())
-        gen.set_offset(old_off + used_offset)
-        base = old_off // 4
-        return seed, base
-    return 0, 0   # _reserve_state is only valid for CUDA devices
+    dev = torch.device(device) if not isinstance(device, torch.device) else device
+    if dev.type != "cuda":
+        return 0, 0  # _reserve_state is only valid for CUDA devices
+    dev_index = _get_device_index(dev, optional=True)
+    if dev_index is None:
+        dev_index = torch.cuda.current_device()
+    gen = torch.cuda.default_generators[dev_index]
+    seed = int(gen.initial_seed())
+    old_off = int(gen.get_offset())
+    gen.set_offset(old_off + used_offset)
+    base = old_off // 4
+    return seed, base
 
 
 @custom_op("custom_op::rand_eager_offset", mutates_args={})
