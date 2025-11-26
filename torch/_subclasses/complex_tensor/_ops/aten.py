@@ -57,6 +57,13 @@ def register_binary_linear(op: OpType) -> Callable[..., Any]:
 
     return register_complex(op, impl)
 
+def register_binary_linear_inplace(op: OpType, out_of_place_impl: Callable):
+    def impl(lhs: ComplexTensor, rhs: ComplexTensor, *args, **kwargs) -> ComplexTensor:
+        result = out_of_place_impl(lhs, rhs, *args, **kwargs)
+        lhs.copy_(result)
+        return lhs
+    return register_complex(op, impl)
+
 
 @register_complex(aten.real)
 def real_impl(self: ComplexTensor) -> torch.Tensor:
@@ -152,11 +159,12 @@ select_scatter_impl = register_force_test(
 )
 
 add_impl = register_binary_linear(aten.add)
-add__impl = register_binary_linear(aten.add_)
+add__impl = register_binary_linear_inplace(aten.add_, add_impl)
 sub_impl = register_binary_linear(aten.sub)
-sub__impl = register_binary_linear(aten.sub_)
+sub__impl = register_binary_linear_inplace(aten.sub_, sub_impl)
 diagonal_scatter_impl = register_binary_linear(aten.diagonal_scatter)
-fill__impl = register_binary_linear(aten.fill_)
+fill_impl = register_binary_linear(aten.fill)
+fill__impl = register_binary_linear_inplace(aten.fill_, fill_impl)
 
 
 @register_complex(aten.rsub)
@@ -712,8 +720,7 @@ def logical_not_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> torch.Te
 
 @register_complex(aten.view_as_real)
 def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
-    re, im = split_complex_tensor(self)
-    return torch.stack([re, im], dim=-1)
+    return self._data
 
 
 @register_complex(aten.linalg_vector_norm)
