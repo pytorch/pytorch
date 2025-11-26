@@ -18,6 +18,7 @@ from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, TypeVar, U
 
 import torch
 from torch.utils import _pytree as pytree
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -605,10 +606,13 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner: Optional[set[Guard]] = None) -> None:
+    def __init__(self, inner: Optional[OrderedSet[Guard] | set[Guard]] = None) -> None:
         if inner is None:
-            inner = set()
-        self.inner = inner
+            self.inner: OrderedSet[Guard] = OrderedSet()
+        elif isinstance(inner, OrderedSet):
+            self.inner = inner
+        else:
+            self.inner = OrderedSet(inner)
 
     def __iter__(self) -> Iterator[Guard]:
         return iter(self.inner)
@@ -645,9 +649,9 @@ class GuardsSet:
         """Delete all guards that contains a given source"""
         from ._dynamo.source import is_from_source
 
-        self.inner = {
+        self.inner = OrderedSet(
             g for g in self.inner if not is_from_source(g.originating_source, source)
-        }
+        )
 
 
 """
