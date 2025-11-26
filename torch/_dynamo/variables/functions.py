@@ -888,7 +888,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self,
         code: types.CodeType,
         f_globals: dict[str, Any],
-        inline_tracer: Optional["InstructionTranslator"],
+        inline_tracer: "InstructionTranslator",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -1020,7 +1020,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def should_allow_nested_graph_breaks(self):
         return False
 
-    def _setup_and_raise_exception(self, tx: "InstructionTranslator", exc: VariableTracker) -> None:
+    def _setup_and_raise_exception(
+        self, tx: "InstructionTranslator", exc: VariableTracker
+    ) -> None:
         # Raise an exception at the point where the generator is paused
         tracer = self._get_inline_tracer(tx)
         try:
