@@ -92,7 +92,7 @@ from torch._inductor.utils import (
     determine_aoti_mmap_flags,
     is_linux,
     is_windows,
-    XPU_KERNEL_BIN_EXT,
+    XPU_KERNEL_FORMAT,
 )
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
@@ -168,7 +168,7 @@ def get_kernel_bin_format(device: str) -> str:
     if device == "cuda":
         return "cubin" if torch.version.hip is None else "hsaco"
     elif device == "xpu":
-        return XPU_KERNEL_BIN_EXT
+        return XPU_KERNEL_FORMAT
     else:
         return ""
 
@@ -370,7 +370,7 @@ def get_path(
 def get_hash(content: str | bytes, extra: str = "", hash_type: str = "code") -> str:
     if hash_type in {"amdgcn", "code", "ptx", "spv"}:
         return code_hash(content, extra)
-    if hash_type in {"cubin", "hsaco", XPU_KERNEL_BIN_EXT}:
+    if hash_type in {"cubin", "hsaco", XPU_KERNEL_FORMAT}:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -1683,7 +1683,7 @@ class CudaKernelParamCache:
         if config.aot_inductor.emit_multi_arch_kernel:
             bin_type_to_ext = {
                 "cubin": ".fatbin",
-                "spv": f".{XPU_KERNEL_BIN_EXT}",
+                "spv": f".{XPU_KERNEL_FORMAT}",
                 "hsaco": ".hsaco",
             }
             assert bin_type in bin_type_to_ext, (
