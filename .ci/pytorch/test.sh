@@ -391,7 +391,7 @@ test_lazy_tensor_meta_reference_disabled() {
 
 test_dynamo_core() {
   time python test/run_test.py \
-    --include-dynamo-core-tests \
+    --dynamo-core-tests \
     --verbose \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -457,6 +457,29 @@ test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
   python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives distributed/test_aten_comm_compute_reordering distributed/test_compute_comm_reordering --verbose
+  assert_git_not_dirty
+}
+
+test_inductor_core() {
+  time python test/run_test.py \
+    --inductor-core-tests \
+    --exclude inductor/test_benchmark_fusion \
+              inductor/test_cutlass_backend \
+              inductor/test_flex_attention \
+              inductor/test_max_autotune \
+              inductor/test_aot_inductor_arrayref \
+              inductor/test_aot_inductor_arrayref \
+              inductor/test_compiled_autograd \
+              inductor/test_compile_subprocess \
+              inductor/test_cpu_cpp_wrapper \
+              inductor/test_cpu_repro \
+              inductor/test_cpu_select_algorithm \
+              inductor/test_torchinductor_dynamic_shapes \
+              inductor/test_torchinductor \
+              inductor/test_mkldnn_pattern_matcher \
+              inductor/test_torchinductor_codegen_dynamic_shapes \
+    --verbose \
+    --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -1250,97 +1273,6 @@ test_custom_script_ops() {
   assert_git_not_dirty
 }
 
-test_libtorch_agnostic_targetting() {
-    echo "Testing libtorch_agnostic runs correctly on TORCH_TARGET_VERSION"
-
-    REPO_DIR=$(pwd)
-    WHEEL_DIR="${REPO_DIR}/test/cpp_extensions/.wheels"
-
-    # Build wheel with current PyTorch (this has TORCH_TARGET_VERSION 2_9_0)
-    echo "Building 2.9 extension wheel with current PyTorch..."
-    pushd test/cpp_extensions/libtorch_agnostic_2_9_extension
-    time python setup.py bdist_wheel
-
-    # Save the wheel
-    mkdir -p "$WHEEL_DIR"
-    cp dist/*.whl "$WHEEL_DIR/"
-    WHEEL_FILE=$(find "$WHEEL_DIR" -maxdepth 1 -name "*.whl" -type f | head -1)
-    echo "Built wheel: $(basename "$WHEEL_FILE")"
-    popd
-
-    # Create venv and install PyTorch 2.9
-    python -m venv venv_pytorch_2_9
-    # shellcheck disable=SC1091
-    . venv_pytorch_2_9/bin/activate
-
-    # Clear PYTHONPATH to avoid using the development PyTorch
-    echo "Clearing PYTHONPATH to use only venv packages..."
-    unset PYTHONPATH
-
-    # Upgrade pip to latest version
-    echo "Upgrading pip to latest version..."
-    pip install --upgrade pip
-    pip --version
-
-    echo "Installing PyTorch 2.9..."
-
-    # Install from release channel only
-    PYTORCH_VERSION="2.9.0"
-
-    # Extract CUDA version from BUILD_ENVIRONMENT (e.g., "cuda12.1" -> "cu121")
-    if [[ "$BUILD_ENVIRONMENT" =~ cuda([0-9]+)\.([0-9]+) ]]; then
-        CUDA_MAJOR="${BASH_REMATCH[1]}"
-        CUDA_MINOR="${BASH_REMATCH[2]}"
-        CUDA_VERSION="cu${CUDA_MAJOR}${CUDA_MINOR}"
-        echo "  Detected CUDA ${CUDA_MAJOR}.${CUDA_MINOR} from BUILD_ENVIRONMENT, using ${CUDA_VERSION}"
-    else
-        # Default to CPU build
-        CUDA_VERSION="cpu"
-        echo "  No CUDA detected in BUILD_ENVIRONMENT, using CPU build"
-    fi
-
-    if pip install torch=="${PYTORCH_VERSION}" --index-url https://download.pytorch.org/whl/${CUDA_VERSION}/; then
-        echo "Installed PyTorch ${PYTORCH_VERSION} from release channel (${CUDA_VERSION})"
-    else
-        echo "  FAILED to install PyTorch 2.9.0 from release channel"
-        echo "  URL: https://download.pytorch.org/whl/${CUDA_VERSION}/"
-        deactivate
-        rm -rf venv_pytorch_2_9
-        return 1
-    fi
-
-    INSTALLED_VERSION=$(python -c "import torch; print(torch.__version__)" 2>/dev/null || echo "unknown")
-    echo "  Installed version: $INSTALLED_VERSION"
-
-    # Install test dependencies
-    echo "Installing test dependencies..."
-    pip install expecttest numpy unittest-xml-reporting
-
-    # Install the pre-built wheel
-    echo ""
-    echo "Installing pre-built 2.9 extension wheel (built with PyTorch 2.10)..."
-    pip install "$WHEEL_FILE"
-    echo "Installed $(basename "$WHEEL_FILE") into PyTorch 2.9 environment"
-
-    # Run tests with PyTorch 2.9 runtime (2.10 tests will be skipped automatically)
-    echo ""
-    echo "Running tests with PyTorch 2.9 runtime (using wheel built on PyTorch 2.10)..."
-    if time python test/cpp_extensions/test_libtorch_agnostic.py -v; then
-        echo ""
-        echo "  Wheel built with current torch and TORCH_TARGET_VERSION 2_9_0 works with PyTorch 2.9 runtime!"
-    else
-        echo "targeting test failed"
-        deactivate
-        rm -rf venv_pytorch_2_9 "$WHEEL_DIR"
-        return 1
-    fi
-
-    deactivate
-    rm -rf venv_pytorch_2_9 "$WHEEL_DIR"
-
-    assert_git_not_dirty
-}
-
 test_jit_hooks() {
   echo "Testing jit hooks in cpp"
   HOOK_BUILD="${CUSTOM_TEST_ARTIFACT_BUILD_DIR}/jit-hook-build"
@@ -1813,8 +1745,6 @@ elif [[ "${BUILD_ENVIRONMENT}" == *aarch64* && "${TEST_CONFIG}" == 'default' ]];
 elif [[ "${TEST_CONFIG}" == *backward* ]]; then
   test_forward_backward_compatibility
   # Do NOT add tests after bc check tests, see its comment.
-elif [[ "${TEST_CONFIG}" == *libtorch_agnostic_targetting* ]]; then
-  test_libtorch_agnostic_targetting
 elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
   build_xla
@@ -1909,6 +1839,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
     test_inductor_aoti_cpp
   fi
+elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
+  test_inductor_core
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"

@@ -403,18 +403,6 @@ class TestAutograd(TestCase):
         out = Func.apply(a)[0]
         out.backward()
 
-    def test_unused_grad_requires_grad_with_materialize(self):
-        x = torch.ones(10, requires_grad=True)
-        y = torch.ones(10, requires_grad=True)
-        z = (x**2).sum()
-
-        g = torch.autograd.grad(
-            z, (x, y), allow_unused=True, materialize_grads=True, create_graph=False
-        )
-
-        self.assertFalse(g[0].requires_grad)
-        self.assertFalse(g[1].requires_grad)
-
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
@@ -10906,34 +10894,6 @@ get_out().sum().backward()
                 return inp**2.0
 
             self.assertTrue(gradcheck(func, x, fast_mode=True))
-
-    def test_grad_thread_safety(self):
-        import threading
-        from concurrent.futures import ThreadPoolExecutor
-
-        NUM_ITERS = 10
-        NUM_THREADS = 4
-
-        # Concurrent calls to tensor.untyped_storage()
-        def access_grad(tensor, barrier):
-            barrier.wait()
-            return weakref.ref(tensor.grad)
-
-        for i in range(NUM_ITERS):
-            tensor = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
-            (tensor**2).sum().backward()
-
-            barrier = threading.Barrier(NUM_THREADS)
-            with ThreadPoolExecutor(max_workers=NUM_THREADS) as executor:
-                futures = [
-                    executor.submit(access_grad, tensor, barrier)
-                    for _ in range(NUM_THREADS)
-                ]
-
-                # Check that all the grad tensors returned were the same
-                for future in futures:
-                    self.assertEqual(future.result()(), tensor.grad)
-                self.assertIsNotNone(tensor.grad)
 
 
 def index_perm_variable(shape, max_indices):

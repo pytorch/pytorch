@@ -421,10 +421,6 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
     None
 )
 
-bucket_all_reduces_fx: Literal["none", "all"] = "none"
-# By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
-bucket_all_reduces_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
-
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
@@ -950,11 +946,6 @@ class aten_distributed_optimizations:
     # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
     collective_estimator: Literal["analytical", "benchmark"] = "analytical"
 
-    # Maximum memory increase above baseline for prefetch operations
-    # Uses minimum of absolute cap and ratio of baseline
-    max_memory_increase_gb: Optional[float] = None  # Absolute cap in GB
-    max_memory_increase_ratio: Optional[float] = None  # Ratio of baseline peak memory
-
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1161,10 +1152,6 @@ freezing_discard_parameters: bool = False
 
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
-
-# Wrap compiled regions in inductor_compiled_code HOP to make them visible to
-# TorchDispatchModes like DebugMode and Selective Activation Checkpointing.
-wrap_inductor_compiled_regions: bool = False
 
 # assume_aligned_inputs means that we assume that inputs will be aligned; we generate
 # code using this assumption, and clone tensors before use if they aren't aligned.
@@ -1822,12 +1809,27 @@ class aot_inductor_mode:
     compile_standalone: bool = False
 
 
-class cutlass:
-    """
-    Config specific to cutlass backend.
-    """
+class cuda:
+    """Settings for cuda backend, today this consists of cutlass"""
 
+    # CUDA arch to use for CUDA template kernel compilation.
+    # e.g. "70", "75", "80", "90", etc.
+    # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
+    arch: Optional[str] = None
+
+    # CUDA version to use for CUDA template kernel compilation.
+    # e.g. "11.4", "12.1", etc.
+    # When version is None, Inductor uses torch.version.cuda.
+    version: Optional[str] = None
+
+    # Optimization level for the host compiler.
     compile_opt_level: Literal["-O0", "-O1", "-O2", "-O3", "-OS"] = "-O1"
+
+    # Whether to enable device LTO (link-time-optimization).
+    enable_cuda_lto = False
+
+    # Whether to keep intermediate files dring compilation.
+    enable_ptxas_info = False
 
     # Whether to enable debug info, e.g. line number, cutlass debug info.
     enable_debug_info = False
@@ -1840,10 +1842,7 @@ class cutlass:
     cutlass_dir = os.path.realpath(
         os.environ.get(
             "TORCHINDUCTOR_CUTLASS_DIR",
-            os.path.join(
-                os.path.dirname(torch.__file__),
-                "../third_party/cutlass/",
-            ),
+            os.path.join(os.path.dirname(torch.__file__), "../third_party/cutlass/"),
         )
     )
 
@@ -1862,6 +1861,14 @@ class cutlass:
 
     # Whether to only use TMA-compatible kernels in CUTLASS
     cutlass_tma_only = False
+
+    # Path to CUDA NVCC.
+    # NVCC search order:
+    # 1) cuda_cxx set in this config
+    # 2) CUDACXX environment variable
+    # 3) CUDA_HOME environment variable
+    # 4) default system search PATH.
+    cuda_cxx: Optional[str] = None
 
     # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
@@ -1930,41 +1937,6 @@ class cutlass:
 
     # Enable caching codegen of cuda templates.
     enable_caching_codegen: bool = True
-
-
-class cuda(cutlass):
-    # CUDA arch to use for CUDA template kernel compilation.
-    # e.g. "70", "75", "80", "90", etc.
-    # When arch is None, Inductor uses torch.cuda.get_device_capability(0).
-    arch: Optional[str] = None
-
-    # CUDA version to use for CUDA template kernel compilation.
-    # e.g. "11.4", "12.1", etc.
-    # When version is None, Inductor uses torch.version.cuda.
-    version: Optional[str] = None
-
-    # Path to CUDA NVCC.
-    # NVCC search order:
-    # 1) cuda_cxx set in this config
-    # 2) CUDACXX environment variable
-    # 3) CUDA_HOME environment variable
-    # 4) default system search PATH.
-    cuda_cxx: Optional[str] = None
-
-    # Whether to enable device LTO (link-time-optimization).
-    enable_cuda_lto = False
-
-    # Whether to keep intermediate files dring compilation.
-    enable_ptxas_info = False
-
-
-class xpu(cutlass):
-    # Xe arch to use for SYCL template kernel compilation.
-    # eg. 12, 20, which corresponding to Xe12(PVC) and Xe20 (BMG)
-    arch: Optional[str] = None
-    # oneAPI version to use for SYCL template kernel compilation.
-    # e.g. "20250201".
-    version: Optional[str] = None
 
 
 class rocm:
@@ -2175,7 +2147,7 @@ _cache_config_ignore_prefix: list[str] = [
     # trace functions are not relevant to config caching
     "trace",
     # uses absolute path
-    "cutlass.cutlass_dir",
+    "cuda.cutlass_dir",
     # not relevant
     "worker_start_method",
     "compile_threads",

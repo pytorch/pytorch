@@ -422,17 +422,7 @@ def deserialize_torch_artifact(
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
     # weights_only=False as we want to load custom objects here (e.g. ScriptObject)
-    try:
-        artifact = torch.load(buffer, weights_only=True)
-    except Exception as e:
-        buffer.seek(0)
-        artifact = torch.load(buffer, weights_only=False)
-        log.warning(
-            "Fallback to weights_only=False succeeded. "
-            "Loaded object of type %s after initial failure: %s",
-            type(artifact),
-            exc_info=e,
-        )
+    artifact = torch.load(buffer, weights_only=False)
     assert isinstance(artifact, (tuple, dict))
     return artifact
 

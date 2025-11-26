@@ -1765,12 +1765,7 @@ class DeviceCachingAllocator {
     auto node_get_dependencies =
         [](cudaGraphNode_t n, cudaGraphNode_t* deps, size_t* count) -> void {
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
-      if (deps == nullptr) {
-        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
-      } else {
-        cudaGraphEdgeData edgeData;
-        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, &edgeData, count));
-      }
+      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
 #else
       C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, count));
 #endif

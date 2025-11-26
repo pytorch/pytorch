@@ -130,7 +130,6 @@ from .source import (
     ChainedSource,
     ClosureSource,
     CodeSource,
-    CollectionsSource,
     ConstantSource,
     ConstDictKeySource,
     CurrentStreamSource,
@@ -1439,13 +1438,6 @@ class GuardBuilder(GuardBuilderBase):
         elif istype(source, TorchSource):
             out = root_guard_manager.lambda_manager(
                 python_lambda=lambda _: torch,
-                source=source_name,
-                example_value=example_value,
-                guard_manager_enum=guard_manager_enum,
-            )
-        elif istype(source, CollectionsSource):
-            out = root_guard_manager.lambda_manager(
-                python_lambda=lambda _: collections,
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,

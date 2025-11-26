@@ -978,21 +978,23 @@ class TestGradTransform(TestCase):
                 fn = foo
                 bdim = 0
                 for op in reversed(op_list):
-                    if op is vmap:
+                    if op == vmap:
                         fn = op(fn, in_dims=bdim)
                         bdim += 1
                     else:
                         fn = op(fn)
 
                 expected = f"{repr(x)}"
-                for level, op in enumerate(op_list):
-                    if op is grad:
-                        expected = (
-                            f"GradTrackingTensor(lvl={level + 1}, value={expected})"
-                        )
-                    elif op is vmap:
+                level = 0
+                for op in op_list:
+                    level += 1  # noqa: SIM113
+                    if op == grad:
+                        expected = f"GradTrackingTensor(lvl={level}, value={expected})"
+                    elif op == vmap:
                         bdim -= 1
-                        expected = f"BatchedTensor(lvl={level + 1}, bdim={bdim}, value={expected})"
+                        expected = (
+                            f"BatchedTensor(lvl={level}, bdim={bdim}, value={expected})"
+                        )
 
                 fn(x)
                 buf = buf.replace("\n", "").replace("  ", "")

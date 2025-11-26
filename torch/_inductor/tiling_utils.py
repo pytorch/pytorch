@@ -163,9 +163,6 @@ def find_broadcast_var(
 
     zero_index = sympy_subs(index, variables)
     for v in var_ranges.keys():
-        if v not in index.free_symbols:
-            continue
-
         variables[v] = 1
         try:
             new_val = sympy_subs(index, variables)

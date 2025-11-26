@@ -23,7 +23,6 @@ class NCCL_COLL(IntEnum):
     ALL_GATHER = 1
     REDUCE_SCATTER = 2
     ALL_TO_ALL = 3
-    UNSUPPORTED = 4
 
 
 class NVIDIA_GPU_TYPE(IntEnum):
@@ -54,10 +53,10 @@ def get_collective_type_from_kernel_name(kernel_name: str) -> NCCL_COLL:
         return NCCL_COLL.ALL_GATHER
     elif "reduce_scatter" in kernel_name:
         return NCCL_COLL.REDUCE_SCATTER
-    elif any(comm in kernel_name for comm in ("all_to_all", "alltoall")):
+    elif "torch.ops._dtensor.shard_dim_alltoall.default" in kernel_name:
         return NCCL_COLL.ALL_TO_ALL
     else:
-        return NCCL_COLL.UNSUPPORTED
+        raise ValueError(f"Unsupported collective kernel: {kernel_name}")
 
 
 def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
@@ -197,9 +196,16 @@ def estimate_nccl_collective_runtime_nccl_estimator(snode) -> Optional[float]:  
     if "all_gather_into_tensor_out" in py_kernel_name:
         args = args[1:] + args[0]
 
-    with torch.distributed._time_estimator(group=pg, device=device) as time_estimator:
-        w = fn(*args, **kwargs)
-        torch.ops._c10d_functional.wait_tensor.default(w)
+    try:
+        with torch.distributed._time_estimator(
+            group=pg, device=device
+        ) as time_estimator:
+            w = fn(*args, **kwargs)
+            torch.ops._c10d_functional.wait_tensor.default(w)
+    except Exception as e:
+        # NCCL estimator can fail
+        log.info(e)  # noqa: G200
+        return None
 
     est_time_us = time_estimator.estimated_time
     # -1000 constant is NCCL return in case of error during estimations.
@@ -321,7 +327,7 @@ def estimate_nccl_collective_runtime_impl(
 
 def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
     """
-    Returns estimated NCCL collective runtime in nanoseconds (ms).
+    Returns estimated NCCL collective runtime in nanoseconds (ns).
 
     The following heuristics are copied from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc.
     We aim to estimate the runtime as accurately as possible.
@@ -341,67 +347,23 @@ def estimate_nccl_collective_runtime(node: ir.IRNode) -> float:
 
 
 def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
-    """Estimate the size of a collective operation in bytes, including inputs and outputs."""
-    input_bytes = None
+    size = 0
+    for node in fx_node.all_input_nodes:
+        if (t := node.meta.get("val")) is not None:
+            size += t.numel() * t.element_size()
 
-    args, kwargs = fx_node.args, fx_node.kwargs
-    kwargs = dict(kwargs)
-
-    # dont double count pre-allocated buffer passed in
-    kwargs.pop("out", None)
-
-    def tensor_bytes(t) -> int:
-        return get_size_numel(t.size()) * get_dtype_size(t.dtype)
-
-    def add_inp_bytes(inp: torch.fx.Node):
-        t = inp.meta.get("val", None)
-        if t is None:
-            return
-
-        nonlocal input_bytes
-        if input_bytes is None:
-            input_bytes = 0
-        input_bytes += tensor_bytes(t)
-
-    pytree.tree_map_only(
-        torch.fx.Node,
-        add_inp_bytes,
-        (args, kwargs),
-    )
-
-    output_tensor = fx_node.meta.get("val", None)
-
-    if input_bytes is None or output_tensor is None:
-        return 0
-
-    output_bytes = (
-        get_size_numel(output_tensor.size()) * output_tensor.element_size()
-    )  # pyre-ignore
-
-    return input_bytes + output_bytes
-
-
-def estimate_fx_collective_memory_footprint(fx_node: torch.fx.Node) -> int:
-    """Estimate the memory footprint of a collective operation in bytes.
-
-    This returns the total bytes that need to be live concurrently in memory.
-    For all_reduce, we divide by 2 since it can be done in-place.
-    """
-    from torch._inductor.fx_passes.bucketing import (
-        is_all_reduce_tensor as is_all_reduce,
-    )
-
-    size = estimate_fx_collective_size(fx_node)
-    return size if not is_all_reduce(fx_node) else size // 2
+    # TODO - symbolic
+    return size
 
 
 def estimate_nccl_collective_runtime_from_fx_node(
     fx_node: torch.fx.Node,
     override_size: Optional[int] = None,
+    # TODO(ivankobzarev): NCCL estimator sometimes fail unexpectedly, enable back after fix.
     use_nccl_estimator: bool = True,
 ) -> float:
     """
-    Returns estimated NCCL collective runtime in nanoseconds (ms).
+    Returns estimated NCCL collective runtime in nanoseconds (ns).
 
     The following heuristics are copied from https://github.com/NVIDIA/nccl/blob/master/src/graph/tuning.cc.
     We aim to estimate the runtime as accurately as possible.
@@ -436,20 +398,6 @@ def estimate_nccl_collective_runtime_from_fx_node(
 
     def _nccl_estimate() -> Optional[float]:
         # TODO: Refactor with estimate_nccl_collective_runtime_nccl_estimator
-        from torch.distributed.distributed_c10d import (
-            _get_pg_default_device,
-            _resolve_process_group,
-        )
-
-        pg = _resolve_process_group(group_name)
-        if torch.distributed.distributed_c10d.get_backend(pg) == "fake":
-            # nccl estimator requires real process group
-            return None
-
-        device = _get_pg_default_device(pg)
-        backend = pg._get_backend(device)
-        if not backend.supports_time_estimate:
-            return None
 
         flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
 
@@ -473,6 +421,13 @@ def estimate_nccl_collective_runtime_from_fx_node(
         flat_args = [to_real_tensor(a) for a in flat_args]
         real_args, real_kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
 
+        from torch.distributed.distributed_c10d import _resolve_process_group
+
+        pg = _resolve_process_group(group_name)
+        if torch.distributed.distributed_c10d.get_backend(pg) == "fake":
+            # nccl estimator requires real process group
+            return None
+
         fn = fx_node.target
         assert isinstance(fn, torch._ops.OpOverload)
         with torch.distributed._time_estimator(group=pg) as time_estimator:
@@ -486,7 +441,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
         est_time_ms = est_time_us / 1e3
         return est_time_ms
 
-    if use_nccl_estimator:
+    if torch.distributed.is_nccl_available() and use_nccl_estimator:
         est_time_ms = _nccl_estimate()
         if est_time_ms is not None:
             return est_time_ms

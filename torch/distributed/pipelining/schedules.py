@@ -2272,7 +2272,9 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                     time_step,
                     action,
                 )
-                logger.error(
+                # TODO(whc) what is the best practice for printing a multiline log?
+                # logger will split it into multiple log lines, but this makes it hard to read (too wide)
+                print(
                     _format_pipeline_order(
                         self.pipeline_order_with_comms,  # type: ignore[arg-type]
                         error_step_number=time_step,
