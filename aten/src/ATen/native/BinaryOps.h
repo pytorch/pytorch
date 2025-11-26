@@ -4,6 +4,7 @@
 #include <ATen/native/DispatchStub.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/TypeSafeSignMath.h>
+#include <ATen/native/TensorIterator.h>
 
 
 namespace at {
@@ -51,6 +52,7 @@ using binary_fn_double = void(*)(TensorIterator&, double);
 using binary_fn = void(*)(TensorIterator&);
 using binary_clamp_fn_alpha =
     void(*)(TensorIterator&, const Scalar& alpha, const Scalar& min_val, const Scalar& max_val);
+using ldexp_fn = void(*)(TensorIteratorBase&);
 
 // NB: codegenned
 DECLARE_DISPATCH(structured_binary_fn_alpha, add_stub)
@@ -115,5 +117,6 @@ DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_t_stub)
 DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_u_stub)
 DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_v_stub)
 DECLARE_DISPATCH(structured_binary_fn, shifted_chebyshev_polynomial_w_stub)
+DECLARE_DISPATCH(ldexp_fn, ldexp_stub)
 
 } // namespace at::native
