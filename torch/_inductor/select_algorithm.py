@@ -3450,6 +3450,59 @@ class AlgorithmSelectorCache(PersistentCache):
         return result
 
     @classmethod
+    def _run_collective_benchmark(
+        cls,
+        choice: ChoiceCaller,
+        inputs: tuple,
+        output: torch.Tensor,
+        nruns: int,
+        process_group,
+        timeout,
+        is_warmup: bool = False,
+    ) -> float:
+        """
+        Single function for benchmarking collective operations.
+        Used for both warmup and actual benchmarking.
+
+        Returns total time in milliseconds, or raises TimeoutError if any collective times out.
+        """
+        import torch.distributed as dist
+
+        total_time = 0.0
+
+        for i in range(nruns):
+            if not is_warmup:
+                log.debug("Benchmark run %d/%d", i + 1, nruns)
+
+            # Barrier before each run
+            # If any rank times out here, all ranks will time out naturally
+            work = dist.barrier(group=process_group, async_op=True)
+            if not work.wait(timeout):
+                raise TimeoutError(
+                    f"Barrier timeout during {'warmup' if is_warmup else 'benchmark'}"
+                )
+
+            torch.cuda.synchronize()
+
+            if is_warmup:
+                # Warmup: just run the operation without timing
+                choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
+                torch.cuda.synchronize()
+            else:
+                # Benchmarking: time the operation
+                start_evt = torch.cuda.Event(enable_timing=True)
+                end_evt = torch.cuda.Event(enable_timing=True)
+
+                start_evt.record()
+                choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
+                end_evt.record()
+                end_evt.synchronize()
+
+                total_time += start_evt.elapsed_time(end_evt)
+
+        return total_time
+
+    @classmethod
     def benchmark_collective_choice(
         cls,
         choice: ChoiceCaller,
@@ -3460,9 +3513,9 @@ class AlgorithmSelectorCache(PersistentCache):
         This method ensures all ranks synchronize before benchmarking
         to get accurate measurements for distributed collective operations.
 
-        Timeout/Error handling: If ANY rank times out or encounters an error,
-        ALL ranks will skip this choice by returning float("inf"), allowing
-        the autotuner to fall back to the default implementation.
+        Timeout/Error handling: If ANY rank times out or encounters an error during
+        the collective operations, ALL ranks will naturally time out (since the collective
+        won't complete), allowing the autotuner to fall back to the default implementation.
         """
         from datetime import timedelta
 
@@ -3471,6 +3524,7 @@ class AlgorithmSelectorCache(PersistentCache):
         timeout_seconds = config.collective_benchmark_timeout
 
         nruns = config.collective_benchmark_nruns
+        nwarmup = ir.autotune_warmup
 
         # Use default process group (None = all ranks)
         process_group = None
@@ -3482,94 +3536,21 @@ class AlgorithmSelectorCache(PersistentCache):
 
         timeout = timedelta(seconds=timeout_seconds)
 
-        def sync_timeout_decision(local_timeout: bool) -> bool:
-            """
-            Synchronize timeout decision across all ranks to avoid deadlock.
-            Returns True if any rank timed out (all ranks should fallback).
-            """
-            try:
-                # Each rank reports its timeout status (1.0 = timeout, 0.0 = ok)
-                timeout_tensor = torch.tensor(
-                    [1.0 if local_timeout else 0.0],
-                    dtype=torch.float32,
-                    device=f"cuda:{rank}",
-                )
-                dist.all_reduce(
-                    timeout_tensor, op=dist.ReduceOp.MAX, group=process_group
-                )
-
-                # If any rank timed out(non zero), all ranks should know
-                any_rank_timed_out = timeout_tensor.item() > 0.5
-                return any_rank_timed_out
-            except Exception:
-                log.warning("[Rank %d] Failed to sync timeout decision", rank)
-                return True
-
         try:
-            # Warmup barrier with timeout
-            work = dist.barrier(group=process_group, async_op=True)
-            local_timeout = not work.wait(timeout)
+            # Do n warmups
+            cls._run_collective_benchmark(
+                choice, inputs, output, nwarmup, process_group, timeout, is_warmup=True
+            )
 
-            # Sync decision across all ranks
-            if sync_timeout_decision(local_timeout):
-                log.warning(
-                    "Warmup barrier timeout detected for choice %s (timeout=%.1fs). "
-                    "All ranks skipping this choice.",
-                    getattr(choice, "name", "<unknown>"),
-                    timeout_seconds,
-                )
-                return float("inf")
-
-            torch.cuda.synchronize()
-
-            # Warmup with barrier synchronization for collective ops
-            nwarmup = ir.autotune_warmup
-            for _ in range(nwarmup):
-                work = dist.barrier(group=process_group, async_op=True)
-                if not work.wait(timeout):
-                    log.warning("Warmup barrier timeout, skipping this choice")
-                    return float("inf")
-
-                torch.cuda.synchronize()
-                choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
-                torch.cuda.synchronize()
-
-            total_time = 0.0
-
-            for i in range(nruns):
-                log.debug("Benchmark run %d/%d", i + 1, nruns)
-
-                # Barrier with timeout before each run
-                work = dist.barrier(group=process_group, async_op=True)
-                local_timeout = not work.wait(timeout)
-
-                # Sync decision across all ranks
-                if sync_timeout_decision(local_timeout):
-                    log.warning(
-                        "Barrier timeout for choice %s at run %d/%d (timeout=%.1fs). "
-                        "All ranks skipping this choice.",
-                        getattr(choice, "name", "<unknown>"),
-                        i + 1,
-                        nruns,
-                        timeout_seconds,
-                    )
-                    return float("inf")
-
-                torch.cuda.synchronize()
-
-                start_evt = torch.cuda.Event(enable_timing=True)
-                end_evt = torch.cuda.Event(enable_timing=True)
-
-                start_evt.record()
-                choice.benchmark_collective(*inputs, out=output)  # type: ignore[attr-defined]
-                end_evt.record()
-                end_evt.synchronize()
-
-                total_time += start_evt.elapsed_time(end_evt)
+            # Do n actual benchmarking runs
+            total_time = cls._run_collective_benchmark(
+                choice, inputs, output, nruns, process_group, timeout, is_warmup=False
+            )
 
             avg_time = total_time / nruns
 
-            # All-reduce to get max time across ranks with timeout
+            # All-reduce to get max time across ranks
+            # If any rank times out here, all ranks will time out naturally
             time_tensor = torch.tensor(
                 [avg_time], dtype=torch.float32, device=f"cuda:{rank}"
             )
@@ -3579,17 +3560,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 group=process_group,
                 async_op=True,
             )
-            local_timeout = not work.wait(timeout)
-
-            # Sync decision across all ranks
-            if sync_timeout_decision(local_timeout):
-                log.warning(
-                    "All-reduce timeout for choice %s (timeout=%.1fs). "
-                    "All ranks skipping this choice.",
-                    getattr(choice, "name", "<unknown>"),
-                    timeout_seconds,
+            if not work.wait(timeout):
+                raise TimeoutError(
+                    "All-reduce timeout when collecting benchmark results"
                 )
-                return float("inf")
 
             timing = time_tensor.item()
 
