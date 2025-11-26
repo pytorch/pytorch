@@ -97,6 +97,7 @@ templates = {
     <a href="/fr_trace_nccl">FlightRecorder NCCL</a> <!--@lint-ignore-->
     <a href="/profile">torch profiler</a> <!--@lint-ignore-->
     <a href="/wait_counters">Wait Counters</a> <!--@lint-ignore-->
+    <a href="/tcpstore">TCPStore</a> <!--@lint-ignore-->
 </nav>
 
 <section class="content">
@@ -211,6 +212,19 @@ Hi
     {% endfor %}
 {% endblock %}
     """,
+    "tcpstore.html": """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}TCPStore Keys{% endblock %}</h1>
+{% endblock %}
+{% block content %}
+    <pre>
+    {% for k, v in zip(keys, values) -%}
+{{ k }}: {{ v | truncate(100) }}
+    {% endfor %}
+    </pre>
+{% endblock %}
+    """,
 }
 
 
@@ -259,6 +273,7 @@ class FrontendServer:
             "/fr_trace_nccl": self._handle_fr_trace_nccl,
             "/profile": self._handle_profiler,
             "/wait_counters": self._handle_wait_counters,
+            "/tcpstore": self._handle_tcpstore,
         }
 
         # Create HTTP server
@@ -353,6 +368,13 @@ class FrontendServer:
         return self._render_template(
             "json_resp.html", title="Wait Counters", addrs=addrs, resps=resps
         )
+
+    def _handle_tcpstore(self, req: HTTPRequestHandler) -> bytes:
+        store = tcpstore_client(prefix="")
+        keys = store.list_keys()
+        keys.sort()
+        values = [repr(v) for v in store.multi_get(keys)]
+        return self._render_template("tcpstore.html", keys=keys, values=values)
 
 
 def main(port: int) -> None:
