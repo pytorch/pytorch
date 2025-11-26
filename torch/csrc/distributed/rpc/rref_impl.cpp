@@ -290,12 +290,12 @@ void OwnerRRef::setError(std::exception_ptr eptr) {
 std::ostream& operator<<(std::ostream& os, const RRef& rref) {
   if (rref.isOwner()) {
     return os << "OwnerRRef("
-              << "rref_id=" << rref.rrefId() << ")";
+              << "rref_id=" << rref.rrefId() << ')';
   } else {
     return os << "UserRRef("
               << "rref_id=" << rref.rrefId()
               << ", fork_id=" << static_cast<const UserRRef*>(&rref)->forkId()
-              << ")";
+              << ')';
   }
 }
 

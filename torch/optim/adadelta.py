@@ -38,7 +38,7 @@ class Adadelta(Optimizer):
         capturable: bool = False,
         maximize: bool = False,
         differentiable: bool = False,
-    ):
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -257,7 +257,7 @@ def _single_tensor_adadelta(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
@@ -317,7 +317,7 @@ def _multi_tensor_adadelta(
     differentiable: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if differentiable:
         raise AssertionError("_foreach ops don't support autograd")
 
@@ -427,7 +427,7 @@ def adadelta(
     eps: float,
     weight_decay: float,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs Adadelta algorithm computation.
 
     See :class:`~torch.optim.Adadelta` for details.
