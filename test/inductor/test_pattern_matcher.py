@@ -1418,18 +1418,17 @@ class TestPatternMatcher(TestCase):
         x = torch.randn(3, device=GPU_TYPE)
 
         def func(x):
-            twos = torch.ones(3, device=x.device) * 2
-            x = twos * x
-            x = x + 1
             perm = torch.randperm(x.numel(), device=x.device)
             return x.view(-1)[perm].view_as(x)
 
+        counters.clear()
         torch.manual_seed(40)
         result = func(x)
         cm = torch.compile(func)
         torch.manual_seed(40)
         result_compiled = cm(x)
         torch.testing.assert_close(result, result_compiled)
+        assert counters["inductor"]["pattern_matcher_count"] == 1
 
     @inductor_config.patch(fx_graph_remote_cache=False)
     def test_match_equivalent_function_invocations2(self):
