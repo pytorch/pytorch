@@ -28,6 +28,8 @@ from .planner import (
     WriteItem,
     WriteItemType,
 )
+from bisect import bisect_right, insort
+
 from .resharding import (
     _check_shard_metadata_pair_overlap,
     _shards_get_overlap_region_wrt_saved_tensor,
@@ -270,11 +272,69 @@ def create_read_items_for_chunk_list(
     Returns:
         A list of ``ReadItem`` that will satisfy all input chunks.
     """
-    read_items = []
-    # this is a naive quadratic algo that can be optimized later
-    for idx, shard in enumerate(local_chunks):
-        for storage_idx, storage_md in enumerate(checkpoint_md.chunks):
-            if not _check_shard_metadata_pair_overlap(shard, storage_md):
+    read_items: list[ReadItem] = []
+    saved_chunks = checkpoint_md.chunks
+
+    if not local_chunks or not saved_chunks:
+        return read_items
+
+    num_dims = len(local_chunks[0].offsets)
+    sweep_dim = 0
+    if num_dims > 1:
+        max_size = 0
+        for dim in range(num_dims):
+            dim_size = max(
+                max(
+                    chunk.offsets[dim] + chunk.sizes[dim]
+                    for chunk in local_chunks
+                ),
+                max(
+                    chunk.offsets[dim] + chunk.sizes[dim]
+                    for chunk in saved_chunks
+                ),
+            )
+            if dim_size > max_size:
+                max_size = dim_size
+                sweep_dim = dim
+
+    saved_sorted_indices = sorted(
+        range(len(saved_chunks)),
+        key=lambda idx: saved_chunks[idx].offsets[sweep_dim],
+    )
+
+    local_sorted_indices = sorted(
+        range(len(local_chunks)),
+        key=lambda idx: local_chunks[idx].offsets[sweep_dim],
+    )
+
+    active_saved: list[tuple[int, int]] = []
+    saved_ptr = 0
+    num_saved = len(saved_sorted_indices)
+
+    for local_idx in local_sorted_indices:
+        local_chunk = local_chunks[local_idx]
+        local_start = local_chunk.offsets[sweep_dim]
+        local_end = local_start + local_chunk.sizes[sweep_dim]
+
+        cutoff = bisect_right(active_saved, (local_start, -1))
+        if cutoff:
+            del active_saved[:cutoff]
+
+        while saved_ptr < num_saved:
+            storage_idx = saved_sorted_indices[saved_ptr]
+            storage_chunk = saved_chunks[storage_idx]
+            saved_start = storage_chunk.offsets[sweep_dim]
+
+            if saved_start >= local_end:
+                break
+
+            saved_end = saved_start + storage_chunk.sizes[sweep_dim]
+            insort(active_saved, (saved_end, storage_idx))
+            saved_ptr += 1
+
+        for _, storage_idx in active_saved:
+            storage_chunk = saved_chunks[storage_idx]
+            if not _check_shard_metadata_pair_overlap(local_chunk, storage_chunk):
                 continue
 
             storage_offsets = []
@@ -286,7 +346,7 @@ def create_read_items_for_chunk_list(
                 offset_for_current_tensor,
                 length,
             ) in _shards_get_overlap_region_wrt_saved_tensor(
-                saved_shard=storage_md, current_shard=shard
+                saved_shard=storage_chunk, current_shard=local_chunk
             ):
                 storage_offsets.append(offset_for_saved_tensor)
                 dest_offsets.append(offset_for_current_tensor)
@@ -294,9 +354,9 @@ def create_read_items_for_chunk_list(
 
             read_items.append(
                 _create_read_item_for_tensor(
-                    dest_index=MetadataIndex(fqn, shard.offsets, idx),
+                    dest_index=MetadataIndex(fqn, local_chunk.offsets, local_idx),
                     dest_offsets=dest_offsets,
-                    storage_index=MetadataIndex(fqn, storage_md.offsets, storage_idx),
+                    storage_index=MetadataIndex(fqn, storage_chunk.offsets, storage_idx),
                     storage_offsets=storage_offsets,
                     lengths=lengths,
                 )
