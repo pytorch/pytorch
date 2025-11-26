@@ -3386,7 +3386,6 @@ class TestSparse(TestSparseBase):
         self.assertRaises(TypeError, lambda: t.numpy())
 
     @coalescedonoff
-    @expectedFailureMPS
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
     def test_softmax(self, device, dtype, coalesced):
@@ -3701,7 +3700,6 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.float)
     @dtypesIfMPS(torch.float32)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.softmax, 1, device, dtype)
@@ -3709,18 +3707,18 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double, torch.float)
     @dtypesIfMPS(torch.float32)
-    @expectedFailureMPS
     @unittest.skipIf(TEST_WITH_CROSSREF, "generator unsupported triggers assertion error")
     def test_log_softmax_zero_nnz(self, device, dtype):
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 1, device, dtype)
         self._check_zero_nnz_softmax_op(torch.sparse.log_softmax, 10, device, dtype)
 
     @dtypes(torch.float)
-    @expectedFailureMPS
     def test_log_softmax_float(self, device, dtype):
+        # float16 -> float32 comparison for mps since mps doesnt have float64
+        dtype = torch.float16 if device == "mps:0" else dtype
         x = (torch.rand(4, 3, dtype=dtype, device=device) - 10000000.0).to_sparse()
         out = torch.sparse.log_softmax(x, dim=1).to_dense()
-        x_double = x.double()
+        x_double = x.double() if device != "mps:0" else x.float()
         out_double = torch.sparse.log_softmax(x_double, dim=1).to_dense()
         self.assertEqual(out, out_double.to(dtype=dtype))
 

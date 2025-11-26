@@ -6918,12 +6918,14 @@
   dispatch:
     SparseCPU: softmax_sparse_cpu
     SparseCUDA: softmax_sparse_cuda
+    SparseMPS: softmax_sparse_mps
   autogen: _sparse_softmax.out
 
 - func: _sparse_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
     SparseCPU: softmax_backward_sparse_cpu
     SparseCUDA: softmax_backward_sparse_cuda
+    SparseMPS: softmax_backward_sparse_mps
   autogen: _sparse_softmax_backward_data.out
 
 - func: _sparse_log_softmax.int(Tensor self, int dim, ScalarType? dtype=None) -> Tensor
@@ -6939,12 +6941,14 @@
   dispatch:
     SparseCPU: log_softmax_sparse_cpu
     SparseCUDA: log_softmax_sparse_cuda
+    SparseMPS: log_softmax_sparse_mps
   autogen: _sparse_log_softmax.out
 
 - func: _sparse_log_softmax_backward_data(Tensor grad_output, Tensor output, int dim, Tensor self) -> Tensor
   dispatch:
     SparseCPU: log_softmax_backward_sparse_cpu
     SparseCUDA: log_softmax_backward_sparse_cuda
+    SparseMPS: log_softmax_backward_sparse_mps
   autogen: _sparse_log_softmax_backward_data.out
 
 - func: _spdiags(Tensor diagonals, Tensor offsets, int[] shape, Layout? layout=None) -> Tensor
