@@ -258,33 +258,33 @@ class _XPUAllocator:
 
 
 class XPUPluggableAllocator(_XPUAllocator):
-    r"""XPU memory allocator loaded from a so file."""
+    r"""XPU memory allocator loaded from a shared library."""
 
-    def __init__(self, path_to_so_file: str, alloc_fn_name: str, free_fn_name: str):
-        r"""XPU memory allocator loaded dynamically from a shared library (.so).
+    def __init__(self, path_to_lib_file: str, alloc_fn_name: str, free_fn_name: str):
+        r"""XPU memory allocator loaded dynamically from a shared library.
 
         This lets users provide custom allocation and free functions implemented
-        in a separate shared object. The allocator is registered through
+        in a separate shared library. The allocator is registered through
         ``torch._C._xpu_customAllocator`` and becomes available for use via
         ``torch.memory.xpu.change_current_allocator``.
 
         Arguments:
-            path_to_so_file (str):
-                Filesystem path to the `.so` file containing the allocation
+            path_to_lib_file (str):
+                Filesystem path to the shared library file containing the allocation
                 and free functions.
             alloc_fn_name (str):
-                Name of the allocation function exported from the `.so` file.
+                Name of the allocation function exported from the shared library.
                 The function must have the signature:
 
                     ``void* alloc_fn(size_t size, int device, sycl::queue* queue);``
 
             free_fn_name (str):
-                Name of the free function exported from the `.so` file. The
-                function must have the signature:
+                Name of the free function exported from the shared library.
+                The function must have the signature:
 
                     ``void free_fn(void* ptr, size_t size, sycl::queue* queue);``
         """
-        allocator_lib = ctypes.CDLL(path_to_so_file)
+        allocator_lib = ctypes.CDLL(path_to_lib_file)
 
         alloc_fn_ptr = getattr(allocator_lib, alloc_fn_name)
         free_fn_ptr = getattr(allocator_lib, free_fn_name)
@@ -293,7 +293,9 @@ class XPUPluggableAllocator(_XPUAllocator):
         free_fn_addr = ctypes.cast(free_fn_ptr, ctypes.c_void_p).value
 
         if alloc_fn_addr is None or free_fn_addr is None:
-            raise RuntimeError("Failed to load allocator symbols from the .so file.")
+            raise RuntimeError(
+                "Failed to load allocator symbols from the shared library."
+            )
 
         self._allocator = torch._C._xpu_customAllocator(alloc_fn_addr, free_fn_addr)
 
