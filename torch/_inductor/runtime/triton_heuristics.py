@@ -29,10 +29,9 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
-    _IS_WINDOWS,
     prefix_is_reduction,
     triton_version_uses_attrs_dict,
-    XPU_KERNEL_BIN_EXT,
+    XPU_KERNEL_FORMAT,
 )
 from . import triton_helpers
 from .autotune_cache import AutotuneCache
@@ -761,7 +760,7 @@ class CachingAutotuner(KernelInterface):
 
         if self.device_props.type == "xpu":
             # TODO: remove this after Intel triton supports generate native code on Windows.
-            if not _IS_WINDOWS:
+            if XPU_KERNEL_FORMAT == "zebin":
                 options["generate_native_code"] = True
 
         return options
@@ -1178,7 +1177,7 @@ class CachingAutotuner(KernelInterface):
         from torch._inductor import config
         from torch._inductor.codecache import CudaKernelParamCache
 
-        bin_type = {"hip": "hsaco", "xpu": XPU_KERNEL_BIN_EXT}.get(
+        bin_type = {"hip": "hsaco", "xpu": XPU_KERNEL_FORMAT}.get(
             self.device_props.type, "cubin"
         )
         binary = launcher.bin.asm[bin_type]
