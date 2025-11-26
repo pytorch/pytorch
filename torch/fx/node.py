@@ -753,9 +753,7 @@ class Node(_NodeBase):
                 # between eager and compiled execution, regardless of generator usage
                 return True
 
-            from torch._higher_order_ops.effects import has_effects
-
-            return self.target in _side_effectful_functions or has_effects(self.target)
+            return self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":
