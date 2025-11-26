@@ -102,7 +102,6 @@ from torch.testing._internal.common_utils import (
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.logging_utils import make_logging_test
 
 
 pytree_modules = {

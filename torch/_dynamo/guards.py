@@ -641,7 +641,6 @@ class GuardManagerWrapper:
         self, mgr: GuardManager, body: IndentedBufferWithPrefix
     ) -> None:
         with body.indent():
-            # Sort leaf guards by their verbose code parts to ensure consistent ordering
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, RelationalGuard):
                     if guard not in self.printed_relational_guards:
@@ -704,7 +703,6 @@ class GuardManagerWrapper:
 
         def visit(mgr: GuardManager) -> None:
             nonlocal relational_guards_seen
-            # Sort leaf guards by their verbose code parts to ensure consistent ordering
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, RelationalGuard):
                     if guard not in relational_guards_seen:
