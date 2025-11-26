@@ -229,6 +229,18 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
         return x
 
+    def exit_on_graph_break(self) -> bool:
+        """
+        functional_call is side-effect free and purely functional.
+        We don't need to break the graph when using it, which allows
+        it to work with higher-order ops like cond and scan.
+
+        Returns False to indicate that this context manager does not
+        require graph breaks, enabling it to work with higher-order
+        operators that require full graph capture.
+        """
+        return False
+
     # Forward all other method calls to self.cm_vt
     def __getattr__(self, name: str) -> Any:
         # This will be called for any attribute not explicitly defined in this class
