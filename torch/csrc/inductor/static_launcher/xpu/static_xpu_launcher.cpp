@@ -12,7 +12,7 @@
 #include <ATen/Context.h>
 #include <c10/core/DeviceGuard.h>
 #include <c10/xpu/XPUStream.h>
-#include <torch/csrc/inductor/static_xpu_launcher.h>
+#include <torch/csrc/inductor/static_launcher/xpu/static_xpu_launcher.h>
 #include <cstdint>
 #include <stdexcept>
 
@@ -334,7 +334,6 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
         delete reinterpret_cast<sycl::kernel*>(ptr);
       });
 
-  n_spills /= 4;
   return Py_BuildValue("(Oii)", kernel_py, n_regs, n_spills);
   END_HANDLE_TH_ERRORS
 }
@@ -480,24 +479,24 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
+std::array<PyMethodDef, 2> StaticXpuLauncherMethods = {
     PyMethodDef{
         "_launch_kernel",
         launch_kernel,
         METH_VARARGS,
-        "Statically launch triton compiled CUDA kernels"},
+        "Statically launch triton compiled XPU kernels"},
     PyMethodDef{
         "_load_kernel",
         load_kernel,
         METH_VARARGS,
-        "Load CUDA kernel from cubin file"}};
+        "Load XPU kernel from zebin file"}};
 
-// Define a minimal type for StaticCudaLauncher.
+// Define a minimal type for StaticXpuLauncher.
 // We don't implement __new__ or __init__ because we're using it only as a
 // container for static methods.
-PyTypeObject StaticCudaLauncherType = {
+PyTypeObject StaticXpuLauncherType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
-    "torch._C._StaticCudaLauncher", // tp_name
+    "torch._C._StaticXpuLauncher", // tp_name
     sizeof(PyObject), // tp_basicsize
     0, // tp_itemsize
     nullptr, // tp_dealloc
@@ -536,15 +535,15 @@ PyTypeObject StaticCudaLauncherType = {
     nullptr, // tp_new
 };
 } // anonymous namespace
-// Module initialization: add StaticCudaLauncher to the module with our static
+// Module initialization: add StaticXpuLauncher to the module with our static
 // methods.
 bool StaticXpuLauncher_init(PyObject* module) {
-  if (PyType_Ready(&StaticCudaLauncherType) < 0) {
+  if (PyType_Ready(&StaticXpuLauncherType) < 0) {
     return false;
   }
   // Add our static methods to the type's dictionary.
-  PyObject* dict = StaticCudaLauncherType.tp_dict;
-  for (auto& def : StaticCudaLauncherMethods) {
+  PyObject* dict = StaticXpuLauncherType.tp_dict;
+  for (auto& def : StaticXpuLauncherMethods) {
     PyObject* func = PyCFunction_New(&def, nullptr);
     if (!func) {
       return false;
@@ -557,11 +556,11 @@ bool StaticXpuLauncher_init(PyObject* module) {
     }
     Py_DECREF(static_method);
   }
-  Py_INCREF(&StaticCudaLauncherType);
+  Py_INCREF(&StaticXpuLauncherType);
   if (PyModule_AddObject(
-          module, "_StaticCudaLauncher", (PyObject*)&StaticCudaLauncherType) <
+          module, "_StaticXpuLauncher", (PyObject*)&StaticXpuLauncherType) <
       0) {
-    Py_DECREF(&StaticCudaLauncherType);
+    Py_DECREF(&StaticXpuLauncherType);
     return false;
   }
   return true;
