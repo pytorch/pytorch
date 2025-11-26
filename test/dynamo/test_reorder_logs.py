@@ -54,7 +54,7 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
         counters.clear()
         x = torch.randn(3, 3)
         orig_out = fn(x)
-        with torch._dynamo.config.patch(ignore_logger_methods={ignore_method}):
+        with torch._dynamo.config.patch(ignore_logging_functions={ignore_method}):
             opt_f = torch.compile(backend="eager")(fn)
             with self.assertLogs(logger, level="INFO") as captured:
                 logger.info("call logger info to avoid error")
@@ -68,6 +68,97 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
         else:
             self.assertIn("moo", printed_output)
             self.assertGreater(len(counters["graph_break"]), 0)
+
+
+    def test_ignore_arbitrary_function_noop(self):
+        counters.clear()
+        calls = []
+
+        def dbg_fn(x):
+            calls.append("ran")
+
+        torch._dynamo.config.ignore_logging_functions.add(dbg_fn)
+
+        def f(x):
+            dbg_fn(x)  # must be no-op inside Dynamo
+            return x + 1
+
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+
+        opt_out = opt_f(x)
+
+        # function must never run
+        self.assertEqual(calls, [])
+
+        # output must match eager
+        self.assertTrue(same(opt_out, x + 1))
+
+        # no graph breaks allowed
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+        torch._dynamo.config.ignore_logging_functions.clear()
+
+
+    def test_ignore_function_returns_none(self):
+        counters.clear()
+
+        def ignore_me(x):
+            return "should_not_run"
+
+        torch._dynamo.config.ignore_logging_functions.add(ignore_me)
+
+        def f(x):
+            y = ignore_me(x)  # Dynamo substitutes Constant(None)
+            return x * 2
+
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+
+        opt_out = opt_f(x)
+
+        # output correct
+        self.assertTrue(same(opt_out, x * 2))
+
+        # ensure no graph breaks
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+        torch._dynamo.config.ignore_logging_functions.clear()
+
+
+    def test_ignore_function_does_not_conflict_with_reorderable(self):
+        counters.clear()
+        log = []
+
+        def ignored(x):
+            log.append("ignored")
+
+        def reordered(x):
+            log.append("reordered")
+
+        torch._dynamo.config.ignore_logging_functions.add(ignored)
+
+        with torch._dynamo.config.patch(reorderable_logging_functions={reordered}):
+
+            def f(x):
+                ignored(x)
+                reordered(x)
+                return x + 1
+
+            x = torch.ones(3, 3)
+            opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+            opt_out = opt_f(x)
+
+        # ignored must NOT run
+        self.assertNotIn("ignored", log)
+
+        # reordered MUST run
+        self.assertIn("reordered", log)
+
+        # output is correct
+        self.assertTrue(same(opt_out, x + 1))
+
+        torch._dynamo.config.ignore_logging_functions.clear()
 
 
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):

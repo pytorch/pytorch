@@ -586,11 +586,10 @@ log_compilation_metrics = True
 # mutated after the print statement.
 reorderable_logging_functions: set[Callable[[Any], None]] = set()
 
-# A set of methods that will be ignored while tracing,
-# to prevent graph breaks.
-# Add logging.Logger.<method> to ignore all calls for method,
-# or logger.<method> to ignore calls for method from this logger instance only.
-ignore_logger_methods: set[Callable[..., Any]] = set()
+# A set of callables that will be ignored during Dynamo tracing.
+# These functions will NOT run, will NOT be reordered, and will NOT
+# cause graph breaks. They act as full no-ops.
+ignore_logging_functions: set[Callable[..., Any]] = set()
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
