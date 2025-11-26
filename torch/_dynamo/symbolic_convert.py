@@ -2063,7 +2063,7 @@ class InstructionTranslatorBase(
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(ConstantVariable.create(None))
+                self.push(variables.constant_none)
             else:
                 # pop the iterator in Python < 3.12
                 self.pop()
@@ -3665,9 +3665,9 @@ class InstructionTranslatorBase(
         tos = self.stack[-1]
         assert isinstance(tos, ConstDictVariable)
         if isinstance(tos.items, collections.abc.Mapping):
-            self.push(ConstantVariable.create(True))
+            self.push(variables.constant_true)
         else:
-            self.push(ConstantVariable.create(False))
+            self.push(variables.constant_false)
 
     def MATCH_SEQUENCE(self, inst: Instruction) -> None:
         tos = self.stack[-1]
@@ -3676,9 +3676,9 @@ class InstructionTranslatorBase(
         if isinstance(tos_value, collections.abc.Sequence) and not isinstance(
             tos_value, (str, bytes, bytearray)
         ):
-            self.push(ConstantVariable.create(True))
+            self.push(variables.constant_true)
         else:
-            self.push(ConstantVariable.create(False))
+            self.push(variables.constant_false)
 
     def MATCH_KEYS(self, inst: Instruction) -> None:
         tos = self.stack[-1]
@@ -3690,11 +3690,11 @@ class InstructionTranslatorBase(
         if all(k in tos1 for k in keys):  # type: ignore[attr-defined]
             self.push(TupleVariable([tos1.getitem_const(self, k) for k in keys]))  # type: ignore[attr-defined,arg-type]
             if sys.version_info < (3, 11):
-                self.push(ConstantVariable.create(True))
+                self.push(variables.constant_true)
         else:
-            self.push(ConstantVariable.create(None))
+            self.push(variables.constant_none)
             if sys.version_info < (3, 11):
-                self.push(ConstantVariable.create(False))
+                self.push(variables.constant_false)
 
     def LOAD_ASSERTION_ERROR(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval("AssertionError"))
@@ -4955,7 +4955,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         if self.output.should_exit:
             # graph break
-            return ConstantVariable.create(None)  # return dummy variable
+            return variables.constant_none  # return dummy variable
 
         assert self.symbolic_result is not None
 
@@ -5195,7 +5195,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 "Too many yield values in generator. Maybe you are inlining an infinite generator. "
                 f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
             )
-        self.push(ConstantVariable.create(None))
+        self.push(variables.constant_none)
         if (
             config.enable_faithful_generator_behavior
             or self.is_generator_from_ctx_manager

@@ -401,7 +401,7 @@ class BaseUserFunctionVariable(VariableTracker):
         except NotImplementedError:
             if name == "__name__" and isinstance(self, NestedUserFunctionVariable):
                 result = True
-        return variables.ConstantVariable.create(result)
+        return variables.constant_true if result else variables.constant_false
 
     def closure_vars(self, tx: "InstructionTranslator") -> dict[str, VariableTracker]:
         return {}
@@ -987,8 +987,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         if name in self.python_type().__dict__:
-            return ConstantVariable.create(True)
-        return ConstantVariable.create(False)
+            return variables.constant_true
+        return variables.constant_false
 
     def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
         return False

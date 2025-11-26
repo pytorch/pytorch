@@ -341,6 +341,12 @@ its type to `common_constant_types`.
         return variables.ConstantVariable.create(result)
 
 
+constant_none = ConstantVariable(None)
+constant_true = ConstantVariable(True)
+constant_false = ConstantVariable(False)
+constant_NotImplemented = ConstantVariable(NotImplemented)
+
+
 class EnumVariable(VariableTracker):
     """VariableTracker for enum.Enum and enum.IntEnum instances
 

@@ -2035,7 +2035,7 @@ class BuiltinVariable(VariableTracker):
                 NNModuleVariable,
             ),
         ):
-            return variables.ConstantVariable.create(True)
+            return variables.constant_true
         elif isinstance(arg, UserDefinedVariable):
             return variables.ConstantVariable.create(callable(arg.value))
         elif isinstance(
@@ -2049,7 +2049,7 @@ class BuiltinVariable(VariableTracker):
                 ListIteratorVariable,
             ),
         ):
-            return variables.ConstantVariable.create(False)
+            return variables.constant_false
         else:
             return None
 
@@ -2150,7 +2150,7 @@ class BuiltinVariable(VariableTracker):
                 f"{len(args)} args",
             )
         if len(args) == 1:
-            args = (*args, ConstantVariable.create(None))
+            args = (*args, variables.constant_none)
         if len(args) != 2:
             raise_args_mismatch(
                 tx,
