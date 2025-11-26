@@ -1913,7 +1913,10 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(result.dtype.is_floating_point)
         self.assertTrue(torch.all(torch.isfinite(result)))
 
-instantiate_device_type_tests(TestUnaryUfuncs, globals())
+devices = ["cpu", "cuda", "xpu", "hpu"]
+instantiate_device_type_tests(
+    TestUnaryUfuncs, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()
