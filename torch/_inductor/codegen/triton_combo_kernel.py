@@ -699,7 +699,7 @@ class ComboKernel(Kernel):
                 block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
         self.block_args = list(block_names.keys())
 
-        return [ConstexprArg(x) for x in block_names.keys()]
+        return [ConstexprArg(x) for x in block_names]
 
     def add_numel_to_args(
         self, argdefs: list[ArgName], signature: list[Any]

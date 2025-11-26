@@ -167,7 +167,7 @@ static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, co
     std::stringstream ss;
     ss << arg_name << " should be greater than zero but got (";
     std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
-    ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
+    ss << args.back() <<  ")" << " (while checking arguments for " << c << ')';
     TORCH_CHECK(false, ss.str());
   }
 }

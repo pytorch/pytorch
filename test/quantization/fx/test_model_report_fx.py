@@ -205,7 +205,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 2)
 
             # for each linear layer, should be supported but not used
-            for linear_key in per_channel_info.keys():
+            for linear_key in per_channel_info:
                 module_entry = per_channel_info[linear_key]
 
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
@@ -277,7 +277,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info.keys():
+            for key in per_channel_info:
                 module_entry = per_channel_info[key]
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
 
@@ -327,7 +327,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info.keys():
+            for key in per_channel_info:
                 module_entry = per_channel_info[key]
 
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
@@ -371,7 +371,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info.keys():
+            for key in per_channel_info:
                 module_entry = per_channel_info[key]
 
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
@@ -415,7 +415,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info.keys():
+            for key in per_channel_info:
                 module_entry = per_channel_info[key]
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
                 self.assertEqual(module_entry["per_channel_quantization_used"], True)
@@ -482,7 +482,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 1)
 
             # for the one conv, it should still give advice to use different qconfig
-            for key in per_channel_info.keys():
+            for key in per_channel_info:
                 module_entry = per_channel_info[key]
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
                 self.assertEqual(module_entry["per_channel_quantization_used"], False)
@@ -974,7 +974,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             # there should be two entries
             self.assertEqual(len(model_report.get_observers_of_interest()), 2)
             for detector in test_detector_set:
-                self.assertTrue(detector.get_detector_name() in model_report.get_observers_of_interest().keys())
+                self.assertTrue(detector.get_detector_name() in model_report.get_observers_of_interest())
 
                 # get number of entries for this detector
                 detector_obs_of_interest_fqns = model_report.get_observers_of_interest()[detector.get_detector_name()]

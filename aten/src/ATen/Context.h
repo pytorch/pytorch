@@ -174,6 +174,12 @@ class TORCH_API Context {
   static long versionCuDNN() {
     return detail::getCUDAHooks().versionCuDNN();
   }
+  static long versionRuntimeCuDNN() {
+    return detail::getCUDAHooks().versionRuntimeCuDNN();
+  }
+  static long versionCuDNNFrontend() {
+    return detail::getCUDAHooks().versionCuDNNFrontend();
+  }
   static bool hasCuSOLVER() {
     return detail::getCUDAHooks().hasCuSOLVER();
   }

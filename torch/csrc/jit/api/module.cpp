@@ -615,7 +615,7 @@ std::string Module::dump_to_str(
             print_method_bodies, print_attr_values, print_param_values));
   }
   ss << "  }" << '\n';
-  ss << "}" << '\n';
+  ss << '}' << '\n';
 
   return ss.str();
 }

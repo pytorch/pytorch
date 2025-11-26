@@ -212,17 +212,12 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
   loss.resize_((reduction == Reduction::None || grad_output.defined()) ? target.sizes() : IntArrayRef({}));
   TORCH_CHECK(loss.is_mps());
 
-  Tensor loss_squeezed = loss.squeeze();
-  Tensor input_squeezed = input.squeeze();
-  Tensor target_squeezed = target.squeeze();
-
   @autoreleasepool {
-    std::string key =
-        op_name + reductionToString(reduction) + getTensorsStringKey({input_squeezed, target_squeezed, weight});
+    std::string key = op_name + reductionToString(reduction) + getTensorsStringKey({input, target, weight});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_squeezed);
-      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target_squeezed);
+      newCachedGraph->inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input);
+      newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
 
       MPSGraphTensor* bceLossUnweighted = nil;
       // if grad_output is defined, then it's a backward pass
@@ -252,12 +247,12 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
           newCachedGraph->gradInputTensor = bceLoss;
         }
       } else {
-        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input_squeezed.sizes().size());
+        newCachedGraph->lossTensor = reduceTensor(bceLoss, reduction, mpsGraph, input.sizes().size());
       }
     });
-    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input_squeezed);
-    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target_squeezed);
-    Placeholder lossPlaceholder = Placeholder(cachedGraph->lossTensor, loss_squeezed);
+    Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
+    Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
+    Placeholder lossPlaceholder = Placeholder(cachedGraph->lossTensor, loss);
 
     NSMutableDictionary* feeds = [[NSMutableDictionary new] autorelease];
 
@@ -421,6 +416,8 @@ static void nllnd_loss_forward_impl(Tensor& output,
                                     int64_t reduction,
                                     int64_t ignore_index,
                                     bool is2D) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(output.scalar_type()),
+                              "nlld_loss for complex is not supported for MPS");
   std::vector<long long> reshapedTarget(target_arg.sizes().begin(), target_arg.sizes().end());
   reshapedTarget.push_back(1);
 
@@ -829,6 +826,9 @@ static void smooth_l1_loss_backward_impl(const Tensor& grad_output,
 Tensor& huber_loss_out_mps(const Tensor& input, const Tensor& target, int64_t reduction, double delta, Tensor& output) {
   std::string op_name = __func__;
   using namespace mps;
+  TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kLong, "MPS doesn't know how to do square_i64");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(input.scalar_type()),
+                              "huber_loss for complex is not supported for MPS");
   TORCH_CHECK(delta > 0, "huber_loss does not support non-positive values for delta.")
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   TORCH_CHECK(output.is_mps());
