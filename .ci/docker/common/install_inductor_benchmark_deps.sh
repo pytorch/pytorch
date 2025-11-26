@@ -36,7 +36,7 @@ function install_torchbench() {
 conda_install pango
 
 # Stable packages are ok here, just to satisfy TorchBench check
-pip_install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+pip_install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu128
 
 install_torchbench
 install_huggingface
