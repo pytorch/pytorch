@@ -3,7 +3,7 @@
 # PLEASE DON'T MODIFY THIS FILE SO THAT WE DON'T GET OUT OF SYNC
 import logging
 from abc import ABCMeta
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch.ao.quantization.observer import (
@@ -40,7 +40,7 @@ _SUB_BYTE_UINT_BOUNDS = {
 Map from dtype to the bound value of integers
 TODO: maybe can replace this with call to torch.iinfo
 """
-_DTYPE_TO_QVALUE_BOUNDS: dict[Union[torch.dtype, TorchAODType], tuple[int, int]] = {
+_DTYPE_TO_QVALUE_BOUNDS: dict[torch.dtype | TorchAODType, tuple[int, int]] = {
     torch.uint8: (0, 255),
     torch.int8: (-128, 127),
     torch.int16: (-(2**15), 2**15 - 1),
@@ -204,13 +204,13 @@ def choose_qparams_affine_with_min_max(
     mapping_type: MappingType,
     block_size: tuple[int, ...],
     target_dtype: torch.dtype,
-    quant_min: Optional[int] = None,
-    quant_max: Optional[int] = None,
-    eps: Optional[float] = None,
-    scale_dtype: Optional[torch.dtype] = None,
-    zero_point_dtype: Optional[torch.dtype] = None,
+    quant_min: int | None = None,
+    quant_max: int | None = None,
+    eps: float | None = None,
+    scale_dtype: torch.dtype | None = None,
+    zero_point_dtype: torch.dtype | None = None,
     preserve_zero: bool = True,
-    zero_point_domain: Optional[ZeroPointDomain] = ZeroPointDomain.INT,
+    zero_point_domain: ZeroPointDomain | None = ZeroPointDomain.INT,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """A variant of :func:`~torchao.quantization.quant_primitives.choose_qparams_affine`
     operator that pass in min_val and max_val directly instead of deriving these from a single input.
@@ -241,19 +241,19 @@ def choose_qparams_affine_with_min_max(
 
 @register_custom_op
 def _choose_qparams_affine(
-    input: Optional[torch.Tensor],
+    input: torch.Tensor | None,
     mapping_type: str,
     block_size: list[int],
     target_dtype: torch.dtype,
-    quant_min: Optional[Union[int, float, bool]] = None,
-    quant_max: Optional[Union[int, float, bool]] = None,
-    eps: Optional[float] = None,
-    scale_dtype: Optional[torch.dtype] = None,
-    zero_point_dtype: Optional[torch.dtype] = None,
+    quant_min: int | float | bool | None = None,
+    quant_max: int | float | bool | None = None,
+    eps: float | None = None,
+    scale_dtype: torch.dtype | None = None,
+    zero_point_dtype: torch.dtype | None = None,
     preserve_zero: bool = True,
-    zero_point_domain: Optional[str] = "INT",
-    min_val: Optional[torch.Tensor] = None,
-    max_val: Optional[torch.Tensor] = None,
+    zero_point_domain: str | None = "INT",
+    min_val: torch.Tensor | None = None,
+    max_val: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """op definition that has compatible signatures with custom op library
 
@@ -388,11 +388,11 @@ def quantize_affine(
     input: torch.Tensor,
     block_size: tuple[int, ...],
     scale: torch.Tensor,
-    zero_point: Optional[torch.Tensor],
+    zero_point: torch.Tensor | None,
     output_dtype: torch.dtype,
-    quant_min: Optional[Union[int, float]] = None,
-    quant_max: Optional[Union[int, float]] = None,
-    zero_point_domain: Optional[ZeroPointDomain] = ZeroPointDomain.INT,
+    quant_min: int | float | None = None,
+    quant_max: int | float | None = None,
+    zero_point_domain: ZeroPointDomain | None = ZeroPointDomain.INT,
 ) -> torch.Tensor:
     """
     Args:
@@ -445,11 +445,11 @@ def _quantize_affine(
     input: torch.Tensor,
     block_size: list[int],
     scale: torch.Tensor,
-    zero_point: Optional[torch.Tensor],
+    zero_point: torch.Tensor | None,
     output_dtype: torch.dtype,
-    quant_min: Optional[Union[int, float, bool]] = None,
-    quant_max: Optional[Union[int, float, bool]] = None,
-    zero_point_domain: Optional[str] = ZeroPointDomain.INT.name,
+    quant_min: int | float | bool | None = None,
+    quant_max: int | float | bool | None = None,
+    zero_point_domain: str | None = ZeroPointDomain.INT.name,
 ) -> torch.Tensor:
     """op definition that has compatible signatures with custom op library
 
@@ -480,10 +480,10 @@ def _quantize_affine_no_dtype_cast(
     input: torch.Tensor,
     block_size: list[int],
     scale: torch.Tensor,
-    zero_point: Optional[torch.Tensor],
-    quant_min: Union[int, float],
-    quant_max: Union[int, float],
-    zero_point_domain: Optional[str] = ZeroPointDomain.INT.name,
+    zero_point: torch.Tensor | None,
+    quant_min: int | float,
+    quant_max: int | float,
+    zero_point_domain: str | None = ZeroPointDomain.INT.name,
 ) -> torch.Tensor:
     """
     The op does the following:
@@ -544,10 +544,10 @@ def dequantize_affine(
     input: torch.Tensor,
     block_size: tuple[int, ...],
     scale: torch.Tensor,
-    zero_point: Optional[torch.Tensor],
+    zero_point: torch.Tensor | None,
     input_dtype: torch.dtype,
-    quant_min: Optional[Union[int, float]] = None,
-    quant_max: Optional[Union[int, float]] = None,
+    quant_min: int | float | None = None,
+    quant_max: int | float | None = None,
     zero_point_domain: ZeroPointDomain = ZeroPointDomain.INT,
     *,
     output_dtype: torch.dtype = torch.float32,
@@ -592,11 +592,11 @@ def _dequantize_affine(
     input: torch.Tensor,
     block_size: list[int],
     scale: torch.Tensor,
-    zero_point: Optional[torch.Tensor],
+    zero_point: torch.Tensor | None,
     input_dtype: torch.dtype,
-    quant_min: Optional[Union[int, float, bool]] = None,
-    quant_max: Optional[Union[int, float, bool]] = None,
-    zero_point_domain: Optional[str] = ZeroPointDomain.INT.name,
+    quant_min: int | float | bool | None = None,
+    quant_max: int | float | bool | None = None,
+    zero_point_domain: str | None = ZeroPointDomain.INT.name,
     output_dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
     """op definition that has compatible signatures with custom op library"""
@@ -623,10 +623,10 @@ def _dequantize_affine_no_dtype_check(
     input: torch.Tensor,
     block_size: list[int],
     scale: torch.Tensor,
-    zero_point: Optional[torch.Tensor],
-    quant_min: Union[int, float],
-    quant_max: Union[int, float],
-    zero_point_domain: Optional[str] = ZeroPointDomain.INT.name,
+    zero_point: torch.Tensor | None,
+    quant_min: int | float,
+    quant_max: int | float,
+    zero_point_domain: str | None = ZeroPointDomain.INT.name,
     output_dtype: torch.dtype = torch.float32,
 ) -> torch.Tensor:
     """This function converts AQT tensors to their high precision floating point representation
@@ -758,14 +758,14 @@ class AffineQuantizedMovingAverageMinMaxObserver(AffineQuantizedObserverBase):
         target_dtype: torch.dtype,
         granularity: Granularity,
         averaging_constant=0.01,
-        quant_min: Optional[int] = None,
-        quant_max: Optional[int] = None,
-        eps: Optional[float] = None,
+        quant_min: int | None = None,
+        quant_max: int | None = None,
+        eps: float | None = None,
         is_dynamic=False,
-        scale_dtype: Optional[torch.dtype] = None,
-        zero_point_dtype: Optional[torch.dtype] = None,
+        scale_dtype: torch.dtype | None = None,
+        zero_point_dtype: torch.dtype | None = None,
         preserve_zero: bool = True,
-        zero_point_domain: Optional[ZeroPointDomain] = ZeroPointDomain.INT,
+        zero_point_domain: ZeroPointDomain | None = ZeroPointDomain.INT,
         # there could be some extra args that's ignored
         **kwargs,
     ):
@@ -854,14 +854,14 @@ class AffineQuantizedPlaceholderObserver(AffineQuantizedObserverBase):
         mapping_type: MappingType,
         target_dtype: torch.dtype,
         granularity: Granularity,
-        quant_min: Optional[int] = None,
-        quant_max: Optional[int] = None,
-        eps: Optional[float] = None,
+        quant_min: int | None = None,
+        quant_max: int | None = None,
+        eps: float | None = None,
         is_dynamic=False,
-        scale_dtype: Optional[torch.dtype] = None,
-        zero_point_dtype: Optional[torch.dtype] = None,
+        scale_dtype: torch.dtype | None = None,
+        zero_point_dtype: torch.dtype | None = None,
         preserve_zero: bool = True,
-        zero_point_domain: Optional[ZeroPointDomain] = ZeroPointDomain.INT,
+        zero_point_domain: ZeroPointDomain | None = ZeroPointDomain.INT,
         # there could be some extra args that's ignored
         **kwargs,
     ):

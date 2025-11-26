@@ -421,7 +421,7 @@ RESET_GRAD_ACCUMULATOR = {"set_", "resize_"}
 #      inplace or out-variants)
 # If the function does not modify its arguments, we also check the following properties
 # pertaining to its output:
-#   2) Its TensorImpl has use_count of 1
+#   2) Its TensorImpl has use_count of 1 (or 2 if it has a PyObject)
 #   3) If the function is a view function, it has the same StorageImpl as that of
 #      the input it is aliased with. Otherwise, its StorageImpl has use_count of 1
 #
@@ -496,10 +496,10 @@ if (${tensor_name}_impl_saved && !at::impl::dispatch_mode_enabled() && !at::impl
 """
 )
 
-ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE = CodeTemplate(
+ENFORCE_TENSOR_IMPL_USE_COUNT = CodeTemplate(
     """\
 if (!at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name}))
-  TORCH_INTERNAL_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
+  TORCH_INTERNAL_ASSERT(${tensor_name}.use_count() == expected_fresh_use_count(${tensor_name}), "function: ${fn_name}");
 """
 )
 
@@ -760,6 +760,12 @@ auto ${inp_name}_t_raw = toNonOptFwGrad(${inp});
 auto ${inp_name}_tensor = toNonOptTensor(${inp});
 auto ${inp_name}_t = (${inp_name}_t_raw.defined() || !${inp_name}_tensor.defined())
   ? ${inp_name}_t_raw : at::${zeros_fn}(${inp_name}_tensor.sym_sizes(), ${inp_name}_tensor.options());
+"""
+)
+
+FW_DERIVATIVE_UPDATE_WRAPPED_NUM_TEMPLATE = CodeTemplate(
+    """\
+update_wrapped_number(${inp_name}_tensor, ${inp_name}_t);
 """
 )
 
@@ -1658,7 +1664,7 @@ def emit_body(
 
                     if type_wrapper_name(f) not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
                         stmts_after_call += [
-                            ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE.substitute(
+                            ENFORCE_TENSOR_IMPL_USE_COUNT.substitute(
                                 tensor_name=ret_name, fn_name=type_wrapper_name(f)
                             )
                         ]
@@ -1911,6 +1917,13 @@ def emit_body(
                             zeros_fn=zeros_fn,
                         )
                     )
+                    if zeros_fn == "_efficientzerotensor_symint":
+                        unpacked_arguments += (
+                            FW_DERIVATIVE_UPDATE_WRAPPED_NUM_TEMPLATE.substitute(
+                                inp_name=inp.name
+                            )
+                        )
+
                 if inp.name in (derivative.required_inputs_primal or []):
                     unpacked_arguments += (
                         FW_DERIVATIVE_DEFINED_PRIMAL_TEMPLATE.substitute(

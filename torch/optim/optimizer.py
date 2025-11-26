@@ -204,7 +204,7 @@ def _device_dtype_check_for_fused(
         )
 
 
-def _view_as_real(params, *state_and_grads):
+def _view_as_real(params, *state_and_grads) -> None:
     for i, p in enumerate(params):
         if torch.is_complex(p):
             params[i] = torch.view_as_real(params[i])

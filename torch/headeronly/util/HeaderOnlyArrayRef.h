@@ -3,6 +3,7 @@
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <functional>

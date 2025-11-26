@@ -312,7 +312,7 @@ class CUDATemplateKernel(CUDAKernel):
         size_vars.extend(str(s) for s in free_symbols)
         self.size_args.extend(free_symbols)
         size_args = [f"const int {s}" for s in size_vars]
-        offset_args = [f"const int {name}_offset" for name in self.named_nodes.keys()]
+        offset_args = [f"const int {name}_offset" for name in self.named_nodes]
         runtime_arg_decls = ",".join(
             [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
         )
