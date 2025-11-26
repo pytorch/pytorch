@@ -447,14 +447,18 @@ std::string CUDAHooks::showConfig() const {
 
 
   auto printCudnnStyleVersion = [&](size_t v) {
-    oss << (v / 1000) << '.' << (v / 100 % 10);
+    if (v >= 9000) {
+      oss << (v / 10000) << '.' << (v / 100 % 100);
+    } else {
+      oss << (v / 1000) << '.' << (v / 100 % 10);
+    }
     if (v % 100 != 0) {
       oss << '.' << (v % 100);
     }
   };
 
   size_t cudnnVersion = cudnnGetVersion();
-  oss << "  - CuDNN ";
+  oss << "  - CuDNN runtime version ";
   printCudnnStyleVersion(cudnnVersion);
   size_t cudnnCudartVersion = cudnnGetCudartVersion();
   if (cudnnCudartVersion != CUDART_VERSION) {
@@ -464,7 +468,7 @@ std::string CUDAHooks::showConfig() const {
   }
   oss << '\n';
   if (cudnnVersion != CUDNN_VERSION) {
-    oss << "    - Built with CuDNN ";
+    oss << "    - Built with CuDNN compile-time version";
     printCudnnStyleVersion(CUDNN_VERSION);
     oss << '\n';
   }
