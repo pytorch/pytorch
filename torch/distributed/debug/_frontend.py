@@ -1,31 +1,86 @@
+import asyncio
 import json
 import logging
 import socket
 import threading
-from collections.abc import Iterator
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
-import requests
 from jinja2 import DictLoader, Environment
+from tabulate import tabulate
 
 from torch.distributed.debug._store import get_world_size, tcpstore_client
+from torch.distributed.flight_recorder.components.builder import build_db
+from torch.distributed.flight_recorder.components.config_manager import JobConfig
+from torch.distributed.flight_recorder.components.types import (
+    Collective,
+    Group,
+    Membership,
+    NCCLCall,
+)
 
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 
-def fetch_all(
-    endpoint: str, args: str = ""
-) -> tuple[list[str], Iterator[requests.Response]]:
+@dataclass(slots=True)
+class Response:
+    status_code: int
+    text: str
+
+    def raise_for_status(self):
+        if self.status_code != 200:
+            raise RuntimeError(f"HTTP {self.status_code}: {self.text}")
+
+    def json(self):
+        return json.loads(self.text)
+
+
+def fetch_thread_pool(urls: list[str]) -> Iterable[Response]:
+    # late import for optional dependency
+    import requests
+
+    max_workers = 20
+
+    def get(url: str) -> Response:
+        resp = requests.post(url)
+        return Response(resp.status_code, resp.text)
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        resps = executor.map(get, urls)
+
+    return resps
+
+
+def fetch_aiohttp(urls: list[str]) -> Iterable[Response]:
+    # late import for optional dependency
+    import aiohttp
+
+    async def fetch(session: aiohttp.ClientSession, url: str) -> Response:
+        async with session.post(url) as resp:
+            text = await resp.text()
+            return Response(resp.status, text)
+
+    async def gather(urls: list[str]) -> Iterable[Response]:
+        async with aiohttp.ClientSession() as session:
+            return await asyncio.gather(*[fetch(session, url) for url in urls])
+
+    return asyncio.run(gather(urls))
+
+
+def fetch_all(endpoint: str, args: str = "") -> tuple[list[str], Iterable[Response]]:
     store = tcpstore_client()
     keys = [f"rank{r}" for r in range(get_world_size())]
     addrs = store.multi_get(keys)
     addrs = [f"{addr.decode()}/handler/{endpoint}?{args}" for addr in addrs]
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        resps = executor.map(requests.post, addrs)
+    try:
+        resps = fetch_aiohttp(addrs)
+    except ImportError:
+        resps = fetch_thread_pool(addrs)
 
     return addrs, resps
 
@@ -93,10 +148,13 @@ templates = {
 
     <a href="/">Home</a> <!--@lint-ignore-->
     <a href="/stacks">Python Stack Traces</a> <!--@lint-ignore-->
-    <a href="/fr_trace">FlightRecorder</a> <!--@lint-ignore-->
+    <a href="/fr_trace">FlightRecorder CPU</a> <!--@lint-ignore-->
+    <a href="/fr_trace_json">(JSON)</a> <!--@lint-ignore-->
     <a href="/fr_trace_nccl">FlightRecorder NCCL</a> <!--@lint-ignore-->
+    <a href="/fr_trace_nccl_json">(JSON)</a> <!--@lint-ignore-->
     <a href="/profile">torch profiler</a> <!--@lint-ignore-->
     <a href="/wait_counters">Wait Counters</a> <!--@lint-ignore-->
+    <a href="/tcpstore">TCPStore</a> <!--@lint-ignore-->
 </nav>
 
 <section class="content">
@@ -211,6 +269,35 @@ Hi
     {% endfor %}
 {% endblock %}
     """,
+    "tcpstore.html": """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}TCPStore Keys{% endblock %}</h1>
+{% endblock %}
+{% block content %}
+    <pre>
+    {% for k, v in zip(keys, values) -%}
+{{ k }}: {{ v | truncate(100) }}
+    {% endfor %}
+    </pre>
+{% endblock %}
+    """,
+    "fr_trace.html": """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}{{ title }}{% endblock %}</h1>
+{% endblock %}
+{% block content %}
+    <h2>Groups</h2>
+    {{ groups | safe }}
+    <h2>Memberships</h2>
+    {{ memberships | safe }}
+    <h2>Collectives</h2>
+    {{ collectives | safe }}
+    <h2>NCCL Calls</h2>
+    {{ ncclcalls | safe }}
+{% endblock %}
+    """,
 }
 
 
@@ -256,9 +343,12 @@ class FrontendServer:
             "/": self._handle_index,
             "/stacks": self._handle_stacks,
             "/fr_trace": self._handle_fr_trace,
+            "/fr_trace_json": self._handle_fr_trace_json,
             "/fr_trace_nccl": self._handle_fr_trace_nccl,
+            "/fr_trace_nccl_json": self._handle_fr_trace_nccl_json,
             "/profile": self._handle_profiler,
             "/wait_counters": self._handle_wait_counters,
+            "/tcpstore": self._handle_tcpstore,
         }
 
         # Create HTTP server
@@ -321,7 +411,46 @@ class FrontendServer:
             "raw_resp.html", title="Stacks", addrs=addrs, resps=resps
         )
 
+    def _render_fr_trace(self, addrs: list[str], resps: list[Response]) -> bytes:
+        config = JobConfig()
+        # pyrefly: ignore [bad-assignment]
+        args = config.parse_args(args=None)
+
+        details = {}
+        for rank, resp in enumerate(resps):
+            resp.raise_for_status()
+            dump = {
+                "rank": rank,
+                "host_name": addrs[rank],
+                **resp.json(),
+            }
+            if "entries" not in dump:
+                dump["entries"] = []
+            details[f"rank{rank}.json"] = dump
+
+        version = next(iter(details.values()))["version"]
+
+        db = build_db(details, args, version)
+
+        return self._render_template(
+            "fr_trace.html",
+            title="FlightRecorder",
+            groups=tabulate(db.groups, headers=Group._fields, tablefmt="html"),
+            memberships=tabulate(
+                db.memberships, headers=Membership._fields, tablefmt="html"
+            ),
+            collectives=tabulate(
+                db.collectives, headers=Collective._fields, tablefmt="html"
+            ),
+            ncclcalls=tabulate(db.ncclcalls, headers=NCCLCall._fields, tablefmt="html"),
+        )
+
     def _handle_fr_trace(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("fr_trace_json")
+
+        return self._render_fr_trace(addrs, list(resps))
+
+    def _handle_fr_trace_json(self, req: HTTPRequestHandler) -> bytes:
         addrs, resps = fetch_all("fr_trace_json")
 
         return self._render_template(
@@ -332,6 +461,11 @@ class FrontendServer:
         )
 
     def _handle_fr_trace_nccl(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("dump_nccl_trace_json", "onlyactive=true")
+
+        return self._render_fr_trace(addrs, list(resps))
+
+    def _handle_fr_trace_nccl_json(self, req: HTTPRequestHandler) -> bytes:
         addrs, resps = fetch_all("dump_nccl_trace_json", "onlyactive=true")
 
         return self._render_template(
@@ -353,6 +487,13 @@ class FrontendServer:
         return self._render_template(
             "json_resp.html", title="Wait Counters", addrs=addrs, resps=resps
         )
+
+    def _handle_tcpstore(self, req: HTTPRequestHandler) -> bytes:
+        store = tcpstore_client(prefix="")
+        keys = store.list_keys()
+        keys.sort()
+        values = [repr(v) for v in store.multi_get(keys)]
+        return self._render_template("tcpstore.html", keys=keys, values=values)
 
 
 def main(port: int) -> None:
