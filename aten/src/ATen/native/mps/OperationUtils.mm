@@ -806,11 +806,11 @@ MetalShaderLibrary::~MetalShaderLibrary() {
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary() {
   std::lock_guard guard(library_mutex_);
-  if (C10_UNLIKELY(!library_)) {
+  if (C10_UNLIKELY(!cached_library_)) {
     TORCH_INTERNAL_ASSERT(nparams == 0);
-    library_ = compileLibrary(shaderSource);
+    cached_library_ = compileLibrary(shaderSource);
   }
-  return library_;
+  return cached_library_;
 }
 
 id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::string>& params) {
@@ -849,7 +849,7 @@ id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::s
 
   {
     std::lock_guard library_guard(library_mutex_);
-    library_ = lib;
+    cached_library_ = lib;
   }
 
   return lib;
@@ -911,7 +911,7 @@ std::pair<id<MTLComputePipelineState>, id<MTLFunction>> MetalShaderLibrary::getL
 std::vector<std::string> MetalShaderLibrary::getFunctionNames() {
   {
     std::lock_guard guard(library_mutex_);
-    if (C10_UNLIKELY(!library_ && nparams > 0)) {
+    if (C10_UNLIKELY(!cached_library_ && nparams > 0)) {
       throw std::runtime_error("Library must be initialized first");
     }
   }
@@ -955,13 +955,13 @@ class BundledShaderLibary : public MetalShaderLibrary {
  protected:
   id<MTLLibrary> getLibrary() override {
     std::lock_guard guard(library_mutex_);
-    if (C10_UNLIKELY(!library_)) {
+    if (C10_UNLIKELY(!cached_library_)) {
       auto device = MPSDevice::getInstance()->device();
       NSError* error = nil;
-      library_ = [device newLibraryWithData:getSectionData("metal_basic") error:&error];
-      TORCH_CHECK(library_, "Failed to create metal library, error: ", [[error description] UTF8String]);
+      cached_library_ = [device newLibraryWithData:getSectionData("metal_basic") error:&error];
+      TORCH_CHECK(cached_library_, "Failed to create metal library, error: ", [[error description] UTF8String]);
     }
-    return library_;
+    return cached_library_;
   }
 
   id<MTLLibrary> getLibrary(const std::initializer_list<std::string>& params) override {
@@ -1151,7 +1151,7 @@ MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
 
 // DynamicMetalShaderLibrary implementation
 DynamicMetalShaderLibrary::~DynamicMetalShaderLibrary() {
-  [library_ release];
+  [cached_library_ release];
 }
 
 // MetalKernelFunction implementation
