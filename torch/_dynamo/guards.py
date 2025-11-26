@@ -641,7 +641,14 @@ class GuardManagerWrapper:
         self, mgr: GuardManager, body: IndentedBufferWithPrefix
     ) -> None:
         with body.indent():
-            for guard in mgr.get_leaf_guards():
+            # Sort leaf guards by their verbose code parts to ensure consistent ordering
+            sorted_guards = sorted(
+                mgr.get_leaf_guards(),
+                key=lambda g: g.verbose_code_parts()[0]
+                if g.verbose_code_parts()
+                else "",
+            )
+            for guard in sorted_guards:
                 if isinstance(guard, RelationalGuard):
                     if guard not in self.printed_relational_guards:
                         self.printed_relational_guards.add(guard)
@@ -703,7 +710,14 @@ class GuardManagerWrapper:
 
         def visit(mgr: GuardManager) -> None:
             nonlocal relational_guards_seen
-            for guard in mgr.get_leaf_guards():
+            # Sort leaf guards by their verbose code parts to ensure consistent ordering
+            sorted_guards = sorted(
+                mgr.get_leaf_guards(),
+                key=lambda g: g.verbose_code_parts()[0]
+                if g.verbose_code_parts()
+                else "",
+            )
+            for guard in sorted_guards:
                 if isinstance(guard, RelationalGuard):
                     if guard not in relational_guards_seen:
                         # pyrefly: ignore [bad-argument-type]

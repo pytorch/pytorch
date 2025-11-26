@@ -1229,7 +1229,9 @@ graph():
         )
         guard_code_str = "\n".join(guard_code)
 
-        for line in """\
+        self.assertExpectedInline(
+            guard_code_str,
+            """\
 2 <= L['x'].size()[0]
 L['x'] is L['y']
 L['x'].ndimension() == 2
@@ -1237,18 +1239,14 @@ L['x'].requires_grad == False
 L['x'].size()[1] == L['x'].size()[0]
 L['x'].storage_offset() == 0
 ___dict_contains('operator', G['sys'].modules)
-___dict_contains('operator', G['sys'].modules)
 hasattr(L['x'], '_dynamo_dynamic_indices') == False
 not ___dict_contains('aaaaaaaa', G['sys'].modules)
 not ___dict_contains('bbbbbbbb', G['sys'].modules)
 not ___dict_contains('cccccccc', G['sys'].modules)
 str(L['x'].device) == 'cpu'
 str(L['x'].dtype) == 'torch.float32'
-utils_device.CURRENT_DEVICE == None""".split("\n"):
-            self.assertIn(
-                line,
-                guard_code_str,
-            )
+utils_device.CURRENT_DEVICE == None""",
+        )
 
     def test_fold(self):
         def fn(a):
