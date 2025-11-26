@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    IS_H100,
     requires_gpu,
     requires_triton,
 )
@@ -313,6 +314,7 @@ class TestSelectAlgorithm(TestCase):
         foo(torch.randn(64, 64, device=GPU_TYPE))
         self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
+    @unittest.skipIf(IS_H100, "Fails on H100, see #143412")
     @expectedFailureDynamicWrapper
     @patches
     def test_convolution1(self):
