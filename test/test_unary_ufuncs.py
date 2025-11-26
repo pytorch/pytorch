@@ -17,6 +17,7 @@ from torch.testing._internal.common_device_type import (
     dtypesIfCUDA,
     instantiate_device_type_tests,
     largeTensorTest,
+    onlyOn,
     onlyCPU,
     onlyNativeDeviceTypes,
     ops,
@@ -776,7 +777,7 @@ class TestUnaryUfuncs(TestCase):
                     with self.assertRaises(AttributeError):
                         torch_inplace_method = getattr(torch.Tensor, fn_name + "_")
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.complex64)
     def test_tan_complex_cuda_matches_numpy(self, device, dtype):
         # Focused accuracy check for complex tan on CUDA against NumPy reference
@@ -809,7 +810,7 @@ class TestUnaryUfuncs(TestCase):
         z = torch.complex(real, imag).to(dtype)
         self.compare_with_numpy(torch.tan, np.tan, z)
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.complex64)
     def test_tanh_complex_cuda_matches_numpy(self, device, dtype):
         # Focused accuracy check for complex tanh on CUDA against NumPy reference
@@ -1549,7 +1550,7 @@ class TestUnaryUfuncs(TestCase):
             self.assertGreater(math.copysign(1.0, v), 0.0)
 
     # TODO: update to compare against NumPy by rationalizing with OpInfo
-    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.float, torch.double)
     def test_abs_zero(self, device, dtype):
         # Both abs(0.0) and abs(-0.0) should result in 0.0
@@ -1557,7 +1558,7 @@ class TestUnaryUfuncs(TestCase):
         for num in abs_zeros:
             self.assertGreater(math.copysign(1.0, num), 0.0)
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.bool, torch.int8)
     def test_narrow_dtypes(self, device, dtype):
         x_int = torch.randint(2, (8 * 1024,), device=device, dtype=torch.int)
@@ -1613,7 +1614,7 @@ class TestUnaryUfuncs(TestCase):
         self.assertEqual(1, len(z))
         self.assertEqual(torch.empty(0, dtype=torch.long), z[0])
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.int8)
     @largeTensorTest("8GB")
     @skipIfRocm(msg="ROCM tries to allocate 60GB")
@@ -1773,7 +1774,7 @@ class TestUnaryUfuncs(TestCase):
             ),
         )
 
-    @unittest.skipIf(not torch.accelerator.is_available(), "GPU not available")
+    @onlyOn(["cuda", "xpu"])
     def test_nonzero_static_large(self, device):
         # large enough to have multiple iters per SM even on H100
         # with 132 sms
@@ -1913,9 +1914,8 @@ class TestUnaryUfuncs(TestCase):
         self.assertTrue(result.dtype.is_floating_point)
         self.assertTrue(torch.all(torch.isfinite(result)))
 
-devices = ["cpu", "cuda", "xpu", "hpu"]
 instantiate_device_type_tests(
-    TestUnaryUfuncs, globals(), only_for=devices, allow_xpu=True
+    TestUnaryUfuncs, globals(), allow_xpu=True
 )
 
 if __name__ == "__main__":
