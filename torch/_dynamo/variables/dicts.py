@@ -1481,9 +1481,11 @@ class DictViewVariable(VariableTracker):
         self, tx: "InstructionTranslator", name: str
     ) -> ConstantVariable:
         assert self.kv is not None
-        if name in self.python_type().__dict__:
-            return variables.constant_true
-        return variables.constant_false
+        return (
+            variables.constant_true
+            if name in self.python_type().__dict__
+            else variables.constant_false
+        )
 
     def call_method(
         self,
