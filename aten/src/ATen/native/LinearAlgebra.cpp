@@ -20,6 +20,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Utils.h>
+#include <ATen/native/zendnn/Matmul.h>
 #include <ATen/cpu/Utils.h>
 #include <c10/core/GradMode.h>
 #include <c10/util/accumulate.h>
@@ -1396,6 +1397,7 @@ static inline bool apply_mkldnn_matmul_heur(int64_t m, int64_t k, int64_t n) {
   return at::globalContext().userEnabledMkldnn() && m > min_dim && k > min_dim && n > min_dim && m * k * n > min_size;
 }
 #endif
+
 static void addmm_impl_cpu_(
     Tensor &result, const Tensor &self, Tensor m1, Tensor m2, const Scalar& beta, const Scalar& alpha) {
   TORCH_INTERNAL_ASSERT(self.dim() == 2 && m1.dim() == 2 && m2.dim() == 2);
@@ -1728,7 +1730,6 @@ static void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const T
         result.data_ptr<scalar_t>(), ldc, result_strides[0]);
   });
 }
-
 // This tries to apply some optimizations to bmm/baddbmm:
 // - When the operand size is small, computation are parallelized over the batch
 //   dimension using OMP and naive matrix multiplication is applied.
@@ -1751,6 +1752,7 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
   int64_t res_rows = batch1_sizes[1];
   int64_t res_cols = batch2_sizes[2];
 
+
   // handle pathological cases that blas may not like
   if (self_or_result.numel() == 0) {
     return;
@@ -1771,6 +1773,19 @@ static inline void bmm_out_or_baddbmm_(const Tensor& self_or_result_, const Tens
     return (strides[2] == 1 && (sizes[1] == 1 || strides[1] >= sizes[2])) ||
         (strides[1] == 1 && (sizes[2] == 1 || strides[2] >= sizes[1]));
   };
+
+#if AT_ZENDNN_ENABLED()
+  if(at::cpu::is_amd_cpu()
+      && at::cpu::is_avx512_supported()
+      && self_or_result.scalar_type() == kBFloat16
+      && self_or_result.is_contiguous()
+      && self_or_result.sizes()[0] > 1)
+  {
+      zendnn_baddbmm(self_or_result, batch1, batch2, beta.to<float>(), alpha.to<float>());
+      return;
+  }
+#endif
+
 #if !defined(__aarch64__) || AT_MKLDNN_ACL_ENABLED()
   // Always apply mkldnn heuristic on x86 platform, but on ARM only if compiled with ACL
   bool apply_heur = apply_mkldnn_matmul_heur(batch1.sizes()[1], batch1.sizes()[2], batch2.sizes()[2]);
