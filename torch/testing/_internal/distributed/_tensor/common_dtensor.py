@@ -6,7 +6,6 @@ import contextlib
 import copy
 import functools
 import itertools
-import sys
 import types
 from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
@@ -43,12 +42,12 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import (
+    exit_if_lt_x_cuda_devs,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
     run_subtests,
     skip_if_lt_x_gpu,
-    TEST_SKIPS,
 )
 from torch.testing._internal.common_utils import (
     TEST_CUDA,
@@ -396,8 +395,8 @@ class DTensorTestBase(MultiProcessTestCase):
         return init_device_mesh(self.device_type, (self.world_size,))
 
     def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
-        if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
+        if "nccl" in self.backend:
+            exit_if_lt_x_cuda_devs(self.world_size)
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
 
@@ -712,9 +711,6 @@ class LocalDTensorTestBase(DTensorTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
         return True
-
-    def _handle_test_skip(self, msg: str) -> None:
-        self.skipTest(msg)
 
     def _get_local_tensor_mode(self):
         return LocalTensorMode(frozenset(range(self.world_size)))
