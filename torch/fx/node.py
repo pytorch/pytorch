@@ -762,6 +762,14 @@ class Node(_NodeBase):
                 ):
                     return self.args[0] in _side_effectful_functions
 
+            from torch._higher_order_ops.effects import _get_effect
+
+            if (
+                isinstance(self.target, torch._ops.OpOverload)
+                and _get_effect(self.target) is not None
+            ):
+                return True
+
             return self.target in _side_effectful_functions
 
         # Check if an impure module.
