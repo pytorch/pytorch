@@ -153,7 +153,7 @@ class TestComplexBwdGradients(TestCase):
         allowed_dtypes=[torch.complex128],
     )
     def test_fn_grad(self, device: str, dtype: torch.dtype, op: OpInfo) -> None:
-        self.check_consistency(device, dtype, op, Variant.GradCheck)
+        self.check_grad(device, dtype, op)
 
 
 instantiate_device_type_tests(TestComplexTensor, globals())

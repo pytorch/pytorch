@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import functools
 from dataclasses import dataclass, field, fields
 from enum import auto, Enum
 from typing import Any, TYPE_CHECKING
@@ -139,90 +138,105 @@ class TestCase(PytorchTestCase):
 
                 self.assertEqual(value_e, value_a, *args, **kwargs)
 
-    def check_consistency(
-        self, device: str, dtype, op: OpInfo, variant: Variant
-    ) -> None:
+    def conditional_skip(self, desc: Descriptor) -> None:
         try:
-            from .test_complex_tensor import EXTRA_KWARGS, SKIPS
+            from .test_complex_tensor import SKIPS
         except ImportError:
-            from test_complex_tensor import EXTRA_KWARGS, SKIPS
-        test_info = Descriptor(
+            from test_complex_tensor import SKIPS
+        for xfail_info, reason in SKIPS.items():
+            if xfail_info.matches(desc):
+                self.skipTest(reason)
+
+    def get_extra_kwargs(self, desc: Descriptor) -> dict[str, Any]:
+        try:
+            from .test_complex_tensor import EXTRA_KWARGS
+        except ImportError:
+            from test_complex_tensor import EXTRA_KWARGS
+
+        for extra_info, extra_kw in EXTRA_KWARGS.items():
+            if extra_info.matches(desc):
+                return extra_kw
+
+        return {}
+
+    def check_consistency(
+        self, device: str, dtype: torch.dtype, op: OpInfo, variant: Variant
+    ) -> None:
+        assert variant in {Variant.Op, Variant.Distributed}, (
+            "`check_consistency` called with the wrong `variant`."
+        )
+        desc = Descriptor(
             op=get_overload_packet_from_name(op.name),
             device_type=torch.device(device).type,
             dtype=dtype,
             variant=variant,
         )
-        for xfail_info, reason in SKIPS.items():
-            if xfail_info.matches(test_info):
-                self.skipTest(reason)
+        self.conditional_skip(desc)
+        kwargs = self.get_extra_kwargs(desc)
 
-        kwargs = {}
-        for extra_info, extra_kw in EXTRA_KWARGS.items():
-            if extra_info.matches(test_info):
-                kwargs = extra_kw
-                break
-        sample_inputs = op.sample_inputs(device, dtype)
         transform_fn = TRANSFORM_FUNCS[variant]
 
+        sample_inputs = op.sample_inputs(device, dtype)
+
         for sample_input in sample_inputs:
-            match variant:
-                case Variant.Op | Variant.Distributed:
 
-                    def expected(sample_input=sample_input):
-                        return op(
-                            sample_input.input,
-                            *sample_input.args,
-                            **sample_input.kwargs,
-                        )
+            def expected(sample_input=sample_input):
+                return op(
+                    sample_input.input,
+                    *sample_input.args,
+                    **sample_input.kwargs,
+                )
 
-                    subclass_sample = sample_input.transform(transform_fn)
+            subclass_sample = sample_input.transform(transform_fn)
 
-                    def actual(subclass_sample=subclass_sample):
-                        return op(
-                            subclass_sample.input,
-                            *subclass_sample.args,
-                            **subclass_sample.kwargs,
-                        )
+            def actual(subclass_sample=subclass_sample):
+                return op(
+                    subclass_sample.input,
+                    *subclass_sample.args,
+                    **subclass_sample.kwargs,
+                )
 
-                    self.assertSameResult(expected, actual, **kwargs)
-                case Variant.GradCheck:
-                    input_list = []
-                    # Mark all applicable tensors with `requires_grad=True`
-                    # Come up with a list of applicable tensors.
-                    subclass_sample = sample_input.transform(
-                        functools.partial(transform_fn, input_list=input_list)
-                    )
+            self.assertSameResult(expected, actual, **kwargs)
 
-                    # The function to gradcheck is the op, replacing the appropriate tensors
-                    # with the input ones
-                    def func(*t: torch.Tensor):
-                        it = iter(t)
+    def check_grad(self, device: str, dtype: torch.dtype, op: OpInfo) -> None:
+        desc = Descriptor(
+            op=get_overload_packet_from_name(op.name),
+            device_type=torch.device(device).type,
+            dtype=dtype,
+            variant=Variant.GradCheck,
+        )
+        self.conditional_skip(desc)
 
-                        def f(x):
-                            if not isinstance(x, torch.Tensor):
-                                return x
-                            return next(it)
+        sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
 
-                        input_sample = sample_input.transform(f)
-                        return op(
-                            input_sample.input,
-                            *input_sample.args,
-                            **input_sample.kwargs,
-                        )
+        for sample_input in sample_inputs:
+            subclass_sample = sample_input.transform(_as_complex_tensor)
 
-                    # Do the actual gradcheck
-                    self.assertTrue(
-                        gradcheck(
-                            func,
-                            input_list,
-                            raise_exception=True,
-                            fast_mode=True,
-                            check_batched_grad=True,
-                            check_forward_ad=True,
-                        )
-                    )
-                case _:
-                    self.assertTrue(False, "Testcase not implemented for variant.")
+            if isinstance(subclass_sample.input, torch.Tensor):
+                input_list = [subclass_sample.input, *subclass_sample.args]
+
+                def func(*t: torch.Tensor):
+                    return op(*t, **subclass_sample.kwargs)
+            else:
+                # For ops like `stack` and `cat`, we need to specify
+                # the list of inputs a bit differently
+                assert len(subclass_sample.args) == 0, "Unexpected args."
+                input_list = list(subclass_sample.input)
+
+                def func(*t: torch.Tensor):
+                    return op(list(t), **subclass_sample.kwargs)
+
+            # Do the actual gradcheck
+            self.assertTrue(
+                gradcheck(
+                    func,
+                    input_list,
+                    raise_exception=True,
+                    fast_mode=True,
+                    check_batched_grad=True,
+                    check_forward_ad=True,
+                )
+            )
 
 
 aten = torch.ops.aten
