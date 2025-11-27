@@ -1475,8 +1475,7 @@ static void addmm_impl_cpu_(
 #if defined(__aarch64__) && AT_MKLDNN_ACL_ENABLED()
   // On AArch64 if LHS matrix in BLAS routine is transposed but RHS is not then
   // it is faster to call oneDNN matrix multiplication primitive with RHS*LHS
-  // that will call then into Arm® Compute Library (ACL) GEMM kernel and also
-  // additionally have support for running kernel with BF16 instructions
+  // that will call then into Arm® Compute Library (ACL) f32 GEMM kernel
   if (transpose_c) {
     if (use_mkldnn_matmul(b, a, c) && transpose_a && !transpose_b && result.scalar_type() == at::ScalarType::Float) {
       try {
