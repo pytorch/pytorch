@@ -300,10 +300,10 @@ static void isin_Tensor_Tensor_out_mps(const Tensor& elements,
 
   if (test_elements.numel() == 0) {
     if (invert) {
-      auto ones = ones_like(out);
+      auto ones = ones_like(out, std::optional<at::ScalarType>{});
       out.copy_(ones);
     } else {
-      auto zeros = zeros_like(out);
+      auto zeros = zeros_like(out, std::optional<at::ScalarType>{});
       out.copy_(zeros);
     }
     return;

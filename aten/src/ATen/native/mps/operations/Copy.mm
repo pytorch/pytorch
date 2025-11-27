@@ -3,6 +3,11 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/Copy.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/_copy_from_and_resize_native.h>
 #include <ATen/ops/_copy_from_native.h>
 #include <ATen/ops/imag.h>
@@ -10,6 +15,7 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros_like.h>
+#endif
 
 namespace at::native {
 namespace mps {

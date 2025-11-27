@@ -5,9 +5,13 @@
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/RangeUtils.h>
 #include <ATen/native/mps/OperationUtils.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/linspace_native.h>
 #include <ATen/ops/range_native.h>
+#endif
 #include <cmath>
 #include <limits>
 

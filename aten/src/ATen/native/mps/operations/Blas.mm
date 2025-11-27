@@ -50,12 +50,13 @@ inline void dot_check(const Tensor& self, const Tensor& other) {
 }
 } // namespace mps
 
+
 Tensor dot_mps(const Tensor& self, const Tensor& other) {
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
 
   if (self.numel() == 0 & other.numel() == 0) {
-    return zeros({}, self.options());
+    return at::zeros({}, self.options());
   }
 
   dot_check(self, other);

@@ -5,9 +5,6 @@
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
-#include <ATen/ops/digamma_native.h>
-#include <ATen/ops/lgamma_native.h>
-#include <ATen/ops/polygamma_native.h>
 
 namespace at::native {
 namespace mps {
@@ -15,6 +12,15 @@ namespace mps {
 static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Gamma_metallib.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/digamma_native.h>
+#include <ATen/ops/lgamma_native.h>
+#include <ATen/ops/polygamma_native.h>
+#endif
 #endif
 
 static id<MTLComputePipelineState> getCPLState(const Tensor& t1, const Tensor& t2, const std::string& fname) {

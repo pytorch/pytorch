@@ -15,8 +15,9 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
-#endif
+#else
 #include <ATen/ops/_efficientzerotensor_native.h>
+#endif
 
 #include <utility>
 
