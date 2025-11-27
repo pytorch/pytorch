@@ -796,8 +796,10 @@ static PyObject* THPModule_DLPackExchangeAPI(
     PyObject* _unused,
     PyObject* noargs) {
   HANDLE_TH_ERRORS
-  return THPUtils_packInt64(
-      reinterpret_cast<int64_t>(TorchDLPackExchangeAPI::Global()));
+  return PyCapsule_New(
+      const_cast<DLPackExchangeAPI*>(TorchDLPackExchangeAPI::Global()),
+      "dlpack_exchange_api",
+      nullptr);
   END_HANDLE_TH_ERRORS
 }
 

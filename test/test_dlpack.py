@@ -538,20 +538,30 @@ class TestTorchDlPack(TestCase):
     @onlyNativeDeviceTypes
     def test_dlpack_exchange_api(self, device):
         """Comprehensive test of all DLPack Exchange API functions using inline C++"""
-        # Check that the C API function exists and get the API pointer
+        # Check that the C API capsule exists and get it
         self.assertTrue(hasattr(torch.Tensor, "__c_dlpack_exchange_api__"))
-        api_ptr = torch.Tensor.__c_dlpack_exchange_api__
-        self.assertIsInstance(api_ptr, int, "API pointer should be an integer")
-        self.assertNotEqual(api_ptr, 0, "API pointer should not be NULL")
+        api_capsule = torch.Tensor.__c_dlpack_exchange_api__
+        self.assertEqual(
+            type(api_capsule).__name__, "PyCapsule", "API should be a PyCapsule"
+        )
+        self.assertRegex(str(api_capsule), r'capsule object "dlpack_exchange_api"')
         tensor = torch.arange(24, dtype=torch.float32, device=device).reshape(2, 3, 4)
 
         source = """
         #include <torch/extension.h>
         #include <ATen/dlpack.h>
+        #include <pybind11/pybind11.h>
         #include <memory>
 
-        void test_dlpack_exchange_api(at::Tensor tensor, int64_t api_ptr_int, bool is_cuda) {
-            DLPackExchangeAPI* api = reinterpret_cast<DLPackExchangeAPI*>(api_ptr_int);
+        namespace py = pybind11;
+
+        void test_dlpack_exchange_api(at::Tensor tensor, py::object api_obj, bool is_cuda) {
+            PyObject* api_capsule = api_obj.ptr();
+            TORCH_CHECK(PyCapsule_IsValid(api_capsule, "dlpack_exchange_api"),
+                        "Invalid or mismatched DLPack exchange API capsule");
+            const DLPackExchangeAPI* api =
+                static_cast<const DLPackExchangeAPI*>(
+                    PyCapsule_GetPointer(api_capsule, "dlpack_exchange_api"));
 
             // Test 1: API structure and version
             {
@@ -751,7 +761,7 @@ class TestTorchDlPack(TestCase):
         )
 
         # Run the comprehensive C++ test
-        module.test_dlpack_exchange_api(tensor, api_ptr, device.startswith("cuda"))
+        module.test_dlpack_exchange_api(tensor, api_capsule, device.startswith("cuda"))
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals(), allow_mps=True)
