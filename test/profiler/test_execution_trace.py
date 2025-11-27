@@ -379,7 +379,7 @@ class TestExecutionTrace(TestCase):
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
     @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
+        not (has_triton() and (TEST_CUDA or TEST_XPU)),
         "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
@@ -438,7 +438,7 @@ class TestExecutionTrace(TestCase):
         sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
     )
     @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
+        not (has_triton() and (TEST_CUDA or TEST_XPU)),
         "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
@@ -500,8 +500,8 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA),
-        "need triton and device CUDA availability to run",
+        not (has_triton() and (TEST_CUDA or TEST_XPU)),
+        "need triton and device(CUDA or XPU) availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_triton_fx_graph_with_et(self, device):
@@ -509,8 +509,6 @@ class TestExecutionTrace(TestCase):
         from torch._inductor.codecache import PyCodeCache
 
         PyCodeCache.cache_clear(purge=True)
-
-        import os
 
         @torchdynamo.optimize("inductor")
         def fn(a, b, c):
@@ -520,15 +518,14 @@ class TestExecutionTrace(TestCase):
             return x.cos()
 
         a, b, c = (
-            torch.randn(4, 4, requires_grad=False).to(torch.device("cuda:0"))
+            torch.randn(4, 4, requires_grad=False).to(torch.device(device))
             for _ in range(3)
         )
 
-        inputs = [a, b, c]
         with torch._inductor.config.patch(
             compile_threads=1, fx_graph_cache=False, fx_graph_remote_cache=False
         ):
-            fn(*inputs)
+            fn(a, b, c)
 
         et = ExecutionTraceObserver()
         with tempfile.NamedTemporaryFile(
@@ -546,7 +543,7 @@ class TestExecutionTrace(TestCase):
         ) as p:
             for idx in range(10):
                 with record_function(f"## LOOP {idx} ##"):
-                    fn(*inputs)
+                    fn(a, b, c)
                 p.step()
 
         et_path = p.execution_trace_observer.get_output_file_path()
@@ -576,31 +573,31 @@ class TestExecutionTrace(TestCase):
                     if len(fx_graph) > 0:
                         assert (
                             fx_graph[0]
-                            == '#   %mm : Tensor "f32[4, 4][4, 1]cuda:0" = PlaceHolder[target=mm]'
+                            == f'#   %mm : Tensor "f32[4, 4][4, 1]{device}" = PlaceHolder[target=mm]'
                         )
                         assert (
                             fx_graph[1]
-                            == '#   %arg2_1 : Tensor "f32[4, 4][4, 1]cuda:0" = PlaceHolder[target=arg2_1]'
+                            == f'#   %arg2_1 : Tensor "f32[4, 4][4, 1]{device}" = PlaceHolder[target=arg2_1]'
                         )
                         assert (
                             fx_graph[2]
-                            == '#   %sin : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%mm,), kwargs = {})'  # noqa: B950
+                            == f'#   %sin : Tensor "f32[4, 4][4, 1]{device}"[num_users=1] = call_function[target=torch.ops.aten.sin.default](args = (%mm,), kwargs = {{}})'  # noqa: B950
                         )
                         assert (
                             fx_graph[3]
-                            == '#   %permute_1 : Tensor "f32[4, 4][1, 4]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.permute.default](args = (%sin, [1, 0]), kwargs = {})'  # noqa: B950
+                            == f'#   %permute_1 : Tensor "f32[4, 4][1, 4]{device}"[num_users=1] = call_function[target=torch.ops.aten.permute.default](args = (%sin, [1, 0]), kwargs = {{}})'  # noqa: B950
                         )
                         assert (
                             fx_graph[4]
-                            == '#   %mul : Tensor "f32[4, 4][4, 1]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg2_1, 1111), kwargs = {})'  # noqa: B950
+                            == f'#   %mul : Tensor "f32[4, 4][4, 1]{device}"[num_users=1] = call_function[target=torch.ops.aten.mul.Tensor](args = (%arg2_1, 1111), kwargs = {{}})'  # noqa: B950
                         )
                         assert (
                             fx_graph[5]
-                            == '#   %add : Tensor "f32[4, 4][1, 4]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%permute_1, %mul), kwargs = {})'  # noqa: B950
+                            == f'#   %add : Tensor "f32[4, 4][1, 4]{device}"[num_users=1] = call_function[target=torch.ops.aten.add.Tensor](args = (%permute_1, %mul), kwargs = {{}})'  # noqa: B950
                         )
                         assert (
                             fx_graph[6]
-                            == '#   %cos : Tensor "f32[4, 4][1, 4]cuda:0"[num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%add,), kwargs = {})'  # noqa: B950
+                            == f'#   %cos : Tensor "f32[4, 4][1, 4]{device}"[num_users=1] = call_function[target=torch.ops.aten.cos.default](args = (%add,), kwargs = {{}})'  # noqa: B950
                         )
                         assert fx_graph[7] == "#   return %cos"
                 os.remove(file_path)
