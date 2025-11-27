@@ -44,12 +44,6 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   fi
 fi
 
-# Ensure CUDA 13.0 libraries (including cuDNN 9.13.0) are found at runtime
-if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
-  export LD_LIBRARY_PATH=/usr/local/cuda-13.0/lib64:/usr/local/cuda-13.0/lib:${LD_LIBRARY_PATH:-}
-  echo "Set LD_LIBRARY_PATH for CUDA 13.0 runtime libraries"
-fi
-
 echo "Environment variables:"
 env
 

@@ -35,8 +35,17 @@ function install_torchbench() {
 # Pango is needed for weasyprint which is needed for doctr
 conda_install pango
 
+# Detect CUDA 13 from build environment and use appropriate wheel index
+if [[ "${BUILD_ENVIRONMENT}" == *cuda13* ]]; then
+  CUDA_INDEX_URL="https://download.pytorch.org/whl/cu130"
+  echo "BUILD_ENVIRONMENT contains cuda13, using cu130 wheels"
+else
+  CUDA_INDEX_URL="https://download.pytorch.org/whl/cu128"
+  echo "Using stable CUDA 12.8 wheels"
+fi
+
 # Stable packages are ok here, just to satisfy TorchBench check
-pip_install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+pip_install torch torchvision torchaudio --index-url "${CUDA_INDEX_URL}"
 
 install_torchbench
 install_huggingface
