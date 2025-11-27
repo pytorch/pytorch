@@ -25,6 +25,8 @@ set -eux -o pipefail
 # Pythonless binary, then it expects to be in the root folder of the unzipped
 # libtorch package.
 
+# ensure we don't link to system libraries, linked libraries should be found from RPATH
+unset LD_LIBRARY_PATH
 
 if [[ -z ${DESIRED_PYTHON:-} ]]; then
   export DESIRED_PYTHON=${MATRIX_PYTHON_VERSION:-}
@@ -46,7 +48,10 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   export install_root="$PWD"
 else
 
-  if [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+)t ]]; then
+  if [[ $DESIRED_PYTHON =~ ^cp([0-9])([0-9][0-9])(-cp[0-9]+)?t?$ ]]; then
+    # Handle inputs like cp310-cp310 or cp310-cp310t
+    py_dot="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+  elif [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+)t ]]; then
     # For python that is maj.mint keep original version
     py_dot="$DESIRED_PYTHON"
   elif [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+) ]];  then
