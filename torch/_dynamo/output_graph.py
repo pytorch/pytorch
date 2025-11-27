@@ -3390,6 +3390,7 @@ class SubgraphTracer(fx.Tracer):
             # Also see NOTE: [Export inputs must be explicitly passed in]
             is_strict_export = self.is_export
             is_non_strict_export = torch.compiler.is_compiling()
+            # allow lifting for non-root
             is_root_graph_and_export = self.parent is None and (
                 is_strict_export or is_non_strict_export
             )
