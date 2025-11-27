@@ -211,9 +211,8 @@ def bind_args_cached(
                 TypeError,
                 tx,
                 args=[
-                    ConstantVariable.create(
                         f"Missing required positional argument: {name}"
-                    )
+
                 ],
             )
 
@@ -226,9 +225,7 @@ def bind_args_cached(
             TypeError,
             tx,
             args=[
-                ConstantVariable.create(
                     f"Too many positional arguments: got {len(args)}, expected {len(spec.all_pos_names)}"
-                )
             ],
         )
 
@@ -246,9 +243,7 @@ def bind_args_cached(
                 TypeError,
                 tx,
                 args=[
-                    ConstantVariable.create(
                         f"Missing required keyword-only argument: {name}"
-                    )
                 ],
             )
 
@@ -260,7 +255,7 @@ def bind_args_cached(
             TypeError,
             tx,
             args=[
-                ConstantVariable.create(f"Unexpected keyword arguments: {list(rem_kw)}")
+                f"Unexpected keyword arguments: {list(rem_kw)}"
             ],
         )
 
