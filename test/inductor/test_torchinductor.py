@@ -10276,16 +10276,19 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @skipIfXpu(msg="Incorrect XPU reference")
-    def test_argmax_argmin2(self):
-        def fn(x):
-            return (
-                aten.argmax(x, 0),
-                aten.argmin(x, 0),
-                aten.argmax(x, 1),
-                aten.argmin(x, 1),
-            )
+    @parametrize("cpu_backend", ["cpu", "triton"])
+    def test_argmax_argmin2(self, cpu_backend):
+        with config.patch("cpu_backend", cpu_backend):
 
-        self.common(fn, (torch.randn([144, 144]),))
+            def fn(x):
+                return (
+                    aten.argmax(x, 0),
+                    aten.argmin(x, 0),
+                    aten.argmax(x, 1),
+                    aten.argmin(x, 1),
+                )
+
+            self.common(fn, (torch.randn([144, 144]),))
 
     @skipIfXpu(msg="Incorrect XPU reference")
     def test_argmax_argmin_with_duplicates(self):
