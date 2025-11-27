@@ -125,6 +125,15 @@ def early_config_prune(g, m, dtsize, configs, named_args):
 
 
 triton_grouped_mm_source = r"""
+{% macro assign_maybe_constexpr(name, value_expr) -%}
+    {%- set value_str = value_expr | string -%}
+    {%- set sentinel = "__NOT_A_NUMBER__" -%}
+    {%- set as_int = value_str | int(default=sentinel) -%}
+    {%- set as_float = value_str | float(default=sentinel) -%}
+    {%- set is_constexpr = (as_int != sentinel) or (as_float != sentinel) -%}
+    {{ name }}{{ ": tl.constexpr" if is_constexpr else "" }} = {{ value_expr }}
+{%- endmacro %}
+
 import triton
 import triton.language as tl
 
@@ -211,38 +220,39 @@ def do_mma(a, b, accumulator):
 
 {%- if A_IS_2D %}
 {%- if B_IS_2D %}
-    G: tl.constexpr = {{size("offsets_ptr", 0)}}
+    {{ assign_maybe_constexpr("G", size("offsets_ptr", 0)) }}
 {%- else %}
-    G: tl.constexpr = {{size("b_ptr", 0)}}
+    {{ assign_maybe_constexpr("G", size("b_ptr", 0)) }}
 {%- endif %}
 {%- else %}
 {%- if B_IS_2D %}
-    G: tl.constexpr = {{size("a_ptr", 0)}}
+    {{ assign_maybe_constexpr("G", size("a_ptr", 0)) }}
 {%- else %}
-    G: tl.constexpr = {{size("a_ptr", 0)}}
+    {{ assign_maybe_constexpr("G", size("a_ptr", 0)) }}
 {%- endif %}
 {%- endif %}
 
     # the b_ptr tensor is given with its last two dims transposed, revert here
 
-    M: tl.constexpr = {{size("a_ptr", -2)}}
-    N: tl.constexpr = {{size("b_ptr", -1)}}
-    K: tl.constexpr = {{size("a_ptr", -1)}}
+    {{ assign_maybe_constexpr("M", size("a_ptr", -2)) }}
+    {{ assign_maybe_constexpr("N", size("b_ptr", -1)) }}
+    {{ assign_maybe_constexpr("K", size("a_ptr", -1)) }}
 
-    A_STRIDE_M: tl.constexpr = {{stride("a_ptr", -2)}}
-    A_STRIDE_K: tl.constexpr = {{stride("a_ptr", -1)}}
+    {{ assign_maybe_constexpr("A_STRIDE_M", stride("a_ptr", -2)) }}
+    {{ assign_maybe_constexpr("A_STRIDE_K", stride("a_ptr", -1)) }}
 {%- if not A_IS_2D %}
-    A_STRIDE_G: tl.constexpr = {{stride("a_ptr", 0)}}
+    {{ assign_maybe_constexpr("A_STRIDE_G", stride("a_ptr", 0)) }}
 {%- if SCALED %}
-    SCALE_A_STRIDE_G: tl.constexpr = {{stride("scale_a_ptr", 0)}}
+    {{ assign_maybe_constexpr("SCALE_A_STRIDE_G", stride("scale_a_ptr", 0)) }}
 {%- endif %}
 {%- endif %}
-    B_STRIDE_N: tl.constexpr = {{stride("b_ptr", -1)}}
-    B_STRIDE_K: tl.constexpr = {{stride("b_ptr", -2)}}
+    {{ assign_maybe_constexpr("B_STRIDE_N", stride("b_ptr", -1)) }}
+    {{ assign_maybe_constexpr("B_STRIDE_K", stride("b_ptr", -2)) }}
 {%- if not B_IS_2D %}
-    B_STRIDE_G: tl.constexpr = {{stride("b_ptr", 0)}}
+    {{ assign_maybe_constexpr("B_STRIDE_G", stride("b_ptr", 0)) }}
+    B_STRIDE_G = {{stride("b_ptr", 0)}}
 {%- if SCALED %}
-    SCALE_B_STRIDE_G: tl.constexpr = {{stride("scale_b_ptr", 0)}}
+    {{ assign_maybe_constexpr("SCALE_B_STRIDE_G", stride("scale_b_ptr", 0)) }}
 {%- endif %}
 {%- endif %}
 
