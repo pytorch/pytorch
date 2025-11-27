@@ -847,7 +847,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const std::optional<int64_t
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
        << ", window="; \
     if (window.defined()) { \
-      SS << window.toString() << "{" << window.sizes() << "}"; \
+      SS << window.toString() << '{' << window.sizes() << '}'; \
     } else { \
       SS << "None"; \
     } \
@@ -1046,7 +1046,7 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const std::optional<int64_
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
        << ", window="; \
     if (window.defined()) { \
-      SS << window.toString() << "{" << window.sizes() << "}"; \
+      SS << window.toString() << '{' << window.sizes() << '}'; \
     } else { \
       SS << "None"; \
     } \

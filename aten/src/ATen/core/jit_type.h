@@ -211,7 +211,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   std::string str() const override {
     std::stringstream ss;
-    ss << getElementType()->str() << "?";
+    ss << getElementType()->str() << '?';
     return ss.str();
   }
 
@@ -240,7 +240,7 @@ struct TORCH_API OptionalType : public UnionType {
 
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Optional[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Optional[" << getElementType()->annotation_str(printer) << ']';
     return ss.str();
   }
 };
@@ -906,7 +906,7 @@ struct TORCH_API ListType
 
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "List[" << getElementType()->annotation_str(printer) << "]";
+    ss << "List[" << getElementType()->annotation_str(printer) << ']';
     return ss.str();
   }
 };
@@ -946,7 +946,7 @@ struct TORCH_API DictType : public SharedType {
   std::string str() const override {
     std::stringstream ss;
     ss << "Dict(" << getKeyType()->str() << ", " << getValueType()->str()
-       << ")";
+       << ')';
     return ss.str();
   }
 
@@ -1018,7 +1018,7 @@ struct TORCH_API FutureType
 
   std::string str() const override {
     std::stringstream ss;
-    ss << "Future(" << getElementType()->str() << ")";
+    ss << "Future(" << getElementType()->str() << ')';
     return ss.str();
   }
   TypePtr createWithContained(
@@ -1041,7 +1041,7 @@ struct TORCH_API FutureType
 
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Future[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Future[" << getElementType()->annotation_str(printer) << ']';
     return ss.str();
   }
 };
@@ -1060,7 +1060,7 @@ struct TORCH_API AwaitType
 
   std::string str() const override {
     std::stringstream ss;
-    ss << "Await(" << getElementType()->str() << ")";
+    ss << "Await(" << getElementType()->str() << ')';
     return ss.str();
   }
   TypePtr createWithContained(
@@ -1083,7 +1083,7 @@ struct TORCH_API AwaitType
 
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Await[" << getElementType()->annotation_str(printer) << "]";
+    ss << "Await[" << getElementType()->annotation_str(printer) << ']';
     return ss.str();
   }
 };
@@ -1102,7 +1102,7 @@ struct TORCH_API RRefType
 
   std::string str() const override {
     std::stringstream ss;
-    ss << "RRef(" << getElementType()->str() << ")";
+    ss << "RRef(" << getElementType()->str() << ')';
     return ss.str();
   }
   TypePtr createWithContained(
@@ -1115,7 +1115,7 @@ struct TORCH_API RRefType
 
   std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "RRef[" << getElementType()->annotation_str(printer) << "]";
+    ss << "RRef[" << getElementType()->annotation_str(printer) << ']';
     return ss.str();
   }
 };

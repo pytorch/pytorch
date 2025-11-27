@@ -10,6 +10,7 @@ import operator
 import os
 import os.path
 import re
+import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -46,12 +47,13 @@ from . import config
 from ._activation_checkpointing.graph_info_provider import GraphInfoProvider
 from ._activation_checkpointing.knapsack import (
     dp_knapsack,
+    dp_knapsack_sliding_hirschberg,
     greedy_knapsack,
     ilp_knapsack,
 )
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
 from ._aot_autograd.descriptors import AOTOutput, SavedForBackwardsAOTOutput
-from ._aot_autograd.functional_utils import assert_functional_graph
+from ._aot_autograd.functional_utils import _is_functional_graph
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
 from .compile_utils import fx_graph_cse, get_aten_target, raise_getitems
@@ -1044,7 +1046,20 @@ def default_partition(
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
     if graph_has_recomputable_ops:
-        assert_functional_graph(joint_module.graph)
+        if _is_functional_graph(joint_module.graph)[0] is not None:
+            # Fall-back to previous behavior to avoid bc-breaking, although can
+            # eventually flip the switch to make this a hard error.
+            warnings.warn(
+                "Trying to unsafely apply AC to a non-functional graph with the "
+                "default partitioner. Falling back to min-cut partitioner."
+            )
+            return min_cut_rematerialization_partition(
+                joint_module,
+                _joint_inputs,
+                num_fwd_outputs=num_fwd_outputs,
+                static_lifetime_input_indices=static_lifetime_input_indices,
+            )
+
         joint_module = cleanup_recompute_tags(joint_module, is_default_partition=True)
 
     if not config.unsafe_allow_optimization_of_collectives:
@@ -1061,22 +1076,54 @@ def default_partition(
     saved_values = []
     saved_sym_nodes = []
 
+    distributed_enabled = torch.distributed.is_available()
+
+    def is_tensor(node):
+        return "tensor_meta" in node.meta or isinstance(
+            node.meta.get("val"), torch._subclasses.FakeTensor
+        )
+
+    def is_multi_output(node):
+        return (
+            all(user.target == operator.getitem for user in node.users)
+            and len(node.users) > 0
+        )
+
+    def is_impure(node):
+        # wait tensor is an "impure" op according to DCE's definition of impure
+        # (see is_impure in torch/fx/node.py), but it survives past
+        # functionalization and can be safely dup'd and reordered under the
+        # assumption SPMD.
+        return (
+            node.is_impure(impure_random=False)
+            and node.op
+            not in (
+                "placeholder",
+                "output",
+            )
+            and (
+                not distributed_enabled
+                or node.target is not torch.ops._c10d_functional.wait_tensor.default
+            )
+        )
+
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
+            continue
+        if node.target is torch.ops.aten._assert_scalar.default:
             continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
             continue
+        if is_multi_output(node):
+            # Must be ordered before MUST_SAVE tags to avoid saving tuples marked MUST_SAVE.
+            continue
         if node.meta.get("recompute") == CheckpointPolicy.MUST_SAVE:
             saved_values.append(node)
             continue
-        if node.is_impure(impure_random=False) and node.op not in (
-            "placeholder",
-            "output",
-        ):
-            # See is_impure in torch/fx/node.py
+        if is_impure(node):
             assert not graph_has_recomputable_ops, (
                 "Trying to apply AC on a graph with impure op",
                 node,
@@ -1084,8 +1131,11 @@ def default_partition(
             )
             saved_values.append(node)
             continue
+        assert is_tensor(node) or node.op != "call_function", (
+            f"Expected {node} to be a tensor"
+        )
         backward_usages = [n for n in node.users if n.name not in forward_node_names]
-        if "tensor_meta" in node.meta and all(is_sym_node(n) for n in backward_usages):
+        if all(is_sym_node(n) for n in backward_usages):
             # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
             # and not the actual tensor data,
             # then it will be a lot cheaper to save only the sizes/strides, and not the actual tensor.
@@ -1095,13 +1145,6 @@ def default_partition(
             # then we would be obligated to clone the input before saving it to appease autograd.
             # (This is how we originally found this bug).
             saved_sym_nodes.extend(backward_usages)
-            continue
-        if (
-            "tensor_meta" not in node.meta
-            and node.op == "call_function"
-            and not isinstance(node.meta.get("val"), torch._subclasses.FakeTensor)
-        ):
-            assert all(user.target == operator.getitem for user in node.users)
             continue
         if not must_recompute(node):
             saved_values.append(node)
@@ -1121,6 +1164,19 @@ def default_partition(
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=static_lifetime_input_nodes,
     )
+
+    # Run DCE while overriding the definition of is_impure_node
+    def is_not_collective(node):
+        if not distributed_enabled:
+            return True
+        if node.target is torch.ops._c10d_functional.wait_tensor.default:
+            return False
+        if node.target is torch.ops._c10d_functional.all_gather_into_tensor.default:
+            return False
+        return True
+
+    fw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
+    bw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
@@ -1634,6 +1690,13 @@ def force_save_bw_mutation_src(joint_module: fx.GraphModule) -> None:
             break
 
 
+def is_getitem_of_multi_output(node):
+    if node.target != operator.getitem:
+        return False
+    parent = node.args[0]
+    return "tensor_meta" not in parent.meta and node.op == "call_function"
+
+
 def cleanup_recompute_tags(
     joint_module: fx.GraphModule, *, is_default_partition: bool
 ) -> fx.GraphModule:
@@ -1676,6 +1739,10 @@ def cleanup_recompute_tags(
         elif (
             "ac_graph_id" not in node.meta
             and any(must_recompute(user) for user in node.users)
+            and not (
+                # Avoid saving getitem nodes which are not labeled with "ac_graph_id"
+                is_getitem_of_multi_output(node) and "ac_graph_id" in node.args[0].meta
+            )
             and is_default_partition
         ):
             # This node is not part of the AC region and a user is marked as recompute.
@@ -2299,6 +2366,8 @@ def _optimize_runtime_with_given_memory(
         return ilp_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
+    elif SOLVER == "dp_knapsack_sliding_hirschberg":
+        return dp_knapsack_sliding_hirschberg(memory, runtimes, max_memory)
     elif SOLVER == "dynamic_memory_budget_dp":
         log.warning(
             "dynamic_memory_budget_dp is an experimental solver. "

@@ -195,6 +195,10 @@ else:
             _rank_map: Optional[torch.Tensor] = None,
             _root_mesh: Optional["DeviceMesh"] = None,
         ) -> None:
+            # no-op in OSS, logs API usage metrics in meta-internal runs
+            torch._C._log_api_usage_once(
+                "torch.distributed.device_mesh.DeviceMesh.__init__"
+            )
             if mesh is not None:
                 if _layout is not None or _rank_map is not None:
                     raise TypeError(
@@ -256,14 +260,13 @@ else:
                 )
 
             # private field to pre-generate DeviceMesh's hash
-            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+            self._flatten_rank_map = tuple(self._rank_map.tolist())
             self._thread_id = None
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            self._thread_id = None
             if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
@@ -293,11 +296,6 @@ else:
                 self._coordinate_on_dim: Optional[list[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
-
-            # private field to pre-generate DeviceMesh's hash
-            self._flatten_rank_map = tuple(self._rank_map.tolist())
-            # Initialize instance-specific flatten mapping
-            self._flatten_mapping = {}
 
         @property
         def device_type(self) -> str:
@@ -381,7 +379,7 @@ else:
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
-        ) -> Optional[str]:
+        ) -> _GroupName:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
             pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
             backend, pg_options = backend_override
@@ -468,6 +466,11 @@ else:
                             f"in {subgroup_ranks}!"
                         )
                     pg_name = dim_group.group_name
+
+            if pg_name is None:
+                raise RuntimeError(
+                    f"Rank {get_rank()} wasn't present in any dimension!"
+                )
             return pg_name
 
         @staticmethod
@@ -484,7 +487,7 @@ else:
             for dim in range(len(layout)):
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
                 dim_group_names.append(
-                    DeviceMesh._init_one_process_group(  # type: ignore[arg-type]
+                    DeviceMesh._init_one_process_group(
                         layout[dim], rank_map, dim_name, backend_override[dim]
                     )
                 )
