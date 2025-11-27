@@ -758,10 +758,8 @@ class CachingAutotuner(KernelInterface):
             if "matrix_instr_nonkdim" in compile_meta:
                 options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
 
-        if self.device_props.type == "xpu":
-            # TODO: remove this after Intel triton supports generate native code on Windows.
-            if XPU_KERNEL_FORMAT == "zebin":
-                options["generate_native_code"] = True
+        if self.device_props.type == "xpu" and XPU_KERNEL_FORMAT == "zebin":
+            options["generate_native_code"] = True
 
         return options
 
