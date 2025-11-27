@@ -424,7 +424,10 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return a @ b
 
-        mm(torch.rand([25, 25], device=GPU_TYPE), torch.rand([25, 25], device=GPU_TYPE))
+        # Size must be big enough such that `is_mm_compute_bound` returns True and we need padding to 4 elements
+        # machine balance is ~8.3 (A100), 14.1 (H100), size must be 3x that, see arithmetic_intensity for M=N=K
+        size = [61, 61]
+        mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
         self.assertTrue(len(local_cache) == 2)
         FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
@@ -435,7 +438,7 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return (a + 1) @ b
 
-        mm(torch.rand([25, 25], device=GPU_TYPE), torch.rand([25, 25], device=GPU_TYPE))
+        mm(torch.rand(size, device=GPU_TYPE), torch.rand(size, device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
         # reuse original base timing
         self.assertTrue(len(local_cache) == 3)
