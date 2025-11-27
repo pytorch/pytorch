@@ -654,12 +654,15 @@ def get_pip_packages(run_lambda, patterns=None):
     return pip_version, filtered_out
 
 
-def get_cachingallocator_config() -> str:
-    """Return the caching allocator configuration from environment variables."""
-    for var in ("PYTORCH_ALLOC_CONF", "PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_HIP_ALLOC_CONF"):
+def get_cachingallocator_config() -> dict[str, str]:
+    """Return the caching allocator configuration from environment variables.
+    """
+    environs = {}
+    for var in ("PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_HIP_ALLOC_CONF","PYTORCH_ALLOC_CONF", ):
         if config := os.environ.get(var):
-            return config
-    return ""
+            environs[var] = config
+
+    return environs
 
 
 def get_cuda_module_loading_config():
@@ -792,6 +795,7 @@ Is XPU available: {is_xpu_available}
 HIP runtime version: {hip_runtime_version}
 MIOpen runtime version: {miopen_runtime_version}
 Is XNNPACK available: {is_xnnpack_available}
+Caching allocator config: {caching_allocator_config}
 
 CPU:
 {cpu_info}
@@ -882,6 +886,9 @@ def pretty_str(envinfo):
             mutable_dict["conda_packages"], "[conda] "
         )
     mutable_dict["cpu_info"] = envinfo.cpu_info
+    mutable_dict["caching_allocator_config"] = envinfo.caching_allocator_config
+    if not envinfo.caching_allocator_config:
+        mutable_dict["caching_allocator_config"] = "N/A"
     return env_info_fmt.format(**mutable_dict)
 
 
