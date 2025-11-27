@@ -3662,6 +3662,16 @@ class AlgorithmSelectorCache(PersistentCache):
 
             timings[choice] = timing
 
+            # If a collective choice failed or timed out, skip the rest of the choices
+            if is_collective and not math.isfinite(timing):
+                log.warning(
+                    "Choice %s failed or timed out during collective benchmarking. "
+                    "Stopping further benchmarking to avoid NCCL corruption.",
+                    getattr(choice, "name", "<unknown>"),
+                )
+                timings.update({c: float("inf") for c in choices if c not in timings})
+                break
+
         return timings
 
     @classmethod
