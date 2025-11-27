@@ -201,7 +201,7 @@ class TestModule(TestCase):
                     input_device_1_kwargs = _to_device1(input_device_kwargs)
 
                     m.to(1)
-                    with torch.device(f"{device_type}:1"):
+                    with torch.accelerator.device_index(1):
                         m(*input_device_1_args, **input_device_1_kwargs)
                     self._assert_module_parameters_and_buffer_are(m, torch.device(f"{device_type}:1"), dtype)
 
