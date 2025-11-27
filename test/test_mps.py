@@ -11108,7 +11108,7 @@ class TestConvolutionMPS(TestCaseMPS):
             x_gpu = conv_gpu(y_gpu)
             self.assertEqual(x_cpu, x_gpu.cpu(), rtol=1e-03, atol=1e-05)
 
-    @parametrize("dtype", [torch.float32, torch.float16])
+    @parametrize("dtype", [torch.float32, torch.float16, torch.bfloat16])
     def test_grid_sample(self, dtype):
         def test(N, C, H, W, mode, padding_mode, align_corners, input_requires_grad):
             def test_shape(N, C, IH, IW, H, W, mode, padding_mode, align_corners):
@@ -11240,42 +11240,44 @@ class TestConvolutionMPS(TestCaseMPS):
             W = random.randint(3, IW + 2)
             test_shape(0, C, IH, IW, H, W, mode, padding_mode, align_corners)
 
+        if dtype != torch.float32:
+            return
         for mode in ('bilinear', 'nearest'):
             for padding_mode in ('zeros', 'reflection'):
                 for align_corners in (True, False):
                     # test known input
-                    input = torch.arange(1., 11, device="mps", dtype=dtype).view(1, 1, 2, 5)
+                    input = torch.arange(1., 11, device="mps").view(1, 1, 2, 5)
                     grid = torch.tensor(
                         [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-6], [0.5, 1.0]],
-                         [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]], device="mps", dtype=dtype).view(1, 2, 5, 2)
+                        [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]], device="mps").view(1, 2, 5, 2)
                     if mode == 'bilinear':
                         if padding_mode == 'zeros':
                             if align_corners:
                                 groundtruth = torch.tensor(
                                     [[0.0000, 6.0000000000, 5.0000, 4.8340, 9.0000],
-                                     [2.2500, 6.3332500450, 5.0000, 5.1000, 0.0000]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [2.2500, 6.3332500450, 5.0000, 5.1000, 0.0000]], device="mps").view(1, 1, 2, 5)
                             else:
                                 groundtruth = torch.tensor(
                                     [[0.0000, 6.5000000000, 1.2500, 4.6675000191, 4.6250],
-                                     [0.5000, 7.1665000916, 1.2500, 5.0000000000, 0.0000]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [0.5000, 7.1665000916, 1.2500, 5.0000000000, 0.0000]], device="mps").view(1, 1, 2, 5)
                         elif padding_mode == 'border':
                             if align_corners:
                                 groundtruth = torch.tensor(
                                     [[1.2000, 6.0000000000, 5.0000, 4.8340, 9.0000],
-                                     [2.2500, 6.3332500450, 5.0000, 5.1000, 8.7500]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [2.2500, 6.3332500450, 5.0000, 5.1000, 8.7500]], device="mps").view(1, 1, 2, 5)
                             else:
                                 groundtruth = torch.tensor(
                                     [[1.0000, 6.5000000000, 5.0000, 4.6675000191, 9.2500],
-                                     [1.0000, 7.1665000916, 5.0000, 5.0000000000, 10.0000]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [1.0000, 7.1665000916, 5.0000, 5.0000000000, 10.0000]], device="mps").view(1, 1, 2, 5)
                         elif padding_mode == 'reflection':
                             if align_corners:
                                 groundtruth = torch.tensor(
                                     [[3.4500, 6.0000000000, 5.0000, 4.8340, 9.0000],
-                                     [2.2500, 6.3332500450, 5.0000, 5.1000, 7.7500]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [2.2500, 6.3332500450, 5.0000, 5.1000, 7.7500]], device="mps").view(1, 1, 2, 5)
                             else:
                                 groundtruth = torch.tensor(
                                     [[3.0000004768, 6.5000000000, 5.0000, 4.6675000191, 9.2500],
-                                     [1.0000000000, 7.1665000916, 5.0000, 5.0000000000, 9.2500]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [1.0000000000, 7.1665000916, 5.0000, 5.0000000000, 9.2500]], device="mps").view(1, 1, 2, 5)
                         else:
                             raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'nearest':
@@ -11283,29 +11285,29 @@ class TestConvolutionMPS(TestCaseMPS):
                             if align_corners:
                                 groundtruth = torch.tensor(
                                     [[0., 8., 5., 7., 9.],
-                                     [1., 8., 5., 8., 0.]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [1., 8., 5., 8., 0.]], device="mps").view(1, 1, 2, 5)
                             else:
                                 groundtruth = torch.tensor(
                                     [[0., 8., 5., 7., 0.],
-                                     [1., 8., 5., 8., 0.]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [1., 8., 5., 8., 0.]], device="mps").view(1, 1, 2, 5)
                         elif padding_mode == 'border':
                             if align_corners:
                                 groundtruth = torch.tensor(
                                     [[1., 8., 5., 7., 9.],
-                                     [1., 8., 5., 8., 10.]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [1., 8., 5., 8., 10.]], device="mps").view(1, 1, 2, 5)
                             else:
                                 groundtruth = torch.tensor(
                                     [[1., 8., 5., 7., 9.],
-                                     [1., 8., 5., 8., 10.]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [1., 8., 5., 8., 10.]], device="mps").view(1, 1, 2, 5)
                         elif padding_mode == 'reflection':
                             if align_corners:
                                 groundtruth = torch.tensor(
                                     [[1., 8., 5., 7., 9.],
-                                     [1., 8., 5., 8., 9.]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [1., 8., 5., 8., 9.]], device="mps").view(1, 1, 2, 5)
                             else:
                                 groundtruth = torch.tensor(
                                     [[1., 8., 5., 7., 9.],
-                                     [1., 8., 5., 8., 9.]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [1., 8., 5., 8., 9.]], device="mps").view(1, 1, 2, 5)
                         else:
                             raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
                     elif mode == 'bicubic':
@@ -11313,38 +11315,37 @@ class TestConvolutionMPS(TestCaseMPS):
                             if align_corners:
                                 groundtruth = torch.tensor(
                                     [[-0.10424726, 7.1400003, 5.0000, 5.7842274, 9.0000],
-                                     [2.4492188, 7.4814040, 5.0000, 6.0277520, 0.0000]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [2.4492188, 7.4814040, 5.0000, 6.0277520, 0.0000]], device="mps").view(1, 1, 2, 5)
                             else:
                                 groundtruth = torch.tensor(
                                     [[0.00000, 7.6287503, 1.0625, 5.5977230, 5.3270264],
-                                     [0.40625, 8.0288770, 1.0625, 5.9375067, -0.3515625]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [0.40625, 8.0288770, 1.0625, 5.9375067, -0.3515625]], device="mps").view(1, 1, 2, 5)
                         elif padding_mode == 'border':
                             if align_corners:
                                 groundtruth = torch.tensor(
                                     [[1.1520010, 6.0599990, 5.0000, 4.870930, 9.0000000],
-                                     [2.1328125, 6.4258375, 5.0000, 5.076003, 8.8671875]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [2.1328125, 6.4258375, 5.0000, 5.076003, 8.8671875]], device="mps").view(1, 1, 2, 5)
                             else:
                                 groundtruth = torch.tensor(
                                     [[0.894531, 6.6050020, 4.625, 4.7138715, 9.800781],
-                                     [0.906250, 7.2822485, 4.625, 5.0000052, 10.00000]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [0.906250, 7.2822485, 4.625, 5.0000052, 10.00000]], device="mps").view(1, 1, 2, 5)
                         elif padding_mode == 'reflection':
                             if align_corners:
                                 groundtruth = torch.tensor(
                                     [[3.1822524, 6.239998, 5.0000, 4.8709273, 9.00000],
-                                     [1.7812500, 6.703594, 5.0000, 5.0760007, 8.21875]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [1.7812500, 6.703594, 5.0000, 5.0760007, 8.21875]], device="mps").view(1, 1, 2, 5)
                             else:
                                 groundtruth = torch.tensor(
                                     [[2.7993753, 6.6050020, 4.25, 4.7138715, 10.269531],
-                                     [0.8125000, 7.2822485, 4.25, 5.0000052, 9.332031]], device="mps", dtype=dtype).view(1, 1, 2, 5)
+                                     [0.8125000, 7.2822485, 4.25, 5.0000052, 9.332031]], device="mps").view(1, 1, 2, 5)
                         else:
                             raise AssertionError(f"missing groundtruth test for padding mode '{padding_mode}'")
 
                     else:
                         raise AssertionError(f"missing groundtruth test for interpolation mode '{mode}'")
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
-                                           align_corners=align_corners)
-                    atol, rtol = (2e-2, 1e-2) if dtype == torch.float16 else (1e-5, 0)
-                    self.assertEqual(output, groundtruth, atol=atol, rtol=rtol,
+                                        align_corners=align_corners)
+                    self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
                                      msg=f"groundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
 

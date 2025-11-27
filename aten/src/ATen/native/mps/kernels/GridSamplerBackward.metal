@@ -1,5 +1,6 @@
 #include <ATen/native/mps/kernels/GridSampler.h>
 #include <ATen/native/mps/kernels/GridSamplerBackward.h>
+#include <c10/metal/atomic.h>
 #include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_stdlib>
@@ -10,22 +11,24 @@ using namespace c10::metal;
 
 template <typename scalar_t>
 static inline scalar_t grid_sampler_unnormalize(scalar_t coord, int size, bool align_corners) {
+  using opmath_t = opmath_t<scalar_t>;
   if (align_corners) {
-    return ((coord + 1.0f) / 2.0f) * (size - 1);
+    return static_cast<scalar_t>((static_cast<opmath_t>(coord) + 1.0f) / 2.0f * (size - 1));
   } else {
-    return ((coord + 1.0f) * size - 1.0f) / 2.0f;
+    return static_cast<scalar_t>(((static_cast<opmath_t>(coord) + 1.0f) * size - 1.0f) / 2.0f);
   }
 }
 
 template <typename scalar_t>
 static inline scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int size,
                                                          bool align_corners, thread scalar_t* grad_in) {
+  using opmath_t = opmath_t<scalar_t>;
   if (align_corners) {
-    *grad_in = static_cast<scalar_t>(size - 1) / 2.0f;
-    return ((coord + 1.0f) / 2.0f) * (size - 1);
+    *grad_in = static_cast<scalar_t>(static_cast<opmath_t>(size - 1) / 2.0f);
+    return static_cast<scalar_t>((static_cast<opmath_t>(coord) + 1.0f) / 2.0f * (size - 1));
   } else {
-    *grad_in = static_cast<scalar_t>(size) / 2.0f;
-    return ((coord + 1.0f) * size - 1.0f) / 2.0f;
+    *grad_in = static_cast<scalar_t>(static_cast<opmath_t>(size) / 2.0f);
+    return static_cast<scalar_t>(((static_cast<opmath_t>(coord) + 1.0f) * size - 1.0f) / 2.0f);
   }
 }
 
@@ -56,15 +59,16 @@ static inline scalar_t reflect_coordinates(scalar_t in, int twice_low, int twice
   if (twice_low == twice_high) {
     return static_cast<scalar_t>(0);
   }
-  scalar_t min_val = static_cast<scalar_t>(twice_low) / 2.0f;
-  scalar_t span = static_cast<scalar_t>(twice_high - twice_low) / 2.0f;
-  in = abs(in - min_val);
-  scalar_t extra = fmod(in, span);
-  int flips = static_cast<int>(floor(in / span));
+  using opmath_t = opmath_t<scalar_t>;
+  opmath_t min_val = static_cast<opmath_t>(twice_low) / 2.0f;
+  opmath_t span = static_cast<opmath_t>(twice_high - twice_low) / 2.0f;
+  opmath_t in_f = abs(static_cast<opmath_t>(in) - min_val);
+  opmath_t extra = fmod(in_f, span);
+  int flips = static_cast<int>(floor(in_f / span));
   if (flips % 2 == 0) {
-    return extra + min_val;
+    return static_cast<scalar_t>(extra + min_val);
   } else {
-    return span - extra + min_val;
+    return static_cast<scalar_t>(span - extra + min_val);
   }
 }
 
@@ -75,24 +79,25 @@ static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, 
     *grad_in = static_cast<scalar_t>(0);
     return static_cast<scalar_t>(0);
   }
+  using opmath_t = opmath_t<scalar_t>;
   int grad_in_mult;
-  scalar_t min_val = static_cast<scalar_t>(twice_low) / 2.0f;
-  scalar_t span = static_cast<scalar_t>(twice_high - twice_low) / 2.0f;
-  in = in - min_val;
-  if (in < static_cast<scalar_t>(0)) {
+  opmath_t min_val = static_cast<opmath_t>(twice_low) / 2.0f;
+  opmath_t span = static_cast<opmath_t>(twice_high - twice_low) / 2.0f;
+  opmath_t in_f = static_cast<opmath_t>(in) - min_val;
+  if (in_f < static_cast<opmath_t>(0)) {
     grad_in_mult = -1;
-    in = -in;
+    in_f = -in_f;
   } else {
     grad_in_mult = 1;
   }
-  scalar_t extra = fmod(in, span);
-  int flips = static_cast<int>(floor(in / span));
+  opmath_t extra = fmod(in_f, span);
+  int flips = static_cast<int>(floor(in_f / span));
   if (flips % 2 == 0) {
     *grad_in = static_cast<scalar_t>(grad_in_mult);
-    return extra + min_val;
+    return static_cast<scalar_t>(extra + min_val);
   } else {
     *grad_in = static_cast<scalar_t>(-grad_in_mult);
-    return span - extra + min_val;
+    return static_cast<scalar_t>(span - extra + min_val);
   }
 }
 
@@ -159,11 +164,11 @@ static inline void safe_add_2d(
     const index_t NC_offset, const index_t memory_span) {
   if (within_bounds_2d(h, w, H, W)) {
     index_t offset = NC_offset + h * sH + w * sW;
-    // Using atomic_float which is standard in Metal
-    atomic_fetch_add_explicit(
-      (device atomic_float*) data + offset,
-      delta,
-      memory_order_relaxed
+    using atomic_t = typename AtomicType<scalar_t>::type;
+    AtomicType<scalar_t>::atomic_add(
+      (device atomic_t*)data,
+      offset,
+      delta
     );
   }
 }
@@ -387,3 +392,4 @@ kernel void grid_sampler_2d_backward(
 
 REGISTER_GRID_SAMPLER_OP(float);
 REGISTER_GRID_SAMPLER_OP(half);
+REGISTER_GRID_SAMPLER_OP(bfloat);
