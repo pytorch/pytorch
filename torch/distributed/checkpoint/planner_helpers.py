@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import io
+from bisect import bisect_right, insort
 from collections.abc import Callable
 from typing import Any, cast
 
@@ -28,8 +29,6 @@ from .planner import (
     WriteItem,
     WriteItemType,
 )
-from bisect import bisect_right, insort
-
 from .resharding import (
     _check_shard_metadata_pair_overlap,
     _shards_get_overlap_region_wrt_saved_tensor,
@@ -284,14 +283,8 @@ def create_read_items_for_chunk_list(
         max_size = 0
         for dim in range(num_dims):
             dim_size = max(
-                max(
-                    chunk.offsets[dim] + chunk.sizes[dim]
-                    for chunk in local_chunks
-                ),
-                max(
-                    chunk.offsets[dim] + chunk.sizes[dim]
-                    for chunk in saved_chunks
-                ),
+                max(chunk.offsets[dim] + chunk.sizes[dim] for chunk in local_chunks),
+                max(chunk.offsets[dim] + chunk.sizes[dim] for chunk in saved_chunks),
             )
             if dim_size > max_size:
                 max_size = dim_size
@@ -356,7 +349,9 @@ def create_read_items_for_chunk_list(
                 _create_read_item_for_tensor(
                     dest_index=MetadataIndex(fqn, local_chunk.offsets, local_idx),
                     dest_offsets=dest_offsets,
-                    storage_index=MetadataIndex(fqn, storage_chunk.offsets, storage_idx),
+                    storage_index=MetadataIndex(
+                        fqn, storage_chunk.offsets, storage_idx
+                    ),
                     storage_offsets=storage_offsets,
                     lengths=lengths,
                 )
