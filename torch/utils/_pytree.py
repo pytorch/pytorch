@@ -1182,12 +1182,12 @@ class TreeSpec:
         return self._children[index]
 
     def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
-        def helper(treespec: TreeSpec, tree: PyTree, subtrees: list[PyTree]) -> None:
+        def helper(treespec: TreeSpec, node: PyTree, subtrees: list[PyTree]) -> None:
             if treespec.is_leaf():
-                subtrees.append(tree)
+                subtrees.append(node)
                 return
 
-            node_type = _get_node_type(tree)
+            node_type = _get_node_type(node)
             if treespec.type not in BUILTIN_TYPES:
                 # Always require custom node types to match exactly
                 if node_type != treespec.type:
@@ -1196,7 +1196,7 @@ class TreeSpec:
                         f"expected {treespec.type!r}, but got {node_type!r}.",
                     )
                 flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-                children, context = flatten_fn(tree)
+                children, context = flatten_fn(node)
                 if len(children) != treespec.num_children:
                     raise ValueError(
                         f"Node arity mismatch; "
@@ -1218,10 +1218,10 @@ class TreeSpec:
                         f"Node type mismatch; "
                         f"expected {treespec.type!r}, but got {node_type!r}.",
                     )
-                if len(tree) != treespec.num_children:
+                if len(node) != treespec.num_children:
                     raise ValueError(
                         f"Node arity mismatch; "
-                        f"expected {treespec.num_children}, but got {len(tree)}.",
+                        f"expected {treespec.num_children}, but got {len(node)}.",
                     )
 
                 if both_standard_dict:
@@ -1233,7 +1233,7 @@ class TreeSpec:
                         else treespec._context[1]
                     )
                     expected_keys = dict_context
-                    got_key_set = set(tree)
+                    got_key_set = set(node)
                     expected_key_set = set(expected_keys)
                     if got_key_set != expected_key_set:
                         missing_keys = expected_key_set.difference(got_key_set)
@@ -1244,11 +1244,11 @@ class TreeSpec:
                         if extra_keys:
                             message += f"; extra key(s): {extra_keys}"
                         raise ValueError(f"Node keys mismatch{message}.")
-                    children = [tree[key] for key in expected_keys]
+                    children = [node[key] for key in expected_keys]
                 else:
                     # node_type is treespec.type
                     flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-                    children, context = flatten_fn(tree)
+                    children, context = flatten_fn(node)
                     if (
                         node_type is not deque  # ignore mismatch of `maxlen` for deque
                     ) and context != treespec._context:
@@ -1441,10 +1441,13 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     This is the inverse operation of `tree_flatten`.
     """
     if not _is_pytreespec_instance(treespec):
-        raise TypeError(
-            f"Expected `treespec` to be an instance of "
-            f"PyTreeSpec but got item of type {type(treespec)}."
-        )
+        if not _is_pytreespec_instance(leaves):
+            raise TypeError(
+                f"Expected `treespec` to be an instance of "
+                f"PyTreeSpec but got item of type {type(treespec)}."
+            )
+        # Allow passing the PyTreeSpec instance as the first argument
+        leaves, treespec = treespec, leaves
     return treespec.unflatten(leaves)
 
 
