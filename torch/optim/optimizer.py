@@ -47,6 +47,21 @@ _global_optimizer_pre_hooks: dict[int, GlobalOptimizerPreHook] = OrderedDict()
 _global_optimizer_post_hooks: dict[int, GlobalOptimizerPostHook] = OrderedDict()
 _foreach_supported_types = [torch.Tensor, torch.nn.parameter.Parameter]
 
+CANONICAL_KEYS = [
+    "lr",
+    "momentum",
+    "dampening",
+    "weight_decay",
+    "nesterov",
+    "betas",
+    "eps",
+    "maximize",
+    "foreach",
+    "capturable",
+    "differentiable",
+]
+
+
 
 class _RequiredParameter:
     """Singleton class representing a required parameter for an Optimizer."""
@@ -437,15 +452,18 @@ class Optimizer:
         self.defaults.setdefault("differentiable", False)
 
     def __repr__(self) -> str:  # noqa: D105
-        format_string = self.__class__.__name__ + " ("
+        format_string = f"{self.__class__.__name__} ("
         for i, group in enumerate(self.param_groups):
-            format_string += "\n"
-            format_string += f"Parameter Group {i}\n"
-            for key in sorted(group.keys()):
-                if key != "params":
+            format_string += f"\nParameter Group {i}\n"
+            for key in CANONICAL_KEYS:
+                if key in group:
                     format_string += f"    {key}: {group[key]}\n"
+        for key in group.keys():
+            if key not in CANONICAL_KEYS and key != "params":
+                format_string += f"    {key}: {group[key]}\n"
         format_string += ")"
         return format_string
+
 
     # Currently needed by Adam and AdamW
     def _cuda_graph_capture_health_check(self) -> None:
