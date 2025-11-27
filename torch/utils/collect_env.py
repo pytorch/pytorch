@@ -657,12 +657,15 @@ def get_pip_packages(run_lambda, patterns=None):
 def get_cachingallocator_config() -> dict[str, str]:
     """Return the caching allocator configuration from environment variables.
     """
-    environs = {}
-    for var in ("PYTORCH_CUDA_ALLOC_CONF", "PYTORCH_HIP_ALLOC_CONF","PYTORCH_ALLOC_CONF", ):
-        if config := os.environ.get(var):
-            environs[var] = config
-
-    return environs
+    return {
+        var: os.environ.get(var)
+        for var in (
+            "PYTORCH_CUDA_ALLOC_CONF",
+            "PYTORCH_HIP_ALLOC_CONF",
+            "PYTORCH_ALLOC_CONF",
+        )
+        if os.environ.get(var)
+    }
 
 
 def get_cuda_module_loading_config():

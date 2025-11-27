@@ -1361,6 +1361,15 @@ def memory_usage(device: "Device" = None) -> int:
     Warning: Each sample period may be between 1 second and 1/6 second,
     depending on the product being queried.
     """
+    return {
+        var: os.environ.get(var)
+        for var in (
+            "PYTORCH_CUDA_ALLOC_CONF",
+            "PYTORCH_HIP_ALLOC_CONF",
+            "PYTORCH_ALLOC_CONF",
+        )
+        if os.environ.get(var)
+    }
     if not torch.version.hip:
         handle = _get_pynvml_handler()
         device = _get_nvml_device_index(device)
