@@ -1087,7 +1087,8 @@ TORCH_IMPL_FUNC(index_copy_out)
     result.copy_(self);
 
   // See Note [Enabling Deterministic Operations]
-  if (result.is_cuda() && globalContext().deterministicAlgorithms()) {
+  if ((result.is_cuda() || result.is_xpu()) &&
+      globalContext().deterministicAlgorithms()) {
     torch::List<std::optional<Tensor>> indices;
     indices.resize(dim + 1);
     indices.set(dim, index);
@@ -2668,6 +2669,9 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
   broadcast_shape = infer_size_symint(indices_sizes, self.sym_sizes());
   auto self_broadcasted = at::broadcast_to_symint(self, broadcast_shape);
 
+  // Wrap negative indices to positive (Python-style)
+  indices_broadcasted =
+      indices_broadcasted.remainder(self_broadcasted.size(dim));
   return std::make_tuple(
       std::move(self_broadcasted),
       std::move(indices_broadcasted),

@@ -5307,6 +5307,7 @@ def new_group(
     use_local_synchronization: bool = False,
     group_desc=None,
     device_id: Optional[torch.device] = None,
+    always_return_group_name: bool = False,
 ):
     """
     Create a new distributed group.
@@ -5385,6 +5386,7 @@ def new_group(
         use_local_synchronization=use_local_synchronization,
         group_desc=group_desc,
         device_id=device_id,
+        always_return_group_name=always_return_group_name,
     )
 
 
@@ -5397,6 +5399,7 @@ def _new_group_with_tag(
     use_local_synchronization=False,
     group_desc=None,
     device_id: Optional[torch.device] = None,
+    always_return_group_name: bool = False,
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
@@ -5481,8 +5484,7 @@ def _new_group_with_tag(
         group_desc=group_desc,
     )
 
-    if pg == GroupMember.NON_GROUP_MEMBER:
-        # TODO: Add a config for this new behavior?
+    if always_return_group_name and pg == GroupMember.NON_GROUP_MEMBER:
         return _NonGroupMember(group_name)
 
     # Create the global rank to group rank mapping

@@ -46,6 +46,7 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
+#include <pybind11/functional.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
@@ -1013,6 +1014,15 @@ This class does not support ``__members__`` property.)");
     return ::c10d::unregister_all_process_groups();
   });
 
+  // Register an alias for a process group name
+  module.def(
+      "_register_process_group_alias",
+      [](const std::string& alias_name, const std::string& canonical_name) {
+        ::c10d::register_process_group_alias(alias_name, canonical_name);
+      },
+      py::arg("alias_name"),
+      py::arg("canonical_name"));
+
 #ifdef USE_NVSHMEM
   // Initializes the device state in CUmodule so that it’s able to perform
   // NVSHMEM operations.
@@ -1656,6 +1666,12 @@ See queue_push for more details.
 
 Arguments:
     key (str): The key of the queue to get the length.
+)")
+          .def(
+              "list_keys",
+              &::c10d::Store::listKeys,
+              R"(
+Returns a list of all keys in the store.
 )")
           .def(
               "has_extended_api",
@@ -4056,10 +4072,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 
   module.def(
       "_set_global_rank",
-      [](int64_t rank) {
-        c10::SetGlobalRank(rank);
-        ::c10d::set_global_rank(rank);
-      },
+      [](int64_t rank) { c10::SetGlobalRank(rank); },
       py::arg("rank"),
       R"(
         Arguments:
@@ -4206,7 +4219,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           }),
           py::arg("host_or_file"),
           py::arg("port") = -1)
-      .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown);
+      .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown)
+      .def_property_readonly(
+          "port", &::c10d::control_plane::WorkerServer::port);
 
   module.def(
       "_get_handler",
@@ -4221,6 +4236,25 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       R"(
       Returns the handler with the specified name.
     )");
+
+  module.def(
+      "_register_handler",
+      [](const std::string& name, const py::function& handler) {
+        ::c10d::control_plane::registerHandler(
+            name,
+            [handler](
+                const ::c10d::control_plane::Request& req,
+                ::c10d::control_plane::Response& res) {
+              py::gil_scoped_acquire acquire;
+              handler(std::ref(req), std::ref(res));
+            });
+      },
+
+      py::arg("name"),
+      py::arg("handler"),
+      R"(
+    Registers a handler by name.
+  )");
 
   module.def(
       "_get_handler_names",
@@ -4239,12 +4273,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       // Default constructor.
       .def(py::init<>())
       .def("body", &::c10d::control_plane::Request::body)
-      .def("params", &::c10d::control_plane::Request::params);
+      .def("get_param", &::c10d::control_plane::Request::getParam);
 
-  py::class_<
-      ::c10d::control_plane::Response,
-      std::shared_ptr<::c10d::control_plane::Response>,
-      PythonResponse>(
+  py::class_<::c10d::control_plane::Response, PythonResponse>(
       module,
       "_Response",
       R"(

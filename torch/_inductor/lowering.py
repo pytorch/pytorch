@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     canonicalize_dim,
@@ -2704,6 +2705,8 @@ def require_channels_last(_, *args, **kwargs):
 
 
 def constrain_to_fake_tensor(arg, fake_arg):
+    if isinstance(fake_arg, FakeScriptObject):
+        return arg
     if isinstance(arg, ir.IRNode):
         meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
@@ -3091,6 +3094,8 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
 make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
+
+make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
 
 
 # Register with type_promotion_kind None.
@@ -3913,15 +3918,6 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
 def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
     if may_realize:
 
-        def try_get_name(x):
-            if isinstance(x, ir.TensorBox):
-                x = x.data
-            if isinstance(x, ir.BaseView):
-                x = x.unwrap_view()
-            if isinstance(x, ir.StorageBox):
-                x = x.data
-            return x.get_name() if isinstance(x, ir.Buffer) else None
-
         def indice_slice_from_randperm(indice):
             # Refer to: https://github.com/pytorch/pytorch/pull/139366#discussion_r1825424660
             # For this specific pattern, indices is unique as coming from torch.randperm.
@@ -3936,7 +3932,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
                 )
             return False
 
-        if try_get_name(self) in values.get_read_names() and not all(
+        if ir.try_get_name(self) in values.get_read_names() and not all(
             indice_slice_from_randperm(indice) for indice in indices
         ):
             # Fix issue: https://github.com/pytorch/pytorch/issues/138908
@@ -7099,13 +7095,19 @@ def sym_constrain_range(a, min=None, max=None):
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     val = V.graph.current_node.meta["val"]
-    return val.node.expr
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
-    return val.node.expr
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
 
 
 @register_lowering(aten.sym_numel)
@@ -7447,9 +7449,9 @@ def _sink_tokens(tokens):
 def with_effects(token, op, *args, **kwargs):
     result = ir.EffectfulKernel.create(op, *args, **kwargs)
 
-    from torch._higher_order_ops.effects import get_effect_key
+    from torch._higher_order_ops.effects import _get_effect
 
-    effect_type = get_effect_key(op, args, kwargs)
+    effect_type = _get_effect(op)
     assert effect_type is not None
     effectful_kernel = V.graph.effectful_ops[effect_type]
 

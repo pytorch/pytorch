@@ -4,8 +4,6 @@
 
 namespace c10d {
 
-C10_EXPORT void set_global_rank(int rank);
-
 C10_EXPORT void set_thread_isolation_mode(bool enable);
 
 bool get_thread_isolation_mode();
@@ -20,5 +18,9 @@ C10_EXPORT c10::intrusive_ptr<c10d::ProcessGroup> resolve_process_group(
 C10_EXPORT void unregister_process_group(const std::string& group_name);
 
 C10_EXPORT void unregister_all_process_groups();
+
+C10_EXPORT void register_process_group_alias(
+    const std::string& alias_name,
+    const std::string& canonical_name);
 
 } // namespace c10d

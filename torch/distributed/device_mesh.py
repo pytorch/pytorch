@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import collections
 import logging
 import os
 import threading
@@ -196,6 +195,10 @@ else:
             _rank_map: Optional[torch.Tensor] = None,
             _root_mesh: Optional["DeviceMesh"] = None,
         ) -> None:
+            # no-op in OSS, logs API usage metrics in meta-internal runs
+            torch._C._log_api_usage_once(
+                "torch.distributed.device_mesh.DeviceMesh.__init__"
+            )
             if mesh is not None:
                 if _layout is not None or _rank_map is not None:
                     raise TypeError(
@@ -257,14 +260,13 @@ else:
                 )
 
             # private field to pre-generate DeviceMesh's hash
-            self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
+            self._flatten_rank_map = tuple(self._rank_map.tolist())
             self._thread_id = None
             # Initialize instance-specific flatten mapping
             self._flatten_mapping = {}
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
-            self._thread_id = None
             if device_type != "xla":
                 # always try to create default (world) pg, even if it is not initialized
                 # already. The world pg is used for device mesh identity (rank) on each
@@ -294,11 +296,6 @@ else:
                 self._coordinate_on_dim: Optional[list[int]] = (
                     rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
-
-            # private field to pre-generate DeviceMesh's hash
-            self._flatten_rank_map = tuple(self._rank_map.tolist())
-            # Initialize instance-specific flatten mapping
-            self._flatten_mapping = {}
 
         @property
         def device_type(self) -> str:
@@ -382,7 +379,7 @@ else:
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
-        ) -> Optional[str]:
+        ) -> _GroupName:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
             pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
             backend, pg_options = backend_override
@@ -451,10 +448,17 @@ else:
             # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
             # along with appending information to the `dim_group_names` list whenever necessary.
             pg_name = None
-            pg_rank_by_name: dict[_GroupName, list[int]] = collections.defaultdict(list)
+            found_my_rank = False
 
-            rank = get_rank()
-
+            # We want a consistent naming scheme across ranks so the output
+            # graphs are the same on each rank. To do this we'll always report
+            # the name of the first created group and if that's not our rank's
+            # name then we'll add an alias.
+            #
+            # Couldn't we just tell c10d to use the same name on every rank? In
+            # theory yes, but for consistency we want to create ALL groups (even
+            # ones that don't contain our rank) and there's checks to ensure
+            # that we don't duplicate names.
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
                 dim_group = new_group(
@@ -463,47 +467,27 @@ else:
                     backend=backend,
                     pg_options=pg_options,
                     group_desc=group_desc,
+                    always_return_group_name=True,
                 )
+                if pg_name is None:
+                    pg_name = dim_group.group_name
 
                 # only add to dim_groups if the current rank in the subgroup
-                if rank in subgroup_ranks:
-                    if pg_name is not None:
+                if get_rank() in subgroup_ranks:
+                    if found_my_rank:
                         raise RuntimeError(
-                            f"Each device mesh dimension should get only one process group, but got {rank} "
+                            f"Each device mesh dimension should get only one process group, but got {get_rank()} "
                             f"in {subgroup_ranks}!"
                         )
-                    pg_name = dim_group.group_name
-                else:
-                    # This rank is not a member of the subgroup.
-                    assert isinstance(
-                        dim_group, torch.distributed.distributed_c10d._NonGroupMember
-                    )
+                    found_my_rank = True
+                    if pg_name != dim_group.group_name:
+                        torch._C._distributed_c10d._register_process_group_alias(
+                            pg_name, dim_group.group_name
+                        )
 
-                pg_rank_by_name[dim_group.group_name].extend(subgroup_ranks)
-
-            if len(pg_rank_by_name) <= 1:
-                # All ranks return the same group - no need for a rank_map.
-                return pg_name
-
-            else:
-                # The different ranks use different groups. We could just return
-                # the group for OUR rank - but then different ranks would
-                # produce slightly different code. So instead use a rank_map
-                # which is the same for all ranks and resolves to the correct
-                # group at runtime.
-                #
-                # The format is "rank_map:0:group1,1:group2,2:group3"
-                #
-                # This would be better if we could just send the dim_name but
-                # unfortunately this has to be decoded in c10d where we don't
-                # have access to the DeviceMesh.
-                pg_name_by_rank = "rank_map:" + ",".join(
-                    f"{k}:{v}"
-                    for k, v in sorted(
-                        (n, k) for k, v in pg_rank_by_name.items() for n in v
-                    )
-                )
-                return pg_name_by_rank
+            if not pg_name:
+                raise RuntimeError(f"Rank {get_rank()} not present in DeviceMesh")
+            return pg_name
 
         @staticmethod
         def _init_process_groups(
@@ -519,7 +503,7 @@ else:
             for dim in range(len(layout)):
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
                 dim_group_names.append(
-                    DeviceMesh._init_one_process_group(  # type: ignore[arg-type]
+                    DeviceMesh._init_one_process_group(
                         layout[dim], rank_map, dim_name, backend_override[dim]
                     )
                 )
