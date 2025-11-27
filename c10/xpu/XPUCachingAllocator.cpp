@@ -1276,9 +1276,7 @@ class DeviceCachingAllocator {
         queue,
         mempool_id,
         getApproximateTime(),
-        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr,
-        compile_string,
-        user_metadata);
+        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
 
     if (record_history) {
       alloc_buffer.insertEntries(te);
@@ -1414,6 +1412,7 @@ class XPUAllocator : public DeviceAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
+  bool record_history = false;
 
   void add_allocated_block(Block* block) {
     std::lock_guard<std::mutex> lock(mutex);

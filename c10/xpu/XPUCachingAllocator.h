@@ -67,18 +67,14 @@ struct TraceEntry {
       sycl::queue* queue,
       MempoolId_t mempool,
       approx_time_t time,
-      std::shared_ptr<GatheredContext> context = nullptr,
-      std::string compile_context = "",
-      std::string user_metadata = "")
+      std::shared_ptr<GatheredContext> context = nullptr)
       : action_(action),
         device_(device),
         addr_(addr),
         context_(std::move(context)),
         queue_(queue),
         size_(size),
-        mempool_(std::move(mempool)),
-        compile_context_(std::move(compile_context)),
-        user_metadata_(std::move(user_metadata)) {
+        mempool_(std::move(mempool)) {
     time_.approx_t_ = time;
   }
   Action action_;
@@ -89,8 +85,6 @@ struct TraceEntry {
   size_t size_;
   MempoolId_t mempool_;
   trace_time_ time_{};
-  std::string compile_context_;
-  std::string user_metadata_;
 };
 
 // Calls made by record_function will save annotations
