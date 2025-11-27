@@ -363,6 +363,7 @@ BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>* _get_benchm
   static thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>
     *benchmark_cache_fused = new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>();
   return benchmark_cache_fused;
+}
 } // namespace
 
 void run_conv_plan(
