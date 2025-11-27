@@ -555,7 +555,7 @@ class TestTorchDlPack(TestCase):
 
         namespace py = pybind11;
 
-        void test_dlpack_exchange_api(at::Tensor tensor, py::object api_obj, bool is_cuda) {
+        void test_dlpack_exchange_api(at::Tensor tensor, py::object api_obj, bool test_stream_exchange) {
             PyObject* api_capsule = api_obj.ptr();
             TORCH_CHECK(PyCapsule_IsValid(api_capsule, "dlpack_exchange_api"),
                         "Invalid or mismatched DLPack exchange API capsule");
@@ -710,6 +710,8 @@ class TestTorchDlPack(TestCase):
             }
 
             // Test 5: dltensor_from_py_object_no_sync (non-owning conversion)
+            DLDeviceType device_type;
+            int32_t device_id;
             {
                 std::unique_ptr<PyObject, decltype(&Py_DecRef)> py_obj(
                     THPVariable_Wrap(tensor), &Py_DecRef);
@@ -731,19 +733,21 @@ class TestTorchDlPack(TestCase):
                 TORCH_CHECK(dltensor.dtype.bits == 32,
                             "Expected dtype bits 32, got ", dltensor.dtype.bits);
                 TORCH_CHECK(dltensor.data != nullptr, "Data pointer is NULL");
+
+                // Capture device info for stream test
+                device_type = dltensor.device.device_type;
+                device_id = dltensor.device.device_id;
             }
 
             // Test 6: current_work_stream
             {
-                void* stream_out = nullptr;
-                DLDeviceType device_type = is_cuda ? kDLCUDA : kDLCPU;
-                int result = api->current_work_stream(device_type, 0, &stream_out);
-                TORCH_CHECK(result == 0,
-                            "current_work_stream failed with code ", result);
-                // For CPU, stream should be nullptr; for CUDA it may be non-null
-                if (!is_cuda) {
-                    TORCH_CHECK(stream_out == nullptr,
-                                "CPU stream should be nullptr");
+                if (test_stream_exchange) {
+                    void* stream_out = nullptr;
+                    int result = api->current_work_stream(device_type, device_id, &stream_out);
+                    TORCH_CHECK(result == 0,
+                                "current_work_stream failed with code ", result);
+                    TORCH_CHECK(stream_out != nullptr,
+                                "Expected stream to be non-NULL");
                 }
             }
         }
