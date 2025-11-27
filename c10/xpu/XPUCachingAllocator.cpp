@@ -1267,7 +1267,6 @@ class DeviceCachingAllocator {
       std::shared_ptr<GatheredContext> context) {
     if (!record_history)
       return;
-    std::string compile_string = "N/A";
     TraceEntry te(
         action,
         device,
@@ -1277,10 +1276,7 @@ class DeviceCachingAllocator {
         mempool_id,
         getApproximateTime(),
         record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
-
-    if (record_history) {
-      alloc_buffer.insertEntries(te);
-    }
+    alloc_buffer.insertEntries(te);
   }
 
   std::vector<TraceEntry> trace(
