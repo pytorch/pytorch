@@ -1709,6 +1709,11 @@ def get_selected_tests(options) -> list[str]:
     if options.exclude_quantization_tests:
         options.exclude.extend(QUANTIZATION_TESTS)
 
+    if options.dynamo or options.inductor:
+        # Avoid compile dynamo/inductor wrapped tests twice
+        options.exclude.extend(DYNAMO_CORE_TESTS)
+        options.exclude.extend(INDUCTOR_TESTS)
+
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
         options.exclude.extend(["distributions/test_constraints"])
