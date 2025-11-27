@@ -685,3 +685,619 @@ def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
 
 
 add_layout_constraint(aten.convolution, constrain_conv_to_fx_strides)
+
+
+def conv_bwd_input_layout(
+    grad_output: TensorBox,
+    input: TensorBox,
+    weight: TensorBox,
+    stride: Sequence[int],
+    padding: tuple[int, ...],
+    dilation: tuple[int, ...],
+    transposed: bool,
+    output_padding: tuple[int, ...],
+    groups: int,
+) -> ir.Layout:
+
+    with V.graph.fake_mode:
+        go = ir.ir_node_to_tensor(grad_output, guard_shape=True)
+        x  = ir.ir_node_to_tensor(input,       guard_shape=True)
+        w  = ir.ir_node_to_tensor(weight,      guard_shape=True)
+
+        dx, _, _ = torch.ops.aten.convolution_backward(
+            go,
+            x,
+            w,
+            None,  # bias_sizes
+            V.graph.sizevars.size_hints(stride),
+            V.graph.sizevars.size_hints(padding),
+            V.graph.sizevars.size_hints(dilation),
+            transposed,
+            V.graph.sizevars.size_hints(output_padding),
+            groups,
+            (True, False, False),
+        )
+        sizes = ir.convert_shape_to_inductor(dx.size())
+        stride_ = ir.convert_shape_to_inductor(dx.stride())
+
+    return ir.FixedLayout(
+        input.get_device_or_error(),
+        input.get_dtype(),
+        sizes,
+        stride_,
+    )
+
+
+def conv_bwd_weight_layout(
+    grad_output: TensorBox,
+    input: TensorBox,
+    weight: TensorBox,
+    stride: Sequence[int],
+    padding: tuple[int, ...],
+    dilation: tuple[int, ...],
+    transposed: bool,
+    output_padding: tuple[int, ...],
+    groups: int,
+) -> ir.Layout:
+    with V.graph.fake_mode:
+        go = ir.ir_node_to_tensor(grad_output, guard_shape=True)
+        x  = ir.ir_node_to_tensor(input,       guard_shape=True)
+        w  = ir.ir_node_to_tensor(weight,      guard_shape=True)
+
+        _, dw, _ = torch.ops.aten.convolution_backward(
+            go,
+            x,
+            w,
+            None,  # bias_sizes
+            V.graph.sizevars.size_hints(stride),
+            V.graph.sizevars.size_hints(padding),
+            V.graph.sizevars.size_hints(dilation),
+            transposed,
+            V.graph.sizevars.size_hints(output_padding),
+            groups,
+            (False, True, False),
+        )
+        sizes = ir.convert_shape_to_inductor(dw.size())
+        stride_ = ir.convert_shape_to_inductor(dw.stride())
+
+    return ir.FixedLayout(
+        weight.get_device_or_error(),
+        weight.get_dtype(),
+        sizes,
+        stride_,
+    )
+
+
+def call_aten_dw(x_t, go_t, *, w_shape, stride, padding, dilation, groups, out):
+    if x_t.is_contiguous(memory_format=torch.channels_last):
+        memory_fmt = torch.channels_last
+    else:
+        memory_fmt = torch.contiguous_format
+
+    dummy_weight = torch.empty(
+        w_shape, dtype=out.dtype, device=x_t.device, memory_format=memory_fmt
+    )
+
+    tmp = torch.ops.aten.convolution_backward(
+        go_t,
+        x_t,
+        dummy_weight,
+        None,
+        stride,
+        padding,
+        dilation,
+        False,
+        [0, 0],
+        groups,
+        (False, True, False),
+    )[1]
+
+    out.copy_(tmp.to(out.dtype))
+    return out
+
+
+ext_kn_aten_dw = ExternKernelChoice(call_aten_dw, None)
+
+
+def call_aten_dx(go_t, w_t, *, x_shape, stride, padding, dilation, groups, out):
+    if go_t.is_contiguous(memory_format=torch.channels_last):
+        memory_fmt = torch.channels_last
+    else:
+        memory_fmt = torch.contiguous_format
+
+    dummy_input = torch.empty(
+        x_shape, dtype=out.dtype, device=go_t.device, memory_format=memory_fmt
+    )
+
+    tmp = torch.ops.aten.convolution_backward(
+        go_t,
+        dummy_input,
+        w_t,
+        None,
+        stride,
+        padding,
+        dilation,
+        False,
+        [0, 0],
+        groups,
+        (True, False, False),
+    )[0]
+
+    out.copy_(tmp.to(out.dtype))
+    return out
+
+
+ext_kn_aten_dx = ExternKernelChoice(call_aten_dx, None)
+
+@SymbolicGridFn
+def conv2d_bwd_weight_grid(cout, cin, kh, kw, meta, *, cdiv):
+    g = meta["GROUPS"]
+    return (
+        cdiv(cin * kh * kw, meta["BLOCK_M"]),
+        cdiv(cout // g, meta["BLOCK_N"]),
+        g,
+    )
+
+LOOP_BODY_BWD_WEIGHT_2D = r"""
+
+        idx_k = k + tl.arange(0, BLOCK_K)
+        n  = (idx_k // (OUT_H * OUT_W)).to(tl.int32)
+        rem = idx_k % (OUT_H * OUT_W)
+        yh = (rem // OUT_W).to(tl.int32)
+        yw = (rem %  OUT_W).to(tl.int32)
+
+        m  = (m0 + tl.arange(0, BLOCK_M)).to(tl.int32)
+        ic = (m // (KERNEL_H * KERNEL_W)).to(tl.int32)
+        ij =  m %  (KERNEL_H * KERNEL_W)
+        i  = (ij // KERNEL_W).to(tl.int32)
+        j  = (ij %  KERNEL_W).to(tl.int32)
+
+        xh = yh[:, None] * STRIDE_H - PADDING_H + i[None, :] * DILATION_H
+        xw = yw[:, None] * STRIDE_W - PADDING_W + j[None, :] * DILATION_W
+
+        x_ptrs = X_base \
+            + n[:,    None]  * stride_xn \
+            + ic[None,    :] * stride_xc \
+            + xh             * stride_xh \
+            + xw             * stride_xw
+
+        mask_x = (
+            (n[:,    None]  < BATCH) &
+            (ic[None,    :] < GROUP_IN_C) &
+            (xh >= 0) & (xh < IN_H) &
+            (xw >= 0) & (xw < IN_W)
+        )
+        matrix_x = tl.load(x_ptrs, mask=mask_x, other=0.0)
+        matrix_x = tl.trans(matrix_x)
+
+        dy_ptrs = dY_base \
+            + n[:,    None]  * stride_dyn \
+            + oc[None,    :] * stride_dyc \
+            + yh[:,   None]  * stride_dyh \
+            + yw[:,   None]  * stride_dyw
+
+        mask_dy = (
+            (n[:,    None]  < BATCH) &
+            (oc[None,    :] < GROUP_OUT_C) &
+            (yh[:,   None]  < OUT_H) &
+            (yw[:,   None]  < OUT_W)
+        )
+        matrix_dy = tl.load(dy_ptrs, mask=mask_dy, other=0.0)
+
+        acc += tl.dot(matrix_x, matrix_dy, allow_tf32=ALLOW_TF32)
+"""
+
+
+conv2d_bwd_weight_template = TritonTemplate(
+    name="convolution2d_bwd_weight",
+    grid=conv2d_bwd_weight_grid,
+    source=r"""
+{{def_kernel("X", "dY")}}
+
+    BATCH = {{size("X", 0)}}
+    IN_C  = {{size("X", 1)}}
+    IN_H  = {{size("X", 2)}}
+    IN_W  = {{size("X", 3)}}
+    OUT_C = {{size("dY", 1)}}
+    OUT_H = {{size("dY", 2)}}
+    OUT_W = {{size("dY", 3)}}
+
+    stride_xn = {{stride("X", 0)}}
+    stride_xc = {{stride("X", 1)}}
+    stride_xh = {{stride("X", 2)}}
+    stride_xw = {{stride("X", 3)}}
+
+    stride_dyn = {{stride("dY", 0)}}
+    stride_dyc = {{stride("dY", 1)}}
+    stride_dyh = {{stride("dY", 2)}}
+    stride_dyw = {{stride("dY", 3)}}
+
+    m0 = tl.program_id(0) * BLOCK_M
+    oc = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+
+{% if GROUPS == 1 %}
+    group = 0
+    GROUP_IN_C  = IN_C
+    GROUP_OUT_C = OUT_C
+{% else %}
+    group = tl.program_id(2)
+    GROUP_IN_C  = IN_C  // GROUPS
+    GROUP_OUT_C = OUT_C // GROUPS
+{% endif %}
+
+    X_base  = X  + group * GROUP_IN_C  * stride_xc
+    dY_base = dY + group * GROUP_OUT_C * stride_dyc
+
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+
+    K_TOTAL = BATCH * OUT_H * OUT_W
+    for k in range(0, K_TOTAL, BLOCK_K):
+        """
+   + LOOP_BODY_BWD_WEIGHT_2D + r"""
+
+    m = m0 + tl.arange(0, BLOCK_M)
+    ic = m // (KERNEL_H * KERNEL_W)
+    ij = m % (KERNEL_H * KERNEL_W)
+    i  = ij // KERNEL_W
+    j  = ij % KERNEL_W
+
+    out_ic = ic
+    out_oc = oc + group * GROUP_OUT_C
+
+    mask = (out_ic[:, None] < GROUP_IN_C) & (oc[None, :] < GROUP_OUT_C)
+
+    {{store_output(("out_oc[None, :]", "out_ic[:, None]", "i[:, None]", "j[:, None]"),
+                   "acc", "mask")}}
+""",
+)
+
+@SymbolicGridFn
+def conv2d_bwd_input_grid(n, cin, h, w, meta, *, cdiv):
+    g = meta["GROUPS"]
+    return (
+        cdiv(n * h * w, meta["BLOCK_M"]),
+        cdiv(cin // g, meta["BLOCK_N"]),
+        g,
+    )
+
+LOOP_BODY_BWD_INPUT_2D = r"""
+        idx_k = k + tl.arange(0, BLOCK_K)
+        oc_k = (idx_k // (KERNEL_H * KERNEL_W)).to(tl.int32)
+        ij   = idx_k %  (KERNEL_H * KERNEL_W)
+        i_k  = (ij // KERNEL_W).to(tl.int32)
+        j_k  = (ij %  KERNEL_W).to(tl.int32)
+
+        n_i = n.to(tl.int32)
+        h_i = h.to(tl.int32)
+        w_i = w.to(tl.int32)
+
+        oc_global = oc_k + group * GROUP_OUT_C
+
+        yhn = h_i[:, None] + PADDING_H - i_k[None, :] * DILATION_H
+        ywn = w_i[:, None] + PADDING_W - j_k[None, :] * DILATION_W
+
+        cand_h = (yhn >= 0) & (yhn <= (OUT_H - 1) * STRIDE_H)
+        cand_w = (ywn >= 0) & (ywn <= (OUT_W - 1) * STRIDE_W)
+
+        div_ok_h = tl.where(cand_h, (yhn % STRIDE_H) == 0, False)
+        div_ok_w = tl.where(cand_w, (ywn % STRIDE_W) == 0, False)
+
+        yh = tl.where(div_ok_h, yhn // STRIDE_H, 0)
+        yw = tl.where(div_ok_w, ywn // STRIDE_W, 0)
+
+        dy_ptrs = dY \
+            + n_i[:, None]    * stride_dyn \
+            + oc_global[None, :]   * stride_dyc \
+            + yh              * stride_dyh \
+            + yw              * stride_dyw
+
+        mask_dy = (
+            (n_i[:, None]    < BATCH) &
+            (oc_k[None, :]   < GROUP_OUT_C) &
+            div_ok_h & div_ok_w &
+            (yh >= 0) & (yh < OUT_H) &
+            (yw >= 0) & (yw < OUT_W)
+        )
+        mat_dy = tl.load(dy_ptrs, mask=mask_dy, other=0.0)
+
+        w_ptrs = W \
+            + oc_global[:, None] * stride_wc_out \
+            + ic[None, :] * stride_wc_in  \
+            + i_k[:, None]  * stride_wh     \
+            + j_k[:, None]  * stride_ww
+
+        mask_w = (oc_k[:, None] < GROUP_OUT_C) & (ic[None, :] < GROUP_IN_C)
+        mat_w = tl.load(w_ptrs, mask=mask_w, other=0.0)
+
+        # (M,K) @ (K,N) = (M,N)
+        acc += tl.dot(mat_dy, mat_w, allow_tf32=ALLOW_TF32)
+"""
+
+conv2d_bwd_input_template = TritonTemplate(
+    name="convolution2d_bwd_input",
+    grid=conv2d_bwd_input_grid,
+    source=r"""
+{{def_kernel("dY", "W")}}
+
+    BATCH = {{size("dY", 0)}}
+    OUT_C = {{size("dY", 1)}}
+    OUT_H = {{size("dY", 2)}}
+    OUT_W = {{size("dY", 3)}}
+    GROUP_IN_C  = {{size("W", 1)}}
+    KERNEL_H = {{size("W", 2)}}
+    KERNEL_W = {{size("W", 3)}}
+
+    IN_H = {{size(None, 2)}}
+    IN_W = {{size(None, 3)}}
+
+    stride_dyn = {{stride("dY", 0)}}
+    stride_dyc = {{stride("dY", 1)}}
+    stride_dyh = {{stride("dY", 2)}}
+    stride_dyw = {{stride("dY", 3)}}
+
+    stride_wc_out = {{stride("W", 0)}}
+    stride_wc_in  = {{stride("W", 1)}}
+    stride_wh     = {{stride("W", 2)}}
+    stride_ww     = {{stride("W", 3)}}
+
+{% if GROUPS == 1 %}
+    group = 0
+    GROUP_OUT_C = OUT_C
+{% else %}
+    group = tl.program_id(2)
+    GROUP_OUT_C = OUT_C // GROUPS
+{% endif %}
+
+    nhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    w = nhw % IN_W
+    nh = nhw // IN_W
+    h = nh % IN_H
+    n = nh // IN_H
+
+    ic = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+
+    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
+
+    K_TOTAL = GROUP_OUT_C * KERNEL_H * KERNEL_W
+    for k in range(0, K_TOTAL, BLOCK_K):
+        """
+    + LOOP_BODY_BWD_INPUT_2D + r"""
+
+    mask = (
+        (n[:, None] < BATCH)
+        & (h[:, None] < IN_H)
+        & (w[:, None] < IN_W)
+        & (ic[None, :] < GROUP_IN_C)
+    )
+
+    ic_global = ic + group * GROUP_IN_C
+
+    {{store_output(("n[:, None]", "ic_global[None, :]", "h[:, None]", "w[:, None]"),
+                   "acc", "mask")}}
+""",
+)
+
+@register_lowering(aten.convolution_backward.default)
+def convolution_backward_lowering(
+    grad_output: TensorBox,
+    input: TensorBox,
+    weight: TensorBox,
+    bias_sizes: Optional[Sequence[int]],
+    stride: Sequence[int],
+    padding: Sequence[int],
+    dilation: Sequence[int],
+    transposed: bool,
+    output_padding: Sequence[int],
+    groups: int,
+    output_mask: Sequence[bool],
+):
+    stride = tuple(stride)
+    padding = tuple(padding)
+    dilation = tuple(dilation)
+    output_padding = tuple(output_padding)
+    if not isinstance(groups, int):
+        groups = V.graph.sizevars.evaluate_static_shape(groups)
+
+    out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
+        weight.get_size()
+    )
+
+    ndim = len(kernel_shape)
+    assert ndim == 2, "This template only handles 2D for now"
+
+    stride = pad_listlike(stride, ndim)
+    padding = pad_listlike(padding, ndim)
+    dilation = pad_listlike(dilation, ndim)
+    output_padding = pad_listlike(output_padding, ndim)
+
+    stride = tuple(V.graph.sizevars.evaluate_static_shapes(stride))
+    padding = tuple(V.graph.sizevars.evaluate_static_shapes(padding))
+
+    input.realize(); weight.realize(); grad_output.realize()
+
+    kwargs: ConvLayoutParams = {
+        "stride": stride,
+        "padding": padding,
+        "dilation": dilation,
+        "transposed": transposed,
+        "output_padding": output_padding,
+        "groups": groups,
+    }
+
+    # TODO: remove this.
+    if "conv_configs" not in globals() and "conv_configs" not in locals():
+        def conv_cfg(arg1, arg2, arg3, device_type):
+            get_cfg = V.choices.get_conv_configs(device_type)
+            rtn = []
+            for cfg in get_cfg(arg1, arg2, arg3, **mm_config_kwargs(device_type, _is_large_block_for_cpu)):
+                rtn.append(cfg)
+            return rtn
+
+        globals()["conv_configs"] = conv_cfg
+
+    dw = None
+    if output_mask[1]:
+        choices_dw = []
+
+        args_w = [input, grad_output]
+        layout_dw = conv_bwd_weight_layout(grad_output, input, weight, **kwargs)
+
+        if V.graph.layout_opt and ndim == 2:
+            input = ir.ExternKernel.require_channels_last(input)
+            grad_output = ir.ExternKernel.require_channels_last(grad_output)
+        else:
+            req_stride_order = ir.get_stride_order(
+                V.graph.sizevars.size_hints(layout_dw.stride)
+            )
+            input = ir.ExternKernel.require_stride_order(input, req_stride_order)
+            grad_output = ir.ExternKernel.require_stride_order(grad_output, req_stride_order)
+
+        if (
+            torch._inductor.utils._use_conv_bwd_weight_autotune_backend("TRITON")
+            and use_triton_template(layout_dw)
+            and not transposed
+            and is_zeros(output_padding)
+        ):
+
+            # TODO: Use the autotune configuration specific to backward convolution.
+            for cfg in conv_configs(
+                sympy_product([input.get_size()[0], *input.get_size()[2:]]),
+                out_chan,
+                in_chan,
+                device_type=ir.get_device_type(input),
+            ):
+                if ndim == 2:
+                    conv2d_bwd_weight_template.maybe_append_choice(
+                        choices_dw,
+                        input_nodes=(input, grad_output),
+                        layout=layout_dw,
+                        KERNEL_H=kernel_shape[0],
+                        KERNEL_W=kernel_shape[1],
+                        PADDING_H=padding[0],
+                        PADDING_W=padding[1],
+                        STRIDE_H=stride[0],
+                        STRIDE_W=stride[1],
+                        DILATION_H=dilation[0],
+                        DILATION_W=dilation[0],
+                        GROUPS=groups,
+                        ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                        num_stages=cfg.num_stages,
+                        num_warps=cfg.num_warps,
+                        **cfg.kwargs,
+                    )
+
+                # TODO: backward weight 3D
+
+        if (
+            torch._inductor.utils._use_conv_bwd_weight_autotune_backend("ATEN")
+            or len(choices_dw) == 0
+        ):
+            choices_dw.append(
+                ext_kn_aten_dw.bind(
+                    input_nodes=args_w,
+                    layout=layout_dw,
+                    ordered_kwargs_for_cpp_kernel=[
+                        "w_shape",
+                        "stride",
+                        "padding",
+                        "dilation",
+                        "groups",
+                    ],
+                    w_shape=weight.get_size(),
+                    stride=stride,
+                    padding=padding,
+                    dilation=dilation,
+                    groups=groups,
+                )
+            )
+
+        # TODO: use_ck_conv_template for bwd conv
+
+        dw = autotune_select_algorithm(
+            "convolution_bwd_weight", choices_dw, args_w, layout_dw
+        )
+
+    dx = None
+    if output_mask[0]:
+        choices_dx = []
+
+        args_x = [grad_output, weight]
+
+        layout_dx = conv_bwd_input_layout(grad_output, input, weight, **kwargs)
+
+        if V.graph.layout_opt and ndim == 2:
+            grad_output = ir.ExternKernel.require_channels_last(grad_output)
+        else:
+            req_stride_order = ir.get_stride_order(
+                V.graph.sizevars.size_hints(layout_dx.stride)
+            )
+            grad_output = ir.ExternKernel.require_stride_order(grad_output, req_stride_order)
+
+        if (
+            torch._inductor.utils._use_conv_bwd_input_autotune_backend("TRITON")
+            and use_triton_template(layout_dx)
+            and not transposed
+            and is_zeros(output_padding)
+        ):
+            # TODO: Use the autotune configuration specific to backward convolution.
+            for cfg in conv_configs(
+                sympy_product([input.get_size()[0], *input.get_size()[2:]]),
+                out_chan,
+                in_chan,
+                device_type=ir.get_device_type(input),
+            ):
+                if ndim == 2:
+                    conv2d_bwd_input_template.maybe_append_choice(
+                        choices_dx,
+                        input_nodes=(grad_output, weight),
+                        layout=layout_dx,
+                        KERNEL_H=kernel_shape[0],
+                        KERNEL_W=kernel_shape[1],
+                        PADDING_H=padding[0],
+                        PADDING_W=padding[1],
+                        STRIDE_H=stride[0],
+                        STRIDE_W=stride[1],
+                        DILATION_H=dilation[0],
+                        DILATION_W=dilation[1],
+                        GROUPS=groups,
+                        ALLOW_TF32=torch.backends.cudnn.allow_tf32,
+                        num_stages=cfg.num_stages,
+                        num_warps=cfg.num_warps,
+                        **cfg.kwargs,
+                    )
+
+                # TODO: backward input 3D
+
+        if (
+            torch._inductor.utils._use_conv_bwd_input_autotune_backend("ATEN")
+            or len(choices_dx) == 0
+        ):
+            choices_dx.append(
+                ext_kn_aten_dx.bind(
+                    input_nodes=args_x,
+                    layout=layout_dx,
+                    ordered_kwargs_for_cpp_kernel=["x_shape", "stride", "padding", "dilation", "groups"],
+                    x_shape=input.get_size(),
+                    stride=stride, padding=padding, dilation=dilation, groups=groups,
+                )
+            )
+
+        # TODO: use_ck_conv_template for bwd conv
+
+        dx = autotune_select_algorithm("convolution_bwd_input", choices_dx, args_x, layout_dx)
+
+    db = None
+    if output_mask[2] and bias_sizes is not None:
+        db = grad_output.sum(dim=(0, 2, 3))
+
+    return (dx, dw, db)
+
+def constrain_conv_bwd_to_fx_strides(fx_node, *args, **kwargs):
+    assert fx_node.target == torch.ops.aten.convolution_backward.default
+    if V.graph.layout_opt:
+        return args, kwargs
+    else:
+        return constrain_to_fx_strides(fx_node, *args, **kwargs)
+
+add_layout_constraint(aten.convolution_backward, constrain_conv_bwd_to_fx_strides)
+
