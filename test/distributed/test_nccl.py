@@ -306,12 +306,12 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         symm_mem.rendezvous(tensor, group=group_name)
         signal_val = 5
 
-        if self.rank == 0:
-            torch.ops.symm_mem.nccl_put_with_signal(tensor, signal_val, 1)
-        elif self.rank == 1:
-            torch.ops.symm_mem.nccl_wait_for_signal(tensor, signal_val, 1)
+        if self.rank == 1:
+            torch.ops.symm_mem.nccl_put_with_signal(tensor, signal_val, 0)
+        elif self.rank == 0:
+            torch.ops.symm_mem.nccl_wait_for_signal(tensor, signal_val)
             torch.testing.assert_close(
-                tensor, torch.zeros(numel, dtype=dtype, device=self.device)
+                tensor, torch.ones(numel, dtype=dtype, device=self.device)
             )
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")

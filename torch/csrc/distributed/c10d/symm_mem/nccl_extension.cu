@@ -1,25 +1,9 @@
-#include <dlfcn.h>
-#include <ATen/ceil_div.h>
-#include <c10/cuda/CUDAGuard.h>
-
-#include <torch/csrc/distributed/c10d/symm_mem/env.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
-#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
-
-#include <ATen/ceil_div.h>
+#include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.cu>
 
 namespace c10d::nccl_extension {
 
 #define THREADS_PER_BLOCK 512
 #define WARP_SIZE 32
-// #define AT_DISPATCH_CASE_CONVERT(enum_type, scalar_type, ...)               \
-//   case enum_type: {                                                         \
-//     AT_PRIVATE_CHECK_SELECTIVE_BUILD(enum_type);                            \
-//     using scalar_t = scalar_type;                                           \
-//     return __VA_ARGS__();                                                   \
-//   }
 
 #define AT_DISPATCH_NCCL_FLOATS(scalar_type, name, ...)                  \
   AT_DISPATCH_SWITCH(                                                  \
@@ -51,6 +35,7 @@ __global__ void lsa_put_kernel(
     T* dst = reinterpret_cast<T*>(
         get_remote_ptr(buffer, dst_peer, dst_byte_offset));
 
+    // TODO: use 16B access for efficiency
     for (size_t i = tid; i < nelems; i += stride) {
         dst[i] = src[i];
     }
@@ -73,6 +58,7 @@ __global__ void lsa_put_signal_kernel(
     T* dst = reinterpret_cast<T*>(
         get_remote_ptr(buffer, dst_peer, dst_byte_offset));
 
+    // TODO: use 16B access for efficiency
     for (size_t i = tid; i < nelems; i += stride) {
         dst[i] = src[i];
     }
@@ -93,7 +79,7 @@ __global__ void lsa_put_signal_kernel(
     }
 }
 
-__global__ void nccl_wait_for_signal_table_kernel(
+__global__ void nccl_wait_for_signal_kernel(
     void**  signal_pad,
     int  cur_rank,
     uint64_t  target_signal_value
@@ -107,7 +93,6 @@ __global__ void nccl_wait_for_signal_table_kernel(
             if (val >= static_cast<unsigned long long>(target_signal_value)) break;
             __nanosleep(64);
         }
-        __threadfence_system();
     }
 }
 
@@ -131,13 +116,15 @@ void nccl_put(at::Tensor& tensor, const int64_t peer) {
   });
 }
 
-void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal, int64_t cur_rank) {
+void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
+  auto symm_mem_nccl = c10::static_intrusive_pointer_cast<c10d::symmetric_memory::NCCLSymmetricMemory>(std::move(symm_mem));
+  int cur_rank = symm_mem_nccl->get_nccl_dev_comm().lsaRank;
   AT_DISPATCH_NCCL_FLOATS(sigpad.scalar_type(), "nccl_wait_for_signal", [&]() {
-    nccl_wait_for_signal_table_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
-        symm_mem->get_signal_pad_ptrs_dev(),
+    nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
+        symm_mem_nccl->get_signal_pad_ptrs_dev(),
         cur_rank,
         signal);
     });
@@ -180,6 +167,7 @@ __global__ void lsa_get_kernel(
     const T* src = reinterpret_cast<const T*>(
         get_remote_ptr(buffer, peer, src_byte_offset));
 
+    // TODO: use 16B access for efficiency
     for (size_t i = tid; i < nelems; i += stride) {
         dst[i] = src[i];
     }

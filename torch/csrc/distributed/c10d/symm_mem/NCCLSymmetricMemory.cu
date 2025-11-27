@@ -49,15 +49,15 @@ struct NCCLAllocation {
 };
 
 static __global__ void build_ptr_dev(
-  ncclWindow_t handle,
-  size_t       offset,      // byte offset inside the window
-  void**       table,       // [world_size] pointer table (device memory)
-  int          world_size)
+  ncclWindow_t  handle,
+  size_t  offset,  // byte offset inside the window
+  void**  buffer,  // symmetric memory buffer
+  int  world_size)
 {
   int tid = blockIdx.x * blockDim.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int peer = tid; peer < world_size; peer += stride) {
-      table[peer] = ncclGetLsaPointer(handle, offset, peer);
+      buffer[peer] = ncclGetLsaPointer(handle, offset, peer);
   }
 }
 
@@ -68,8 +68,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
       const std::string& group_name,
       ncclWindow_t buffer_handle,
       ncclWindow_t signal_handle,
-      ncclDevComm devComm,
-      void* signal_pad_ptr)
+      ncclDevComm devComm)
       : allocation_(allocation),
         buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
@@ -85,7 +84,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     GroupInfo& group_info = get_group_info(group_name);
     auto store = group_info.store;
     rank_ = group_info.rank;
-    world_size_ = group_info.world_size;
+    world_size_ = group_info.world_size;  // size of current group
     // Exchange rank to global rank mapping for this group.
     // If it is already available, skip the exchange.
     if (group_info.rank_to_global_rank.empty()) {
@@ -104,32 +103,26 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     rank_to_global_rank_ = group_info.rank_to_global_rank;
 
     const size_t arr_size = sizeof(void*) * world_size_;
-    buffers_dev_ = reinterpret_cast<void**>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-    signal_pads_dev_ = reinterpret_cast<void**>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+    auto& allocator = *c10::cuda::CUDACachingAllocator::get();
+    auto buffer_pads_dev_dp = allocator.allocate(arr_size);
+    buffers_dev_ = reinterpret_cast<void**>(buffer_pads_dev_dp.get());
+    auto signal_pads_dev_dp = allocator.allocate(arr_size);
+    signal_pads_dev_ = reinterpret_cast<void**>(signal_pads_dev_dp.get());
 
     int threads = std::min(128, world_size_);
-    build_ptr_dev<<<1, threads>>>(buffer_handle, 0, buffers_dev_, world_size_);
-    build_ptr_dev<<<1, threads>>>(signal_handle, 0, signal_pads_dev_, world_size_);
-
-    rank_to_global_rank_dev_ = reinterpret_cast<int*>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int) * world_size_));
-    AT_CUDA_CHECK(cudaMemcpy(
-        rank_to_global_rank_dev_,
-        rank_to_global_rank_.data(),
-        sizeof(int) * world_size_,
-        cudaMemcpyHostToDevice));
+    auto stream = at::cuda::getCurrentCUDAStream();
+    build_ptr_dev<<<1, threads, 0, stream>>>(buffer_handle, 0, buffers_dev_, world_size_);
+    build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle, 0, signal_pads_dev_, world_size_);
   }
 
   ~NCCLSymmetricMemory() override = default;
 
   std::vector<void*> get_buffer_ptrs() override {
-    return buffers_;
+    return {};
   }
 
   std::vector<void*> get_signal_pad_ptrs() override {
-    return signal_pads_;
+    return {};
   }
 
   void** get_buffer_ptrs_dev() override {
@@ -187,7 +180,7 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   };
 
   int* get_rank_to_global_rank_dev() override {
-    return rank_to_global_rank_dev_;
+    return nullptr;
   };
 
   ncclWindow_t get_buffer_handle() {
@@ -205,9 +198,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
  private:
   std::shared_ptr<NCCLAllocation> allocation_;
   size_t buffer_size_;
-  // TODO: We need to finalize what booking variables we need for nccl backend.
-  std::vector<void*> buffers_;
-  std::vector<void*> signal_pads_;
   int device_idx_;
   int rank_;
   int world_size_;
@@ -219,7 +209,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   ncclDevComm devComm_;
 
   std::vector<int> rank_to_global_rank_;
-  int* rank_to_global_rank_dev_;
 };
 
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
@@ -328,7 +317,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     C10D_NCCL_CHECK(ncclDevCommCreate(comm, &reqs, &devComm), "ncclDevCommCreate failed");
 
     auto symm_mem =
-        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle), std::move(devComm), std::move(signal_pad_ptr));
+        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle), std::move(devComm));
 
     symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
     return symm_mem;
