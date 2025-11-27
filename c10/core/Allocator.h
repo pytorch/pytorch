@@ -386,6 +386,16 @@ void for_each_selected_stat_type(const StatTypes& stat_types, Func f) {
   }
 }
 
+inline void decrease_stat_array(
+    StatArray& stat_array,
+    size_t amount,
+    const StatTypes& stat_types) {
+  for_each_selected_stat_type(
+      stat_types, [&stat_array, amount](size_t stat_type) {
+        stat_array[stat_type].decrease(amount);
+      });
+}
+
 // Structure for keeping timing information
 struct DurationStat {
   void increase(int64_t amount) {

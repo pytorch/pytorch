@@ -139,16 +139,6 @@ namespace {
 
 using stream_set = ska::flat_hash_set<cuda::CUDAStream>;
 
-void decrease_stat_array(
-    StatArray& stat_array,
-    size_t amount,
-    const StatTypes& stat_types) {
-  for_each_selected_stat_type(
-      stat_types, [&stat_array, amount](size_t stat_type) {
-        stat_array[stat_type].decrease(amount);
-      });
-}
-
 struct Block;
 struct PrivatePool;
 typedef bool (*Comparison)(const Block*, const Block*);
