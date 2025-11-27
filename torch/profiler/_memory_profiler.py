@@ -1190,7 +1190,7 @@ class MemoryProfileTimeline:
         axes.set_title(title)
 
         # Embed the memory timeline image into the HTML file
-        tmpfile = NamedTemporaryFile("wb", suffix=".png", delete=False)
+        tmpfile = NamedTemporaryFile("wb", suffix=".png", delete=False)  # noqa :SIM115
         tmpfile.close()
         fig.savefig(tmpfile.name, format="png")
 

@@ -669,18 +669,18 @@ class TestExecutionTrace(TestCase):
         assert event_count == expected_loop_events
 
     def test_execution_trace_no_capture(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-        et = ExecutionTraceObserver().register_callback(fp.name)
+        with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
+            et = ExecutionTraceObserver().register_callback(fp.name)
 
-        assert fp.name == et.get_output_file_path()
-        et.unregister_callback()
-        nodes = self.get_execution_trace_root(fp.name)
-        for n in nodes:
-            assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
-        assert found_root_node
+            assert fp.name == et.get_output_file_path()
+            et.unregister_callback()
+            nodes = self.get_execution_trace_root(fp.name)
+            os.unlink(fp.name)
+            for n in nodes:
+                assert "name" in n
+                if "[pytorch|profiler|execution_trace|process]" in n["name"]:
+                    found_root_node = True
+            assert found_root_node
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
