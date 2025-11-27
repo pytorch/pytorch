@@ -2288,11 +2288,9 @@ class BenchmarkRunner:
                     )
                 ):
                     is_same = False
-            except Exception as e:
+            except Exception:
                 # Sometimes torch.allclose may throw RuntimeError
-                exception_string = str(e)
-                accuracy_status = f"fail_exception: {exception_string}"
-                return record_status(accuracy_status, dynamo_start_stats=start_stats)
+                is_same = False
 
             if not is_same:
                 accuracy_status = "eager_two_runs_differ"
@@ -2381,7 +2379,9 @@ class BenchmarkRunner:
                     print(
                         f"Load model outputs from {self.args.compare_model_outputs_with} to compare"
                     )
-                    saved_result = torch.load(self.args.compare_model_outputs_with)
+                    saved_result = torch.load(
+                        self.args.compare_model_outputs_with, weights_only=False
+                    )
                     is_bitwise_same = bitwise_same(saved_result, new_result)
                     if not is_bitwise_same:
                         print(
@@ -2409,11 +2409,9 @@ class BenchmarkRunner:
                     force_max_multiplier=force_max_multiplier,
                 ):
                     is_same = False
-            except Exception as e:
+            except Exception:
                 # Sometimes torch.allclose may throw RuntimeError
-                exception_string = str(e)
-                accuracy_status = f"fail_exception: {exception_string}"
-                return record_status(accuracy_status, dynamo_start_stats=start_stats)
+                is_same = False
 
             if not is_same:
                 if self.args.skip_accuracy_check:

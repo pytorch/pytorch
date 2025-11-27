@@ -297,7 +297,7 @@ def create_joint(
                 fn, primals
             )
         mode = get_proxy_mode()
-        assert mode is not None
+        assert mode is not None, "Expected non-None proxy mode"
         for node in mode.tracer.graph.nodes:
             node.meta["partitioner_tag"] = "is_forward"
 
