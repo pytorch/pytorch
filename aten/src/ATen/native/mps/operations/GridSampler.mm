@@ -381,7 +381,7 @@ grid_sampler_2d_backward_mps(const Tensor& grad_output, const Tensor& input,
         grid, interpolation_mode, padding_mode, align_corners, output_mask,
         /*op_name=*/"grid_sampler_2d_backward"
   ); 
-  return std::make_tuple(grad_input, grad_grid);
+  return std::make_tuple(std::move(grad_input), std::move(grad_grid));
   
 }
 
