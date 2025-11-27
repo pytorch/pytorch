@@ -53,15 +53,9 @@ else()
 endif()
 
 # Include directories.
-if(EXISTS "${TORCH_INSTALL_PREFIX}/include")
-  set(TORCH_INCLUDE_DIRS
-    ${TORCH_INSTALL_PREFIX}/include
-    ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
-else()
-  set(TORCH_INCLUDE_DIRS
-    ${TORCH_INSTALL_PREFIX}/include
-    ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
-endif()
+set(TORCH_INCLUDE_DIRS
+  ${TORCH_INSTALL_PREFIX}/include
+  ${TORCH_INSTALL_PREFIX}/include/torch/csrc/api/include)
 
 # Library dependencies.
 if(@BUILD_SHARED_LIBS@)
