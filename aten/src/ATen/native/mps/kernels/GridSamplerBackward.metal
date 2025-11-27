@@ -220,32 +220,6 @@ static inline void add_value_bounded(
 }
 
 
-// template<typename scalar_t>
-// static inline void get_cubic_upsampling_coefficients(thread scalar_t coeffs[4], scalar_t t) {
-//     constexpr scalar_t A = -0.75;
-//     scalar_t t_abs = abs(t);
-//     scalar_t t2 = t * t;
-//     scalar_t t3 = t2 * t;
-
-//     coeffs[0] = ((A * (t_abs + 1)) - 5 * A) * t2 * t_abs + (8 * A) * t2 - (4 * A) * t_abs; // Simplified from original, less numerically stable
-//     coeffs[1] = ((A + 2) * t_abs - (A + 3)) * t2 + 1;
-//     coeffs[2] = ((A + 2) * (1-t_abs) - (A + 3)) * (1-t_abs)*(1-t_abs) + 1; // Incorrect, but following original structure
-//     coeffs[3] = 1.0f - coeffs[0] - coeffs[1] - coeffs[2];
-    
-//     // Correct PyTorch implementation:
-//     t = abs(t);
-//     coeffs[1] = ((A+2)*t-(A+3))*t*t + 1;
-//     coeffs[2] = ((A+2)*(1-t)-(A+3))*(1-t)*(1-t) + 1;
-//     t = t+1;
-//     coeffs[0] = ((A)*t-(5*A))*t*t + (8*A)*t - 4*A;
-//     t = t+1; // should be 2-t from the original t
-//     coeffs[3] = ((A)*(2-t)-(5*A))*(2-t)*(2-t) + (8*A)*(2-t) - 4*A;
-// }
-
-// Note: Bicubic interpolation helpers removed - not supported on MPS
-// If bicubic support is added in the future, restore cubic_convolution1, cubic_convolution2,
-// get_cubic_upsampling_coefficients, and get_cubic_coefficients_grad functions
-
 
 template <typename scalar_t>
 kernel void grid_sampler_2d_backward(
