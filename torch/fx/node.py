@@ -359,7 +359,7 @@ class Node(_NodeBase):
             "name": self.name,
             "op": self.op,
             "target": self.target,
-            "type": self.target,
+            "type": self.type,
             "_sort_key": self._sort_key,
             "_args": self._args,
             "_kwargs": self._kwargs,
