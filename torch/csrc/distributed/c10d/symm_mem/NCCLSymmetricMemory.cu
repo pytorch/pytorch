@@ -310,8 +310,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     // Create device communicator
     ncclDevComm devComm;
     ncclDevCommRequirements reqs;
+    // See example in https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/deviceapi.html#simple-lsa-kernel
     memset(&reqs, 0, sizeof(ncclDevCommRequirements));
     // TODO: we need to figure out how to set the number of CTA and requirements.
+    // See https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/api/device.html#nccldevcommrequirements
     int nCTAs = 16;
     reqs.lsaBarrierCount = nCTAs;
     C10D_NCCL_CHECK(ncclDevCommCreate(comm, &reqs, &devComm), "ncclDevCommCreate failed");
