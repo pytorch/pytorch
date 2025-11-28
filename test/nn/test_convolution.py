@@ -188,6 +188,17 @@ class TestConvolutionNN(NNTestCase):
                 + r"input of size: \[1, 10, 1, 28, 28\]",
             ):
                 F.conv2d(x, w)
+    
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_conv2d_device_mismatch_error(self):
+        x = torch.randn(1, 3, 32, 32, device="cuda")
+        w = torch.randn(3, 3, 3, 3, device="cpu")
+        
+        with self.assertRaisesRegex(
+                RuntimeError,
+                r"Expected input and weight to be on the same device"
+            ):
+                F.conv2d(x, w)
 
     def test_conv2d_discontiguous_weight(self):
         for dtype in (torch.float, torch.cfloat):

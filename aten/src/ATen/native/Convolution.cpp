@@ -775,6 +775,12 @@ static void check_input_same_type_as_parameters(
     const Tensor& input,
     const Tensor& weight,
     const Tensor& bias) {
+  TORCH_CHECK(input.device() == weight.device(),
+      "Expected input and weight to be on the same device (got ",
+      input.device(), " and ", weight.device(), ")");
+  TORCH_CHECK(!bias.defined() || input.device() == bias.device(), 
+      "Expected input and bias to be on the saem device (got ",
+      input.device(), " and ", bias.device(), ")");
   TORCH_CHECK(input.options().type_equal(weight.options()),
       "Input type (", input.toString(), ") and weight type (", weight.toString(),
       ") should be the same");
