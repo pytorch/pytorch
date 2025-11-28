@@ -41,7 +41,6 @@ struct SegmentInfo {
   bool is_expandable = false;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
-  std::shared_ptr<GatheredContext> context_when_allocated;
 };
 
 union trace_time_ {
@@ -134,7 +133,7 @@ C10_XPU_API void recordHistory(
     RecordContext when,
     bool clearHistory);
 
-C10_XPU_API SnapshotInfo snapshot();
+C10_XPU_API SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0});
 
 class XPUAllocator;
 
