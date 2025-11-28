@@ -221,7 +221,7 @@ def _local_functional_all_to_all_single(
     tensor: torch.Tensor,
     output_split_sizes: list[torch.SymInt],
     input_split_sizes: list[torch.SymInt],
-    group_name: str,
+    group_name: _GroupName,
 ) -> torch.Tensor:
     # "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
     from . import LocalIntNode, LocalTensor
