@@ -1710,7 +1710,7 @@ def get_selected_tests(options) -> list[str]:
         options.exclude.extend(QUANTIZATION_TESTS)
 
     if options.dynamo or options.inductor:
-        # Avoid compile dynamo/inductor wrapped tests twice
+        # Avoid compile dynamo/inductor tests twice
         options.exclude.extend(DYNAMO_CORE_TESTS)
         options.exclude.extend(INDUCTOR_TESTS)
 
