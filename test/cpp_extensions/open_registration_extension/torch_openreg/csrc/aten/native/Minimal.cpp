@@ -1,9 +1,9 @@
-#include <unordered_set>
+#include "Minimal.h"
+#include "runtime/OpenRegGenerator.h"
 
 #include <ATen/core/DistributionsHelper.h>
 
-#include "Minimal.h"
-#include "runtime/OpenRegGenerator.h"
+#include <unordered_set>
 
 namespace at::native::openreg {
 
@@ -211,8 +211,8 @@ inline c10::openreg::OpenRegGeneratorImpl* get_openreg_gen(
         ") for openreg backend");
     return gen;
   }
-  const auto& def = c10::openreg::getDefaultOpenRegGenerator(device_index);
-  return at::check_generator<c10::openreg::OpenRegGeneratorImpl>(def);
+  const auto& gen = c10::openreg::getDefaultOpenRegGenerator(device_index);
+  return at::check_generator<c10::openreg::OpenRegGeneratorImpl>(gen);
 }
 
 template <typename T>
@@ -236,6 +236,7 @@ inline void fill_normal(
     data[i] = static_cast<T>(dist(gen));
   }
 }
+
 } // anonymous namespace
 
 at::Tensor rand(
@@ -283,10 +284,6 @@ at::Tensor rand(
       result.options().device(at::kCPU));
 
   switch (dtype) {
-    case at::kInt: {
-      fill_uniform<int>(as_cpu.data_ptr<int>(), as_cpu.numel(), gen);
-      break;
-    }
     case at::kFloat: {
       fill_uniform<float>(as_cpu.data_ptr<float>(), as_cpu.numel(), gen);
       break;
@@ -349,10 +346,6 @@ at::Tensor randn(
       result.options().device(at::kCPU));
 
   switch (dtype) {
-    case at::kInt: {
-      fill_normal<int>(as_cpu.data_ptr<int>(), as_cpu.numel(), gen);
-      break;
-    }
     case at::kFloat: {
       fill_normal<float>(as_cpu.data_ptr<float>(), as_cpu.numel(), gen);
       break;
