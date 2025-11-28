@@ -5,7 +5,6 @@
 #include <deque>
 #include <mutex>
 #include <set>
-#include <stack>
 #include <vector>
 
 namespace c10::xpu::XPUCachingAllocator {
@@ -445,15 +444,11 @@ class RingBuffer {
   // under alloc_trace_lock.
   mutable std::mutex alloc_trace_lock;
   size_t alloc_trace_next = 0;
-  std::vector<T>*
-      alloc_trace; // pointer because we need to intentionally leak this on
-                   // deallocation it can hold references to Python state which
-                   // will already be destroyed when we are in exit handlers
-};
+  // Leaked on deallocation to avoid issues with Python shutdown
+  std::vector<T>* alloc_trace;
+  ;
 
 } // anonymous namespace
-
-using AllocatorTraceTracker = std::function<void(const TraceEntry&)>;
 
 class DeviceCachingAllocator {
  private:
@@ -1408,7 +1403,6 @@ class XPUAllocator : public DeviceAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
-  bool record_history = false;
 
   void add_allocated_block(Block* block) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -1597,7 +1591,6 @@ class XPUAllocator : public DeviceAllocator {
       size_t alloc_buffer_max_entries,
       RecordContext when,
       bool clearHistory) {
-    record_history = enabled;
     for (auto& allocator : device_allocators) {
       allocator->recordHistory(
           enabled,
@@ -1795,3 +1788,4 @@ MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
 }
 
 } // namespace c10::xpu
+ 

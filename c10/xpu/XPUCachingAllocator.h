@@ -16,32 +16,6 @@ enum struct RecordContext {
   ALL = 3, // additionally record stacks for when something is freed
 };
 
-struct BlockInfo {
-  size_t size = 0;
-  size_t requested_size = 0;
-  int32_t gc_counter = 0;
-  bool allocated = false;
-  bool active = false;
-  std::shared_ptr<GatheredContext> context_when_allocated;
-};
-
-// Struct containing info of a memory segment (i.e. one contiguous device memory
-// allocation).
-struct SegmentInfo {
-  c10::DeviceIndex device = 0;
-  size_t address = 0;
-  size_t total_size = 0;
-  size_t requested_size = 0;
-  size_t allocated_size = 0;
-  size_t active_size = 0;
-  sycl::queue* queue = nullptr;
-  bool is_large = false;
-  bool is_expandable = false;
-  MempoolId_t owner_private_pool_id = {0, 0};
-  std::vector<BlockInfo> blocks;
-  std::shared_ptr<GatheredContext> context_when_allocated;
-};
-
 union trace_time_ {
   time_t t_;
   approx_time_t approx_t_;
@@ -85,37 +59,6 @@ struct TraceEntry {
   size_t size_;
   MempoolId_t mempool_;
   trace_time_ time_{};
-};
-
-// Calls made by record_function will save annotations
-struct AnnotationEntry {
-  AnnotationEntry(c10::DeviceIndex device, approx_time_t time)
-      : device_(device) {
-    time_.approx_t_ = time;
-  }
-
-  void recordUserMetadata(const std::string& name, std::string value) {
-    metadata_[name] = std::move(value);
-  }
-
-  c10::DeviceIndex device_;
-  trace_time_ time_{};
-  std::unordered_map<std::string, std::string> metadata_;
-};
-
-struct AllocatorConfigInfo {
-  double garbage_collection_threshold;
-  size_t max_split_size;
-  bool expandable_segments;
-  std::vector<size_t> roundup_power2_divisions;
-  std::string last_allocator_settings;
-};
-
-struct SnapshotInfo {
-  std::vector<SegmentInfo> segments;
-  std::vector<std::vector<TraceEntry>> device_traces;
-  std::vector<AnnotationEntry> external_annotations;
-  AllocatorConfigInfo config_metadata;
 };
 
 C10_XPU_API Allocator* get();
