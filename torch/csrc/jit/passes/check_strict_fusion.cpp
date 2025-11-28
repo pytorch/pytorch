@@ -1,6 +1,7 @@
 
 #include <torch/csrc/jit/passes/check_strict_fusion.h>
 
+#include <c10/util/Exception.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>

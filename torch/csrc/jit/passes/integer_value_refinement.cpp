@@ -1,3 +1,4 @@
+#include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/integer_value_refinement.h>

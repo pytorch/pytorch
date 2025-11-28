@@ -1,3 +1,4 @@
+#include <torch/csrc/jit/passes/peephole.h>
 #include <torch/csrc/jit/passes/peephole_non_tensor.h>
 
 #include <ATen/core/jit_type.h>

@@ -4,7 +4,7 @@ import torch
 
 
 if TYPE_CHECKING:
-    from torch.ao.quantization.qconfig import QConfig
+    from torch.ao.quantization.qconfig import QConfig  # noqa: TC004
 
 
 __all__ = ["Linear"]

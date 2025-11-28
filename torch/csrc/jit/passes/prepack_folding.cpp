@@ -1,6 +1,7 @@
 #include <stack>
 
 #include <torch/csrc/jit/api/module.h>
+#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/prepack_folding.h>
 
