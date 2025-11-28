@@ -1,9 +1,5 @@
-#include <ATen/core/jit_type.h>
-#include <c10/util/irange.h>
 
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/subgraph_matcher.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/fuse_linear.h>
