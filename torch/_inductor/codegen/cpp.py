@@ -1872,15 +1872,13 @@ class CppVecOverrides(CppOverrides):
                 code.writeline(f"for (int i = 0; i < {cexpr_index(size)}; i++)")
                 with code.indent():
                     code.writeline(f"tmpbuf_out[i] = {res};")
+                load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
                 if output_mask:
-                    load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
                     load_fn = f"at::vec::VecMask<{cdtype},{n_vec}>::from"
+                elif n_vec == 1:
+                    load_fn = f"at::vec::Vectorized<{octype}>::loadu"
                 else:
-                    load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
-                    if n_vec == 1:
-                        load_fn = f"at::vec::Vectorized<{octype}>::loadu"
-                    else:
-                        load_fn = f" at::vec::VectorizedN<{octype}, {n_vec}>::loadu"
+                    load_fn = f" at::vec::VectorizedN<{octype}, {n_vec}>::loadu"
                 code.writeline(f"return {load_fn}({load_args});")
             code.writeline("()")
             return code
