@@ -8245,7 +8245,7 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(x_mps.cpu(), x_cpu)
 
     def test_empty_posneginf(self):
-        # just to check that it doesnt crash
+        # just to check that it doesn't crash
         input_tensor = torch.empty(0, device="mps")
         out_pos = torch.isposinf(input_tensor)
         out_neg = torch.isposinf(input_tensor)
@@ -8253,7 +8253,7 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(out_neg.numel(), 0)
 
     def test_empty_dot(self):
-        # just to check that it doesnt crash
+        # just to check that it doesn't crash
         a = torch.rand((0), device="mps")
         b = torch.rand((0), device="mps")
         self.assertEqual(a.dot(b), a.cpu().dot(b.cpu()))
@@ -9667,7 +9667,7 @@ class TestSDPA(TestCaseMPS):
         memory_footprints = []
         for _ in range(100):
             output = F.scaled_dot_product_attention(query, key, value)
-            # syncronize to wait for the GPU computation to return
+            # synchronize to wait for the GPU computation to return
             torch.mps.synchronize()
             current_mem, driver_mem = get_mps_memory_usage()
             memory_footprints.append((current_mem, driver_mem))
@@ -12977,8 +12977,8 @@ class TestMetalLibrary(TestCaseMPS):
         idx = 25
         x[idx] = torch.nan
         lib.do_max(z0, z1, x)
-        self.assertTrue(z0.isnan().all().item(), f"results are {z0}, but all elements shold have been nan")
-        self.assertTrue((z1 == idx).all().item(), f"results are {z1}, but all elements shold have been {idx}")
+        self.assertTrue(z0.isnan().all().item(), f"results are {z0}, but all elements should have been nan")
+        self.assertTrue((z1 == idx).all().item(), f"results are {z1}, but all elements should have been {idx}")
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.bfloat16])
     def test_atomic_add(self, dtype):
