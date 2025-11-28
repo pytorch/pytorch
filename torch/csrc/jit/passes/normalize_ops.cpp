@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/passes/normalize_ops.h>
 
+#include <c10/util/Exception.h>
+
 namespace torch::jit {
 
 namespace {

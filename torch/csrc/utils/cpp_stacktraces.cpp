@@ -1,5 +1,8 @@
 #include <torch/csrc/utils/cpp_stacktraces.h>
 
+#include <cstdlib>
+#include <cstring>
+
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 
