@@ -8,6 +8,7 @@ from functools import partial
 from collections.abc import Callable
 
 import torch
+import torch.nn.functional as F
 
 from torch.quantization._quantized_conversions import (
     pack_int4_to_int8,
@@ -404,7 +405,7 @@ class TestMatmulCuda(InductorTestCase):
         b.requires_grad_(True)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
 
-        f = torch._grouped_mm
+        f = F.grouped_mm
         out = f(a, b.t(), offs=offs, out_dtype=dtype)
         gO = torch.rand_like(out)
         out.backward(gO)
@@ -456,7 +457,7 @@ class TestMatmulCuda(InductorTestCase):
             if check_zero_size:
                 offs[0] = offs[1]
 
-            f = torch._grouped_mm
+            f = F.grouped_mm
             out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
             gO = torch.rand_like(out)
             if not check_zero_size:
@@ -501,7 +502,7 @@ class TestMatmulCuda(InductorTestCase):
         b_contig = b if b_row_major else b.transpose(-2, -1)
         self.assertTrue(b_contig.is_contiguous() is not strided)
 
-        f = torch._grouped_mm
+        f = F.grouped_mm
         out = f(a, b.transpose(-2, -1), out_dtype=dtype)
         gO = torch.rand_like(out)
         out.backward(gO)
@@ -541,7 +542,7 @@ class TestMatmulCuda(InductorTestCase):
             if check_zero_size:
                 offs[0] = offs[1]
 
-            f = torch._grouped_mm
+            f = F.grouped_mm
             out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
             gO = torch.rand_like(out)
             if not check_zero_size:
@@ -559,7 +560,7 @@ class TestMatmulCuda(InductorTestCase):
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    # TODO(future PR): enable compile for torch._grouped_mm fallback path
+    # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
@@ -572,7 +573,7 @@ class TestMatmulCuda(InductorTestCase):
 
         align = 16 // dtype_AB.itemsize
 
-        f_ref = torch._grouped_mm
+        f_ref = F.grouped_mm
 
         options = {}
         if max_autotune:
