@@ -474,30 +474,46 @@ def autograd_cache_key(
     """
     Generate a unique hash of the FX graph for caching.
     """
-    check_cacheable(gm)
-    if has_triton_package():
-        # Due to https://github.com/triton-lang/triton/issues/3729,
-        # if triton is < 3.2.0, AOTAutogradCache may cause us to
-        # attempt to load a cache entry without initializing
-        # the CUDA context on the autograd thread.
+    import random
 
-        # Without caching, we naturally do this initialization when
-        # tracing through the graph with the autograd engine.
-        import triton
+    # If enable_aot_compile is set, we're in AOT precompile mode where we always
+    # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
+    # a proper key because we are guaranteed in an AOT precompile world that there will
+    # be no invalid sharing of artifacts.
+    generate_fallback_nonce_key = torch._dynamo.config.enable_aot_compile
 
-        if triton.__version__ < "3.2.0":
-            raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
-    details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
-    pickler = AOTAutogradCachePickler(gm)
-    # The prefix distinguishes among the other kinds of objects we cache
-    key = "a" + pickler.get_hash(details)
-    debug_lines = pickler.debug_lines(details)
-    log.debug(
-        "Autograd graph cache hash details for key %s:\n%s",
-        key,
-        LazyString(lambda: "\n".join(debug_lines)),
-    )
-    return key, debug_lines
+    try:
+        check_cacheable(gm)
+        if has_triton_package():
+            # Due to https://github.com/triton-lang/triton/issues/3729,
+            # if triton is < 3.2.0, AOTAutogradCache may cause us to
+            # attempt to load a cache entry without initializing
+            # the CUDA context on the autograd thread.
+
+            # Without caching, we naturally do this initialization when
+            # tracing through the graph with the autograd engine.
+            import triton
+
+            if triton.__version__ < "3.2.0":
+                raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
+        details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
+        pickler = AOTAutogradCachePickler(gm)
+        # The prefix distinguishes among the other kinds of objects we cache
+        key = "a" + pickler.get_hash(details)
+        debug_lines = pickler.debug_lines(details)
+        log.debug(
+            "Autograd graph cache hash details for key %s:\n%s",
+            key,
+            LazyString(lambda: "\n".join(debug_lines)),
+        )
+        return key, debug_lines
+    except Exception:
+        # If generate_fallback_nonce_key is enabled and we can't generate a proper key,
+        # just generate a random nonce string instead
+        if generate_fallback_nonce_key:
+            return str(random.random()), []
+        else:
+            raise
 
 
 @contextlib.contextmanager

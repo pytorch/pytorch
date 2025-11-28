@@ -227,7 +227,6 @@ def aot_compile_fullgraph(
             torch._guards.tracing(tracing_context),
             torch._functorch.config.patch(
                 {
-                    "bundled_autograd_cache": True,
                     "force_non_lazy_backward_lowering": True,
                 }
             ),
