@@ -5035,7 +5035,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     for i in instance_lists[1:]:
                         assert i.image_size == image_size
                 ret = Instances(image_size)
-                for k in instance_lists[0]._fields.keys():
+                for k in instance_lists[0]._fields:
                     values = [i.get(k) for i in instance_lists]
                     v0 = values[0]
                     if isinstance(v0, torch.Tensor):
