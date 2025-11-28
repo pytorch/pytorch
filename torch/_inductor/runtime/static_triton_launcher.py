@@ -37,9 +37,7 @@ class StaticallyLaunchedTritonKernel:
 
     @cached_property
     def C_impl(self):
-        from torch._C import _StaticCudaLauncher
-
-        return _StaticCudaLauncher
+        raise NotImplementedError
 
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
@@ -272,3 +270,20 @@ class StaticallyLaunchedTritonKernel:
             args,
             stream,
         )
+
+
+class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
+    @cached_property
+    def C_impl(self):
+        from torch._C import _StaticCudaLauncher
+
+        return _StaticCudaLauncher
+
+
+def statically_launched_kernel_by_device(
+    kernel: CompiledKernel, device_type: str = "cuda"
+) -> StaticallyLaunchedTritonKernel:
+    if device_type == "cuda":
+        return StaticallyLaunchedCudaKernel(kernel, device_type)
+    else:
+        raise NotImplementedError(f"Device type {device_type} not supported")
