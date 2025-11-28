@@ -1062,6 +1062,11 @@ if sys.version_info >= (3, 12):
         typing.TypeVar,
         typing.TypeVarTuple,
         typing.TypeAliasType,
+    )
+
+
+if sys.version_info >= (3, 14):
+    _builtin_final_typing_classes += (
         typing.Union,
     )
 
