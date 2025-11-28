@@ -1788,4 +1788,3 @@ MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
 }
 
 } // namespace c10::xpu
- 
