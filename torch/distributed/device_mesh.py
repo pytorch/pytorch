@@ -42,12 +42,12 @@ else:
     from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
         _get_default_group,
-        GroupName,
         _resolve_process_group,
         get_backend,
         get_process_group_ranks,
         get_rank,
         get_world_size,
+        GroupName,
         init_process_group,
         is_initialized,
         new_group,
