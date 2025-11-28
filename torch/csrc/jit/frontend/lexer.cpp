@@ -1,5 +1,7 @@
 #include <torch/csrc/jit/frontend/lexer.h>
 
+#include <c10/util/Exception.h>
+
 #include <cstring>
 #include <string>
 #include <unordered_map>

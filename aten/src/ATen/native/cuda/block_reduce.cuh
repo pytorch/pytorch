@@ -1,5 +1,7 @@
 #pragma once
 
+#include <thrust/tuple.h>
+
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 

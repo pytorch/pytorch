@@ -1,5 +1,6 @@
 #include <c10/cuda/CUDAMiscFunctions.h>
 #include <c10/util/env.h>
+#include <cuda_runtime.h>
 #include <string>
 
 namespace c10::cuda {

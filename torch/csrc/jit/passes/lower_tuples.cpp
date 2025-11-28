@@ -1,5 +1,6 @@
 #include <torch/csrc/jit/passes/lower_tuples.h>
 
+#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/constants.h>

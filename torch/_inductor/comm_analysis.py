@@ -1,7 +1,6 @@
 import functools
 import logging
 import math
-import operator
 from enum import IntEnum
 from typing import Any, Optional
 
@@ -9,7 +8,6 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import hint_int
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -71,23 +69,18 @@ def get_collective_type(node: ir.IRNode) -> NCCL_COLL:
     return get_collective_type_from_kernel_name(name)
 
 
-def get_ir_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int:
+def get_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int:
     numel = sympy_product(size)
     if isinstance(numel, sympy.Integer):
         return int(numel)
+
     return V.graph.sizevars.size_hint(numel, fallback=fallback)
-
-
-def get_fx_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int:
-    numel = functools.reduce(operator.mul, size, 1)
-    result = hint_int(numel, fallback=fallback)
-    return result
 
 
 def get_collective_input_size_bytes(node: ir.IRNode) -> int:
     sz_bytes = 0
     for inp in node.inputs:  # type: ignore[attr-defined]
-        numel = get_ir_node_size_numel(inp.layout.size)
+        numel = get_size_numel(inp.layout.size)
         sz_bytes += numel * get_dtype_size(inp.layout.dtype)
     return sz_bytes
 
@@ -357,18 +350,18 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
     # dont double count pre-allocated buffer passed in
     kwargs.pop("out", None)
 
-    def tensor_bytes(t: torch.Tensor) -> int:
-        return get_fx_node_size_numel(t.size()) * get_dtype_size(t.dtype)
+    def tensor_bytes(t) -> int:
+        return get_size_numel(t.size()) * get_dtype_size(t.dtype)
 
     def add_inp_bytes(inp: torch.fx.Node):
-        inp_val = inp.meta.get("val", None)
-        if not isinstance(inp_val, torch.Tensor):
+        t = inp.meta.get("val", None)
+        if t is None:
             return
 
         nonlocal input_bytes
         if input_bytes is None:
             input_bytes = 0
-        input_bytes += tensor_bytes(inp_val)
+        input_bytes += tensor_bytes(t)
 
     pytree.tree_map_only(
         torch.fx.Node,
@@ -376,12 +369,14 @@ def estimate_fx_collective_size(fx_node: torch.fx.Node) -> int:
         (args, kwargs),
     )
 
-    output_val = fx_node.meta.get("val", None)
+    output_tensor = fx_node.meta.get("val", None)
 
-    if input_bytes is None or not isinstance(output_val, torch.Tensor):
+    if input_bytes is None or output_tensor is None:
         return 0
 
-    output_bytes = tensor_bytes(output_val)
+    output_bytes = (
+        get_size_numel(output_tensor.size()) * output_tensor.element_size()
+    )  # pyre-ignore
 
     return input_bytes + output_bytes
 
@@ -472,7 +467,7 @@ def estimate_nccl_collective_runtime_from_fx_node(
             if isinstance(e, torch.fx.Node):
                 return to_real_tensor(e.meta["val"])
             if isinstance(e, torch.Tensor):
-                return _tensor([get_fx_node_size_numel(e.size())], e.dtype, e.device)
+                return _tensor([get_size_numel(e.size())], e.dtype, e.device)
             return e
 
         flat_args = [to_real_tensor(a) for a in flat_args]

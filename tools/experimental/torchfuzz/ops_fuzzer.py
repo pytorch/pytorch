@@ -2,6 +2,7 @@
 
 import random
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 
@@ -30,7 +31,7 @@ def _get_cached_operators():
 
 
 def _get_template_filtered_operators(
-    template: str = "default", supported_ops: list[str] | None = None
+    template: str = "default", supported_ops: Optional[list[str]] = None
 ):
     """Get operators filtered by template's supported_ops, with user override.
 
@@ -273,7 +274,7 @@ def fuzz_op(
     depth,
     stack_size,
     template: str = "default",
-    supported_ops: list[str] | None = None,
+    supported_ops: Optional[list[str]] = None,
 ) -> tuple[str, list[Spec]]:
     """
     Given an output specification, returns an operation that can
@@ -428,9 +429,9 @@ def _get_arg_args_specs(target_spec: Spec) -> tuple[str, list[Spec]]:
 def fuzz_operation_graph(
     target_spec: Spec,
     max_depth: int = 7,
-    seed: int | None = None,
+    seed: Optional[int] = None,
     template: str = "default",
-    supported_ops: list[str] | None = None,
+    supported_ops: Optional[list[str]] = None,
 ) -> OperationGraph:
     """
     Generate a graph of operations that produces the target specification.
