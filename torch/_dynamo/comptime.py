@@ -47,7 +47,7 @@ from torch._dynamo.variables.base import VariableTracker
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
-from .exc import unimplemented_v2
+from .exc import unimplemented
 from .variables import CellVariable
 from .variables.constant import ConstantVariable
 from .variables.tensor import SymNodeVariable
@@ -193,7 +193,7 @@ class ComptimeContext:
         """
         Manually trigger a graph break
         """
-        unimplemented_v2(
+        unimplemented(
             gb_type="ComptimeContext graph break",
             context=msg,
             explanation=f"Manually triggered ComptimeContext graph break with message {msg}.",

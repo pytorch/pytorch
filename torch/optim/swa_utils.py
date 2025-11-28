@@ -62,6 +62,7 @@ def get_ema_multi_avg_fn(decay=0.999):
         )
 
     @torch.no_grad()
+<<<<<<< HEAD
     def ema_update(ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, num_averaged: Union[Tensor, int]):
         """In-place update of `ema_param_list` using `current_param_list`.
 
@@ -73,62 +74,62 @@ def get_ema_multi_avg_fn(decay=0.999):
         # Detect first update (num_averaged can be Tensor or int)
         if isinstance(num_averaged, Tensor):
             is_first_update = int(num_averaged.item()) == 0
+=======
+    def ema_update(
+        ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _
+    ) -> None:
+        # foreach lerp only handles float and complex
+        if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(
+            ema_param_list[0]
+        ):
+            torch._foreach_lerp_(ema_param_list, current_param_list, 1 - decay)
+>>>>>>> 4c246677784c6a14bc2dbb9ff8773ef0a3a3222f
         else:
             is_first_update = num_averaged == 0
 
         # Prefer foreach implementations for floating types
         if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(ema_param_list[0]):
-            if is_first_update:
-                # Initialize EMA to model weights: W^{EMA}_0 = W^{model}_0
-                try:
-                    # efficient list copy if supported
-                    torch._foreach_copy_(ema_param_list, current_param_list)
-                except Exception:
-                    for p_ema, p_model in zip(ema_param_list, current_param_list, strict=True):
-                        p_ema.copy_(p_model)
-            else:
-                # Apply lerp: p_ema = (1 - alpha) * p_model + alpha * p_ema
-                # torch._foreach_lerp_(list_a, list_b, weight) performs: list_a[i] = (1-weight)*list_a[i] + weight*list_b[i]
-                # we pass weight = 1 - decay to get: p_ema = decay * p_ema + (1 - decay) * p_model
-                torch._foreach_lerp_(ema_param_list, current_param_list, 1 - decay)
-        else:
-            # Fallback for non-floating types
-            for p_ema, p_model in zip(ema_param_list, current_param_list, strict=True):
-                if is_first_update:
-                    p_ema.copy_(p_model)
+            @torch.no_grad()
+            def ema_update(
+                ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, num_averaged: Union[Tensor, int]
+            ):
+                """In-place update of `ema_param_list` using `current_param_list`.
+
+                If `num_averaged == 0` we initialize EMA := model (W^{EMA}_0 = W^{model}_0).
+                Otherwise we apply the EMA step:
+                    W^{EMA}_t = α W^{EMA}_{t-1} + (1-α) W^{model}_t
+                """
+
+                # Detect first update (num_averaged can be Tensor or int)
+                if isinstance(num_averaged, Tensor):
+                    is_first_update = int(num_averaged.item()) == 0
                 else:
-                    p_ema.copy_(p_ema * decay + p_model * (1 - decay))
+                    is_first_update = num_averaged == 0
 
-    return ema_update
+                # Prefer foreach implementations for floating types
+                if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(ema_param_list[0]):
+                    if is_first_update:
+                        # Initialize EMA to model weights: W^{EMA}_0 = W^{model}_0
+                        try:
+                            # efficient list copy if supported
+                            torch._foreach_copy_(ema_param_list, current_param_list)
+                        except Exception:
+                            for p_ema, p_model in zip(ema_param_list, current_param_list, strict=True):
+                                p_ema.copy_(p_model)
+                    else:
+                        # Apply lerp: p_ema = (1 - alpha) * p_model + alpha * p_ema
+                        # torch._foreach_lerp_(list_a, list_b, weight) performs: list_a[i] = (1-weight)*list_a[i] + weight*list_b[i]
+                        # we pass weight = 1 - decay to get: p_ema = decay * p_ema + (1 - decay) * p_model
+                        torch._foreach_lerp_(ema_param_list, current_param_list, 1 - decay)
+                else:
+                    # Fallback for non-floating types
+                    for p_ema, p_model in zip(ema_param_list, current_param_list, strict=True):
+                        if is_first_update:
+                            p_ema.copy_(p_model)
+                        else:
+                            p_ema.copy_(p_ema * decay + p_model * (1 - decay))
 
-
-def get_swa_multi_avg_fn():
-    """Get the function applying stochastic weight average (SWA) across multiple params."""
-
-    @torch.no_grad()
-    def swa_update(
-        averaged_param_list: PARAM_LIST,
-        current_param_list: PARAM_LIST,
-        num_averaged: Union[Tensor, int],
-    ):
-        # foreach lerp only handles float and complex
-        if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(
-            averaged_param_list[0]
-        ):
-            torch._foreach_lerp_(
-                averaged_param_list,
-                current_param_list,
-                cast(float, 1 / (num_averaged + 1)),
-            )
-        else:
-            diffs = torch._foreach_sub(current_param_list, averaged_param_list)
-            if isinstance(num_averaged, Tensor):
-                torch._foreach_addcdiv_(
-                    averaged_param_list,
-                    diffs,
-                    [num_averaged + 1] * len(averaged_param_list),
-                )
-            else:
+            return ema_update
                 torch._foreach_add_(
                     averaged_param_list, diffs, alpha=1.0 / (num_averaged + 1)
                 )
@@ -273,7 +274,7 @@ class AveragedModel(Module):
             Callable[[PARAM_LIST, PARAM_LIST, Union[Tensor, int]], None]
         ] = None,
         use_buffers=False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         super().__init__()
         if avg_fn is not None and multi_avg_fn is not None:
             raise AssertionError(
@@ -293,7 +294,7 @@ class AveragedModel(Module):
         """Forward pass."""
         return self.module(*args, **kwargs)
 
-    def update_parameters(self, model: Module):
+    def update_parameters(self, model: Module) -> None:
         """Update model parameters."""
         self_param = (
             # pyrefly: ignore [bad-argument-type]
@@ -375,7 +376,7 @@ def update_bn(
     loader: Iterable[Any],
     model: Module,
     device: Optional[Union[int, torch.device]] = None,
-):
+) -> None:
     r"""Update BatchNorm running_mean, running_var buffers in the model.
 
     It performs one pass over data in `loader` to estimate the activation
@@ -413,7 +414,7 @@ def update_bn(
 
     was_training = model.training
     model.train()
-    for module in momenta.keys():
+    for module in momenta:
         module.momentum = None
 
     for input in loader:
@@ -424,7 +425,7 @@ def update_bn(
 
         model(input)
 
-    for bn_module in momenta.keys():
+    for bn_module in momenta:
         bn_module.momentum = momenta[bn_module]
     model.train(was_training)
 
@@ -480,7 +481,7 @@ class SWALR(LRScheduler):
         anneal_epochs=10,
         anneal_strategy: Literal["cos", "linear"] = "cos",
         last_epoch=-1,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups, strict=True):
             group["swa_lr"] = swa_lr
@@ -562,7 +563,7 @@ class SWALR(LRScheduler):
             for group, lr in zip(self.optimizer.param_groups, prev_lrs, strict=True)
         ]
 
-    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]):
+    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]) -> None:
         self._anneal_strategy = anneal_strategy
         if anneal_strategy == "cos":
             self.anneal_func = self._cosine_anneal

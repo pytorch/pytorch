@@ -4,9 +4,10 @@
 import dataclasses
 import io
 import logging
-import operator
+import math
+import sys
+from bisect import bisect_right, insort
 from collections import ChainMap
-from functools import reduce
 from typing import Any, cast, Optional, Union
 
 import torch
@@ -634,10 +635,11 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
             continue
         if len(value.size) == 0:
             continue
+        chunks = value.chunks
         chunks_volume = 0
-        for chunk_idx, chunk0 in enumerate(value.chunks):
+        for chunk in chunks:
             # Compute the volume
-            if not _check_box_bounds(value.size, chunk0):
+            if not _check_box_bounds(value.size, chunk):
                 logger.warning(
                     """
                         key:%s has out of bounds chunk:
@@ -645,21 +647,46 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
                     """,
                     key,
                     value.size,
-                    chunk0,
+                    chunk,
                 )
                 all_good = False
-            chunks_volume += reduce(operator.mul, chunk0.sizes, 1)
+            chunks_volume += math.prod(chunk.sizes)
 
-            # Check for overlap
-            for chunk1 in value.chunks[chunk_idx + 1 :]:
-                if _check_box_overlap(chunk0, chunk1):
-                    logger.warning(
-                        "key:%s has overlapping chunks: %s %s", key, chunk0, chunk1
-                    )
-                    all_good = False
+        if len(chunks) > 1:
+            dims = len(value.size)
+            sweep_dim = max(range(dims), default=0, key=lambda d: value.size[d])
+            sorted_indices = sorted(
+                range(len(chunks)),
+                key=lambda idx: (
+                    chunks[idx].offsets[sweep_dim],
+                    *(chunks[idx].offsets[d] for d in range(dims)),
+                ),
+            )
+            active: list[tuple[int, int]] = []
+            for idx in sorted_indices:
+                current = chunks[idx]
+                start = current.offsets[sweep_dim]
+                end = start + current.sizes[sweep_dim]
+
+                cutoff = bisect_right(active, (start, sys.maxsize))
+                if cutoff:
+                    del active[:cutoff]
+
+                for _, other_idx in active:
+                    other = chunks[other_idx]
+                    if _check_box_overlap(current, other):
+                        logger.warning(
+                            "key:%s has overlapping chunks: %s %s",
+                            key,
+                            current,
+                            other,
+                        )
+                        all_good = False
+
+                insort(active, (end, idx))
 
         # Check whether combined chunk cover the whole tensor
-        tensor_volume = reduce(operator.mul, value.size, 1)
+        tensor_volume = math.prod(value.size)
         if len(global_plan) > 1 and chunks_volume != tensor_volume:
             logger.warning(
                 """

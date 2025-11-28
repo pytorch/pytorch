@@ -59,6 +59,9 @@ constexpr DispatchKeySet nested_dispatch_keyset =
         {DispatchKey::AutogradNestedTensor, DispatchKey::NestedTensor}) |
     DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
+constexpr DispatchKeySet functorch_batched_dispatch_keyset =
+    DispatchKeySet(DispatchKey::FuncTorchBatched);
+
 DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
   TORCH_INTERNAL_ASSERT(t != DispatchKey::Undefined);
   switch (t) {
@@ -77,6 +80,8 @@ DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t) {
       return backend_dispatch_keyset;
     case DispatchKey::CompositeExplicitAutogradNonFunctional:
       return non_functional_backend_dispatch_keyset;
+    case DispatchKey::FuncTorchBatchedDecomposition:
+      return functorch_batched_dispatch_keyset;
     default:
       return DispatchKeySet(t);
   }
@@ -171,7 +176,7 @@ std::ostream& operator<<(std::ostream& os, DispatchKeySet ts) {
     os << k;
     first = false;
   }
-  os << ")";
+  os << ')';
   return os;
 }
 

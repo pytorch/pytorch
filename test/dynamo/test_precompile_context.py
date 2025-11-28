@@ -58,7 +58,7 @@ class PrecompileContextTests(InductorTestCase):
         result.sum().backward()
         self.assertEqual(len(PrecompileContext._dynamo_cache_entries), 1)
         self.assertEqual(len(PrecompileContext._backend_artifacts_by_key), 1)
-        for key in PrecompileContext._backend_artifacts_by_key.keys():
+        for key in PrecompileContext._backend_artifacts_by_key:
             result = PrecompileContext.serialize_artifact_by_key(key)
             assert isinstance(result, BackendCacheArtifact)
             self.assertEqual(result.key, key)

@@ -7,6 +7,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 from torch._inductor.runtime.triton_compat import tl
+from torch._inductor.template_heuristics.cutedsl import get_groupgemm_configs
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
@@ -19,7 +20,6 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
-    ensure_cute_available,
     get_gpu_shared_memory,
     get_num_sms,
     has_free_symbols,
@@ -34,9 +34,6 @@ from .mm_common import (
     persistent_grouped_mm_grid,
 )
 
-
-if ensure_cute_available():
-    from torch._inductor.template_heuristics.cutedsl import get_groupgemm_configs
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
