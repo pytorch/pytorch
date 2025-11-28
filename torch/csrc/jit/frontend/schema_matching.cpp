@@ -679,7 +679,7 @@ Value* emitBuiltinCall(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     const std::optional<NamedValue>& self) {
-  const auto& variants = getAllOperatorsFor(name);
+  auto variants = getAllOperatorsFor(name);
   const auto& builtin_functions = getAllBuiltinFunctionsFor(name);
 
   // first let's set the graph's version
