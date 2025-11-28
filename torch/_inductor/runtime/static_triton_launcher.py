@@ -300,8 +300,8 @@ def statically_launched_kernel_by_device(
     kernel: CompiledKernel, device_type: str = "cuda"
 ) -> StaticallyLaunchedTritonKernel:
     if device_type == "cuda":
-        return StaticallyLaunchedCudaKernel(kernel, device_type)
+        return StaticallyLaunchedCudaKernel(kernel)
     elif device_type == "xpu":
-        return StaticallyLaunchedXpuKernel(kernel, device_type)
+        return StaticallyLaunchedXpuKernel(kernel)
     else:
         raise NotImplementedError(f"Device type {device_type} not supported")
