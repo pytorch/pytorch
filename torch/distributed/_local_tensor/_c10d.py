@@ -238,7 +238,9 @@ def _local_functional_all_to_all_single(
         ):
             local_ints = dict(input_split_size.node._local_ints.items())
         else:
-            local_ints = {rank: int(input_split_size) for rank in tensor._local_tensors}
+            local_ints = {
+                rank: int(input_split_size) for rank in tensor._local_tensors.keys()
+            }
         for rank, split_size in local_ints.items():
             if rank not in split_local_sizes:
                 split_local_sizes[rank] = []

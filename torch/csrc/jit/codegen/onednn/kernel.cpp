@@ -1,6 +1,7 @@
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <torch/csrc/jit/codegen/onednn/kernel.h>
 
+#include <ATen/core/functional.h>
 #include <torch/csrc/jit/jit_log.h>
 
 namespace torch::jit::fuser::onednn {

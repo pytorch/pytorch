@@ -1,6 +1,7 @@
 """Base operator implementation."""
 
 from abc import ABC, abstractmethod
+from typing import Optional
 
 from torchfuzz.tensor_fuzzer import Spec
 
@@ -21,7 +22,7 @@ class Operator(ABC):
 
     @property
     @abstractmethod
-    def torch_op_name(self) -> str | None:
+    def torch_op_name(self) -> Optional[str]:
         """
         Return the torch operation name this operator represents.
 
@@ -56,10 +57,10 @@ class Operator(ABC):
     def get_weight(
         self,
         *,
-        target_spec: Spec | None = None,
-        depth: int | None = None,
-        stack_size: int | None = None,
-        template: str | None = None,
+        target_spec: Optional[Spec] = None,
+        depth: Optional[int] = None,
+        stack_size: Optional[int] = None,
+        template: Optional[str] = None,
     ) -> float:
         """
         Return the selection weight for this operator.
