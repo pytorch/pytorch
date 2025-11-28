@@ -856,6 +856,51 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 )
                 torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
 
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    def test_linear_input_non_contiguous_3D(self, device="cpu"):
+        self.device = device
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 3, bias=bias)
+
+            def forward(self, x):
+                x = torch.reshape(torch.permute(x, (0, 2, 3, 1)), (2, 12, 4))
+                return self.linear(x)
+
+        dtypes = [torch.float]
+        if is_mkldnn_bf16_supported(self.device):
+            dtypes.append(torch.bfloat16)
+        if is_mkldnn_fp16_supported(self.device):
+            dtypes.append(torch.float16)
+
+        for dtype, bias in itertools.product(dtypes, [True, False]):
+            mod = M(bias).eval()
+            v = torch.randn(2, 4, 3, 4)
+            torch._dynamo.reset()
+            autocast_enabled = dtype in [torch.bfloat16, torch.float16]
+            with (
+                torch.no_grad(),
+                torch.autocast(
+                    device_type="cpu",
+                    enabled=autocast_enabled,
+                    dtype=dtype,
+                ),
+            ):
+                expected = mod(v)
+                actual, (source_code,) = run_and_get_code(
+                    torch.compile(mod, fullgraph=True),
+                    v,
+                )
+                self.assertIn(
+                    "torch.ops.mkldnn._linear_pointwise.default"
+                    if autocast_enabled
+                    else "torch.ops.mkl._mkl_linear.default",
+                    source_code,
+                )
+                torch.testing.assert_close(actual, expected, atol=1e-2, rtol=1e-2)
+
     @skipIfXpu(
         msg="Different with CPU, two linears will be concat on XPU for better performance"
     )
