@@ -34,7 +34,7 @@
   of triton kernels have less than 10 args, this seems unlikely to be
   expensive.
 
-  This launcher is paired with StaticallyLaunchedTritonKernel in
+  This launcher is paired with StaticallyLaunchedCudaKernel in
   triton_heuristics.py.
 
   TODO:
