@@ -294,10 +294,11 @@ class CachingAutotuner(KernelInterface):
             **triton_meta,
             "device": self.device_props.index,
             "device_type": self.device_props.type,
-            "warp_size": self.device_props.warp_size,
-            "max_threads_per_block": self.device_props.max_threads_per_block, 
         }
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
+        # Add device properties to inductor_meta for use by coordinate descent tuner
+        self.inductor_meta["warp_size"] = self.device_props.warp_size
+        self.inductor_meta["max_threads_per_block"] = self.device_props.max_threads_per_block
         self.deterministic_mode = self.inductor_meta.get("deterministic", False)
 
         self.save_cache_hook = save_cache_hook
@@ -340,7 +341,6 @@ class CachingAutotuner(KernelInterface):
             name=self.fn.__name__,
             size_hints=size_hints,
             inductor_meta=self.inductor_meta,
-            triton_meta=self.triton_meta,
         )
         self.filename = filename
 

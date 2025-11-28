@@ -57,7 +57,6 @@ class CoordescTuner:
         name="unknown",
         size_hints=None,
         inductor_meta=None,
-        triton_meta=None,
         frozen_fields=None,
     ):
         self.is_mm = is_mm  # we will tune num_stages for mm
@@ -72,7 +71,6 @@ class CoordescTuner:
         self.name = name
         self.size_hints = size_hints
         self.inductor_meta = inductor_meta or {}
-        self.triton_meta = triton_meta
         self.frozen_fields: OrderedSet[str] = (
             OrderedSet(frozen_fields) if frozen_fields is not None else OrderedSet()
         )
@@ -83,10 +81,10 @@ class CoordescTuner:
         return min(max_block, size_hint) if size_hint is not None else max_block
 
     def get_warpsmax(self):
-        if self.triton_meta:
-            # Avoid querying device directly if triton_meta is populated
-            warp_size = self.triton_meta.get('warp_size')
-            max_threads_per_block = self.triton_meta.get('max_threads_per_block')
+        # Avoid querying device directly if device properties are populated in inductor_meta
+        warp_size = self.inductor_meta.get('warp_size')
+        max_threads_per_block = self.inductor_meta.get('max_threads_per_block')
+        if warp_size and max_threads_per_block:
             return max_threads_per_block // warp_size
         else:
             return get_max_numwarps()
