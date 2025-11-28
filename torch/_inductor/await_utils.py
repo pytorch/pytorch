@@ -2,10 +2,10 @@ import asyncio
 import sys
 import weakref
 from asyncio import AbstractEventLoop, Future
-from collections.abc import Awaitable, Coroutine, Generator, Iterator
+from collections.abc import Awaitable, Callable, Coroutine, Generator, Iterator
 from contextlib import contextmanager, ExitStack
 from contextvars import Context
-from typing import Any, Callable, Optional, Protocol, TypeVar
+from typing import Any, Optional, Protocol, TypeVar
 
 from torch.utils._ordered_set import OrderedSet
 

@@ -190,12 +190,14 @@ class IListRef;
  * it to a function (e.g. `ImplT::<dispatch-function>(this_)`).
  */
 #define TORCH_ILISTREF_UNWRAP(TAG, BODY)                         \
+  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")    \
   switch (TAG) {                                                 \
     TORCH_ILISTREF_FORALL_TAGS(TORCH_ILISTREF_UNWRAP_CASE, BODY) \
     break;                                                       \
     default:                                                     \
       TORCH_INTERNAL_ASSERT(false, "invalid IListRef tag.");     \
-  }
+  } \
+  C10_DIAGNOSTIC_POP()
 
 enum class IListRefTag {
 #define DEFINE_TAG(tag, ...) tag,
