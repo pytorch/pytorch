@@ -389,14 +389,25 @@ def raise_observed_exception(
     kwargs: Optional[dict[str, Any]] = None,
     msg: Optional[str] = None,
 ) -> NoReturn:
-    from .variables import BuiltinVariable
+    from .variables import BuiltinVariable, ConstantVariable, VariableTracker
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     # If a message is provided but no args, use the message as the first argument
     if msg is not None and (args is None or len(args) == 0):
         args = [msg]
-    exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
+
+    # Wrap args in ConstantVariable if they are not already VariableTrackers
+    # This is needed for ExceptionVariable which expects VTs
+    vt_args = []
+    if args:
+        for arg in args:
+            if not isinstance(arg, VariableTracker):
+                vt_args.append(ConstantVariable.create(arg))
+            else:
+                vt_args.append(arg)
+
+    exception_vt = BuiltinVariable(exc_type).call_function(tx, vt_args, kwargs or {})  # type: ignore[arg-type]
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raised_exc = get_dynamo_observed_exception(exc_type)
     # Store the original exception arguments for better error messages

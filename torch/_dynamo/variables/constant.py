@@ -218,7 +218,7 @@ its type to `common_constant_types`.
                     raise_observed_exception(
                         type(exc),
                         tx,
-                        args=list(map(ConstantVariable.create, exc.args)),
+                        args=list(exc.args),
                     )
             if (
                 hasattr(operator, name)
@@ -240,7 +240,7 @@ its type to `common_constant_types`.
                         return ConstantVariable.create(op(self.value, add_target))
                     except Exception as e:
                         raise_observed_exception(
-                            type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                            type(e), tx, args=list(e.args)
                         )
         elif isinstance(self.value, bytes) and name == "decode":
             method = getattr(self.value, name)
@@ -263,7 +263,7 @@ its type to `common_constant_types`.
                 )
             except Exception as e:
                 raise_observed_exception(
-                    type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                    type(e), tx, args=list(e.args)
                 )
         elif name == "__contains__" and len(args) == 1 and args[0].is_python_constant():
             assert not kwargs
@@ -274,7 +274,7 @@ its type to `common_constant_types`.
                 return ConstantVariable.create(result)
             except TypeError as e:
                 raise_observed_exception(
-                    type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                    type(e), tx, args=list(e.args)
                 )
         return super().call_method(tx, name, args, kwargs)
 

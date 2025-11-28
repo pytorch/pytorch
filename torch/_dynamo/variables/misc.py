@@ -468,7 +468,7 @@ class ExceptionVariable(VariableTracker):
         val: VariableTracker,
     ):
         def raise_error(msg):
-            raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
+            raise_observed_exception(TypeError, tx, args=[msg])
 
         name = name_var.as_python_constant()
         if name == "__context__":

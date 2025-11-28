@@ -2241,7 +2241,7 @@ class CollectionsNamedTupleFunction(UserFunctionVariable):
                 raise_observed_exception(
                     type(exc),
                     tx,
-                    args=list(map(ConstantVariable.create, exc.args)),
+                    args=list(exc.args),
                 )
             return variables.UserDefinedClassVariable(
                 # pyrefly: ignore[unbound-name]

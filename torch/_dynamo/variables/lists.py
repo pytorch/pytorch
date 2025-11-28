@@ -120,8 +120,7 @@ class BaseListVariable(VariableTracker):
 
         if isinstance(index, slice):
             if index.step == 0:
-                msg = ConstantVariable.create("slice step cannot be zero")
-                raise_observed_exception(ValueError, tx, args=[msg])
+                raise_observed_exception(ValueError, tx, args=["slice step cannot be zero"])
             # Set source to None because slicing a list gives a new local
             return self.clone(
                 items=self.items[index],
@@ -220,7 +219,7 @@ class BaseListVariable(VariableTracker):
 
             if value.python_type() not in (int, slice):
                 msg = f"indices must be integers or slices, not {value.python_type()}"
-                raise_observed_exception(TypeError, tx, args=[ConstantVariable(msg)])
+                raise_observed_exception(TypeError, tx, args=[msg])
 
             return self.getitem_const(tx, value)
         elif name == "__contains__":
@@ -271,10 +270,11 @@ class BaseListVariable(VariableTracker):
             if type(self) is not type(args[0]):
                 tp_name = self.python_type_name()
                 other = args[0].python_type_name()
-                msg_vt = ConstantVariable.create(
-                    f'can only concatenate {tp_name} (not "{other}") to {tp_name}'
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[f'can only concatenate {tp_name} (not "{other}") to {tp_name}'],
                 )
-                raise_observed_exception(TypeError, tx, args=[msg_vt])
 
             if name == "__add__":
                 return type(self)(self.items + args[0].items, source=self.source)  # type: ignore[attr-defined]
@@ -291,10 +291,13 @@ class BaseListVariable(VariableTracker):
                 )
 
             if not (args[0].is_python_constant() and args[0].python_type() is int):
-                msg_vt = ConstantVariable.create(
-                    f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'"
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"can't multiply sequence by non-int type of '{args[0].python_type_name()}'"
+                    ],
                 )
-                raise_observed_exception(TypeError, tx, args=[msg_vt])
 
             val = args[0].as_python_constant()
 
@@ -463,7 +466,7 @@ class RangeVariable(BaseListVariable):
             raise_observed_exception(
                 IndexError,
                 tx,
-                args=[ConstantVariable("range object index out of range")],
+                args=["range object index out of range"],
             )
 
         return variables.ConstantVariable.create(self.start() + (index * self.step()))
@@ -503,8 +506,9 @@ class RangeVariable(BaseListVariable):
         elif isinstance(index, int):
             return self.apply_index(index)
         else:
-            msg = ConstantVariable("range indices must be integers or slices")
-            raise_observed_exception(TypeError, tx, args=[msg])
+            raise_observed_exception(
+                TypeError, tx, args=["range indices must be integers or slices"]
+            )
 
     def as_proxy(self) -> range:
         return self.python_type()(*self._as_proxy())
@@ -596,7 +600,7 @@ class RangeVariable(BaseListVariable):
                 raise_observed_exception(
                     TypeError,
                     tx,
-                    args=[ConstantVariable.create(msg)],
+                    args=[msg],
                 )
 
             if pt is not range:
@@ -657,8 +661,9 @@ class CommonListMethodsVariable(BaseListVariable):
                 )
 
             if not args[0].has_force_unpack_var_sequence(tx):
-                msg = ConstantVariable.create(f"{type(args[0])} object is not iterable")
-                raise_observed_exception(TypeError, tx, args=[msg])
+                raise_observed_exception(
+                    TypeError, tx, args=[f"{type(args[0])} object is not iterable"]
+                )
 
             (arg,) = args
             arg.force_apply_to_var_sequence(
@@ -691,14 +696,12 @@ class CommonListMethodsVariable(BaseListVariable):
                 )
 
             if len(self.items) == 0:
-                msg = ConstantVariable.create("pop from empty list")
-                raise_observed_exception(IndexError, tx, args=[msg])
+                raise_observed_exception(IndexError, tx, args=["pop from empty list"])
 
             if len(args):
                 idx = args[0].as_python_constant()
                 if idx > len(self.items):
-                    msg = ConstantVariable.create("pop index out of range")
-                    raise_observed_exception(IndexError, tx, args=[msg])
+                    raise_observed_exception(IndexError, tx, args=["pop index out of range"])
             tx.output.side_effects.mutation(self)
             return self.items.pop(*[a.as_python_constant() for a in args])
         elif name == "clear" and self.is_mutable():
@@ -776,13 +779,16 @@ class CommonListMethodsVariable(BaseListVariable):
                     raise_observed_exception(
                         type(exc),
                         tx,
-                        args=list(map(ConstantVariable.create, exc.args)),
+                        args=list(exc.args),
                     )
             else:
-                msg = ConstantVariable.create(
-                    f"list indices must be integers or slices, not {args[0].python_type_name()}"
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        f"list indices must be integers or slices, not {args[0].python_type_name()}"
+                    ],
                 )
-                raise_observed_exception(TypeError, tx, args=[msg])
             return ConstantVariable.create(None)
         elif name == "copy":
             # List copy() doesn't have args and kwargs
@@ -877,7 +883,7 @@ class ListVariable(CommonListMethodsVariable):
                     raise_observed_exception(
                         type(exc),
                         tx,
-                        args=list(map(ConstantVariable.create, exc.args)),
+                        args=list(exc.args),
                     )
             else:
                 if isinstance(key, SymNodeVariable):
@@ -889,7 +895,7 @@ class ListVariable(CommonListMethodsVariable):
                     self.items[key] = value
                 except (IndexError, TypeError) as e:
                     raise_observed_exception(
-                        type(e), tx, args=list(map(ConstantVariable.create, e.args))
+                        type(e), tx, args=list(e.args)
                     )
             return ConstantVariable.create(None)
 
@@ -1498,11 +1504,7 @@ class NamedTupleVariable(TupleVariable):
                     raise_observed_exception(
                         ValueError,
                         tx,
-                        args=[
-                            ConstantVariable.create(
-                                f"Got unexpected field name: '{field_name}'"
-                            )
-                        ],
+                        args=[f"Got unexpected field name: '{field_name}'"],
                     )
 
                 # Replace the item at the field's index

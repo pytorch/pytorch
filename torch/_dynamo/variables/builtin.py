@@ -701,7 +701,7 @@ class BuiltinVariable(VariableTracker):
                 raise_observed_exception(
                     type(exc),
                     tx,
-                    args=list(map(ConstantVariable.create, exc.args)),
+                    args=list(exc.args),
                 )
 
         list_like_expansion_handlers: list[
@@ -729,7 +729,7 @@ class BuiltinVariable(VariableTracker):
                     raise_observed_exception(
                         type(exc),
                         tx,
-                        args=list(map(ConstantVariable.create, exc.args)),
+                        args=list(exc.args),
                     )
 
             result: list[
@@ -1142,7 +1142,7 @@ class BuiltinVariable(VariableTracker):
                         raise_observed_exception(
                             type(exc),
                             tx,
-                            args=list(map(ConstantVariable.create, exc.args)),
+                            args=list(exc.args),
                         )
                     except AsPythonConstantNotImplementedError as exc:
                         unimplemented(
@@ -1183,7 +1183,7 @@ class BuiltinVariable(VariableTracker):
                             raise_observed_exception(
                                 type(exc),
                                 tx,
-                                args=list(map(ConstantVariable.create, exc.args)),
+                                args=list(exc.args),
                             )
                         # pyrefly: ignore [unbound-name]
                         return VariableTracker.build(tx, res)
