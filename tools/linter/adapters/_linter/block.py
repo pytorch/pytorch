@@ -5,7 +5,7 @@ import itertools
 import token
 from enum import Enum
 from functools import cached_property, total_ordering
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 
 
@@ -64,7 +64,7 @@ class Block:
     is_method: bool = dc.field(default=False, repr=False)
 
     # A block index to the parent of this block, or None for a top-level block.
-    parent: Optional[int] = None
+    parent: int | None = None
 
     # A list of block indexes for the children
     children: list[int] = dc.field(default_factory=list)
