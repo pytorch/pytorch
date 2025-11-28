@@ -119,9 +119,6 @@ class FileBackedGraphModule:
         with self.tempfile as f:
             f.write(self.value)
 
-    def __del__(self) -> None:
-        os.unlink(self.tempfile.name)
-
     @property
     def __file__(self) -> str:
         return self.tempfile.name

@@ -838,7 +838,7 @@ class MultiProcessTestCase(TestCase):
                 args=(
                     rank,
                     self._current_test_name(),
-                    self.file_name,
+                    self.filename,
                     child_conn,
                 ),
                 kwargs={
