@@ -683,6 +683,60 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         else:
             return variables.LazyVariableTracker.create(value, source)
 
+    def is_python_object_hashable(self):
+        """
+        Unlike the variable tracker's own __hash__, this method checks whether
+        the underlying Python object referenced by this variable tracker is hashable.
+        """
+        unimplemented(
+            gb_type="Dynamo cannot determine whether the underlying object is hashable",
+            context=f"is_python_object_hashable {self}",
+            explanation=f"Unable to determine whether the underlying object for {self} is hashable",
+            hints=[
+                (
+                    f"Dynamo cannot determine whether {self} is hashable. "
+                    "Consider using a different type of object as the dictionary key."
+                ),
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+    def get_python_object_hash(self):
+        """
+        Unlike the variable tracker’s own __hash__, this method is used by
+        ConstDictVariableTracker to compute the hash of the underlying key object.
+        """
+        unimplemented(
+            gb_type="Dynamo does not know how to compute the underlying object's hash",
+            context=f"get_python_object_hash {self}",
+            explanation=f"Unable to compute the hash of the underlying object for {self}",
+            hints=[
+                (
+                    f"Dynamo cannot compute the hash of the underlying object for {self}. "
+                    "Consider using a different type of object as the dictionary key."
+                ),
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+    def is_python_object_equal(self, other):
+        """
+        NB - Deliberately not overriding the __eq__ method because that can
+        disable the __hash__ for the vt itself.
+        """
+        unimplemented(
+            gb_type="Dynamo does not know how to compute the equality of this variable tracker",
+            context=f"is_python_object_equal {self}",
+            explanation=f"Unable to compute the comparison of the underlying object for {self}",
+            hints=[
+                (
+                    f"Dynamo cannot compute the comparison of the underlying object for {self}. "
+                    "Consider using a different type of object as the dictionary key."
+                ),
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
     def __init__(
         self,
         *,

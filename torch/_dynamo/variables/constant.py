@@ -20,6 +20,7 @@ from ..exc import raise_observed_exception, unimplemented
 from ..utils import (
     cmp_name_to_op_mapping,
     common_constant_types,
+    is_hash_method_overridden,
     istype,
     np,
     raise_args_mismatch,
@@ -340,6 +341,16 @@ its type to `common_constant_types`.
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
+    def is_python_object_hashable(self):
+        return True
+
+    def get_python_object_hash(self):
+        return hash(self.value)
+
+    def is_python_object_equal(self, other):
+        # Could be an EnumVariable as well
+        return self.as_python_constant() == other.as_python_constant()
+
 
 class EnumVariable(VariableTracker):
     """VariableTracker for enum.Enum and enum.IntEnum instances
@@ -388,3 +399,12 @@ class EnumVariable(VariableTracker):
         member = getattr(self.value, name)
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, member, source=source)
+
+    def is_python_object_hashable(self):
+        return not is_hash_method_overridden(self.value)
+
+    def get_python_object_hash(self):
+        return hash(self.as_python_constant())
+
+    def is_python_object_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()

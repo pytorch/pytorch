@@ -3667,5 +3667,47 @@
         "Use custom operators instead of direct attribute/method access."
       ]
     }
+  ],
+  "GB0363": [
+    {
+      "Gb_type": "Dynamo cannot determine whether the underlying object is hashable",
+      "Context": "is_underlying_object_hashable {self}",
+      "Explanation": "Unable to determine whether the underlying object for {self} is hashable",
+      "Hints": [
+        "Dynamo cannot determine whether {self} is hashable. ",
+        "Consider using a different type of object as the dictionary key.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Dynamo cannot determine whether the underlying object is hashable",
+      "Context": "is_underlying_object_hashable {self}",
+      "Explanation": "Unable to determine whether the underlying object for {self} is hashable",
+      "Hints": [
+        "Dynamo cannot determine whether {self} is hashable. Consider using a different type of object as the dictionary key.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0364": [
+    {
+      "Gb_type": "Dynamo does not know how to compute the underlying object's hash",
+      "Context": "get_underlying_object_hash {self}",
+      "Explanation": "Unable to compute the hash of the underlying object for {self}",
+      "Hints": [
+        "Dynamo cannot compute the hash of the underlying object for {self}. ",
+        "Consider using a different type of object as the dictionary key.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Dynamo does not know how to compute the underlying object's hash",
+      "Context": "get_underlying_object_hash {self}",
+      "Explanation": "Unable to compute the hash of the underlying object for {self}",
+      "Hints": [
+        "Dynamo cannot compute the hash of the underlying object for {self}. Consider using a different type of object as the dictionary key.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

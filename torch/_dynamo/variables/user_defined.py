@@ -80,6 +80,7 @@ from ..utils import (
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
+    is_hash_method_overridden,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_wrapper_or_member_descriptor,
@@ -927,6 +928,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return self.value.__name__
         return super().const_getattr(tx, name)
 
+    def is_python_object_hashable(self):
+        return True
+
+    def get_python_object_hash(self):
+        return hash(self.value)
+
+    def is_python_object_equal(self, other):
+        return (
+            isinstance(other, variables.UserDefinedClassVariable)
+            and self.value is other.value
+        )
+
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
     @property
@@ -1742,6 +1755,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         except ObservedAttributeError:
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
+
+    def is_python_object_hashable(self):
+        return not is_hash_method_overridden(self.value)
+
+    def get_python_object_hash(self):
+        return hash(id(self.value))
+
+    def is_python_object_equal(self, other):
+        # id check
+        return self is other
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):

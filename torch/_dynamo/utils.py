@@ -4952,3 +4952,7 @@ def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
+
+
+def is_hash_method_overridden(obj: Any) -> bool:
+    return type(obj).__dict__.get("__hash__", False)
