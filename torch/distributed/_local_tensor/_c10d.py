@@ -11,8 +11,8 @@ from torch.distributed._mesh_layout import _MeshLayout
 from torch.distributed.distributed_c10d import (
     _check_op,
     _get_default_group,
-    GroupName,
     _resolve_process_group,
+    GroupName,
     ProcessGroup,
     ReduceOp,
     Work,
