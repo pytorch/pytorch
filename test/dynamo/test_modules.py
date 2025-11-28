@@ -2788,7 +2788,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 )
 
             def forward(self, x):
-                for activation_name in self.activations.keys():
+                for activation_name in self.activations:
                     x = self.activations[activation_name](x)
                 return x
 
