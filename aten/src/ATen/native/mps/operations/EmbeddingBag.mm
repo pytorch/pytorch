@@ -73,6 +73,29 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   }
   int64_t feature_size = weight.size(1);
 
+  // Validate indices are within bounds [0, weight.size(0))
+  int64_t num_weights = weight.size(0);
+  Tensor indices_cpu = indices.to(at::kCPU);
+  if (indices_cpu.scalar_type() == ScalarType::Long) {
+    auto indices_data = indices_cpu.const_data_ptr<int64_t>();
+    for (int64_t i = 0; i < num_indices; i++) {
+      int64_t idx = indices_data[i];
+      TORCH_CHECK(
+          idx >= 0 && idx < num_weights,
+          "Index ", i, " of input takes value ", idx,
+          " which is not in the valid range [0, ", num_weights, ")");
+    }
+  } else {
+    auto indices_data = indices_cpu.const_data_ptr<int32_t>();
+    for (int64_t i = 0; i < num_indices; i++) {
+      int32_t idx = indices_data[i];
+      TORCH_CHECK(
+          idx >= 0 && idx < num_weights,
+          "Index ", i, " of input takes value ", idx,
+          " which is not in the valid range [0, ", num_weights, ")");
+    }
+  }
+
   auto bag_size = at::empty({num_bags}, indices.options());
   auto offset2bag = at::empty({indices.size(0)}, indices.options());
   auto output = at::empty({num_bags, feature_size}, weight.options());
