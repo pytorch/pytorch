@@ -563,8 +563,9 @@ def schedule_comm_wait(graph: fx.Graph) -> None:
         # Move wait nodes and all the subsequent nodes in the comm_block to
         # before the first user -- target_node.
         wait_idx = -1
-        for wait_idx, node in enumerate(allreduce.node_list):
+        for idx, node in enumerate(allreduce.node_list):
             if node == allreduce.wait_nodes[0]:
+                wait_idx = idx
                 break
         assert wait_idx >= 0
         move_block_before(allreduce.node_list[wait_idx:], target_node)
