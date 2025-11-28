@@ -21,7 +21,7 @@ class TestHeuristicsUtils(unittest.TestCase):
         self, first: dict[TestRun, Any], second: dict[TestRun, Any]
     ) -> None:
         self.assertEqual(first.keys(), second.keys())
-        for key in first:
+        for key in first.keys():
             self.assertAlmostEqual(first[key], second[key])
 
     def test_normalize_ratings(self) -> None:
