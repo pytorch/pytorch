@@ -1088,6 +1088,29 @@ class DeviceCachingAllocator {
     }
   }
 
+  std::vector<Block*> get_private_pool_head_blocks(PrivatePool* pool) const {
+    std::vector<Block*> blocks;
+    for (Block* b : active_blocks) {
+      if ((b->pool == &pool->small_blocks || b->pool == &pool->large_blocks) &&
+          b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+
+    for (Block* b : pool->small_blocks.blocks) {
+      if (b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+    for (Block* b : pool->large_blocks.blocks) {
+      if (b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+
+    return blocks;
+  }
+
   void create_or_incref_pool(
       MempoolId_t mempool_id,
       XPUAllocator* allocator = nullptr) {
