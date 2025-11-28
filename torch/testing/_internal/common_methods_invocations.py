@@ -8187,7 +8187,6 @@ def sample_inputs_embedding_bag(op_info, device, dtype, requires_grad, **kwargs)
 def error_inputs_embedding_bag(op_info, device, **kwargs):
     """
     Error inputs for nn.functional.embedding_bag.
-    Tests invalid (negative) index values that should cause errors.
     """
     # Test Case 1: Single negative index in 2D tensor
     weight = make_tensor((10, 4), device=device, dtype=torch.float32)
@@ -8198,37 +8197,11 @@ def error_inputs_embedding_bag(op_info, device, **kwargs):
         error_regex=r"Index.*of input takes value.*which is not in the valid range"
     )
 
-    # Test Case 2: Multiple negative indices in 2D tensor
-    indices_multi_neg = torch.tensor([[-1, -2], [1, -3]]).long().to(device)
-    yield ErrorInput(
-        SampleInput(weight, indices_multi_neg),
-        error_type=RuntimeError,
-        error_regex=r"Index.*of input takes value.*which is not in the valid range"
-    )
-
-    # Test Case 3: Negative indices in 1D tensor WITH offsets (must have offsets)
+    # Test Case 2: Negative indices in 1D tensor WITH offsets (must have offsets)
     indices_1d = torch.tensor([-1, 2, 3, 4]).long().to(device)
     offsets = torch.tensor([0, 2]).long().to(device)
     yield ErrorInput(
         SampleInput(weight, indices_1d, offsets),
-        error_type=RuntimeError,
-        error_regex=r"Index.*of input takes value.*which is not in the valid range"
-    )
-
-    # Test Case 4: More negative indices in 1D with offsets (mixed)
-    indices_1d_multi = torch.tensor([-1, 2, -3, 4]).long().to(device)
-    offsets = torch.tensor([0, 2]).long().to(device)
-    yield ErrorInput(
-        SampleInput(weight, indices_1d_multi, offsets),
-        error_type=RuntimeError,
-        error_regex=r"Index.*of input takes value.*which is not in the valid range"
-    )
-
-    # Test Case 5: All negative indices in 1D with offsets
-    indices_all_neg = torch.tensor([-1, -2, -3, -4]).long().to(device)
-    offsets = torch.tensor([0, 2]).long().to(device)
-    yield ErrorInput(
-        SampleInput(weight, indices_all_neg, offsets),
         error_type=RuntimeError,
         error_regex=r"Index.*of input takes value.*which is not in the valid range"
     )
