@@ -102,10 +102,10 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         uv pip install --system "${torch_whl}[opt-einsum]" "${vision_whl}" "${audio_whl}" /dist/*.whl; \
     elif [ -n "$PINNED_TORCH_VERSION" ]; then \
         echo "[INFO] Installing pinned torch nightly version to build vllm: $PINNED_TORCH_VERSION"; \
-        uv pip install --system "$PINNED_TORCH_VERSION" --extra-index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
+        uv pip install --system "$PINNED_TORCH_VERSION" --find-links https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     else \
         echo "[INFO] Installing torch nightly with latest one to build vllm"; \
-        uv pip install --system torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
+        uv pip install --system torch torchvision torchaudio --find-links https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     fi
 
 # Install numba 0.61.2 for cuda environment
@@ -280,7 +280,7 @@ RUN --mount=type=bind,source=${TORCH_WHEELS_PATH},target=/dist \
         uv pip install --system "${torch_whl}[opt-einsum]" "${vision_whl}" "${audio_whl}" /dist/*.whl; \
     else \
         echo "[INFO] Installing torch versions from torch_build_versions.txt"; \
-        uv pip install --system $(cat torch_build_versions.txt | xargs) --extra-index-url https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
+        uv pip install --system $(cat torch_build_versions.txt | xargs) --find-links https://download.pytorch.org/whl/nightly/cu$(echo $CUDA_VERSION | cut -d. -f1,2 | tr -d '.'); \
     fi
 
 RUN --mount=type=cache,target=/root/.cache/uv \

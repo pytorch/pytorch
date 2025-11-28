@@ -59,8 +59,8 @@ ARG TARGETPLATFORM
 
 # INSTALL_CHANNEL whl - release, whl/nightly - nightly, whl/test - test channels
 RUN case ${TARGETPLATFORM} in \
-         "linux/arm64")  pip install --extra-index-url https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
-         *)              pip install --extra-index-url https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH#.}/ torch torchvision torchaudio ;; \
+         "linux/arm64")  pip install --find-links https://download.pytorch.org/whl/cpu/ torch torchvision torchaudio ;; \
+         *)              pip install --find-links https://download.pytorch.org/${INSTALL_CHANNEL}/${CUDA_PATH#.}/ torch torchvision torchaudio ;; \
     esac && \
     /opt/conda/bin/conda clean -ya
 RUN /opt/conda/bin/pip install torchelastic
