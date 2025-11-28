@@ -8835,10 +8835,14 @@ class Conditional(ExternKernel):
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
             assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
+        # Determine device from operands only (not predicate)
+        # The predicate can be on a different device (e.g., CPU for control flow)
+        # while the data operands and outputs should be on the compute device
         device = next(
-            o.get_device()
-            for o in [predicate] + operands
-            if not isinstance(o, ShapeAsConstantBuffer)
+            (o.get_device()
+            for o in operands
+            if not isinstance(o, ShapeAsConstantBuffer)),
+            predicate.get_device()  # fallback to predicate if no operands
         )
         unbacked_bindings = resolve_unbacked_bindings(
             V.graph.sizevars.shape_env,
