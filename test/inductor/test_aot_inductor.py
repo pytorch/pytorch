@@ -67,12 +67,10 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     MACOS_VERSION,
-    MI300_ARCH,
     parametrize,
     runOnRocm,
     skipIfMPS,
     skipIfRocm,
-    skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -175,11 +173,8 @@ def get_module_ext_type():
 
 
 class AOTInductorTestsTemplate:
-    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
-    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
-    @skipIfRocmArch(MI300_ARCH)
     def test_simple(self, embed_kernel_binary, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -250,8 +245,8 @@ class AOTInductorTestsTemplate:
     # failure on CI
     @common_utils.parametrize("embed_kernel_binary", [False])
     @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 6),
-        "Test is only supported on CUDA 12.6+",
+        torch.version.hip is None and _get_torch_cuda_version() < (12, 8),
+        "Test is only supported on CUDA 12.8+",
     )
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
@@ -5212,10 +5207,7 @@ class AOTInductorTestsTemplate:
             )
             self.assertTrue(same(model(*example_input), actual))
 
-    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
-    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("max_autotune", [True, False])
-    @skipIfRocmArch(MI300_ARCH)
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")

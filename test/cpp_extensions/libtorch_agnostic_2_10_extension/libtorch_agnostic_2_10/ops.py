@@ -239,3 +239,29 @@ def get_template_any_data_ptr(t, dtype, mutable) -> int:
     return torch.ops.libtorch_agnostic_2_10.get_template_any_data_ptr.default(
         t, dtype, mutable
     )
+
+
+def my_get_curr_cuda_blas_handle() -> int:
+    """
+    Return the current cuBlasHandle_t pointer value.
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_get_curr_cuda_blas_handle.default()
+
+
+def my_string_op(t, accessor, passthru) -> tuple[list[str], int]:
+    """
+    The purpose of this op is to test inputting and outputting strings in a
+    stable custom op. This particular op takes in a Tensor, a string denoting
+    which tensor metadata API to call, and a pass through string to return a
+    string list and the value of the tensor metadata.
+
+    If accessor is "size" or "stride", query along the 0th dim.
+
+    Args:
+        t: Tensor - input tensor to query
+        accessor: str - which property to access ("dim", "size", or "stride")
+        passthru: str - a string that gets returned as the last element of the list
+
+    Returns: tuple - (list of [accessor, value, passthru] as strings, value)
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_string_op.default(t, accessor, passthru)
