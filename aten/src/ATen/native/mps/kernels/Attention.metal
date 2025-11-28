@@ -83,7 +83,8 @@ template <typename T, int D, int V = D>
 
   // For each key
   for (uint i = simd_gid; i < N; i += BN) {
-    if (!has_mask || mask[0]) {
+    // Bounds check: ensure we don't read beyond valid K/V data
+    if (i < N && (!has_mask || mask[0])) {
       // Read the key
       for (uint j = 0; j < qk_per_thread; j++) {
         k[j] = static_cast<U>(keys[j]);
@@ -230,7 +231,8 @@ template <typename T, int D, int V = D>
 
   // For each key
   for (uint i = block_idx * BN + simd_gid; i < N; i += blocks * BN) {
-    if (!has_mask || mask[0]) {
+    // Bounds check: ensure we don't read beyond valid K/V data
+    if (i < N && (!has_mask || mask[0])) {
       // Read the key
       for (uint i = 0; i < qk_per_thread; i++) {
         k[i] = static_cast<U>(keys[i]);
