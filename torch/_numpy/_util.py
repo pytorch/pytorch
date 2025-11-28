@@ -230,6 +230,12 @@ def _coerce_to_tensor(obj, dtype=None, copy=False, ndmin=0):
     if ndim_extra > 0:
         tensor = tensor.view((1,) * ndim_extra + tensor.shape)
 
+    # special handling for np._CopyMode
+    try:
+        copy = bool(copy)
+    except ValueError:
+        # TODO handle _CopyMode.IF_NEEDED correctly
+        copy = False
     # copy if requested
     if copy:
         tensor = tensor.clone()

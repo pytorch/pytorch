@@ -29,8 +29,9 @@ import contextlib
 import functools
 import inspect
 import operator
+from collections.abc import Generator, Iterable, Sequence
 from types import TracebackType
-from typing import Any, Generator, Iterable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -43,7 +44,7 @@ from torch.overrides import (
 from torch.utils._device import DeviceContext
 
 from .. import graph_break_hints
-from ..exc import unimplemented_v2
+from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..polyfills import NoEnterTorchFunctionMode
 from ..source import AttrSource, GlobalSource, TorchFunctionModeStackSource, TypeSource
@@ -163,7 +164,8 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         if value is not None:
             super().__init__(value, **kwargs)
         self.value = value
-        self.cm_obj = value  # needed for BC with calling enter from CM code
+        # needed for BC with calling enter from CM code
+        self.cm_obj = value  # type: ignore[assignment]
         self.source = source  # type: ignore[assignment]
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -556,7 +558,7 @@ def dispatch_torch_function(
         if not (isinstance(res, ConstantVariable) and res.value is NotImplemented):
             return res
 
-    unimplemented_v2(
+    unimplemented(
         gb_type="All __torch_function__ overrides returned NotImplemented due to TypeError from user code",
         context=f"{fn=}, {args=}, {kwargs=}",
         explanation=f"All __torch_function__ overrides for for function {fn} returned NotImplemented",
@@ -624,7 +626,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # I think only `_base` is breaking because we aren't modelling view
         # relationship perfectly in some scenarios.
         if name in banned_attrs:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported tensor subclass attribute access",
                 context=f"{name}",
                 explanation="`torch.compile` currently can't trace this",
@@ -684,7 +686,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                     )
 
                 elif attr_is_overridden:
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Unsupported tensor subclass overridden attribute access",
                         context=f"{name}",
                         explanation="`torch.compile` only support tracing certain types of overridden tensor subclass attributes",
@@ -722,17 +724,17 @@ class TensorWithTFOverrideVariable(TensorVariable):
         self,
         tx: "InstructionTranslator",
         name: str,
-        args: "list[VariableTracker]",
+        args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         # This code block implements inlining the __torch_function__ override
         # of `call_method`.
-        tf_args = [self] + args
+        tf_args = [self] + list(args)
         if can_dispatch_torch_function(tx, tf_args, kwargs):
             import torch
 
             if _is_attr_overridden(tx, self, name):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Tensor subclass overridden method call",
                     context=f"{name}",
                     explanation="`torch.compile` currently can't trace this",

@@ -14,6 +14,7 @@ from torch.testing._internal import common_utils
 
 class TestOpRecorder(common_utils.TestCase):
     def setUp(self):
+        super().setUp()
         self.opset_version = 17
         self.opset = onnxscript.values.Opset("", self.opset_version)
         self.recorder = _building.OpRecorder(opset=self.opset, constant_farm={})

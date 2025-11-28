@@ -125,10 +125,10 @@ case "$tag" in
     UCC_COMMIT=${_UCC_COMMIT}
     TRITON=yes
     ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks)
+  pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks)
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
+    GCC_VERSION=11
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -140,16 +140,6 @@ case "$tag" in
     CUDA_VERSION=12.8.1
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
-    VISION=yes
-    KATEX=yes
-    UCX_COMMIT=${_UCX_COMMIT}
-    UCC_COMMIT=${_UCC_COMMIT}
-    TRITON=yes
-    ;;
-  pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9)
-    CUDA_VERSION=12.8.1
-    ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=9
     VISION=yes
     KATEX=yes
     UCX_COMMIT=${_UCX_COMMIT}
@@ -168,6 +158,18 @@ case "$tag" in
     VISION=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-py3.11-clang12)
+    ANACONDA_PYTHON_VERSION=3.11
+    CLANG_VERSION=12
+    VISION=no
+    TRITON=no
+    ;;
+  pytorch-linux-jammy-py3.12-clang12)
+    ANACONDA_PYTHON_VERSION=3.12
+    CLANG_VERSION=12
+    VISION=no
+    TRITON=no
+    ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
       ANACONDA_PYTHON_VERSION=3.10
@@ -176,7 +178,7 @@ case "$tag" in
     fi
     GCC_VERSION=11
     VISION=yes
-    ROCM_VERSION=7.0
+    ROCM_VERSION=7.1
     NINJA_VERSION=1.9.0
     TRITON=yes
     KATEX=yes
@@ -195,9 +197,9 @@ case "$tag" in
     NINJA_VERSION=1.9.0
     TRITON=yes
     ;;
-  pytorch-linux-jammy-xpu-n-py3 | pytorch-linux-jammy-xpu-n-py3-inductor-benchmarks)
+  pytorch-linux-noble-xpu-n-py3 | pytorch-linux-noble-xpu-n-py3-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
+    GCC_VERSION=13
     VISION=yes
     XPU_VERSION=2025.2
     NINJA_VERSION=1.9.0
@@ -248,6 +250,12 @@ case "$tag" in
     HALIDE=yes
     TRITON=yes
     ;;
+  pytorch-linux-jammy-cuda12.8-py3.12-pallas)
+    CUDA_VERSION=12.8.1
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=11
+    PALLAS=yes
+    ;;
   pytorch-linux-jammy-py3.12-triton-cpu)
     CUDA_VERSION=12.6
     ANACONDA_PYTHON_VERSION=3.12
@@ -261,9 +269,9 @@ case "$tag" in
     PYTHON_VERSION=3.10
     CUDA_VERSION=12.8.1
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc11)
+  pytorch-linux-jammy-aarch64-py3.10-gcc13)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
+    GCC_VERSION=13
     ACL=yes
     VISION=yes
     OPENBLAS=yes
@@ -271,9 +279,19 @@ case "$tag" in
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks)
+  pytorch-linux-jammy-aarch64-py3.10-clang21)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=11
+    CLANG_VERSION=21
+    ACL=yes
+    VISION=yes
+    OPENBLAS=yes
+    # snadampal: skipping llvm src build install because the current version
+    # from pytorch/llvm:9.0.1 is x86 specific
+    SKIP_LLVM_SRC_BUILD_INSTALL=yes
+    ;;
+  pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=13
     ACL=yes
     VISION=yes
     OPENBLAS=yes
@@ -359,6 +377,7 @@ docker build \
        --build-arg "INDUCTOR_BENCHMARKS=${INDUCTOR_BENCHMARKS}" \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "HALIDE=${HALIDE}" \
+       --build-arg "PALLAS=${PALLAS}" \
        --build-arg "XPU_VERSION=${XPU_VERSION}" \
        --build-arg "UNINSTALL_DILL=${UNINSTALL_DILL}" \
        --build-arg "ACL=${ACL:-}" \
