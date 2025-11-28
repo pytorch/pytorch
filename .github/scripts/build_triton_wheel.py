@@ -146,7 +146,10 @@ def main() -> None:
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--release", action="store_true")
     parser.add_argument(
-        "--device", type=str, default="cuda", choices=["cuda", "rocm-n", "rocm-n-1", "xpu", "aarch64"]
+        "--device",
+        type=str,
+        default="cuda",
+        choices=["cuda", "rocm-n", "rocm-n-1", "xpu", "aarch64"],
     )
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
@@ -163,7 +166,7 @@ def main() -> None:
     device = args.device
     if args.device.startswith("rocm"):
         device = "rocm"
-        
+
     build_triton(
         device=device,
         commit_hash=(
