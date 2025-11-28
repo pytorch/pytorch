@@ -1879,6 +1879,7 @@ REGISTER_ALLOCATOR(kXPU, &allocator)
 } // namespace c10::xpu::XPUCachingAllocator
 
 namespace c10::xpu {
+
 // uid_ is incremented when a user creates a MemPool,
 //
 // uuid_ is incremented when XPUGraph creates a MemPool
