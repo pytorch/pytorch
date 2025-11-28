@@ -446,7 +446,7 @@ class RingBuffer {
   size_t alloc_trace_next = 0;
   // Leaked on deallocation to avoid issues with Python shutdown
   std::vector<T>* alloc_trace;
-  ;
+};
 
 } // anonymous namespace
 
