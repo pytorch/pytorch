@@ -62,7 +62,11 @@ from .runtime_utils import (
     triton_hash_to_path_key,
     validate_triton_config,
 )
-from .static_triton_launcher import StaticallyLaunchedTritonKernel
+from .static_triton_launcher import (
+    statically_launched_kernel_by_device,
+    StaticallyLaunchedCudaKernel,
+    StaticallyLaunchedXpuKernel,
+)
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -99,7 +103,9 @@ if TYPE_CHECKING:
 
     LauncherType = Any
 
-_KernelType = Union[CompiledKernel, StaticallyLaunchedTritonKernel]
+_KernelType = Union[
+    CompiledKernel, StaticallyLaunchedCudaKernel, StaticallyLaunchedXpuKernel
+]
 _T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
@@ -1601,7 +1607,7 @@ class CannotStaticallyLaunchKernel(Exception):
     pass
 
 
-class StaticTritonCompileResult(CompileResult[StaticallyLaunchedTritonKernel]):
+class StaticTritonCompileResult(CompileResult[_T]):
     """
     TritonCompileResult that uses StaticCudaLauncher,
     which vastly simplifies the setup and metadata needed to be kept.
@@ -1613,11 +1619,11 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedTritonKernel]):
         inductor_meta: dict[str, Any],
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
-    ) -> StaticallyLaunchedTritonKernel | None:
+    ) -> _KernelType | None:
         if not torch._inductor.config.use_static_triton_launcher:
             return None
 
-        def check_can_launch() -> StaticallyLaunchedTritonKernel:
+        def check_can_launch() -> _KernelType:
             if triton_meta.get("device_type") not in ("cuda", "xpu"):
                 raise CannotStaticallyLaunchKernel("Non-cuda//XPU device")
 
@@ -1668,7 +1674,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedTritonKernel]):
                 kernel._cubin_path = cubin_location
 
             try:
-                static_kernel = StaticallyLaunchedTritonKernel(
+                static_kernel = statically_launched_kernel_by_device(
                     kernel, triton_meta.get("device_type")
                 )
             except NotImplementedError as e:
@@ -1680,7 +1686,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedTritonKernel]):
             result = check_can_launch()
             return result
         except CannotStaticallyLaunchKernel as e:
-            log.info("Bypassing StaticallyLaunchedTritonKernel due to %s", str(e))  # noqa: G200
+            log.info("Bypassing StaticallyLaunchedCudaKernel due to %s", str(e))  # noqa: G200
             if torch._inductor.config.strict_static_cuda_launcher:
                 raise e
             return None
@@ -1755,7 +1761,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedTritonKernel]):
             if i not in self.kernel.full_constexprs and arg not in none_args
         ]
 
-        # StaticallyLaunchedTritonKernel.run takes in order grid_0, grid_1, grid_2, stream, and call_args
+        # StaticallyLaunchedCudaKernel.run takes in order grid_0, grid_1, grid_2, stream, and call_args
         runner_args = ["grid_0", "grid_1", "grid_2", "stream", *call_args]
         launcher = self._gen_launcher_code(scope, def_args, runner_args)
         launcher.config = self.config  # type: ignore[attr-defined]

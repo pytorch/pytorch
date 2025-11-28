@@ -2,6 +2,7 @@
 import os
 import random
 import tempfile
+from typing import Union
 from unittest import mock
 
 import torch
@@ -9,7 +10,9 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
 from torch._inductor.runtime.static_triton_launcher import (
-    StaticallyLaunchedTritonKernel,
+    statically_launched_kernel_by_device,
+    StaticallyLaunchedCudaKernel,
+    StaticallyLaunchedXpuKernel,
 )
 from torch._inductor.runtime.triton_compat import CompiledKernel, tl, triton
 from torch._inductor.runtime.triton_helpers import libdevice
@@ -73,14 +76,14 @@ class TestStaticTritonLauncher(TestCase):
     def _make_launcher(
         self,
         compiled_kernel: CompiledKernel,
-    ) -> StaticallyLaunchedTritonKernel:
+    ) -> Union[StaticallyLaunchedCudaKernel, StaticallyLaunchedXpuKernel]:
         """
         Compiles a Triton kernel with the provided *args,
         writes its cubin to the temporary file, and returns the file path.
         """
         cubin_file = self.write_cubin_to_tmp(compiled_kernel)
         compiled_kernel._cubin_path = cubin_file
-        result = StaticallyLaunchedTritonKernel(compiled_kernel, GPU_TYPE)
+        result = statically_launched_kernel_by_device(compiled_kernel, GPU_TYPE)
         # Test reload cubin from raw here
         old_cubin_path = result.cubin_path
         assert old_cubin_path is not None
@@ -310,6 +313,7 @@ class TestStaticTritonLauncher(TestCase):
         self.assertEqual(new_arg0, arg0)
 
     @skipIfXpu(msg="Only testing CUDA OOM behavior")
+    @skipIfRocm
     def test_too_high_shared_mem(self):
         @triton.jit
         def simple_kernel(arg0, arg1):

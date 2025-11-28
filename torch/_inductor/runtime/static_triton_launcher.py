@@ -37,25 +37,11 @@ class StaticallyLaunchedTritonKernel:
 
     @cached_property
     def C_impl(self):
-        if self.device_type == "xpu":
-            from torch._C import _StaticXpuLauncher
+        raise NotImplementedError
 
-            return _StaticXpuLauncher
-
-        from torch._C import _StaticCudaLauncher
-
-        return _StaticCudaLauncher
-
-    def __init__(self, kernel: CompiledKernel, device_type: str = "cuda") -> None:
+    def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
-        # pyrefly: ignore [missing-attribute]
-        if "zebin" in kernel.asm:
-            # pyrefly: ignore [missing-attribute]
-            self.cubin_raw = kernel.asm["zebin"]
-        else:
-            # pyrefly: ignore [missing-attribute]
-            self.cubin_raw = kernel.asm.get("cubin", None)
         # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
 
@@ -70,7 +56,6 @@ class StaticallyLaunchedTritonKernel:
 
         # pyrefly: ignore [missing-attribute]
         self.hash = kernel.hash
-        self.device_type = device_type
 
         if triton_knobs is None:
             # pyrefly: ignore [missing-attribute]
@@ -283,3 +268,40 @@ class StaticallyLaunchedTritonKernel:
             args,
             stream,
         )
+
+
+class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
+    @cached_property
+    def C_impl(self):
+        from torch._C import _StaticCudaLauncher
+
+        return _StaticCudaLauncher
+
+    def __init__(self, kernel: CompiledKernel) -> None:
+        # pyrefly: ignore [missing-attribute]
+        self.cubin_raw = kernel.asm.get("cubin", None)
+        super().__init__(kernel)
+
+
+class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
+    @cached_property
+    def C_impl(self):
+        from torch._C import _StaticXpuLauncher
+
+        return _StaticXpuLauncher
+
+    def __init__(self, kernel: CompiledKernel) -> None:
+        # pyrefly: ignore [missing-attribute]
+        self.cubin_raw = kernel.asm.get("zebin", None)
+        super().__init__(kernel)
+
+
+def statically_launched_kernel_by_device(
+    kernel: CompiledKernel, device_type: str = "cuda"
+) -> StaticallyLaunchedTritonKernel:
+    if device_type == "cuda":
+        return StaticallyLaunchedCudaKernel(kernel, device_type)
+    elif device_type == "xpu":
+        return StaticallyLaunchedXpuKernel(kernel, device_type)
+    else:
+        raise NotImplementedError(f"Device type {device_type} not supported")
