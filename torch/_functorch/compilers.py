@@ -391,10 +391,13 @@ def _save_fx_default(current_name, folder_name, dump_example_input, gm, example_
         gm.to_folder(
             f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}"
         )
-        with open(
-            f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input"
-        ) as f:
-            pickle.dump(input_meta, f)
+        pickle.dump(
+            input_meta,
+            open(
+                f"{folder_name}/{current_name}/{current_name}_{type_name}_{graph_index}/{current_name}_{type_name}_{graph_index}.input",  # noqa: B950
+                "wb",
+            ),
+        )  # noqa: E501
         if dump_example_input:
             torch.save(
                 args,

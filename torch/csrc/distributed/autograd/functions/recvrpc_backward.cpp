@@ -1,3 +1,4 @@
+#include <ATen/core/functional.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/rpc_messages/propagate_gradients_req.h>

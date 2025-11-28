@@ -1,3 +1,4 @@
+#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <torch/library.h>

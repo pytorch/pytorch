@@ -1,5 +1,7 @@
 """Arg operator implementation."""
 
+from typing import Optional
+
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import Spec
 
@@ -11,7 +13,7 @@ class ArgOperator(Operator):
         super().__init__("arg")
 
     @property
-    def torch_op_name(self) -> str | None:
+    def torch_op_name(self) -> Optional[str]:
         """Arg is not a torch operation, it represents function arguments."""
         return None
 
