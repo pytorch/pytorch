@@ -3243,13 +3243,13 @@ class BuiltinVariable(VariableTracker):
     ) -> VariableTracker:
         return a.call_method(tx, "__contains__", [b], {})
 
-    def is_python_object_hashable(self):
+    def is_python_hashable(self):
         return True
 
-    def get_python_object_hash(self):
+    def get_python_hash(self):
         return hash(self.fn)
 
-    def is_python_object_equal(self, other):
+    def is_python_equal(self, other):
         return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
 
 

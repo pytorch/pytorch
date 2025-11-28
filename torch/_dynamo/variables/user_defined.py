@@ -928,13 +928,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return self.value.__name__
         return super().const_getattr(tx, name)
 
-    def is_python_object_hashable(self):
+    def is_python_hashable(self):
         return True
 
-    def get_python_object_hash(self):
+    def get_python_hash(self):
         return hash(self.value)
 
-    def is_python_object_equal(self, other):
+    def is_python_equal(self, other):
         return (
             isinstance(other, variables.UserDefinedClassVariable)
             and self.value is other.value
@@ -1756,36 +1756,28 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
 
-    def is_python_object_hashable(self):
-        return not is_hash_method_overridden(self.value)
+    def is_python_hashable(self):
+        if is_hash_method_overridden(self.value):
+            unimplemented(
+                gb_type="User-defined object with overridden __hash__",
+                context=f"hashing object of type={type(self.value)} and variable tracker {self}",
+                explanation=f"Found a user-defined object {self} with overridden __hash__ when attempting to hash it",
+                hints=[
+                    "Dynamo does not support hashing user-defined objects with overridden __hash__",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        return True
 
-    def get_python_object_hash(self):
+    def get_python_hash(self):
         return hash(id(self.value))
 
-    def is_python_object_equal(self, other):
+    def is_python_equal(self, other):
         # id check
         return self is other
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
-    class HashWrapper:
-        """This class is hashed if a dataclass is used as a key in a dict.
-        It's necessary to avoid side effects from calling the __init__ of the dataclass class when hashing"""
-
-        def __init__(self, c, fields):
-            self.cls = c
-            self.fields = tuple(fields.items())
-
-        def __eq__(self, other):
-            return (
-                type(self) is type(other)
-                and self.cls == other.cls
-                and self.fields == other.fields
-            )
-
-        def __hash__(self):
-            return hash((self.cls, self.fields))
-
     @staticmethod
     def create(tx, value, source):
         from dataclasses import fields
@@ -1882,6 +1874,22 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
+
+    def is_python_hashable(self):
+        # TODO - Check corner cases like eq=False, hash=False etc
+        return True
+
+    def get_python_hash(self):
+        return hash(tuple(arg.get_python_hash() for arg in self.fields.values()))
+
+    def is_python_equal(self, other):
+        is_class_same = self.python_type() is other.python_type()
+        is_field_name_same = self.fields.keys() == other.fields.keys()
+        is_field_value_same = all(
+            value_a.is_python_equal(value_b)
+            for value_a, value_b in zip(self.fields.values(), other.fields.values())
+        )
+        return is_class_same and is_field_name_same and is_field_value_same
 
 
 class SourcelessGraphModuleVariable(UserDefinedObjectVariable):

@@ -1283,6 +1283,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
     def test_method_wrapper_as_dict_key(self):
         add_method = list.__add__
         mul_method = list.__mul__
+
         def fn(x):
             # Method wrappers are the type of bound methods on built-in types
             d = {add_method: x * 2, mul_method: x * 3}
@@ -1336,6 +1337,21 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         with self.assertRaisesRegex(Unsupported, "Observed exception"):
             opt_fn(x)
+
+    def test_get_default_nowrap_functions_as_dict_key(self):
+        def fn(x):
+            # Get the set of default nowrap functions
+            nowrap_funcs = torch.overrides.get_default_nowrap_functions()
+            # Use the set as a dict key and search for Tensor.grad.__get__ in it
+            d = {frozenset(nowrap_funcs): x * 2}
+            # Check if Tensor.grad.__get__ is in the set
+            if torch.Tensor.grad.__get__ in nowrap_funcs:
+                return d[frozenset(nowrap_funcs)] + x
+            return x
+
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
 
 
 instantiate_parametrized_tests(DictTests)
@@ -1881,6 +1897,53 @@ class DictMethodsTests(torch._dynamo.test_case.TestCase):
         ref = fn(x)
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
+
+    def test_custom_object_as_dict_key(self):
+        """Test that custom objects with __hash__ as dict keys are properly handled.
+
+        This test verifies that when using custom objects with overridden __hash__
+        and __eq__ as dictionary keys, two instances with the same hash and equality
+        should be recognized as the same key.
+        """
+
+        class CustomKey:
+            def __init__(self, value, name):
+                self.value = value
+                self.name = name
+
+        def fn(x):
+            d = {}
+            # Create first instance
+            key1 = CustomKey(42, "test")
+            d[key1] = x * 2
+
+            # Create second instance with same values - should hash to same value
+            key2 = CustomKey(42, "test")
+            d[key2] = x * 3  # This should overwrite the first value
+
+            return d[key1] * d[key2]
+
+        x = torch.randn(4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertTrue(same(opt_fn(x), fn(x)))
+
+    def test_user_defined_object(self):
+        class A:
+            def __init__(self):
+                self.x = {}
+                REF[self] = {}
+
+        REF = {}
+
+        def f(a, x):
+            REF[a]["foo"] = x
+            return x + 1
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+
+        x = torch.randn(4)
+        self.assertTrue(same(f(A(), x), opt_f(A(), x)))
 
 
 class DictSubclassMethodsTests(DictMethodsTests):

@@ -1306,6 +1306,15 @@ class MethodWrapperVariable(VariableTracker):
     def as_python_constant(self):
         return self.method_wrapper
 
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.as_python_constant())
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
+
 
 class GetSetDescriptorVariable(VariableTracker):
     def __init__(self, desc, **kwargs) -> None:
@@ -1440,13 +1449,13 @@ class TypingVariable(VariableTracker):
         #
         codegen.append_output(codegen.create_load_const(self.value))
 
-    def is_python_object_hashable(self):
+    def is_python_hashable(self):
         return True
 
-    def get_python_object_hash(self):
+    def get_python_hash(self):
         return hash(self.as_python_constant())
 
-    def is_python_object_equal(self, other):
+    def is_python_equal(self, other):
         return self.as_python_constant() == other.as_python_constant()
 
 
@@ -1627,13 +1636,13 @@ class NumpyVariable(VariableTracker):
 
         return super().as_proxy()
 
-    def is_python_object_hashable(self):
+    def is_python_hashable(self):
         return True
 
-    def get_python_object_hash(self):
+    def get_python_hash(self):
         return hash(self.as_python_constant())
 
-    def is_python_object_equal(self, other):
+    def is_python_equal(self, other):
         return self.as_python_constant() == other.as_python_constant()
 
 
@@ -2116,14 +2125,12 @@ class WeakRefVariable(VariableTracker):
         codegen(self.callback_vt)
         codegen.extend_output(create_call_function(2, False))
 
-    def is_python_object_hashable(self):
+    def is_python_hashable(self):
         return True
 
-    def get_python_object_hash(self):
-        # Weakref is always hashable even if the underlying object is not
-        # hashable. We use the vt itself as an anchor point here.
-        return self.referent_vt.get_python_object_hash()
-        # return hash(id(self))
+    def get_python_hash(self):
+        # weakref relies on the referent's hash
+        return self.referent_vt.get_python_hash()
 
-    def is_python_object_equal(self, other):
-        return self is other
+    def is_python_equal(self, other):
+        return self.referent_vt.is_python_equal(other.referent_vt)

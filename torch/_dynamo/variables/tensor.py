@@ -1428,16 +1428,16 @@ class TensorVariable(VariableTracker):
             self.proxy.node._rename(name)
             self._is_name_set = True
 
-    def is_python_object_hashable(self):
+    def is_python_hashable(self):
         # Tensors are hashable if they have an example_value (a fake tensor)
         # Most VT's should have one.
         # It'd be nice if at some point we could assert that they all have one
         return self.as_proxy().node.meta["example_value"] is not None
 
-    def get_python_object_hash(self):
+    def get_python_hash(self):
         return hash(self.as_proxy().node.meta["example_value"])
 
-    def is_python_object_equal(self, other):
+    def is_python_equal(self, other):
         a = self.as_proxy().node.meta["example_value"]
         b = other.as_proxy().node.meta["example_value"]
         return a is b

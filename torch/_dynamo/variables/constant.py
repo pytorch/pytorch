@@ -341,13 +341,13 @@ its type to `common_constant_types`.
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
-    def is_python_object_hashable(self):
+    def is_python_hashable(self):
         return True
 
-    def get_python_object_hash(self):
+    def get_python_hash(self):
         return hash(self.value)
 
-    def is_python_object_equal(self, other):
+    def is_python_equal(self, other):
         # Could be an EnumVariable as well
         return self.as_python_constant() == other.as_python_constant()
 
@@ -400,11 +400,11 @@ class EnumVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, member, source=source)
 
-    def is_python_object_hashable(self):
+    def is_python_hashable(self):
         return not is_hash_method_overridden(self.value)
 
-    def get_python_object_hash(self):
+    def get_python_hash(self):
         return hash(self.as_python_constant())
 
-    def is_python_object_equal(self, other):
+    def is_python_equal(self, other):
         return self.as_python_constant() == other.as_python_constant()
