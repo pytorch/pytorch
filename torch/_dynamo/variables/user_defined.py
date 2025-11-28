@@ -80,7 +80,6 @@ from ..utils import (
     get_custom_getattr,
     has_torch_function,
     is_frozen_dataclass,
-    is_hash_method_overridden,
     is_lru_cache_wrapped_function,
     is_namedtuple_cls,
     is_wrapper_or_member_descriptor,
@@ -90,6 +89,7 @@ from ..utils import (
     object_has_getattribute,
     proxy_args_kwargs,
     raise_args_mismatch,
+    raise_on_overridden_hash,
     set_methods,
     tensortype_to_dtype,
     tuple_methods,
@@ -1757,16 +1757,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return variables.ConstantVariable.create(False)
 
     def is_python_hashable(self):
-        if is_hash_method_overridden(self.value):
-            unimplemented(
-                gb_type="User-defined object with overridden __hash__",
-                context=f"hashing object of type={type(self.value)} and variable tracker {self}",
-                explanation=f"Found a user-defined object {self} with overridden __hash__ when attempting to hash it",
-                hints=[
-                    "Dynamo does not support hashing user-defined objects with overridden __hash__",
-                    *graph_break_hints.SUPPORTABLE,
-                ],
-            )
+        raise_on_overridden_hash(self.value, self)
         return True
 
     def get_python_hash(self):
@@ -1774,7 +1765,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def is_python_equal(self, other):
         # id check
-        return self is other
+        return self.value is other.value
 
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):

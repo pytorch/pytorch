@@ -20,10 +20,10 @@ from ..exc import raise_observed_exception, unimplemented
 from ..utils import (
     cmp_name_to_op_mapping,
     common_constant_types,
-    is_hash_method_overridden,
     istype,
     np,
     raise_args_mismatch,
+    raise_on_overridden_hash,
 )
 from .base import ValueMutationNew, VariableTracker
 
@@ -401,7 +401,8 @@ class EnumVariable(VariableTracker):
         return VariableTracker.build(tx, member, source=source)
 
     def is_python_hashable(self):
-        return not is_hash_method_overridden(self.value)
+        raise_on_overridden_hash(self.value, self)
+        return True
 
     def get_python_hash(self):
         return hash(self.as_python_constant())

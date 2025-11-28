@@ -212,7 +212,6 @@ class ConstDictVariable(VariableTracker):
         Hashable = ConstDictVariable._HashableTracker
         return (
             vt.is_python_hashable()
-            # is_hashable(vt)
             and Hashable(vt) in self.items
             and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
         )
