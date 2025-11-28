@@ -2,9 +2,8 @@
 
 #include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/operator_upgraders/version_map.h>
-#include <iostream>
+#include <algorithm>
 #include <optional>
-#include <regex>
 #include <string>
 #include <vector>
 
