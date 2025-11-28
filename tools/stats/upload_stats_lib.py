@@ -49,7 +49,7 @@ def _get_artifact_urls(prefix: str, workflow_run_id: int) -> dict[Path, str]:
         headers=_get_request_headers(),
     )
     artifacts = response.json()["artifacts"]
-    while "next" in response.links.keys():
+    while "next" in response.links:
         response = requests.get(
             response.links["next"]["url"], headers=_get_request_headers()
         )

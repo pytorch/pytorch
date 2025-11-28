@@ -2182,7 +2182,7 @@ def forward(self, child : torch.Tensor, const_unused : int):
         gm = backend.graphs[0]
         graph = gm.code.strip()
         subgraphs = []
-        for module_name in gm._modules.keys():
+        for module_name in gm._modules:
             subgraphs.append(getattr(gm, module_name).code.strip())
         return (graph, *subgraphs)
 

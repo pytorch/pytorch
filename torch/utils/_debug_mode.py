@@ -39,7 +39,7 @@ import os
 import traceback
 import weakref
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING, Union  # noqa: F401
+from typing import Any, TYPE_CHECKING, Union  # noqa: F401
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -1101,7 +1101,7 @@ class DebugMode(TorchDispatchMode):
 
                 def compare_triton_hashes(hashes1, hashes2, is_input):
                     assert set(hashes1.keys()) == set(hashes2.keys())  # type: ignore[union-attr]
-                    for key in hashes1.keys():
+                    for key in hashes1:
                         if hashes1[key] != hashes2[key]:
                             difference_info.append(
                                 {

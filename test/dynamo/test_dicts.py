@@ -143,7 +143,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
         def fn(x):
             for value in sd.values():
                 x = x * value
-            for key in sd.keys():
+            for key in sd:
                 x = x * key
             for k, v in sd.items():
                 x = x * k
@@ -189,7 +189,7 @@ class DictTests(torch._dynamo.test_case.TestCase):
             for value in sd.values():
                 x = x * value
             sd[6] = 14
-            for key in sd.keys():
+            for key in sd:
                 x = x * key
             for k, v in sd.items():
                 x = x * k
