@@ -2,9 +2,64 @@
 
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/xpu/XPUStream.h>
 
 namespace c10::xpu::XPUCachingAllocator {
+
+typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
+
+enum struct RecordContext {
+  NEVER = 0,
+  STATE = 1, // only keep stacks for active allocations
+  ALLOC = 2, // additionally keep stacks for allocations in the trace history
+  ALL = 3, // additionally record stacks for when something is freed
+};
+
+union trace_time_ {
+  time_t t_;
+  approx_time_t approx_t_;
+};
+
+struct TraceEntry {
+  enum Action {
+    ALLOC,
+    FREE_REQUESTED,
+    FREE_COMPLETED,
+    SEGMENT_ALLOC,
+    SEGMENT_FREE,
+    SEGMENT_MAP,
+    SEGMENT_UNMAP,
+    SNAPSHOT,
+    OOM
+  };
+  TraceEntry(
+      Action action,
+      c10::DeviceIndex device,
+      size_t addr,
+      size_t size,
+      sycl::queue* queue,
+      MempoolId_t mempool,
+      approx_time_t time,
+      std::shared_ptr<GatheredContext> context = nullptr)
+      : action_(action),
+        device_(device),
+        addr_(addr),
+        context_(std::move(context)),
+        queue_(queue),
+        size_(size),
+        mempool_(std::move(mempool)) {
+    time_.approx_t_ = time;
+  }
+  Action action_;
+  c10::DeviceIndex device_;
+  size_t addr_;
+  std::shared_ptr<GatheredContext> context_;
+  sycl::queue* queue_{};
+  size_t size_;
+  MempoolId_t mempool_;
+  trace_time_ time_{};
+};
 
 C10_XPU_API Allocator* get();
 
@@ -32,6 +87,13 @@ C10_XPU_API void enablePeerAccess(
 C10_XPU_API double getMemoryFraction(DeviceIndex device);
 
 C10_XPU_API void setMemoryFraction(double fraction, DeviceIndex device);
+
+C10_XPU_API void recordHistory(
+    bool enabled,
+    CreateContextFn context_recorder,
+    size_t alloc_trace_max_entries,
+    RecordContext when,
+    bool clearHistory);
 
 class XPUAllocator;
 
