@@ -3,15 +3,17 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Any, Literal, Optional
 
+import torch
 import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch._inductor.augmented_graph_helper import AugmentedGraphHelper
 from torch._inductor.fx_passes.bucketing import (
+    _schedulable_wait_node,
     bucket_key,
     BucketMode,
+    has_mergeable_all_gather_convert_dtype,
     is_all_gather_into_tensor as is_all_gather,
     is_reduce_scatter_tensor as is_reduce_scatter,
-    is_wait_tensor,
 )
 from torch._inductor.fx_passes.overlap_scheduling import (
     CollBucket,
@@ -50,12 +52,12 @@ class WhyNoBucket:
 
 def is_collective_or_wait(n: fx.Node) -> bool:
     """Check if node is a collective start or wait."""
-    if is_wait_tensor(n):
+    if _schedulable_wait_node(n):
         return True
     # Collective starts have exactly one use: the wait_tensor
     if len(n.users) == 1:
         user = next(iter(n.users.keys()))
-        if is_wait_tensor(user):
+        if _schedulable_wait_node(user):
             return True
     return False
 
@@ -185,7 +187,7 @@ class OverlapPreservingBucketer:
             if node in self.collective_info and get_group_name(node) == pg:
                 node_type = "starts"
                 hiding_nodes |= self.collective_info[node].hiding_nodes
-            elif is_wait_tensor(node):
+            elif _schedulable_wait_node(node):
                 wait_input = node.args[0]
                 if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
                     node_type = "waits"
@@ -207,6 +209,7 @@ class OverlapPreservingBucketer:
 
             prev_event = event
             position += 1
+
         return head
 
     def _populate_node_to_event(self, pg: str) -> None:
@@ -231,7 +234,6 @@ class OverlapPreservingBucketer:
                 self.aug_graph.add_extra_dep(n=info.wait_node, dep=hn)
 
     def bucket_collectives(self) -> None:
-        """Main entry point for bucketing collectives."""
         # Group collectives by PG first
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start in self.collective_info:
@@ -281,6 +283,15 @@ class OverlapPreservingBucketer:
         # Apply topological sort with all dependencies
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
+        for n, deps in additional_deps.items():
+            torch._check(
+                not n._erased, lambda: f"Erased node deps not transferred: {n}"
+            )
+            for d in deps:
+                torch._check(
+                    not d._erased, lambda: f"Erased node deps not transferred: {d}"
+                )
+
         _stable_topological_sort(self.graph, additional_deps)
 
         # After topological sort, preserve dependencies using effect tokens
@@ -315,7 +326,7 @@ class OverlapPreservingBucketer:
         # Sort collectives by node index for efficient distance checking
         sorted_collectives = sorted(collective_group, key=lambda n: self.node_idx[n])
 
-        for start_node in sorted_collectives:
+        for i, start_node in enumerate(sorted_collectives):
             if start_node in processed:
                 continue
 
@@ -325,25 +336,17 @@ class OverlapPreservingBucketer:
                 total_bytes=self.collective_info[start_node].size_bytes,
             )
             processed.add(start_node)
-            start_node_idx = self.node_idx[start_node]
 
             # Check candidates in sorted order, break when beyond max distance
-            for candidate in sorted_collectives:
+            for candidate in sorted_collectives[i + 1 : i + 1 + self.max_coll_distance]:
                 if candidate in processed:
                     continue
 
-                candidate_idx = self.node_idx[candidate]
-                # Check if candidate is within max distance from the bucket start
-                distance = abs(candidate_idx - start_node_idx)
-                if distance > self.max_coll_distance:
-                    # Since sorted, all remaining candidates will be too far
-                    if candidate_idx > start_node_idx:
-                        break
-                    continue
-
                 candidate_bytes = self.collective_info[candidate].size_bytes
+                # proxy on memory use, if we see a too large bucket,
+                # dont look for another, later bucket
                 if bucket_info.total_bytes + candidate_bytes > max_bucket_bytes:
-                    continue
+                    break
 
                 if self._can_add_to_bucket(bucket_info, candidate):
                     bucket_info.collectives.append(candidate)
@@ -762,6 +765,11 @@ class OverlapPreservingBucketer:
         old_starts = list(bucket)
         old_waits = [self.collective_info[n].wait_node for n in bucket]
 
+        fused_convert_dtypes = []
+        for n in old_starts:
+            if has_mergeable_all_gather_convert_dtype(n):
+                fused_convert_dtypes.append(n.args[0])
+
         # Find where to place the bucketed operations
         next_node = bucket[0]
         while next_node in bucket:
@@ -795,7 +803,7 @@ class OverlapPreservingBucketer:
             )
 
         # Get new nodes
-        new_waits = [n for n in new_nodes if is_wait_tensor(n)]
+        new_waits = [n for n in new_nodes if _schedulable_wait_node(n)]
         assert len(new_waits) == 1
 
         new_wait = new_waits[0]
@@ -808,6 +816,22 @@ class OverlapPreservingBucketer:
             erased_to_new[old_start] = new_start
         for old_wait in old_waits:
             erased_to_new[old_wait] = new_wait
+
+        # Handle convert_element_type nodes that were fused and erased
+        # The bucketed operation may have a _pre_bucket op that handles dtype conversion
+        if fused_convert_dtypes:
+            # all gather bucketing may fuse in dtype conversion into the bucketing
+            # if so, we need to transfer hiding deps from the old dtype conversion
+            # to the new bucketing node
+            new_convert_dtypes_node = new_start.kwargs["out"]
+            assert isinstance(new_convert_dtypes_node, fx.Node)
+            assert (
+                new_convert_dtypes_node.target
+                == torch.ops.bucketing._pre_bucket_all_gather.default
+            )
+
+            for n in fused_convert_dtypes:
+                erased_to_new[n] = new_convert_dtypes_node
 
         # Transfer all dependencies from old nodes to new nodes
         self.aug_graph.transfer_erased_node_deps(erased_to_new)
