@@ -5,6 +5,7 @@ Partitioned Scatter Optimization for Reduced Atomic Contention.
 This pass transforms high-contention index_put operations by distributing
 writes across multiple partitions, reducing atomic contention.
 """
+
 import logging
 import math
 from typing import Any, Optional
@@ -23,6 +24,7 @@ from torch._inductor.pattern_matcher import (
     register_graph_pattern,
 )
 
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -40,7 +42,7 @@ partitioned_scatter_patterns = PatternMatcherPass(
 def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
     """
     Apply partitioned scatter optimization to high-contention index_put operations.
-    
+
     Reduces atomic contention by distributing writes across multiple buffers.
     Controlled by: config.partitioned_scatter_enabled
     """
@@ -49,7 +51,7 @@ def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
 
     lazy_init()
     num_matches = partitioned_scatter_patterns.apply(graph)
-    
+
     if num_matches > 0:
         log.info(
             f"partitioned_scatter_optimization: applied to {num_matches} operation(s)"
@@ -82,7 +84,7 @@ def validate_match(match: Match) -> bool:
     output_node = match.output_node()
     if not output_node or not hasattr(output_node, "args") or len(output_node.args) < 4:
         return False
-    
+
     # Only apply when accumulating
     if output_node.args[3] is not True:
         log.debug("Skipping: accumulate=False")
@@ -105,14 +107,14 @@ def validate_match(match: Match) -> bool:
     index_meta = _get_tensor_meta(index_node)
     if not input_meta or not index_meta:
         return False
-    
+
     # Skip unsupported cases
     if isinstance(input_meta["numel"], torch.SymInt) or isinstance(
         index_meta["numel"], torch.SymInt
     ):
         log.debug("Skipping: dynamic shapes not supported")
         return False
-    
+
     if input_meta["dtype"] == torch.bool or index_meta["dtype"] == torch.bool:
         log.debug("Skipping: bool dtype not supported")
         return False
@@ -128,9 +130,9 @@ def validate_match(match: Match) -> bool:
     # Safety check (also done in _estimate_optimal_partitions)
     if output_size == 0 or index_size == 0:
         return False
-    
+
     contention_ratio = index_size / output_size
-    
+
     # Check minimum index size threshold
     min_index_size = getattr(config, "partitioned_scatter_min_index_size", 4096)
     if index_size < min_index_size:
@@ -140,13 +142,13 @@ def validate_match(match: Match) -> bool:
     # Only use if index_size is small enough and estimated contention is relevant
     if not (index_size < (min_index_size * 8)) and contention_ratio < 4:
         return False
-    
+
     # Get optimal partitions and adjust for memory constraints
     num_partitions = _estimate_optimal_partitions(output_size, index_size)
     num_partitions = _fit_to_memory_budget(
         output_size, num_partitions, input_meta["dtype"]
     )
-    
+
     # If reduced to < 2 partitions, optimization not worthwhile
     if num_partitions < MIN_PARTITIONS:
         log.debug("Skipping: insufficient memory for minimum partitions")
@@ -155,13 +157,13 @@ def validate_match(match: Match) -> bool:
     # Store optimization parameters for replacement
     match._num_partitions = num_partitions  # type: ignore[attr-defined]
     match._scatter_dim = scatter_dim  # type: ignore[attr-defined]
-    
+
     log.debug(
         f"Applying optimization: {num_partitions} partitions, "
         f"dim={scatter_dim}, contention={contention_ratio:.2f}, "
         f"output_size={output_size}, index_size={index_size}"
     )
-    
+
     return True
 
 
@@ -174,11 +176,11 @@ def create_replacement(
     """Replace high-contention index_put with partitioned scatter."""
     graph = match.graph
     matched_node = match.output_node()
-    
+
     # Get optimization parameters (dynamically set in validate_match)
     num_partitions: int = getattr(match, "_num_partitions", MIN_PARTITIONS)
     scatter_dim: int = getattr(match, "_scatter_dim", 0)
-    
+
     # Extract index node and metadata
     _, index_node = _extract_scatter_dim_and_index(indices)
     if index_node is None:
@@ -188,7 +190,7 @@ def create_replacement(
     input_meta = input_tensor.meta["val"]
     index_meta = index_node.meta["val"]
     values_meta = values.meta["val"]
-    
+
     # Detect fake mode
     fake_mode = detect_fake_mode([input_meta, index_meta, values_meta])
     if fake_mode is None:
@@ -200,17 +202,26 @@ def create_replacement(
         flat_index, flat_values = _flatten_indices_if_needed(
             graph, index_node, values, index_meta, values_meta, fake_mode
         )
-        
+
         # Create partitioned scatter
         output = _create_partitioned_scatter(
-            graph, input_tensor, indices, flat_index, flat_values,
-            scatter_dim, num_partitions, input_meta, index_meta, values_meta, fake_mode
+            graph,
+            input_tensor,
+            indices,
+            flat_index,
+            flat_values,
+            scatter_dim,
+            num_partitions,
+            input_meta,
+            index_meta,
+            values_meta,
+            fake_mode,
         )
 
     # Replace original node
     matched_node.replace_all_uses_with(output)
     graph.erase_node(matched_node)
-    
+
     counters["inductor"]["partitioned_scatter_applied"] += 1
     return output
 
@@ -218,7 +229,7 @@ def create_replacement(
 def _get_max_partitions_for_size(output_size: int) -> int:
     """
     Get maximum partitions based on output tensor size.
-    
+
     Larger tensors use fewer partitions to limit memory overhead.
     """
     if output_size >= 100_000_000:  # >= 100M elements
@@ -236,16 +247,16 @@ def _estimate_optimal_partitions(output_size: int, index_size: int) -> int:
     # Safety check for edge cases
     if output_size == 0 or index_size == 0:
         return MIN_PARTITIONS
-    
+
     contention_ratio = index_size / output_size
-    
+
     # Size-aware partition limits (larger tensors = fewer partitions to limit memory)
     max_partitions_for_size = _get_max_partitions_for_size(output_size)
-    
+
     # Contention-based calculation - square root scaling
     # Use max to ensure we never go below MIN_PARTITIONS for the base calculation
     base_partitions = max(MIN_PARTITIONS, int(math.sqrt(contention_ratio) * 16))
-    
+
     # Round to power of 2 and apply limits
     partitions = 2 ** math.ceil(math.log2(base_partitions))
     return min(partitions, max_partitions_for_size, MAX_PARTITIONS)
@@ -273,7 +284,7 @@ def _fit_to_memory_budget(
         current_partitions = num_partitions
         while current_partitions >= MIN_PARTITIONS:
             overhead = output_size * element_bytes * (current_partitions - 1)
-            
+
             if overhead <= budget:
                 # Only format debug string if debug logging is enabled
                 if current_partitions < num_partitions and log.isEnabledFor(
@@ -282,10 +293,10 @@ def _fit_to_memory_budget(
                     log.debug(
                         f"Reduced partitions from {num_partitions} to "
                         f"{current_partitions} to fit memory budget "
-                        f"({overhead/1e9:.2f}GB / {budget/1e9:.2f}GB)"
+                        f"({overhead / 1e9:.2f}GB / {budget / 1e9:.2f}GB)"
                     )
                 return current_partitions
-            
+
             # Reduce by half (maintain power of 2)
             current_partitions //= 2
 
@@ -294,7 +305,7 @@ def _fit_to_memory_budget(
             overhead = output_size * element_bytes * (MIN_PARTITIONS - 1)
             log.debug(
                 f"Insufficient memory even for {MIN_PARTITIONS} partitions: "
-                f"{overhead/1e9:.2f}GB > {budget/1e9:.2f}GB"
+                f"{overhead / 1e9:.2f}GB > {budget / 1e9:.2f}GB"
             )
         return 0
 
@@ -303,16 +314,18 @@ def _fit_to_memory_budget(
         return num_partitions  # Assume we have enough memory if we can't check
 
 
-def _extract_scatter_dim_and_index(indices_arg: Any) -> tuple[Optional[int], Optional[fx.Node]]:
+def _extract_scatter_dim_and_index(
+    indices_arg: Any,
+) -> tuple[Optional[int], Optional[fx.Node]]:
     """Extract scatter dimension and index node from indices argument."""
     # Case 1: Single index → dim=0
     if not isinstance(indices_arg, (list, tuple)):
         return 0, indices_arg
-    
+
     # List with Nones → position of non-None is dim
     index_node = None
     scatter_dim = None
-    
+
     # Case 2 -> Find the first non-None index as the scatter dimension
     for dim, idx in enumerate(indices_arg):
         if idx is not None:
@@ -321,7 +334,7 @@ def _extract_scatter_dim_and_index(indices_arg: Any) -> tuple[Optional[int], Opt
                 return None, None
             index_node = idx
             scatter_dim = dim
-    
+
     return scatter_dim, index_node
 
 
@@ -329,11 +342,11 @@ def _get_tensor_meta(node: fx.Node) -> Optional[dict[str, Any]]:
     """Extract tensor metadata from FX node."""
     if not hasattr(node, "meta") or "val" not in node.meta:
         return None
-    
+
     val = node.meta["val"]
     if not isinstance(val, (torch.Tensor, type(val))) or not hasattr(val, "shape"):
         return None
-    
+
     return {
         "shape": tuple(val.shape),
         "dtype": val.dtype,
@@ -365,10 +378,10 @@ def _flatten_indices_if_needed(
     """Flatten multi-dimensional indices if needed."""
     if len(index_meta.shape) <= 1:
         return index_node, values
-        
+
     num_operations = index_meta.numel()
     device = index_meta.device
-    
+
     # Flatten index
     flat_index = graph.call_function(
         aten.reshape.default,
@@ -377,7 +390,7 @@ def _flatten_indices_if_needed(
     _set_fake_tensor_meta(
         flat_index, num_operations, index_meta.dtype, device, fake_mode
     )
-    
+
     # Flatten values
     flat_values_shape = [num_operations] + list(
         values_meta.shape[len(index_meta.shape) :]
@@ -389,7 +402,7 @@ def _flatten_indices_if_needed(
     _set_fake_tensor_meta(
         flat_values, flat_values_shape, values_meta.dtype, device, fake_mode
     )
-    
+
     return flat_index, flat_values
 
 
@@ -410,7 +423,7 @@ def _create_partitioned_scatter(
     dim_size = input_meta.shape[scatter_dim]
     num_operations = index_meta.numel()
     device = index_meta.device
-    
+
     # Generate operation IDs
     operation_ids = graph.call_function(
         prims.iota.default,
@@ -426,7 +439,7 @@ def _create_partitioned_scatter(
     _set_fake_tensor_meta(
         operation_ids, num_operations, index_meta.dtype, device, fake_mode
     )
-    
+
     # Assign to partitions using bitwise AND (equivalent to modulo for power of 2)
     partition_ids = graph.call_function(
         aten.bitwise_and.Scalar,
@@ -435,11 +448,11 @@ def _create_partitioned_scatter(
     _set_fake_tensor_meta(
         partition_ids, num_operations, index_meta.dtype, device, fake_mode
     )
-    
+
     # Create expanded buffer
     expanded_shape = list(input_meta.shape)
     expanded_shape[scatter_dim] *= num_partitions
-    
+
     expanded_buffer = graph.call_function(
         aten.full.default,
         args=(expanded_shape, 0),
@@ -455,7 +468,7 @@ def _create_partitioned_scatter(
     )
     # Tag as part of partitioned scatter optimization
     expanded_buffer.meta["partitioned_scatter_node"] = "buffer"
-    
+
     # Adjust indices
     partition_offsets = graph.call_function(
         aten.mul.Tensor,
@@ -472,10 +485,10 @@ def _create_partitioned_scatter(
     _set_fake_tensor_meta(
         adjusted_index, num_operations, index_meta.dtype, device, fake_mode
     )
-    
+
     # Reconstruct indices list
     adjusted_indices = _reconstruct_indices_list(indices, adjusted_index, scatter_dim)
-    
+
     # Scatter with reduced contention
     scattered_buffer = graph.call_function(
         aten.index_put.default,
@@ -486,20 +499,18 @@ def _create_partitioned_scatter(
     )
     # Tag as part of partitioned scatter optimization
     scattered_buffer.meta["partitioned_scatter_node"] = "scatter"
-    
+
     # Reshape for reduction
     reduce_shape = list(expanded_shape)
     reduce_shape[scatter_dim] = num_partitions
     reduce_shape.insert(scatter_dim + 1, dim_size)
-    
+
     reshaped = graph.call_function(
         aten.view.default,
         args=(scattered_buffer, reduce_shape),
     )
-    _set_fake_tensor_meta(
-        reshaped, reduce_shape, values_meta.dtype, device, fake_mode
-    )
-    
+    _set_fake_tensor_meta(reshaped, reduce_shape, values_meta.dtype, device, fake_mode)
+
     # Sum across partitions
     if values_meta.dtype in [torch.int8, torch.int16, torch.int32, torch.uint8]:
         reduced = graph.call_function(
@@ -517,7 +528,7 @@ def _create_partitioned_scatter(
     )
     # Tag as part of partitioned scatter optimization
     reduced.meta["partitioned_scatter_node"] = "reduction"
-    
+
     # Add to original input
     output = graph.call_function(
         aten.add.Tensor,
@@ -526,14 +537,14 @@ def _create_partitioned_scatter(
     _set_fake_tensor_meta(
         output, input_meta.shape, values_meta.dtype, device, fake_mode
     )
-    
+
     # Tag the output node with optimization metadata
-    # Not currently used, but may help with debugging and 
+    # Not currently used, but may help with debugging and
     # future codegen optimizations.
     output.meta["partitioned_scatter_applied"] = True
     output.meta["partitioned_scatter_num_partitions"] = num_partitions
     output.meta["partitioned_scatter_dim"] = scatter_dim
-    
+
     return output
 
 
