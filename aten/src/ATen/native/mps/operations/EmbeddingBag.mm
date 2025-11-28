@@ -80,19 +80,27 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
     auto indices_data = indices_cpu.const_data_ptr<int64_t>();
     for (int64_t i = 0; i < num_indices; i++) {
       int64_t idx = indices_data[i];
-      TORCH_CHECK(
-          idx >= 0 && idx < num_weights,
-          "Index ", i, " of input takes value ", idx,
-          " which is not in the valid range [0, ", num_weights, ")");
+      TORCH_CHECK(idx >= 0 && idx < num_weights,
+                  "Index ",
+                  i,
+                  " of input takes value ",
+                  idx,
+                  " which is not in the valid range [0, ",
+                  num_weights,
+                  ")");
     }
   } else {
     auto indices_data = indices_cpu.const_data_ptr<int32_t>();
     for (int64_t i = 0; i < num_indices; i++) {
       int32_t idx = indices_data[i];
-      TORCH_CHECK(
-          idx >= 0 && idx < num_weights,
-          "Index ", i, " of input takes value ", idx,
-          " which is not in the valid range [0, ", num_weights, ")");
+      TORCH_CHECK(idx >= 0 && idx < num_weights,
+                  "Index ",
+                  i,
+                  " of input takes value ",
+                  idx,
+                  " which is not in the valid range [0, ",
+                  num_weights,
+                  ")");
     }
   }
 
