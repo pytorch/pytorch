@@ -379,7 +379,7 @@ else:
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
-        ) -> _GroupName:
+        ) -> _GroupName | None:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
             pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
             backend, pg_options = backend_override
@@ -466,11 +466,6 @@ else:
                             f"in {subgroup_ranks}!"
                         )
                     pg_name = dim_group.group_name
-
-            if pg_name is None:
-                raise RuntimeError(
-                    f"Rank {get_rank()} wasn't present in any dimension!"
-                )
             return pg_name
 
         @staticmethod
@@ -482,7 +477,7 @@ else:
         ) -> list[_GroupName]:
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
-            dim_group_names: list[_GroupName] = []
+            dim_group_names: list[_GroupName | None] = []
             # create sub pgs base on the mesh argument specified
             for dim in range(len(layout)):
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
@@ -491,10 +486,11 @@ else:
                         layout[dim], rank_map, dim_name, backend_override[dim]
                     )
                 )
-            if any(n is None for n in dim_group_names):
-                assert all(n is None for n in dim_group_names)
-                return []
-            return dim_group_names
+            dim_non_none_group_names = [n for n in dim_group_names if n is not None]
+            assert not dim_non_none_group_names or len(dim_non_none_group_names) == len(
+                dim_group_names
+            )
+            return dim_non_none_group_names
 
         def _get_root_mesh(self) -> "DeviceMesh":
             return self._root_mesh if self._root_mesh else self

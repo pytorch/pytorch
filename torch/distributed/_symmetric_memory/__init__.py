@@ -481,7 +481,7 @@ network interfaces.
 
 @torch.library.impl(lib, "get_remote_tensors", "CUDA")
 def _get_remote_tensors_default(
-    local: torch.Tensor, group_name: str
+    local: torch.Tensor, group_name: c10d._GroupName
 ) -> tuple[torch.Tensor, ...]:
     hdl = rendezvous(local, group_name)
     if hdl is None:
@@ -495,7 +495,7 @@ def _get_remote_tensors_default(
 
 @torch.library.impl(lib, "get_remote_tensors", "Meta")
 def _get_remote_tensors_meta(
-    local: torch.Tensor, group_name: str
+    local: torch.Tensor, group_name: c10d._GroupName
 ) -> tuple[torch.Tensor, ...]:
     group = c10d._resolve_process_group(group_name)
     return tuple(torch.empty_like(local) for _ in range(group.size()))
