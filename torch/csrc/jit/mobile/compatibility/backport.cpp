@@ -1,5 +1,3 @@
-#include <ATen/core/ivalue.h>
-#include <caffe2/serialize/file_adapter.h>
 #include <caffe2/serialize/inline_container.h>
 #include <torch/csrc/jit/mobile/compatibility/backport.h>
 #include <torch/csrc/jit/mobile/compatibility/backport_manager.h>
