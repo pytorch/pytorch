@@ -6,10 +6,10 @@ which calls get_cmake_cache_variables_from_file
 from __future__ import annotations
 
 import re
-from typing import IO, Optional
+from typing import IO
 
 
-CMakeValue = Optional[bool | str]
+CMakeValue = bool | str | None
 
 
 def convert_cmake_value_to_python_value(
