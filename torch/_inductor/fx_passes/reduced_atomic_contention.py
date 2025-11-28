@@ -91,7 +91,11 @@ def validate_match(match: Match) -> bool:
     # Extract metadata
     input_node = output_node.args[0]
     indices_arg = output_node.args[1]
-    
+
+    # Validate input_node is an FX Node
+    if not isinstance(input_node, fx.Node):
+        return False
+
     scatter_dim, index_node = _extract_scatter_dim_and_index(indices_arg)
     if scatter_dim is None or index_node is None:
         return False
