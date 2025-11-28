@@ -42,7 +42,7 @@ else:
     from torch._C._distributed_c10d import Backend as C10dBackend
     from torch.distributed.distributed_c10d import (
         _get_default_group,
-        _GroupName,
+        GroupName,
         _resolve_process_group,
         get_backend,
         get_process_group_ranks,
@@ -379,7 +379,7 @@ else:
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
-        ) -> _GroupName:
+        ) -> GroupName:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
             pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
             backend, pg_options = backend_override
@@ -495,10 +495,10 @@ else:
             rank_map: torch.Tensor,
             mesh_dim_names: Optional[tuple[str, ...]],
             backend_override: tuple[BackendConfig, ...],
-        ) -> list[_GroupName]:
+        ) -> list[GroupName]:
             # group_name associated with each mesh dimension, each
             # mesh dimension should have one sub-group per rank
-            dim_group_names: list[_GroupName | None] = []
+            dim_group_names: list[GroupName | None] = []
             # create sub pgs base on the mesh argument specified
             for dim in range(len(layout)):
                 dim_name = mesh_dim_names[dim] if mesh_dim_names else f"dim_{dim}"
@@ -507,6 +507,7 @@ else:
                         layout[dim], rank_map, dim_name, backend_override[dim]
                     )
                 )
+            # Filter out None values. If any are None then they should all be None.
             dim_non_none_group_names = [n for n in dim_group_names if n is not None]
             assert not dim_non_none_group_names or len(dim_non_none_group_names) == len(
                 dim_group_names
@@ -1230,7 +1231,7 @@ else:
             concat_dim_names: list[str] = []
             concat_sizes: list[IntTuple] = []
             concat_strides: list[IntTuple] = []
-            concat_dim_group_name: list[_GroupName] = []
+            concat_dim_group_name: list[GroupName] = []
             flatten_rank_map = device_mesh_list[0]._flatten_rank_map
             for dm in device_mesh_list:
                 for i in range(len(dm._layout)):

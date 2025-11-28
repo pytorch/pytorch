@@ -144,7 +144,7 @@ _XCCL_AVAILABLE = True
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
 
-_GroupName = NewType("_GroupName", str)
+GroupName = NewType("GroupName", str)
 
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
@@ -583,7 +583,7 @@ class _CollOp:
 # DO NOT USE THESE FIELDS DIRECTLY.
 # Use them through the _world object to make sure the _world override mechanism
 _pg_map: dict[ProcessGroup, tuple[str, Store]] = {}
-_pg_names: dict[ProcessGroup, _GroupName] = {}
+_pg_names: dict[ProcessGroup, GroupName] = {}
 _pg_group_ranks: dict[ProcessGroup, dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
 _pg_backend_config: dict[ProcessGroup, str] = {}
@@ -635,7 +635,7 @@ class _World:
         return _pg_map
 
     @property
-    def pg_names(self) -> dict[ProcessGroup, _GroupName]:
+    def pg_names(self) -> dict[ProcessGroup, GroupName]:
         """
         Process group's names, map from ProcessGroup to str.
 
@@ -753,7 +753,7 @@ class GroupMember(metaclass=_WorldMeta):
 
 @dataclass
 class _NonGroupMember:
-    group_name: _GroupName
+    group_name: GroupName
 
 
 def _get_default_timeout(backend: Backend) -> timedelta:
@@ -950,7 +950,7 @@ def _device_capability(group: Optional[ProcessGroup] = None) -> list[str]:
 def _store_based_barrier(
     rank,
     store,
-    group_name: _GroupName,
+    group_name: GroupName,
     rendezvous_count,
     timeout,
     logging_interval=timedelta(seconds=10),
@@ -1119,12 +1119,12 @@ def _get_group_size(group: ProcessGroup | None) -> int:
     return group.size()
 
 
-def _get_group_size_by_name(group_name: _GroupName) -> int:
+def _get_group_size_by_name(group_name: GroupName) -> int:
     group = _resolve_process_group(group_name)
     return group.size()
 
 
-def _resolve_group_name_by_ranks_and_tag(ranks: list[int], tag: str) -> _GroupName:
+def _resolve_group_name_by_ranks_and_tag(ranks: list[int], tag: str) -> GroupName:
     # TODO(yifu): remove this function once ranks + tag is not a supported
     # identifier for process group for functional collectives.
     group = _find_pg_by_ranks_and_tag(tag, ranks)
@@ -1907,7 +1907,7 @@ def _new_process_group_helper(
     global_ranks_in_group,
     backend,
     store,
-    group_name: _GroupName,
+    group_name: GroupName,
     backend_options=None,
     timeout=None,
     pg_tag=None,
@@ -5108,13 +5108,13 @@ def _process_group_color(ranks: list[int]) -> int:
     return color
 
 
-def _process_group_name(ranks, use_hashed_name) -> _GroupName:
+def _process_group_name(ranks, use_hashed_name) -> GroupName:
     # Create name for a process group.
     global _world
     if use_hashed_name:
-        pg_name = _GroupName(_hash_ranks_to_str(ranks))
+        pg_name = GroupName(_hash_ranks_to_str(ranks))
     else:
-        pg_name = _GroupName(str(_world.group_count))
+        pg_name = GroupName(str(_world.group_count))
         _world.group_count += 1
     # TODO: why is group count incremented only in the else path?
     return pg_name
@@ -6243,7 +6243,7 @@ def _update_process_group_global_state(
     pg: ProcessGroup,
     backend_name: str,
     store: Store,
-    group_name: _GroupName,
+    group_name: GroupName,
     backend_config: str,
     rank_mapping: Optional[dict[int, int]] = None,
     pg_tag: Optional[str] = None,

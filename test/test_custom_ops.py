@@ -891,7 +891,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [3.14]
         if typ is bool:
             return [True]
-        if typ is str or typ is torch.distributed.distributed_c10d._GroupName:
+        if typ is str or typ is torch.distributed.distributed_c10d.GroupName:
             return ["foo"]
         if typ is torch.dtype:
             return [torch.float32]
@@ -925,9 +925,6 @@ class TestCustomOp(CustomOpTestCaseBase):
             assert len(args) == 1
             examples = self._generate_examples(args[0])
             return list(itertools.product(examples, examples)) + []
-        import fbvscode
-
-        fbvscode.set_trace()
         raise NotImplementedError(
             f"testrunner cannot generate instanstance of type {typ}"
         )
