@@ -353,15 +353,21 @@ struct BenchmarkCache {
 //
 // We also leak them due to apparent teardown segfaults observed since cuDNN
 // version 9.10+
-BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>* _get_benchmark_cache() {
-  static thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>
-    *benchmark_cache = new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>();
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>*
+_get_benchmark_cache() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyWrapper> *benchmark_cache =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>();
   return benchmark_cache;
 }
 
-BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>* _get_benchmark_cache_fused() {
-  static thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>
-    *benchmark_cache_fused = new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>();
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>*
+_get_benchmark_cache_fused() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyFusedWrapper> *benchmark_cache_fused =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>();
   return benchmark_cache_fused;
 }
 } // namespace
