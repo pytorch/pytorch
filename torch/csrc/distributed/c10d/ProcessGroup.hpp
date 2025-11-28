@@ -810,6 +810,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
       tensor = at::empty(
           {1},
           at::TensorOptions().device(at::DeviceType::XPU).dtype(at::kByte));
+    } else if (backendType_ == c10d::ProcessGroup::BackendType::CUSTOM) {
+      // set privateuse1 tensor
+      tensor = at::empty(
+          {1},
+          at::TensorOptions()
+              .device(at::DeviceType::PrivateUse1)
+              .dtype(at::kByte));
     } else {
       // Default to using cpu implementation
       tensor = at::empty(
