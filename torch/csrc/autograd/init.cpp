@@ -390,25 +390,31 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_supported_activities", []() {
     std::set<torch::profiler::impl::ActivityType> activities{
         torch::profiler::impl::ActivityType::CPU};
-#if defined(USE_KINETO)
-#if (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
-    if (at::getNumGPUs() > 0) {
-      activities.insert(torch::profiler::impl::ActivityType::CUDA);
-    }
-#endif // (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
-    if (at::hasXPU()) {
-      activities.insert(torch::profiler::impl::ActivityType::XPU);
-    }
+#if defined(USE_KINETO) && \
+    (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
     if (at::hasHPU()) {
       activities.insert(torch::profiler::impl::ActivityType::HPU);
     }
+    if (at::getNumGPUs() > 0) {
+      activities.insert(torch::profiler::impl::ActivityType::CUDA);
+    }
+#elif defined(USE_KINETO)
+    if (at::hasXPU()) {
+      activities.insert(torch::profiler::impl::ActivityType::XPU);
+    }
+    if (at::hasHPU()) {
+      activities.insert(torch::profiler::impl::ActivityType::HPU);
+    }
+    if (at::hasMTIA()) {
+      activities.insert(torch::profiler::impl::ActivityType::MTIA);
+    }
     if (c10::get_privateuse1_backend() != "privateuseone") {
       activities.insert(torch::profiler::impl::ActivityType::PrivateUse1);
     }
-#endif // defined(USE_KINETO)
+#endif
     return activities;
   });
 

@@ -988,7 +988,7 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
   }
 }
 
-void TensorImpl::incref_pyobject() const noexcept {
+void TensorImpl::incref_pyobject() const {
   // Because intrusive_ptr incref uses relaxed memory order, we need to
   // do an acquire fence to ensure that the kHasPyObject bit was
   // observed before the load of the PyObject* below.
@@ -999,12 +999,12 @@ void TensorImpl::incref_pyobject() const noexcept {
   (*pyobj_slot_.pyobj_interpreter())->incref(obj);
 }
 
-void TensorImpl::decref_pyobject() const noexcept {
+void TensorImpl::decref_pyobject() const {
   PyObject* obj = pyobj_slot_.load_pyobj();
   (*pyobj_slot_.pyobj_interpreter())->decref(obj);
 }
 
-bool TensorImpl::try_incref_pyobject() const noexcept {
+bool TensorImpl::try_incref_pyobject() const {
   c10::impl::PyInterpreter* interp = pyobj_slot_.pyobj_interpreter();
   if (C10_UNLIKELY(!interp)) {
     return false;

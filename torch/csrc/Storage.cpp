@@ -245,7 +245,7 @@ static PyObject* THPStorage_pynew(
           storage_set(storage, i, value);
         }
       }
-    } catch (const std::exception&) {
+    } catch (const std::exception& e) {
       TORCH_CHECK(
           THPStorageStr "(): tried to construct a storage from a sequence (",
           THPUtils_typename(sequence),

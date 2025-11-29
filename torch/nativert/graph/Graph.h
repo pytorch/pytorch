@@ -97,7 +97,6 @@ using Constant = std::variant<
     bool,
     std::vector<bool>,
     std::vector<std::string>,
-    std::vector<std::vector<int64_t>>,
     std::unique_ptr<Graph>>;
 
 c10::IValue constantToIValue(const Constant& constant);

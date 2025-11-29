@@ -17,7 +17,6 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -26,6 +25,7 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_evenly_shardable_on_dim,
     normalize_dim,
     normalize_dims,
+    register_op_strategy,
 )
 from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
@@ -162,16 +162,6 @@ class _NormPartial(Partial):
 
     def __hash__(self) -> int:
         return 1 + hash(self.norm_type)
-
-    def __repr__(self) -> str:
-        """
-        machine readable representation of the _NormPartial placement
-        """
-        return f"_NormPartial(reduce_op={self.reduce_op}, norm_type={self.norm_type})"
-
-    def __str__(self) -> str:
-        """human readable representation of the _NormPartial placement"""
-        return f"_NormP({self.reduce_op}, {self.norm_type})"
 
 
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[list[int]]:
@@ -415,15 +405,10 @@ def cumsum_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [
-        aten.std.correction,
-        aten.std.correction_out,
-        aten.var.correction,
-        aten.var.correction_out,
-    ],
+    [aten.var.correction, aten.var.correction_out],
     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
 )
-def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
+def var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     if not isinstance(input_strategy, OpStrategy):
