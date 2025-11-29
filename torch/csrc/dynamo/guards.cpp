@@ -569,11 +569,11 @@ PyObject* TensorGuards_check_verbose(
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef TensorGuards_methods[] = {
     {"check",
-     static_cast<PyCFunction>(reinterpret_cast<void*>(TensorGuards_check)),
+     reinterpret_cast<PyCFunction>(reinterpret_cast<void*>(TensorGuards_check)),
      METH_VARARGS | METH_KEYWORDS,
      ""},
     {"check_verbose",
-     static_cast<PyCFunction>(
+     reinterpret_cast<PyCFunction>(
          reinterpret_cast<void*>(TensorGuards_check_verbose)),
      METH_VARARGS | METH_KEYWORDS,
      "verbose fail reasons for failed checks"},
@@ -804,19 +804,23 @@ PyObject* GlobalStateGuard_load(
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef GlobalStateGuard_methods[] = {
     {"check",
-     static_cast<PyCFunction>(reinterpret_cast<void*>(GlobalStateGuard_check)),
+     reinterpret_cast<PyCFunction>(
+         reinterpret_cast<void*>(GlobalStateGuard_check)),
      METH_NOARGS,
      "Return true if global state was the same as at creation time"},
     {"reason",
-     static_cast<PyCFunction>(reinterpret_cast<void*>(GlobalStateGuard_reason)),
+     reinterpret_cast<PyCFunction>(
+         reinterpret_cast<void*>(GlobalStateGuard_reason)),
      METH_NOARGS,
      "Return string reason for guard check failing"},
     {"__getstate__",
-     static_cast<PyCFunction>(reinterpret_cast<void*>(GlobalStateGuard_dump)),
+     reinterpret_cast<PyCFunction>(
+         reinterpret_cast<void*>(GlobalStateGuard_dump)),
      METH_NOARGS,
      "Return serialized json format"},
     {"__setstate__",
-     static_cast<PyCFunction>(reinterpret_cast<void*>(GlobalStateGuard_load)),
+     reinterpret_cast<PyCFunction>(
+         reinterpret_cast<void*>(GlobalStateGuard_load)),
      METH_VARARGS,
      "Parse serialized json format"},
     {nullptr}};
