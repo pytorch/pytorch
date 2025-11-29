@@ -10,7 +10,7 @@ import json
 import re
 from enum import Enum
 from pathlib import Path
-from typing import NamedTuple, Union
+from typing import NamedTuple
 
 
 LINTER_CODE = "HEADER_ONLY_LINTER"
@@ -24,15 +24,15 @@ class LintSeverity(str, Enum):
 
 
 class LintMessage(NamedTuple):
-    path: Union[str, None]
-    line: Union[int, None]
-    char: Union[int, None]
+    path: str | None
+    line: int | None
+    char: int | None
     code: str
     severity: LintSeverity
     name: str
-    original: Union[str, None]
-    replacement: Union[str, None]
-    description: Union[str, None]
+    original: str | None
+    replacement: str | None
+    description: str | None
 
 
 CPP_TEST_GLOBS = [
