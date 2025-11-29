@@ -81,7 +81,10 @@ def _make_lowp_aware_gradcheck(gradcheck_fn):
                 cloned.append(inp)
                 continue
             gradcheck_dtype = torch.complex128 if inp.dtype.is_complex else torch.float64
-            c = inp.detach().clone().to("cpu").to(gradcheck_dtype).coalesce().requires_grad_(inp.requires_grad)
+            c = inp.detach().clone().to("cpu").to(gradcheck_dtype)
+            if c.is_sparse:
+                c = c.coalesce()
+            c = c.requires_grad_(inp.requires_grad)
             cloned.append(c)
         return tuple(cloned)
 
@@ -101,8 +104,8 @@ def _make_lowp_aware_gradcheck(gradcheck_fn):
         orig_grads, orig_inputs = compute_grads(fn, inputs)
 
         for i, (og, rg, o_inp, r_inp) in enumerate(zip(orig_grads, ref_grads, orig_inputs, ref_inputs)):
-            og_dense = og.to_dense()
-            rg_dense = rg.to_dense()
+            og_dense = og.to_dense() if og.is_sparse else og
+            rg_dense = rg.to_dense() if rg.is_sparse else rg
             og_dense = og_dense.to('cpu')
             rg_dense = rg_dense.to(device='cpu', dtype=og_dense.dtype)
             if not torch.allclose(og_dense, rg_dense):
@@ -141,8 +144,6 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
 def gradcheck_semantics(test_name='gradcheck'):
     gradcheck_sparse = functools.partial(gradcheck, masked=False)
     gradcheck_masked = functools.partial(gradcheck, masked=True)
-    gradcheck_sparse = _make_lowp_aware_gradcheck(gradcheck_sparse)
-    gradcheck_masked = _make_lowp_aware_gradcheck(gradcheck_masked)
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
@@ -2303,7 +2304,6 @@ class TestSparse(TestSparseBase):
         nnzs = (0, 5, 15, 25)
 
         lhs_data = torch.arange(1, 26, device=device).reshape(shape).to(dtype).to_sparse(sparse_dims)
-
         for nnz in nnzs:
             for lhs_is_coalesced, rhs_is_coalesced in product(*repeat((True, False), 2)):
                 lhs = torch.sparse_coo_tensor(
@@ -2322,15 +2322,29 @@ class TestSparse(TestSparseBase):
                 # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
                 # lhs.sparse_mask(lhs_mask) accomplishes that.
                 lhs_mask = lhs.detach().clone()
-                lhs_mask = lhs.detach().clone()
+
+                def op_masked(x):
+                    m, r = lhs_mask, rhs
+                    if x.device != m.device:
+                        m = m.to(device=x.device)
+                        r = r.to(device=x.device)
+                    return x.sparse_mask(m).sparse_mask(r).to_dense(masked_grad=True)
+
                 gradcheck(
-                    lambda x, mask, r: x.sparse_mask(mask).sparse_mask(r).to_dense(masked_grad=True),
-                    (lhs, lhs_mask, rhs),
+                    op_masked,
+                    (lhs,),
                     masked=True
                 )
+
+                def op_unmasked(x):
+                    r = rhs
+                    if x.device != r.device:
+                        r = r.to(device=x.device)
+                    return x.sparse_mask(r).to_dense(masked_grad=False)
+
                 gradcheck(
-                    lambda x, r: x.sparse_mask(r).to_dense(masked_grad=False),
-                    (lhs, rhs),
+                    op_unmasked,
+                    (lhs, ),
                     masked=False
                 )
 
