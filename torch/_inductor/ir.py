@@ -119,7 +119,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cutlass.cuda_template import CUDATemplate
+    from .codegen.cuda.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
@@ -957,9 +957,6 @@ class Loops(IRNode):
             + [f"{name}={getattr(self, name)}" for name in names]
             + [f"origin_node={self.origin_node!r}"]
         )
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
 
     def __str__(self) -> str:
         return self._to_str(("ranges",))
@@ -8229,9 +8226,6 @@ class FallbackKernel(ExternKernelAlloc):
             packed.outputs = [outputs]
         # pyrefly: ignore [bad-return]
         return outputs
-
-    def apply_constraint(self) -> None:
-        return super().apply_constraint()
 
 
 @ir_dataclass(frozen=False)
