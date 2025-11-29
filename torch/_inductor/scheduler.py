@@ -6167,7 +6167,8 @@ class Scheduler:
         )
 
         # don't support benchmark fusion for CPU C++ backend right now.
-        if device is None or (device.type == "cpu" and config.cpu_backend != "triton"):
+        # disabling cpu triton backend for now.
+        if device is None or device.type == "cpu":
             return False
 
         if not config.benchmark_combo_kernel:
