@@ -1,14 +1,20 @@
 # Owner(s): ["module: dynamo"]
+import sys
+import unittest
+
 import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._functorch
+import torch.distributed as dist
+import torch.nn as nn
 from torch._dynamo.precompile_context import BackendCacheArtifact, PrecompileContext
 from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import (
     BundledAOTAutogradCacheArtifact,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import GPU_TYPE, requires_triton
 
 
@@ -103,6 +109,48 @@ class PrecompileContextTests(InductorTestCase):
         assert len(aot_autograd_artifacts) == 1
         entry = next(iter(aot_autograd_artifacts.values())).content
         self.assertEqual(entry._my_private_field, 42)
+
+    @requires_triton()
+    @unittest.skipIf(not dist.is_available(), "Distributed not available")
+    def test_deepcopy_with_device_mesh(self):
+        """
+        Test that deepcopy in record_artifact works correctly with device mesh
+        and DTensor. This reproduces the issue where deepcopy would
+        fail when trying to meta storages. See the following PR for more info:
+        https://github.com/pytorch/pytorch/pull/169242
+        """
+        store = FakeStore()
+        dist.init_process_group("fake", store=store, rank=0, world_size=4)
+
+        try:
+            from torch.distributed.device_mesh import init_device_mesh
+            from torch.distributed.tensor import DTensor, Replicate
+
+            mesh = init_device_mesh("cuda", (2, 2), mesh_dim_names=("dp", "tp"))
+
+            class SimpleModel(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = nn.Linear(32, 32)
+
+                def forward(self, x, d_x, mesh):
+                    x = self.linear(x)
+                    y = d_x.redistribute(mesh, placements=(Replicate(), Replicate()))
+                    return x, y
+
+            model = SimpleModel().cuda()
+            input_tensor = torch.randn(32, 32, device="cuda")
+            placements = (Replicate(), Replicate())
+            d_input_tensor = DTensor.from_local(input_tensor, mesh, placements)
+
+            compiled_fn = torch.compile(model, fullgraph=True)
+
+            # This should not raise an error about device mismatch during deepcopy
+            result = compiled_fn(input_tensor, d_input_tensor, mesh)
+
+            self.assertGreater(len(PrecompileContext._backend_artifacts_by_key), 0)
+        finally:
+            dist.destroy_process_group()
 
 
 if __name__ == "__main__":
