@@ -82,12 +82,12 @@ class TestAutocast(TestCase):
             y = torch.randn(3, 3, device="openreg")
             result1 = torch.mm(x, y)
             self.assertEqual(result1.dtype, torch.float16)
-            
+
             # Nested autocast context with bfloat16
             with torch.amp.autocast(device_type="openreg", dtype=torch.bfloat16):
                 result2 = torch.mm(x, y)
                 self.assertEqual(result2.dtype, torch.bfloat16)
-            
+
             # After exiting nested context, should restore to float16
             result3 = torch.mm(x, y)
             self.assertEqual(result3.dtype, torch.float16)
@@ -109,7 +109,7 @@ class TestAutocast(TestCase):
             result = torch.mm(x, y)
             self.assertEqual(result.dtype, torch.float16)
             self.assertTrue(result.requires_grad)
-            
+
             # Test backward propagation
             loss = result.sum()
             loss.backward()
@@ -139,22 +139,24 @@ class TestAutocast(TestCase):
             x = torch.randn(2, 3, device="openreg")
             y = torch.randn(3, 3, device="openreg")
             z = torch.randn(2, device="openreg")
-            
+
             # Low precision operation
             result1 = torch.mm(x, y)
             self.assertEqual(result1.dtype, torch.float16)
-            
+
             # fp32 operation
             result2 = torch.asin(z)
             self.assertEqual(result2.dtype, torch.float32)
-            
+
             # Combined operations
             result3 = torch.mm(result1, y)
             self.assertEqual(result3.dtype, torch.float16)
 
     def test_autocast_disable(self):
         """Test disabling autocast"""
-        with torch.amp.autocast(device_type="openreg", dtype=torch.float16, enabled=False):
+        with torch.amp.autocast(
+            device_type="openreg", dtype=torch.float16, enabled=False
+        ):
             x = torch.randn(2, 3, device="openreg", dtype=torch.float32)
             y = torch.randn(3, 3, device="openreg", dtype=torch.float32)
             result = torch.mm(x, y)
@@ -163,7 +165,9 @@ class TestAutocast(TestCase):
 
     def test_autocast_cache_enabled(self):
         """Test autocast caching"""
-        with torch.amp.autocast(device_type="openreg", dtype=torch.float16, cache_enabled=True):
+        with torch.amp.autocast(
+            device_type="openreg", dtype=torch.float16, cache_enabled=True
+        ):
             x = torch.randn(2, 3, device="openreg")
             y = torch.randn(3, 3, device="openreg")
             result1 = torch.mm(x, y)
