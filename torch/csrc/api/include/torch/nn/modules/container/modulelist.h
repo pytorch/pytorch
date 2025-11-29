@@ -218,7 +218,7 @@ class ModuleListImpl : public Cloneable<ModuleListImpl> {
       push_back(std::move(module));
     else {
       modules_.insert(
-          modules_.begin() + Iterator::difference_type(index),
+          modules_.begin() + static_cast<Iterator::difference_type>(index),
           std::move(module));
 
       for (const auto i : c10::irange(index, size() - 1)) {

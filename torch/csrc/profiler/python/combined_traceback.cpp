@@ -85,7 +85,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
       }
     }
     for (const auto& f : to_symbolize) {
-      auto f_code = (PyCodeObject*)f.code;
+      auto f_code = static_cast<PyCodeObject*>(f.code);
       py::handle filename = f_code->co_filename;
       py::handle funcname = f_code->co_name;
       auto lineno = PyCode_Addr2Line(f_code, f.lasti);
@@ -94,7 +94,7 @@ struct PythonTraceback : public CapturedTraceback::Python {
       result.all_frames.emplace_back(unwind::Frame{
           py::cast<std::string>(filename),
           py::cast<std::string>(funcname),
-          (uint64_t)lineno});
+          static_cast<uint64_t>(lineno)});
       // find all the additional frames associated with inductor generated
       // code
       if (stack_frames_for_code.ptr()) {

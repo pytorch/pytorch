@@ -51,7 +51,7 @@ struct DebugInfo {
     CheckedLexer L = s_.debug_info.lexer(offset_);
     std::tie(length_, is_64bit_) = L.readSectionLength();
     sec_offset_size_ = is_64bit_ ? 8 : 4;
-    end_ = (const char*)L.loc() + length_;
+    end_ = static_cast<const char*>(L.loc()) + length_;
     version_ = L.read<uint16_t>();
     UNWIND_CHECK(
         version_ == 5 || version_ == 4,
@@ -143,10 +143,10 @@ struct DebugInfo {
         line_number_program_offset_ = readSegmentOffset(L);
       } else if (form == DW_FORM_exprloc) {
         auto sz = L.readULEB128();
-        L.skip(int64_t(sz));
+        L.skip(static_cast<int64_t>(sz));
       } else if (form == DW_FORM_block1) {
         auto sz = L.read<uint8_t>();
-        L.skip(int64_t(sz));
+        L.skip(static_cast<int64_t>(sz));
       } else if (attr == DW_AT_ranges) {
         auto range_offset = readEncoded(L, form);
         LOG_INFO("setting range_ptr to {:x} {:x}\n", range_offset, form);
@@ -161,7 +161,7 @@ struct DebugInfo {
       } else {
         auto sz = formSize(form, sec_offset_size_);
         UNWIND_CHECK(sz, "unsupported form in compilation unit {:x}", form);
-        L.skip(int64_t(*sz));
+        L.skip(static_cast<int64_t>(*sz));
       }
     }
   }

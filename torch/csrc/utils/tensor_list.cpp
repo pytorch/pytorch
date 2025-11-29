@@ -64,7 +64,7 @@ PyObject* tensor_to_list(const Tensor& tensor) {
       tensor.numel() == 0 || data.const_data_ptr(),
       "tolist() shouldn't be called on a tensor with unallocated storage");
   return recursive_to_list(
-      (const char*)data.const_data_ptr(),
+      static_cast<const char*>(data.const_data_ptr()),
       data.sizes(),
       data.strides(),
       0,

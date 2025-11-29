@@ -66,7 +66,7 @@ struct TupleType : public Type {
     if (!PyTuple_Check(object))
       return false;
     auto num_elements = PyTuple_GET_SIZE(object);
-    if (num_elements != (long)types.size())
+    if (num_elements != static_cast<long>(types.size()))
       return false;
     for (const auto i : c10::irange(num_elements)) {
       if (!types[i]->is_matching(PyTuple_GET_ITEM(object, i)))

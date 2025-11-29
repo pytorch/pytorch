@@ -26,7 +26,8 @@ static py::object dynamo_call_callback(
   THPPyInterpreterFrame* frame = THPPyInterpreterFrame_New(_frame);
   TORCH_CHECK(
       frame, "Dynamo failed to initialize CPython interpreter frame wrapper");
-  frame->locals = (PyObject*)framelocals_mapping_to_dict(locals);
+  frame->locals =
+      reinterpret_cast<PyObject*>(framelocals_mapping_to_dict(locals));
 
   py::object cache_entry_obj = py::none();
   if (cache_entry) {
@@ -34,7 +35,9 @@ static py::object dynamo_call_callback(
   }
 
   py::object result = callback(
-      py::handle((PyObject*)frame), cache_entry_obj, py::handle(frame_state));
+      py::handle(reinterpret_cast<PyObject*>(frame)),
+      cache_entry_obj,
+      py::handle(frame_state));
   Py_DECREF(frame);
   return result;
 }
@@ -276,7 +279,7 @@ PyObject* dynamo__custom_eval_frame(
   }
 
   if (maybe_cached_code != Py_None) {
-    cached_code = (PyCodeObject*)maybe_cached_code;
+    cached_code = reinterpret_cast<PyCodeObject*>(maybe_cached_code);
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     eval_custom();
@@ -388,7 +391,7 @@ PyObject* dynamo_set_code_exec_strategy(PyObject* dummy, PyObject* args) {
     return nullptr;
   }
 
-  PyCodeObject* code = (PyCodeObject*)code_obj;
+  PyCodeObject* code = reinterpret_cast<PyCodeObject*>(code_obj);
   ExtraState* extra = get_extra_state(code);
   if (extra == nullptr) {
     extra = init_and_set_extra_state(code);

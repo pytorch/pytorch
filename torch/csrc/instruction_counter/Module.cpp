@@ -44,8 +44,8 @@ static long start() {
         c10::utils::str_error(errno).c_str());
     return -1;
   }
-  ioctl((int)fd, PERF_EVENT_IOC_RESET, 0); // Reset the counter
-  ioctl((int)fd, PERF_EVENT_IOC_ENABLE, 0); // Enable the counter
+  ioctl(static_cast<int>(fd), PERF_EVENT_IOC_RESET, 0); // Reset the counter
+  ioctl(static_cast<int>(fd), PERF_EVENT_IOC_ENABLE, 0); // Enable the counter
   return fd;
 #endif
 }

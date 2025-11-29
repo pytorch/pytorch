@@ -353,7 +353,8 @@ static uint64_t get_min_operator_version_from_version_map(
       if (version_entry != get_operator_version_map().end()) {
         const auto& entry = version_entry->second;
         min_version = std::max(
-            min_version, uint64_t(entry[entry.size() - 1].bumped_at_version));
+            min_version,
+            static_cast<uint64_t>(entry[entry.size() - 1].bumped_at_version));
       }
     }
   }

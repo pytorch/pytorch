@@ -80,7 +80,7 @@ static void THPEvent_dealloc(THPEvent* self) {
     pybind11::gil_scoped_release no_gil{};
     self->event.~Event();
   }
-  PyObject_ClearWeakRefs((PyObject*)self);
+  PyObject_ClearWeakRefs(reinterpret_cast<PyObject*>(self));
   Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 

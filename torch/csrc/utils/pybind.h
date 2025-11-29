@@ -237,9 +237,11 @@ struct type_caster<c10::Stream> {
     PyObject* obj = src.ptr();
     if (THPStream_Check(obj)) {
       value = c10::Stream::unpack3(
-          ((THPStream*)obj)->stream_id,
-          static_cast<c10::DeviceIndex>(((THPStream*)obj)->device_index),
-          static_cast<c10::DeviceType>(((THPStream*)obj)->device_type));
+          (reinterpret_cast<THPStream*>(obj))->stream_id,
+          static_cast<c10::DeviceIndex>(
+              (reinterpret_cast<THPStream*>(obj))->device_index),
+          static_cast<c10::DeviceType>(
+              (reinterpret_cast<THPStream*>(obj))->device_type));
       return true;
     }
     return false;

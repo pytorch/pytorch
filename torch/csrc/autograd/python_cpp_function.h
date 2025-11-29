@@ -24,7 +24,7 @@ TORCH_PYTHON_API PyObject* CppFunction_pynew(
   THPObjectPtr obj(type->tp_alloc(type, 0));
   if (!obj)
     return nullptr;
-  THPCppFunction* f = (THPCppFunction*)obj.get();
+  THPCppFunction* f = reinterpret_cast<THPCppFunction*>(obj.get());
   HANDLE_TH_ERRORS
   new (&f->cdata) std::shared_ptr<Node>(Ctor()(args));
   END_HANDLE_TH_ERRORS

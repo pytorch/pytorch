@@ -416,7 +416,8 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
     if (node->hasAttributeS("allowzero")) {
       allowzero = node->i(attr::allowzero);
     }
-    for (size_t i = 0; i < (size_t)(inputTensorValues[1].sizes()[0]); ++i) {
+    for (size_t i = 0; i < static_cast<size_t>(inputTensorValues[1].sizes()[0]);
+         ++i) {
       // All shape dim values should be >= -1
       // onnx::Reshape supports a shape dim value to be zero, in
       // which case the actual dim value remains unchanged. However,

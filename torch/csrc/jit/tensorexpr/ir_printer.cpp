@@ -140,7 +140,7 @@ void IRPrinter::visit(const MaxPtr& v) {
   v->lhs()->accept(this);
   os() << ", ";
   v->rhs()->accept(this);
-  os() << ", " << (unsigned int)v->propagate_nans() << ')';
+  os() << ", " << static_cast<unsigned int>(v->propagate_nans()) << ')';
 }
 
 void IRPrinter::visit(const MinPtr& v) {
@@ -148,7 +148,7 @@ void IRPrinter::visit(const MinPtr& v) {
   v->lhs()->accept(this);
   os() << ", ";
   v->rhs()->accept(this);
-  os() << ", " << (unsigned int)v->propagate_nans() << ')';
+  os() << ", " << static_cast<unsigned int>(v->propagate_nans()) << ')';
 }
 
 void IRPrinter::visit(const CompareSelectPtr& v) {

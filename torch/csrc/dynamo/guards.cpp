@@ -313,18 +313,18 @@ static void TensorGuards_dealloc(TensorGuards* self) {
     delete self->checks;
     self->checks = nullptr;
   }
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
 static PyObject* TensorGuards_new(
     PyTypeObject* type,
     PyObject* args,
     PyObject* kwds) {
-  TensorGuards* self = (TensorGuards*)type->tp_alloc(type, 0);
+  TensorGuards* self = reinterpret_cast<TensorGuards*>(type->tp_alloc(type, 0));
   if (self != nullptr) {
     self->checks = new ChecksList();
   }
-  return (PyObject*)self;
+  return reinterpret_cast<PyObject*>(self);
 }
 
 static std::vector<std::optional<c10::SymInt>> wrapIntegersInOptional(
@@ -569,11 +569,12 @@ PyObject* TensorGuards_check_verbose(
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef TensorGuards_methods[] = {
     {"check",
-     (PyCFunction)(void*)TensorGuards_check,
+     static_cast<PyCFunction>(reinterpret_cast<void*>(TensorGuards_check)),
      METH_VARARGS | METH_KEYWORDS,
      ""},
     {"check_verbose",
-     (PyCFunction)(void*)TensorGuards_check_verbose,
+     static_cast<PyCFunction>(
+         reinterpret_cast<void*>(TensorGuards_check_verbose)),
      METH_VARARGS | METH_KEYWORDS,
      "verbose fail reasons for failed checks"},
     {nullptr} /* Sentinel */
@@ -803,19 +804,19 @@ PyObject* GlobalStateGuard_load(
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef GlobalStateGuard_methods[] = {
     {"check",
-     (PyCFunction)(void*)GlobalStateGuard_check,
+     static_cast<PyCFunction>(reinterpret_cast<void*>(GlobalStateGuard_check)),
      METH_NOARGS,
      "Return true if global state was the same as at creation time"},
     {"reason",
-     (PyCFunction)(void*)GlobalStateGuard_reason,
+     static_cast<PyCFunction>(reinterpret_cast<void*>(GlobalStateGuard_reason)),
      METH_NOARGS,
      "Return string reason for guard check failing"},
     {"__getstate__",
-     (PyCFunction)(void*)GlobalStateGuard_dump,
+     static_cast<PyCFunction>(reinterpret_cast<void*>(GlobalStateGuard_dump)),
      METH_NOARGS,
      "Return serialized json format"},
     {"__setstate__",
-     (PyCFunction)(void*)GlobalStateGuard_load,
+     static_cast<PyCFunction>(reinterpret_cast<void*>(GlobalStateGuard_load)),
      METH_VARARGS,
      "Parse serialized json format"},
     {nullptr}};
@@ -1665,7 +1666,7 @@ class LeafGuard {
   virtual bool check_nopybind(FrameLocalsMapping* map) {
     // throw std::runtime_error("fallback to python");
     // Could fallback to running check on the Python dict (lazily constructed)
-    return check_nopybind((PyObject*)map->to_dict());
+    return check_nopybind(reinterpret_cast<PyObject*>(map->to_dict()));
   }
 
   virtual ~LeafGuard() = default;
@@ -1915,7 +1916,7 @@ class RANGE_ITERATOR_MATCH : public LeafGuard {
     if (Py_TYPE(value) != (void*)_type_id) {
       return false;
     }
-    _PyRangeIterObject* iter = (_PyRangeIterObject*)value;
+    _PyRangeIterObject* iter = reinterpret_cast<_PyRangeIterObject*>(value);
 
 #if IS_PYTHON_3_12_PLUS
     long start = iter->start;
@@ -1956,7 +1957,7 @@ class TUPLE_ITERATOR_LEN : public LeafGuard {
     if (Py_TYPE(value) != (void*)_type_id) {
       return false;
     }
-    _PyTupleIterObject* it = (_PyTupleIterObject*)value;
+    _PyTupleIterObject* it = reinterpret_cast<_PyTupleIterObject*>(value);
     Py_ssize_t length = 0;
     if (it->it_seq)
       length = PyTuple_GET_SIZE(it->it_seq) - it->it_index;
@@ -2122,7 +2123,8 @@ class GLOBAL_STATE : public LeafGuard {
             std::move(user_stack)),
         _guard(PyObject_New(GlobalStateGuard, &GlobalStateGuardType)) {
     _guard->init();
-    owner_ = py::reinterpret_steal<py::object>((PyObject*)_guard);
+    owner_ =
+        py::reinterpret_steal<py::object>(reinterpret_cast<PyObject*>(_guard));
   }
 
   GLOBAL_STATE(
@@ -2132,7 +2134,7 @@ class GLOBAL_STATE : public LeafGuard {
       py::object user_stack)
       : LeafGuard(root, std::move(verbose_code_parts), std::move(user_stack)),
         owner_(std::move(initial_state)),
-        _guard((GlobalStateGuard*)owner_.ptr()) {
+        _guard(reinterpret_cast<GlobalStateGuard*>(owner_.ptr())) {
     if (!PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType)) {
       throw py::type_error("GLOBAL_STATE expects a GlobalStateGuard");
     }
@@ -2764,7 +2766,8 @@ class GuardAccessor {
   virtual bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) {
     // throw std::runtime_error("fallback to python");
     // Could fallback to running check on the Python dict (lazily constructed)
-    return check_nopybind((PyObject*)map->to_dict(), matches_dict_tag);
+    return check_nopybind(
+        reinterpret_cast<PyObject*>(map->to_dict()), matches_dict_tag);
   }
   virtual GuardDebugInfo check_verbose_nopybind(PyObject* obj) = 0;
   virtual std::string repr() const = 0;
@@ -4437,14 +4440,15 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
   template <typename T>
   bool check_nopybind_template(T* value) {
     // Ignore value arg, only used to satisfy the interface
-    const size_t len = (size_t)at::impl::PythonTorchFunctionTLS::stack_len();
+    const size_t len =
+        static_cast<size_t>(at::impl::PythonTorchFunctionTLS::stack_len());
     const size_t ref_stack_size = this->_ref_stack.size();
 
     if (len != ref_stack_size) {
       return false;
     }
 
-    for (int64_t idx = 0; (size_t)idx < len; idx++) {
+    for (int64_t idx = 0; static_cast<size_t>(idx) < len; idx++) {
       std::shared_ptr<c10::SafePyObject> mode =
           at::impl::PythonTorchFunctionTLS::get_stack_at(idx);
 
@@ -4539,7 +4543,7 @@ class TENSOR_MATCH : public LeafGuard {
     LocalState state;
     _tensor_check = std::make_unique<TensorCheck>(
         state,
-        (PyTypeObject*)pytype.ptr(),
+        reinterpret_cast<PyTypeObject*>(pytype.ptr()),
         std::move(tensor),
         dispatch_keys.cast<c10::DispatchKeySet>(),
         std::move(tensor_dims_size),
@@ -5848,13 +5852,13 @@ class TypeGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
-    PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
+    PyObject* x = reinterpret_cast<PyObject*>(Py_TYPE(obj)); // borrowed ref
     return _guard_manager->check_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    PyObject* x = (PyObject*)Py_TYPE(obj); // borrowed ref
+    PyObject* x = reinterpret_cast<PyObject*>(Py_TYPE(obj)); // borrowed ref
     return _guard_manager->check_verbose_nopybind(x);
   }
 
@@ -5900,7 +5904,8 @@ class TypeDictGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
-    PyObject* x = ((PyTypeObject*)obj)->tp_dict; // borrowed ref
+    PyObject* x =
+        (reinterpret_cast<PyTypeObject*>(obj))->tp_dict; // borrowed ref
     if (x == nullptr) {
       return false;
     }
@@ -5909,7 +5914,8 @@ class TypeDictGuardAccessor : public GuardAccessor {
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    PyObject* x = ((PyTypeObject*)obj)->tp_dict; // borrowed ref
+    PyObject* x =
+        (reinterpret_cast<PyTypeObject*>(obj))->tp_dict; // borrowed ref
     if (x == nullptr) {
       return GuardDebugInfo(false, "null type dict on " + repr(), 0);
     }
@@ -5960,13 +5966,15 @@ class TypeMROGuardAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
-    PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
+    PyObject* x =
+        (reinterpret_cast<PyTypeObject*>(obj))->tp_mro; // borrowed ref
     return _guard_manager->check_nopybind(x);
   }
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    PyObject* x = ((PyTypeObject*)obj)->tp_mro; // borrowed ref
+    PyObject* x =
+        (reinterpret_cast<PyTypeObject*>(obj))->tp_mro; // borrowed ref
     return _guard_manager->check_verbose_nopybind(x);
   }
 
@@ -6012,7 +6020,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false)
       override { // borrowed ref
-    _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
+    _PyTupleIterObject* it = reinterpret_cast<_PyTupleIterObject*>(obj);
     PyObject* x =
         PyTuple_GET_ITEM(it->it_seq, it->it_index + _index); // borrowed ref
     if (x == nullptr) {
@@ -6026,7 +6034,7 @@ class TupleIteratorGetItemAccessor : public GuardAccessor {
 
   GuardDebugInfo check_verbose_nopybind(
       PyObject* obj) override { // borrowed ref
-    _PyTupleIterObject* it = (_PyTupleIterObject*)obj;
+    _PyTupleIterObject* it = reinterpret_cast<_PyTupleIterObject*>(obj);
     PyObject* x =
         PyTuple_GET_ITEM(it->it_seq, it->it_index + _index); // borrowed ref
     if (x == nullptr) {
@@ -6762,7 +6770,7 @@ void* convert_to_root_guard_manager(py::object root) {
     return nullptr;
   }
   RootGuardManager* root_mgr = std::move(root).cast<RootGuardManager*>();
-  return (void*)root_mgr;
+  return reinterpret_cast<void*>(root_mgr);
 }
 
 bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
@@ -6777,7 +6785,7 @@ bool run_root_guard_manager(void* root, FrameLocalsMapping* f_locals) {
   std::cout << "#instructions in guard eval = " << n << std::endl << std::flush;
 #endif
 
-  return ((RootGuardManager*)root)->check_nopybind(f_locals);
+  return (static_cast<RootGuardManager*>(root))->check_nopybind(f_locals);
 }
 
 PyObject* torch_c_dynamo_guards_init() {
@@ -6785,11 +6793,12 @@ PyObject* torch_c_dynamo_guards_init() {
   TensorGuardsType.tp_name = "torch._C._dynamo.guards.TensorGuards";
   TensorGuardsType.tp_basicsize = sizeof(TensorGuards);
   TensorGuardsType.tp_itemsize = 0;
-  TensorGuardsType.tp_dealloc = (destructor)TensorGuards_dealloc;
+  TensorGuardsType.tp_dealloc =
+      reinterpret_cast<destructor>(TensorGuards_dealloc);
   TensorGuardsType.tp_flags = Py_TPFLAGS_DEFAULT;
   TensorGuardsType.tp_doc = "Check properties of a torch.Tensor";
   TensorGuardsType.tp_methods = TensorGuards_methods;
-  TensorGuardsType.tp_init = (initproc)TensorGuards_init;
+  TensorGuardsType.tp_init = reinterpret_cast<initproc>(TensorGuards_init);
   TensorGuardsType.tp_new = TensorGuards_new;
 
   if (PyType_Ready(&TensorGuardsType) < 0)
@@ -6801,7 +6810,8 @@ PyObject* torch_c_dynamo_guards_init() {
   GlobalStateGuardType.tp_flags = Py_TPFLAGS_DEFAULT;
   GlobalStateGuardType.tp_doc = "Guard on PyTorch global flags such as no_grad";
   GlobalStateGuardType.tp_methods = GlobalStateGuard_methods;
-  GlobalStateGuardType.tp_init = (initproc)GlobalStateGuard_init;
+  GlobalStateGuardType.tp_init =
+      reinterpret_cast<initproc>(GlobalStateGuard_init);
   GlobalStateGuardType.tp_new = PyType_GenericNew;
 
   if (PyType_Ready(&GlobalStateGuardType) < 0)
@@ -6816,7 +6826,9 @@ PyObject* torch_c_dynamo_guards_init() {
 #endif
 
   Py_INCREF(&TensorGuardsType);
-  if (PyModule_AddObject(m, "TensorGuards", (PyObject*)&TensorGuardsType) < 0) {
+  if (PyModule_AddObject(
+          m, "TensorGuards", reinterpret_cast<PyObject*>(&TensorGuardsType)) <
+      0) {
     Py_DECREF(&TensorGuardsType);
     Py_DECREF(m);
     return nullptr;
@@ -6824,7 +6836,9 @@ PyObject* torch_c_dynamo_guards_init() {
 
   Py_INCREF(&GlobalStateGuardType);
   if (PyModule_AddObject(
-          m, "GlobalStateGuard", (PyObject*)&GlobalStateGuardType) < 0) {
+          m,
+          "GlobalStateGuard",
+          reinterpret_cast<PyObject*>(&GlobalStateGuardType)) < 0) {
     Py_DECREF(&GlobalStateGuardType);
     Py_DECREF(m);
     return nullptr;

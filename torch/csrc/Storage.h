@@ -32,7 +32,8 @@ inline bool THPStorage_Check(PyObject* obj) {
   if (!THPStorageClass)
     return false;
 
-  const auto result = PyObject_IsInstance(obj, (PyObject*)THPStorageClass);
+  const auto result =
+      PyObject_IsInstance(obj, reinterpret_cast<PyObject*>(THPStorageClass));
   if (result == -1)
     throw python_error();
   return result;

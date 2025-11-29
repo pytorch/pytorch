@@ -88,10 +88,8 @@ using make_function_traits_t =
 template <size_t Start, size_t N, size_t... Is>
 struct make_offset_index_sequence_impl
     : make_offset_index_sequence_impl<Start, N - 1, Start + N - 1, Is...> {
-  static_assert(
-      static_cast<int>(Start) >= 0,
-      "make_offset_index_sequence: Start < 0");
-  static_assert(static_cast<int>(N) >= 0, "make_offset_index_sequence: N < 0");
+  static_assert(Start >= 0, "make_offset_index_sequence: Start < 0");
+  static_assert(N >= 0, "make_offset_index_sequence: N < 0");
 };
 
 template <size_t Start, size_t... Is>

@@ -21,7 +21,7 @@ struct StridedData {
   int64_t elementSize;
 
   void step(int dim) {
-    data = (char*)data + (strides[dim] * elementSize);
+    data = static_cast<char*>(data) + (strides[dim] * elementSize);
   }
 };
 

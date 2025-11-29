@@ -108,7 +108,7 @@ namespace torch::utils {
 
 THPByteOrder THP_nativeByteOrder() {
   uint32_t x = 1;
-  return *(uint8_t*)&x ? THP_LITTLE_ENDIAN : THP_BIG_ENDIAN;
+  return *reinterpret_cast<uint8_t*>(&x) ? THP_LITTLE_ENDIAN : THP_BIG_ENDIAN;
 }
 
 template <typename T, typename U>
@@ -175,7 +175,7 @@ TORCH_API void THP_decodeBuffer<bool, bool>(
     bool /*unused*/,
     size_t len) {
   for (const auto i : c10::irange(len)) {
-    dst[i] = (int)src[i] != 0 ? true : false;
+    dst[i] = static_cast<int>(src[i]) != 0 ? true : false;
   }
 }
 

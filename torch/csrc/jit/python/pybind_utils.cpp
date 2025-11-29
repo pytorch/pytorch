@@ -600,11 +600,11 @@ py::object toPyObject(IValue ivalue) {
               : py::cast(*tensor.const_data_ptr<bool>());
         case at::ScalarType::Long:
           return (tensor._is_zerotensor())
-              ? py::cast(int64_t(0))
+              ? py::cast(static_cast<int64_t>(0))
               : py::cast(*tensor.const_data_ptr<int64_t>());
         case at::ScalarType::UInt64:
           return (tensor._is_zerotensor())
-              ? py::cast(uint64_t(0))
+              ? py::cast(static_cast<uint64_t>(0))
               : py::cast(*tensor.const_data_ptr<uint64_t>());
         case at::ScalarType::Double:
           return (tensor._is_zerotensor())

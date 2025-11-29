@@ -54,7 +54,7 @@ enum class PickleOpCode : char {
 
   // Protocol 2
   // NOLINTNEXTLINE(readability-redundant-inline-specifier)
-  PROTO = char('\x80'),
+  PROTO = '\x80',
   NEWOBJ = '\x81',
   EXT1 = '\x82',
   EXT2 = '\x83',
@@ -73,7 +73,7 @@ enum class PickleOpCode : char {
 
   // Protocol 4
   // NOLINTNEXTLINE(readability-redundant-inline-specifier)
-  SHORT_BINUNICODE = char('\x8c'),
+  SHORT_BINUNICODE = '\x8c',
   BINUNICODE8 = '\x8d',
   BINBYTES8 = '\x8e',
   EMPTY_SET = '\x8f',

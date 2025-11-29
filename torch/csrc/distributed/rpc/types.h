@@ -36,7 +36,8 @@ struct TORCH_API GloballyUniqueId final {
 
   struct Hash {
     size_t operator()(const GloballyUniqueId& key) const {
-      return (uint64_t(key.createdOn_) << kLocalIdBits) | key.localId_;
+      return (static_cast<uint64_t>(key.createdOn_) << kLocalIdBits) |
+          key.localId_;
     }
   };
 

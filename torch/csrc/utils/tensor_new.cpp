@@ -130,11 +130,13 @@ ScalarType infer_scalar_type(PyObject* obj) {
 #ifdef USE_NUMPY
   if (is_numpy_available()) {
     if (PyArray_Check(obj)) {
-      return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)obj));
+      return numpy_dtype_to_aten(
+          PyArray_TYPE(reinterpret_cast<PyArrayObject*>(obj)));
     }
     if (PyArray_CheckScalar(obj)) {
       THPObjectPtr arr(PyArray_FromScalar(obj, nullptr));
-      return numpy_dtype_to_aten(PyArray_TYPE((PyArrayObject*)arr.get()));
+      return numpy_dtype_to_aten(
+          PyArray_TYPE(reinterpret_cast<PyArrayObject*>(arr.get())));
     }
   }
 #endif
@@ -437,7 +439,7 @@ Tensor internal_new_from_data(
         tensor = at::empty(sizes, opts.pinned_memory(pin_memory));
         if (c10::multiply_integers(tensor.sizes()) != 0) {
           recursive_store(
-              (char*)tensor.data_ptr(),
+              static_cast<char*>(tensor.data_ptr()),
               tensor.sizes(),
               tensor.strides(),
               0,
@@ -1714,8 +1716,9 @@ Tensor tensor_fromDLPack(PyObject* data) {
 
   if (PyCapsule_IsValid(
           data, at::DLPackTraits<DLManagedTensorVersioned>::capsule)) {
-    auto versioned = (DLManagedTensorVersioned*)PyCapsule_GetPointer(
-        data, at::DLPackTraits<DLManagedTensorVersioned>::capsule);
+    auto versioned =
+        static_cast<DLManagedTensorVersioned*>(PyCapsule_GetPointer(
+            data, at::DLPackTraits<DLManagedTensorVersioned>::capsule));
 
     TORCH_CHECK(versioned != nullptr, bad_capsule);
     TORCH_CHECK(
@@ -1727,8 +1730,8 @@ Tensor tensor_fromDLPack(PyObject* data) {
 
     return tensor_fromDLPackImpl(data, versioned);
   } else {
-    auto managed = (DLManagedTensor*)PyCapsule_GetPointer(
-        data, at::DLPackTraits<DLManagedTensor>::capsule);
+    auto managed = static_cast<DLManagedTensor*>(
+        PyCapsule_GetPointer(data, at::DLPackTraits<DLManagedTensor>::capsule));
     TORCH_CHECK(managed != nullptr, bad_capsule);
     return tensor_fromDLPackImpl(data, managed);
   }

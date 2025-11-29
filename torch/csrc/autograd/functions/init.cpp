@@ -63,7 +63,7 @@ static void addClass(
   createForwardFunctionPyTypeObject<T>(
       type, name, function_properties, function_methods);
   Py_INCREF(&type);
-  PyModule_AddObject(module, name, (PyObject*)&type);
+  PyModule_AddObject(module, name, reinterpret_cast<PyObject*>(&type));
   registerCppFunction(typeid(C), &type);
 }
 
@@ -76,7 +76,7 @@ template <
     PyObject* (*Convert)(ConvertArgT)>
 static PyObject* getTupleAttr(PyObject* obj, void* _unused) {
   HANDLE_TH_ERRORS
-  THPCppFunction* self = (THPCppFunction*)obj;
+  THPCppFunction* self = reinterpret_cast<THPCppFunction*>(obj);
   auto& arr = ((T*)(self->cdata.get()))->*ptr;
   auto num_elems = arr.size();
   THPObjectPtr py_tuple(PyTuple_New(num_elems));
@@ -98,15 +98,15 @@ template <
     PyObject* (*Convert)(ConvertArgT)>
 static PyObject* getValueAttr(PyObject* obj, void* _unused) {
   HANDLE_TH_ERRORS
-  THPCppFunction* self = (THPCppFunction*)obj;
+  THPCppFunction* self = reinterpret_cast<THPCppFunction*>(obj);
   auto& val = ((T*)(self->cdata.get()))->*ptr;
   return Convert(val);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* accumulateGradVar(PyObject* _self, void* _unused) {
-  THPCppFunction* self = (THPCppFunction*)_self;
-  auto grad_acc = (AccumulateGrad*)self->cdata.get();
+  THPCppFunction* self = reinterpret_cast<THPCppFunction*>(_self);
+  auto grad_acc = static_cast<AccumulateGrad*>(self->cdata.get());
   return THPVariable_Wrap(grad_acc->variable);
 }
 

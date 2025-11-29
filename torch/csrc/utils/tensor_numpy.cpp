@@ -200,7 +200,8 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor, bool force /*=false*/) {
   PyObject* py_tensor = THPVariable_Wrap(prepared_tensor);
   if (!py_tensor)
     throw python_error();
-  if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
+  if (PyArray_SetBaseObject(
+          reinterpret_cast<PyArrayObject*>(array.get()), py_tensor) == -1) {
     return nullptr;
   }
   // Use the private storage API
@@ -228,7 +229,7 @@ at::Tensor tensor_from_numpy(
       "expected np.ndarray (got ",
       Py_TYPE(obj)->tp_name,
       ")");
-  auto array = (PyArrayObject*)obj;
+  auto array = reinterpret_cast<PyArrayObject*>(obj);
 
   // warn_if_not_writable is true when a copy of numpy variable is created.
   // the warning is suppressed when a copy is being created.

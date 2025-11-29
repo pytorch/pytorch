@@ -354,7 +354,7 @@ const c10::List<c10::IValue> FlightRecorder<EventType>::getCollectiveTrace(
       auto d = new_dict();
       d.insert(name_key, f.funcname);
       d.insert(filename_key, f.filename);
-      d.insert(line_key, int64_t(f.lineno));
+      d.insert(line_key, static_cast<int64_t>(f.lineno));
       all_frames.emplace_back(std::move(d));
     }
   }

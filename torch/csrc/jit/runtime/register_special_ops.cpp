@@ -114,7 +114,7 @@ void storeLastDimensionFloat(
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
   for (const auto i : c10::irange(n)) {
-    *(float*)data = static_cast<float>(obj[i].to<double>());
+    *reinterpret_cast<float*>(data) = static_cast<float>(obj[i].to<double>());
     data += strides[dim] * elementSize;
   }
 }
@@ -130,7 +130,8 @@ void storeLastDimensionHalf(
   auto seq_size = obj.size();
   checkSequenceSize(n, dim, seq_size);
   for (const auto i : c10::irange(n)) {
-    *(at::Half*)data = at::convert<at::Half, double>(obj[i].to<double>());
+    *reinterpret_cast<at::Half*>(data) =
+        at::convert<at::Half, double>(obj[i].to<double>());
     data += strides[dim] * elementSize;
   }
 }
@@ -209,7 +210,7 @@ void createTensorFromList(Stack& stack) {
 
   if (tensor.numel() != 0) {
     recursiveStore(
-        (char*)tensor.data_ptr(),
+        static_cast<char*>(tensor.data_ptr()),
         sizes,
         tensor.strides(),
         0,
