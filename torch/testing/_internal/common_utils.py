@@ -5160,10 +5160,6 @@ skipIfSlowGradcheckEnv = unittest.skipIf(
     TEST_WITH_SLOW_GRADCHECK,
     "Tests that don't use gradcheck don't need to run on slow_gradcheck CI",
 )
-GRADCHECK_DTYPE_EPS_MAP = {
-    torch.float32: 1e-4,
-    torch.complex64: 1e-4,
-}
 
 
 def gradcheck(fn, inputs, **kwargs):
@@ -5180,20 +5176,6 @@ def gradcheck(fn, inputs, **kwargs):
 
     if TEST_WITH_SLOW_GRADCHECK:
         default_values["fast_mode"] = False
-
-    # set eps based on input dtype
-    if kwargs.get("eps") is None:
-        input_dtype = None
-        if isinstance(inputs, torch.Tensor):
-            input_dtype = inputs.dtype
-        else:
-            # find the first tensor in the inputs sequence
-            for inp in inputs:
-                if isinstance(inp, torch.Tensor):
-                    input_dtype = inp.dtype
-                    break
-        if input_dtype is not None and input_dtype in GRADCHECK_DTYPE_EPS_MAP:
-            default_values["eps"] = GRADCHECK_DTYPE_EPS_MAP[input_dtype]
 
     for key, value in default_values.items():
         # default value override values explicitly set to None

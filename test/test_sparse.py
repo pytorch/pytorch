@@ -61,8 +61,107 @@ if TEST_SCIPY:
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests  # noqa: PLW0127
 
+# def _make_lowp_aware_gradcheck(gradcheck_fn):
+#     """
+#     Wraps a gradcheck function to handle low precision dtypes.
+    
+#     For float64/complex128 inputs: runs gradcheck directly.
+#     For lower precision inputs: compares backward() on device against 
+#     backward() on CPU in float64/complex128.
+#     """
+#     highp_dtypes = (torch.float64, torch.complex128)
+    
+#     def needs_comparison(inputs):
+#         for inp in inputs:
+#             if isinstance(inp, torch.Tensor) and inp.requires_grad and inp.dtype not in highp_dtypes:
+#                 return True
+#         return False
+    
+#     def promote_dtype(dtype):
+#         if dtype.is_complex:
+#             return torch.complex128
+#         return torch.float64
+    
+#     def clone_inputs(inputs, device=None, promote=False):
+#         cloned = []
+#         for inp in inputs:
+#             if isinstance(inp, torch.Tensor):
+#                 new_dtype = promote_dtype(inp.dtype) if promote else inp.dtype
+#                 new_device = device if device is not None else inp.device
+                
+#                 # MUST clone() to get independent copy, especially for sparse tensors
+#                 c = inp.detach().clone()
+                
+#                 # Move to target device FIRST to avoid MPS dtype limitations
+#                 if new_device != c.device:
+#                     c = c.to(device=new_device)
+#                 torch.testing.assert_close(c.cpu(), inp.cpu())
+                
+#                 # Then change dtype if needed
+#                 if new_dtype != c.dtype:
+#                     c = c.to(dtype=new_dtype)
+                
+#                 if inp.requires_grad:
+#                     c = c.requires_grad_(True)
+#                 cloned.append(c)
+#             else:
+#                 cloned.append(inp)
+#         return cloned
+    
+#     def to_dense_if_sparse(t):
+#         if t.is_sparse or t.layout in (torch.sparse_csr, torch.sparse_csc, torch.sparse_bsr, torch.sparse_bsc):
+#             return t.to_dense()
+#         return t
+    
+#     def compute_grads(fn, inputs):
+#         out = fn(*inputs)
+#         if isinstance(out, torch.Tensor) and out.requires_grad:
+#             out.backward(torch.ones_like(out))
+#         return [inp.grad for inp in inputs if isinstance(inp, torch.Tensor) and inp.requires_grad]
+    
+#     @functools.wraps(gradcheck_fn)
+#     def wrapped(fn, inputs, *args, **kwargs):
+#         # Handle single tensor input - don't iterate over it
+#         if isinstance(inputs, torch.Tensor):
+#             inputs = (inputs,)
+#         else:
+#             inputs = tuple(inputs)
+        
+#         if not needs_comparison(inputs):
+#             return gradcheck_fn(fn, inputs, *args, **kwargs)
+        
+#         # Reference: backward on CPU in float64/complex128
+#         ref_inputs = clone_inputs(inputs, device='cpu', promote=False)
+#         ref_grads = compute_grads(fn, ref_inputs)
+        
+#         # Actual backward on original device in original dtype
+#         orig_inputs = clone_inputs(inputs)
+#         orig_grads = compute_grads(fn, orig_inputs)
+        
+#         for i, (orig_g, ref_g) in enumerate(zip(orig_grads, ref_grads)):
+#             # Convert to dense if sparse, then move to CPU for comparison
+#             orig_g_dense = to_dense_if_sparse(orig_g).to(device='cpu')
+#             ref_g_dense = to_dense_if_sparse(ref_g).to(dtype=orig_g.dtype)
+            
+#             print(orig_g_dense)
+#             print(ref_g_dense)
+#             if not torch.allclose(orig_g_dense, ref_g_dense):
+#                 max_diff = (orig_g_dense - ref_g_dense).abs().max()
+#                 raise AssertionError(
+#                     f"Gradient mismatch for input {i} (dtype={orig_g.dtype}). "
+#                     f"Max diff: {max_diff}"
+#                 )
+        
+#         return True
+    
+#     if hasattr(gradcheck_fn, 'masked'):
+#         wrapped.masked = gradcheck_fn.masked
+    
+#     return wrapped
+
 # batched grad doesn't support sparse
 gradcheck = functools.partial(gradcheck, check_batched_grad=False)
+# gradcheck = _make_lowp_aware_gradcheck(gradcheck)
 
 CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda
@@ -83,6 +182,11 @@ def all_sparse_layouts(test_name='layout', include_strided=False):
 def gradcheck_semantics(test_name='gradcheck'):
     gradcheck_sparse = functools.partial(gradcheck, masked=False)
     gradcheck_masked = functools.partial(gradcheck, masked=True)
+    
+    # Wrap both versions
+    # gradcheck_sparse = _make_lowp_aware_gradcheck(gradcheck_sparse)
+    # gradcheck_masked = _make_lowp_aware_gradcheck(gradcheck_masked)
+    
     gradcheck_sparse.masked = False
     gradcheck_masked.masked = True
     return parametrize(test_name, [
@@ -1696,8 +1800,7 @@ class TestSparse(TestSparseBase):
             def fn(S, D):
                 return torch.sparse.mm(S, D)
 
-            kwargs = {"atol": 2e-5} if dtype == torch.float32 else {}
-            gradcheck(fn, (S, D), masked=True, **kwargs)
+            gradcheck(fn, (S, D), masked=True)
 
         test_shape(7, 8, 9, 20, False)
         test_shape(7, 8, 9, 20, True)
@@ -1720,6 +1823,7 @@ class TestSparse(TestSparseBase):
             self.assertEqual((a * b).to_dense(), a.to_dense() * b.to_dense())
             gradcheck(lambda x, y: (x * y).to_dense(), [a, b])
             # Issues with 0-dim indices/values
+            # gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True)
             kwargs = {"eps": 3e-4, "atol": 5e-5} if dtype == torch.float32 else {}
             gradcheck(lambda x, y: torch.sparse.sum(x * y).to_dense(), [a, b], masked=True, **kwargs)
 
@@ -2264,10 +2368,17 @@ class TestSparse(TestSparseBase):
                 # sparsity_pattern(lhs) == sparsity_pattern(lhs.grad).
                 # lhs.sparse_mask(lhs_mask) accomplishes that.
                 lhs_mask = lhs.detach().clone()
-                kwargs = {"eps": 3e-4, "atol": 5e-5} if dtype in [torch.float32, torch.complex64] else {}
-                gradcheck(lambda x: x.sparse_mask(lhs_mask).sparse_mask(rhs).to_dense(masked_grad=True), (lhs,),
-                          masked=True, **kwargs)
-                gradcheck(lambda x: x.sparse_mask(rhs).to_dense(masked_grad=False), (lhs,), masked=False, **kwargs)
+                lhs_mask = lhs.detach().clone()
+                gradcheck(
+                    lambda x, mask, r: x.sparse_mask(mask).sparse_mask(r).to_dense(masked_grad=True),
+                    (lhs, lhs_mask, rhs),
+                    masked=True
+                )
+                gradcheck(
+                    lambda x, r: x.sparse_mask(r).to_dense(masked_grad=False),
+                    (lhs, rhs),
+                    masked=False
+                )
 
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)

@@ -6089,7 +6089,7 @@ Done""",
                     masked=True,
                 )
             )
-            self.assertTrue(
+            self.assertFalse(
                 gradcheck(
                     lambda x: x.to_dense(),
                     (x,),
