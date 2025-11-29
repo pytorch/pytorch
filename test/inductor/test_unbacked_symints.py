@@ -650,7 +650,7 @@ class TestUnbackedSymints(InductorTestCase):
         torch.testing.assert_close(actual, expected)
 
     @skipIfXpu(
-        msg="Invalid SPIR-V modul,https://github.com/intel/torch-xpu-ops/issues/2329"
+        msg="Invalid SPIR-V module,https://github.com/intel/torch-xpu-ops/issues/2329"
     )
     @skipGPUIf(not HAS_GPU, "requires gpu and triton")
     @inductor_config.patch({"max_autotune": True})
