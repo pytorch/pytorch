@@ -395,10 +395,10 @@ def _build_prefix_set(fqns: list[str]) -> set[str]:
     """
     prefix_set: set[str] = set()
     for fqn in fqns:
-        parts = fqn.split(".")
-        for i in range(1, len(parts)):
-            # add prefixes ending with '.'
-            prefix_set.add(".".join(parts[:i]) + ".")
+        # add prefixes ending with '.'
+        for i, ch in enumerate(fqn):
+            if ch == '.':
+                prefix_set.add(fqn[:i+1])
         # add the full name without trailing '.'
         prefix_set.add(fqn)
     return prefix_set
