@@ -1065,6 +1065,10 @@ if sys.version_info >= (3, 12):
     )
 
 
+if sys.version_info >= (3, 14):
+    _builtin_final_typing_classes += (typing.Union,)
+
+
 def is_typing(value: Any) -> bool:
     # _Final catches most of typing classes:
     #   - Any
