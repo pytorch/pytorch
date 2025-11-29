@@ -72,8 +72,6 @@ from .user_defined import UserDefinedObjectVariable
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
-    from .constant import ConstantVariable
-
 
 def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
     """
@@ -232,7 +230,7 @@ class NNModuleVariable(VariableTracker):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> "ConstantVariable":
+    ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
         install_guard(

@@ -1,6 +1,5 @@
 import enum
 import types
-from collections.abc import Callable
 from typing import Optional, overload
 
 from torch._dynamo.guards import GuardManagerWrapper
@@ -28,7 +27,6 @@ class _CacheEntry:
     compile_id: CompileId
     # If we run into circular issues, just use object
     guard_manager: GuardManagerWrapper
-    backend: Callable
     next: _CacheEntry | None
 
 class _PrecompileEntry:

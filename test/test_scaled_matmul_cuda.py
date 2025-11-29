@@ -11,14 +11,7 @@ from typing import Optional
 import torch
 
 
-from torch.nn.functional import (
-    grouped_mm,
-    pad,
-    scaled_mm,
-    scaled_grouped_mm,
-    ScalingType,
-    SwizzleType,
-)
+from torch.nn.functional import pad, scaled_mm, scaled_grouped_mm, ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     _get_torch_cuda_version,
@@ -792,7 +785,7 @@ class TestFP8Matmul(TestCase):
         )
 
         # bf16 reference output
-        y_bf16 = grouped_mm(
+        y_bf16 = torch._grouped_mm(
             # Note: Reference result should be on reconstructed, not original values.
             #       as-in float(fp4(t)) not t itself.
             xh, wh.t(), offs=input_group_end_offsets, out_dtype=torch.bfloat16
@@ -938,7 +931,7 @@ class TestFP8Matmul(TestCase):
         # Compute reference bf16 grouped gemm.
         # Note: Reference result should be on reconstructed, not original values.
         #       as-in float(fp4(t)) not t itself.
-        y_bf16 = grouped_mm(
+        y_bf16 = torch._grouped_mm(
             xh,
             wh.transpose(-2, -1),
             offs=input_group_end_offsets,

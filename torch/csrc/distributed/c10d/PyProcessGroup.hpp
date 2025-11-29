@@ -339,7 +339,7 @@ class TORCH_PYTHON_API PythonOnCompletionHook {
         eptr = std::make_exception_ptr(std::runtime_error(e.what()));
         e.restore();
         PyErr_Clear();
-      } catch (std::exception&) {
+      } catch (std::exception& e) {
         eptr = std::current_exception();
       }
     }

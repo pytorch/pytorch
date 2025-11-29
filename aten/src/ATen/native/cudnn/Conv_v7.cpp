@@ -93,10 +93,11 @@ std::ostream& operator<<(std::ostream& out, const ConvolutionArgs& args) {
       << "input: " << args.idesc // already has a trailing newline
       << "output: " << args.odesc // already has a trailing newline
       << "weight: " << args.wdesc // already has a trailing newline
-      << "Pointer addresses: " << '\n'
-      << "    input: " << args.input.const_data_ptr() << '\n'
-      << "    output: " << args.output.const_data_ptr() << '\n'
-      << "    weight: " << args.weight.const_data_ptr() << '\n';
+      << "Pointer addresses: "
+      << "\n"
+      << "    input: " << args.input.const_data_ptr() << "\n"
+      << "    output: " << args.output.const_data_ptr() << "\n"
+      << "    weight: " << args.weight.const_data_ptr() << "\n";
 
   return out;
 }
@@ -774,7 +775,7 @@ void raw_cudnn_convolution_forward_out_32bit(
             args,
             "Forward algorithm: ",
             static_cast<int>(fwdAlgPerf.algo),
-            '\n');
+            "\n");
       });
 }
 

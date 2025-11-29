@@ -2280,11 +2280,11 @@ class BuiltinVariable(VariableTracker):
                     "1 kwargs (`strict`)",
                     f"{len(kwargs)} kwargs",
                 )
-        strict = kwargs.pop("strict", ConstantVariable.create(False))
+        strict = kwargs.pop("strict", False)
         iter_args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(
             iter_args,
-            strict=strict.as_python_constant(),
+            strict=strict,  # type: ignore[arg-type]
             mutation_type=ValueMutationNew(),
         )
 

@@ -576,17 +576,6 @@ def insert_deferred_runtime_asserts(
                 if i0 in constrained_unbacked_symbols:
                     continue  # constrain symbol just once
 
-                if i0 in shape_env.size_like:
-                    if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range_for_size.default,
-                            (expr_to_proxy[i0].node,),
-                        )
-                    else:
-                        graph.call_function(
-                            torch._check_is_size, (expr_to_proxy[i0].node,)
-                        )
-
                 vr = shape_env.var_to_range[i0]
                 if vr.is_int and vr.upper == sys.maxsize - 1:
                     # treat upper bound == sys.maxsize - 1 for int symbols as +oo
