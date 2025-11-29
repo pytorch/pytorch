@@ -191,8 +191,8 @@ class TestDebugUtilsDevice(TestCase):
 
 instantiate_device_type_tests(TestDebugUtils, globals())
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(TestDebugUtilsDevice, globals(), only_for=devices)
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(TestDebugUtilsDevice, globals(), only_for=devices, allow_xpu=True)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
