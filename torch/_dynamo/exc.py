@@ -646,12 +646,10 @@ def augment_exc_message(exc: Exception, msg: str = "\n", export: bool = False) -
     old_msg = "" if len(exc.args) == 0 else str(exc.args[0])
 
     if isinstance(exc, KeyError):
-        exc.args = (KeyErrorMsg(old_msg + msg),) + (
-            exc.args[1:] if len(exc.args) > 1 else ()
-        )
+        exc.args = (KeyErrorMsg(old_msg + msg),) + exc.args[1:]
     else:
         new_msg = old_msg + msg
-        exc.args = (new_msg,) + (exc.args[1:] if len(exc.args) > 1 else ())
+        exc.args = (new_msg,) + exc.args[1:]
 
 
 def get_exc_message(
