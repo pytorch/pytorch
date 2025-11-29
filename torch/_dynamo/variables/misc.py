@@ -2126,7 +2126,7 @@ class WeakRefVariable(VariableTracker):
         codegen.extend_output(create_call_function(2, False))
 
     def is_python_hashable(self):
-        return True
+        return self.referent_vt.is_python_hashable()
 
     def get_python_hash(self):
         # weakref relies on the referent's hash
