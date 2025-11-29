@@ -1428,6 +1428,20 @@ class TensorVariable(VariableTracker):
             self.proxy.node._rename(name)
             self._is_name_set = True
 
+    def is_python_hashable(self):
+        # Tensors are hashable if they have an example_value (a fake tensor)
+        # Most VT's should have one.
+        # It'd be nice if at some point we could assert that they all have one
+        return self.as_proxy().node.meta["example_value"] is not None
+
+    def get_python_hash(self):
+        return hash(self.as_proxy().node.meta["example_value"])
+
+    def is_python_equal(self, other):
+        a = self.as_proxy().node.meta["example_value"]
+        b = other.as_proxy().node.meta["example_value"]
+        return a is b
+
 
 class SymNodeVariable(VariableTracker):
     """
@@ -1515,6 +1529,20 @@ class SymNodeVariable(VariableTracker):
                 *proxy_args_kwargs([self, *args], kwargs),
             ),
         )
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        # Essentially convert the SymNode to a constant variable whenever its
+        # searched for a dict key.
+        return hash(self.evaluate_expr())
+
+    def is_python_equal(self, other):
+        if isinstance(other, SymNodeVariable):
+            return self.evaluate_expr() == other.evaluate_expr()
+        # could be constant variable as well
+        return self.evaluate_expr() == other.as_python_constant()
 
 
 class NumpyNdarrayVariable(TensorVariable):
