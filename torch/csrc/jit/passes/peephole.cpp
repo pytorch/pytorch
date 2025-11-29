@@ -2,8 +2,6 @@
 
 #include <ATen/core/jit_type.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
-#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/concat_opt.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
@@ -11,7 +9,6 @@
 #include <torch/csrc/jit/passes/peephole_dict_idioms.h>
 #include <torch/csrc/jit/passes/peephole_list_idioms.h>
 #include <torch/csrc/jit/passes/peephole_non_tensor.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
 
 namespace torch::jit {
 
