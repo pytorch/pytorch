@@ -2381,9 +2381,6 @@ class FunctoolsPartialVariable(VariableTracker):
         return hash((func_hash, *args_hash, *values_hash))
 
     def is_python_equal(self, other):
-        if self is other:
-            return True
-
         return (
             self.func.is_python_equal(other.func)
             and all(

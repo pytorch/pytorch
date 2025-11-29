@@ -52,8 +52,8 @@ if TYPE_CHECKING:
 
 
 # [Adding a new supported class within the keys of ConstDictVariable]
-# - Add its tracker type to is_hashable
-# - (perhaps) Define how it is compared in _HashableTracker._eq_impl
+# - Implement is_python_hashable() method in the VariableTracker subclass
+# - Implement get_python_hash() and is_python_equal() methods for hashable types
 
 
 def was_instancecheck_override(obj: Any) -> bool:
@@ -113,6 +113,16 @@ class ConstDictVariable(VariableTracker):
             self.vt = vt
 
         def __hash__(self) -> int:
+            """
+            Computes the hash value for the wrapped VariableTracker.
+
+            For unrealized LazyVariableTrackers, uses the hash of the original value
+            to avoid realizing the tracker and inserting unnecessary guards.
+            For all other cases, delegates to the VariableTracker's get_python_hash method.
+
+            Returns:
+                The hash value of the underlying variable tracker
+            """
             if (
                 isinstance(self.vt, variables.LazyVariableTracker)
                 and not self.vt.is_realized()
@@ -122,6 +132,20 @@ class ConstDictVariable(VariableTracker):
             return self.vt.get_python_hash()
 
         def __eq__(self, other) -> bool:
+            """
+            Checks equality between two _HashableTracker instances.
+
+            Delegates to the VariableTracker's is_python_equal method to compare
+            the underlying variable trackers for Python-level equality.
+
+            Args:
+                other: Another _HashableTracker instance to compare with
+
+            Returns:
+                True if the underlying variable trackers are Python-equal, False otherwise
+            """
+            if self.vt is other.vt:
+                return True
             return self.vt.is_python_equal(other.vt)
 
     def __init__(
@@ -798,6 +822,9 @@ class ConstDictVariable(VariableTracker):
         return super().clone(**kwargs)
 
     def is_python_hashable(self):
+        """
+        Dictionaries are mutable and therefore not hashable in Python.
+        """
         return False
 
 
@@ -1314,6 +1341,9 @@ class FrozensetVariable(SetVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def is_python_hashable(self):
+        """
+        Frozensets are immutable and hashable in Python.
+        """
         return True
 
     def get_python_hash(self):
@@ -1513,4 +1543,7 @@ class DictItemsVariable(DictViewVariable):
         return super().call_method(tx, name, args, kwargs)
 
     def is_python_hashable(self):
+        """
+        Dictionary item views are not hashable in Python.
+        """
         return False

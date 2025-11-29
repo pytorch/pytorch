@@ -1761,7 +1761,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return True
 
     def get_python_hash(self):
-        return hash(id(self.value))
+        # default hash
+        return hash(self.value)
 
     def is_python_equal(self, other):
         # id check

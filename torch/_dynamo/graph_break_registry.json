@@ -3689,5 +3689,27 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0365": [
+    {
+      "Gb_type": "Dynamo cannot determine the hash of an object",
+      "Context": "get_python_hash {self}",
+      "Explanation": "Dynamo does not know the hash of the underlying python object for {self}",
+      "Hints": [
+        "Consider using a different type of object as the dictionary key instead of {self.python_type()}.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0366": [
+    {
+      "Gb_type": "Dynamo cannot determine the equality comparison of an object",
+      "Context": "is_python_equal {self}",
+      "Explanation": "Dynamo does not know the equality comparison of the underlying python object for {self}",
+      "Hints": [
+        "Consider using a different type of object as the dictionary key instead of {self.python_type()}.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

@@ -705,14 +705,34 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Unlike the variable tracker’s own __hash__, this method is used by
         ConstDictVariableTracker to compute the hash of the underlying key object.
         """
-        raise RuntimeError(f"Missing get_python_hash implementation for {self}")
+        unimplemented(
+            gb_type="Dynamo cannot determine the hash of an object",
+            context=f"get_python_hash {self}",
+            explanation=f"Dynamo does not know the hash of the underlying python object for {self}",
+            hints=[
+                (
+                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
+                ),
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def is_python_equal(self, other):
         """
         NB - Deliberately not overriding the __eq__ method because that can
         disable the __hash__ for the vt itself.
         """
-        raise RuntimeError(f"Missing is_python_equal implementation for {self}")
+        unimplemented(
+            gb_type="Dynamo cannot determine the equality comparison of an object",
+            context=f"is_python_equal {self}",
+            explanation=f"Dynamo does not know the equality comparison of the underlying python object for {self}",
+            hints=[
+                (
+                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
+                ),
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def __init__(
         self,
