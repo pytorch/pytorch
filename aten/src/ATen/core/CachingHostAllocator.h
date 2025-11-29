@@ -70,17 +70,17 @@ struct PinnedReserveSegment {
     // Round up the requested size to 4KB boundary for all including the small ones.
     size_t rounded_bytes = (bytes + 4096 - 1) & ~(4096 - 1);
 
-    if (((uint8_t*)current_ptr_ + rounded_bytes) > ((uint8_t*)start_ + size_)) {
+    if ((static_cast<uint8_t*>(current_ptr_) + rounded_bytes) > (static_cast<uint8_t*>(start_) + size_)) {
       return nullptr;
     }
 
     void* ptr = current_ptr_;
-    current_ptr_ = (uint8_t*)current_ptr_ + rounded_bytes;
+    current_ptr_ = static_cast<uint8_t*>(current_ptr_) + rounded_bytes;
     return ptr;
   }
 
   bool owns(void* ptr) {
-    return ptr >= start_ && ptr < (uint8_t*)start_ + size_;
+    return ptr >= start_ && ptr < static_cast<uint8_t*>(start_) + size_;
   }
 
   std::mutex mutex_;
