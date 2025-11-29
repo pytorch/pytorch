@@ -14,6 +14,7 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
+import torch.fx.graph as fx_graph
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
@@ -303,6 +304,26 @@ pytree.register_constant(CustomConstantType)
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        self._fx_magic_methods_snapshot = fx_graph.magic_methods.copy()
+        self._saved_default_device_context = getattr(
+            torch._GLOBAL_DEVICE_CONTEXT, "device_context", None
+        )
+
+    def tearDown(self):
+        fx_graph.magic_methods.clear()
+        fx_graph.magic_methods.update(self._fx_magic_methods_snapshot)
+
+        current_ctx = getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+        if current_ctx is not self._saved_default_device_context:
+            if self._saved_default_device_context is None:
+                torch.set_default_device(None)
+            else:
+                torch.set_default_device(self._saved_default_device_context.device)
+
+        super().tearDown()
+
     def _tracefunc(self, frame, event, arg):
         if event != "call":
             return
