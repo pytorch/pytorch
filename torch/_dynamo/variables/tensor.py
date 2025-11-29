@@ -1530,6 +1530,20 @@ class SymNodeVariable(VariableTracker):
             ),
         )
 
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        # Essentially convert the SymNode to a constant variable whenever its
+        # searched for a dict key.
+        return hash(self.evaluate_expr())
+
+    def is_python_equal(self, other):
+        if isinstance(other, SymNodeVariable):
+            return self.evaluate_expr() == other.evaluate_expr()
+        # could be constant variable as well
+        return self.evaluate_expr() == other.as_python_constant()
+
 
 class NumpyNdarrayVariable(TensorVariable):
     """

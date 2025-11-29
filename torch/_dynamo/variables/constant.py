@@ -349,6 +349,10 @@ its type to `common_constant_types`.
 
     def is_python_equal(self, other):
         # Could be an EnumVariable as well
+        from .tensor import SymNodeVariable
+
+        if isinstance(other, SymNodeVariable):
+            return self.as_python_constant() == other.evaluate_expr()
         return self.as_python_constant() == other.as_python_constant()
 
 
