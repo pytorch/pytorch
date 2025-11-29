@@ -74,7 +74,7 @@ class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[2, 3]"):
         l_x_ = L_x_
 
-        sub: "f32[2, 3]" = l_x_.sub(1);  l_x_ = None
+        sub: "f32[2, 3]" = l_x_ - 1;  l_x_ = None
         sin: "f32[2, 3]" = torch.sin(sub);  sub = None
         return (sin,)
 """,  # NOQA: B950
