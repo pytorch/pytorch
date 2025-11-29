@@ -2683,6 +2683,12 @@ def pointwise(
                             )
                         ]
                     )
+            if torch.xpu.is_available():
+                configs.extend(
+                    [  # intel-xpu-backend-for-triton #5133
+                        triton_config_with_settings(size_hints, 32),
+                    ]
+                )
     if len(size_hints) == 2:
         # Only avoiding tuning on TileHint.SQUARE if not on ROCm builds
         # ROCm has observed improvement by diverging here
@@ -2720,6 +2726,13 @@ def pointwise(
                         triton_config_with_settings(
                             size_hints, 32, 512
                         ),  # +30% for some kernels
+                    ]
+                )
+            if torch.xpu.is_available():
+                configs.extend(
+                    [
+                        # intel-xpu-backend-for-triton #5198
+                        triton_config_with_settings(size_hints, 32, 32, num_warps=8),
                     ]
                 )
     if len(size_hints) == 3:
