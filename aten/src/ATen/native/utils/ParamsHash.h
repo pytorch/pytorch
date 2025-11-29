@@ -23,7 +23,7 @@ struct ParamsHash {
       value ^= ptr[i];
       value *= 0x01000193;
     }
-    return (size_t)value;
+    return static_cast<size_t>(value);
   }
 };
 
@@ -97,7 +97,7 @@ struct ParamsWrapperHash {
       value ^= ptr[i];
       value *= 0x01000193;
     }
-    return (size_t)value;
+    return static_cast<size_t>(value);
   }
 };
 

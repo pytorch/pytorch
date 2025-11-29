@@ -194,7 +194,7 @@ class TORCH_API RecordFunctionCallback {
   }
 
   bool checkScope(RecordScope sc) const {
-    return scopes_[(size_t)sc];
+    return scopes_[static_cast<size_t>(sc)];
   }
 
   StartCallback start() const {
