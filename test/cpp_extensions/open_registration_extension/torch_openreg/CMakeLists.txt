@@ -30,6 +30,8 @@ set(CMAKE_INSTALL_MESSAGE NEVER)
 set(Torch_DIR ${PYTORCH_INSTALL_DIR}/share/cmake/Torch)
 find_package(Torch REQUIRED)
 
+include_directories(${PYTORCH_INSTALL_DIR}/../third_party/kineto/libkineto/include)
+
 if(DEFINED PYTHON_INCLUDE_DIR)
   include_directories(${PYTHON_INCLUDE_DIR})
 else()
