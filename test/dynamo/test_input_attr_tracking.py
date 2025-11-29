@@ -328,7 +328,7 @@ class GraphModule(torch.nn.Module):
 
         _lower_version_count_by_1 = torch__dynamo_variables_builtin__lower_version_count_by_1(set_);  set_ = _lower_version_count_by_1 = None
 
-        mul: "f32[2, 2]" = l_x_ * l_y_;  l_x_ = l_y_ = None
+        mul: "f32[2, 2]" = l_x_.mul(l_y_);  l_x_ = l_y_ = None
         return (mul,)
 """,
         )

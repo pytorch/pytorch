@@ -3826,10 +3826,10 @@ def forward(self, pred, x):
     arg0, arg1, = fx_pytree.tree_flatten_spec(([pred, x], {}), self._in_spec)
     l_pred_ = arg0
     l_x_ = arg1
-    a = torch.ones(6, 4)
-    b = torch.ones(6, 4)
-    c = torch.ones(6, 4)
-    d = torch.ones(6, 4)
+    a = torch.ones(6, 4, device = device(type='cpu'))
+    b = torch.ones(6, 4, device = device(type='cpu'))
+    c = torch.ones(6, 4, device = device(type='cpu'))
+    d = torch.ones(6, 4, device = device(type='cpu'))
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
     cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (a, b, l_x_, d, c));  l_pred_ = cond_true_0 = cond_false_0 = a = b = l_x_ = d = c = None
