@@ -137,7 +137,7 @@ struct UnwindCache {
         [](struct dl_phdr_info* info,
            size_t size [[maybe_unused]],
            void* data) {
-          Version* v = (Version*)data;
+          Version* v = static_cast<Version*>(data);
           v->adds_ = info->dlpi_adds;
           v->subs_ = info->dlpi_subs;
           return 1;
@@ -153,12 +153,14 @@ struct UnwindCache {
         [](struct dl_phdr_info* info,
            size_t size [[maybe_unused]],
            void* data) {
-          auto self = (UnwindCache*)data;
+          auto self = static_cast<UnwindCache*>(data);
           uint64_t last_addr = 0;
-          auto segments = (Elf64_Phdr*)info->dlpi_phdr;
+          auto segments = const_cast<Elf64_Phdr*>(info->dlpi_phdr);
           for (auto i : c10::irange(info->dlpi_phnum)) {
             if (segments[i].p_type == PT_LOAD) {
-              auto begin = ((uint64_t)info->dlpi_addr + segments[i].p_vaddr);
+              auto begin =
+                  (static_cast<uint64_t>(info->dlpi_addr) +
+                   segments[i].p_vaddr);
               auto end = (begin + segments[i].p_memsz);
               last_addr = std::max(end, last_addr);
             }

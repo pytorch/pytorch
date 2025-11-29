@@ -40,7 +40,7 @@ struct NVTXThreadLocalState : ProfilerStateBase {
       at::TensorImpl* tensor,
       at::RecordFunctionHandle op_id,
       int output_nr) {
-    producer_tensor_map_[(void*)tensor] =
+    producer_tensor_map_[reinterpret_cast<void*>(tensor)] =
         std::pair<at::RecordFunctionHandle, int>{op_id, output_nr};
   }
 
@@ -60,8 +60,9 @@ std::pair<at::RecordFunctionHandle, int> NVTXThreadLocalState::getOpIdFromInput(
   if (tensor.defined()) {
     at::TensorImpl* ten_addr = tensor.unsafeGetTensorImpl();
     // See if Address is in the map already
-    if (producer_tensor_map_.count((void*)ten_addr) > 0) {
-      producer_op_pair = producer_tensor_map_[(void*)ten_addr];
+    if (producer_tensor_map_.count(reinterpret_cast<void*>(ten_addr)) > 0) {
+      producer_op_pair =
+          producer_tensor_map_[reinterpret_cast<void*>(ten_addr)];
     }
   }
   return producer_op_pair;

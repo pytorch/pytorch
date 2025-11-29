@@ -510,12 +510,13 @@ struct TORCH_API SourceRange {
     }
 
     auto lineno = source_view_->lineno_for_offset(start_);
-    auto col_offset = (int)start_ - (int)source_view_->offset_for_line(lineno);
+    auto col_offset = static_cast<int>(start_) -
+        static_cast<int>(source_view_->offset_for_line(lineno));
     // TODO: std::optional<>::value returns an rvalue ref so can't use it here??
     return std::make_tuple<std::string, size_t, size_t>(
         source_view_->filename().value_or(""),
         source_view_->lineno_to_source_lineno(lineno),
-        (size_t)col_offset);
+        static_cast<size_t>(col_offset));
   }
 
   bool operator==(const SourceRange& rhs) const {

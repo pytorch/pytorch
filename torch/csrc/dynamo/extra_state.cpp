@@ -82,7 +82,7 @@ FrameState* extract_frame_state(ExtraState* extra_state) {
   if (extra_state == nullptr) {
     return nullptr;
   }
-  return (FrameState*)extra_state->frame_state.ptr();
+  return static_cast<FrameState*>(extra_state->frame_state.ptr());
 }
 
 FrameExecStrategy extra_state_get_exec_strategy(ExtraState* extra_state) {
@@ -97,19 +97,22 @@ void extra_state_set_exec_strategy(
 
 ExtraState* get_extra_state(PyCodeObject* code) {
   ExtraState* extra = nullptr;
-  _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
+  _PyCode_GetExtra(
+      reinterpret_cast<PyObject*>(code),
+      extra_index,
+      reinterpret_cast<void**>(&extra));
   return extra;
 }
 
 void destroy_extra_state(void* obj) {
-  ExtraState* extra = (ExtraState*)obj;
+  ExtraState* extra = static_cast<ExtraState*>(obj);
   delete extra;
 }
 
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   ExtraState* old_extra_state = get_extra_state(code);
   CHECK(extra_state == nullptr || old_extra_state != extra_state);
-  _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
+  _PyCode_SetExtra(reinterpret_cast<PyObject*>(code), extra_index, extra_state);
 }
 
 ExtraState* init_and_set_extra_state(PyCodeObject* code) {
@@ -173,7 +176,8 @@ void lookup(
       } catch (py::error_already_set& e) {
         if (guard_error_hook) {
           py::handle guard_error_hook_handle(guard_error_hook);
-          py::handle f_locals_dict = (PyObject*)f_locals->to_dict();
+          py::handle f_locals_dict =
+              reinterpret_cast<PyObject*>(f_locals->to_dict());
           guard_error_hook_handle(
               cache_entry.guard_manager,
               cache_entry.code,
@@ -233,7 +237,7 @@ py::list _debug_get_cache_entry_list(const py::handle& code_obj) {
   if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
     throw py::type_error("expected a code object!");
   }
-  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  PyCodeObject* code = reinterpret_cast<PyCodeObject*>(code_obj.ptr());
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
@@ -256,7 +260,7 @@ void _reset_precompile_entries(const py::handle& code_obj) {
   if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
     throw py::type_error("expected a code object!");
   }
-  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  PyCodeObject* code = reinterpret_cast<PyCodeObject*>(code_obj.ptr());
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {
@@ -271,7 +275,7 @@ void _load_precompile_entry(
   if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
     throw py::type_error("expected a code object!");
   }
-  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  PyCodeObject* code = reinterpret_cast<PyCodeObject*>(code_obj.ptr());
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra == nullptr) {
@@ -294,7 +298,7 @@ py::list _debug_get_precompile_entries(const py::handle& code_obj) {
   if (!py::isinstance(code_obj, py::module::import("types").attr("CodeType"))) {
     throw py::type_error("expected a code object!");
   }
-  PyCodeObject* code = (PyCodeObject*)code_obj.ptr();
+  PyCodeObject* code = reinterpret_cast<PyCodeObject*>(code_obj.ptr());
   ExtraState* extra = get_extra_state(code);
   py::list result;
   if (extra != nullptr) {

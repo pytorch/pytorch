@@ -4482,9 +4482,9 @@ std::tuple<Tensor, Tensor> triangular_solve_backward(
         grad_a =
             transpose ? -x.conj().matmul(grad_b.mT()) : -grad_b.matmul(x.mH());
         if (upper) {
-          grad_a = grad_a.triu((int)unitriangular);
+          grad_a = grad_a.triu(static_cast<int>(unitriangular));
         } else {
-          grad_a = grad_a.tril(-((int)unitriangular));
+          grad_a = grad_a.tril(-(static_cast<int>(unitriangular)));
         }
       }
     }

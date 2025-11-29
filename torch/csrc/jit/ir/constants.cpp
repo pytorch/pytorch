@@ -157,7 +157,7 @@ std::optional<IValue> toIValue(const Value* v) {
   if (type->isSubtypeOf(*TensorType::get())) {
     return node->t(attr::value);
   } else if (type->isSubtypeOf(*BoolType::get())) {
-    return (bool)node->i(attr::value);
+    return static_cast<bool>(node->i(attr::value));
   } else if (
       type->isSubtypeOf(*NumberType::get()) &&
       node->kindOf(attr::value) == AttributeKind::i) {

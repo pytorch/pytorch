@@ -43,10 +43,10 @@ struct Action {
         out << 'u';
         break;
       case A_REG_PLUS_DATA:
-        out << 'r' << (int)self.reg << " + " << self.data;
+        out << 'r' << static_cast<int>(self.reg) << " + " << self.data;
         break;
       case A_REG_PLUS_DATA_DEREF:
-        out << "*(r" << (int)self.reg << " + " << self.data << ')';
+        out << "*(r" << static_cast<int>(self.reg) << " + " << self.data << ')';
         break;
       case A_LOAD_CFA_OFFSET:
         out << "*(cfa + " << self.data << ')';

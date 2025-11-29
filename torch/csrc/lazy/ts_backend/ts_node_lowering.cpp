@@ -92,7 +92,7 @@ torch::lazy::TSOpVector DeviceData::Lower(
     torch::lazy::TSLoweringContext* loctx) const {
   auto infoptr = data_->info();
   auto deviceDataInfoPtr =
-      (torch::lazy::LazyGraphExecutor::DeviceDataInfo*)infoptr;
+      static_cast<torch::lazy::LazyGraphExecutor::DeviceDataInfo*>(infoptr);
   if (GRAPH_DUMP_ENABLED) {
     LOG(ERROR) << "Lowering device data node, tensor id "
                << deviceDataInfoPtr->tensor_id << '\n';

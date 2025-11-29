@@ -1759,7 +1759,7 @@ int nnc_lowerings_lazy_registration() {
          const std::optional<ScalarType>& outputType,
          at::Device device) {
         return computeTranspose(
-            {inputs[0], (int64_t)1, (int64_t)0},
+            {inputs[0], static_cast<int64_t>(1), static_cast<int64_t>(0)},
             outputShape,
             outputStrides,
             outputType,

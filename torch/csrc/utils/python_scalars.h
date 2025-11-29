@@ -22,78 +22,79 @@ inline T unpackIntegral(PyObject* obj, const char* type) {
 inline void store_scalar(void* data, at::ScalarType scalarType, PyObject* obj) {
   switch (scalarType) {
     case at::kByte:
-      *(uint8_t*)data = unpackIntegral<uint8_t>(obj, "uint8");
+      *static_cast<uint8_t*>(data) = unpackIntegral<uint8_t>(obj, "uint8");
       break;
     case at::kUInt16:
-      *(uint16_t*)data = unpackIntegral<uint16_t>(obj, "uint16");
+      *static_cast<uint16_t*>(data) = unpackIntegral<uint16_t>(obj, "uint16");
       break;
     case at::kUInt32:
-      *(uint32_t*)data = unpackIntegral<uint32_t>(obj, "uint32");
+      *static_cast<uint32_t*>(data) = unpackIntegral<uint32_t>(obj, "uint32");
       break;
     case at::kUInt64:
       // NB: This doesn't allow implicit conversion of float to int
-      *(uint64_t*)data = THPUtils_unpackUInt64(obj);
+      *static_cast<uint64_t*>(data) = THPUtils_unpackUInt64(obj);
       break;
     case at::kChar:
-      *(int8_t*)data = unpackIntegral<int8_t>(obj, "int8");
+      *static_cast<int8_t*>(data) = unpackIntegral<int8_t>(obj, "int8");
       break;
     case at::kShort:
-      *(int16_t*)data = unpackIntegral<int16_t>(obj, "int16");
+      *static_cast<int16_t*>(data) = unpackIntegral<int16_t>(obj, "int16");
       break;
     case at::kInt:
-      *(int32_t*)data = unpackIntegral<int32_t>(obj, "int32");
+      *static_cast<int32_t*>(data) = unpackIntegral<int32_t>(obj, "int32");
       break;
     case at::kLong:
-      *(int64_t*)data = unpackIntegral<int64_t>(obj, "int64");
+      *static_cast<int64_t*>(data) = unpackIntegral<int64_t>(obj, "int64");
       break;
     case at::kHalf:
-      *(at::Half*)data =
+      *static_cast<at::Half*>(data) =
           at::convert<at::Half, double>(THPUtils_unpackDouble(obj));
       break;
     case at::kFloat:
-      *(float*)data = (float)THPUtils_unpackDouble(obj);
+      *static_cast<float*>(data) =
+          static_cast<float>(THPUtils_unpackDouble(obj));
       break;
     case at::kDouble:
-      *(double*)data = THPUtils_unpackDouble(obj);
+      *static_cast<double*>(data) = THPUtils_unpackDouble(obj);
       break;
     case at::kComplexHalf:
-      *(c10::complex<at::Half>*)data =
-          (c10::complex<at::Half>)static_cast<c10::complex<float>>(
-              THPUtils_unpackComplexDouble(obj));
+      *static_cast<c10::complex<at::Half>*>(data) = c10::complex<at::Half>(
+          static_cast<c10::complex<float>>(THPUtils_unpackComplexDouble(obj)));
       break;
     case at::kComplexFloat:
-      *(c10::complex<float>*)data =
-          (c10::complex<float>)THPUtils_unpackComplexDouble(obj);
+      *static_cast<c10::complex<float>*>(data) =
+          c10::complex<float>(THPUtils_unpackComplexDouble(obj));
       break;
     case at::kComplexDouble:
-      *(c10::complex<double>*)data = THPUtils_unpackComplexDouble(obj);
+      *static_cast<c10::complex<double>*>(data) =
+          THPUtils_unpackComplexDouble(obj);
       break;
     case at::kBool:
-      *(bool*)data = THPUtils_unpackNumberAsBool(obj);
+      *static_cast<bool*>(data) = THPUtils_unpackNumberAsBool(obj);
       break;
     case at::kBFloat16:
-      *(at::BFloat16*)data =
+      *static_cast<at::BFloat16*>(data) =
           at::convert<at::BFloat16, double>(THPUtils_unpackDouble(obj));
       break;
     // TODO(#146647): simplify below with macros
     case at::kFloat8_e5m2:
-      *(at::Float8_e5m2*)data =
+      *static_cast<at::Float8_e5m2*>(data) =
           at::convert<at::Float8_e5m2, double>(THPUtils_unpackDouble(obj));
       break;
     case at::kFloat8_e5m2fnuz:
-      *(at::Float8_e5m2fnuz*)data =
+      *static_cast<at::Float8_e5m2fnuz*>(data) =
           at::convert<at::Float8_e5m2fnuz, double>(THPUtils_unpackDouble(obj));
       break;
     case at::kFloat8_e4m3fn:
-      *(at::Float8_e4m3fn*)data =
+      *static_cast<at::Float8_e4m3fn*>(data) =
           at::convert<at::Float8_e4m3fn, double>(THPUtils_unpackDouble(obj));
       break;
     case at::kFloat8_e4m3fnuz:
-      *(at::Float8_e4m3fnuz*)data =
+      *static_cast<at::Float8_e4m3fnuz*>(data) =
           at::convert<at::Float8_e4m3fnuz, double>(THPUtils_unpackDouble(obj));
       break;
     case at::kFloat8_e8m0fnu:
-      *(at::Float8_e8m0fnu*)data =
+      *static_cast<at::Float8_e8m0fnu*>(data) =
           at::convert<at::Float8_e8m0fnu, double>(THPUtils_unpackDouble(obj));
       break;
     default:

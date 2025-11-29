@@ -244,7 +244,7 @@ std::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   L.expect('=');
   const std::string& num = L.expect(TK_NUMBER).text();
   try {
-    return (bool)std::stoi(num);
+    return static_cast<bool>(std::stoi(num));
   } catch (const std::invalid_argument&) {
     throw(
         ErrorReport(L.cur())

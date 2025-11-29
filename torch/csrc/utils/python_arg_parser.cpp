@@ -181,10 +181,10 @@ auto handle_torch_function_getter(
     THPVariable* self,
     const std::string& property_name) -> PyObject* {
   py::object torch_api = PyObject_FastGetAttrString(
-      THPVariableClass, (char*)property_name.c_str());
+      THPVariableClass, const_cast<char*>(property_name.c_str()));
   std::string module_name = "torch.Tensor." + property_name;
   return handle_torch_function(
-      (PyObject*)self,
+      reinterpret_cast<PyObject*>(self),
       "__get__",
       nullptr,
       nullptr,
@@ -197,12 +197,12 @@ auto handle_torch_function_setter(
     const std::string& property_name,
     PyObject* value) -> int {
   py::object torch_api = PyObject_FastGetAttrString(
-      THPVariableClass, (char*)property_name.c_str());
+      THPVariableClass, const_cast<char*>(property_name.c_str()));
   std::string module_name = "torch.Tensor." + property_name;
   if (value != nullptr) {
     py::tuple args_ = py::make_tuple(py::handle(value));
     handle_torch_function(
-        (PyObject*)self,
+        reinterpret_cast<PyObject*>(self),
         "__set__",
         args_.ptr(),
         nullptr,
@@ -210,7 +210,7 @@ auto handle_torch_function_setter(
         module_name);
   } else {
     handle_torch_function(
-        (PyObject*)self,
+        reinterpret_cast<PyObject*>(self),
         "__delete__",
         nullptr,
         nullptr,
@@ -245,8 +245,8 @@ auto handle_torch_function(
     PyObject* kwargs,
     PyObject* torch_api,
     const std::string& module_name) -> PyObject* {
-  py::object torch_api_function =
-      PyObject_FastGetAttrString(torch_api, (char*)func_name.c_str());
+  py::object torch_api_function = PyObject_FastGetAttrString(
+      torch_api, const_cast<char*>(func_name.c_str()));
   TORCH_INTERNAL_ASSERT(
       torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
@@ -272,7 +272,7 @@ static PyObject* get_type_of_overloaded_arg(PyObject* obj_or_type) {
   if (PyType_Check(obj_or_type)) {
     return obj_or_type;
   }
-  return (PyObject*)Py_TYPE(obj_or_type);
+  return reinterpret_cast<PyObject*>(Py_TYPE(obj_or_type));
 }
 
 static py::object maybe_get_registered_torch_dispatch_rule(
@@ -306,7 +306,7 @@ static py::object maybe_get_registered_torch_dispatch_rule(
 static bool is_dtensor(PyObject* obj) {
 #ifdef USE_DISTRIBUTED
   const py::handle dtensor = get_dtensor_class();
-  return (PyObject*)Py_TYPE(obj) == dtensor.ptr() ||
+  return reinterpret_cast<PyObject*>(Py_TYPE(obj)) == dtensor.ptr() ||
       py::isinstance(py::handle(obj), dtensor);
 #else
   return false;
@@ -696,8 +696,8 @@ auto handle_torch_function(
     const char* func_name_override) -> PyObject* {
   py::object torch_api_function = PyObject_FastGetAttrString(
       torch_api,
-      (char*)(func_name_override ? func_name_override
-                                 : r.get_func_name().c_str()));
+      const_cast<char*>(
+          func_name_override ? func_name_override : r.get_func_name().c_str()));
   TORCH_INTERNAL_ASSERT(
       torch_api_function.ptr() != nullptr, "torch API function must exist");
   py::tuple args_ = combine_self_args(self, args);
@@ -757,8 +757,8 @@ auto handle_torch_function_indexing(
   if (val != nullptr) {
     is_tensor_and_append_overloaded(val, &overridable_args);
   }
-  py::object func =
-      PyObject_FastGetAttrString(THPVariableClass, (char*)func_name);
+  py::object func = PyObject_FastGetAttrString(
+      THPVariableClass, const_cast<char*>(func_name));
   py::object args = (val == nullptr)
       ? py::make_tuple(py::handle(self), py::handle(index))
       : py::make_tuple(py::handle(self), py::handle(index), py::handle(val));
@@ -816,7 +816,8 @@ static void append_overloaded_arg(
     PyObject* obj,
     bool obj_is_type) {
   bool class_not_seen_yet = true;
-  PyObject* obj_type = obj_is_type ? obj : (PyObject*)Py_TYPE(obj);
+  PyObject* obj_type =
+      obj_is_type ? obj : reinterpret_cast<PyObject*>(Py_TYPE(obj));
   for (auto& arg : *overloaded_args) {
     if (obj_type == get_type_of_overloaded_arg(arg)) {
       // obj is the same type as another parameter we've seen in a prior

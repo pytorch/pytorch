@@ -100,8 +100,9 @@ struct FDE {
 
     cie_begin_ = LC.loc();
     fde_begin_ = L.loc();
-    cie_end_ = (void*)((const char*)cie_start + cie_length);
-    fde_end_ = (void*)((const char*)fde_start + length);
+    cie_end_ =
+        reinterpret_cast<void*>(static_cast<char*>(cie_start) + cie_length);
+    fde_end_ = reinterpret_cast<void*>(static_cast<char*>(fde_start) + length);
   }
 
   // OP Code implementations
@@ -351,7 +352,7 @@ struct FDE {
           default: {
             std::stringstream ss;
             // NOLINTNEXTLINE(performance-no-int-to-ptr)
-            ss << "unknown op code " << (void*)(uint64_t)lowbits;
+            ss << "unknown op code " << (void*)static_cast<uint64_t>(lowbits);
             throw UnwindError(ss.str());
           }
         }

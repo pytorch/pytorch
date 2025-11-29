@@ -490,7 +490,7 @@ class Vectorizer : public IRMutator {
     StmtPtr new_body = body->accept_mutator(this);
 
     if (new_body == body) {
-      return (ForPtr)v;
+      return ForPtr(v);
     }
 
     return alloc<For>(var, new_start, new_stop, new_body, loop_options);
@@ -1019,17 +1019,17 @@ class LoadOrStoreUseFinder : public IRVisitor {
  private:
   void visit(const StorePtr& v) override {
     if (stores_[v->buf()].insert(last_stmt_).second) {
-      uses_[v->buf()].push_back({(StmtPtr)v, true});
+      uses_[v->buf()].push_back({StmtPtr(v), true});
     }
-    last_stmt_ = (StmtPtr)v;
+    last_stmt_ = StmtPtr(v);
     IRVisitor::visit(v);
   }
 
   void visit(const ExternalCallPtr& v) override {
     if (stores_[v->buf()].insert(last_stmt_).second) {
-      uses_[v->buf()].push_back({(StmtPtr)v, true});
+      uses_[v->buf()].push_back({StmtPtr(v), true});
     }
-    last_stmt_ = (StmtPtr)v;
+    last_stmt_ = StmtPtr(v);
 
     for (const BufPtr& input_buf : v->buf_args()) {
       if (loads_[input_buf].insert(last_stmt_).second) {
@@ -1043,10 +1043,10 @@ class LoadOrStoreUseFinder : public IRVisitor {
   void visit(const ExternalCallWithAllocPtr& v) override {
     for (const auto& out_buf : v->buf_out_args()) {
       if (stores_[out_buf].insert(last_stmt_).second) {
-        uses_[out_buf].push_back({(StmtPtr)v, true});
+        uses_[out_buf].push_back({StmtPtr(v), true});
       }
     }
-    last_stmt_ = (StmtPtr)v;
+    last_stmt_ = StmtPtr(v);
 
     for (const auto& input_buf : v->buf_args()) {
       if (loads_[input_buf].insert(last_stmt_).second) {
@@ -1089,19 +1089,19 @@ class ContainedStmtsFinder : public IRVisitor {
 
  private:
   void visit(const StorePtr& v) override {
-    contained_.insert((StmtPtr)v);
+    contained_.insert(StmtPtr(v));
     IRVisitor::visit(v);
   }
   void visit(const ExternalCallPtr& v) override {
-    contained_.insert((StmtPtr)v);
+    contained_.insert(StmtPtr(v));
     IRVisitor::visit(v);
   }
   void visit(const ExternalCallWithAllocPtr& v) override {
-    contained_.insert((StmtPtr)v);
+    contained_.insert(StmtPtr(v));
     IRVisitor::visit(v);
   }
   void visit(const BlockPtr& v) override {
-    contained_.insert((StmtPtr)v);
+    contained_.insert(StmtPtr(v));
     IRVisitor::visit(v);
   }
 
@@ -2624,7 +2624,7 @@ StmtPtr LoopNest::getLoopBodyFor(BufPtr buf) const {
   if (writes.size() == 2) {
     if (StorePtr s = to<Store>(writes.back())) {
       if (ReduceOpPtr r = to<ReduceOp>(s->value())) {
-        return (StmtPtr)s;
+        return StmtPtr(s);
       }
     }
   }
@@ -2639,7 +2639,7 @@ StmtPtr LoopNest::getLoopBodyFor(BufPtr buf) const {
     res = Block::getSharedParent(res, s);
   }
 
-  return (StmtPtr)res;
+  return StmtPtr(res);
 }
 
 ForPtr LoopNest::getParentLoop(const StmtPtr& st) {

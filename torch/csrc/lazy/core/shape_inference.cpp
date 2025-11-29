@@ -81,7 +81,7 @@ static std::vector<int64_t> expand_param_if_needed(
     int64_t expected_dim) {
   if (list_param.size() == 1) {
     return std::vector<int64_t>(expected_dim, list_param[0]);
-  } else if ((int64_t)list_param.size() != expected_dim) {
+  } else if (static_cast<int64_t>(list_param.size()) != expected_dim) {
     std::ostringstream ss;
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
@@ -216,12 +216,12 @@ std::vector<Shape> compute_shape_constant_pad_nd(
       "dimensions.");
 
   std::vector<int64_t> new_shape;
-  new_shape.reserve((size_t)l_diff);
-  for (size_t i = 0; i < (size_t)l_diff; i++) {
+  new_shape.reserve(static_cast<size_t>(l_diff));
+  for (size_t i = 0; i < static_cast<size_t>(l_diff); i++) {
     new_shape.emplace_back(input_sizes[i]);
   }
 
-  for (const auto i : c10::irange((size_t)l_pad)) {
+  for (const auto i : c10::irange(static_cast<size_t>(l_pad))) {
     auto pad_idx = pad.size() - ((i + 1) * 2);
     auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
     TORCH_CHECK(
