@@ -23,7 +23,7 @@ on:
       - .github/workflows/test-b200.yml
   workflow_dispatch:
   schedule:
-    - cron: 0 4,10,16,22 * * *  # every 6 hours
+    - cron: 0 */2 * * *  # every 2 hours
   push:
     tags:
       - ciflow/b200/*
