@@ -5834,6 +5834,47 @@ class CPUReproTests(TestCase):
 
         torch.compile(fn)(torch.randn(2, 2))
 
+    @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKLDNN is not enabled")
+    @requires_vectorization
+    @config.patch(freezing=True)
+    def test_upsample_layout(self):
+        class UpsampleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+                self.upsample = nn.Upsample(
+                    scale_factor=2, mode="bilinear", align_corners=True
+                )
+                self.conv2 = nn.Conv2d(64, 16, kernel_size=3, padding=1)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.upsample(x)
+                x = self.conv2(x)
+                x = torch.relu(x)
+                return x
+
+        mod = UpsampleModel()
+        cmod = torch.compile(mod)
+        for dtype in [torch.float32, torch.bfloat16]:
+            x = torch.randn(4, 64, 64, 64, dtype=dtype)
+            with (
+                torch.no_grad(),
+                torch.amp.autocast(
+                    device_type="cpu", dtype=dtype, enabled=dtype == torch.bfloat16
+                ),
+            ):
+                ref_res = mod(x)
+                res, code = run_and_get_cpp_code(cmod, x)
+                FileCheck().check_count(
+                    "transpose_mxn",
+                    2,
+                    exactly=True,
+                ).run(code)
+                atol = 1e-2 if dtype == torch.bfloat16 else 1e-5
+                rtol = 1e-2 if dtype == torch.bfloat16 else 1e-5
+                torch.testing.assert_close(ref_res, res, atol=atol, rtol=rtol)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

@@ -319,6 +319,23 @@ def mark_nodes_dislike_padding(
             cur.meta["dislike_padding"] = True
 
 
+def is_mkldnn_conv(note: Node) -> bool:
+    if (
+        isinstance(note.target, functools.partial)
+        and len(note.target.args) > 0
+        and hasattr(note.target.args[0], "targets")
+    ):
+        for target in note.target.args[0].targets:
+            if target.fns[0] in [
+                torch.ops.mkldnn._convolution_pointwise.default,
+                torch.ops.mkldnn._convolution_pointwise.binary,
+                torch.ops.mkldnn._convolution_pointwise_.binary,
+            ]:
+                return True
+
+    return False
+
+
 class GraphLowering(torch.fx.Interpreter):
     graph_outputs: list[ir.IRNode]
 
@@ -672,6 +689,17 @@ class GraphLowering(torch.fx.Interpreter):
         conv_nodes = [
             n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
         ]
+
+        # When mkldnn_fusion is enabled, conv will be replaced by the lowering pattern function.
+        # See _register_unary_fusion_lowering in torch/_inductor/fx_passes/mkldnn_fusion.py.
+        if (
+            getattr(torch.ops, "mkldnn", None) is not None
+            and getattr(torch.ops.mkldnn, "_convolution_pointwise", None) is not None
+        ):
+            for n in gm.graph.nodes:
+                if is_mkldnn_conv(n):
+                    conv_nodes.append(n)
+
         nconv = len(conv_nodes)
 
         if nconv == 0:
@@ -679,8 +707,8 @@ class GraphLowering(torch.fx.Interpreter):
 
         # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
-            torch.backends.mkldnn.enabled
-            and torch.backends.mkldnn.is_available()
+            torch.backends.mkldnn.enabled  # pyrefly: ignore [unbound-name]
+            and torch.backends.mkldnn.is_available()  # pyrefly: ignore [unbound-name]
             and all(
                 n.args[idx].meta["val"].device.type in SUPPORTED_MKLDNN_DEVICES
                 for n in conv_nodes
@@ -875,6 +903,14 @@ class GraphLowering(torch.fx.Interpreter):
                     last_conv = n
                 continue
             if n.target in nodes_cannot_propagate:
+                continue
+            if (
+                getattr(torch.ops, "mkldnn", None) is not None
+                and getattr(torch.ops.mkldnn, "_convolution_pointwise", None)
+                is not None
+                and is_mkldnn_conv(n)
+            ):
+                output_set.add(n)
                 continue
             for user in n.users:
                 if user in output_set:
@@ -1636,6 +1672,28 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)  # type: ignore[arg-type]
 
+        def mark_use_channels_last_layout(
+                result: ir.TensorBox, n: torch.fx.Node
+        ) -> ir.TensorBox:
+            dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+            strides = n.meta["val"].stride()
+            unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
+            if (
+                not unbacked_symbols_in_strides
+                and dense
+                and len(result.get_size()) == 4
+                and n in self.nodes_prefer_channels_last
+                and not is_user_visible
+                and not is_input_for_as_strided
+            ):
+                result = ir.ExternKernel.require_stride_order(
+                    result,
+                    ir.get_stride_order(
+                        make_channels_last_strides_for(n.meta["val"].shape)
+                    ),
+                )
+            return result
+
         from torch._inductor.compiler_bisector import CompilerBisector
 
         buffer_watermark = len(self.buffers)
@@ -1890,6 +1948,14 @@ class GraphLowering(torch.fx.Interpreter):
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()
 
+                data = result.data
+                while hasattr(data, "data") and not isinstance(data, StorageBox):
+                    data = data.data
+                if isinstance(data, StorageBox) and data.should_realize_on_reuse(
+                    len(n.users)
+                ):
+                    result = mark_use_channels_last_layout(result, n)
+
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
 
@@ -1898,6 +1964,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # Prevent excessive accumulation in a computed buffer, when
                 # there are multiple branches each with small number of memory
                 # reads, but they converge to a user.
+                result = mark_use_channels_last_layout(result, n)
                 result.realize_hint()
 
             # Realize if a Pointwise has too much stuff to be inlined.
