@@ -20,6 +20,7 @@ their semantic behavior.
 """
 
 import contextlib
+import copy
 import functools
 import inspect
 import itertools
@@ -251,6 +252,66 @@ def _make_inlined(tx: "InstructionTranslator", f):
     return inline_call
 
 
+def add_call_function(
+    tx: "InstructionTranslator",
+    fn: Any,
+    args: tuple[Any, ...],
+    kwargs: dict[str, Any],
+    flat_example_value: Any,
+):
+    from .builder import wrap_fx_proxy
+
+    # Store the invocation as a call
+    flat_variable = wrap_fx_proxy(
+        tx=tx,
+        proxy=tx.output.create_proxy(
+            "call_function",
+            fn,
+            args=args,
+            kwargs=kwargs,
+        ),
+        example_value=flat_example_value,
+    )
+    return flat_variable
+
+
+def overwrite_tensor_vt_requires_grad(graph_output_vts, flat_variable):
+    # this is required for faithfully representing the autograd.Function forward
+    # outputs.
+    for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
+        if isinstance(orig_vt, (variables.SymNodeVariable, variables.TensorVariable)):
+            assert isinstance(
+                subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
+            )
+            orig_vt.requires_grad = subgraph_vt.requires_grad
+            if orig_vt.requires_grad:
+                orig_vt.has_grad_fn = True
+
+
+def overwrite_tensor_vt_proxy(graph_output_vts, flat_variable):
+    # wrap_fx_proxy creates fresh variable trackers. However, the main program
+    # after the speculate subgraph can still use the original tensor vts that
+    # are still pointing to the nodes present in the subgraph. So, we reproxify
+    # the original tensor vts with the subgraph outputs. This way, whenever the
+    # outer graph uses an original vt, it uses the subgraph output.
+    #
+    # This is critical for maintaining the separation between:
+    # - `body_r`: The output VT structure that Dynamo continues tracing (may
+    #   contain non-proxyable objects, nested structures, etc.)
+    # - `graph_output_vts`: Only the tensor/symint VTs that were actual graph
+    #   outputs from speculate_subgraph
+    #
+    # By overwriting the proxies of VTs in `body_r` with the proxies from the
+    # HOP call, we ensure the outer graph correctly references the HOP outputs
+    # while still allowing `body_r` to contain arbitrary Python objects.
+    for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
+        if isinstance(orig_vt, (variables.SymNodeVariable, variables.TensorVariable)):
+            assert isinstance(
+                subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
+            )
+            orig_vt.proxy = subgraph_vt.proxy
+
+
 def _call_function_with_auto_output_flattening(
     tx: "InstructionTranslator",
     fn: Any,
@@ -282,44 +343,10 @@ def _call_function_with_auto_output_flattening(
     Returns:
         The body_r VT (unchanged), which Dynamo will continue tracing with
     """
-    from .builder import wrap_fx_proxy
 
-    # Store the invocation as a call
-    flat_variable = wrap_fx_proxy(
-        tx=tx,
-        proxy=tx.output.create_proxy(
-            "call_function",
-            fn,
-            args=args,
-            kwargs=kwargs,
-        ),
-        example_value=flat_example_value,
-    )
-
-    # wrap_fx_proxy creates fresh variable trackers. However, the main program
-    # after the speculate subgraph can still use the original tensor vts that
-    # are still pointing to the nodes present in the subgraph. So, we reproxify
-    # the original tensor vts with the subgraph outputs. This way, whenever the
-    # outer graph uses an original vt, it uses the subgraph output.
-    #
-    # This is critical for maintaining the separation between:
-    # - `body_r`: The output VT structure that Dynamo continues tracing (may
-    #   contain non-proxyable objects, nested structures, etc.)
-    # - `graph_output_vts`: Only the tensor/symint VTs that were actual graph
-    #   outputs from speculate_subgraph
-    #
-    # By overwriting the proxies of VTs in `body_r` with the proxies from the
-    # HOP call, we ensure the outer graph correctly references the HOP outputs
-    # while still allowing `body_r` to contain arbitrary Python objects.
+    flat_variable = add_call_function(tx, fn, args, kwargs, flat_example_value)
     if body_r is not None:
-        for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
-            if isinstance(
-                orig_vt, (variables.SymNodeVariable, variables.TensorVariable)
-            ):
-                assert isinstance(
-                    subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
-                )
-                orig_vt.proxy = subgraph_vt.proxy
+        overwrite_tensor_vt_proxy(graph_output_vts, flat_variable)
     return body_r
 
 
@@ -823,16 +850,8 @@ def validate_args_and_maybe_create_graph_inputs(
             if set_subgraph_inputs == "automatic":
                 args.append(a)
                 continue
-            elif set_subgraph_inputs == "semi_automatic":
-                if isinstance(a, AutogradFunctionContextVariable):
-                    example_value = a.as_proxy().node.meta["example_value"]
-                    arg_name = (
-                        a.as_proxy().node.name
-                        if sub_args_names is None
-                        else sub_args_names[idx]
-                    )
-                    tracer.create_graph_input(arg_name, a.python_type(), example_value)
-                elif a.maybe_fx_node() is not None:
+            elif set_subgraph_inputs == "automatic_with_forced_inputs":
+                if isinstance(a, variables.TensorVariable):
                     node = a.maybe_fx_node()
                     example_value = node.meta["example_value"]
                     arg_name = (
@@ -1195,9 +1214,19 @@ def speculate_subgraph_with_auto_output_flattening(
     # target of the proxy that we created for the higherOrderOperator.
     source_target: Optional[HigherOrderOperator] = None,
     enable_grad: Optional[bool] = None,
-    # TODO - We can probably just make everyone use automatic for wrap_semantics
+    # automatic: relies on Dynamo to find the used tensors and lift them as
+    # inputs.
+    #
+    # automatic_with_forced_inputs: relies on the function arg names to create
+    # a new proxy. Also, it will always INSERT a tensor placeholder as input,
+    # even though it might not be used in the graph and they will also be in the
+    # same order as the original function (as opposed to automatic which will
+    # not insert the unused placeholder and can insert other placeholders in the
+    # order they are see while tracing). This is useful for autograd.Function
+    # backward where we do need to account for all the inputs of the backwards
+    # to be lifted as inputs for making the fwd-bwd graph consistent.
     set_subgraph_inputs: Literal[
-        "automatic", "semi_automatic", "flatten_manual", "manual"
+        "automatic", "automatic_with_forced_inputs", "flatten_manual", "manual"
     ] = "automatic",
     # Make default False
     restore_side_effects: bool = True,
@@ -1288,7 +1317,7 @@ def speculate_subgraph_with_auto_output_flattening(
 
     assert set_subgraph_inputs in {
         "automatic",
-        "semi_automatic",
+        "automatic_with_forced_inputs",
         "flatten_manual",
         "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
@@ -1514,7 +1543,7 @@ def speculate_subgraph(
 
     assert set_subgraph_inputs in {
         "automatic",
-        "semi_automatic",
+        "automatic_with_forced_inputs",
         "flatten_manual",
         "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
@@ -3699,10 +3728,10 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
 
 class AutogradFunctionApplyVariable(VariableTracker):
-    def __init__(self, fwd_graph, bwd_graph, parent_source, **kwargs) -> None:
+    def __init__(self, fwd_fn, bwd_fn, parent_source, **kwargs) -> None:
         super().__init__(**kwargs)
-        self.fwd_graph = fwd_graph
-        self.bwd_graph = bwd_graph
+        self.fwd_fn = fwd_fn
+        self.bwd_fn = bwd_fn
         self.parent_source = parent_source
 
     def call_function(
@@ -3711,222 +3740,94 @@ class AutogradFunctionApplyVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        from . import (
-            AutogradFunctionContextVariable,
-            UserDefinedClassVariable,
-            UserFunctionVariable,
-            UserMethodVariable,
-        )
-        from .builder import wrap_fx_proxy
-
         """
-        Consider the following:
+        At the highest level, the goal of tracing an autograd.Function is to
+        essentially emit a new autograd.Function object. To do this, Dynamo
+        traces fwd and bwd graph and then inserts a AutogradFunctionApply HOP in
+        the graph that call the traced fwd and bwd graph in the `forward` and
+        `backward` methods respectively. AOTDispatcher desugars this HOP and
+        just inlines the hop fwd and bwd into the main graph during its tracing.
+
+        However, the traced forward and backward graphs cannot be directly
+        placed in the new autograd.Function because autograd.Function has some
+        requirements.
+
+        a) # fwd graph inputs = # bwd graph outputs
+        b) # fwd graph outputs = # bwd graph inputs
+        c) Since the graphs do not have ctx variable, we have to manually return
+        the saved_tensors from the forward and have additional inputs in the
+        backward, and wire the connections.
+
+        Unfortunately, reworking the initial traced fwd and bwd graphs to
+        satisfy the above 3 conditions leads to a very tedious codebase.
+
+        Lets look at an example
+
+        class Foo:
+            def __init__(self):
+                self.a = 4
+
         class MySin(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, x):
+            def forward(ctx, x, foo):
                 ctx.save_for_backward(x)
-                return x.sin()
+                return x.sin() + foo.a
+
             @staticmethod
             def backward(ctx, grad):
                 x, = ctx.saved_tensors
                 return grad * x.cos()
+
         We want the resulting graphs to look like:
-        def fwd(ctx, x):
+
+        # Note that Dynamo lifts the foo_a directly as an input.
+        def fwd(ctx, x, foo_a):
             # (output, saved tensors / attrs)
-            return (x.sin(), [x])
-        # bwd(ctx, grad0, grad1, ..., gradn, *saved_tensors_or_attrs)
+            return (x.sin() + foo_a, (x))
+
+        # Note that backward graph has None as the second output to match the
+        # fwd requirements (even though the original backward function has just
+        # output)
         def bwd(ctx, grad, x):
-            return grad * x.cos()
+            return grad * x.cos(), None
+
+
         To accomplish this, we're going to:
         1. Construct a ctx object
-        2. (fwd_out, _), fwd_graph, fwd_freevars = speculate_subgraph on MySin.forward (manually_set_inputs=True)
-        3. (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph on MySin.backward, while manually setting
-        the ctx and grad inputs.
-        4. Manually rewriting the fwd graph's output to be (output, stuff_that_gets_used in bwd_graph)
-        Getting from 3 to 4 is pretty elegant: stuff_that_gets_used in bwd graph is
-        just the bwd_freevars returned from speculate_subgraph, assuming MySin.backward
-        doesn't capture any arguments.
-        All these steps work if MySin.backward doesn't capture any values. This is a
-        limitation in general that we should check for.
+        2. Speculate subgraph forward
+        3. Speculate subgraph backward
+        4. rewired_bwd_graph_inputs - Use the traced fwd graph as the anchor point, and rewire the backward graph outputs
+        5. handle_saved_tensors_wiring - Hhandle the saved tensors, as mentioned in (c)
         """
 
-        prev_side_effects = tx.output.side_effects.clone()
         fwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
             tx.output,
             parent=tx.output.current_tracer,
             source_target="autograd.Function",
         )
 
-        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
-        with discard_graph_changes(tx):
-            # A little hacky, but we need a dummy ctx proxy for speculate_subgraph.
-            # We should clean this up at some point.
-            proxy = tx.output.create_proxy(
-                "call_function", torch.autograd.function.FunctionCtx, (), {}
-            )
-            set_example_value(proxy.node, ctx.value)
-            ctx.proxy = proxy
+        ctx = self.prepare_ctx_vt(tx, args, kwargs)
 
-        if isinstance(self.fwd_graph, types.FunctionType):
-            fwd_fn = UserFunctionVariable(self.fwd_graph)
-            fwd_args = [ctx, *args]
-        elif isinstance(self.fwd_graph, types.MethodType):
-            fwd_fn = UserMethodVariable(
-                self.fwd_graph.__func__,
-                UserDefinedClassVariable(self.fwd_graph.__class__),
-            )
-            fwd_args = [fwd_fn.obj, ctx, *args]
-        else:
-            unimplemented(
-                gb_type="autograd.Function.apply: non-function or method forward",
-                context=str(self.fwd_graph),
-                explanation="Expected forward function to be a function or method.",
-                hints=[],
-            )
-
-        # Speculate subgraph on the fwd
-        (fwd_out, _), fwd_graph, fwd_freevars = speculate_subgraph(
-            tx,
-            fwd_fn,
-            fwd_args,
-            kwargs,
-            "autograd.Function",
-            enable_grad=False,
-            set_subgraph_inputs="semi_automatic",
-            restore_side_effects=False,
-            tracer=fwd_tracer,
+        fwd_fn, fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts = (
+            self.trace_forward_graph(tx, ctx, fwd_tracer, args, kwargs)
         )
 
-        if ctx in tx.output.side_effects.store_attr_mutations:
-            if (
-                "_materialize_non_diff_grads"
-                in tx.output.side_effects.store_attr_mutations[ctx]
-            ):
-                unimplemented(
-                    gb_type="autograd.Function.apply: _materialize_non_diff_grads mutation",
-                    context="",
-                    explanation="Mutations to autograd.Function.ctx._materialize_non_diff_grads are not supported.",
-                    hints=[
-                        *graph_break_hints.SUPPORTABLE,
-                    ],
-                )
-
-        bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
-            tx.output,
-            parent=fwd_tracer,
-            source_target="autograd.Function",
+        bwd_args, bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
+            self.trace_backward_graph(tx, ctx, fwd_tracer, fwd_out, fwd_fn)
         )
 
-        # Speculate subgraph on the backward. We make the
-        # bwd tracer a child of the fwd tracer, because backward may rely on
-        # tensors/attrs created in the fwd tracer.
+        self.rewire_bwd_graph_inputs(
+            fwd_freevars, bwd_out, bwd_graph, bwd_freevars, args
+        )
 
-        if isinstance(fwd_out, variables.BaseListVariable):
-            bwd_args = [ctx, *fwd_out.items]
-        else:
-            bwd_args = [ctx, fwd_out]
-
-        bwd_src = AttrSource(self.parent_source, member="backward")
-        if isinstance(self.bwd_graph, types.FunctionType):
-            bwd_fn = UserFunctionVariable(self.bwd_graph, source=bwd_src)
-        elif isinstance(self.bwd_graph, types.MethodType):
-            bwd_fn = UserMethodVariable(
-                self.bwd_graph.__func__,
-                UserDefinedClassVariable(self.bwd_graph.__class__),
-                source=bwd_src,
-            )
-            bwd_args = [bwd_fn.obj, *bwd_args]
-        else:
-            unimplemented(
-                gb_type="autograd.Function.apply: non-function or method backward",
-                context=str(self.bwd_graph),
-                explanation="Expected backward function to be a function or method.",
-                hints=[],
-            )
-
-        def is_strict_for(v: VariableTracker):
-            if isinstance(v, variables.TensorVariable):
-                # we can be more lax for stuff from forward
-                return v.proxy.tracer is not fwd_tracer
-            return True
-
-        with (
-            tx.output.subtracer(fwd_fn, fwd_tracer),
-            tx.strict_translation_mode(is_strict_for),
-        ):
-            try:
-                (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
-                    tx,
-                    bwd_fn,
-                    bwd_args,
-                    kwargs,
-                    "autograd.Function",
-                    enable_grad=False,
-                    set_subgraph_inputs="manual",
-                    restore_side_effects=False,
-                    tracer=bwd_tracer,
-                )
-            except torch._dynamo.exc.Unsupported as e:
-                if isinstance(
-                    e, torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace
-                ):
-                    from unittest import mock
-
-                    bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
-                        tx.output,
-                        parent=fwd_tracer,
-                        source_target="autograd.Function",
-                    )
-                    from .._trace_wrapped_higher_order_op import (
-                        autograd_function_backward_rewritten,
-                    )
-
-                    if isinstance(self.bwd_graph, types.FunctionType):
-                        bwd_fn = UserFunctionVariable(
-                            autograd_function_backward_rewritten(self.bwd_graph)
-                        )
-                    elif isinstance(self.bwd_graph, types.MethodType):
-                        bwd_fn = UserMethodVariable(
-                            autograd_function_backward_rewritten(
-                                self.bwd_graph.__func__
-                            ),
-                            UserDefinedClassVariable(self.bwd_graph.__class__),
-                        )
-                    else:
-                        unimplemented(
-                            gb_type="autograd.Function.apply: non-function or method backward (2)",
-                            context=str(self.bwd_graph),
-                            explanation="Expected backward function to be a function or method.",
-                            hints=[],
-                        )
-
-                    with mock.patch(
-                        "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
-                        [],
-                    ):
-                        (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
-                            tx,
-                            bwd_fn,
-                            bwd_args,
-                            kwargs,
-                            "autograd.Function",
-                            enable_grad=False,
-                            set_subgraph_inputs="manual",
-                            restore_side_effects=False,
-                            tracer=bwd_tracer,
-                        )
-                else:
-                    raise e
-
-        # TODO: assert that bwd_graph didn't capture values that were
-        # not created inside fwd_graph.
-
-        # TODO(oulgen): Ideally, we would not do a linear search for output
-        # node but as things currently are there could be nodes after the
-        # output node
-        # This is bug prone as if there's code after the output node, then
-        # graph.output will append the output at the very end
-        # This might be a behavior difference
+        fwd_graph, bwd_graph = self.handle_saved_tensors_wiring(
+            fwd_out,
+            fwd_graph,
+            fwd_freevars,
+            fwd_graph_output_vts,
+            bwd_graph,
+            bwd_freevars,
+        )
 
         # If users call ctx.mark_non_differentiable, we should capture these output tensors who
         # are marked as non-differentiable and pass them to ApplyTemplate
@@ -3942,100 +3843,13 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 ):
                     non_differentiable_idx.append(i)
 
-        # Rewrite the output of fwd_graph to (output, stuff_necessary_for_bwd)
-        for node in fwd_graph.find_nodes(op="output"):
-            fwd_graph.erase_node(node)
-            break
-
-        # Because we lift the bwd_freevars as inputs of the bwd_graph,
-        # we have to manually add the bwd_freevars as output of fwd_graph.
-        # However, the bwd_freevars got from speculate_subgraph use the Proxies in the bwd_graph,
-        # we need to convert them to Proxies in the fwd_graph and then generate new fwd_graph output.
-        fwd_proxy_of_bwd_freevars = []
-        for k in bwd_freevars:
-            if k in fwd_freevars:
-                fwd_proxy_of_bwd_freevars.append(fwd_freevars[k])
-            else:
-                fwd_proxy_of_bwd_freevars.append(k)
-
-        def unwrap_proxy(x):
-            if isinstance(x, torch.fx.Proxy):
-                return x.node
-            else:
-                assert variables.ConstantVariable.is_literal(x), (
-                    f"Only constant is allowed. Got {x}"
-                )
-                return x
-
-        new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
-        new_fwd_graph_outputs = pytree.tree_map(unwrap_proxy, new_fwd_graph_outputs)
-        fwd_graph.output(new_fwd_graph_outputs)
-        fwd_graph.lint()
-
         # Store fwd_body
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         fwd_name = tx.output.install_subgraph(
             "fwd_body",
             torch.fx.GraphModule(fwd_nn_modules.nn_modules, fwd_graph),
         )
-
         fwd_node = make_attr(tx, fwd_name)
-
-        # The type of original args can be arbitrary, but we only support basic type in FX graph.
-        # So the speculated subgraph input includes original tensor args and the lifted freevars.
-        # We need to filter out the original tensor args and concat them with the lifted freevars
-        # to generate the proxy args for the FX call_function node.
-        filtered_args = []
-        # A boolean list to mark if the type of corresponding argument is tensor.
-        # This is used to determine if a FX node's argument should be an argument of
-        # ApplyTemplate.forward and if we should skip the output from ApplyTemplate.backward
-        # at torch._functorch.autograd_function.AutogradFunctionApply.
-        args_tensor_mask = [False] * len(args)
-        for i, arg in enumerate(args):
-            if isinstance(arg, (variables.TensorVariable, variables.SymNodeVariable)):
-                filtered_args.append(arg)
-                args_tensor_mask[i] = True
-
-        # Rewrite the output of bwd_graph to remove the grad output for the non-Tensor args.
-        new_bwd_graph_outputs = None
-        for node in bwd_graph.find_nodes(op="output"):
-            bwd_graph.erase_node(node)
-            break
-
-        # The same as the above fwd proxies, we need to use the bwd proxies in the bwd_graph
-        # if some of the output is from fwd_freevars.
-        bwd_out_proxy = bwd_out.as_proxy()
-        bwd_proxy_of_fwd_freevars = []
-        if isinstance(bwd_out_proxy, (tuple, list)):
-            for k in bwd_out_proxy:
-                if k in bwd_freevars:
-                    bwd_proxy_of_fwd_freevars.append(bwd_freevars[k])
-                else:
-                    bwd_proxy_of_fwd_freevars.append(k)
-        else:
-            if bwd_out_proxy in bwd_freevars:
-                bwd_proxy_of_fwd_freevars = bwd_freevars[bwd_out_proxy]
-            else:
-                bwd_proxy_of_fwd_freevars = bwd_out_proxy
-
-        # Remove bwd output for non-Tensor args.
-        output_proxy = bwd_proxy_of_fwd_freevars
-        if isinstance(output_proxy, (tuple, list)):
-            new_bwd_graph_outputs = ()
-            for x, mask in zip(output_proxy, args_tensor_mask):
-                if mask:
-                    new_bwd_graph_outputs = new_bwd_graph_outputs + (x,)
-                else:
-                    assert x is None, f"Grad of non-Tensor arg {x} is not None."
-        else:
-            new_bwd_graph_outputs = output_proxy
-
-        # Update the bwd graph output.
-        new_bwd_graph_outputs = pytree.tree_map(
-            lambda x: None if x is None else x.node, new_bwd_graph_outputs
-        )
-        bwd_graph.output(new_bwd_graph_outputs)
-        bwd_graph.lint()
 
         # Store bwd_body
         bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
@@ -4043,18 +3857,14 @@ class AutogradFunctionApplyVariable(VariableTracker):
             "bwd_body",
             torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
         )
-
         bwd_node = make_attr(tx, bwd_name)
-
-        tx.output.side_effects = prev_side_effects
 
         p_args = (
             fwd_node,
             bwd_node,
-            *([arg.as_proxy() for arg in filtered_args] + list(fwd_freevars.keys())),
+            *list(fwd_freevars.keys()),
         )
         kwargs = {
-            "args_tensor_mask": args_tensor_mask,
             "non_differentiable_idx": non_differentiable_idx,
         }
 
@@ -4065,29 +3875,587 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # The fwd outputs (tensor's example_value) need to be inferred from fake tensor prop to get the correct attributes
         # (e.g, tensor.requires_grad), which would be used by downstream Dynamo tracing.
         # Since there can be other ops like Triton kernels, which depends on python dispatcher, we have to enable it.
-        with enable_python_dispatcher(), tx.output.fake_mode:
-            fake_args = (
-                tx.output.nn_modules[fwd_node.node.name],
-                tx.output.nn_modules[bwd_node.node.name],
-                *(
-                    [
-                        _get_fake_value(arg)
-                        for arg in filtered_args + list(fwd_freevars.keys())
-                    ]
-                ),
-            )
-            example_value = autograd_function_apply(*fake_args, **kwargs)
+        with enable_python_dispatcher():
+            with tx.output.fake_mode:
+                fwd_freevars_args = [_get_fake_value(arg) for arg in fwd_freevars]
+                fake_args = (
+                    tx.output.nn_modules[fwd_node.node.name],
+                    tx.output.nn_modules[bwd_node.node.name],
+                    *fwd_freevars_args,
+                )
+                example_value = autograd_function_apply(*fake_args, **kwargs)
 
-        return wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                autograd_function_apply,
-                args=p_args,
-                kwargs=kwargs,
-            ),
-            example_value=example_value,
+        flat_variable = add_call_function(
+            tx, autograd_function_apply, p_args, kwargs, example_value
         )
+        overwrite_tensor_vt_proxy(fwd_graph_output_vts, flat_variable)
+        overwrite_tensor_vt_requires_grad(fwd_graph_output_vts, flat_variable)
+        return fwd_out
+
+    def prepare_ctx_vt(self, tx, args, kwargs):
+        from . import AutogradFunctionContextVariable
+
+        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
+        with discard_graph_changes(tx):
+            # A little hacky, but we need a dummy ctx proxy for speculate_subgraph.
+            # We should clean this up at some point.
+            proxy = tx.output.create_proxy(
+                "call_function", torch.autograd.function.FunctionCtx, (), {}
+            )
+            set_example_value(proxy.node, ctx.value)
+            ctx.proxy = proxy
+        return ctx
+
+    def trace_forward_graph(self, tx, ctx, fwd_tracer, args, kwargs):
+        """
+        Traces the forward method of the autograd.Function object.
+        """
+        from torch._functorch.autograd_function import DynamoAutogradFunctionTraceHelper
+
+        fwd_fn, fwd_args = self.prepare_fn_vt(ctx, "forward", args)
+
+        # autograd.Function forward does a few things like running in no_grad
+        # mode and also applying view_as for input tensors that are returned as
+        # outputs. Therefore, we wrap the original forward in a helper that have
+        # those extra bits for Dynamo to trace.
+        fwd_fn = _make_inlined(tx, DynamoAutogradFunctionTraceHelper.fwd_trace_helper)(
+            fwd_fn
+        )
+
+        # Speculate subgraph on the fwd
+        fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts = (
+            speculate_subgraph_with_auto_output_flattening(
+                tx,
+                fwd_fn,
+                fwd_args,
+                kwargs,
+                "autograd.Function",
+                enable_grad=None,
+                set_subgraph_inputs="automatic",
+                restore_side_effects=False,
+                tracer=fwd_tracer,
+            )
+        )
+
+        # There could be unused inputs in the forward, and Dynamo might not
+        # capture them. We must lift them as inputs, because even though they
+        # are not used in forward, we still need to account for their gradients
+        # in the backward.
+        for arg in args:
+            if isinstance(arg, variables.TensorVariable):
+                fwd_tracer.maybe_lift_tracked_freevar_to_input(arg.as_proxy())
+
+        if ctx in tx.output.side_effects.store_attr_mutations:
+            if (
+                "_materialize_non_diff_grads"
+                in tx.output.side_effects.store_attr_mutations[ctx]
+            ):
+                unimplemented(
+                    gb_type="autograd.Function.apply: _materialize_non_diff_grads mutation",
+                    context="",
+                    explanation="Mutations to autograd.Function.ctx._materialize_non_diff_grads are not supported.",
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+
+        return fwd_fn, fwd_out, fwd_graph, fwd_freevars, fwd_graph_output_vts
+
+    def trace_backward_graph(self, tx, ctx, fwd_tracer, fwd_out, fwd_fn):
+        """
+        Traces the backward method of the autograd.Function object.
+        """
+        from . import UserDefinedClassVariable, UserFunctionVariable, UserMethodVariable
+
+        # Note that for the forward, we do not restore side effects, because we
+        # want the later tracing to see the side-effects. But for backward, we
+        # are just trying to capture the graph, and therefore we must restore
+        # the side effects.
+        prev_side_effects = tx.output.side_effects
+
+        # Speculate subgraph on the backward. We make the bwd tracer a child of
+        # the fwd tracer, because backward may rely on tensors/attrs created in
+        # the fwd tracer.
+        bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+            tx.output,
+            parent=fwd_tracer,
+            source_target="autograd.Function",
+        )
+
+        bwd_args = []
+        if isinstance(fwd_out, variables.TensorVariable):
+            bwd_args.append(fwd_out)
+        else:
+            assert isinstance(fwd_out, variables.BaseListVariable)
+            for i in fwd_out.items:
+                if isinstance(i, variables.TensorVariable):
+                    bwd_args.append(i)
+                else:
+                    bwd_args.append(ConstantVariable.create(None))
+
+        bwd_fn, bwd_args = self.prepare_fn_vt(ctx, "backward", bwd_args)
+
+        def is_strict_for(v: VariableTracker):
+            if isinstance(v, variables.TensorVariable):
+                # we can be more lax for stuff from forward
+                return v.proxy.tracer is not fwd_tracer
+            return True
+
+        # automatic_with_forced_inputs relies on the function arg names to
+        # create a new proxy. Also, it will always INSERT a tensor placeholder
+        # as input, even though it might not be used in the graph. This allows
+        # us to make a mapping for the backward graph.
+        with (
+            tx.output.subtracer(fwd_fn, fwd_tracer),
+            tx.strict_translation_mode(is_strict_for),
+        ):
+            try:
+                bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
+                    speculate_subgraph_with_auto_output_flattening(
+                        tx,
+                        bwd_fn,
+                        bwd_args,
+                        {},
+                        "autograd.Function",
+                        enable_grad=False,
+                        set_subgraph_inputs="automatic_with_forced_inputs",
+                        restore_side_effects=False,
+                        tracer=bwd_tracer,
+                    )
+                )
+            except torch._dynamo.exc.Unsupported as e:
+                if isinstance(
+                    e, torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace
+                ):
+                    # TODO - Do not support this path because of eager
+                    # divergence forced by contiguous calls. Instead suggested
+                    # nonstrict_trace.
+                    from unittest import mock
+
+                    bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+                        tx.output,
+                        parent=fwd_tracer,
+                        source_target="autograd.Function",
+                    )
+                    from .._trace_wrapped_higher_order_op import (
+                        autograd_function_backward_rewritten,
+                    )
+
+                    if isinstance(self.bwd_fn, types.FunctionType):
+                        bwd_fn = UserFunctionVariable(
+                            autograd_function_backward_rewritten(self.bwd_fn)
+                        )
+                    elif isinstance(self.bwd_fn, types.MethodType):
+                        bwd_fn = UserMethodVariable(
+                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
+                            UserDefinedClassVariable(self.bwd_fn.__class__),
+                        )
+                    else:
+                        unimplemented(
+                            gb_type="autograd.Function.apply: non-function or method backward (2)",
+                            context=str(self.bwd_graph),
+                            explanation="Expected backward function to be a function or method.",
+                            hints=[],
+                        )
+
+                    with mock.patch(
+                        "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
+                        [],
+                    ):
+                        bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
+                            speculate_subgraph_with_auto_output_flattening(
+                                tx,
+                                bwd_fn,
+                                bwd_args,
+                                {},
+                                "autograd.Function",
+                                enable_grad=False,
+                                set_subgraph_inputs="automatic_with_forced_inputs",
+                                restore_side_effects=False,
+                                tracer=bwd_tracer,
+                            )
+                        )
+                else:
+                    raise e
+
+        # Restore the side effects
+        tx.output.side_effects = prev_side_effects
+
+        return bwd_args, bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts
+
+    def rewire_bwd_graph_inputs(
+        self,
+        fwd_freevars,
+        bwd_out,
+        bwd_graph,
+        bwd_freevars,
+        orig_fwd_args,
+    ):
+        # ---------------------------------------------------------------------
+        # Forward–Backward Input/Output Alignment
+        #
+        # autograd.Function requires that the outputs of backward() correspond
+        # exactly to the inputs of forward(). Normally this alignment is the
+        # user’s responsibility. However, when Dynamo synthesizes a new
+        # autograd.Function for a traced region, Dynamo must perform this
+        # alignment automatically.
+        #
+        # To do this, Dynamo uses the *original* forward call site as the anchor
+        # that defines how forward inputs map to backward outputs.
+        #
+        # ---------------------------------------------------------------------
+        # Terminology
+        #
+        # fwd_freevars / bwd_freevars:
+        #     Maps from *outer-graph proxies* to *inner-graph placeholder
+        #     proxies*. Keys are always outer-graph proxies (these may be actual
+        #     user inputs or intermediate values lifted into the subgraph).
+        #
+        # orig_fwd_args:
+        #     VariableTrackers for the forward() inputs. Since these correspond
+        #     to user-exposed arguments, each tracker points to an *outer-graph*
+        #     proxy.
+        #
+        # bwd_outs:
+        #     VariableTrackers for the backward() outputs. These usually point to
+        #     *inner-graph* proxies, except for cases where a forward input is
+        #     passed directly through to a backward output—in which case the
+        #     tracker may still refer to an outer-graph proxy.
+        #
+        # ---------------------------------------------------------------------
+        # Goal
+        #
+        # To ensure forward–backward consistency, we must rewire the backward
+        # graph outputs so that they line up with the forward graph inputs.
+        #
+        # We build a mapping from outer-graph proxy → inner-graph proxy using
+        # orig_fwd_args and bwd_outs, then iterate over the fwd_graph inputs to
+        # determine which backward outputs must be generated (or padded with
+        # None) to satisfy autograd’s calling convention.
+        #
+        # ---------------------------------------------------------------------
+        # Example
+        #
+        # Suppose the forward receives a user-defined object:
+        #
+        # @dataclass
+        # class Weird:
+        #     x: int
+        #     b: torch.Tensor
+        #     c: torch.Tensor
+        #
+        # class Foo(torch.autograd.Function):
+        #     @staticmethod
+        #     def forward(ctx, x: torch.Tensor, weird: Weird, z: torch.Tensor):
+        #         ctx.save_for_backward(weird.b, weird.c)
+        #         return weird.b * weird.c * x.clone()
+        #
+        #     @staticmethod
+        #     def backward(ctx, grad):
+        #         b, c = ctx.saved_tensors
+        #         return grad * b * c, None, grad * 2
+        #
+        # Dynamo lifts the tensor fields of the user-defined object for the trace:
+        #
+        # fwd_graph():
+        #     %l_weird_b : FakeTensor = placeholder[target=l_weird_b]
+        #     %l_weird_c : FakeTensor = placeholder[target=l_weird_c]
+        #     %l_x_      : FakeTensor = placeholder[target=l_x_]
+        #     %l_z_      : FakeTensor = placeholder[target=l_z_]
+        #     ...
+        #     return (outs,)
+        #
+        # The initial backward graph:
+        #
+        # bwd_graph():
+        #     %grad       : Tensor    = placeholder[target=grad]
+        #     %l_weird_b  : FakeTensor = placeholder[target=l_weird_b]
+        #     %l_weird_c  : FakeTensor = placeholder[target=l_weird_c]
+        #     ...
+        #     return (mul_1, mul_2)
+        #
+        # The forward graph has 4 inputs, but the backward graph produces only 2
+        # outputs, and their ordering does not match the forward argument order.
+        #
+        # So Dynamo rewires the backward graph outputs to align with the forward
+        # inputs:
+        #
+        # bwd_graph():
+        #     ...
+        #     return (None, None, mul_1, mul_2)
+        #
+        # This ensures the synthesized autograd.Function conforms to PyTorch’s
+        # forward/backward contract.
+        # ---------------------------------------------------------------------
+
+        def get_bwd_node(vt):
+            # Backward tensor vt here can be - (1) an intermediate, or (2) input
+            # to the backward graph. If it is an input to the backward graph, we have to lookup bwd_freevars to get the inner proxy.
+            return bwd_freevars.get(vt.proxy, vt.proxy).node
+
+        # Find the mapping between orig_fwd_args and bwd_out
+        outer_fwd_proxy_to_bwd_node = {}
+        if isinstance(bwd_out, variables.BaseListVariable):
+            bwd_outs = bwd_out.items
+            for idx, fwd_arg in enumerate(orig_fwd_args):
+                # We care about tensor args. For non-tensor args, the bwd output returns None.
+                if isinstance(fwd_arg, variables.TensorVariable):
+                    bwd_out_at_idx = bwd_outs[idx]
+                    if isinstance(bwd_out_at_idx, variables.TensorVariable):
+                        outer_fwd_proxy_to_bwd_node[fwd_arg.proxy] = get_bwd_node(
+                            bwd_out_at_idx
+                        )
+                    else:
+                        # backward can return None at the output
+                        assert (
+                            isinstance(bwd_out_at_idx, variables.ConstantVariable)
+                            and bwd_out_at_idx.value is None
+                        )
+                        outer_fwd_proxy_to_bwd_node[fwd_arg.proxy] = None
+
+        elif isinstance(bwd_out, variables.TensorVariable):
+            outer_fwd_proxy_to_bwd_node[orig_fwd_args[0].proxy] = get_bwd_node(bwd_out)
+
+        # Ideally, we should have walked through the fwd placeholders. But we
+        # can instead walk through the fwd_freevars, which is a insertion sorted
+        # dictionary and therefore represents the outer_proxies for the
+        # placeholder in the same order as that as placeholders.
+        rewired_bwd_outputs = [
+            outer_fwd_proxy_to_bwd_node.get(fwd_proxy) for fwd_proxy in fwd_freevars
+        ]
+
+        for node in bwd_graph.find_nodes(op="output"):
+            bwd_graph.erase_node(node)
+            break
+        bwd_graph.output(tuple(rewired_bwd_outputs))
+        bwd_graph.lint()
+
+    def handle_saved_tensors_wiring(
+        self,
+        fwd_out,
+        fwd_graph,
+        fwd_freevars,
+        fwd_graph_body_outputs,
+        bwd_graph,
+        bwd_freevars,
+    ):
+        # ---------------------------------------------------------------------
+        # Rewiring Forward Outputs to Backward Inputs (and Handling Saved Tensors)
+        #
+        # In `rewire_bwd_graph_inputs`, we aligned the *forward inputs* with the
+        # *backward outputs*. This method performs the complementary task:
+        # aligning the *forward outputs* with the *backward inputs*, while also
+        # incorporating all tensors saved via ctx.save_for_backward.
+        #
+        # There are two main issues we must resolve:
+        #
+        # (1) Forward outputs may contain non-tensor values.
+        #     This means the number of tensors visible in fwd_out may not match
+        #     the number of tensors produced by the traced forward graph. As a
+        #     result, the backward graph’s placeholders may not line up with the
+        #     actual tensor outputs.
+        #
+        # (2) The backward graph may require intermediate tensors saved during
+        #     the forward pass (via save_for_backward), but those intermediates
+        #     might not currently be included among the forward graph’s outputs.
+        #
+        # Together, these issues mean that the bwd_graph input signature may be
+        # inconsistent with what fwd_graph outputs, and we need to rewrite both.
+        #
+        # Lets look at an example to understand the transformation
+        #
+        # class Add(torch.autograd.Function):
+        #     @staticmethod
+        #     def forward(ctx, x, y):
+        #         a = torch.sin(x)
+        #         b = torch.cos(y)
+        #         ctx.save_for_backward(a)
+        #         return Foo(a, b), x * y
+
+        #     @staticmethod
+        #     def backward(ctx, grad_a, grad_b):
+        #         (a,) = ctx.saved_tensors
+        #         return grad_b * 2, a * grad_b * 3
+
+        # Before
+        # fwd_graph():
+        #     %l_x_ : torch._subclasses.fake_tensor.FakeTensor [num_users=2] = placeholder[target=l_x_]
+        #     %l_y_ : torch._subclasses.fake_tensor.FakeTensor [num_users=2] = placeholder[target=l_y_]
+        #     ....
+        #     return (a, b, out)
+        #
+        # bwd_graph():
+        #     %grad_b : torch.Tensor [num_users=2] = placeholder[target=grad_b]
+        #     %a : torch._subclasses.fake_tensor.FakeTensor [num_users=1] = placeholder[target=a]
+        #     ....
+        #     return (mul, mul_2)
+        #
+        # The problems here:
+        #   (1) fwd_graph has 3 tensor outputs (a, b, out), but bwd_graph has
+        #       only 1 gradient input - grad_b. We need 3.
+        #
+        #   (2) bwd_graph uses `a` (a saved tensor) as an input, but fwd_graph
+        #       does not currently return `a`. To make `a` available to the
+        #       backward graph, the forward graph must expose it as part of its
+        #       output signature.
+        #
+        # After this transformation
+        # fwd_graph():
+        #     %l_x_ : torch._subclasses.fake_tensor.FakeTensor [num_users=2] = placeholder[target=l_x_]
+        #     %l_y_ : torch._subclasses.fake_tensor.FakeTensor [num_users=2] = placeholder[target=l_y_]
+        #     .....
+        #     return ((a, b, out), (a,))
+        # bwd_graph():
+        #     %unused_0 : [num_users=0] = placeholder[target=unused_0]
+        #     %unused_1 : [num_users=0] = placeholder[target=unused_1]
+        #     %grad_b : [num_users=2] = placeholder[target=grad_b]
+        #     %a : [num_users=1] = placeholder[target=a]
+        #     .....
+        #     return (mul, mul_2)
+        #
+        # Key changes:
+        #
+        #   1) The forward graph now returns:
+        #           (existing_outputs), (saved_tensors)
+        #      This exposes saved intermediates (`a`) as part of the fwd output
+        #      structure, making them available to backward.
+        #
+        #   2) The backward graph input signature is rewritten to:
+        #           (*grads_for_existing_outputs, *saved_tensors)
+        #      This ensures the counts and ordering match the new fwd_graph
+        #      output structure. Placeholders corresponding to tensors whose
+        #      gradients are unused (e.g., `a`, `b`) appear as `%unused_*`.
+        #
+        # This alignment ensures that the synthesized autograd.Function follows
+        # PyTorch’s forward/backward calling convention and that all required
+        # saved tensors are available to the backward graph.
+        # ---------------------------------------------------------------------
+
+        # To address Problem (1), we must determine which backward-graph inputs
+        # correspond to the forward-graph outputs.
+        #
+        # We use two facts:
+        #   • `fwd_out` preserves the original forward output order.
+        #   • Backward-graph inputs are also ordered according to the backward()
+        #     method signature, thanks to automatic_with_forced_inputs.
+        #
+        # For any forward output that is *not* a tensor, there is no
+        # corresponding tensor placeholder in the backward graph. During tracing,
+        # we intentionally inserted a `None` VariableTracker for these positions,
+        # so the backward graph contains no placeholder for them.
+        bwd_input_nodes = list(bwd_graph.find_nodes(op="placeholder"))
+        fwd_vt_to_bwd_node = {}
+        bwd_idx = 0
+        if isinstance(fwd_out, variables.BaseListVariable):
+            for fwd_vt in fwd_out.items:
+                if isinstance(fwd_vt, variables.TensorVariable):
+                    fwd_vt_to_bwd_node[fwd_vt] = bwd_input_nodes[bwd_idx]
+                    bwd_idx += 1
+        else:
+            if isinstance(fwd_out, variables.TensorVariable):
+                fwd_vt_to_bwd_node[fwd_out] = bwd_input_nodes[bwd_idx]
+                bwd_idx += 1
+
+        rewired_bwd_graph_inputs = []
+        for fwd_graph_vt in fwd_graph_body_outputs:
+            # for tensor vts that were part of a user-defined object (like in
+            # the above example), we just set None for now. Later, we will use
+            # these None to insert a unused placeholder.
+            rewired_bwd_graph_inputs.append(fwd_vt_to_bwd_node.get(fwd_graph_vt))
+
+        # To address Problem (2), we must incorporate any tensors that were saved
+        # (or otherwise smuggled) from the forward pass into the backward graph.
+        #
+        # Fortunately, these are easy to identify: they appear in `bwd_freevars`.
+        # `bwd_freevars` maps outer-graph lifted proxies to inner-graph placeholder
+        # proxies. Because the backward graph is traced using proxies originating
+        # from `fwd_out`, any value lifted into the backward graph represents a
+        # saved/smuggled tensor.
+        #
+        # Once we identify these saved tensors, we must also locate their
+        # corresponding forward-graph proxies so that the forward graph can return
+        # these tensors as part of its output signature.
+        extra_fwd_output_nodes = []
+        for fwd_proxy, bwd_inner_proxy in bwd_freevars.items():
+            # For backward, its easy, just get the node from bwd_inner_proxy
+            rewired_bwd_graph_inputs.append(bwd_inner_proxy.node)
+
+            # For the fwd_proxy, it could be a proxy from the outer graph, or it
+            # could be an intermediate.
+            # First ensure that's its inner fwd proxy
+            inner_fwd_proxy = fwd_freevars.get(fwd_proxy, fwd_proxy)
+            extra_fwd_output_nodes.append(inner_fwd_proxy.node)
+
+        # Mechanical steps from here on. We have the extra_fwd_outputs and rewired_bwd_inputs. Lets make the changes.
+        # Lets change the fwd graph outputs.
+        fwd_output_nodes = []
+        for node in fwd_graph.find_nodes(op="output"):
+            fwd_output_nodes = node.args[0]
+            fwd_graph.erase_node(node)
+            break
+
+        # The signature is now ((*existing_outputs), (*extra_outputs)). Please
+        # take a look at AutogradFunctionApply where we take the saved_tensors
+        # out in the forward method to save for backward.
+        new_fwd_graph_outputs = (fwd_output_nodes, tuple(extra_fwd_output_nodes))
+        fwd_graph.output(new_fwd_graph_outputs)
+        fwd_graph.lint()
+
+        # Now lets change the bwd graph.
+        new_graph = torch.fx.Graph()
+        env = {}
+
+        count = itertools.count()
+
+        for node in rewired_bwd_graph_inputs:
+            if node is None:
+                new_node = new_graph.placeholder(f"unused_{next(count)}")
+            else:
+                new_node = new_graph.placeholder(node.name)
+                new_node.meta = copy.copy(node.meta)
+            env[node] = new_node
+
+        for node in bwd_graph.nodes:
+            if node.op == "placeholder":
+                assert node in env
+            else:
+                env[node] = new_graph.node_copy(node, lambda x: env[x])
+                env[node].meta = copy.copy(node.meta)
+
+        new_graph.lint()
+        return fwd_graph, new_graph
+
+    def prepare_fn_vt(self, ctx, method_name, args):
+        from . import UserDefinedClassVariable, UserFunctionVariable, UserMethodVariable
+
+        source = None
+        if self.parent_source:
+            source = AttrSource(self.parent_source, member=method_name)
+
+        if method_name == "forward":
+            fn = self.fwd_fn
+        else:
+            fn = self.bwd_fn
+
+        if isinstance(fn, types.FunctionType):
+            fn_vt = UserFunctionVariable(fn, source=source)
+            fn_args = [ctx, *args]
+        elif isinstance(fn, types.MethodType):
+            cls_vt = UserDefinedClassVariable(fn.__class__)
+            fn_vt = UserMethodVariable(
+                fn.__func__,
+                cls_vt,
+                source=source,
+            )
+            fn_args = [cls_vt, ctx, *args]
+        else:
+            unimplemented(
+                gb_type="autograd.Function.apply: non-function or method forward",
+                context=str(fn),
+                explanation=f"Expected {method_name} to be a function or method.",
+                hints=[],
+            )
+        return fn_vt, fn_args
 
 
 def _get_fake_value(x):
