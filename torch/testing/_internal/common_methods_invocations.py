@@ -9384,6 +9384,47 @@ def sample_inputs_diagflat(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_input((2,)), offset=1)
     yield SampleInput(make_input((2,)), offset=-1)
 
+
+def error_inputs_max_unpool(op_info, device, **kwargs):
+    """Error inputs for max_unpool: shape mismatch between input and indices."""
+    make_arg = partial(make_tensor, device=device, dtype=torch.float32)
+
+    unpool_name_to_dim = {
+        'nn.functional.max_unpool1d': 1,
+        'nn.functional.max_unpool2d': 2,
+        'nn.functional.max_unpool3d': 3
+    }
+
+    pool_dim = unpool_name_to_dim[op_info.name]
+
+    # Create mismatched shapes for input and indices
+    if pool_dim == 1:
+        # 1D: input (8, 8), indices (8, 7) - mismatch in last dimension
+        input_shape = (8, 8)
+        indices_shape = (8, 7)
+        kwargs_dict = {'kernel_size': 3, 'stride': 2, 'padding': 0}
+    elif pool_dim == 2:
+        # 2D: input (1, 1, 4, 4), indices (1, 1, 4, 1) - mismatch in width
+        input_shape = (1, 1, 4, 4)
+        indices_shape = (1, 1, 4, 1)
+        kwargs_dict = {'kernel_size': 3, 'stride': 2, 'padding': 0}
+    else:  # pool_dim == 3
+        # 3D: input (1, 1, 4, 4, 4), indices (1, 1, 4, 4, 1) - mismatch in width
+        input_shape = (1, 1, 4, 4, 4)
+        indices_shape = (1, 1, 4, 4, 1)
+        kwargs_dict = {'kernel_size': 3, 'stride': 2, 'padding': 0}
+
+    yield ErrorInput(
+        SampleInput(
+            make_arg(input_shape),
+            args=(torch.zeros(indices_shape, device=device, dtype=torch.long),),
+            kwargs=kwargs_dict
+        ),
+        error_type=RuntimeError,
+        error_regex='Expected shape of indices to be same as that of the input tensor'
+    )
+
+
 def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
     unpool_name_to_pool_method_dict = {
         'nn.functional.max_unpool1d': torch.nn.functional.max_pool1d,
@@ -16252,6 +16293,7 @@ op_db: list[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
+           error_inputs_func=error_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
                # We skip tests here because there is non-determinism in backward
@@ -16286,6 +16328,7 @@ op_db: list[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
+           error_inputs_func=error_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
                # We skip tests here because there is non-determinism in backward
@@ -16323,6 +16366,7 @@ op_db: list[OpInfo] = [
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_max_unpool,
+           error_inputs_func=error_inputs_max_unpool,
            skips=(
                # Gradients are tested in `variant_test_name=grad` below.
                # We skip tests here because there is non-determinism in backward
