@@ -136,4 +136,5 @@ from torch.backends import (
     openmp as openmp,
     opt_einsum as opt_einsum,
     quantized as quantized,
+    vulkan as vulkan,
 )
