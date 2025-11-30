@@ -1,6 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
+#include <thrust/pair.h>
+
 #include <tuple>
 #include <type_traits>
 
