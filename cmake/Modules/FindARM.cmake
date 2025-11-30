@@ -21,7 +21,19 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
     CHECK_CXX_SOURCE_COMPILES("${SVE_BF16_CODE}" CXX_SVE256_FOUND)
     SET(CMAKE_REQUIRED_FLAGS ${CMAKE_REQUIRED_FLAGS_SAVE})
 
-    if(CXX_SVE256_FOUND)
+    # gcc 11.5 hits an internal compiler error on the SVE intrinsics in ATen's
+    # vec headers, so keep SVE off and let aarch64 fall back to NEON.
+    # See https://github.com/pytorch/pytorch/issues/162422
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64"
+       AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+       AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "11.5.0"
+       AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS "11.6.0")
+      message(WARNING "gcc ${CMAKE_CXX_COMPILER_VERSION} miscompiles SVE intrinsics. "
+        "Disabling SVE and falling back to NEON; use gcc 13 or newer for SVE. "
+        "See https://github.com/pytorch/pytorch/issues/162422")
+      set(CXX_SVE256_FOUND FALSE CACHE BOOL "SVE256 disabled for gcc 11.5" FORCE)
+      set(CXX_SVE_FOUND FALSE CACHE BOOL "SVE disabled for gcc 11.5" FORCE)
+    elseif(CXX_SVE256_FOUND)
       # Any compiler that supports SVE256 also supports SVE128
       set(CXX_SVE_FOUND TRUE CACHE BOOL "SVE available on host")
       message(STATUS "SVE support detected.")
