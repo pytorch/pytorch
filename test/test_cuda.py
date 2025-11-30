@@ -175,7 +175,8 @@ class TestCuda(TestCase):
             thread.join()
 
     @serialTest()
-    def test_host_memory_stats(self):
+    # FIXME: broken if not run as first test to pin memory?
+    def test_a_host_memory_stats(self):
         # Helper functions
         def empty_stats():
             return {
