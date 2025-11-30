@@ -675,7 +675,9 @@ class TestExecutionTrace(TestCase):
             assert fp.name == et.get_output_file_path()
             et.unregister_callback()
             nodes = self.get_execution_trace_root(fp.name)
+            fp.close()
             os.unlink(fp.name)
+            found_root_node = False
             for n in nodes:
                 assert "name" in n
                 if "[pytorch|profiler|execution_trace|process]" in n["name"]:
