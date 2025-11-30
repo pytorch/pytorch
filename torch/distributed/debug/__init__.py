@@ -62,9 +62,7 @@ def start_debug_server(port: int = 25999, worker_port: int = 0) -> None:
     from torch.distributed.debug._frontend import main
 
     if RANK == 0:
-        _DEBUG_SERVER_PROC = _MP_CONTEXT.Process(
-            target=main, args=(port,), daemon=True
-        )
+        _DEBUG_SERVER_PROC = _MP_CONTEXT.Process(target=main, args=(port,), daemon=True)
         _DEBUG_SERVER_PROC.start()
 
 
