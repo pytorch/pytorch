@@ -3386,25 +3386,21 @@ class SubgraphTracer(fx.Tracer):
             # might be created. For this purpose, we track the basic symbols of intermediate results
             # immediately after they're created at wrap_fx_proxy with track_produced_symints. Notice
             # that for basic symbols that're already tracked by create_graph_input, we won't track it again.
-            #
-            # Also see NOTE: [Export inputs must be explicitly passed in]
-            is_strict_export = self.is_export
-            is_non_strict_export = torch.compiler.is_compiling()
-            if not is_strict_export and not is_non_strict_export:
-                if isinstance(example_value, torch.Tensor):
-                    self._lift_basic_symbols(example_value, source)
-                elif isinstance(example_value, (list, tuple)):
-                    for i, e in enumerate(example_value):
-                        if not isinstance(e, torch.Tensor):
-                            continue
 
-                        e_source = None
-                        if source:
-                            e_source = GetItemSource(
-                                base=source, index=i, index_is_slice=False
-                            )
+            if isinstance(example_value, torch.Tensor):
+                self._lift_basic_symbols(example_value, source)
+            elif isinstance(example_value, (list, tuple)):
+                for i, e in enumerate(example_value):
+                    if not isinstance(e, torch.Tensor):
+                        continue
 
-                        self._lift_basic_symbols(e, e_source)
+                    e_source = None
+                    if source:
+                        e_source = GetItemSource(
+                            base=source, index=i, index_is_slice=False
+                        )
+
+                    self._lift_basic_symbols(e, e_source)
 
             # Bound the symbol to ph if example_value is a SymInt with basic symbol.
             if isinstance(example_value, torch.SymInt) and isinstance(
@@ -3619,6 +3615,12 @@ class SubgraphTracer(fx.Tracer):
         # before the tensor. This ordering ensures that when we look at the tensor's
         # symbols, they're already lifted/tracked. E.g. this assumption is used
         # in insert_deferred_runtime_asserts.
+
+        # Also see NOTE: [Export inputs must be explicitly passed in]
+        is_strict_export = self.is_export
+        is_non_strict_export = torch.compiler.is_compiling()
+        is_export = is_strict_export or is_non_strict_export
+
         def _lift_symbols_in_symint(
             s: Union[int, torch.SymInt],
             source: Optional[Source],
@@ -3637,6 +3639,10 @@ class SubgraphTracer(fx.Tracer):
                 # Recursively lift symbols in symint until top-level.
                 self.parent._lift_basic_symbols(s, source)
                 for s0 in self_to_be_bound:
+                    if s0 not in self.parent.bound_symbols and is_export:
+                        # see NOTE: [Export inputs must be explicitly passed in]
+                        # Lift the symint if the symbol is already present in the parent subtracer.
+                        continue
                     parent_proxy = self.parent.bound_symbols[s0]
                     example_val = parent_proxy.node.meta["example_value"]  # type: ignore[union-attr]
                     assert isinstance(example_val, torch.SymInt)
@@ -3655,7 +3661,8 @@ class SubgraphTracer(fx.Tracer):
                     )
                     self.lifted_freevars[parent_proxy] = ph  # type: ignore[index]
             # For root_tracer:
-            else:
+            elif not is_export:
+                # see NOTE: [Export inputs must be explicitly passed in]
                 assert len(self_to_be_bound) == 1, (
                     f"For root tracer, we only expect to bind basic symbols (compound symbols "
                     f"should be cached before) but got unbound symbols {self_to_be_bound} in {s}"
