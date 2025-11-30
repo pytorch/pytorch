@@ -98,11 +98,11 @@ def _wrap(fn, i, args, error_file):
 
 class ProcessContext:
     def __init__(self, processes, error_files):
-        self.error_files = error_files
         self.processes = processes
         self.sentinels = {
             process.sentinel: index for index, process in enumerate(processes)
         }
+        self.__error_files = error_files
 
     def pids(self):
         return [int(process.pid) for process in self.processes]
@@ -182,7 +182,7 @@ class ProcessContext:
 
         # The file will only be created if the process crashed.
         failed_process = self.processes[error_index]
-        if not os.access(self.error_files[error_index], os.R_OK):
+        if not os.access(self.__error_files[error_index], os.R_OK):
             exitcode = self.processes[error_index].exitcode
             if exitcode < 0:
                 try:
@@ -204,8 +204,9 @@ class ProcessContext:
                     exit_code=exitcode,
                 )
 
-        with open(self.error_files[error_index], "rb") as fh:
+        with open(self.__error_files[error_index], "rb") as fh:
             original_trace = pickle.load(fh)
+            os.remove(self.__error_files[error_index])
         msg = f"\n\n-- Process {error_index:d} terminated with the following error:\n"
         msg += original_trace
         raise ProcessRaisedException(msg, error_index, failed_process.pid)
