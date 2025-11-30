@@ -3804,7 +3804,7 @@ def error_inputs_max_pool2d(op_info, device, **kwargs):
     # error: inputs when kernel size too large for input
     yield ErrorInput(SampleInput(make_arg((1, 1, 4)),
                                  kwargs={'kernel_size': 2}),
-                     error_regex='output size is too small')
+                     error_regex='Output size is too small')
 
 
 def error_inputs_max_pool3d(op_info, device, **kwargs):
@@ -3841,7 +3841,7 @@ def error_inputs_max_pool3d(op_info, device, **kwargs):
     # error: inputs when kernel size too large for input
     yield ErrorInput(SampleInput(make_arg((1, 1, 1, 4, 4)),
                                  kwargs={'kernel_size': 2}),
-                     error_regex='output size is too small')
+                     error_regex='Output size is too small')
 
 
 
