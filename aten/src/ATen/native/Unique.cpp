@@ -323,7 +323,7 @@ std::tuple<Tensor, Tensor, Tensor> unique_consecutive_cpu_template(
 
 template<class ForwardIt>
 ForwardIt _unique_dim_cpu_impl(ForwardIt first, ForwardIt last,
-  std::vector<int64_t>& indices, Tensor inverse_indices_vec, Tensor counts) {
+  std::vector<int64_t>& indices, const Tensor& inverse_indices_vec, const Tensor& counts) {
     if (first == last) {
       return last;
     }
