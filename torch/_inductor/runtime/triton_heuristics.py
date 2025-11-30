@@ -3344,6 +3344,11 @@ def _persistent_reduction_configs(
             else:
                 num_warps, min_num_warps = 1, 1
                 x_block = min(1024 // rnumel, 8)
+                if torch.xpu.is_available():
+                    x_block = 8
+                    num_warps = None
+                    min_num_warps = None
+                    reduction_hint = None
 
                 configs = [
                     triton_config_reduction(
