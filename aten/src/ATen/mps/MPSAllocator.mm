@@ -243,6 +243,11 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   // first, try to get a block from the existing pool.
   bool block_found = get_free_buffer(params);
   if (!block_found) {
+    // CRITICAL FIX: Free pending buffers BEFORE garbage collection
+    // Without this, buffers_pending_free accumulates indefinitely, causing memory leaks
+    // in long-running training sessions. This fixes the 150MB/step leak.
+    freeInactiveBuffers();
+
     // do garbage collection if memory pressure is high and there's enough memory in pool
     if (params.has_memory_pressure && alloc_size < pool.available_size) {
       garbage_collect_cached_buffers(params);
