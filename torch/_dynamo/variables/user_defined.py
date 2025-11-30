@@ -1907,9 +1907,9 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         elif (
             name == "__setattr__"
             and len(args) == 2
-            and args[0].is_python_constant()
-            and args[0].as_python_constant()
-            in ("__cause__", "__context__", "__suppress_context__", "__traceback__")
+            and args[0].is_constant_match(
+                "__cause__", "__context__", "__suppress_context__", "__traceback__"
+            )
         ):
             self.exc_vt.call_setattr(tx, args[0], args[1])
         elif name == "with_traceback":

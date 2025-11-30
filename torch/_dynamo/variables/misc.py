@@ -474,9 +474,7 @@ class ExceptionVariable(VariableTracker):
         if name == "__context__":
             self.set_context(val)
         elif name == "__cause__":
-            if (
-                val.is_python_constant() and val.as_python_constant() is None
-            ) or isinstance(
+            if val.is_constant_none() or isinstance(
                 val,
                 (
                     variables.BuiltinVariable,
@@ -490,12 +488,12 @@ class ExceptionVariable(VariableTracker):
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__suppress_context__":
-            if val.is_python_constant() and val.as_python_constant() in (True, False):
+            if val.is_constant_match(True, False):
                 self.__suppress_context__ = val
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__traceback__":
-            if val.is_python_constant() and val.as_python_constant() is None:
+            if val.is_constant_none():
                 self.__traceback__ = val
             else:
                 unimplemented(

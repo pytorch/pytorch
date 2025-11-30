@@ -118,6 +118,12 @@ its type to `common_constant_types`.
     def is_symnode_like(self) -> bool:
         return isinstance(self.value, (int, bool))
 
+    def is_constant_match(self, *values: Any) -> bool:
+        return self.value in values
+
+    def is_constant_none(self) -> bool:
+        return self.value is None
+
     @property
     def items(self) -> list[VariableTracker]:
         """
@@ -314,10 +320,7 @@ its type to `common_constant_types`.
                 return map_fn.call_function(tx, [self, *rest], {})
             else:
                 for other in rest:
-                    if not (
-                        other.is_python_constant()
-                        and other.as_python_constant() is None
-                    ):
+                    if not other.is_constant_none():
                         return self._tree_map_fallback(
                             tx,
                             tree_map_fn,

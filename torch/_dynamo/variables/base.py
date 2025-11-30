@@ -366,6 +366,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
+    def is_constant_match(self, *values: Any) -> bool:
+        """
+        Check if this variable is a python constant matching one of the given values.
+
+        Examples:
+            var.is_constant_match(None)  # True if var is constant None
+            var.is_constant_match(True, False)  # True if var is constant True or False
+            var.is_constant_match(NotImplemented)  # True if var is constant NotImplemented
+        """
+        return False
+
+    def is_constant_none(self) -> bool:
+        """Check if this variable is a constant None value."""
+        return False
+
     def make_guard(self, fn: Callable[..., Any]) -> Guard:
         if self.source:
             return self.source.make_guard(fn)
@@ -576,10 +591,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> "VariableTracker":
         """Performance optimization to implement optree.tree_map faster than tracing it"""
         is_leaf_var = tree_map_kwargs.get("is_leaf")
-        if is_leaf_var is not None and not (
-            is_leaf_var.is_python_constant()
-            and is_leaf_var.as_python_constant() is None
-        ):
+        if is_leaf_var is not None and not is_leaf_var.is_constant_none():
             pred_result = is_leaf_var.call_function(tx, [self], {})
             try:
                 leaf_decision = pred_result.as_python_constant()

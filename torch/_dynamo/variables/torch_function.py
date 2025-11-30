@@ -543,9 +543,7 @@ def dispatch_torch_function(
         res = tx.symbolic_torch_function_state.call_torch_function_mode(
             tx, fn, types, args, kwargs
         )
-        if not (
-            res.is_python_constant() and res.as_python_constant() is NotImplemented
-        ):
+        if not res.is_constant_match(NotImplemented):
             return res
 
     for arg in overloaded_args:
@@ -557,9 +555,7 @@ def dispatch_torch_function(
             kwargs,
         )
 
-        if not (
-            res.is_python_constant() and res.as_python_constant() is NotImplemented
-        ):
+        if not res.is_constant_match(NotImplemented):
             return res
 
     unimplemented(

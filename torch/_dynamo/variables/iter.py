@@ -585,7 +585,7 @@ class FilterVariable(IteratorVariable):
         while True:
             item = _next()
             self.index += 1
-            if self.fn.is_python_constant() and self.fn.as_python_constant() is None:
+            if self.fn.is_constant_none():
                 res = item
             else:
                 res = self.fn.call_function(tx, [item], {})

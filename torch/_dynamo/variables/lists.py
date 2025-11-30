@@ -905,10 +905,7 @@ class ListVariable(CommonListMethodsVariable):
             if len(kwargs) != 0:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
 
-            if (
-                key_fn_var.is_python_constant()
-                and key_fn_var.as_python_constant() is None
-            ):
+            if key_fn_var.is_constant_none():
                 keys = self.items.copy()
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]

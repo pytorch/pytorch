@@ -1000,7 +1000,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             from .lists import BaseListVariable
 
-            if layout and layout.as_python_constant() == torch.strided:
+            if layout and layout.is_constant_match(torch.strided):
                 unimplemented(
                     gb_type="Attempted to use strided NestedTensor",
                     context=f"layout={layout}",
@@ -1024,9 +1024,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.nn.functional.one_hot)
         def handle_one_hot(self, tx: "InstructionTranslator", *args, **kwargs):
             if len(args) + len(kwargs) == 1 or (
-                len(args) == 2
-                and args[1].is_python_constant()
-                and args[1].as_python_constant() == -1
+                len(args) == 2 and args[1].is_constant_match(-1)
             ):
                 unimplemented(
                     gb_type="Attempted to use `torch.nn.functional.one_hot` with data-dependent output shape",
@@ -1340,7 +1338,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Running the graph will ensure that the DeviceContext mode is
             # at the correct position in the stack
             TorchFunctionModeStackVariable.register_mutation(tx)
-            if args[0].is_python_constant() and args[0].as_python_constant() is None:
+            if args[0].is_constant_none():
                 TorchFunctionModeStackVariable.clear_default_device(tx)
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)

@@ -225,11 +225,7 @@ def find_mismatched_vars(var, types, allow_none=False):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
     else:
-
-        def _is_none(var):
-            return var.is_python_constant() and var.as_python_constant() is None
-
-        if not isinstance(var, types) and not (allow_none and _is_none(var)):
+        if not isinstance(var, types) and not (allow_none and var.is_constant_none()):
             mismatched_vars.add(var)
     return mismatched_vars
 
@@ -2648,10 +2644,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Check all outputs of map are tensors.
         # For map, outputting None is OK, thus ignore None values in the check
         body_r_vars = body_r.unpack_var_sequence(tx)
-        none_mask = [
-            type(x.realize()) is ConstantVariable and x.as_python_constant() is None
-            for x in body_r_vars
-        ]
+        none_mask = [x.is_constant_none() for x in body_r_vars]
         _check_all_tensorvariable(
             [br for bm, br in zip(none_mask, body_r_vars) if not bm]
         )

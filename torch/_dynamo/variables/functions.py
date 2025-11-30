@@ -1053,10 +1053,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             if self._is_generator_just_started() and len(args):
                 # can't send non-None value to a just-started generator
                 # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
-                if not all(
-                    arg.is_python_constant() and arg.as_python_constant() is None
-                    for arg in args
-                ):
+                if not all(arg.is_constant_none() for arg in args):
                     raise_observed_exception(TypeError, tx)
             tracer = self._get_inline_tracer(tx)
             tracer.push_many(args)
@@ -2994,7 +2991,7 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         if len(args) == 2:
             is_leaf = args[1]
 
-        if not (is_leaf.is_python_constant() and is_leaf.as_python_constant() is None):
+        if not is_leaf.is_constant_none():
             return super().call_function(tx, args, kwargs)
 
         # Optimize the case where is_leaf is None

@@ -2561,7 +2561,7 @@ class BuiltinVariable(VariableTracker):
         if default is not None:
             hasattr_var = self.call_hasattr(tx, obj, name_var)
             if hasattr_var is not None:
-                assert hasattr_var.as_python_constant() in (True, False)
+                assert hasattr_var.is_constant_match(True, False)
                 if not hasattr_var.as_python_constant():
                     return default
             else:

@@ -4985,10 +4985,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
                 # When the generator returns None, we raise StopIteration
                 args = []
-                if not (
-                    self.symbolic_result.is_python_constant()
-                    and self.symbolic_result.as_python_constant() is None
-                ):
+                if not self.symbolic_result.is_constant_none():
                     args = [self.symbolic_result]
                 exc.raise_observed_exception(StopIteration, self, args=args)
             else:
@@ -4996,7 +4993,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         else:
             if is_generator(code):
                 assert isinstance(self, InliningGeneratorInstructionTranslator)
-                assert self.symbolic_result.as_python_constant() is None
+                assert self.symbolic_result.is_constant_none()
                 return ListIteratorVariable(
                     self.generated_items,
                     mutation_type=ValueMutationNew(),
@@ -5228,7 +5225,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if not (val.is_python_constant() and val.as_python_constant() is None):
+        if not val.is_constant_none():
             # invoke send
             # Unreachable code - if you hit this, you are implementing generator support and have
             # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
@@ -5270,7 +5267,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             isinstance(tos, UserDefinedObjectVariable)
             and isinstance(tos.value, collections.abc.Iterator)
         ):
-            if val.is_python_constant() and val.as_python_constant() is None:
+            if val.is_constant_none():
                 try:
                     val = tos.next_variable(self)  # type: ignore[arg-type]
                 except (StopIteration, exc.ObservedUserStopIteration) as ex:
