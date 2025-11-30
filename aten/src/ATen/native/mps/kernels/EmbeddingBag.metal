@@ -226,18 +226,18 @@ void embedding_bag_impl(
       max_indices, max_indices_strides, bag_idx, feature_idx, max_idx);
 }
 
-#define DISPATCH_IMPL(MODE) \
-  embedding_bag_impl<MODE>( \
-      weight,               \
-      indices,              \
-      offsets,              \
-      per_sample_weights,   \
-      output,               \
-      offset2bag,           \
-      bag_size,             \
-      max_indices,          \
-      params,               \
-      error_buf,            \
+#define DISPATCH_IMPL(MODE)        \
+  return embedding_bag_impl<MODE>( \
+      weight,                      \
+      indices,                     \
+      offsets,                     \
+      per_sample_weights,          \
+      output,                      \
+      offset2bag,                  \
+      bag_size,                    \
+      max_indices,                 \
+      params,                      \
+      error_buf,                   \
       tid)
 
 template <typename T, typename I>
