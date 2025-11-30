@@ -810,7 +810,7 @@ class MultiProcessTestCase(TestCase):
         self.processes = []  # type: ignore[var-annotated]
         self.rank = self.MAIN_PROCESS_RANK
         with tempfile.NamedTemporaryFile(delete=False) as f:
-            self.filename = f.name
+            self.file_name = f.name
         # pid to pipe consisting of error message from process.
         self.pid_to_pipe = {}  # type: ignore[var-annotated]
 
@@ -838,7 +838,7 @@ class MultiProcessTestCase(TestCase):
                 args=(
                     rank,
                     self._current_test_name(),
-                    self.filename,
+                    self.file_name,
                     child_conn,
                 ),
                 kwargs={
