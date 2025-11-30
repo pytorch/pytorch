@@ -7,7 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -16,6 +16,8 @@ from torch.utils._ordered_set import OrderedSet
 
 # Prevent circular import
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._inductor.runtime.triton_compat import Config
     from torch._inductor.scheduler import BaseSchedulerNode
 

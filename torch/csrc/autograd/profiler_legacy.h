@@ -117,7 +117,7 @@ struct TORCH_API LegacyEvent {
   }
 
   double cpuElapsedUs(const LegacyEvent& e) const {
-    return static_cast<double>(e.cpu_ns_ - cpu_ns_) / (1000.0);
+    return static_cast<double>(e.cpu_ns_ - cpu_ns_) / 1000.0;
   }
 
   void setCpuUs(int64_t cpu_us) {
@@ -125,7 +125,7 @@ struct TORCH_API LegacyEvent {
   }
 
   double cpuUs() const {
-    return static_cast<double>(cpu_ns_) / (1000.0);
+    return static_cast<double>(cpu_ns_) / 1000.0;
   }
 
   double cudaElapsedUs(const LegacyEvent& e) const;

@@ -274,7 +274,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
             self.assertTrue(buf.eq(peer_rank + world.size() // 2).all())
 
 
-# We move AsyncTP tests to a seperate test suite because 1) Async TP ops are not
+# We move AsyncTP tests to a separate test suite because 1) Async TP ops are not
 # the core symmetric memory APIs, they are more like applications, 2)
 # MultiProcContinuousTest will skip all the following tests if a test fails (
 # we should fix this too). We still want to get the test signals for the core
@@ -621,7 +621,7 @@ class AsyncTPTest(MultiProcContinuousTest):
 
 # [READ ME FIRST]
 # The `SymmMemEmptySetDeviceTest` suite parameterizes whether user sets the
-# device before calling symm_mem.emtpy.  Either way should work.
+# device before calling symm_mem.empty.  Either way should work.
 # However, since `set_device` is persistent, we cannot use the
 # `MultiProcContinuousTest` template because the next function will be
 # "contaminated", leading to flaky tests (e.g. hang). Therefore, we use

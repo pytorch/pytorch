@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, TYPE_CHECKING, Union
+from typing import Optional, overload, Union
 
 import torch
 import torch.distributed as dist
@@ -14,13 +14,12 @@ from torch.distributed.fsdp._fully_shard._fsdp_api import (
     OffloadPolicy,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_common import (
+    DDPMeshInfo,
     detect_compiled_autograd,
-    HSDPMeshInfo,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_device_from_mesh,
     _get_managed_states,
-    _get_post_forward_mesh_info,
     _init_default_fully_shard_mesh,
     _move_states_to_device,
 )
@@ -37,12 +36,6 @@ from torch.distributed.tensor import DeviceMesh, init_device_mesh
 from torch.distributed.utils import _get_root_modules
 
 from .contract import _get_registry, contract
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from torch.distributed.tensor import Shard
 
 
 cls_to_replicate_cls: dict[type, type] = {}
@@ -95,7 +88,7 @@ class _ReplicateState(FSDPState):
         modules: tuple[nn.Module, ...],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
-        auto_reshard_after_forward: bool,
+        auto_reshard_after_forward: bool = False,
     ) -> None:
         for module in modules:
             _insert_module_state(module, self)
@@ -171,8 +164,6 @@ def replicate_impl(
     mesh: DeviceMesh,
     *,
     device_id: Optional[Union[int, torch.device]] = None,
-    reshard_after_forward: Optional[Union[bool, int]] = None,
-    shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]] = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
     ignored_params: Optional[set[nn.Parameter]] = None,
@@ -184,30 +175,25 @@ def replicate_impl(
         )
 
     mesh = mesh or _init_default_fully_shard_mesh()
-    if mesh.ndim != 2:
-        raise ValueError(f"replicate expects a 2D DeviceMesh but got {mesh}")
+    if mesh.ndim != 1:
+        raise ValueError(f"replicate expects a 1D DeviceMesh but got {mesh}")
 
     else:
         if mesh.mesh_dim_names is None:
             raise AssertionError(
                 "Please init the 2D mesh for HSDP with mesh_dim_names specified"
             )
-        mesh_info = HSDPMeshInfo(mesh, shard_mesh_dim=1, replicate_mesh_dim=0)
+        mesh_info = DDPMeshInfo(mesh, replicate_mesh_dim=0)
     device = _get_device_from_mesh(mesh)
-    auto_reshard_after_forward = reshard_after_forward is None
-    # If the user does not provide ``reshard_after_forward``, we set it to True.
-    # During lazy_init, we identify which module is the root and override its value to False
-    post_forward_mesh_info = _get_post_forward_mesh_info(
-        reshard_after_forward if not auto_reshard_after_forward else True,  # type: ignore[arg-type]
-        mesh_info,
-    )
+
+    post_forward_mesh_info = None
 
     arg_module = module
     modules = (
         (module,) if isinstance(module, nn.Module) else tuple(_get_root_modules(module))
     )
     state = replicate.state(modules[0])  # type: ignore[attr-defined] # see [1]
-    state.init(modules, device, mp_policy, auto_reshard_after_forward)
+    state.init(modules, device, mp_policy)
 
     managed_modules = _get_managed_modules(modules, ignored_params)
     params, buffers = _get_managed_states(managed_modules, ignored_params)
@@ -217,10 +203,10 @@ def replicate_impl(
         state._fsdp_param_group = FSDPParamGroup(
             params,
             modules,
-            mesh_info,
+            mesh_info,  # type: ignore[arg-type]
             post_forward_mesh_info,
             device,
-            shard_placement_fn,
+            None,
             mp_policy,
             offload_policy,
         )
@@ -237,11 +223,39 @@ def replicate_impl(
     return arg_module
 
 
-@contract(state_cls=_ReplicateState)
+@overload
+# pyrefly: ignore [inconsistent-overload]
 def replicate(
     module: nn.Module,
-    **kwargs,
-) -> nn.Module:
+    *,
+    mesh: Optional[DeviceMesh] = ...,
+    mp_policy: MixedPrecisionPolicy = ...,
+    offload_policy: OffloadPolicy = ...,
+    ignored_params: Optional[set[nn.Parameter]] = ...,
+) -> ReplicateModule: ...
+
+
+@overload
+# pyrefly: ignore [inconsistent-overload]
+def replicate(
+    module: list[nn.Module],
+    *,
+    mesh: Optional[DeviceMesh] = ...,
+    mp_policy: MixedPrecisionPolicy = ...,
+    offload_policy: OffloadPolicy = ...,
+    ignored_params: Optional[set[nn.Parameter]] = ...,
+) -> list[ReplicateModule]: ...
+
+
+@contract(state_cls=_ReplicateState)  # type: ignore[misc]
+def replicate(
+    module: nn.Module,
+    *,
+    mesh: Optional[DeviceMesh] = None,
+    mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
+    offload_policy: OffloadPolicy = OffloadPolicy(),
+    ignored_params: Optional[set[nn.Parameter]] = None,
+):
     r"""Replicates a module
 
     Args:
@@ -253,24 +267,21 @@ def replicate(
         >>> replicate(module)
     """
 
-    if "device_id" in kwargs:
-        if not isinstance(kwargs["device_id"], (int, torch.device)):
-            raise RuntimeError(
-                "Expected device_id to be int or torch.device, "
-                f"but got {type(kwargs['device_id'])}"
-            )
-
     if not is_composable_with_replicate(module):
         raise RuntimeError(
             "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
         )
 
-    device_mesh = kwargs.pop("device_mesh", None)
-    if device_mesh is None:
-        device_mesh = replicate_mesh()
+    if mesh is None:
+        mesh = replicate_mesh()
 
-    module = replicate_impl(module, mesh=device_mesh, **kwargs)
-    return module
+    return replicate_impl(
+        module,
+        mesh,
+        mp_policy=mp_policy,
+        offload_policy=offload_policy,
+        ignored_params=ignored_params,
+    )
 
 
 class ReplicateModule(FSDPModule):
@@ -341,8 +352,8 @@ def replicate_mesh():
     device = torch._C._get_accelerator()
     mesh = init_device_mesh(
         device.type,
-        mesh_shape=(default_pg.size(), 1),
-        mesh_dim_names=("replicate", "shard"),
+        mesh_shape=(default_pg.size(),),
+        mesh_dim_names=("replicate",),
     )
     return mesh
 

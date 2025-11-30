@@ -97,8 +97,8 @@ jobs:
         shell: bash
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ $ngpu -lt 4 ]]; then
-            echo "Error: only $ngpu GPU(s) detected, at least 4 GPUs are needed for distributed jobs"
+          if [[ $ngpu -lt 2 ]]; then #We are temporarily reducing this down to 2 from 4 so that we can run tests on nodes with less gpus.
+            echo "Error: only $ngpu GPU(s) detected, at least 2 GPUs are needed for distributed jobs"
             exit 1
           fi
 

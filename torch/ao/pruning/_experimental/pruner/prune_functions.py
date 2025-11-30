@@ -5,7 +5,7 @@ Also contains utilities for bias propagation
 """
 
 from collections.abc import Callable
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch import nn, Tensor
@@ -89,7 +89,7 @@ def _prune_module_bias(module: nn.Module, mask: Tensor) -> None:
         delattr(module, "_bias")
 
 
-def _propagate_module_bias(module: nn.Module, mask: Tensor) -> Optional[Tensor]:
+def _propagate_module_bias(module: nn.Module, mask: Tensor) -> Tensor | None:
     r"""
     In the case that we need to propagate biases, this function will return the biases we need
     """
@@ -143,7 +143,7 @@ def prune_linear_linear(linear1: nn.Linear, linear2: nn.Linear) -> None:
 
 def prune_linear_activation_linear(
     linear1: nn.Linear,
-    activation: Optional[Callable[[Tensor], Tensor]],
+    activation: Callable[[Tensor], Tensor] | None,
     linear2: nn.Linear,
 ):
     mask = _prune_linear_helper(linear1)
@@ -236,7 +236,7 @@ def prune_conv2d_conv2d(conv2d_1: nn.Conv2d, conv2d_2: nn.Conv2d) -> None:
 
 def prune_conv2d_activation_conv2d(
     conv2d_1: nn.Conv2d,
-    activation: Optional[Callable[[Tensor], Tensor]],
+    activation: Callable[[Tensor], Tensor] | None,
     conv2d_2: nn.Conv2d,
 ):
     r"""
@@ -295,7 +295,7 @@ def prune_conv2d_activation_conv2d(
 def prune_conv2d_pool_activation_conv2d(
     c1: nn.Conv2d,
     pool: nn.Module,
-    activation: Optional[Callable[[Tensor], Tensor]],
+    activation: Callable[[Tensor], Tensor] | None,
     c2: nn.Conv2d,
 ) -> None:
     prune_conv2d_activation_conv2d(c1, activation, c2)
@@ -303,7 +303,7 @@ def prune_conv2d_pool_activation_conv2d(
 
 def prune_conv2d_activation_pool_conv2d(
     c1: nn.Conv2d,
-    activation: Optional[Callable[[Tensor], Tensor]],
+    activation: Callable[[Tensor], Tensor] | None,
     pool: nn.Module,
     c2: nn.Conv2d,
 ) -> None:
@@ -313,7 +313,7 @@ def prune_conv2d_activation_pool_conv2d(
 def prune_conv2d_pool_flatten_linear(
     conv2d: nn.Conv2d,
     pool: nn.Module,
-    flatten: Optional[Callable[[Tensor], Tensor]],
+    flatten: Callable[[Tensor], Tensor] | None,
     linear: nn.Linear,
 ) -> None:
     mask = _prune_conv2d_helper(conv2d)
@@ -332,9 +332,10 @@ def prune_conv2d_pool_flatten_linear(
         linear_ic = linear.weight.shape[1]
 
     conv2d_oc = len(mask)
-    assert linear_ic % conv2d_oc == 0, (
-        f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
-    )
+    if linear_ic % conv2d_oc != 0:
+        raise AssertionError(
+            f"Flattening from dimensions {conv2d_oc} to {linear_ic} not supported"
+        )
 
     flatten_scale = linear_ic // conv2d_oc
     flattened_mask = torch.tensor(
@@ -376,7 +377,7 @@ def prune_lstm_output_linear(
 def prune_lstm_output_layernorm_linear(
     lstm: nn.LSTM,
     getitem: Callable,
-    layernorm: Optional[nn.LayerNorm],
+    layernorm: nn.LayerNorm | None,
     linear: nn.Linear,
 ) -> None:
     for i in range(lstm.num_layers):

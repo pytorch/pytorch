@@ -40,7 +40,7 @@ inline c10::metal::opmath_t<T> matmul_inner(
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     for (uint k = 0; k < TILE_DIM; k++) {
-      sum += A_tile[tid.y][k] * B_tile[k][tid.x];
+      sum += c10::metal::mul(A_tile[tid.y][k], B_tile[k][tid.x]);
     }
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -96,7 +96,9 @@ kernel void addmm(
     auto bias =
         biasData[thread_id.y * strides[3].x + thread_id.x * strides[3].y];
     outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
-        static_cast<T>(alpha_beta[0] * sum + alpha_beta[1] * bias);
+        static_cast<T>(
+            c10::metal::mul(alpha_beta[0], sum) +
+            c10::metal::mul(alpha_beta[1], bias));
   }
 }
 
@@ -831,6 +833,10 @@ kernel void orgqr(
 INSTANTIATE_MM_OPS(float);
 INSTANTIATE_MM_OPS(half);
 INSTANTIATE_MM_OPS(bfloat);
+
+// Complex MM
+INSTANTIATE_MM_OPS(float2);
+INSTANTIATE_MM_OPS(half2);
 
 // Integral MM
 INSTANTIATE_MM_OPS(long);

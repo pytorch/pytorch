@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch._C import _get_privateuse1_backend_name, _rename_privateuse1_backend
@@ -82,7 +81,7 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     _privateuse1_backend_name = backend_name
 
 
-def _check_register_once(module, attr):
+def _check_register_once(module, attr) -> None:
     if hasattr(module, attr):
         raise RuntimeError(
             f"The custom device module of {module} has already been registered with {attr}"
@@ -90,7 +89,7 @@ def _check_register_once(module, attr):
 
 
 def _normalization_device(
-    custom_backend_name: str, device: Optional[Union[int, str, torch.device]] = None
+    custom_backend_name: str, device: int | str | torch.device | None = None
 ) -> int:
     def _get_current_device_index():
         _get_device_index = "current_device"
@@ -137,7 +136,7 @@ def _generate_tensor_methods_for_privateuse1_backend(custom_backend_name: str) -
 
     def wrap_tensor_to(
         self: torch.Tensor,
-        device: Optional[Union[int, torch.device]] = None,
+        device: int | torch.device | None = None,
         non_blocking=False,
         **kwargs,
     ) -> torch.Tensor:
@@ -188,7 +187,7 @@ def _generate_module_methods_for_privateuse1_backend(custom_backend_name: str) -
 
     def wrap_module_to(
         self: torch.nn.modules.module.T,
-        device: Optional[Union[int, torch.device]] = None,
+        device: int | torch.device | None = None,
     ) -> torch.nn.modules.module.T:
         r"""Move all model parameters and buffers to the custom device.
 
@@ -268,7 +267,7 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(
 
 
 def _generate_storage_methods_for_privateuse1_backend(
-    custom_backend_name: str, unsupported_dtype: Optional[list[torch.dtype]] = None
+    custom_backend_name: str, unsupported_dtype: list[torch.dtype] | None = None
 ) -> None:
     # Attribute is registered in the _StorageBase class
     # and UntypedStorage obtains through inheritance.
@@ -355,7 +354,7 @@ def generate_methods_for_privateuse1_backend(
     for_module: bool = True,
     for_packed_sequence: bool = True,
     for_storage: bool = False,
-    unsupported_dtype: Optional[list[torch.dtype]] = None,
+    unsupported_dtype: list[torch.dtype] | None = None,
 ) -> None:
     r"""
     Automatically generate attributes and methods for the custom backend after rename privateuse1 backend.
@@ -448,33 +447,33 @@ def _get_custom_mod_func(func_name: str):
 
 
 class _DummyBackendModule:
-    def is_initialized(self):
+    def is_initialized(self) -> bool:
         return True
 
-    def is_available(self):
+    def is_available(self) -> bool:
         return True
 
-    def current_device(self):
+    def current_device(self) -> int:
         return 0
 
-    def _is_in_bad_fork(self):
+    def _is_in_bad_fork(self) -> bool:
         return False
 
-    def manual_seed_all(self, seed: int):
+    def manual_seed_all(self, seed: int) -> None:
         pass
 
-    def device_count(self):
+    def device_count(self) -> int:
         return 1
 
 
 class _DummyPrivateUse1Hook(torch._C._acc.PrivateUse1Hooks):
-    def is_available(self):
+    def is_available(self) -> bool:
         return True
 
-    def has_primary_context(self, dev_id):
+    def has_primary_context(self, dev_id) -> bool:
         return True
 
-    def is_built(self):
+    def is_built(self) -> bool:
         return True
 
 
@@ -485,7 +484,7 @@ class _DummyDeviceGuard(torch._C._acc.DeviceGuard):
 
 def _setup_privateuseone_for_python_backend(
     rename=None, backend_module=None, hook=None, device_guard=None
-):
+) -> None:
     """This function will prepare the PrivateUse1 dispatch key to be used as a python backend.
 
     WARNING: this API is experimental and might change without notice.

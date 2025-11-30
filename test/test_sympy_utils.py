@@ -67,10 +67,12 @@ BINARY_OPS = [
     "mod",
     "bitwise_and",
     "bitwise_or",
+    "bitwise_xor",
 ]
 BITWISE_OPS = [
     "bitwise_and",
     "bitwise_or",
+    "bitwise_xor",
 ]
 
 UNARY_BOOL_OPS = ["not_"]

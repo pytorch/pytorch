@@ -8,7 +8,7 @@ import logging
 import re
 from collections import defaultdict
 from math import inf
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -51,7 +51,7 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from ..ops_handler import ReductionType, StoreMode
     from ..shape_propagation import BlockShapeType
@@ -571,10 +571,12 @@ class HalideOverrides(OpOverrides):
         raise NotImplementedError("device_assert_async")
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def partial_accumulate(
         name: str,
         reduction_type: str,
         value: CSEVariable,
+        extra_meta: dict[str, Any],
     ) -> None:
         raise NotImplementedError
 
@@ -904,7 +906,7 @@ class HalideKernel(SIMDKernel):
             return self.dom_renames[prefix]
 
         renames = {}
-        for var in self.halide_vars.keys():
+        for var in self.halide_vars:
             if not self.inside_reduction and var in self.reduction_renames:
                 continue
             m = re.match(r"^h(\d+)$", var.name)

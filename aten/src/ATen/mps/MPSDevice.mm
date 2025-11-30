@@ -1,7 +1,5 @@
 //  Copyright © 2022 Apple Inc.
 
-#include <c10/util/CallOnce.h>
-
 #include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
@@ -9,9 +7,6 @@
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 
 namespace at::mps {
-
-static std::unique_ptr<MPSDevice> mps_device;
-static c10::once_flag mpsdev_init;
 
 static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& device) {
   // MPS Advanced Indexing needs at least Metal 2.0 (support for Argument Buffers and function constants)
@@ -21,8 +16,8 @@ static inline MTLLanguageVersion getMetalLanguageVersion(const id<MTLDevice>& de
 }
 
 MPSDevice* MPSDevice::getInstance() {
-  c10::call_once(mpsdev_init, [] { mps_device = std::unique_ptr<MPSDevice>(new MPSDevice()); });
-  return mps_device.get();
+  static MPSDevice mps_device;
+  return &mps_device;
 }
 
 MPSDevice::~MPSDevice() {

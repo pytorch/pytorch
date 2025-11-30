@@ -47,7 +47,7 @@ class Adam(Optimizer):
         differentiable: bool = False,
         fused: Optional[bool] = None,
         decoupled_weight_decay: bool = False,
-    ):
+    ) -> None:
         if isinstance(lr, Tensor):
             if foreach and not capturable:
                 raise ValueError(
@@ -365,7 +365,7 @@ def _single_tensor_adam(
     capturable: bool,
     differentiable: bool,
     decoupled_weight_decay: bool,
-):
+) -> None:
     if grad_scale is not None or found_inf is not None:
         raise AssertionError("Expected grad_scale and found_inf to be None")
 
@@ -423,7 +423,7 @@ def _single_tensor_adam(
                     if weight_decay.requires_grad:
                         grad = grad.addcmul_(param.clone(), weight_decay)
                     else:
-                        # pyrefly: ignore  # bad-argument-type
+                        # pyrefly: ignore [bad-argument-type]
                         grad = grad.add(param, alpha=weight_decay)
                 else:
                     grad = grad.add(param, alpha=weight_decay)
@@ -572,7 +572,7 @@ def _multi_tensor_adam(
     capturable: bool,
     differentiable: bool,
     decoupled_weight_decay: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
@@ -608,7 +608,7 @@ def _multi_tensor_adam(
         if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
+            for p, step in zip(params, state_steps, strict=True)
         ):
             raise AssertionError(
                 f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
@@ -925,7 +925,7 @@ def adam(
     weight_decay: float,
     eps: float,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs Adam algorithm computation.
 
     See :class:`~torch.optim.Adam` for details.

@@ -16,7 +16,7 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
         graph (Graph): The graph to be annotated
     """
     for node in graph.nodes:
-        if node.target == operator.getitem:
+        if node.target is operator.getitem:
             sequence_node, index_node = node.args
             if not sequence_node.type:
                 continue

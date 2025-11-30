@@ -14,6 +14,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestCheckpointReader(TestCase):
     def setUp(self):
+        super().setUp()
         # Create a temporary directory for test checkpoints
         self.temp_dir = tempfile.mkdtemp()
 

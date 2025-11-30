@@ -1272,15 +1272,18 @@ def aot_dispatch_subclass(
 
         args_unwrapped = (primals_unwrapped_pair[0], tangents_unwrapped_pair[0])
         args_descs_unwrapped = (primals_unwrapped_pair[1], tangents_unwrapped_pair[1])
+        remapped_static_indices = remap_unwrapped_subclass_arg_indices(
+            args[0], meta.static_input_indices
+        )
     else:
         args_unwrapped, args_descs_unwrapped = unwrap_tensor_subclasses(  # type: ignore[assignment]
             args,  # type: ignore[arg-type]
             args_descs,  # type: ignore[arg-type]
             append_symints=True,
         )
-    remapped_static_indices = remap_unwrapped_subclass_arg_indices(
-        args, meta.static_input_indices
-    )
+        remapped_static_indices = remap_unwrapped_subclass_arg_indices(
+            args, meta.static_input_indices
+        )
 
     if is_joint_structure:
         primals_unwrapped = args_unwrapped[0]  # type: ignore[assignment]
@@ -1310,12 +1313,12 @@ def aot_dispatch_subclass(
     # See Note: [Partitioner handling for Subclasses, Part 2] for more info.
     meta_updated = run_functionalized_fw_and_collect_metadata(
         without_output_descs(metadata_fn),
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         flat_args_descs=primals_unwrapped_descs,
         static_input_indices=remapped_static_indices,
         keep_input_mutations=meta.keep_input_mutations,
         is_train=meta.is_train,
-        # pyrefly: ignore  # not-iterable
+        # pyrefly: ignore [not-iterable]
     )(*primals_unwrapped)
 
     subclass_meta.fw_metadata = meta_updated

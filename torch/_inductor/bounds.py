@@ -1,7 +1,8 @@
 import logging
 import operator
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import sympy
 from sympy import Expr
@@ -85,7 +86,7 @@ class BoundVars:
         self, submodules: dict[str, Callable[..., Any]]
     ) -> dict[str, Callable[..., ValueRanges[Expr]]]:
         result: dict[str, Callable[..., ValueRanges[Expr]]] = {}
-        for key in submodules.keys():
+        for key in submodules:
             if key == "get_index":
                 result[key] = self.get_index
             elif "masked_subblock" in key:

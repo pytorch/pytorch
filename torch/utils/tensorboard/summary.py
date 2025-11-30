@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
 import json
 import logging
-import os
 import struct
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import numpy as np
@@ -115,7 +114,7 @@ _TENSOR_TYPE_MAP = {
 }
 
 
-def _calc_scale_factor(tensor):
+def _calc_scale_factor(tensor) -> int:
     converted = tensor.numpy() if not isinstance(tensor, np.ndarray) else tensor
     return 1 if converted.dtype == np.uint8 else 255
 
@@ -249,7 +248,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             ssi.hparams[k].number_value = v
 
             if k in hparam_domain_discrete:
-                domain_discrete: Optional[struct_pb2.ListValue] = struct_pb2.ListValue(
+                domain_discrete: struct_pb2.ListValue | None = struct_pb2.ListValue(
                     values=[
                         struct_pb2.Value(number_value=d)
                         for d in hparam_domain_discrete[k]
@@ -261,6 +260,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             hps.append(
                 HParamInfo(
                     name=k,
+                    # pyrefly: ignore [missing-attribute]
                     type=DataType.Value("DATA_TYPE_FLOAT64"),
                     domain_discrete=domain_discrete,
                 )
@@ -283,6 +283,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             hps.append(
                 HParamInfo(
                     name=k,
+                    # pyrefly: ignore [missing-attribute]
                     type=DataType.Value("DATA_TYPE_STRING"),
                     domain_discrete=domain_discrete,
                 )
@@ -305,6 +306,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
             hps.append(
                 HParamInfo(
                     name=k,
+                    # pyrefly: ignore [missing-attribute]
                     type=DataType.Value("DATA_TYPE_BOOL"),
                     domain_discrete=domain_discrete,
                 )
@@ -314,6 +316,7 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
         if isinstance(v, torch.Tensor):
             v = make_np(v)[0]
             ssi.hparams[k].number_value = v
+            # pyrefly: ignore [missing-attribute]
             hps.append(HParamInfo(name=k, type=DataType.Value("DATA_TYPE_FLOAT64")))
             continue
         raise ValueError(
@@ -322,31 +325,38 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
 
     content = HParamsPluginData(session_start_info=ssi, version=PLUGIN_DATA_VERSION)
     smd = SummaryMetadata(
+        # pyrefly: ignore [missing-attribute]
         plugin_data=SummaryMetadata.PluginData(
             plugin_name=PLUGIN_NAME, content=content.SerializeToString()
         )
     )
+    # pyrefly: ignore [missing-attribute]
     ssi = Summary(value=[Summary.Value(tag=SESSION_START_INFO_TAG, metadata=smd)])
 
-    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict.keys()]
+    mts = [MetricInfo(name=MetricName(tag=k)) for k in metric_dict]
 
     exp = Experiment(hparam_infos=hps, metric_infos=mts)
 
     content = HParamsPluginData(experiment=exp, version=PLUGIN_DATA_VERSION)
     smd = SummaryMetadata(
+        # pyrefly: ignore [missing-attribute]
         plugin_data=SummaryMetadata.PluginData(
             plugin_name=PLUGIN_NAME, content=content.SerializeToString()
         )
     )
+    # pyrefly: ignore [missing-attribute]
     exp = Summary(value=[Summary.Value(tag=EXPERIMENT_TAG, metadata=smd)])
 
+    # pyrefly: ignore [missing-attribute]
     sei = SessionEndInfo(status=Status.Value("STATUS_SUCCESS"))
     content = HParamsPluginData(session_end_info=sei, version=PLUGIN_DATA_VERSION)
     smd = SummaryMetadata(
+        # pyrefly: ignore [missing-attribute]
         plugin_data=SummaryMetadata.PluginData(
             plugin_name=PLUGIN_NAME, content=content.SerializeToString()
         )
     )
+    # pyrefly: ignore [missing-attribute]
     sei = Summary(value=[Summary.Value(tag=SESSION_END_INFO_TAG, metadata=smd)])
 
     return exp, ssi, sei
@@ -380,10 +390,12 @@ def scalar(name, tensor, collections=None, new_style=False, double_precision=Fal
         if double_precision:
             tensor_proto = TensorProto(double_val=[scalar], dtype="DT_DOUBLE")
 
+        # pyrefly: ignore [missing-attribute]
         plugin_data = SummaryMetadata.PluginData(plugin_name="scalars")
         smd = SummaryMetadata(plugin_data=plugin_data)
         return Summary(
             value=[
+                # pyrefly: ignore [missing-attribute]
                 Summary.Value(
                     tag=name,
                     tensor=tensor_proto,
@@ -392,6 +404,7 @@ def scalar(name, tensor, collections=None, new_style=False, double_precision=Fal
             ]
         )
     else:
+        # pyrefly: ignore [missing-attribute]
         return Summary(value=[Summary.Value(tag=name, simple_value=scalar)])
 
 
@@ -419,6 +432,7 @@ def tensor_proto(tag, tensor):
             **{
                 "dtype": dtype,
                 "tensor_shape": TensorShapeProto(
+                    # pyrefly: ignore [missing-attribute]
                     dim=[TensorShapeProto.Dim(size=x) for x in tensor.shape]
                 ),
                 field_name: conversion_fn(tensor),
@@ -427,8 +441,10 @@ def tensor_proto(tag, tensor):
     else:
         raise ValueError(f"{tag} has unsupported tensor dtype {tensor.dtype}")
 
+    # pyrefly: ignore [missing-attribute]
     plugin_data = SummaryMetadata.PluginData(plugin_name="tensor")
     smd = SummaryMetadata(plugin_data=plugin_data)
+    # pyrefly: ignore [missing-attribute]
     return Summary(value=[Summary.Value(tag=tag, metadata=smd, tensor=tensor_proto)])
 
 
@@ -462,6 +478,7 @@ def histogram_raw(name, min, max, num, sum, sum_squares, bucket_limits, bucket_c
         bucket_limit=bucket_limits,
         bucket=bucket_counts,
     )
+    # pyrefly: ignore [missing-attribute]
     return Summary(value=[Summary.Value(tag=name, histo=hist)])
 
 
@@ -484,6 +501,7 @@ def histogram(name, values, bins, max_bins=None):
     """
     values = make_np(values)
     hist = make_histogram(values.astype(float), bins, max_bins)
+    # pyrefly: ignore [missing-attribute]
     return Summary(value=[Summary.Value(tag=name, histo=hist)])
 
 
@@ -577,6 +595,7 @@ def image(tag, tensor, rescale=1, dataformats="NCHW"):
     tensor = tensor.astype(np.float32)
     tensor = (tensor * scale_factor).clip(0, 255).astype(np.uint8)
     image = make_image(tensor, rescale=rescale)
+    # pyrefly: ignore [missing-attribute]
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
 
@@ -594,6 +613,7 @@ def image_boxes(
         rois=tensor_boxes,
         labels=labels,
     )
+    # pyrefly: ignore [missing-attribute]
     return Summary(value=[Summary.Value(tag=tag, image=image)])
 
 
@@ -632,6 +652,7 @@ def make_image(tensor, rescale=1, rois=None, labels=None):
     image.save(output, format="PNG")
     image_string = output.getvalue()
     output.close()
+    # pyrefly: ignore [missing-attribute]
     return Summary.Image(
         height=height,
         width=width,
@@ -648,6 +669,7 @@ def video(tag, tensor, fps=4):
     tensor = tensor.astype(np.float32)
     tensor = (tensor * scale_factor).clip(0, 255).astype(np.uint8)
     video = make_video(tensor, fps)
+    # pyrefly: ignore [missing-attribute]
     return Summary(value=[Summary.Value(tag=tag, image=video)])
 
 
@@ -672,26 +694,23 @@ def make_video(tensor, fps):
     # encode sequence of images into gif string
     clip = mpy.ImageSequenceClip(list(tensor), fps=fps)
 
-    filename = tempfile.NamedTemporaryFile(suffix=".gif", delete=False).name
-    try:  # newer version of moviepy use logger instead of progress_bar argument.
-        clip.write_gif(filename, verbose=False, logger=None)
-    except TypeError:
-        try:  # older version of moviepy does not support progress_bar argument.
-            clip.write_gif(filename, verbose=False, progress_bar=False)
+    with tempfile.NamedTemporaryFile(suffix=".gif") as f:
+        filename = f.name
+        try:  # newer version of moviepy use logger instead of progress_bar argument.
+            clip.write_gif(filename, verbose=False, logger=None)
         except TypeError:
-            clip.write_gif(filename, verbose=False)
+            try:  # older version of moviepy does not support progress_bar argument.
+                clip.write_gif(filename, verbose=False, progress_bar=False)
+            except TypeError:
+                clip.write_gif(filename, verbose=False)
 
-    with open(filename, "rb") as f:
+        f.seek(0)
         tensor_string = f.read()
 
-    try:
-        os.remove(filename)
-    except OSError:
-        logger.warning("The temporary file used by moviepy cannot be deleted.")
-
-    return Summary.Image(
-        height=h, width=w, colorspace=c, encoded_image_string=tensor_string
-    )
+        # pyrefly: ignore [missing-attribute]
+        return Summary.Image(
+            height=h, width=w, colorspace=c, encoded_image_string=tensor_string
+        )
 
 
 def audio(tag, tensor, sample_rate=44100):
@@ -715,6 +734,7 @@ def audio(tag, tensor, sample_rate=44100):
         wave_write.writeframes(array.data)
     audio_string = fio.getvalue()
     fio.close()
+    # pyrefly: ignore [missing-attribute]
     audio = Summary.Audio(
         sample_rate=sample_rate,
         num_channels=1,
@@ -722,6 +742,7 @@ def audio(tag, tensor, sample_rate=44100):
         encoded_audio_string=audio_string,
         content_type="audio/wav",
     )
+    # pyrefly: ignore [missing-attribute]
     return Summary(value=[Summary.Value(tag=tag, audio=audio)])
 
 
@@ -736,6 +757,7 @@ def custom_scalars(layout):
                     raise AssertionError("len(tags) != 3")
                 mgcc = layout_pb2.MarginChartContent(
                     series=[
+                        # pyrefly: ignore [missing-attribute]
                         layout_pb2.MarginChartContent.Series(
                             value=tags[0], lower=tags[1], upper=tags[2]
                         )
@@ -749,6 +771,7 @@ def custom_scalars(layout):
         categories.append(layout_pb2.Category(title=k, chart=charts))
 
     layout = layout_pb2.Layout(category=categories)
+    # pyrefly: ignore [missing-attribute]
     plugin_data = SummaryMetadata.PluginData(plugin_name="custom_scalars")
     smd = SummaryMetadata(plugin_data=plugin_data)
     tensor = TensorProto(
@@ -758,12 +781,14 @@ def custom_scalars(layout):
     )
     return Summary(
         value=[
+            # pyrefly: ignore [missing-attribute]
             Summary.Value(tag="custom_scalars__config__", tensor=tensor, metadata=smd)
         ]
     )
 
 
 def text(tag, text):
+    # pyrefly: ignore [missing-attribute]
     plugin_data = SummaryMetadata.PluginData(
         plugin_name="text", content=TextPluginData(version=0).SerializeToString()
     )
@@ -771,9 +796,11 @@ def text(tag, text):
     tensor = TensorProto(
         dtype="DT_STRING",
         string_val=[text.encode(encoding="utf_8")],
+        # pyrefly: ignore [missing-attribute]
         tensor_shape=TensorShapeProto(dim=[TensorShapeProto.Dim(size=1)]),
     )
     return Summary(
+        # pyrefly: ignore [missing-attribute]
         value=[Summary.Value(tag=tag + "/text_summary", metadata=smd, tensor=tensor)]
     )
 
@@ -787,6 +814,7 @@ def pr_curve_raw(
     pr_curve_plugin_data = PrCurvePluginData(
         version=0, num_thresholds=num_thresholds
     ).SerializeToString()
+    # pyrefly: ignore [missing-attribute]
     plugin_data = SummaryMetadata.PluginData(
         plugin_name="pr_curves", content=pr_curve_plugin_data
     )
@@ -796,11 +824,14 @@ def pr_curve_raw(
         float_val=data.reshape(-1).tolist(),
         tensor_shape=TensorShapeProto(
             dim=[
+                # pyrefly: ignore [missing-attribute]
                 TensorShapeProto.Dim(size=data.shape[0]),
+                # pyrefly: ignore [missing-attribute]
                 TensorShapeProto.Dim(size=data.shape[1]),
             ]
         ),
     )
+    # pyrefly: ignore [missing-attribute]
     return Summary(value=[Summary.Value(tag=tag, metadata=smd, tensor=tensor)])
 
 
@@ -813,6 +844,7 @@ def pr_curve(tag, labels, predictions, num_thresholds=127, weights=None):
     pr_curve_plugin_data = PrCurvePluginData(
         version=0, num_thresholds=num_thresholds
     ).SerializeToString()
+    # pyrefly: ignore [missing-attribute]
     plugin_data = SummaryMetadata.PluginData(
         plugin_name="pr_curves", content=pr_curve_plugin_data
     )
@@ -822,11 +854,14 @@ def pr_curve(tag, labels, predictions, num_thresholds=127, weights=None):
         float_val=data.reshape(-1).tolist(),
         tensor_shape=TensorShapeProto(
             dim=[
+                # pyrefly: ignore [missing-attribute]
                 TensorShapeProto.Dim(size=data.shape[0]),
+                # pyrefly: ignore [missing-attribute]
                 TensorShapeProto.Dim(size=data.shape[1]),
             ]
         ),
     )
+    # pyrefly: ignore [missing-attribute]
     return Summary(value=[Summary.Value(tag=tag, metadata=smd, tensor=tensor)])
 
 
@@ -911,13 +946,17 @@ def _get_tensor_summary(
         float_val=tensor.reshape(-1).tolist(),
         tensor_shape=TensorShapeProto(
             dim=[
+                # pyrefly: ignore [missing-attribute]
                 TensorShapeProto.Dim(size=tensor.shape[0]),
+                # pyrefly: ignore [missing-attribute]
                 TensorShapeProto.Dim(size=tensor.shape[1]),
+                # pyrefly: ignore [missing-attribute]
                 TensorShapeProto.Dim(size=tensor.shape[2]),
             ]
         ),
     )
 
+    # pyrefly: ignore [missing-attribute]
     tensor_summary = Summary.Value(
         tag=metadata.get_instance_name(name, content_type),
         tensor=tensor,
@@ -965,8 +1004,11 @@ def mesh(
 
     summaries = []
     tensors = [
+        # pyrefly: ignore [missing-attribute]
         (vertices, MeshPluginData.VERTEX),
+        # pyrefly: ignore [missing-attribute]
         (faces, MeshPluginData.FACE),
+        # pyrefly: ignore [missing-attribute]
         (colors, MeshPluginData.COLOR),
     ]
     tensors = [tensor for tensor in tensors if tensor[0] is not None]

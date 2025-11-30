@@ -160,10 +160,9 @@ struct Dist {
     // value of k.
     parallel_for(0, combs, internal::GRAIN_SIZE / (16 * m), [p, self_start, self_end, n, m, res_start](int64_t k, int64_t end) {
       const Vec pvec(p);
-      double n2 = n - .5;
+      double n2 = static_cast<double>(n) - .5;
       // The -1 accounts for floating point truncation issues
-      // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
-      int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2 * k - 1)));
+      int64_t i = static_cast<int64_t>((n2 - std::sqrt(n2 * n2 - 2.0 * static_cast<double>(k) - 1.0)));
       int64_t j = k - n * i + i * (i + 1) / 2 + i + 1;
 
       const scalar_t * self_i = self_start + i * m;

@@ -1,6 +1,7 @@
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/Sleep.h>
 
+#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -24,12 +25,46 @@ __global__ void spin_kernel(int64_t cycles) {
 #endif
   }
 }
+
+thread_local int *flag = nullptr;
+
+__global__ void busy_wait_for_flag_kernel(int *flag) {
+  atomicExch(flag, 1);
+  while (atomicAdd(flag, 0) == 1) {
+    // do nothing
+  }
 }
+
+__global__ void clear_flag_kernel(int *flag) {
+  atomicExch(flag, 0);
+}
+
+} // anonymous namespace
 
 void sleep(int64_t cycles) {
   dim3 grid(1);
   dim3 block(1);
   spin_kernel<<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(cycles);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void busy_wait_for_flag() {
+  if (!flag) {
+    flag = (int*)c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int));
+  }
+  dim3 grid(1);
+  dim3 block(1);
+  busy_wait_for_flag_kernel<<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(flag);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void clear_flag() {
+  if (!flag) {
+    flag = (int*)c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int));
+  }
+  dim3 grid(1);
+  dim3 block(1);
+  clear_flag_kernel<<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(flag);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 

@@ -45,7 +45,7 @@ class EinsumDims:
         for input_dim in input_dims:
             dim_char_set.update(input_dim)
 
-        # get a determinisitc order of all dim chars
+        # get a deterministic order of all dim chars
         all_dim_chars = sorted(dim_char_set)
 
         # parse input and output dimensions
@@ -170,7 +170,7 @@ def gen_einsum_strategies(
     # linearity strategy
     if linearity:
         linearity_placement_list: list[Placement] = [Partial()]
-        for input_dim in input_dims:
+        for _ in input_dims:
             linearity_placement_list.append(Partial())
         strategies_over_one_mesh_dim.append(linearity_placement_list)
 

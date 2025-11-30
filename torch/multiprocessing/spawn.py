@@ -12,11 +12,6 @@ import warnings
 from concurrent.futures import as_completed, ThreadPoolExecutor
 from typing import Optional
 
-from torch.numa.binding import (
-    maybe_temporarily_apply_numa_binding_to_current_thread,
-    NumaOptions,
-)
-
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
 
@@ -119,7 +114,7 @@ class ProcessContext:
         """Attempt to join all processes with a shared timeout."""
         end = time.monotonic() + timeout
         for process in self.processes:
-            # pyrefly: ignore  # no-matching-overload
+            # pyrefly: ignore [no-matching-overload]
             time_to_wait = max(0, end - time.monotonic())
             process.join(time_to_wait)
 
@@ -244,7 +239,6 @@ def start_processes(
     join=True,
     daemon=False,
     start_method="spawn",
-    numa_options: Optional[NumaOptions] = None,
 ):
     # To speed up performance in certain cases (see https://github.com/pytorch/pytorch/issues/133010),
     # this func will start processes in parallel if start_method is 'forkserver'.
@@ -283,23 +277,7 @@ def start_processes(
             daemon=daemon,
         )
 
-        # HACK [NUMA inheritance]: Subprocesses inherit the parent thread's CPU
-        # affinity. So, we temporarily apply the bindings to the current thread,
-        # and then immediately undo them.
-        # This is necessary because the alternatives would be to
-        # either
-        # 1. Use numactl CLI. However, Python's multiprocessing library
-        # does not provide an API which would allow us to prepend
-        # the command it runs with numactl options.
-        # 2. Wrap the provided function such that it first applies
-        # NUMA bindings, and then executes as expected. However, this
-        # can result in worse memory locality, because torch and CUDA
-        # initialization would occur before applying the bindings, thus
-        # allowing some memory to be allocated on the wrong NUMA nodes.
-        with maybe_temporarily_apply_numa_binding_to_current_thread(
-            gpu_index=i, numa_options=numa_options
-        ):
-            process.start()
+        process.start()
         return i, process, tf.name
 
     if not start_parallel:

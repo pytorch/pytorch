@@ -82,7 +82,7 @@ def export_compat(
                 "different behavior during inference. "
                 "Calling model.eval() before export is recommended.",
                 UserWarning,
-                stacklevel=2,
+                stacklevel=3,
             )
 
     if isinstance(model, torch.export.ExportedProgram):

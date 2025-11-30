@@ -51,7 +51,7 @@ r"""Whether SIGCHLD handler is set for DataLoader worker failures. Only one
 handler needs to be set for all DataLoaders in a process."""
 
 
-def _set_SIGCHLD_handler():
+def _set_SIGCHLD_handler() -> None:
     # Windows doesn't support SIGCHLD handler
     if IS_WINDOWS:
         return
@@ -67,7 +67,7 @@ def _set_SIGCHLD_handler():
         # no-op.
         previous_handler = None
 
-    def handler(signum, frame):
+    def handler(signum, frame) -> None:
         # This following call uses `waitid` with WNOHANG from C side. Therefore,
         # Python can still get and update the process status successfully.
         _error_if_any_worker_fails()

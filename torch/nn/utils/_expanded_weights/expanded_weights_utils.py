@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 
@@ -32,7 +31,7 @@ def standard_kwargs(kwarg_names, expanded_args):
     expanded_args_without_kwargs = expanded_args[
         : len(expanded_args) - len(kwarg_names)
     ]
-    expanded_kwargs = dict(zip(kwarg_names, kwarg_values))
+    expanded_kwargs = dict(zip(kwarg_names, kwarg_values, strict=True))
     return expanded_args_without_kwargs, expanded_kwargs
 
 
@@ -94,7 +93,7 @@ def _check_and_unexpand_args(func, expanded_args, expanded_kwargs):
                 f"input batch size of {batch_size} with ExpandedWeight of batch size {arg.batch_size}"
             )
 
-    loss_reduction: Optional[str] = None
+    loss_reduction: str | None = None
     for arg in expanded_args + tuple(expanded_kwargs.values()):
         if isinstance(arg, ExpandedWeight):
             if loss_reduction is None:
@@ -123,7 +122,7 @@ def maybe_scale_by_batch_size(grad_sample, expanded_weight):
         return grad_sample
 
 
-def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn):
+def set_grad_sample_if_exists(maybe_expanded_weight, per_sample_grad_fn) -> None:
     unpacked = unpack_expanded_weight_or_tensor(maybe_expanded_weight)
     if isinstance(maybe_expanded_weight, ExpandedWeight):
         grad_sample_contribution = maybe_scale_by_batch_size(

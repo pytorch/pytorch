@@ -10,12 +10,16 @@ import os
 import sys
 import typing
 from abc import abstractmethod
-from typing import Any, Callable, Generic, Optional, TypeVar, Union
-from typing_extensions import override, TypeAlias
+from typing import Any, Generic, Optional, TypeAlias, TypeVar, Union
+from typing_extensions import override
 
 from torch._dynamo.utils import dynamo_timed
 from torch._inductor import config
 from torch.monitor import _WaitCounter
+
+
+if typing.TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 try:

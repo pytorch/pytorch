@@ -57,7 +57,7 @@ Dtype ToDtype(ScalarType type) {
 TORCH_API std::ostream& operator<<(std::ostream& stream, const Dtype& dtype) {
   stream << dtype.scalar_type_;
   if (dtype.lanes() > 1) {
-    stream << "x" << dtype.lanes();
+    stream << 'x' << dtype.lanes();
     ;
   }
   return stream;

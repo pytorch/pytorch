@@ -24,7 +24,13 @@ namespace detail {
 // radix_sort_pairs doesn't interact with value_t other than to copy
 // the data, so we can save template instantiations by reinterpreting
 // it as an opaque type.
+// We use native integer types for 1/2/4/8-byte values to reduce
+// register usage in CUDA kernels. For sizes > 8 fall back to char array.
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
+template <> struct alignas(1) OpaqueType<1> { uint8_t data; };
+template <> struct alignas(2) OpaqueType<2> { uint16_t data; };
+template <> struct alignas(4) OpaqueType<4> { uint32_t data; };
+template <> struct alignas(8) OpaqueType<8> { uint64_t data; };
 
 template<typename key_t, int value_size>
 void radix_sort_pairs_impl(

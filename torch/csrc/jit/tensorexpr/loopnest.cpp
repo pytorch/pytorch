@@ -131,9 +131,9 @@ std::string sanitizeName(const std::string& input_name) {
     } else {
       if (i == 0) {
         // Don't start names with underscore
-        sanitized_name << "v";
+        sanitized_name << 'v';
       }
-      sanitized_name << "_";
+      sanitized_name << '_';
     }
   }
   return sanitized_name.str();

@@ -44,7 +44,7 @@ class NAdam(Optimizer):  # noqa: D101
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -297,7 +297,7 @@ def _single_tensor_nadam(
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -397,7 +397,7 @@ def _multi_tensor_nadam(
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
@@ -412,7 +412,7 @@ def _multi_tensor_nadam(
         if not all(
             p.device.type == mp.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, mp, step in zip(params, mu_products, state_steps)
+            for p, mp, step in zip(params, mu_products, state_steps, strict=True)
         ):
             raise AssertionError(
                 "If capturable=True, "
@@ -570,7 +570,7 @@ def _multi_tensor_nadam(
             step_size_grads = _stack_if_compiling(
                 [
                     (_get_value(lr) * (1.0 - mu) / (1.0 - _get_value(mu_product))) * -1
-                    for mu_product, mu in zip(grouped_mu_products, mus)
+                    for mu_product, mu in zip(grouped_mu_products, mus, strict=True)
                 ]
             )
             step_size_expavg = _stack_if_compiling(
@@ -581,7 +581,9 @@ def _multi_tensor_nadam(
                         / (1.0 - _get_value(mu_product) * mu_next)
                     )
                     * -1
-                    for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)
+                    for mu_product, mu_next in zip(
+                        grouped_mu_products, mu_nexts, strict=True
+                    )
                 ]
             )
 
@@ -622,7 +624,7 @@ def nadam(
     weight_decay: float,
     momentum_decay: float,
     eps: float,
-):
+) -> None:
     r"""Functional API that performs NAdam algorithm computation.
 
     See :class:`~torch.optim.NAdam` for details.

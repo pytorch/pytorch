@@ -23,7 +23,7 @@ if _cusparselt is not None:
         global __cusparselt_version
         global __MAX_ALG_ID
         if __cusparselt_version is None:
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             __cusparselt_version = _cusparselt.getVersionInt()
             if __cusparselt_version == 400:
                 __MAX_ALG_ID = 4

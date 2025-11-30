@@ -1227,7 +1227,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         from torch._custom_op.impl import SUPPORTED_DEVICE_TYPE_TO_KEY
 
-        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY.keys():
+        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY:
             # Smoke test: should not raise error
             custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types=device_type)(
                 foo_impl

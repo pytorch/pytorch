@@ -11,15 +11,18 @@ aspects of contributing to PyTorch.
 <!-- toc -->
 
 - [Developing PyTorch](#developing-pytorch)
-  - [Setup the development environment](#setup-the-development-environment)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
+- [Spin](#spin)
+  - [Linting](#linting)
+    - [default lint](#default-lint)
+  - [Regenerating](#regenerating)
 - [Unit testing](#unit-testing)
   - [Python Unit Testing](#python-unit-testing)
   - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
   - [Local linting](#local-linting)
-    - [Running `mypy`](#running-mypy)
+    - [Running `pyrefly`](#running-pyrefly)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Merging your Change](#merging-your-change)
@@ -66,23 +69,6 @@ aspects of contributing to PyTorch.
 ## Developing PyTorch
 
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
-
-### Setup the development environment
-
-First, you need to [fork the PyTorch project on GitHub](https://github.com/pytorch/pytorch/fork) and follow the instructions at [Connecting to GitHub with SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) to setup your SSH authentication credentials.
-
-Then clone the PyTorch project and setup the development environment:
-
-```bash
-git clone git@github.com:<USERNAME>/pytorch.git
-cd pytorch
-git remote add upstream git@github.com:pytorch/pytorch.git
-
-make setup-env
-# Or run `make setup-env-cuda` for pre-built CUDA binaries
-# Or run `make setup-env-rocm` for pre-built ROCm binaries
-source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
-```
 
 ### Tips and Debugging
 
@@ -292,6 +278,47 @@ dependencies as well as the nightly binaries into the repo directory.
   * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
+## Spin
+
+[Spin](https://github.com/scientific-python/spin) is a developer cli tool that
+helps running common tasks.
+To list the available tasks, run `spin --help`.
+Currently, we support the following tasks with Spin:
+
+### Linting
+
+Spin helps with linting by making sure that lintrunner is installed correctly
+and by isolating the lintrunner environment from the general development
+environment using uv.
+
+|command||
+|-|-|
+|`setup-lint`|update lintrunner and perform a fresh setup|
+|`lazy-setup-lint`|only perform setup if the lint configuration has changed|
+|`lint`|perform default lint (see below)|
+|`quicklint`|perform lint on all files changed in the latest commit and the working directory|
+|`quickfix`|autofix issues on all files changed in the latest commit and the working directory|
+
+#### default lint
+
+Since some linters take a long time to run, we categorize all linters as either
+fast or slow. In the default lint, only the fast linters are run on all files;
+the slow linters are run on the changed files only.
+
+### Regenerating
+
+Pytorch makes use of a number of code generations, which range from the version
+information in `torch/version.py` over type stubs and other linter support to
+github workflows.
+With Spin, we offer a unified interface to these tasks.
+
+|command||
+|-|-|
+|`regenerate-version`|regenerate `torch/version.py`|
+|`regenerate-type-stubs`|regenerates type stubs for use by static type checkers|
+|`regenerate-clangtidy-files`|regenerates clang related files needed for linting|
+|`regenerate-github-workflows`|regenerates github workflows from jinja templates|
+
 ## Unit testing
 
 ### Python Unit Testing
@@ -299,7 +326,7 @@ dependencies as well as the nightly binaries into the repo directory.
 **Prerequisites**:
 The following packages should be installed with `pip`:
 - `expecttest` and `hypothesis` - required to run tests
-- `mypy` - recommended for linting
+- `pyrefly` - recommended for type checking. [Pyrefly](https://pyrefly.org/)
 - `pytest` - recommended to run tests more selectively
 Running
 ```
@@ -368,15 +395,32 @@ make lint
 
 Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner)
 
-#### Running `mypy`
+#### Running `pyrefly`
 
-`mypy` is an optional static type checker for Python. We have multiple `mypy`
-configs for the PyTorch codebase that are automatically validated against whenever the linter is run.
+[Pyrefly](https://pyrefly.org/) is a high-performance static type checker for Python. It provides fast type checking along with IDE features like autocomplete and instant error feedback.
+
+PyTorch uses Pyrefly for type checking across the codebase. The configuration is managed in `pyrefly.toml` at the root of the repository.
+
+**Getting Started with Pyrefly:**
+
+To run type checking on the PyTorch codebase:
+```bash
+pyrefly check
+```
+
+For more detailed error information with summaries:
+```bash
+pyrefly check --summarize-errors
+```
+
+**Learn More:**
+- [Pyrefly Configuration](https://pyrefly.org/en/docs/configuration/) - Detailed configuration options
+- [Pyrefly IDE Features](https://pyrefly.org/en/docs/IDE-features/) - Set up Pyrefly in your editor for real-time type checking
+- [Python Typing Tutorial](https://pyrefly.org/en/docs/typing-for-python-developers/) - Learn about Python type annotations
 
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
-for more information on how to set up `mypy` and tackle type annotation
-tasks.
+for PyTorch-specific guidance on how to set up `pyrefly` and tackle type annotation tasks in this codebase.
 
 ### C++ Unit Testing
 

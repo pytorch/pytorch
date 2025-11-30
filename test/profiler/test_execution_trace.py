@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 from typing import Any
@@ -43,7 +44,7 @@ from torch.utils._triton import has_triton
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
 # threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
+# The work around is turning off monitoring thread when tqdm is loaded.
 # Since these are unit tests, it is safe to turn off monitor thread.
 try:
     import tqdm
@@ -365,6 +366,9 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(
         (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
         "need triton and device(CUDA or XPU) availability to run",
     )
@@ -419,6 +423,9 @@ class TestExecutionTrace(TestCase):
         assert found_call_compiled_fx_graph
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     @unittest.skipIf(
         (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
         "need triton and device(CUDA or XPU) availability to run",
@@ -482,8 +489,8 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
-        "need triton and device(CUDA or XPU) availability to run",
+        (not has_triton()) or (not TEST_CUDA),
+        "need triton and device CUDA availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_triton_fx_graph_with_et(self, device):

@@ -5,16 +5,21 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import NoTest, run_tests, TEST_MPS, TestCase
+from torch.testing._internal.common_utils import (
+    NoTest,
+    run_tests,
+    TEST_ACCELERATOR,
+    TEST_MPS,
+    TEST_MULTIACCELERATOR,
+    TestCase,
+)
 
 
-if not torch.accelerator.is_available():
+if not TEST_ACCELERATOR:
     print("No available accelerator detected, skipping tests", file=sys.stderr)
     TestCase = NoTest  # noqa: F811
     # Skip because failing when run on cuda build with no GPU, see #150059 for example
     sys.exit()
-
-TEST_MULTIACCELERATOR = torch.accelerator.device_count() > 1
 
 
 class TestAccelerator(TestCase):
@@ -233,6 +238,12 @@ class TestAccelerator(TestCase):
         torch.accelerator.reset_peak_memory_stats()
         self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
         self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
+
+    @unittest.skipIf(TEST_MPS, "MPS doesn't support torch.accelerator memory API!")
+    def test_get_memory_info(self):
+        free_bytes, total_bytes = torch.accelerator.get_memory_info()
+        self.assertGreaterEqual(free_bytes, 0)
+        self.assertGreaterEqual(total_bytes, 0)
 
 
 if __name__ == "__main__":

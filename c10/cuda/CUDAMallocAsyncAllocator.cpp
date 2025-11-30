@@ -320,7 +320,7 @@ void mallocAsync(
   TORCH_INTERNAL_ASSERT(
       0 <= device && device < device_count,
       "Invalid device index ",
-      device,
+      static_cast<int>(device),
       ": did you call init?");
 
   // If stream is a null (default) stream,
@@ -370,7 +370,7 @@ void mallocAsync(
         OutOfMemoryError,
         false,
         "Allocation on device ",
-        device,
+        static_cast<int>(device),
         " would exceed allowed memory. (out of memory)",
         "\nCurrently allocated     : ",
         format_size(pytorch_used_bytes[device]),
@@ -427,7 +427,6 @@ struct CudaMallocAsyncAllocator : public CUDAAllocator {
   // on the current device each later call sees.
   void init(int dev_count) override {
     static bool called = [](int dev_count) {
-      ;
       // Are there external guarantees init will be called before
       // any of the allocator's other functions?
       // std::lock_guard<std::mutex> lk(general_mutex);

@@ -8,12 +8,14 @@ import time
 import warnings
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 from torch._utils_internal import log_triton_builds
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
 

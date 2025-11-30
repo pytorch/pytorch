@@ -12,16 +12,16 @@ except ImportError:
 
 def get_cudnn_mode(mode):
     if mode == "RNN_RELU":
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return int(_cudnn.RNNMode.rnn_relu)
     elif mode == "RNN_TANH":
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return int(_cudnn.RNNMode.rnn_tanh)
     elif mode == "LSTM":
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return int(_cudnn.RNNMode.lstm)
     elif mode == "GRU":
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return int(_cudnn.RNNMode.gru)
     else:
         raise Exception(f"Unknown mode: {mode}")  # noqa: TRY002
@@ -60,7 +60,7 @@ def init_dropout_state(dropout, train, dropout_seed, dropout_state):
                     dropout_p,
                     train,
                     dropout_seed,
-                    # pyrefly: ignore  # unexpected-keyword
+                    # pyrefly: ignore [unexpected-keyword]
                     self_ty=torch.uint8,
                     device=torch.device("cuda"),
                 )

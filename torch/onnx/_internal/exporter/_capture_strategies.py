@@ -92,7 +92,7 @@ class CaptureStrategy(abc.ABC):
         dump: bool = False,
         artifacts_dir: str | os.PathLike = ".",
         timestamp: str | None = None,
-    ):
+    ) -> None:
         """Initialize the strategy.
 
         Args:

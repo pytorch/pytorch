@@ -155,7 +155,11 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
     matching_data = {}
     if "*" in key:
         for op_key in op_data:
-            if [None for k1, k2 in zip(op_key, key) if k2 != "*" and k1 != k2]:
+            if [
+                None
+                for k1, k2 in zip(op_key, key, strict=True)
+                if k2 != "*" and k1 != k2
+            ]:
                 continue
             matching_data[op_key] = op_data[op_key]
     else:
@@ -173,10 +177,14 @@ def get_meta(op, key, device_name=None, version=(0, torch.float16, 0.5), exact=F
                 "num_stages",
                 "num_warps",
             )
-            meta = dict(zip(names, values))
+            meta = dict(zip(names, values, strict=True))
         elif op in {"bsr_dense_addmm", "_int_bsr_dense_addmm"}:
             meta = dict(
-                zip(("GROUP_SIZE_ROW", "SPLIT_N", "num_stages", "num_warps"), values)
+                zip(
+                    ("GROUP_SIZE_ROW", "SPLIT_N", "num_stages", "num_warps"),
+                    values,
+                    strict=True,
+                )
             )
         else:
             raise NotImplementedError(f"names for {op=}")
@@ -209,9 +217,8 @@ def update(op, device_name, version, key, value):
 def dump():
     """Store the current runtime db state to the module file."""
     current_file = inspect.getfile(dump)
-    f = open(current_file)
-    current_content = f.read()
-    f.close()
+    with open(current_file) as f:
+        current_content = f.read()
     begin_data_str = "# BEGIN GENERATED DATA\n"
     begin_data_index = current_content.find(begin_data_str)
     end_data_index = current_content.find("    # END GENERATED DATA\n")
@@ -234,17 +241,16 @@ def dump():
     part2 = current_content[end_data_index:]
     data_part = []
     for op_key in sorted(_operation_device_version_data, key=sort_key):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         data_part.append("    " + repr(op_key).replace("'", '"') + ": {")
         op_data = _operation_device_version_data[op_key]
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         data_part.extend(f"        {key}: {op_data[key]}," for key in sorted(op_data))
         data_part.append("    },")
     new_content = part1 + "\n".join(data_part) + "\n" + part2
     if current_content != new_content:
-        f = open(current_file, "w")
-        f.write(new_content)
-        f.close()
+        with open(current_file, "w") as f:
+            f.write(new_content)
 
 
 def minimize(
@@ -289,7 +295,7 @@ def minimize(
         return tuple(parameters[k] for k in sorted(parameters))
 
     def from_key(key, parameters):
-        return dict(zip(sorted(parameters), key))
+        return dict(zip(sorted(parameters), key, strict=True))
 
     if all_values is None:
         all_values = {}
@@ -347,7 +353,7 @@ def minimize(
         for i, (_, d_tuple) in enumerate(all_directions):
             pbar.update(1)
             next_parameters = parameters.copy()
-            for name, direction in zip(names, d_tuple):
+            for name, direction in zip(names, d_tuple, strict=True):
                 value = next_parameters[name]
                 if direction == 0:
                     continue
@@ -371,7 +377,7 @@ def minimize(
                 if next_target < minimal_target:
                     minimal_target = next_target
                     parameters = next_parameters
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     pbar.total += i + 1
                     break
         else:

@@ -60,9 +60,9 @@ def CDNA2OrLater():
 
 def evaluate_platform_supports_flash_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
-            arch_list += ["gfx1101", "gfx1150", "gfx1151", "gfx1200"]
+            arch_list += ["gfx1100", "gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
         return not IS_WINDOWS and SM80OrLater
@@ -70,9 +70,9 @@ def evaluate_platform_supports_flash_attention():
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
-        arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
+        arch_list = ["gfx90a", "gfx942", "gfx1201", "gfx950"]
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
-            arch_list += ["gfx1101", "gfx1150", "gfx1151", "gfx1200"]
+            arch_list += ["gfx1100", "gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
         return True
@@ -89,7 +89,7 @@ def evaluate_platform_supports_green_context():
     driver_version = torch.utils.collect_env.get_nvidia_driver_version(torch.utils.collect_env.run)
     if driver_version is None:
         return False
-    return int(driver_version.split('.')[0]) >= 550
+    return int(driver_version.split('.')[0]) >= 570
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_efficient_attention())

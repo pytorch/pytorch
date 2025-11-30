@@ -35,7 +35,7 @@ static bool mustBeZero(const ExprPtr& e) {
 }
 
 void Bound::print() const {
-  std::cout << "(" << *start << ", " << *end << ")";
+  std::cout << '(' << *start << ", " << *end << ')';
 }
 
 bool Bound::equals(const Bound& other) const {

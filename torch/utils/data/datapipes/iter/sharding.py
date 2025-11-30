@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 from collections.abc import Sized
 from enum import IntEnum
+from typing import NoReturn
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
@@ -24,7 +25,7 @@ class _ShardingIterDataPipe(IterDataPipe):
         num_of_instances: int,
         instance_id: int,
         sharding_group: SHARDING_PRIORITIES,
-    ):
+    ) -> NoReturn:
         raise NotImplementedError
 
 
@@ -40,7 +41,9 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
         source_datapipe: Iterable DataPipe that will be sharded
     """
 
-    def __init__(self, source_datapipe: IterDataPipe, sharding_group_filter=None):
+    def __init__(
+        self, source_datapipe: IterDataPipe, sharding_group_filter=None
+    ) -> None:
         self.source_datapipe = source_datapipe
         self.sharding_group_filter = sharding_group_filter
         self.groups: dict[int, tuple[int, int]] = {}
@@ -68,7 +71,7 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
         self.groups[sharding_group] = (num_of_instances, instance_id)
         self._update_num_of_instances()
 
-    def _update_num_of_instances(self):
+    def _update_num_of_instances(self) -> None:
         sorted_sharding_groups = [
             self.groups[key]
             for key in sorted(self.groups.keys())
@@ -89,7 +92,7 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
             if i % self.num_of_instances == self.instance_id:
                 yield item
 
-    def __len__(self):
+    def __len__(self) -> int:
         if isinstance(self.source_datapipe, Sized):
             return len(self.source_datapipe) // self.num_of_instances + (
                 1

@@ -125,7 +125,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         # Unless we are in prims_mode, in which case we want to use nvprims
         if orig_func in torch_function_passthrough or orig_func in all_prims():
             with self.prims_mode_cls():
-                # pyrefly: ignore  # invalid-param-spec
+                # pyrefly: ignore [invalid-param-spec]
                 return orig_func(*args, **kwargs)
         mapping = torch_to_refs_map()
         func = mapping.get(orig_func, None)
@@ -148,7 +148,7 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
         if func is not None:
             # If the ref exists query whether we should use it or not
             if self.should_fallback_fn(self, orig_func, func, args, kwargs):
-                # pyrefly: ignore  # invalid-param-spec
+                # pyrefly: ignore [invalid-param-spec]
                 return orig_func(*args, **kwargs)
             # torch calls inside func should be interpreted as refs calls
             with self:
@@ -157,5 +157,5 @@ class TorchRefsMode(torch.overrides.TorchFunctionMode):
             raise RuntimeError(
                 f"no _refs support for {torch.overrides.resolve_name(orig_func)}"
             )
-        # pyrefly: ignore  # invalid-param-spec
+        # pyrefly: ignore [invalid-param-spec]
         return orig_func(*args, **kwargs)

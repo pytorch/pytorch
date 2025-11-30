@@ -149,7 +149,7 @@
  *    First, keep in mind that we assume that boxed containers will
  *    have to deal with `IValue` (e.g. `c10::List`). In this context,
  *    what may be happening is that `IValue` doesn't store internally
- *    your type `T`. Instead, it constructs a type new `T` everytime
+ *    your type `T`. Instead, it constructs a type new `T` every time
  *    you try to get `T` for it (see `IListRef<at::OptinalTensorRef>`).
  */
 
@@ -186,16 +186,18 @@ class IListRef;
  * This macro is useful because it allows us to handle different
  * types (that correspond to different tags) to be implemented
  * only once. We can do it even when the implementation of the
- * different tags aren't syntatically the same, by dispatching
+ * different tags aren't syntactically the same, by dispatching
  * it to a function (e.g. `ImplT::<dispatch-function>(this_)`).
  */
 #define TORCH_ILISTREF_UNWRAP(TAG, BODY)                         \
+  C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")    \
   switch (TAG) {                                                 \
     TORCH_ILISTREF_FORALL_TAGS(TORCH_ILISTREF_UNWRAP_CASE, BODY) \
     break;                                                       \
     default:                                                     \
       TORCH_INTERNAL_ASSERT(false, "invalid IListRef tag.");     \
-  }
+  } \
+  C10_DIAGNOSTIC_POP()
 
 enum class IListRefTag {
 #define DEFINE_TAG(tag, ...) tag,

@@ -658,11 +658,11 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_dtensor_device_mesh_device_conversion(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = self.build_device_mesh()
 
-        # construct from a cpu local tensor with cuda device mesh
-        # should automatically convert the dist tensor to cuda
+        # construct from a cpu local tensor with gpu device mesh
+        # should automatically convert the dist tensor to gpu
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3)
         dist_tensor = DTensor.from_local(local_tensor, mesh, placements)
@@ -711,7 +711,7 @@ class DTensorMeshTest(DTensorTestBase):
     @with_comms
     def test_dtensor_2d_mesh(self):
         mesh_tensor = torch.arange(self.world_size).reshape(2, 4)
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # construct a dist tensor on 2d device mesh and test if works
@@ -733,7 +733,7 @@ class DTensorMeshTest(DTensorTestBase):
 
     @with_comms
     def test_device_mesh_nd(self):
-        # construct a cuda device mesh
+        # construct a gpu device mesh
         mesh_tensor = torch.arange(self.world_size).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
         # construct a dist tensor on 3d device mesh and test if works
@@ -1019,6 +1019,28 @@ class DTensorMeshTest(DTensorTestBase):
         except ValueError:
             self.fail("Unexpected ValueError raised with run_check=False")
 
+    @with_comms
+    def test_as_strided_identity(self):
+        # Test calling as_strided with the same size/stride/offset as input tensor
+        # This should be a no-op but currently fails
+        device_mesh = self.build_device_mesh()
+        placements = [Shard(0)]
+        local_tensor = torch.randn(3, 4, device=self.device_type)
+        dtensor = DTensor.from_local(local_tensor, device_mesh, placements)
+
+        # Get the current size, stride, and storage_offset
+        size = dtensor.size()
+        stride = dtensor.stride()
+        storage_offset = dtensor.storage_offset()
+
+        # Call as_strided with the exact same parameters
+        result = dtensor.as_strided(size, stride, storage_offset)
+
+        # The result should be identical to the input
+        self.assertEqual(result.size(), dtensor.size())
+        self.assertEqual(result.stride(), dtensor.stride())
+        self.assertEqual(result.to_local(), dtensor.to_local())
+
 
 DTensorMeshTestWithLocalTensor = create_local_tensor_test_class(
     DTensorMeshTest,
@@ -1042,8 +1064,8 @@ class TestDTensorPlacementTypes(DTensorTestBase):
         # Keep everything deterministic.
         torch.manual_seed(0)
         tensor = torch.rand(size)
-        if self.device_type == "cuda":
-            return tensor.cuda()
+        if self.device_type != "cpu":
+            return tensor.to(self.device_type)
         else:
             return tensor
 

@@ -65,7 +65,7 @@ void quantize_vec(
       (typename T::underlying*)dst,
       count,
       fbgemm::TensorQuantizationParams{
-          (float)scale, (int32_t)zero_point, precision});
+          static_cast<float>(scale), static_cast<int32_t>(zero_point), precision});
 }
 
 #if defined(__ARM_NEON__) || defined(__aarch64__)

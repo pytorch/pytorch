@@ -57,7 +57,7 @@ def _emit_schema(mod, name, schema, arg_start=0, padding=4):
 
 
 def _get_tensor_ops():
-    def is_tensor_method(schema):
+    def is_tensor_method(schema) -> bool:
         if len(schema.arguments) == 0:
             return False
         self = schema.arguments[0]

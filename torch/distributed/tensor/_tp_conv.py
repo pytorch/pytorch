@@ -11,7 +11,10 @@ import torch.distributed.tensor._api as dtensor
 aten = torch.ops.aten
 
 
-def _requires_data_exchange(padding):
+def _requires_data_exchange(padding, dim_map) -> bool:
+    # Data exchange is not need if only sharded across batch dim
+    if all(x == -1 for x in dim_map[1:]):
+        return False
     # TODO: whether there requires data exchange is currently determined by padding
     return padding[-1] != 0
 
@@ -107,6 +110,7 @@ def tp_convolution(
     op_call: torch._ops.OpOverload,
     local_tensor_args: tuple[object, ...],
     local_tensor_kwargs: dict[str, object],
+    dim_map: list[int],
 ) -> object:
     assert op_call == aten.convolution.default
     assert len(local_tensor_args) == 9
@@ -120,7 +124,7 @@ def tp_convolution(
     assert _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation)
     assert isinstance(padding, list)
 
-    if not _requires_data_exchange(padding):
+    if not _requires_data_exchange(padding, dim_map):
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
         return local_results
     else:
@@ -160,6 +164,7 @@ def tp_convolution_backward(
     op_call: torch._ops.OpOverload,
     local_tensor_args: tuple[object, ...],
     local_tensor_kwargs: dict[str, object],
+    dim_map: list[int],
 ) -> object:
     assert op_call == aten.convolution_backward.default
     assert len(local_tensor_args) == 11
@@ -174,7 +179,7 @@ def tp_convolution_backward(
     assert _is_supported(in_tensor.shape, weight.shape, stride, padding, dilation)
     assert isinstance(padding, list)
 
-    if not _requires_data_exchange(padding):
+    if not _requires_data_exchange(padding, dim_map):
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
         return local_results
     else:
@@ -239,15 +244,18 @@ def convolution_handler(
     dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
     assert output_sharding is not None, "output sharding should not be None"
+    output_spec = output_sharding.output_spec
+    assert isinstance(output_spec, dtensor.DTensorSpec)
 
     # local propagation
     local_results = tp_convolution(
-        op_call, tuple(op_info.local_args), op_info.local_kwargs
+        op_call,
+        tuple(op_info.local_args),
+        op_info.local_kwargs,
+        output_spec.dim_map,
     )
 
-    return dtensor.DTensor._op_dispatcher.wrap(
-        local_results, output_sharding.output_spec
-    )
+    return dtensor.DTensor._op_dispatcher.wrap(local_results, output_spec)
 
 
 def convolution_backward_handler(
@@ -270,10 +278,14 @@ def convolution_backward_handler(
     dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
     output_sharding = op_info.output_sharding
     assert output_sharding is not None, "output sharding should not be None"
+    assert isinstance(op_info.flat_args_schema[0], dtensor.DTensorSpec)
 
     # local propagation
     local_results = tp_convolution_backward(
-        op_call, tuple(op_info.local_args), op_info.local_kwargs
+        op_call,
+        tuple(op_info.local_args),
+        op_info.local_kwargs,
+        op_info.flat_args_schema[0].dim_map,
     )
 
     return dtensor.DTensor._op_dispatcher.wrap(

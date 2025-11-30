@@ -342,7 +342,7 @@ class TestTyping(JitTestCase):
             # type: (Dict[str, int]) -> Tuple[str, int]
             key_str = ""
             sum = 0
-            for key in x.keys():
+            for key in x:
                 key_str += key
             for val in x.values():
                 sum += val

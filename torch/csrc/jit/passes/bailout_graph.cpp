@@ -2,14 +2,11 @@
 
 #include <ATen/core/function.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/clear_profiling.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/liveness.h>
 #include <memory>
-#include <unordered_set>
 #include <utility>
 
 namespace torch::jit {
@@ -196,7 +193,7 @@ struct BailOutGraphBuilderForNode {
   std::shared_ptr<Graph> buildBailOutGraphFrom(Node* n) {
     // add graph inputs for guard's input
     // and loop counts for loops `n` is contained in
-    // to make sure we can line bailout grap's inputs up properly
+    // to make sure we can line bailout graph's inputs up properly
     // with arguments to this BailOut node.
     for (auto bi : n->inputs()) {
       getOrAddInputForValue(bi);

@@ -3,7 +3,7 @@
 import math
 import warnings
 from collections.abc import Callable
-from typing import Literal, Optional as _Optional, TypeVar, Union
+from typing import Literal, Optional as _Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -138,7 +138,7 @@ def _no_grad_zero_(tensor: Tensor) -> Tensor:
 
 
 def calculate_gain(
-    nonlinearity: _NonlinearityType, param: _Optional[Union[int, float]] = None
+    nonlinearity: _NonlinearityType, param: _Optional[int | float] = None
 ) -> float:
     r"""Return the recommended gain value for the given nonlinearity function.
 

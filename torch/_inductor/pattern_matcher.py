@@ -49,9 +49,9 @@ import textwrap
 import typing
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from collections.abc import Collection, Generator, Iterable, Mapping, Sequence
+from collections.abc import Callable, Collection, Generator, Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Callable, NoReturn, Optional, Protocol, TypeVar, Union
+from typing import Any, NoReturn, Optional, Protocol, TypeVar, Union
 from typing_extensions import Self, TypeIs
 
 import torch
@@ -743,7 +743,7 @@ class _TargetArgsExpr(_TargetExpr):
         assert len(node_items) == len(self_items)
 
         m = Match(ctx, self)
-        for i, pattern, child_node in zip(itertools.count(), self_items, node_items):
+        for pattern, child_node in zip(self_items, node_items):
             if isinstance(pattern, PatternExpr):
                 child_match = ctx.match(pattern, child_node)
                 if not is_match(child_match):
@@ -1442,6 +1442,13 @@ def register_replacement(
     """
     argnames_static = [*inspect.signature(search_fn).parameters.keys()]
 
+    if inspect.ismethod(search_fn):
+        search_fn = _wrap_bound_method(search_fn, argnames_static)
+
+    if inspect.ismethod(replace_fn):
+        replace_argnames = [*inspect.signature(replace_fn).parameters.keys()]
+        replace_fn = _wrap_bound_method(replace_fn, replace_argnames)
+
     def check_fn(match: Match) -> bool:
         """
         Often shapes get burned into the pattern, so our initial match ran with
@@ -1933,6 +1940,22 @@ def compute_mutation_region_ids(graph: torch.fx.Graph) -> None:
         nd.meta["mutation_region_id"] = mutation_region_id
 
 
+def _wrap_bound_method(fn: Any, argnames: list[str]) -> Any:
+    """
+    Wrap a bound method to remove 'self' from its signature for FX tracing.
+    """
+
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        return fn(*args, **kwargs)
+
+    params = [
+        inspect.Parameter(name, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        for name in argnames
+    ]
+    wrapper.__signature__ = inspect.Signature(params)  # type: ignore[attr-defined]
+    return wrapper
+
+
 class PatternMatcherPass:
     def __init__(
         self,
@@ -2099,7 +2122,7 @@ def fx_to_pattern(
         ) -> PatternExpr:
             process_arg_fn = process_arg
             # Indexing is critical for matching getitem nodes, so we can't ignore int args here
-            if target == operator.getitem:
+            if target is operator.getitem:
 
                 def process_arg_fn_impl(
                     x: T,

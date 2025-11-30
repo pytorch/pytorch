@@ -14,7 +14,7 @@ class OrderedDictWrapper:
     so using properties does not work.
     """
 
-    def __init__(self, cpp_module, attr):
+    def __init__(self, cpp_module, attr) -> None:
         self.cpp_module = cpp_module
         self.attr = attr
 
@@ -37,10 +37,10 @@ class OrderedDictWrapper:
     def __iter__(self):
         return self.cpp_dict.__iter__()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return self.cpp_dict.__len__()
 
-    def __contains__(self, key):
+    def __contains__(self, key) -> bool:
         return self.cpp_dict.__contains__(key)
 
     def __getitem__(self, key):
@@ -50,7 +50,7 @@ class OrderedDictWrapper:
 class ModuleWrapper(nn.Module):
     """A subclass of ``torch.nn.Module`` that wraps a C++ frontend module and delegates all access."""
 
-    def __init__(self, cpp_module):
+    def __init__(self, cpp_module) -> None:
         # Assign before the super class constructor so ``self.training`` can be
         # assigned to in the super class constructor.
         self.cpp_module = cpp_module
@@ -83,8 +83,8 @@ class ModuleWrapper(nn.Module):
         return self.cpp_module.training
 
     @training.setter
-    def training(self, mode):
+    def training(self, mode) -> None:
         self.cpp_module.train(mode)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return self.cpp_module.__repr__()

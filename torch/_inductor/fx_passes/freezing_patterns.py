@@ -144,7 +144,7 @@ def addmm_patterns_init():
             weight_inputs.append("w3")
 
         if not all(
-            match.kwargs[wgt].target == torch.ops.prims.convert_element_type.default
+            match.kwargs[wgt].target is torch.ops.prims.convert_element_type.default
             for wgt in weight_inputs
         ):
             return False

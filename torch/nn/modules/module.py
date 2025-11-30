@@ -294,7 +294,7 @@ def register_module_forward_hook(
 
 
 def register_module_backward_hook(
-    hook: Callable[["Module", _grad_t, _grad_t], Union[None, _grad_t]],
+    hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
 ) -> RemovableHandle:
     r"""Register a backward hook common to all the modules.
 
@@ -323,7 +323,7 @@ def register_module_backward_hook(
 
 
 def register_module_full_backward_pre_hook(
-    hook: Callable[["Module", _grad_t], Union[None, _grad_t]],
+    hook: Callable[["Module", _grad_t], None | _grad_t],
 ) -> RemovableHandle:
     r"""Register a backward pre-hook common to all the modules.
 
@@ -350,7 +350,7 @@ def register_module_full_backward_pre_hook(
 
 
 def register_module_full_backward_hook(
-    hook: Callable[["Module", _grad_t, _grad_t], Union[None, _grad_t]],
+    hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
 ) -> RemovableHandle:
     r"""Register a backward hook common to all the modules.
 
@@ -1073,7 +1073,7 @@ class Module:
         fn(self)
         return self
 
-    def cuda(self, device: Optional[Union[int, device]] = None) -> Self:
+    def cuda(self, device: Optional[int | device] = None) -> Self:
         r"""Move all model parameters and buffers to the GPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1092,7 +1092,7 @@ class Module:
         """
         return self._apply(lambda t: t.cuda(device))
 
-    def ipu(self, device: Optional[Union[int, device]] = None) -> Self:
+    def ipu(self, device: Optional[int | device] = None) -> Self:
         r"""Move all model parameters and buffers to the IPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1111,7 +1111,7 @@ class Module:
         """
         return self._apply(lambda t: t.ipu(device))
 
-    def xpu(self, device: Optional[Union[int, device]] = None) -> Self:
+    def xpu(self, device: Optional[int | device] = None) -> Self:
         r"""Move all model parameters and buffers to the XPU.
 
         This also makes associated parameters and buffers different objects. So
@@ -1130,7 +1130,7 @@ class Module:
         """
         return self._apply(lambda t: t.xpu(device))
 
-    def mtia(self, device: Optional[Union[int, device]] = None) -> Self:
+    def mtia(self, device: Optional[int | device] = None) -> Self:
         r"""Move all model parameters and buffers to the MTIA.
 
         This also makes associated parameters and buffers different objects. So
@@ -1160,7 +1160,7 @@ class Module:
         """
         return self._apply(lambda t: t.cpu())
 
-    def type(self, dst_type: Union[dtype, str]) -> Self:
+    def type(self, dst_type: dtype | str) -> Self:
         r"""Casts all parameters and buffers to :attr:`dst_type`.
 
         .. note::
@@ -1384,7 +1384,7 @@ class Module:
 
     def register_full_backward_pre_hook(
         self,
-        hook: Callable[["Module", _grad_t], Union[None, _grad_t]],
+        hook: Callable[["Module", _grad_t], None | _grad_t],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a backward pre-hook on the module.
@@ -1432,7 +1432,7 @@ class Module:
         return handle
 
     def register_backward_hook(
-        self, hook: Callable[["Module", _grad_t, _grad_t], Union[None, _grad_t]]
+        self, hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t]
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
 
@@ -1459,7 +1459,7 @@ class Module:
 
     def register_full_backward_hook(
         self,
-        hook: Callable[["Module", _grad_t, _grad_t], Union[None, _grad_t]],
+        hook: Callable[["Module", _grad_t, _grad_t], None | _grad_t],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a backward hook on the module.
@@ -1623,12 +1623,9 @@ class Module:
 
     def register_forward_pre_hook(
         self,
-        hook: Union[
-            Callable[[T, tuple[Any, ...]], Optional[Any]],
-            Callable[
-                [T, tuple[Any, ...], dict[str, Any]],
-                Optional[tuple[Any, dict[str, Any]]],
-            ],
+        hook: Callable[[T, tuple[Any, ...]], Optional[Any]]
+        | Callable[
+            [T, tuple[Any, ...], dict[str, Any]], Optional[tuple[Any, dict[str, Any]]]
         ],
         *,
         prepend: bool = False,
@@ -1689,10 +1686,8 @@ class Module:
 
     def register_forward_hook(
         self,
-        hook: Union[
-            Callable[[T, tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, tuple[Any, ...], dict[str, Any], Any], Optional[Any]],
-        ],
+        hook: Callable[[T, tuple[Any, ...], Any], Optional[Any]]
+        | Callable[[T, tuple[Any, ...], dict[str, Any], Any], Optional[Any]],
         *,
         prepend: bool = False,
         with_kwargs: bool = False,
@@ -2438,6 +2433,7 @@ class Module:
                     not is_param_lazy
                     and len(param.shape) == 0
                     and len(input_param.shape) == 1
+                    and input_param.shape[0] == 1
                 ):
                     input_param = input_param[0]
 
@@ -2521,7 +2517,7 @@ class Module:
             unexpected_keys.append(extra_state_key)
 
         if strict:
-            for key in state_dict.keys():
+            for key in state_dict:
                 if key.startswith(prefix) and key != extra_state_key:
                     input_name = key[len(prefix) :].split(".", 1)
                     # Must be Module if it have attributes
@@ -3040,7 +3036,7 @@ class Module:
 
         return replica
 
-    def compile(self, *args, **kwargs):
+    def compile(self, *args, **kwargs) -> None:
         """
         Compile this Module's forward using :func:`torch.compile`.
 

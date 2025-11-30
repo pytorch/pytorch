@@ -530,6 +530,17 @@ class InductorChoices:
             WhyNoFuse(node1, node2)("Fusion will increase peak memory")
             return False
 
+        if (
+            config.max_fusion_unique_io_buffers is not None
+            and scheduler.fusion_prevent_too_many_reads_and_writes(
+                node1,
+                node2,
+                config.max_fusion_unique_io_buffers,
+            )
+        ):
+            WhyNoFuse(node1, node2)("fusion_prevent_too_many_reads_and_writes")
+            return False
+
         return True
 
     @staticmethod
@@ -550,9 +561,11 @@ class InductorChoices:
         shared_data_score: int,
     ) -> bool:
         """Hook for heuristics to prevent horizontal (consumer/consumer) fusions"""
-        if (
-            shared_data_score < config.score_fusion_memory_threshold
-        ) and not MixOrderReduction.can_fuse(node1, node2):
+        if MixOrderReduction.can_fuse(node1, node2):
+            # For mix order reduction, we disregard shared data or
+            # distance.
+            return True
+        if shared_data_score < config.score_fusion_memory_threshold:
             WhyNoFuse(node1, node2)("score_fusion_memory_threshold")
             return False
         if scheduler.are_long_distant_nodes(node1, node2):

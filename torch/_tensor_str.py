@@ -657,10 +657,10 @@ def _str_intern(inp, *, tensor_contents=None):
         grad_fn_name = "Invalid"
 
     if grad_fn_name is None and grad_fn is not None:  # type: ignore[possibly-undefined]
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         grad_fn_name = type(grad_fn).__name__
         if grad_fn_name == "CppFunction":
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             grad_fn_name = grad_fn.name().rsplit("::", 1)[-1]
 
     if grad_fn_name is not None:

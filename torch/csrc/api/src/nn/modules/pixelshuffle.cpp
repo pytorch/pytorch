@@ -9,7 +9,7 @@ PixelShuffleImpl::PixelShuffleImpl(const PixelShuffleOptions& options_)
 
 void PixelShuffleImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::PixelShuffle(upscale_factor="
-         << options.upscale_factor() << ")";
+         << options.upscale_factor() << ')';
 }
 
 void PixelShuffleImpl::reset() {}
@@ -23,7 +23,7 @@ PixelUnshuffleImpl::PixelUnshuffleImpl(const PixelUnshuffleOptions& options_)
 
 void PixelUnshuffleImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::PixelUnshuffle(downscale_factor="
-         << options.downscale_factor() << ")";
+         << options.downscale_factor() << ')';
 }
 
 void PixelUnshuffleImpl::reset() {}

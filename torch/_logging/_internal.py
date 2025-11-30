@@ -498,7 +498,7 @@ def set_logs(
                 if val not in logging._levelToName:
                     raise ValueError(
                         f"Unrecognized log level for log {alias}: {val}, valid level values "
-                        f"are: {','.join([str(k) for k in logging._levelToName.keys()])}"
+                        f"are: {','.join([str(k) for k in logging._levelToName])}"
                     )
 
                 log_state.enable_log(
@@ -891,10 +891,14 @@ class TorchLogsFormatter(logging.Formatter):
         # exception handling - copied from logging.Formatter.format
         s = record.message
         if record.exc_info:
+            from torch._dynamo import config
+
+            should_format_exc = config.verbose or artifact_name != "graph_breaks"
             # Cache the traceback text to avoid converting it multiple times
             # (it's constant anyway)
-            if not record.exc_text:
-                record.exc_text = self.formatException(record.exc_info)
+            if should_format_exc:
+                if not record.exc_text:
+                    record.exc_text = self.formatException(record.exc_info)
         if record.exc_text:
             if s[-1:] != "\n":
                 s = s + "\n"
