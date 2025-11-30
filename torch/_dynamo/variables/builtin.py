@@ -1548,7 +1548,8 @@ class BuiltinVariable(VariableTracker):
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in str_methods:
-                if args[0].is_python_constant():
+                # Only delegate to ConstantVariable, not other types that happen to be constants
+                if isinstance(args[0], ConstantVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is float and len(args) >= 1:
