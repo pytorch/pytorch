@@ -8,37 +8,50 @@
 using namespace metal;
 using namespace c10::metal;
 
-
 template <typename scalar_t>
-static inline scalar_t grid_sampler_unnormalize(scalar_t coord, int size, bool align_corners) {
+static inline scalar_t grid_sampler_unnormalize(
+    scalar_t coord,
+    int size,
+    bool align_corners) {
   using opmath_t = opmath_t<scalar_t>;
   if (align_corners) {
-    return static_cast<scalar_t>((static_cast<opmath_t>(coord) + 1.0f) / 2.0f * (size - 1));
+    return static_cast<scalar_t>(
+        (static_cast<opmath_t>(coord) + 1.0f) / 2.0f * (size - 1));
   } else {
-    return static_cast<scalar_t>(((static_cast<opmath_t>(coord) + 1.0f) * size - 1.0f) / 2.0f);
+    return static_cast<scalar_t>(
+        ((static_cast<opmath_t>(coord) + 1.0f) * size - 1.0f) / 2.0f);
   }
 }
 
 template <typename scalar_t>
-static inline scalar_t grid_sampler_unnormalize_set_grad(scalar_t coord, int size,
-                                                         bool align_corners, thread scalar_t* grad_in) {
+static inline scalar_t grid_sampler_unnormalize_set_grad(
+    scalar_t coord,
+    int size,
+    bool align_corners,
+    thread scalar_t* grad_in) {
   using opmath_t = opmath_t<scalar_t>;
   if (align_corners) {
     *grad_in = static_cast<scalar_t>(static_cast<opmath_t>(size - 1) / 2.0f);
-    return static_cast<scalar_t>((static_cast<opmath_t>(coord) + 1.0f) / 2.0f * (size - 1));
+    return static_cast<scalar_t>(
+        (static_cast<opmath_t>(coord) + 1.0f) / 2.0f * (size - 1));
   } else {
     *grad_in = static_cast<scalar_t>(static_cast<opmath_t>(size) / 2.0f);
-    return static_cast<scalar_t>(((static_cast<opmath_t>(coord) + 1.0f) * size - 1.0f) / 2.0f);
+    return static_cast<scalar_t>(
+        ((static_cast<opmath_t>(coord) + 1.0f) * size - 1.0f) / 2.0f);
   }
 }
 
 template <typename scalar_t>
 static inline scalar_t clip_coordinates(scalar_t in, int clip_limit) {
-  return clamp(in, static_cast<scalar_t>(0), static_cast<scalar_t>(clip_limit - 1));
+  return clamp(
+      in, static_cast<scalar_t>(0), static_cast<scalar_t>(clip_limit - 1));
 }
 
 template <typename scalar_t>
-static inline scalar_t clip_coordinates_set_grad(scalar_t in, int clip_limit, thread scalar_t* grad_in) {
+static inline scalar_t clip_coordinates_set_grad(
+    scalar_t in,
+    int clip_limit,
+    thread scalar_t* grad_in) {
   if (in <= static_cast<scalar_t>(0)) {
     *grad_in = static_cast<scalar_t>(0);
     return static_cast<scalar_t>(0);
@@ -55,7 +68,10 @@ static inline scalar_t clip_coordinates_set_grad(scalar_t in, int clip_limit, th
 }
 
 template <typename scalar_t>
-static inline scalar_t reflect_coordinates(scalar_t in, int twice_low, int twice_high) {
+static inline scalar_t reflect_coordinates(
+    scalar_t in,
+    int twice_low,
+    int twice_high) {
   if (twice_low == twice_high) {
     return static_cast<scalar_t>(0);
   }
@@ -73,8 +89,11 @@ static inline scalar_t reflect_coordinates(scalar_t in, int twice_low, int twice
 }
 
 template <typename scalar_t>
-static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, int twice_high,
-                                                    thread scalar_t* grad_in) {
+static inline scalar_t reflect_coordinates_set_grad(
+    scalar_t in,
+    int twice_low,
+    int twice_high,
+    thread scalar_t* grad_in) {
   if (twice_low == twice_high) {
     *grad_in = static_cast<scalar_t>(0);
     return static_cast<scalar_t>(0);
@@ -101,21 +120,26 @@ static inline scalar_t reflect_coordinates_set_grad(scalar_t in, int twice_low, 
   }
 }
 
-template<typename scalar_t>
-static inline scalar_t safe_downgrade_to_int_range(scalar_t x){
-  if (x > (numeric_limits<int>::max() - 1) || x < numeric_limits<int>::min() || !isfinite(x)) {
+template <typename scalar_t>
+static inline scalar_t safe_downgrade_to_int_range(scalar_t x) {
+  if (x > (numeric_limits<int>::max() - 1) || x < numeric_limits<int>::min() ||
+      !isfinite(x)) {
     return static_cast<scalar_t>(-100.0);
   }
   return x;
 }
 
-template<typename scalar_t>
-static inline scalar_t compute_coordinates(scalar_t coord, int size,
-                                           GridSamplerPadding padding_mode,
-                                           bool align_corners) {
-  // Note: Border padding mode is not supported on MPS and will be rejected by C++ code
-  // before this kernel is called. The Border code path is kept here for completeness.
-  coord = grid_sampler_unnormalize(coord, size, align_corners); // Forward needs unnormalize
+template <typename scalar_t>
+static inline scalar_t compute_coordinates(
+    scalar_t coord,
+    int size,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  // Note: Border padding mode is not supported on MPS and will be rejected by
+  // C++ code before this kernel is called. The Border code path is kept here
+  // for completeness.
+  coord = grid_sampler_unnormalize(
+      coord, size, align_corners); // Forward needs unnormalize
   if (padding_mode == GridSamplerPadding::Border) {
     coord = clip_coordinates(coord, size);
   } else if (padding_mode == GridSamplerPadding::Reflection) {
@@ -132,17 +156,22 @@ static inline scalar_t compute_coordinates(scalar_t coord, int size,
 
 template <typename scalar_t>
 static inline scalar_t grid_sampler_compute_source_index_set_grad(
-    scalar_t coord, int size, GridSamplerPadding padding_mode,
-    bool align_corners, thread scalar_t* grad_in) {
+    scalar_t coord,
+    int size,
+    GridSamplerPadding padding_mode,
+    bool align_corners,
+    thread scalar_t* grad_in) {
   // Note: Border padding mode is not supported on MPS (C++ code rejects it)
   scalar_t grad_clip, grad_refl;
-  coord = grid_sampler_unnormalize_set_grad(coord, size, align_corners, grad_in);
+  coord =
+      grid_sampler_unnormalize_set_grad(coord, size, align_corners, grad_in);
   if (padding_mode == GridSamplerPadding::Border) {
     coord = clip_coordinates_set_grad(coord, size, &grad_clip);
     *grad_in = (*grad_in) * grad_clip;
   } else if (padding_mode == GridSamplerPadding::Reflection) {
     if (align_corners) {
-      coord = reflect_coordinates_set_grad(coord, 0, 2 * (size - 1), &grad_refl);
+      coord =
+          reflect_coordinates_set_grad(coord, 0, 2 * (size - 1), &grad_refl);
     } else {
       coord = reflect_coordinates_set_grad(coord, -1, 2 * size - 1, &grad_refl);
     }
@@ -157,29 +186,39 @@ static inline bool within_bounds_2d(int h, int w, int H, int W) {
   return h >= 0 && h < H && w >= 0 && w < W;
 }
 
-template<typename scalar_t, typename index_t>
+template <typename scalar_t, typename index_t>
 static inline void safe_add_2d(
-    device scalar_t* data, int h, int w,
-    int sH, int sW, int H, int W, scalar_t delta,
-    const index_t NC_offset, const index_t memory_span) {
+    device scalar_t* data,
+    int h,
+    int w,
+    int sH,
+    int sW,
+    int H,
+    int W,
+    scalar_t delta,
+    const index_t NC_offset,
+    const index_t memory_span) {
   if (within_bounds_2d(h, w, H, W)) {
     index_t offset = NC_offset + h * sH + w * sW;
     using atomic_t = typename AtomicType<scalar_t>::type;
-    AtomicType<scalar_t>::atomic_add(
-      (device atomic_t*)data,
-      offset,
-      delta
-    );
+    AtomicType<scalar_t>::atomic_add((device atomic_t*)data, offset, delta);
   }
 }
 
-template<typename scalar_t>
+template <typename scalar_t>
 static inline scalar_t get_value_bounded(
-    device const scalar_t* data, scalar_t x, scalar_t y, int W, int H, int sW, int sH,
-    GridSamplerPadding padding_mode, bool align_corners) {
-  // NOTE: This `compute_coordinates` is slightly different from backward pass one
-  // as it doesn't return a gradient. It's used for fetching values.
-  // Note: Border padding mode is not supported on MPS (C++ code rejects it)
+    device const scalar_t* data,
+    scalar_t x,
+    scalar_t y,
+    int W,
+    int H,
+    int sW,
+    int sH,
+    GridSamplerPadding padding_mode,
+    bool align_corners) {
+  // NOTE: This `compute_coordinates` is slightly different from backward pass
+  // one as it doesn't return a gradient. It's used for fetching values. Note:
+  // Border padding mode is not supported on MPS (C++ code rejects it)
   x = grid_sampler_unnormalize(x, W, align_corners);
   y = grid_sampler_unnormalize(y, H, align_corners);
 
@@ -208,12 +247,20 @@ static inline scalar_t get_value_bounded(
   return static_cast<scalar_t>(0);
 }
 
-
-template<typename scalar_t, typename index_t>
+template <typename scalar_t, typename index_t>
 static inline void add_value_bounded(
-    device scalar_t* data, scalar_t ix, scalar_t iy, int W, int H, int sW, int sH,
-    scalar_t delta, GridSamplerPadding padding_mode, bool align_corners,
-    const index_t NC_offset, const index_t memory_span) {
+    device scalar_t* data,
+    scalar_t ix,
+    scalar_t iy,
+    int W,
+    int H,
+    int sW,
+    int sH,
+    scalar_t delta,
+    GridSamplerPadding padding_mode,
+    bool align_corners,
+    const index_t NC_offset,
+    const index_t memory_span) {
   // In the backward pass for bicubic, ix/iy are already unnormalized,
   // but we still need to handle padding before casting to int.
   ix = compute_coordinates(ix, W, padding_mode, align_corners);
@@ -221,22 +268,19 @@ static inline void add_value_bounded(
 
   int ix_int = static_cast<int>(ix);
   int iy_int = static_cast<int>(iy);
-  safe_add_2d(data, iy_int, ix_int, sH, sW, H, W, delta, NC_offset, memory_span);
+  safe_add_2d(
+      data, iy_int, ix_int, sH, sW, H, W, delta, NC_offset, memory_span);
 }
-
-
 
 template <typename scalar_t>
 kernel void grid_sampler_2d_backward(
-  device scalar_t* grad_input [[buffer(0)]],
-  device scalar_t* grad_grid [[buffer(1)]],
-  const device scalar_t* grad_output [[buffer(2)]],
-  const device scalar_t* input [[buffer(3)]],
-  const device scalar_t* grid [[buffer(4)]],
-  const device GridSamplerBackwardParams<5>& params [[buffer(5)]],
-  uint tid [[thread_position_in_grid]])
-{
-  
+    device scalar_t* grad_input [[buffer(0)]],
+    device scalar_t* grad_grid [[buffer(1)]],
+    const device scalar_t* grad_output [[buffer(2)]],
+    const device scalar_t* input [[buffer(3)]],
+    const device scalar_t* grid [[buffer(4)]],
+    const device GridSamplerBackwardParams<5>& params [[buffer(5)]],
+    uint tid [[thread_position_in_grid]]) {
   using index_t = int32_t;
 
   const bool align_corners = params.align_corners;
@@ -244,7 +288,6 @@ kernel void grid_sampler_2d_backward(
   const GridSamplerPadding padding_mode = params.padding_mode;
   const bool input_requires_grad = params.input_requires_grad;
 
-  
   index_t C = params.input_sizes[1];
   index_t inp_H = params.input_sizes[2];
   index_t inp_W = params.input_sizes[3];
@@ -263,7 +306,8 @@ kernel void grid_sampler_2d_backward(
   index_t gOut_sH = params.grad_output_strides[2];
   index_t gOut_sW = params.grad_output_strides[3];
 
-  // gInp_* (and NC_offset below) are not really needed if input_requires_grad is false.
+  // gInp_* (and NC_offset below) are not really needed if input_requires_grad
+  // is false.
   index_t gInp_sN = 0, gInp_sC = 0, gInp_sH = 0, gInp_sW = 0;
   if (input_requires_grad) {
     gInp_sN = params.grad_input_strides[0];
@@ -273,121 +317,179 @@ kernel void grid_sampler_2d_backward(
   }
   index_t gGrid_sW = params.grad_grid_strides[2];
   const index_t grad_input_memory_span = params.grad_input_memory_span;
-  
-  index_t index = tid ; 
-    const index_t w = index % out_W;
-      const index_t h = (index / out_W) % out_H;
-      const index_t n = index / (out_H * out_W);
-      const auto grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
-      // get the corresponding input x, y co-ordinates from grid
-      scalar_t x = grid[grid_offset];
-      scalar_t y = grid[grid_offset + grid_sCoor];
+  index_t index = tid;
+  const index_t w = index % out_W;
+  const index_t h = (index / out_W) % out_H;
+  const index_t n = index / (out_H * out_W);
+  const auto grid_offset = n * grid_sN + h * grid_sH + w * grid_sW;
 
-      // multipliers for gradients on ix and iy
-      scalar_t gix_mult, giy_mult;
-      scalar_t ix = grid_sampler_compute_source_index_set_grad(x, inp_W, padding_mode, align_corners, &gix_mult);
-      scalar_t iy = grid_sampler_compute_source_index_set_grad(y, inp_H, padding_mode, align_corners, &giy_mult);
+  // get the corresponding input x, y co-ordinates from grid
+  scalar_t x = grid[grid_offset];
+  scalar_t y = grid[grid_offset + grid_sCoor];
 
-      if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
-        // get NE, NW, SE, SW pixel values from (x, y)
-        index_t ix_nw = static_cast<index_t>(floor(ix));
-        index_t iy_nw = static_cast<index_t>(floor(iy));
-        index_t ix_ne = ix_nw + 1;
-        index_t iy_ne = iy_nw;
-        index_t ix_sw = ix_nw;
-        index_t iy_sw = iy_nw + 1;
-        index_t ix_se = ix_nw + 1;
-        index_t iy_se = iy_nw + 1;
+  // multipliers for gradients on ix and iy
+  scalar_t gix_mult, giy_mult;
+  scalar_t ix = grid_sampler_compute_source_index_set_grad(
+      x, inp_W, padding_mode, align_corners, &gix_mult);
+  scalar_t iy = grid_sampler_compute_source_index_set_grad(
+      y, inp_H, padding_mode, align_corners, &giy_mult);
 
-        // get surfaces to each neighbor:
-        scalar_t nw = (ix_se - ix)    * (iy_se - iy);
-        scalar_t ne = (ix    - ix_sw) * (iy_sw - iy);
-        scalar_t sw = (ix_ne - ix)    * (iy    - iy_ne);
-        scalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
+  if (interpolation_mode == GridSamplerInterpolation::Bilinear) {
+    // get NE, NW, SE, SW pixel values from (x, y)
+    index_t ix_nw = static_cast<index_t>(floor(ix));
+    index_t iy_nw = static_cast<index_t>(floor(iy));
+    index_t ix_ne = ix_nw + 1;
+    index_t iy_ne = iy_nw;
+    index_t ix_sw = ix_nw;
+    index_t iy_sw = iy_nw + 1;
+    index_t ix_se = ix_nw + 1;
+    index_t iy_se = iy_nw + 1;
 
-        scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
-        device const scalar_t *gOut_ptr_NCHW = grad_output + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-        index_t NC_offset = n * gInp_sN;
-        device const scalar_t *inp_ptr_NC = input + n * inp_sN;
-        for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
-          const scalar_t gOut = *gOut_ptr_NCHW;
+    // get surfaces to each neighbor:
+    scalar_t nw = (ix_se - ix) * (iy_se - iy);
+    scalar_t ne = (ix - ix_sw) * (iy_sw - iy);
+    scalar_t sw = (ix_ne - ix) * (iy - iy_ne);
+    scalar_t se = (ix - ix_nw) * (iy - iy_nw);
 
-          if (input_requires_grad) {
-            // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
-            safe_add_2d(grad_input, iy_nw, ix_nw, gInp_sH, gInp_sW, inp_H, inp_W, nw * gOut, NC_offset, grad_input_memory_span);
-            safe_add_2d(grad_input, iy_ne, ix_ne, gInp_sH, gInp_sW, inp_H, inp_W, ne * gOut, NC_offset, grad_input_memory_span);
-            safe_add_2d(grad_input, iy_sw, ix_sw, gInp_sH, gInp_sW, inp_H, inp_W, sw * gOut, NC_offset, grad_input_memory_span);
-            safe_add_2d(grad_input, iy_se, ix_se, gInp_sH, gInp_sW, inp_H, inp_W, se * gOut, NC_offset, grad_input_memory_span);
-          }
+    scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
+    device const scalar_t* gOut_ptr_NCHW =
+        grad_output + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+    index_t NC_offset = n * gInp_sN;
+    device const scalar_t* inp_ptr_NC = input + n * inp_sN;
+    for (index_t c = 0; c < C; ++c,
+                 inp_ptr_NC += inp_sC,
+                 NC_offset += gInp_sC,
+                 gOut_ptr_NCHW += gOut_sC) {
+      const scalar_t gOut = *gOut_ptr_NCHW;
 
-          // calculate grad_grid
-          if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
-            scalar_t nw_val = inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW];
-            gix -= nw_val * (iy_se - iy) * gOut;
-            giy -= nw_val * (ix_se - ix) * gOut;
-          }
-          if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
-            scalar_t ne_val = inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW];
-            gix += ne_val * (iy_sw - iy) * gOut;
-            giy -= ne_val * (ix - ix_sw) * gOut;
-          }
-          if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
-            scalar_t sw_val = inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW];
-            gix -= sw_val * (iy - iy_ne) * gOut;
-            giy += sw_val * (ix_ne - ix) * gOut;
-          }
-          if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
-            scalar_t se_val = inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW];
-            gix += se_val * (iy - iy_nw) * gOut;
-            giy += se_val * (ix - ix_nw) * gOut;
-          }
-        }
-
-        // assuming grad_grid is contiguous
-        // thus we can
-        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
-        //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
-        device scalar_t *gGrid_ptr_NHW = grad_grid + index * gGrid_sW;
-        gGrid_ptr_NHW[0] = gix_mult * gix;
-        gGrid_ptr_NHW[1] = giy_mult * giy;
-      } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
-        if (input_requires_grad) {
-          index_t ix_nearest = (index_t)rint(ix);
-          index_t iy_nearest = (index_t)rint(iy);
-
-
-          // assign nearest neighbour pixel value to output pixel
-          device const scalar_t *gOut_ptr_NCHW = grad_output + n * gOut_sN + h * gOut_sH + w * gOut_sW;
-          index_t NC_offset = n * gInp_sN;
-          for (index_t c = 0; c < C; ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
-            // calculate and set grad_input. See Note [Passing pointer and offset to fastAtomicAdd].
-            safe_add_2d(grad_input, iy_nearest, ix_nearest, gInp_sH, gInp_sW, inp_H, inp_W, *gOut_ptr_NCHW, NC_offset, grad_input_memory_span);
-          }
-        }
-
-        // assuming grad_grid is contiguous
-        // thus we can
-        //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
-        //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
-        device scalar_t *gGrid_ptr_NHW = grad_grid + index * gGrid_sW;
-        gGrid_ptr_NHW[0] = static_cast<scalar_t>(0);
-        gGrid_ptr_NHW[1] = static_cast<scalar_t>(0);
+      if (input_requires_grad) {
+        // calculate and set grad_input. See Note [Passing pointer and offset to
+        // fastAtomicAdd].
+        safe_add_2d(
+            grad_input,
+            iy_nw,
+            ix_nw,
+            gInp_sH,
+            gInp_sW,
+            inp_H,
+            inp_W,
+            nw * gOut,
+            NC_offset,
+            grad_input_memory_span);
+        safe_add_2d(
+            grad_input,
+            iy_ne,
+            ix_ne,
+            gInp_sH,
+            gInp_sW,
+            inp_H,
+            inp_W,
+            ne * gOut,
+            NC_offset,
+            grad_input_memory_span);
+        safe_add_2d(
+            grad_input,
+            iy_sw,
+            ix_sw,
+            gInp_sH,
+            gInp_sW,
+            inp_H,
+            inp_W,
+            sw * gOut,
+            NC_offset,
+            grad_input_memory_span);
+        safe_add_2d(
+            grad_input,
+            iy_se,
+            ix_se,
+            gInp_sH,
+            gInp_sW,
+            inp_H,
+            inp_W,
+            se * gOut,
+            NC_offset,
+            grad_input_memory_span);
       }
-      // Note: Bicubic interpolation is not supported on MPS
-      // The C++ code will reject it before reaching this kernel
-    
+
+      // calculate grad_grid
+      if (within_bounds_2d(iy_nw, ix_nw, inp_H, inp_W)) {
+        scalar_t nw_val = inp_ptr_NC[iy_nw * inp_sH + ix_nw * inp_sW];
+        gix -= nw_val * (iy_se - iy) * gOut;
+        giy -= nw_val * (ix_se - ix) * gOut;
+      }
+      if (within_bounds_2d(iy_ne, ix_ne, inp_H, inp_W)) {
+        scalar_t ne_val = inp_ptr_NC[iy_ne * inp_sH + ix_ne * inp_sW];
+        gix += ne_val * (iy_sw - iy) * gOut;
+        giy -= ne_val * (ix - ix_sw) * gOut;
+      }
+      if (within_bounds_2d(iy_sw, ix_sw, inp_H, inp_W)) {
+        scalar_t sw_val = inp_ptr_NC[iy_sw * inp_sH + ix_sw * inp_sW];
+        gix -= sw_val * (iy - iy_ne) * gOut;
+        giy += sw_val * (ix_ne - ix) * gOut;
+      }
+      if (within_bounds_2d(iy_se, ix_se, inp_H, inp_W)) {
+        scalar_t se_val = inp_ptr_NC[iy_se * inp_sH + ix_se * inp_sW];
+        gix += se_val * (iy - iy_nw) * gOut;
+        giy += se_val * (ix - ix_nw) * gOut;
+      }
+    }
+
+    // assuming grad_grid is contiguous
+    // thus we can
+    //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
+    //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
+    device scalar_t* gGrid_ptr_NHW = grad_grid + index * gGrid_sW;
+    gGrid_ptr_NHW[0] = gix_mult * gix;
+    gGrid_ptr_NHW[1] = giy_mult * giy;
+  } else if (interpolation_mode == GridSamplerInterpolation::Nearest) {
+    if (input_requires_grad) {
+      index_t ix_nearest = (index_t)rint(ix);
+      index_t iy_nearest = (index_t)rint(iy);
+
+      // assign nearest neighbour pixel value to output pixel
+      device const scalar_t* gOut_ptr_NCHW =
+          grad_output + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+      index_t NC_offset = n * gInp_sN;
+      for (index_t c = 0; c < C;
+           ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
+        // calculate and set grad_input. See Note [Passing pointer and offset to
+        // fastAtomicAdd].
+        safe_add_2d(
+            grad_input,
+            iy_nearest,
+            ix_nearest,
+            gInp_sH,
+            gInp_sW,
+            inp_H,
+            inp_W,
+            *gOut_ptr_NCHW,
+            NC_offset,
+            grad_input_memory_span);
+      }
+    }
+
+    // assuming grad_grid is contiguous
+    // thus we can
+    //   1. use index with gGrid_sW to directly compute gGrid_ptr_NHW
+    //   2. directly assign to gGrid_ptr_NHW[0], gGrid_ptr_NHW[1]
+    device scalar_t* gGrid_ptr_NHW = grad_grid + index * gGrid_sW;
+    gGrid_ptr_NHW[0] = static_cast<scalar_t>(0);
+    gGrid_ptr_NHW[1] = static_cast<scalar_t>(0);
+  }
+  // Note: Bicubic interpolation is not supported on MPS
+  // The C++ code will reject it before reaching this kernel
 }
 
-#define REGISTER_GRID_SAMPLER_OP(DTYPE)                     \
-  template [[host_name("grid_sampler_2d_backward_" #DTYPE)]]            \
-  kernel void grid_sampler_2d_backward<DTYPE>( \
-      device DTYPE* grad_input [[buffer(0)]],\
-      device DTYPE* grad_grid [[buffer(1)]],\
-      const device DTYPE* grad_output [[buffer(2)]],\
-      const device DTYPE* input [[buffer(3)]],\
-      const device DTYPE* grid [[buffer(4)]],\
-      const device GridSamplerBackwardParams<5>& params [[buffer(5)]],\
+#define REGISTER_GRID_SAMPLER_OP(DTYPE)                                \
+  template [[host_name("grid_sampler_2d_backward_" #DTYPE)]]           \
+  kernel void grid_sampler_2d_backward<DTYPE>(                         \
+      device DTYPE * grad_input [[buffer(0)]],                         \
+      device DTYPE * grad_grid [[buffer(1)]],                          \
+      const device DTYPE* grad_output [[buffer(2)]],                   \
+      const device DTYPE* input [[buffer(3)]],                         \
+      const device DTYPE* grid [[buffer(4)]],                          \
+      const device GridSamplerBackwardParams<5>& params [[buffer(5)]], \
       uint tid [[thread_position_in_grid]]);
 
 REGISTER_GRID_SAMPLER_OP(float);
