@@ -8,7 +8,9 @@ maintaining type safety through the compilation process.
 
 import enum
 import operator
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from collections.abc import Sequence
+from typing import Any, Literal, Optional, overload, TYPE_CHECKING, Union
+from typing_extensions import override
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
@@ -28,6 +30,8 @@ from .base import ValueMutationNew, VariableTracker
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
+    from .functions import UserFunctionVariable
+
 
 class ConstantVariable(VariableTracker):
     """
@@ -37,6 +41,14 @@ class ConstantVariable(VariableTracker):
     The create() method intelligently constructs appropriate variable types for
     nested collections.
     """
+
+    @overload
+    @staticmethod
+    def create(value: bool) -> "ConstantVariable": ...
+
+    @overload
+    @staticmethod
+    def create(value: Any, **kwargs: Any) -> VariableTracker: ...
 
     @staticmethod
     def create(value: Any, **kwargs: Any) -> VariableTracker:
@@ -53,10 +65,10 @@ class ConstantVariable(VariableTracker):
         # Routing for supported collection literals.
         if isinstance(value, set):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.SetVariable(items, **kwargs)
+            return variables.SetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, frozenset):
             items = [ConstantVariable.create(x) for x in value]
-            return variables.FrozensetVariable(items, **kwargs)
+            return variables.FrozensetVariable(items, **kwargs)  # type: ignore[arg-type]
         elif isinstance(value, slice):
             slice_args = (value.start, value.stop, value.step)
             slice_args_vars = tuple(ConstantVariable.create(arg) for arg in slice_args)
@@ -266,9 +278,65 @@ its type to `common_constant_types`.
                 )
         return super().call_method(tx, name, args, kwargs)
 
+    def call_tree_map(
+        self,
+        tx: "InstructionTranslator",
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: VariableTracker,
+        rest: Sequence[VariableTracker],
+        tree_map_kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if self.value is None:
+            none_is_leaf_var = tree_map_kwargs.get("none_is_leaf")
+            if none_is_leaf_var is not None:
+                try:
+                    none_is_leaf = bool(none_is_leaf_var.as_python_constant())
+                except NotImplementedError:
+                    return self._tree_map_fallback(
+                        tx,
+                        tree_map_fn,
+                        map_fn,
+                        rest,
+                        tree_map_kwargs,
+                    )
+            else:
+                tree_map_module = getattr(
+                    getattr(tree_map_fn, "fn", None), "__module__", ""
+                )
+                # torch.utils._pytree and torch.utils._cxx_pytree treat None as a leaf
+                # by default, while optree keeps it as an internal node unless
+                # none_is_leaf=True is provided.
+                none_is_leaf = not tree_map_module.startswith("optree")
+            if none_is_leaf:
+                return map_fn.call_function(tx, [self, *rest], {})
+            else:
+                for other in rest:
+                    if not (
+                        other.is_python_constant()
+                        and other.as_python_constant() is None
+                    ):
+                        return self._tree_map_fallback(
+                            tx,
+                            tree_map_fn,
+                            map_fn,
+                            rest,
+                            tree_map_kwargs,
+                        )
+                return self.clone()
+        if isinstance(self.value, (int, float, bool, complex, str, bytes, torch.dtype)):
+            return map_fn.call_function(tx, [self, *rest], {})
+        return super().call_tree_map(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+        )
+
+    @override
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> VariableTracker:
+    ) -> "ConstantVariable":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
