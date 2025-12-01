@@ -1945,8 +1945,7 @@ class GuardBuilder(GuardBuilderBase):
             guard._unserializable = True
 
         obj_id = self.id_ref(t, f"type({guard.name})")
-        type_repr = repr(t)
-        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})  # {type_repr}"
+        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_type_match_guard(
