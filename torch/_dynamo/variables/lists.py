@@ -365,7 +365,9 @@ class RangeVariable(BaseListVariable):
 
         def maybe_as_int(x: VariableTracker) -> VariableTracker:
             return (
-                ConstantVariable(int(x.value)) if isinstance(x, ConstantVariable) else x
+                ConstantVariable.create(int(x.as_python_constant()))
+                if x.is_python_constant()
+                else x
             )
 
         # cast each argument to an integer
@@ -731,25 +733,24 @@ class CommonListMethodsVariable(BaseListVariable):
             tx.output.side_effects.mutation(self)
             self.items.clear()
             return ConstantVariable.create(None)
-        elif (
-            name == "__setitem__"
-            and self.is_mutable()
-            and args
-            and (
-                args[0].is_python_constant()
-                or isinstance(args[0], SymNodeVariable)
+        elif name == "__setitem__" and self.is_mutable() and args:
+            # Realize args[0] to get the concrete type for proper type checking
+            key = args[0].realize()
+            if not (
+                key.is_python_constant()
+                or isinstance(key, SymNodeVariable)
                 or (
-                    isinstance(args[0], SliceVariable)
+                    isinstance(key, SliceVariable)
                     and all(
                         s.is_python_constant() or isinstance(s, SymNodeVariable)
-                        for s in args[0].items
+                        for s in key.items
                     )
                 )
-            )
-        ):
+            ):
+                return super().call_method(tx, name, args, kwargs)
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
-            key, value = args
+            value = args[1]
             tx.output.side_effects.mutation(self)
             if isinstance(key, SymNodeVariable):
                 self.items[key.evaluate_expr()] = value
@@ -922,10 +923,7 @@ class ListVariable(CommonListMethodsVariable):
             if len(kwargs) != 0:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
 
-            if (
-                key_fn_var.is_python_constant()
-                and key_fn_var.as_python_constant() is None
-            ):
+            if key_fn_var.is_constant_none():
                 keys = self.items.copy()
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
@@ -1294,8 +1292,8 @@ class SizeVariable(TupleVariable):
         sym_sizes = []
 
         for v in self.items:
-            if isinstance(v, ConstantVariable):
-                const_result *= v.value
+            if v.is_python_constant():
+                const_result *= v.as_python_constant()
             else:
                 assert isinstance(v, SymNodeVariable), type(v)
                 # Delay proxy calls  until we know it will be necessary
