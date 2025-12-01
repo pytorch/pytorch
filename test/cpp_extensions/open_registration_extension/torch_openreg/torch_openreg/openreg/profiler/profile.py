@@ -2,12 +2,13 @@ import torch
 from torch.autograd.profiler import (
     _disable_profiler,
     _enable_profiler,
+    _ExperimentalConfig,
     _run_on_profiler_start,
     _run_on_profiler_stop,
     ProfilerConfig,
     ProfilerState,
-    _ExperimentalConfig,
 )
+
 
 class emit_openreg:
     """Context manager that makes every autograd operation emit a PRIVATEUSE1 ("OpenReg") range.
