@@ -44,6 +44,6 @@ jobs:
         run: |
           wget -O pmd.zip https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.19.0/pmd-dist-7.19.0-bin.zip
           unzip pmd.zip
-          PMD_DIR=$(find . -maxdepth 1 -type d -name "pmd-dist*")
-          $PMD_DIR/bin/run.sh pmd -d ./src -R rulesets/java/quickstart.xml -f text
+          ./pmd-bin-7.19.0/bin/run.sh pmd -d ./src -R rulesets/java/quickstart.xml -f text
+
 
