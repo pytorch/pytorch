@@ -6,14 +6,11 @@ on:
       - main
 
 jobs:
-  checkout:
-    uses: ./.github/workflows/checkout.yml
-
-  sonar:
+  sonarqube:
     name: SonarQube
     runs-on: ubuntu-latest
-    needs: checkout
     steps:
+      - uses: actions/checkout@v4
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v6
         env:
