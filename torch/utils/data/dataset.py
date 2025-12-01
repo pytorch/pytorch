@@ -415,14 +415,9 @@ class Subset(Dataset[_T_co]):
         self.dataset = dataset
         self.indices = indices
 
-    def __getitem__(self, idx):
-        if isinstance(idx, list):
-            return self.dataset[[self.indices[i] for i in idx]]
-        return self.dataset[self.indices[idx]]
-
-    def __getitems__(self, indices: list[int]) -> list[_T_co]:
-        # if __getitem__ is overridden but __getitems__ is not, raise an error
-        if type(self).__getitem__ is not Subset.__getitem__:
+        # Check if __getitem__ is overridden but __getitems__ is not
+        if (type(self).__getitem__ is not Subset.__getitem__ and
+            type(self).__getitems__ is Subset.__getitems__):
             raise NotImplementedError(
                 f"{type(self).__name__} overrides __getitem__ but not __getitems__. "
                 "When subclassing Subset and overriding __getitem__, you must also override "
@@ -432,6 +427,12 @@ class Subset(Dataset[_T_co]):
                 "    return [self.__getitem__(idx) for idx in indices]"
             )
 
+    def __getitem__(self, idx):
+        if isinstance(idx, list):
+            return self.dataset[[self.indices[i] for i in idx]]
+        return self.dataset[self.indices[idx]]
+
+    def __getitems__(self, indices: list[int]) -> list[_T_co]:
         # add batched sampling support when parent dataset supports it.
         # see torch.utils.data._utils.fetch._MapDatasetFetcher
         if callable(getattr(self.dataset, "__getitems__", None)):

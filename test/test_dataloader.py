@@ -2557,7 +2557,7 @@ except RuntimeError as e:
     def test_subset_override_getitem_requires_getitems(self):
         """
         Test that subclassing Subset and overriding only __getitem__ without
-        __getitems__ raises a NotImplementedError with a helpful message.
+        __getitems__ raises a NotImplementedError at instantiation time.
         """
 
         class SimpleDataset(Dataset):
@@ -2576,12 +2576,9 @@ except RuntimeError as e:
                 return self.dataset[original_idx] * 2
 
         dataset = SimpleDataset()
-        subset = IncompleteSubset(dataset, [0, 1, 2, 3])
-        self.assertEqual(subset[0].item(), 0)
 
         with self.assertRaises(NotImplementedError) as cm:
-            loader = self._get_data_loader(subset, batch_size=2, shuffle=False)
-            list(loader)
+            subset = IncompleteSubset(dataset, [0, 1, 2, 3])
 
         error_message = str(cm.exception)
         self.assertIn("IncompleteSubset", error_message)
