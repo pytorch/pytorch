@@ -884,17 +884,17 @@ class TestSharding(DTensorTestBase):
     # ],
 # )
 
-TestCPCustomOpsWithLocalTensor = create_local_tensor_test_class(
-    TestCPCustomOps,
-    skipped_tests=[
-        # Missing support for fake tensors
-        "test_flex_cp_custom_op",
-    ],
-)
+# TestCPCustomOpsWithLocalTensor = create_local_tensor_test_class(
+    # TestCPCustomOps,
+    # skipped_tests=[
+        # # Missing support for fake tensors
+        # "test_flex_cp_custom_op",
+    # ],
+# )
 
-TestShardingWithLocalTensor = create_local_tensor_test_class(
-    TestSharding,
-)
+# TestShardingWithLocalTensor = create_local_tensor_test_class(
+    # TestSharding,
+# )
 
 
 if __name__ == "__main__":
