@@ -1,7 +1,4 @@
-#include <ATen/ThreadLocalState.h>
-#include <c10/util/ThreadLocalDebugInfo.h>
 #include <torch/csrc/autograd/functions/utils.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/functions/recvrpc_backward.h>
 #include <torch/csrc/distributed/autograd/functions/sendrpc_backward.h>
