@@ -182,7 +182,6 @@ class ManualOverlapScheduler(OverlapScheduler):
         self.bucketer = ManualOverlapPreservingBucketer(
             graph=self.graph,
             collective_info=self.collective_info,
-            node_ancestors=self.node_ancestors,
             node_users=self.node_users,
             scheduled=OrderedSet(self.graph.nodes),
         )
