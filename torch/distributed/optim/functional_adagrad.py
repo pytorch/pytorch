@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.optim._functional as F
@@ -70,7 +69,7 @@ class _FunctionalAdagrad:
                 "step": torch.tensor(0.0),
             }
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Tensor | None]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []
