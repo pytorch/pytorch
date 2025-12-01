@@ -701,7 +701,7 @@ def check_no_missing_dump_files(
     all_ranks = set()
     for membership in memberships:
         all_ranks.add(int(membership.global_rank))
-    dumps_ranks = {int(key) for key in entries.keys()}
+    dumps_ranks = {int(key) for key in entries}
     missing = all_ranks - dumps_ranks
     assert len(missing) == 0, f"Missing dump files from ranks {missing}"
 
