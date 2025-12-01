@@ -811,6 +811,36 @@ inline T _to(StableIValue val, uint64_t extension_build_version) {
       val, extension_build_version, /*is_internal=*/true);
 }
 
+// Helper callable objects for backward compatibility with the global from/to
+// functions. These are in the detail namespace but will be instantiated in
+// the global namespace for BC.
+// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
+// note]
+struct FromCallable {
+  template <typename T>
+  StableIValue operator()(T val) const {
+    return from(val);
+  }
+
+  template <typename T>
+  StableIValue operator()(const std::optional<T>& val) const {
+    return from(val);
+  }
+
+  StableIValue operator()(const torch::stable::Tensor& val) const {
+    return from(val);
+  }
+};
+
+// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
+// note]
+struct ToCallable {
+  template <typename T>
+  T operator()(StableIValue val) const {
+    return to<T>(val);
+  }
+};
+
 HIDDEN_NAMESPACE_END(torch, stable, detail)
 
 // [global from/to deprecation note]
@@ -819,14 +849,8 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 // namespace. We are only including the following wrappers for backwards
 // compatibility.
 
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-template <typename T>
 C10_DEPRECATED_MESSAGE("Use torch::stable::detail::from instead.")
-auto from = &torch::stable::detail::from<T>;
+inline constexpr torch::stable::detail::FromCallable from{};
 
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-template <typename T>
 C10_DEPRECATED_MESSAGE("Use torch::stable::detail::to instead.")
-auto to = &torch::stable::detail::to<T>;
+inline constexpr torch::stable::detail::ToCallable to{};
