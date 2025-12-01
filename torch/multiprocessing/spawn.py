@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import contextlib
 import logging
 import multiprocessing
 import multiprocessing.connection
@@ -182,34 +183,36 @@ class ProcessContext:
 
         # The file will only be created if the process crashed.
         failed_process = self.processes[error_index]
-        if not os.access(self.__error_files[error_index], os.R_OK):
-            exitcode = self.processes[error_index].exitcode
-            if exitcode < 0:
-                try:
-                    name = signal.Signals(-exitcode).name
-                except ValueError:
-                    name = f"<Unknown signal {-exitcode}>"
-                raise ProcessExitedException(
-                    f"process {error_index:d} terminated with signal {name}",
-                    error_index=error_index,
-                    error_pid=failed_process.pid,
-                    exit_code=exitcode,
-                    signal_name=name,
-                )
-            else:
-                raise ProcessExitedException(
-                    f"process {error_index:d} terminated with exit code {exitcode:d}",
-                    error_index=error_index,
-                    error_pid=failed_process.pid,
-                    exit_code=exitcode,
-                )
-
-        with open(self.__error_files[error_index], "rb") as fh:
-            original_trace = pickle.load(fh)
-            os.remove(self.__error_files[error_index])
-        msg = f"\n\n-- Process {error_index:d} terminated with the following error:\n"
-        msg += original_trace
-        raise ProcessRaisedException(msg, error_index, failed_process.pid)
+        with contextlib.suppress(FileNotFoundError, IOError):
+            msg = (
+                f"\n\n-- Process {error_index:d} terminated with the following error:\n"
+            )
+            with open(self.__error_files[error_index], "rb") as fh:
+                original_trace = pickle.load(fh)
+                msg += original_trace
+            with contextlib.suppress(BaseException):
+                os.remove(self.__error_files[error_index])
+            raise ProcessRaisedException(msg, error_index, failed_process.pid)
+        exitcode = self.processes[error_index].exitcode
+        if exitcode < 0:
+            try:
+                name = signal.Signals(-exitcode).name
+            except ValueError:
+                name = f"<Unknown signal {-exitcode}>"
+            raise ProcessExitedException(
+                f"process {error_index:d} terminated with signal {name}",
+                error_index=error_index,
+                error_pid=failed_process.pid,
+                exit_code=exitcode,
+                signal_name=name,
+            )
+        else:
+            raise ProcessExitedException(
+                f"process {error_index:d} terminated with exit code {exitcode:d}",
+                error_index=error_index,
+                error_pid=failed_process.pid,
+                exit_code=exitcode,
+            )
 
 
 class SpawnContext(ProcessContext):
