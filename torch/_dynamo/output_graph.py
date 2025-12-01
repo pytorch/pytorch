@@ -926,7 +926,10 @@ class OutputGraph(OutputGraphCommon):
 
     @contextlib.contextmanager
     def subtracer(
-        self, source_target: Optional[Target], prior_tracer: "SubgraphTracer"
+        self,
+        source_target: Optional[Target],
+        prior_tracer: "SubgraphTracer",
+        description: Optional[str] = None,
     ) -> Generator[fx.Tracer, None, None]:
         new_scope_ctx = enter_new_scope()
         try:
@@ -942,6 +945,7 @@ class OutputGraph(OutputGraphCommon):
                     parent=self.current_tracer,
                     source_target=source_target,
                     is_export=self.current_tracer.is_export,
+                    description=description,
                 )
             )
             self.tracers.append(tracer)
@@ -2923,6 +2927,7 @@ class SubgraphTracer(fx.Tracer):
         parent: Optional["SubgraphTracer"] = None,
         is_export: bool = False,
         source_target: Optional[Target] = None,
+        description: Optional[str] = None,
     ) -> None:
         super().__init__()
         self.output_graph = weakref.proxy(output_graph)
@@ -2940,6 +2945,7 @@ class SubgraphTracer(fx.Tracer):
         # SubgraphTracers can be nested. See NOTE [HigherOrderOperator tracing design]
         self.parent = parent
         self.source_target = source_target
+        self.description = description
         # A dict mapping previously free variables (Proxy objects)
         # to new Proxy objects that wrap inputs to this subgraph.
         #
@@ -2968,8 +2974,13 @@ class SubgraphTracer(fx.Tracer):
 
         self.prev_inst = None
         # True if this tracer is currently tracing into torch.utils.checkpoint
-        # as part of speculate_subgraph.
-        self.under_activation_checkpoint = False
+        # as part of speculate_subgraph. This is automatically set based on the
+        # description parameter to identify checkpoint contexts.
+        self.under_activation_checkpoint = (
+            description == "torch.utils.checkpoint.checkpoint"
+            if description is not None
+            else False
+        )
         # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
         # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
