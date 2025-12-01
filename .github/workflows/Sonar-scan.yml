@@ -15,9 +15,7 @@ jobs:
         uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          args: >
-            -Dsonar.exclusions=**/*.java,**/*.c,**/*.cpp,**/*.h,**/*.hpp,**/*.m,**/*.mm
+        
 
   cpp-check:
       runs-on: ubuntu-latest
