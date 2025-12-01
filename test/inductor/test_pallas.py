@@ -3,6 +3,7 @@ import functools
 import re
 import sys
 import unittest
+from unittest import mock
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -12,6 +13,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_PALLAS
+from torch.utils._pallas import has_cuda_pallas, has_jax_tpu_backend
 from torch.utils._triton import has_triton
 
 
@@ -746,7 +748,7 @@ class PallasTestsMixin:
         self.assertEqual(result, expected)
 
 
-@unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
+@unittest.skipUnless(has_cuda_pallas(), "requires jax and pallas")
 class PallasTestsCUDA(PallasTestsMixin, TestCase):
     DEVICE = "cuda"
 
@@ -754,6 +756,28 @@ class PallasTestsCUDA(PallasTestsMixin, TestCase):
 @unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
 class PallasTestsCPU(PallasTestsMixin, TestCase):
     DEVICE = "cpu"
+
+
+@unittest.skipUnless(has_jax_tpu_backend(), "requires JAX TPU backend")
+@config.patch({"_debug_cpu_to_tpu_pallas": True})
+class PallasTestsTPU(PallasTestsMixin, TestCase):
+    DEVICE = "cpu"
+
+    @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
+    def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
+        def fn(a, b):
+            return a + b
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            (
+                "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                "Please make sure that you have a TPU available and that JAX is configured correctly."
+            ),
+        ):
+            torch.compile(fn, backend="inductor", options={"cpu_backend": "pallas"})(
+                torch.randn(16), torch.randn(16)
+            )
 
 
 if test_torchinductor.HAS_CPU and HAS_PALLAS:
