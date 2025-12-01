@@ -18,7 +18,7 @@ inline bool is_flash_attention_available(sdp_params const& params, bool debug) {
   return true;
 }
 
-inline bool check_flash_attention_hardware_support(
+bool check_flash_attention_hardware_support(
     sdp_params const& params,
     bool debug) {
   if (!at::xpu::is_available()) {
@@ -29,8 +29,7 @@ inline bool check_flash_attention_hardware_support(
       c10::array_of<sycl::ext::oneapi::experimental::architecture>(
           sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc,
           sycl::ext::oneapi::experimental::architecture::intel_gpu_pvc_vg,
-          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21,
-          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g31);
+          sycl::ext::oneapi::experimental::architecture::intel_gpu_bmg_g21);
   auto* device_prop = at::xpu::getCurrentDeviceProperties();
   auto device_architecture = device_prop->architecture;
 
@@ -40,7 +39,7 @@ inline bool check_flash_attention_hardware_support(
           device_architecture) == supported_architectures.end()) {
     if (debug) {
       TORCH_WARN(
-          "XPU device architecture does not support flash attention. Supported architectures are: intel_gpu_pvc, intel_gpu_pvc_vg, intel_gpu_bmg_g21, intel_gpu_bmg_g31.");
+          "XPU device architecture does not support flash attention. Supported architectures are: intel_gpu_pvc, intel_gpu_pvc_vg, intel_gpu_bmg_g21.");
     }
     return false;
   }
