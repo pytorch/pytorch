@@ -1254,7 +1254,6 @@ def trace_hop_function(
     args,
     sub_kwargs,
 ):
-    enable_side_effects_with_extra_outputs = not restore_side_effects
     autograd_ctx = (
         dynamo_enable_grad(tx, enable_grad)
         if enable_grad is not None
@@ -1262,7 +1261,7 @@ def trace_hop_function(
     )
     side_effects_ctx = (
         dynamo_allow_side_effects_in_hop(tx)
-        if enable_side_effects_with_extra_outputs
+        if not restore_side_effects
         else contextlib.nullcontext()
     )
 
@@ -1430,10 +1429,6 @@ def speculate_subgraph_with_auto_output_flattening(
     if sub_kwargs is None:
         sub_kwargs = {}
 
-    # Compute enable_side_effects_with_extra_outputs from restore_side_effects.
-    # When restore_side_effects is False, we allow side effects by returning extra outputs.
-    enable_side_effects_with_extra_outputs = not restore_side_effects
-
     assert set_subgraph_inputs in {
         "automatic",
         "semi_automatic",
@@ -1547,8 +1542,7 @@ def speculate_subgraph_with_auto_output_flattening(
             # want this to be supported for other Hops as well, specifically
             # nested_compile_region and autograd.Function. Today, its safe
             # because we error out on seeing a side-effect.
-            enable_side_effects_with_extra_outputs = not restore_side_effects
-            if enable_side_effects_with_extra_outputs:
+            if not restore_side_effects:
                 extra_outputs = _collect_intermediate_outputs(
                     tx, subtracer, graph_output_vts, filter_aliased_intermediates
                 )
