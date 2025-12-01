@@ -1085,7 +1085,7 @@ const FunctionSchema* Node::maybeSchema() const {
 
 const Operator* Node::maybeOperator() const {
   if (!op_) {
-    auto candidates = getAllOperatorsFor(kind());
+    const auto& candidates = getAllOperatorsFor(kind());
     for (const auto& candidate : candidates) {
       if (matches(candidate->schema())) {
         op_ = candidate.get();
