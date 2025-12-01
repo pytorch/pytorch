@@ -61,6 +61,7 @@ from .codegen.common import (
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
+    gen_common_triton_imports,
     texpr,
     TMACompatibilityChecker,
     TritonKernel,
@@ -389,6 +390,7 @@ class TritonTemplateKernel(TritonKernel):
         num_buffers_warp_spec=0,
         use_jit=False,
         tma_store=False,
+        transpose_discontiguous_tensor_descriptors_override=None,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -419,6 +421,29 @@ class TritonTemplateKernel(TritonKernel):
             features=SIMDKernelFeatures([], numel),
             hint_override=hint_override,
         )
+        if tma_store:
+            # By default `construct_range_trees` will return the range_trees in the order
+            # ["z", "y", "x", "r0_", "r1_"] (see simd.py:all_prefixes)
+            # and this order defines what the kernel block shape will be. So if the template
+            # input / output has requested e.g. ["x", "y"], `construct_range_trees` will still return the
+            # trees in the order ["y", "x"]. This would mean that the template would need to transpose
+            # the loaded value.
+            # The below sorts the range trees according to that required by the caller
+            prefix_to_range_tree = {rt.prefix: rt for rt in self.range_trees}
+            pw_sorted_range_trees = []
+            reduction_idx = None
+            for i, prefix in enumerate(tiling):
+                rt = prefix_to_range_tree[prefix]
+                # pyrefly: ignore  # missing-argument
+                if rt.is_reduction:
+                    reduction_idx = i
+                    break
+                rt.index = i
+                rt.grid_dim = i
+                rt.tensor_dim = i
+                pw_sorted_range_trees.append(rt)
+            self.range_trees = pw_sorted_range_trees + self.range_trees[reduction_idx:]
+
         self.input_nodes = input_nodes
         self.output_node = output_node
         self.named_input_nodes = {}  # type: ignore[var-annotated]
@@ -426,6 +451,9 @@ class TritonTemplateKernel(TritonKernel):
         self.kernel_name = kernel_name
         self.use_jit = use_jit
         self.tma_store = tma_store
+        self.transpose_discontiguous_tensor_descriptors_override = (
+            transpose_discontiguous_tensor_descriptors_override
+        )
         self.num_stages = num_stages
         self.num_warps = num_warps
         self.num_consumer_groups = num_consumer_groups
@@ -741,7 +769,7 @@ class TritonTemplateKernel(TritonKernel):
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
             code = IndentedBuffer()
-            code.splice(self.gen_common_triton_imports())
+            code.splice(gen_common_triton_imports())
             code.splice(self.jit_lines())
             code.writeline(
                 f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
@@ -1168,13 +1196,8 @@ class TritonTemplateKernel(TritonKernel):
                 intermediate_lines: list[str] = []
                 epilogue_index_symbols: list[sympy.Symbol] = []
                 if self.tma_store:
-                    # Generate the expected indexing symbols.
-                    # Note: TMA indices are expected to be in the
-                    # format (x, y), but the range_tree is always
-                    # (yindex, xindex).
-                    index_order = [1, 0]
                     val_shape_copy = list(val_shape)
-                    for i, range_tree in zip(index_order, self.range_trees[:-1]):
+                    for i, range_tree in enumerate(self.range_trees[:-1]):
                         name = range_tree.name
                         symbol = range_tree.symbol()
                         epilogue_index_symbols.append(symbol)
@@ -1195,7 +1218,7 @@ class TritonTemplateKernel(TritonKernel):
                                 index_symbols[i],
                                 val_shape[i],
                                 i,
-                                len(index_order),
+                                len(val_shape),
                                 # pyrefly: ignore [missing-argument]
                                 block_name=range_tree.symt.name,
                             )
@@ -1212,10 +1235,6 @@ class TritonTemplateKernel(TritonKernel):
                         # after the remapping.
                         # pyrefly: ignore [missing-argument]
                         val_shape_copy[i] = range_tree.symt.name
-                    # Reverse the index symbols because TMA is indexed
-                    # as (x, y) whereas the variables will naturally be indexed
-                    # as (y, x)
-                    epilogue_index_symbols.reverse()
                     val_shape = tuple(val_shape_copy)
                 else:
                     mask_vars: list[str] = []
@@ -1563,6 +1582,7 @@ class GeneratedCodeCache:
         epilogue_fn: Optional[Callable[..., Any]],
         epilogue_fn_hash: Optional[str],
         tma_store: bool,
+        transpose_discontiguous_tensor_descriptors_override: Optional[bool],
         subgraphs: Optional[list[ir.Buffer]],  # has to be none to cache
         workspace_arg: Optional[WorkspaceArg],  # has to be none to cache
         layout: ir.Layout,
@@ -1620,6 +1640,7 @@ class GeneratedCodeCache:
                 "num_buffers_warp_spec": num_buffers_warp_spec,
                 "epilogue_fn_hash": epilogue_fn_hash,
                 "tma_store": tma_store,
+                "transpose_discontiguous_tensor_descriptors_override": transpose_discontiguous_tensor_descriptors_override,
                 "kwargs": kwargs,
                 "hint_override": hint_override,
             }
@@ -1735,6 +1756,7 @@ class TritonTemplate(KernelTemplate):
         generate_with_caching,
         hint_override: Optional[int] = None,
         tma_store: bool = False,
+        transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None,
     ) -> Optional[GenerateAndLoadResult]:
         """Generate the python code and load it into the current process"""
         caching_enabled = (
@@ -1754,6 +1776,7 @@ class TritonTemplate(KernelTemplate):
                 epilogue_fn,
                 epilogue_fn_hash,
                 tma_store,
+                transpose_discontiguous_tensor_descriptors_override,
                 subgraphs,
                 workspace_arg,
                 layout,
@@ -1814,6 +1837,7 @@ class TritonTemplate(KernelTemplate):
                 use_jit=False,
                 hint_override=hint_override,
                 tma_store=tma_store,
+                transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
                 **kernel_options,
             )
 
@@ -1935,6 +1959,7 @@ class TritonTemplate(KernelTemplate):
         generate_with_caching=False,
         hint_override: Optional[int] = None,
         tma_store: bool = False,
+        transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -1981,6 +2006,7 @@ class TritonTemplate(KernelTemplate):
             generate_with_caching and self._cache_codegen_enabled_for_template,
             hint_override=hint_override,
             tma_store=tma_store,
+            transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
         )
 
         # May happen as result of dev by 0.
@@ -2044,6 +2070,7 @@ class TritonTemplate(KernelTemplate):
                 use_jit=False,
                 hint_override=hint_override,
                 tma_store=tma_store,
+                transpose_discontiguous_tensor_descriptors_override=transpose_discontiguous_tensor_descriptors_override,
                 **options,
             )
             render = functools.partial(
@@ -2707,7 +2734,7 @@ class AlgorithmSelectorCache(PersistentCache):
         best_config_future=None,
         return_choice=False,  # TODO: return_choice is temporary and will be refactored soon
     ):
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         # Run preprocessing functions on choices
         for preprocessing_fn in self.preprocessing_fns:
@@ -3223,7 +3250,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         "select_algorithm_num_precompilation_exceptions"
                     ] += 1
                     exceptions.append((futures[future], e))
-                    from torch._inductor.codegen.cutlass.cuda_kernel import (
+                    from torch._inductor.codegen.cuda.cuda_kernel import (
                         CUDATemplateCaller,
                     )
 
@@ -3410,9 +3437,7 @@ class AlgorithmSelectorCache(PersistentCache):
             try:
                 timing = cls.benchmark_choice(choice, autotune_args)
             except CUDACompileError:
-                from torch._inductor.codegen.cutlass.cuda_kernel import (
-                    CUDATemplateCaller,
-                )
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
                 if not isinstance(choice, CUDATemplateCaller):
                     log.exception(
@@ -3423,9 +3448,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 log.warning("Not yet implemented", exc_info=True)
                 timing = float("inf")
             except RuntimeError as e:
-                from torch._inductor.codegen.cutlass.cuda_kernel import (
-                    CUDATemplateCaller,
-                )
+                from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
 
                 msg = str(e)
                 if "invalid argument" in msg:
@@ -3570,12 +3593,12 @@ class AlgorithmSelectorCache(PersistentCache):
             return prescreen_winners
 
         # prescreen cutlass
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         candidates = []
         if (
-            config.cutlass.cutlass_prescreening
-            and len(config.cutlass.cutlass_max_profiling_swizzle_options) > 1
+            config.cuda.cutlass_prescreening
+            and len(config.cuda.cutlass_max_profiling_swizzle_options) > 1
         ):
             candidates.extend(
                 [
@@ -3604,7 +3627,7 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         Prune the choices after prescreening.
         """
-        from .codegen.cutlass.cuda_kernel import CUDATemplateCaller
+        from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
         prescreen_key = f"{name}:{inputs_key}"
 
