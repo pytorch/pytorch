@@ -17,9 +17,10 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
           args: >
-            -Dsonar.projectKey=yourProjectKey
-            -Dsonar.organization=yourOrg
+            -Dsonar.projectKey=sait1219_pytorch
+            -Dsonar.organization=sait1219
             -Dsonar.sources=.
+            -Dsonar.exclusions=**/*.java
             -Dsonar.c.file.suffixes=-
             -Dsonar.cpp.file.suffixes=-
             -Dsonar.objc.file.suffixes=-
