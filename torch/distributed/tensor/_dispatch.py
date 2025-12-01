@@ -43,12 +43,14 @@ except ImportError:
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
+
 def stack_handler(
     op_call: torch._ops.OpOverload,
     args: tuple[object, ...],
     kwargs: dict[str, object],
 ):
     import torch._prims_common as utils
+
     tensors = args[0]
     dim = 0 if len(args) == 1 else args[1]
     wrapped_dim = utils.canonicalize_dim(tensors[0].ndim + 1, dim)
@@ -61,6 +63,7 @@ def stack_handler(
 
     # If dim == tensors[0].ndim, view cannot efficiently handle it
     return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
+
 
 def as_strided_handler(
     op_call: torch._ops.OpOverload,
