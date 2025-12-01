@@ -11,7 +11,6 @@
 #include <vector>
 
 #include <ATen/Dispatch.h>
-#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/NumericUtils.h>
 #include <ATen/TensorIterator.h>
@@ -107,7 +106,7 @@ void min_kernel_impl(
     bool keepdim) {
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
-  AT_DISPATCH_V2(self.scalar_type(), "min_cpu", AT_WRAP([&] {
+  AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "min_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -129,7 +128,7 @@ void min_kernel_impl(
         *indice_data = index;
       }
     );
-  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool);
+  });
 }
 
 void max_kernel_impl(
@@ -140,7 +139,7 @@ void max_kernel_impl(
     bool keepdim) {
   int64_t self_dim_size = ensure_nonempty_size(self, dim);
 
-  AT_DISPATCH_V2(self.scalar_type(), "max_cpu", AT_WRAP([&] {
+  AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool, self.scalar_type(), "max_cpu", [&] {
     compare_base_kernel<scalar_t>(result, indice, self, dim, keepdim, [&] (
       scalar_t* result_data, int64_t* indice_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -162,7 +161,7 @@ void max_kernel_impl(
         *indice_data = index;
       }
     );
-  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), ScalarType::Half, ScalarType::BFloat16, ScalarType::Bool);
+  });
 }
 
 void aminmax_kernel(
@@ -187,7 +186,7 @@ void aminmax_kernel(
     return;
   }
 
-  AT_DISPATCH_V2(self.scalar_type(), "aminmax_cpu", AT_WRAP([&] {
+  AT_DISPATCH_ALL_TYPES_AND3(ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half, self.scalar_type(), "aminmax_cpu", [&] {
     compare_base_kernel<scalar_t, scalar_t>(min_result, max_result, self, wrap_dim, keepdim, [&] (
       scalar_t* min_result_data, scalar_t* max_result_data,
       const scalar_t* self_data, auto self_dim_stride) {
@@ -210,7 +209,7 @@ void aminmax_kernel(
         *max_result_data = max_number;
       }
     );
-  }), AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), ScalarType::Bool, ScalarType::BFloat16, ScalarType::Half);
+  });
 }
 
 void where_kernel_impl(TensorIterator &iter) {

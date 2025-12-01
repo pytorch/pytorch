@@ -19,6 +19,7 @@ import operator
 import os
 import pickle
 import random
+import re
 import sys
 import tempfile
 import threading
@@ -242,6 +243,61 @@ class MiscTests(torch._inductor.test_case.TestCase):
         self.assertTrue(same(val3, correct3))
         self.assertTrue(same(val4, correct1))
         self.assertEqual(counter.frame_count, 3)
+
+    @unittest.skipIf(not TEST_CUDA, "cuda needed")
+    def test_assume_32_bit_indexing(self):
+        @torch.compile(backend="inductor")
+        def func(a, b):
+            # Multiple concat operations
+            x = torch.concat([a, b], dim=0)
+            y = torch.concat([a, b], dim=1)
+
+            # Reshape to create indexing patterns
+            x_flat = x.reshape(-1)
+            y_flat = y.reshape(-1)
+
+            # Take the smaller one and expand
+            min_size = min(x_flat.shape[0], y_flat.shape[0])
+            x_trunc = x_flat[:min_size]
+            y_trunc = y_flat[:min_size]
+
+            # Combine and compute
+            result = (x_trunc + y_trunc) * 10
+
+            # Cumulative operations create complex indexing
+            cumsum = result.cumsum(dim=0)
+
+            return cumsum.sum()
+
+        a = torch.rand(100, 30, device="cuda")
+        b = torch.rand(100, 30, device="cuda")
+
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        torch._dynamo.decorators.mark_unbacked(b, 0)
+        torch._dynamo.decorators.mark_unbacked(b, 1)
+
+        source_code = run_and_get_code(func, a, b)[1]
+
+        self.assertTrue(
+            "xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)\\n"
+            in str(source_code)
+        )
+        self.assertFalse(
+            "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
+        )
+
+        torch._dynamo.reset()
+
+        with torch._inductor.config.patch(assume_32bit_indexing=True):
+            source_code = run_and_get_code(func, a, b)[1]
+            self.assertFalse(
+                "xindex = xoffset + tl.arange(0, XBLOCK)[:].to(tl.int64)\\n"
+                in str(source_code)
+            )
+            self.assertTrue(
+                "xindex = xoffset + tl.arange(0, XBLOCK)[:]\\n" in str(source_code)
+            )
 
     def test_dynamo_inside_custom_op(self):
         cnt = torch._dynamo.testing.InductorAndRecordGraphs()
@@ -734,20 +790,22 @@ graph():
     def test_generate_trivial_abstract_impl(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
-                "mylib::foo",
+                "mylib::foo_generate_trivial_abstract_impl",
                 "(Tensor x, Tensor[] y, Tensor(a!)? z, SymInt w) -> ()",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
+            @torch.library.impl(
+                "mylib::foo_generate_trivial_abstract_impl", "cpu", lib=lib
+            )
             @torch._dynamo.disable
             def foo_impl(x, y, z, w):
                 x + y[0] + w
                 return
 
             def f(x, y, z, w):
-                return torch.ops.mylib.foo(x, y, z, 2)
+                return torch.ops.mylib.foo_generate_trivial_abstract_impl(x, y, z, 2)
 
             x = torch.randn(3)
             y = (torch.randn(3), torch.randn(3))
@@ -5635,6 +5693,115 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         self.assertTrue(same(res11, res12))
         self.assertTrue(same(res21, res22))
 
+    def test_replay_side_effects_config(self):
+        # Test that replay_side_effects config controls mutation replay
+        def fn(x, lst):
+            lst.append(x + 1)
+            return x * 2
+
+        x = torch.tensor([5.0])
+
+        # Test with replay enabled (default)
+        lst_with_replay = []
+        opt_fn_with_replay = torch.compile(fn, backend="eager")
+        result1 = opt_fn_with_replay(x, lst_with_replay)
+        self.assertEqual(len(lst_with_replay), 1)  # Mutation should be replayed
+        self.assertTrue(same(result1, x * 2))
+
+        torch._dynamo.reset()
+
+        # Test with replay disabled
+        lst_without_replay = []
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="warn"
+        ):
+            opt_fn_without_replay = torch.compile(fn, backend="eager")
+            result2 = opt_fn_without_replay(x, lst_without_replay)
+            self.assertEqual(
+                len(lst_without_replay), 0
+            )  # Mutation should NOT be replayed
+            self.assertTrue(same(result2, x * 2))
+
+        torch._dynamo.reset()
+        lst_without_replay = []
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="error"
+        ):
+            opt_fn_without_replay = torch.compile(fn, backend="eager")
+            with self.assertRaisesRegex(
+                RuntimeError,
+                re.escape(
+                    "While compiling, we found certain side effects happened in the model.forward. Here are the list of potential sources you can double check: [\"L['lst']\"]"
+                ),
+            ):
+                _ = opt_fn_without_replay(x, lst_without_replay)
+
+    def test_replay_side_effects_model_attr(self):
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+
+            def forward(self, x):
+                return x.cos()
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+                self.tensor = None
+                self.bar = Bar()
+
+            def forward(self, x):
+                self.const = 5
+                self.tensor = x.sin()
+                res = self.bar(x)
+                return x.cos() + res.sum() + self.tensor
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="error"
+        ):
+            foo = Foo()
+            with self.assertRaisesRegex(
+                RuntimeError,
+                re.escape(
+                    "While compiling, we found certain side effects happened in the model.forward. Here are the list of potential sources you can double check: [\"L['self']\"]"
+                ),
+            ):
+                torch.compile(foo, fullgraph=True)(torch.randn(4, 4))
+
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="silent"
+        ):
+            foo_v2_compile = Foo()
+            foo_v2_eager = Foo()
+            inp = torch.randn(4, 4)
+            res = torch.compile(foo_v2_compile, fullgraph=True)(torch.randn(4, 4))
+            self.assertEqual(foo_v2_compile.tensor, None)
+            self.assertEqual(foo_v2_compile.const, 4)
+            self.assertEqual(foo_v2_compile.bar.const, 4)
+            same(res, foo_v2_eager(inp))
+
+    def test_replay_side_effects_input_mut(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.const = 4
+                self.tensor = None
+
+            def forward(self, x):
+                x.add_(5)
+                return x.cos()
+
+        # This is ok because we actually capture the graph which
+        # has mutation. In export, we never retrace the actual
+        # gm so we won't see any mutation applied to inputs
+        with torch._dynamo.config.patch(
+            replay_side_effects=False, side_effect_replay_policy="error"
+        ):
+            foo = Foo()
+            torch.compile(foo, fullgraph=True)(torch.randn(4, 4))
+
     def test_list_append_return_none(self):
         def fn(x):
             alist = []
@@ -5787,6 +5954,20 @@ utils_device.CURRENT_DEVICE == None""".split("\n"):
         output = loss(input, target)
 
         self.assertTrue(torch.allclose(dynamo_output, output))
+
+    def test_repr(self):
+        class Config:
+            def __repr__(self):
+                return "Config()"
+
+        def forward(x, config):
+            return x * len(repr(config))
+
+        config = Config()
+        x = torch.randn(2, 2)
+
+        compiled = torch.compile(forward, fullgraph=True)
+        compiled(x, config)
 
     def test_nn_functional_reduction(self):
         def fn(loss, reduction):
@@ -9471,6 +9652,36 @@ def ___make_guard_fn():
         self.assertEqual(fn_out, compiled_out)
         self.assertFalse(fn_out)
 
+    def test_constant_hasattr_returns_bool(self):
+        """Test that hasattr on constant values properly returns boolean ConstantVariable."""
+
+        # Test various constant types
+        def fn():
+            # String constant
+            s = "hello"
+            result1 = hasattr(s, "upper")  # True
+            result2 = hasattr(s, "nonexistent")  # False
+
+            # Integer constant
+            i = 42
+            result3 = hasattr(i, "bit_length")  # True
+            result4 = hasattr(i, "fake_method")  # False
+
+            # Float constant
+            f = 3.14
+            result5 = hasattr(f, "is_integer")  # True
+            result6 = hasattr(f, "missing_attr")  # False
+
+            # Use all results to ensure they're compiled
+            return (result1, result2, result3, result4, result5, result6)
+
+        compiled_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+
+        fn_out = fn()
+        compiled_out = compiled_fn()
+        self.assertEqual(fn_out, compiled_out)
+        self.assertEqual(fn_out, (True, False, True, False, True, False))
+
     def test_torch_objects_as_keys(self):
         remap = {torch.float16: torch.float32}
 
@@ -9937,14 +10148,14 @@ def ___make_guard_fn():
     def test_validate_outputs_unbacked_by_custom_op(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch.library.define(
-                "mylib::foo",
+                "mylib::foo_validate_outputs_unbacked",
                 "(Tensor a, Tensor b) -> (Tensor)",
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=lib,
             )
 
-            @torch.library.impl("mylib::foo", "cpu", lib=lib)
-            @torch.library.register_fake("mylib::foo")
+            @torch.library.impl("mylib::foo_validate_outputs_unbacked", "cpu", lib=lib)
+            @torch.library.register_fake("mylib::foo_validate_outputs_unbacked")
             def foo_impl(x, y):
                 return torch.cat([x, y])
 
@@ -9952,7 +10163,7 @@ def ___make_guard_fn():
             def f(x, i):
                 i0, i1 = i.tolist()
                 x0, x1 = x.split([i0, i1])
-                return torch.ops.mylib.foo(x0, x1)
+                return torch.ops.mylib.foo_validate_outputs_unbacked(x0, x1)
 
             f(torch.randn(9, requires_grad=True), torch.tensor([3, 6]))
 
@@ -13911,6 +14122,44 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
             compiled_program(*args)
         except Exception as e:
             self.fail(f"torch.compile failed with error: {e}")
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorify_track_item_symint(self):
+        def _random_resize(image: torch.Tensor):
+            image_metanet = image
+            default_patch_size = 14
+            rand_cnn_resolution = (224, 256)
+            min_nump = rand_cnn_resolution[0] // default_patch_size
+            max_nump = rand_cnn_resolution[1] // default_patch_size
+            new_nump = torch.randint(min_nump, max_nump + 1, (1,)).item()
+            torch._check(new_nump > 0)
+            torch._check(new_nump * default_patch_size > 1)
+
+            image_metanet = F.interpolate(
+                image_metanet,
+                size=(new_nump * default_patch_size, new_nump * default_patch_size),
+                mode="bilinear",
+                align_corners=True,
+            )
+            img_h_new, img_w_new = image_metanet.shape[2:]
+
+            return (img_h_new, img_w_new), image_metanet
+
+        _random_resize_compiled = torch.compile(fullgraph=True)(_random_resize)
+
+        # Test the function
+        input_tensor = torch.rand(1, 3, 224, 224)
+        (h, w), output = _random_resize_compiled(input_tensor)
+
+        # Verify output properties
+        self.assertEqual(output.shape[0], 1)
+        self.assertEqual(output.shape[1], 3)
+        self.assertEqual(output.shape[2], h)
+        self.assertEqual(output.shape[3], w)
+        self.assertTrue(h % 14 == 0)
+        self.assertTrue(w % 14 == 0)
+        self.assertTrue(224 <= h <= 256)
+        self.assertTrue(224 <= w <= 256)
 
 
 if __name__ == "__main__":

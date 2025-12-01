@@ -10,7 +10,6 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/empty_like.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/rsqrt.h>
 #include <ATen/ops/zeros_like.h>

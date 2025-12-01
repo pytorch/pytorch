@@ -754,26 +754,6 @@ class Node(_NodeBase):
 
             return self.target in _side_effectful_functions
 
-        def subgraph_has_impure_ops(module: torch.fx.GraphModule) -> bool:
-            """
-            Return True if a GraphModule type subgraph contains any impure op, else False.
-            """
-            assert isinstance(module, torch.fx.GraphModule), (
-                "caller should only pass GraphModule to subgraph_has_impure_ops check"
-            )
-            for node in module.graph.nodes:
-                if node.op == "call_function" and node.is_impure(impure_random):
-                    return True
-                if (
-                    # pyrefly: ignore [invalid-argument]
-                    node.op == "call_module"
-                    # pyrefly: ignore [not-callable]
-                    and (submodule := module.get_submodule(node.target))
-                    and isinstance(submodule, torch.fx.GraphModule)
-                ):
-                    return subgraph_has_impure_ops(submodule)
-            return False
-
         # Check if an impure module.
         if self.op == "call_module":
             assert self.graph.owning_module is not None, (
@@ -783,10 +763,11 @@ class Node(_NodeBase):
             assert target_mod is not None, (
                 f"Did not find expected submodule target {self.target}"
             )
-            if isinstance(target_mod, torch.fx.GraphModule):
-                return subgraph_has_impure_ops(target_mod)
-            else:
-                return getattr(target_mod, "_is_impure", False)
+            # NOTE: here we can end up considering GraphModule submodules pure,
+            # even if they contain impure ops. It may not be safe to change
+            # because this function is used by graph.eliminate_dead_code,
+            # and some users depend on current elimination behavior.
+            return getattr(target_mod, "_is_impure", False)
 
         return False
 

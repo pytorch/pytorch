@@ -425,6 +425,17 @@ class TestPySymInt(TestCase):
             str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_or(s97, s26), 14)"""
         )
 
+    def test_symint_bitwise_xor(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 0b1100)
+        b0 = create_symint(shape_env, 0b1010)
+        res_xor = a0 ^ b0
+        self.assertEqual(res_xor, 0b0110)
+        self.assertIsInstance(res_xor, torch.SymInt, msg=type(res_xor))
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(BitwiseFn_bitwise_xor(s97, s26), 6)"""
+        )
+
     def test_stride(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5, 5), shape_env)
@@ -499,6 +510,13 @@ class TestPySymInt(TestCase):
         a0 = create_symint(shape_env, 2)
         r = torch.empty(a0, device="meta")
         self.assertIsInstance(r.shape[0], SymInt)
+
+    def test_hash_size(self):
+        # See issue #168254
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 2)
+        r = torch.empty(a0, device="meta")
+        self.assertRaises(TypeError, lambda: hash(r.shape))
 
     def test_guard_int(self):
         shape_env = ShapeEnv()
@@ -4464,6 +4482,105 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         start = torch.tensor(0)
         res = f(x, start, 0)
         self.assertEqual(res.shape, torch.Size([0]))
+
+    @skipIfTorchDynamo()
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_backed_size_oblivious_expand(self):
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+
+        def func(a, shape):
+            return a.expand(*shape)
+
+        compiled = torch.compile(func, fullgraph=True, backend=cnt, dynamic=True)
+
+        def run(a, shape):
+            self.assertEqual(compiled(a, shape), func(a, shape))
+
+        # No specialization - matching dimensions
+        run(torch.rand(2, 10), (2, 10))
+        run(torch.rand(5, 5), (5, 5))
+        self.assertEqual(cnt.frame_count, 1)  # Single compilation
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # Specialize input dim to 1 (broadcasting)
+        # Input dim is 1, needs to expand to larger size
+        run(torch.rand(1, 10), (9, 10))  # Compile with input[0] == 1
+        run(torch.rand(1, 5), (7, 5))  # Reuse same compiled graph
+        self.assertEqual(cnt.frame_count, 1)
+        # Changing input from 1 triggers recompilation
+        run(torch.rand(5, 10), (5, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # Multi-dimensional broadcasting
+        # Multiple dimensions with different broadcast semantics
+        run(torch.rand(1, 1, 10), (5, 7, 10))  # Broadcast first two dims
+        run(torch.rand(1, 1, 5), (3, 4, 5))  # Reuse pattern
+        self.assertEqual(cnt.frame_count, 1)
+
+    @skipIfTorchDynamo()
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_backed_size_oblivious_broadcast(self):
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+
+        def func(a, b):
+            torch.broadcast_shapes(a.size(), b.size())
+            return a + b
+
+        compiled = torch.compile(func, fullgraph=True, backend=cnt, dynamic=True)
+
+        def run(a, b):
+            self.assertEqual(compiled(a, b), func(a, b))
+
+        # No 0/1 specializations, no broadcasts.
+        # but a[0] == b[0] and a[1] == b[1] are asserted.
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        run(torch.rand(1, 1), torch.rand(1, 1))
+        run(torch.rand(10, 10), torch.rand(10, 10))
+
+        self.assertEqual(cnt.frame_count, 1)
+        run(torch.rand(10, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # specialize a[0] == 1. b[0] not specialized.
+        run(torch.rand(1, 10), torch.rand(9, 10))
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 1)
+        # if we change a[0] we get recompilation.
+        run(torch.rand(10, 10), torch.rand(10, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # TODO duck sizing shall be disabled when backed_size_oblivious
+        # is on probably.
+        # specialize b[0] == 1. a[0] not specialized.
+        run(torch.rand(10, 11), torch.rand(1, 11))
+        run(torch.rand(1, 10), torch.rand(1, 10))
+        self.assertEqual(cnt.frame_count, 1)
+        run(torch.rand(2, 10), torch.rand(2, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    def test_unbacked_view_extra(self):
+        def fn(x):
+            i0 = x.nonzero().size(0)
+            y = torch.zeros((i0, 192))
+            return y.view([12, -1, 192])
+
+        res1 = torch.compile(fn, fullgraph=True)(torch.ones((12,)))
+        res2 = fn(torch.ones((12,)))
+        self.assertEqual(res1, res2)
 
 
 instantiate_parametrized_tests(TestUnbacked)

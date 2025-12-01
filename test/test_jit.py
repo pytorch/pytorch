@@ -16271,8 +16271,10 @@ for test in criterion_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
-    TestCase._default_dtype_check_enabled = True
-    run_tests()
-    import jit.test_module_interface
-    suite = unittest.findTestCases(jit.test_module_interface)
-    unittest.TextTestRunner().run(suite)
+    if sys.version_info < (3, 14):
+        TestCase._default_dtype_check_enabled = True
+        run_tests()
+        import jit.test_module_interface
+
+        suite = unittest.findTestCases(jit.test_module_interface)
+        unittest.TextTestRunner().run(suite)

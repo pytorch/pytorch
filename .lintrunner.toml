@@ -186,6 +186,8 @@ include_patterns = [
     'aten/src/ATen/native/nested/cuda/*.h',
     'aten/src/ATen/native/nested/*.cpp',
     'aten/src/ATen/native/nested/*.h',
+    'aten/src/ATen/xpu/**/*.h',
+    'aten/src/ATen/xpu/**/*.cpp',
     'c10/**/*.cpp',
     'c10/**/*.h',
     'torch/*.h',
@@ -1108,12 +1110,6 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'torch/utils/model_dump/preact.mjs',
-    # These files are all grandfathered in, feel free to remove from this list
-    # as necessary
-    # NOTE: remove the patterns in the order they are listed
-    'aten/src/ATen/native/[a-pA-P]*/**',
-    'aten/src/ATen/[a-mA-M]*/**',
-    'test/**',
 ]
 init_command = [
     'python3',
@@ -1402,7 +1398,7 @@ init_command = [
     '--dry-run={{DRYRUN}}',
     'usort==1.0.8.post1',
     'isort==6.0.1',
-    'ruff==0.13.1',  # sync with RUFF
+    'ruff==0.14.4',  # sync with RUFF
 ]
 is_formatter = true
 
@@ -1537,7 +1533,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.13.1',  # sync with PYFMT
+    'ruff==0.14.4',  # sync with PYFMT
 ]
 is_formatter = true
 
@@ -1748,4 +1744,51 @@ include_patterns = ["torch/_dynamo/**/*.py"]
 command = [
   "python3",
   "tools/linter/adapters/gb_registry_linter.py",
+]
+
+[[linter]]
+code = 'PYLINT'
+include_patterns = ['**/*.py']
+exclude_patterns = [
+    '.git/**',
+    'build_test_custom_build/**',
+    'build/**',
+    'caffe2/**',
+    'docs/caffe2/**',
+    'docs/cpp/src/**',
+    'docs/src/**',
+    'fb/**',
+    '**/fb/**',
+    'functorch/docs/**',
+    'functorch/examples/**',
+    'functorch/docs/source/tutorials/**',
+    'torch/_inductor/fx_passes/serialized_patterns/**',
+    'torch/_inductor/autoheuristic/artifacts/**',
+    'scripts/**',
+    'test/generated_type_hints_smoketest.py',
+    'test/test_torchfuzz_repros.py',
+    # CPython tests
+    'test/dynamo/cpython/**',
+    # Tests from the NumPy test suite
+    'test/torch_np/numpy_test/**/*.py',
+    'third_party/**',
+    'torch/include/**',
+    'torch/lib/**',
+    'venv/**',
+    '**/*.pyi',
+    "tools/experimental/torchfuzz/**",
+    'tools/test/test_selective_build.py',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/pylint_linter.py',
+    '--config=pylintrc',
+    '--',
+    '@{{PATHSFILE}}'
+]
+init_command = [
+    'python3',
+    'tools/linter/adapters/pip_init.py',
+    '--dry-run={{DRYRUN}}',
+    'pylint==4.0.2',
 ]

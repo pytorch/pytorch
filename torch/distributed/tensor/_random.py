@@ -3,7 +3,7 @@
 import contextlib
 import warnings
 from logging import getLogger
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
@@ -101,6 +101,9 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
 
     # DTensor no longer maintains a copy of rng state. manual seed on dtensor is the same thing
     # as manual seed on torch.
+    #
+    # torch.manual_seed will handle LocalTensor mode correctly by
+    # iterating through all ranks if seed is a LocalIntNode.
     torch.manual_seed(seed)
 
 
@@ -132,7 +135,7 @@ class _PhiloxState:
 
     @property
     def seed(self) -> int:
-        return int(self._state[:8].view(dtype=torch.int64).item())
+        return int(self._state[:8].view(dtype=torch.uint64).item())
 
     @seed.setter
     def seed(self, seed: int) -> None:
@@ -171,7 +174,7 @@ class _RNGStateTracker:
         self._use_distribute_region = value
 
     def _distribute_region(
-        self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
+        self, spec: DTensorSpec, generator: torch.Generator | None = None
     ):
         pass
 
@@ -237,8 +240,18 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
 
     @contextlib.contextmanager
     def _distribute_region(
-        self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
+        self, spec: DTensorSpec, generator: torch.Generator | None = None
     ):
+        from torch.distributed._local_tensor import maybe_enable_local_tracker
+
+        if local_tracker_context := maybe_enable_local_tracker(
+            self._device.type, self.distribute_region_enabled, spec, generator
+        ):
+            with local_tracker_context:
+                yield
+            return
+
+        # regular (non-LocalTensor) mode
         if generator is not None:
             # This is a little hacky, but for any user-passed generator, we store its state under a unique key,
             # not because we need to keep a copy of it but because its the easiest way to make it work with the
@@ -327,7 +340,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         mesh = spec.mesh
         # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
         # case. Replace the custom logic with dim_map once we support it.
-        dim_map: list[Union[int, list[int]]] = [-1] * spec.ndim
+        dim_map: list[int | list[int]] = [-1] * spec.ndim
         for i, placement in enumerate(spec.placements):
             if isinstance(placement, Shard):
                 shard_dim = placement.dim
