@@ -18,3 +18,20 @@ jobs:
         with:
           args: >
             -Dsonar.exclusions=**/*.java
+
+  cpp-check:
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v3
+        - name: Cppcheck Scan
+          run: cppcheck --enable=all --inconclusive --quiet .
+
+  java-pmd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: PMD Scan
+        run: |
+          curl -L -o pmd-bin.zip https://github.com/pmd/pmd/releases/download/pmd_releases/6.60.0/pmd-bin-6.60.0.zip
+          unzip pmd-bin.zip
+          ./pmd-bin-6.60.0/bin/run.sh pmd -d ./src -R java-basic -f text
