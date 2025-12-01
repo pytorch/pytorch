@@ -148,7 +148,7 @@ def check_file(
     filename: str,
     binary: str,
     build_dir: Path,
-    std: str = "c++17",
+    std: str,
 ) -> list[LintMessage]:
     # Explicitly pass include path for linters that only check headers.
     build_include_args = include_args + ["--extra-arg", f"-I{build_dir}"]
