@@ -64,31 +64,23 @@ def _extract_group_names(snodes: list[BaseSchedulerNode]) -> OrderedSet[str]:
 def align_runtime_estimations_across_all_distributed_ranks(
     snodes: list[BaseSchedulerNode],
 ):
+    from torch._inductor.fx_passes.node_runtime_estimation import (
+        _align_values_across_process_groups,
+    )
+
     runtime_estimations = {}
     for snode in snodes:
         runtime_estimations[snode] = snode.get_estimated_runtime()
 
-    import torch.distributed as dist
-    from torch.distributed.distributed_c10d import _resolve_process_group
-
     group_names = _extract_group_names(snodes)
-
     runtime_estimations_values = list(runtime_estimations.values())
-    for group_name in group_names:
-        group = _resolve_process_group(group_name)
-        group_size = group.size()
-        gathered_runtime_estimations: list[list[float]] = [
-            [] for _ in range(group_size)
-        ]
-        dist.all_gather_object(
-            gathered_runtime_estimations, runtime_estimations_values, group
-        )
-        runtime_estimations_values = torch.median(
-            torch.tensor(gathered_runtime_estimations), dim=0
-        ).values.tolist()
+
+    aligned_values = _align_values_across_process_groups(
+        runtime_estimations_values, group_names
+    )
 
     for i in range(len(snodes)):
-        snodes[i].override_estimated_runtime = runtime_estimations_values[i]
+        snodes[i].override_estimated_runtime = aligned_values[i]
 
 
 def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
