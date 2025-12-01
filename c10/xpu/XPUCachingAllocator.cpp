@@ -1498,6 +1498,8 @@ class DeviceCachingAllocator {
       segment_info.queue = head_block->queue;
       segment_info.is_large = (!head_block->pool->is_small);
       segment_info.is_expandable = head_block->expandable_segment;
+      segment_info.context_when_allocated =
+          head_block->context_when_segment_allocated;
       MempoolId_t id = head_block->pool->owner_MempoolId();
       if ((mempool_id.first == 0 && mempool_id.second == 0) ||
           id == mempool_id) {
@@ -1523,6 +1525,7 @@ class DeviceCachingAllocator {
           segment_info.active_size += block_info.size;
           segment_info.requested_size += block_info.requested_size;
         }
+        block_info.context_when_allocated = block->context_when_allocated;
         block = block->next;
       }
       total_active += segment_info.active_size;

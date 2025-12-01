@@ -23,6 +23,7 @@ struct BlockInfo {
   int32_t gc_counter = 0;
   bool allocated = false;
   bool active = false;
+  std::shared_ptr<GatheredContext> context_when_allocated;
 };
 
 // Struct containing info of a memory segment (i.e. one contiguous device memory
@@ -39,6 +40,7 @@ struct SegmentInfo {
   bool is_expandable = false;
   MempoolId_t owner_private_pool_id = {0, 0};
   std::vector<BlockInfo> blocks;
+  std::shared_ptr<GatheredContext> context_when_allocated;
 };
 
 union trace_time_ {
