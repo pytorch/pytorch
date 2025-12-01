@@ -8839,10 +8839,9 @@ class Conditional(ExternKernel):
         # The predicate can be on a different device (e.g., CPU for control flow)
         # while the data operands and outputs should be on the compute device
         device = next(
-            (o.get_device()
-            for o in operands
-            if not isinstance(o, ShapeAsConstantBuffer)),
-            predicate.get_device()  # fallback to predicate if no operands
+            o.get_device()
+            for o in operands + [predicate]
+            if not isinstance(o, ShapeAsConstantBuffer)
         )
         unbacked_bindings = resolve_unbacked_bindings(
             V.graph.sizevars.shape_env,
