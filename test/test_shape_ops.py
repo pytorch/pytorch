@@ -843,6 +843,16 @@ class TestShapeOps(TestCase):
         with self.assertRaisesRegex(RuntimeError, "step is -1 but must be > 0"):
             x.unfold(0, 1, -1)
 
+    def test_unfold_backward_errors(self, device):
+        grad_in = torch.randn(2, 3, device=device)
+        input_sizes = [6]
+
+        with self.assertRaisesRegex(ValueError, "step is 0 but must be > 0"):
+            torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, 3, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "size is -1 but must be >= 0"):
+            torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, -1, 1)
+
 
 instantiate_device_type_tests(TestShapeOps, globals())
 
