@@ -1255,6 +1255,10 @@ def trace_hop_function(
     sub_kwargs,
 ):
     enable_side_effects_with_extra_outputs = not restore_side_effects
+<<<<<<< HEAD
+
+=======
+>>>>>>> 52912cf5680 (Add alias filtering to invoke subgraph)
     autograd_ctx = (
         dynamo_enable_grad(tx, enable_grad)
         if enable_grad is not None
@@ -1341,12 +1345,14 @@ def speculate_subgraph_with_auto_output_flattening(
     set_subgraph_inputs: Literal[
         "automatic", "semi_automatic", "flatten_manual", "manual"
     ] = "automatic",
-    # Make default False
     restore_side_effects: bool = True,
+<<<<<<< HEAD
+=======
     # Controls whether to filter aliased intermediates when collecting extra outputs.
     # - True: Filter out intermediates that alias with inputs or outputs (strict, for invoke_subgraph)
     # - False: Allow aliased intermediates (for checkpoint/autograd.Function which get desugared/inlined)
     filter_aliased_intermediates: bool = True,
+>>>>>>> 52912cf5680 (Add alias filtering to invoke subgraph)
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
@@ -1548,6 +1554,10 @@ def speculate_subgraph_with_auto_output_flattening(
             # want this to be supported for other Hops as well, specifically
             # nested_compile_region and autograd.Function. Today, its safe
             # because we error out on seeing a side-effect.
+<<<<<<< HEAD
+            enable_side_effects_with_extra_outputs = not restore_side_effects
+=======
+>>>>>>> 52912cf5680 (Add alias filtering to invoke subgraph)
             if enable_side_effects_with_extra_outputs:
                 extra_outputs = _collect_intermediate_outputs(
                     tx, subtracer, graph_output_vts, filter_aliased_intermediates
@@ -2947,11 +2957,8 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     supports_input_mutation = True
     supports_aliasing = True
-    # restore_side_effects controls two behaviors during subgraph tracing:
-    # 1. Whether to enable capturing intermediates as extra outputs (!restore_side_effects)
-    # 2. Whether to save/restore the side_effects data structure (restore_side_effects)
-    # Default True: side effects data is saved/restored, intermediates NOT captured.
-    # Set to False: intermediates ARE captured as extra outputs, side effects NOT restored.
+    # TODO - Go through all subclasses of WrapHigherOrderVariable to see if
+    # restore_side_effects can be ignored. For now, this is conservative.
     restore_side_effects = True
 
     def install_subgraph_in_output_graph(
@@ -2987,9 +2994,12 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description,
             source_target=self.value,
             restore_side_effects=self.restore_side_effects,
+<<<<<<< HEAD
+=======
             filter_aliased_intermediates=getattr(
                 self, "filter_aliased_intermediates", True
             ),
+>>>>>>> 52912cf5680 (Add alias filtering to invoke subgraph)
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
         )
@@ -3448,8 +3458,8 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # For checkpoint, restore_side_effects is the inverse of the config flag.
-        # When skip_fwd_side_effects_in_bwd is True, we don't restore (we allow side effects).
+        # When skip_fwd_side_effects_in_bwd is True, we allow side effects by NOT restoring them.
+        # This enables collecting intermediate outputs for side effects.
         self.restore_side_effects = (
             not torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
         )
@@ -4318,10 +4328,16 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     supports_input_mutation = True
     supports_aliasing = False
+<<<<<<< HEAD
+    # invoke_subgraph does not support side effects, so we restore them (default behavior).
+    # This means enable_side_effects_with_extra_outputs will be False.
+    restore_side_effects = True
+=======
     # invoke_subgraph allows side effects by returning extra outputs, so don't restore
     restore_side_effects = False
     # invoke_subgraph is NOT desugared, so we need strict aliasing filtering
     filter_aliased_intermediates = True
+>>>>>>> 52912cf5680 (Add alias filtering to invoke subgraph)
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
