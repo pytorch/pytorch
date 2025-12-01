@@ -25,7 +25,9 @@ aten = torch.ops.aten
 c10d = torch.ops._c10d_functional
 
 
-def _fn(a: torch.Tensor, b: torch.Tensor, num_chunks: int, orig_out: torch.Tensor):
+def _trace_fn_split_mm_a(
+    a: torch.Tensor, b: torch.Tensor, num_chunks: int, orig_out: torch.Tensor
+):
     a_flat = a.flatten(0, -2)
     a_flat_chunks = a_flat.chunk(num_chunks)
     out = torch.empty_strided(
@@ -41,7 +43,7 @@ def _fn(a: torch.Tensor, b: torch.Tensor, num_chunks: int, orig_out: torch.Tenso
     return (out,)
 
 
-def _mm_split_cat_rs_fn(
+def _trace_fn_mm_rs_scatter(
     a: torch.Tensor,
     b: torch.Tensor,
     num_chunks: int,
@@ -93,10 +95,10 @@ def _mm_split_cat_rs_fn(
     else:
         # A row wise split
         rs_out = torch.cat(rs_outs)
-    return (rs_out,)
+    return rs_out
 
 
-def _mm_split_cat_rs_fn_view3d(
+def _trace_fn_mm_rs_scatter_view3d(
     a: torch.Tensor,
     b: torch.Tensor,
     num_chunks: int,
@@ -108,6 +110,12 @@ def _mm_split_cat_rs_fn_view3d(
     orig_split_num_chunks: int,
     post_mm_ops,
 ):
+    """
+    Chunking replacement for pattern:
+    mm -> view(*, *, *) -> split (dim != 0) -> cat -> reduce_scatter
+
+    chunks matmul A argument rowwise and produces num_chunks similar patterns.
+    """
     assert isinstance(num_chunks, int)
     mm_i_a_args = [a] * num_chunks
     mm_i_b_args = [b] * num_chunks
@@ -132,7 +140,7 @@ def _mm_split_cat_rs_fn_view3d(
         rs_outs.append(rs_out_i)
 
     rs_out = torch.cat(rs_outs)
-    return (rs_out,)
+    return rs_out
 
 
 def _size_hint(s: sympy.Expr) -> int:
@@ -302,7 +310,7 @@ def split_mm(
         trace_args = (arg_a_t, arg_b_t, n_split, mm_out_t)
         _insert_fn_trace_before_node(
             g,
-            _fn,
+            _trace_fn_split_mm_a,
             trace_args,
             mm_n,  # insert before
             [arg_a, arg_b],
@@ -500,11 +508,11 @@ def _process_matmul_reduce_scatter(
     arg_a_t = arg_a.meta["val"]
     arg_b_t = arg_b.meta["val"]
 
-    _fn_to_trace = _mm_split_cat_rs_fn
+    _fn_to_trace = _trace_fn_mm_rs_scatter
 
     view3d_size_to_split = None
     if orig_scatter_dim != 0 and view3d_n is not None:
-        _fn_to_trace = _mm_split_cat_rs_fn_view3d
+        _fn_to_trace = _trace_fn_mm_rs_scatter_view3d
         # dim0 of 3d reshape
         arg1 = view3d_n.args[1]
         assert arg1 is not None
