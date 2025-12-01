@@ -14,6 +14,9 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import _schedulable_wait_node, is_wait_tensor
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
+from torch._inductor.fx_passes.node_runtime_estimation import (
+    _align_values_across_process_groups,
+)
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
@@ -583,24 +586,27 @@ class OverlapScheduler:
                     runtime_estimations_keys.append(cuda_key)
                     benchmarked_collective_nodes.append(n)
 
-        # Single all_gather and compute medians
+        # Extract group names from all collective nodes
+        group_names: OrderedSet[str] = OrderedSet()
+        for info in self.collective_info.values():
+            group_name = get_group_name(info.start_node)
+            group_names.add(group_name)
+
         import torch.distributed as dist
-        from torch._subclasses.fake_tensor import unset_fake_temporarily
-        from torch.distributed.distributed_c10d import _get_default_group
 
         world_size = dist.get_world_size()
-        pg = _get_default_group()
 
-        with unset_fake_temporarily():
-            gathered_runtime_estimations: list[list[float]] = [
-                [] for _ in range(world_size)
-            ]
-            dist.all_gather_object(
-                gathered_runtime_estimations, runtime_estimations, pg
-            )
-            median_runtime_estimations = torch.median(
-                torch.tensor(gathered_runtime_estimations), dim=0
-            ).values.tolist()
+        # Align across all process groups if we have collectives
+        if group_names:
+            from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+            with unset_fake_temporarily():
+                median_runtime_estimations = _align_values_across_process_groups(
+                    runtime_estimations, group_names
+                )
+        else:
+            # No collectives found, skip alignment
+            median_runtime_estimations = runtime_estimations
 
         # Cache medians
         collective_keys = []

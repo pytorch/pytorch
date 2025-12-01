@@ -44,6 +44,37 @@ def get_hint(x: int | torch.SymInt) -> Optional[int]:
     return x.node.hint if x.node.has_hint() else None
 
 
+def _align_values_across_process_groups(
+    values: list[float],
+    group_names: Any,  # OrderedSet[str]
+) -> list[float]:
+    """
+    Align values across multiple process groups using median aggregation.
+
+    When multiple process groups exist (e.g., 2D device mesh), this iteratively
+    aligns across each group to ensure all ranks have consistent values.
+
+    Args:
+        values: List of values to align
+        group_names: Process group names to align across
+
+    Returns:
+        Aligned values (median across all specified groups)
+    """
+    import torch.distributed as dist
+    from torch.distributed.distributed_c10d import _resolve_process_group
+
+    aligned_values = values
+    for group_name in group_names:
+        group = _resolve_process_group(group_name)
+        group_size = group.size()
+        gathered: list[list[float]] = [[] for _ in range(group_size)]
+        dist.all_gather_object(gathered, aligned_values, group)
+        aligned_values = torch.median(torch.tensor(gathered), dim=0).values.tolist()
+
+    return aligned_values
+
+
 def can_benchmark_collective() -> bool:
     """Check if we can benchmark collectives (not fake process group)."""
     import torch.distributed as c10d

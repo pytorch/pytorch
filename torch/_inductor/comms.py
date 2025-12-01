@@ -51,26 +51,36 @@ if TYPE_CHECKING:
     from torch._inductor.scheduler import BaseSchedulerNode
 
 
+def _extract_group_names(snodes: list[BaseSchedulerNode]) -> OrderedSet[str]:
+    group_names: OrderedSet[str] = OrderedSet()
+    for snode in snodes:
+        if is_collective(snode.node):
+            group_names.add(
+                snode.node.constant_args[-1]  # pyrefly: ignore[missing-attribute]
+            )
+    return group_names
+
+
 def align_runtime_estimations_across_all_distributed_ranks(
     snodes: list[BaseSchedulerNode],
 ):
+    from torch._inductor.fx_passes.node_runtime_estimation import (
+        _align_values_across_process_groups,
+    )
+
     runtime_estimations = {}
     for snode in snodes:
         runtime_estimations[snode] = snode.get_estimated_runtime()
-    import torch.distributed as dist
-    from torch.distributed.distributed_c10d import _get_default_group
 
-    world_size = dist.get_world_size()
-    pg = _get_default_group()
-    gathered_runtime_estimations: list[list[float]] = [[] for _ in range(world_size)]
-    dist.all_gather_object(
-        gathered_runtime_estimations, list(runtime_estimations.values()), pg
+    group_names = _extract_group_names(snodes)
+    runtime_estimations_values = list(runtime_estimations.values())
+
+    aligned_values = _align_values_across_process_groups(
+        runtime_estimations_values, group_names
     )
-    median_runtime_estimations = torch.median(
-        torch.tensor(gathered_runtime_estimations), dim=0
-    ).values.tolist()
+
     for i in range(len(snodes)):
-        snodes[i].override_estimated_runtime = median_runtime_estimations[i]
+        snodes[i].override_estimated_runtime = aligned_values[i]
 
 
 def sink_waits(snodes: list[BaseSchedulerNode]) -> list[BaseSchedulerNode]:
