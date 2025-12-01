@@ -27,16 +27,16 @@ jobs:
         run: cppcheck --enable=all --inconclusive --quiet .
 
   java-pmd:
-    name: Java PMD Scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - name: Download PMD
         run: |
           cd $HOME
           wget -O pmd.zip https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.19.0/pmd-dist-7.19.0-bin.zip
           unzip pmd.zip
+
       - name: Run PMD Scan
         run: |
-          alias pmd="$HOME/pmd-bin-7.19.0/bin/pmd"
-          $HOME/pmd-bin-7.19.0/bin/run.sh pmd -d ./src -R rulesets/java/quickstart.xml -f text
+          $HOME/pmd-dist-7.19.0/bin/run.sh pmd -d ./src -R rulesets/java/quickstart.xml -f text
