@@ -37,10 +37,9 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#include <thrust/binary_search.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
-#include <thrust/binary_search.h>
-#include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
 
 #include <bitset>
