@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import io
+import itertools
 from bisect import bisect_right, insort
 from collections.abc import Callable
 from typing import Any, cast
@@ -283,8 +284,8 @@ def create_read_items_for_chunk_list(
         max_size = 0
         for dim in range(num_dims):
             dim_size = max(
-                max(chunk.offsets[dim] + chunk.sizes[dim] for chunk in local_chunks),
-                max(chunk.offsets[dim] + chunk.sizes[dim] for chunk in saved_chunks),
+                chunk.offsets[dim] + chunk.sizes[dim]
+                for chunk in itertools.chain(local_chunks, saved_chunks)
             )
             if dim_size > max_size:
                 max_size = dim_size
