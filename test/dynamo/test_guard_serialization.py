@@ -339,7 +339,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         # NB: This is super janky and might cause unforeseen problems
         if kwarg_gen_fn is not None:
             kwargs = kwarg_gen_fn()
-            for key in self._frame_state.f_locals.keys():
+            for key in self._frame_state.f_locals:
                 if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
