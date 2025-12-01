@@ -33,7 +33,6 @@
 #include <thrust/transform.h>
 #include <thrust/unique.h>
 #include <thrust/system/cuda/execution_policy.h>
-#include <thrust/binary_search.h>
 #include <c10/macros/Macros.h>
 
 namespace at::native {
