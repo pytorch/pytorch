@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 import os
-from typing import Optional
 
 import torch
 
@@ -504,7 +503,7 @@ class UnbackedFuzzTemplate(FuzzTemplate):
 
 def convert_graph_to_python_code(
     operation_graph: OperationGraph,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     template: str = "default",
 ) -> str:
     """
