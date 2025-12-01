@@ -41,13 +41,14 @@ jobs:
 
       - name: Download and unzip PMD
         run: |
-            cd $HOME
-            wget -O pmd.zip https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.19.0/pmd-dist-7.19.0-bin.zip
-            unzip pmd.zip
-            PMD_DIR=$(find $HOME -maxdepth 1 -type d -name "pmd*")
-            echo "PMD_DIR=$PMD_DIR" >> $GITHUB_ENV
-
+          cd $HOME
+          wget -O pmd.zip https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.19.0/pmd-dist-7.19.0-bin.zip
+          unzip pmd.zip
+          # Store the PMD folder in an environment variable
+          PMD_DIR=$(find $HOME -maxdepth 1 -type d -name "pmd-dist*")
+          echo "PMD_DIR=$PMD_DIR" >> $GITHUB_ENV
+      
       - name: Run PMD Scan
         run: |
+          # Run PMD using the detected folder
           $PMD_DIR/bin/run.sh pmd -d ./src -R rulesets/java/quickstart.xml -f text
-
