@@ -99,7 +99,7 @@ def _wrap(fn, i, args, error_file):
 class ProcessContext:
     def __init__(self, processes, error_files):
         self.processes = processes
-        self.sentinels = {
+        self.__sentinels = {
             process.sentinel: index for index, process in enumerate(processes)
         }
         self.__error_files = error_files
@@ -133,18 +133,18 @@ class ProcessContext:
                 still don't exit, wait another grace period before killing them.
         """
         # Ensure this function can be called even when we're done.
-        if len(self.sentinels) == 0:
+        if len(self.__sentinels) == 0:
             return True
 
         # Wait for any process to fail or all of them to succeed.
         ready = multiprocessing.connection.wait(
-            self.sentinels.keys(),
+            self.__sentinels.keys(),
             timeout=timeout,
         )
 
         error_index = None
         for sentinel in ready:
-            index = self.sentinels.pop(sentinel)
+            index = self.__sentinels.pop(sentinel)
             process = self.processes[index]
             process.join()
             if process.exitcode != 0:
@@ -154,7 +154,7 @@ class ProcessContext:
         # Return if there was no error.
         if error_index is None:
             # Return whether or not all processes have been joined.
-            return len(self.sentinels) == 0
+            return len(self.__sentinels) == 0
         # An error occurred. Clean-up all processes before returning.
         # First, allow a grace period for processes to shutdown themselves.
         if grace_period is not None:
