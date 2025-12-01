@@ -368,9 +368,9 @@ void batch_norm_update_stats(
       const auto momentum = static_cast<acc_t>(momentum_);
       gpu_kernel_multiple_outputs(
           iter, [=] GPU_LAMBDA (acc_t mean, acc_t var, scalar_t running_mean, scalar_t running_var)
-               -> ::cuda::std::tuple<scalar_t, scalar_t> {
+               -> NO_ROCM(::cuda)::std::tuple<scalar_t, scalar_t> {
         const auto unbiased_var = var * bessel_correction_factor;
-        return ::cuda::std::tuple<scalar_t, scalar_t>{
+        return NO_ROCM(::cuda)::std::tuple<scalar_t, scalar_t>{
           mean * momentum + (1 - momentum) * running_mean,
           unbiased_var * momentum + (1 - momentum) * running_var,
         };
@@ -404,9 +404,9 @@ void batch_norm_update_stats_and_invert(
       const auto momentum = static_cast<acc_t>(momentum_);
       gpu_kernel_multiple_outputs(
           iter, [=] GPU_LAMBDA (acc_t mean, acc_t var, scalar_t running_mean, scalar_t running_var)
-               -> ::cuda::std::tuple<scalar_t, scalar_t, acc_t> {
+               -> NO_ROCM(::cuda)::std::tuple<scalar_t, scalar_t, acc_t> {
         const auto unbiased_var = var * bessel_correction_factor;
-        return ::cuda::std::tuple<scalar_t, scalar_t, acc_t>{
+        return NO_ROCM(::cuda)::std::tuple<scalar_t, scalar_t, acc_t>{
           mean * momentum + (1 - momentum) * running_mean,
           unbiased_var * momentum + (1 - momentum) * running_var,
           c10::cuda::compat::rsqrt(var + eps)
