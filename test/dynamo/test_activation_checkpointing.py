@@ -1953,24 +1953,24 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False);  wrap_body_0 = l_x_ = None
-        out1: "f32[4, 4]" = tag_activation_checkpoint[0]
-        out2: "f32[4, 4]" = tag_activation_checkpoint[1]
-        getitem_4: "f32[4, 4]" = tag_activation_checkpoint[4];  tag_activation_checkpoint = None
+        getitem_6: "f32[4, 4]" = tag_activation_checkpoint[0]
+        getitem_7: "f32[4, 4]" = tag_activation_checkpoint[1]
+        getitem_8: "f32[4, 4]" = tag_activation_checkpoint[2];  tag_activation_checkpoint = None
 
-        add: "f32[4, 4]" = out1 + out2;  out1 = out2 = None
-        return (add, getitem_4)
+        add: "f32[4, 4]" = getitem_6 + getitem_7;  getitem_6 = getitem_7 = None
+        return (add, getitem_8)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[4, 4]"):
             matmul: "f32[4, 4]" = torch.matmul(l_x_, l_x_)
-            o: "f32[4, 4]" = matmul @ l_x_
+            o: "f32[4, 4]" = matmul @ l_x_;  matmul = None
 
             out: "f32[4, 4]" = l_x_.sin()
 
-            sin_1: "f32[4, 4]" = torch.sin(o)
-            cos: "f32[4, 4]" = torch.cos(sin_1)
+            sin_1: "f32[4, 4]" = torch.sin(o);  o = None
+            cos: "f32[4, 4]" = torch.cos(sin_1);  sin_1 = None
             sin_2: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
-            return (cos, sin_2, matmul, o, out, sin_1)
+            return (cos, sin_2, out)
 """,
         )
 
