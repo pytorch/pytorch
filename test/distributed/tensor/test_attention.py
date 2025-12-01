@@ -836,22 +836,25 @@ class TestSharding(DTensorTestBase):
             mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
         )
 
-        # Create q, k, v tensors with shape (B, nheads, seq_len, dim)
-        q = torch.randn(
-            B, nheads, seq_len, dim, device=self.device_type, dtype=torch.bfloat16
-        )
-        k = torch.randn(
-            B, nheads, seq_len, dim, device=self.device_type, dtype=torch.bfloat16
-        )
-        v = torch.randn(
-            B, nheads, seq_len, dim, device=self.device_type, dtype=torch.bfloat16
-        )
-        q_dt = distribute_tensor(q, device_mesh, [Shard(2)])
-        k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
-        v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
-
         for backend in backends:
             with sdpa_kernel(backend):
+                dtype = torch.bfloat16
+                if backend == SDPBackend.EFFICIENT_ATTENTION:
+                    dtype = torch.float32
+                # Create q, k, v tensors with shape (B, nheads, seq_len, dim)
+                q = torch.randn(
+                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                )
+                k = torch.randn(
+                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                )
+                v = torch.randn(
+                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                )
+                q_dt = distribute_tensor(q, device_mesh, [Shard(2)])
+                k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
+                v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
+
                 register_cp_sharding_rules()
                 out = F.scaled_dot_product_attention(q_dt, k_dt, v_dt)
                 unregister_cp_sharding_rules(clear_the_cache=True)
