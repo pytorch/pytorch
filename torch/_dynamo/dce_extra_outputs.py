@@ -28,13 +28,13 @@ import torch
 _HOPS_WITH_EXTRA_OUTPUTS = {
     torch.ops.higher_order.invoke_subgraph,
     torch.ops.higher_order.tag_activation_checkpoint,
-    torch.ops.higher_order.autograd_function_apply,
+    # torch.ops.higher_order.autograd_function_apply,
 }
 
 
 def dce_hop_extra_outputs(gm: torch.fx.GraphModule) -> bool:
     """
-    Remove unused extra outputs from HOP calls.
+    Remove unused extra outputs from HOP calls recursively.
 
     Args:
         gm: The GraphModule to optimize
@@ -45,6 +45,23 @@ def dce_hop_extra_outputs(gm: torch.fx.GraphModule) -> bool:
     modified = False
     graph = gm.graph
 
+    # STEP 1: recursively process all nested subgraphs (bottom-up)
+    for node in graph.nodes:
+        if node.op == "call_function" and node.target in _HOPS_WITH_EXTRA_OUTPUTS:
+            subgraph_attr = node.args[0]
+            if (
+                isinstance(subgraph_attr, torch.fx.Node)
+                and subgraph_attr.op == "get_attr"
+            ):
+                subgraph_name = subgraph_attr.target
+                assert isinstance(subgraph_name, str)
+                subgraph = getattr(gm, subgraph_name)
+                if isinstance(subgraph, torch.fx.GraphModule):
+                    # Recursively DCE the nested subgraph
+                    if dce_hop_extra_outputs(subgraph):
+                        modified = True
+
+    # STEP 2: Now DCE this graph's subgraphs
     # Group HOP nodes by subgraph name
     # Multiple invocations may share the same subgraph, so we need to check
     # which indices are used across ALL invocations before removing any
@@ -62,8 +79,8 @@ def dce_hop_extra_outputs(gm: torch.fx.GraphModule) -> bool:
                 subgraph_to_nodes[subgraph_name].append(node)
 
     # Process each unique subgraph
-    for subgraph_name, invoke_nodes in subgraph_to_nodes.items():
-        if _dce_subgraph(gm, subgraph_name, invoke_nodes):
+    for subgraph_name, hop_nodes in subgraph_to_nodes.items():
+        if _dce_subgraph(gm, subgraph_name, hop_nodes):
             modified = True
 
     if modified:
@@ -74,26 +91,30 @@ def dce_hop_extra_outputs(gm: torch.fx.GraphModule) -> bool:
 
 
 def _dce_subgraph(
-    gm: torch.fx.GraphModule, subgraph_name: str, invoke_nodes: list[torch.fx.Node]
+    gm: torch.fx.GraphModule, subgraph_name: str, hop_nodes: list[torch.fx.Node]
 ) -> bool:
+    """
+    DCE a single subgraph by removing unused output indices.
+    """
     subgraph = getattr(gm, subgraph_name)
 
     if not isinstance(subgraph, torch.fx.GraphModule):
         return False
 
-    # Collect used indices across ALL invocations of this subgraph
+    # Collect used indices for THIS subgraph
     used_indices: set[int] = set()
 
     # Check if this is the forward subgraph of autograd_function_apply
     # For autograd_function_apply, the fwd subgraph must return (output, saved_values, ...)
     # where indices 0 and 1 are ALWAYS required by the runtime
-    is_autograd_fwd = any(
-        node.target == torch.ops.higher_order.autograd_function_apply
-        for node in invoke_nodes
-    )
+    # is_autograd_fwd = any(
+    #     node.target == torch.ops.higher_order.autograd_function_apply
+    #     for node in hop_nodes
+    # )
+    is_autograd_fwd = False
 
-    for invoke_node in invoke_nodes:
-        for user in list(invoke_node.users):
+    for hop_node in hop_nodes:
+        for user in list(hop_node.users):
             if user.op == "call_function" and user.target == operator.getitem:
                 if len(list(user.users)) > 0:
                     idx = user.args[1]
@@ -109,11 +130,8 @@ def _dce_subgraph(
         used_indices.add(0)  # output
         used_indices.add(1)  # saved_values
 
-    if len(used_indices) == len(old_outputs):
-        return False
-
-    # can still have side effect inside invoke subgraph, so we shouldn't kill it
-    if len(used_indices) == 0:
+    # Nothing to DCE if all outputs are used or no outputs are used
+    if len(used_indices) >= len(old_outputs) or len(used_indices) == 0:
         return False
 
     # Build mapping from old indices to new indices
@@ -128,28 +146,44 @@ def _dce_subgraph(
             new_idx += 1
 
     # Update subgraph output node
-    output_node.args = (tuple(new_outputs),)
+    # Create a new output node with the filtered outputs
+    with subgraph.graph.inserting_before(output_node):
+        new_output_node = subgraph.graph.output(tuple(new_outputs))
+    output_node.replace_all_uses_with(new_output_node)
+    subgraph.graph.erase_node(output_node)
 
-    for invoke_node in invoke_nodes:
+    for hop_node in hop_nodes:
         # Update getitem nodes to use new indices
-        for user in list(invoke_node.users):
+        for user in list(hop_node.users):
             if user.op == "call_function" and user.target == operator.getitem:
                 old_idx = user.args[1]
                 assert isinstance(old_idx, int)
-                if old_idx in old_to_new:
-                    new_idx = old_to_new[old_idx]
-                    user.args = (user.args[0], new_idx)
+                if old_idx not in old_to_new:
+                    assert len(list(user.users)) == 0
+                    gm.graph.erase_node(user)
+                    continue
 
-        # Update example_value metadata on invoke_node
-        if "example_value" in invoke_node.meta:
-            old_example = invoke_node.meta["example_value"]
+                new_idx = old_to_new[old_idx]
+                # Create a new getitem node with the new index
+                with gm.graph.inserting_before(user):
+                    new_getitem = gm.graph.call_function(
+                        operator.getitem, args=(user.args[0], new_idx)
+                    )
+                    # Copy metadata from old node
+                    new_getitem.meta = user.meta.copy()
+                user.replace_all_uses_with(new_getitem)
+                gm.graph.erase_node(user)
+
+        # Update example_value metadata on hop_node
+        if "example_value" in hop_node.meta:
+            old_example = hop_node.meta["example_value"]
             assert isinstance(old_example, (tuple, list))
             new_example = tuple(
                 old_example[old_idx]
                 for old_idx in range(len(old_outputs))
                 if old_idx in used_indices
             )
-            invoke_node.meta["example_value"] = new_example
+            hop_node.meta["example_value"] = new_example
 
     subgraph.graph.lint()
     subgraph.recompile()
