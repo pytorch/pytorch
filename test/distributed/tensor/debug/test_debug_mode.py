@@ -32,6 +32,11 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
+from torch.testing._internal.distributed._tensor.common_dtensor import (
+    DTensorTestBase,
+    skip_if_lt_x_gpu,
+    with_comms,
+)
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 from torch.utils._debug_mode import (
@@ -658,6 +663,29 @@ class TestDTensorDebugMode(TestCase):
         # Colored is nice for actual viewing, not using in this test though
         gm_str = gm.print_readable(colored=False, print_output=False)
         self.assertTrue('"DTensor(f32[8, 32], S(0))" = torch.ops.aten.mm' in gm_str)
+
+
+class TestDTensorDebugModeRealComms(DTensorTestBase):
+    @requires_cuda
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_tensor_hash_waits_on_collective(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        local_tensor = torch.ones(16, device=self.device_type)
+        dt = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        tensor = torch.ones(10, device=self.device_type)
+        output_tensor = torch.zeros(10 * self.world_size, device=self.device_type)
+
+        # This doesn't actually test that we synchronize on collectives.
+        # I found this hard to test robustly since previously we would race.
+        # However, it does test that we do not crash.
+        # This doesn't actually test that we synchronize on collectives,
+        with DebugMode(), DebugMode.log_tensor_hashes():
+            dt.redistribute(mesh, [Replicate()])
+            dist.all_gather_into_tensor(output_tensor, tensor)
+            dist.all_gather_into_tensor(output_tensor, tensor, async_op=True)
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
