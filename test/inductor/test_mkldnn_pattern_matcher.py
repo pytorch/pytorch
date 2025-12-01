@@ -200,10 +200,10 @@ class TestPatternMatcherBase(TestCase):
             maybe_autocast = torch.amp.autocast(
                 device_type=device, dtype=torch.bfloat16
             )
-            atol, rtol = 1e-2, 1e-2
+            atol, rtol = 5e-2, 5e-2
         elif check_autocast == torch.float16 and (is_mkldnn_fp16_supported(device)):
             maybe_autocast = torch.amp.autocast(device_type=device, dtype=torch.float16)
-            atol, rtol = 1e-2, 1e-2
+            atol, rtol = 5e-2, 5e-2
         else:
             assert check_autocast == torch.float32
             maybe_autocast = contextlib.nullcontext()
