@@ -7,6 +7,10 @@
 
 #ifndef USE_ROCM
 #include <cuda/std/tuple>
+#define TUPLE_NAMESPACE ::cuda::std
+#else
+#include <thrust/tuple.h>
+#define TUPLE_NAMESPACE thrust
 #endif
 
 #include <ATen/AccumulateType.h>
@@ -35,7 +39,7 @@ void prelu_kernel(TensorIterator &iter) {
 void prelu_backward_kernel(TensorIterator &iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "prelu_backward_cuda", [&] {
     gpu_kernel_multiple_outputs(iter,
-      [] GPU_LAMBDA (scalar_t input, scalar_t weight, scalar_t grad) -> NO_ROCM(::cuda)::std::tuple<scalar_t, scalar_t> {
+      [] GPU_LAMBDA (scalar_t input, scalar_t weight, scalar_t grad) -> TUPLE_NAMESPACE::tuple<scalar_t, scalar_t> {
         auto mask = input > 0;
         auto grad_input = mask ? grad : weight * grad;
         auto grad_weight = mask ? scalar_t{0} : input * grad;
