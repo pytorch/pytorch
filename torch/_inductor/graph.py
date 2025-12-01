@@ -2443,7 +2443,7 @@ class GraphLowering(torch.fx.Interpreter):
             kernel_autotune_defs = kernel_autotune_defs.replace('"""', '\\"\\"\\"')
 
             tuning_code = (
-                '"""\n'
+                'r"""\n'
                 + "Compile-time auto-tuning block: \n"
                 + kernel_autotune_defs
                 + self.wrapper_code.kernel_autotune_calls.getvalue()
