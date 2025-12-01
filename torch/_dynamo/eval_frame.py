@@ -251,7 +251,7 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             cache_entries = _debug_get_cache_entry_list(frame.f_code)
             if cache_entries:
                 reasons = get_and_maybe_log_recompilation_reasons(
-                    cache_entries[0], frame, skip_logging=True
+                    cache_entries[0], frame, innermost_fn(callback), skip_logging=True
                 )
                 if reasons:
                     failures = textwrap.indent("\n".join(reasons), "- ")
@@ -787,6 +787,11 @@ class _TorchDynamoContext:
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
 
+            if torch._inductor.config.force_disable_caches:
+                raise RuntimeError(
+                    "Cannot precompile with torch._inductor.config.force_disable_caches=True; caching is required."
+                )
+
             if not self.fullgraph:
                 raise RuntimeError(
                     "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
@@ -796,6 +801,7 @@ class _TorchDynamoContext:
                 raise RuntimeError("aot compile requires a callable dynamo callback.")
 
             assert self._hooks is not None
+
             return aot_compile_fullgraph(
                 fn,
                 example_inputs,

@@ -955,6 +955,11 @@ class aten_distributed_optimizations:
     # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
     collective_estimator: Literal["analytical", "benchmark"] = "analytical"
 
+    # Maximum memory increase above baseline for prefetch operations
+    # Uses minimum of absolute cap and ratio of baseline
+    max_memory_increase_gb: Optional[float] = None  # Absolute cap in GB
+    max_memory_increase_ratio: Optional[float] = None  # Ratio of baseline peak memory
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1210,6 +1215,13 @@ autotune_lookup_table: dict[str, dict[str, Any]] = {}
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
 
 enable_autograd_for_aot: bool = False
+
+_debug_cpu_to_tpu_pallas: bool = Config(
+    env_name_force="PALLAS_TARGET_TPU", default=False
+)
+pallas_take_first_jax_device_only: bool = Config(
+    env_name_force="PALLAS_TAKE_FIRST_JAX_DEVICE_ONLY", default=True
+)
 
 
 def get_worker_log_path() -> Optional[str]:

@@ -2050,22 +2050,23 @@ class InstructionTranslatorBase(
 
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
+        self.push(it)
         try:
             val = it.next_variable(self)
-            self.push(it)
             self.push(val)
         except (StopIteration, exc.ObservedUserStopIteration) as e:
             if isinstance(e, exc.ObservedUserStopIteration):
                 exc.handle_observed_exception(self)
 
-            # leave iterator upon exhaustion in 3.12
             if sys.version_info >= (3, 12):
                 # CPython 3.12 actually jumps to the instruction after the END_FOR
                 # and performs the action of END_FOR as part of FOR_ITER. We jump
                 # to the END_FOR and run it, so we need to make sure 2 values are
                 # on the stack for it to pop.
-                self.push(it)
                 self.push(ConstantVariable.create(None))
+            else:
+                # pop the iterator in Python < 3.12
+                self.pop()
             self.jump(inst)
 
     def _create_exception_type(self, val: VariableTracker) -> VariableTracker:
@@ -4166,6 +4167,33 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def _make_frame_loc(
+        self, filename: str, lineno: Optional[int], fallback_lineno: int
+    ) -> tuple[str, int]:
+        if lineno is None or lineno < 0:
+            return (filename, fallback_lineno)
+        return (filename, lineno)
+
+    def _get_frame_loc_chain(
+        self, frame_loc: tuple[str, int]
+    ) -> tuple[tuple[str, int], ...]:
+        frame_loc_chain_list: list[tuple[str, int]] = []
+
+        if config.nested_graph_breaks:
+            current_tx: Optional[InstructionTranslatorBase] = self.parent
+            while current_tx is not None:
+                parent_frame_loc = self._make_frame_loc(
+                    current_tx.f_code.co_filename,
+                    current_tx.lineno,
+                    current_tx.f_code.co_firstlineno,
+                )
+                frame_loc_chain_list.append(parent_frame_loc)
+                current_tx = current_tx.parent
+
+        frame_loc_chain_list.reverse()
+        frame_loc_chain_list.append(frame_loc)
+        return tuple(frame_loc_chain_list)
+
     def log_graph_break(
         self,
         code_options: dict[str, Any],
@@ -4176,14 +4204,25 @@ class InstructionTranslatorBase(
             user_stack = torch._guards.TracingContext.extract_stack()
 
         try:
-            frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+            if config.nested_graph_breaks and self.parent is not None:
+                frame_loc = self._make_frame_loc(
+                    self.f_code.co_filename,
+                    self.lineno,
+                    self.f_code.co_firstlineno,
+                )
+            else:
+                frame_loc = self._make_frame_loc(
+                    user_stack[-1].filename,
+                    user_stack[-1].lineno,
+                    0,
+                )
         except IndexError:
             # first instruction
             frame_loc = (
                 code_options["co_filename"],
                 code_options["co_firstlineno"],
             )
-
+        frame_loc_chain = self._get_frame_loc_chain(frame_loc)
         stack_above_dynamo_formatted = ""
         if config.verbose:
             stack_above_dynamo = get_stack_above_dynamo()
@@ -4228,7 +4267,7 @@ class InstructionTranslatorBase(
         if (
             graph_break_log.isEnabledFor(logging.DEBUG)
             and not explain
-            and graph_break_dup_warning_checker.add(frame_loc)
+            and graph_break_dup_warning_checker.add(frame_loc_chain)  # type: ignore[arg-type]
         ):
             # This log line MUST contain the string "Graph break in user code",
             # This log line is exercised from
