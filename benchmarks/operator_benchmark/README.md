@@ -149,7 +149,7 @@ python -m pt.add_test --tag-filter long
 
 The operator benchmarks are continuously monitored in CI to track performance regressions across a diverse set of CPU and GPU devices. Two GitHub Actions workflows run these benchmarks on a regular schedule:
 
-### CPU Benchmarks
+### CPU Microbenchmarks
 
 The [operator_benchmark.yml](../../.github/workflows/operator_benchmark.yml) workflow runs operator benchmarks on CPU devices:
 
