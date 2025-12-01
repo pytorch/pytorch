@@ -5035,7 +5035,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     for i in instance_lists[1:]:
                         assert i.image_size == image_size
                 ret = Instances(image_size)
-                for k in instance_lists[0]._fields.keys():
+                for k in instance_lists[0]._fields:
                     values = [i.get(k) for i in instance_lists]
                     v0 = values[0]
                     if isinstance(v0, torch.Tensor):
@@ -7094,15 +7094,14 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
-        torch._inductor.config.fallback_random = True
-
-        for backend in ["eager", "aot_eager"]:
-            torch.manual_seed(54321)
-            torch.cuda.manual_seed_all(54321)
-            actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                torch.randn((2, 12, 16, 32, 32))
-            ).sum()
-            self.assertEqual(actual, expected)
+        with torch._inductor.config.patch(fallback_random=True):
+            for backend in ["eager", "aot_eager"]:
+                torch.manual_seed(54321)
+                torch.cuda.manual_seed_all(54321)
+                actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                    torch.randn((2, 12, 16, 32, 32))
+                ).sum()
+                self.assertEqual(actual, expected)
 
     def test_incompatible_configs(self):
         with torch._dynamo.config.patch(
