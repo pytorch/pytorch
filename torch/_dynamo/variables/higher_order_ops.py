@@ -195,13 +195,13 @@ def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
 
 
 @contextlib.contextmanager
-def dynamo_allow_side_effects_with_extra_outputs(tx: "InstructionTranslator"):
-    orig_val = tx.output.current_tracer.allow_side_effects_with_extra_outputs
+def dynamo_allow_side_effects_in_hop(tx: "InstructionTranslator"):
+    orig_val = tx.output.current_tracer.allow_side_effects_in_hop
     try:
-        tx.output.current_tracer.allow_side_effects_with_extra_outputs = True
+        tx.output.current_tracer.allow_side_effects_in_hop = True
         yield
     finally:
-        tx.output.current_tracer.allow_side_effects_with_extra_outputs = orig_val
+        tx.output.current_tracer.allow_side_effects_in_hop = orig_val
 
 
 def find_mismatched_vars(var, types, allow_none=False):
@@ -1134,10 +1134,14 @@ def trace_hop_function(
     subtracer,
     enable_grad,
     restore_side_effects,
+    expose_intermediates_to_outputs,
     args,
     sub_kwargs,
 ):
-    enable_side_effects_with_extra_outputs = not restore_side_effects
+    # TODO (tmanlaibaatar) this should be enabled later
+    # enable_side_effects_with_extra_outputs = not restore_side_effects
+    # if expose_intermediates_to_outputs:
+    #     assert not restore_side_effects
 
     autograd_ctx = (
         dynamo_enable_grad(tx, enable_grad)
@@ -1145,8 +1149,10 @@ def trace_hop_function(
         else contextlib.nullcontext()
     )
     side_effects_ctx = (
-        dynamo_allow_side_effects_with_extra_outputs(tx)
-        if enable_side_effects_with_extra_outputs
+        dynamo_allow_side_effects_in_hop(tx)
+        # This is hack to unblock AC work. Only AC sets this to True now
+        # if enable_side_effects_with_extra_outputs
+        if expose_intermediates_to_outputs
         else contextlib.nullcontext()
     )
 
@@ -1227,6 +1233,8 @@ def speculate_subgraph_with_auto_output_flattening(
     ] = "automatic",
     # Make default False
     restore_side_effects: bool = True,
+    # TODO (clean this later)
+    expose_intermediates_to_outputs=False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
@@ -1313,7 +1321,7 @@ def speculate_subgraph_with_auto_output_flattening(
 
     # Compute enable_side_effects_with_extra_outputs from restore_side_effects.
     # When restore_side_effects is False, we allow side effects by returning extra outputs.
-    enable_side_effects_with_extra_outputs = not restore_side_effects
+    # enable_side_effects_with_extra_outputs = not restore_side_effects
 
     assert set_subgraph_inputs in {
         "automatic",
@@ -1351,6 +1359,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 subtracer,
                 enable_grad,
                 restore_side_effects,
+                expose_intermediates_to_outputs,
                 args,
                 sub_kwargs,
             )
@@ -1428,7 +1437,8 @@ def speculate_subgraph_with_auto_output_flattening(
             # want this to be supported for other Hops as well, specifically
             # nested_compile_region and autograd.Function. Today, its safe
             # because we error out on seeing a side-effect.
-            if enable_side_effects_with_extra_outputs:
+            # if enable_side_effects_with_extra_outputs:
+            if expose_intermediates_to_outputs:
                 extra_outputs = _collect_intermediate_outputs(
                     tx, subtracer, graph_output_vts
                 )
@@ -1574,6 +1584,7 @@ def speculate_subgraph(
                 subtracer,
                 enable_grad,
                 restore_side_effects,
+                False,
                 args,
                 sub_kwargs,
             )
@@ -2866,6 +2877,9 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             description,
             source_target=self.value,
             restore_side_effects=self.restore_side_effects,
+            expose_intermediates_to_outputs=(
+                description == "torch.utils.checkpoint.checkpoint"
+            ),
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
         )

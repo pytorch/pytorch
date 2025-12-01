@@ -655,7 +655,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
         if (
             tx.output.current_tracer.under_activation_checkpoint
-            and not tx.output.current_tracer.allow_side_effects_with_extra_outputs
+            and not tx.output.current_tracer.allow_side_effects_in_hop
         ):
             try:
                 from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
@@ -665,9 +665,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 FSDPState._pre_forward,
                 FSDPState._post_forward,
             ]:
-                with torch._dynamo.side_effects.allow_side_effects_with_extra_outputs(
-                    tx
-                ):
+                with torch._dynamo.side_effects.allow_side_effects_in_hop(tx):
                     return super().call_function(tx, args, kwargs)
 
         tree_map_result = self._maybe_call_tree_map_fastpath(tx, args, kwargs)
