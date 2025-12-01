@@ -7,7 +7,7 @@ on:
 
 jobs:
   checkout:
-    uses: ./.github/workflows/checkout.yaml
+    uses: ./.github/workflows/checkout.yml
 
   sonar:
     name: SonarQube
