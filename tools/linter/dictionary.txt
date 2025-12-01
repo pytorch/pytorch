@@ -28,9 +28,9 @@ inp
 inps
 inpt
 inpts
-matA
-matB
-matC
+mata
+matb
+matc
 NAX
 nd
 nin
@@ -38,6 +38,7 @@ NotIn
 nout
 NowNs
 numer
+OffsetT
 oH
 optins
 ot
