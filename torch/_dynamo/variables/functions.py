@@ -889,7 +889,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self,
         code: types.CodeType,
         f_globals: dict[str, Any],
-        inline_tracer: Optional["InstructionTranslator"],
+        inline_tracer: "InstructionTranslator",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -954,12 +954,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return types.GeneratorType
 
     def _get_inline_tracer(self, tx: "InstructionTranslator") -> Any:
-        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
-
-        if self.inline_tracer is None:
-            self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(  # type: ignore[assignment]
-                tx, self, [], {}
-            )
+        assert self.inline_tracer is not None
         return self.inline_tracer
 
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
