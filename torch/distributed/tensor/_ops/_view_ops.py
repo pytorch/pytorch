@@ -544,6 +544,7 @@ def propagate_shape_and_sharding(
         input_dim: InputDim,
     ) -> tuple[int | None, Shard | None]:
         # if input_dim is sharded, return the mesh_dim and shard placement
+        # Note: _StridedShard is a subclass of Shard, so isinstance check will catch both
         for i, placement in enumerate(input_src_placements):
             if isinstance(placement, Shard) and placement.dim == input_dim.input_dim:
                 return i, placement
@@ -611,28 +612,52 @@ def propagate_shape_and_sharding(
                 # double resharding as a suggestion (e.g. [Shard(0), Shard(0) ])
                 # but we will allow it if that's the input and it's compatible
 
-                # 1. is this dimension shardable on each individual mesh dim?
-                shardable_dims[in_dim.input_dim] = [
-                    out_size % mesh_dim_size == 0 for mesh_dim_size in mesh_sizes
-                ]
+                # Special case for _StridedShard: if we're splitting a _StridedShard dimension
+                # and the first split size equals the split_factor, we can convert to Shard
+                # on the last split dimension
+                shard_mesh_dim, shard_placement = maybe_get_shard_mesh_dim_and_placement(in_dim)
+                is_strided_shard = isinstance(shard_placement, _StridedShard)
 
-                shard_mesh_dim, _ = maybe_get_shard_mesh_dim_and_placement(in_dim)
-                if strict_view and shard_mesh_dim is not None:
-                    if not shardable_dims[in_dim.input_dim][shard_mesh_dim]:
-                        raise RuntimeError(
-                            f"Attempted to split the sharded dimension {in_dim.input_dim} into multiple subdimensions. ",
-                            "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                if is_strided_shard and shard_mesh_dim is not None:
+                    # For _StridedShard(dim=k, split_factor=n), when splitting into (d1, d2, ...),
+                    # if d1 == n, we can convert to Shard on the rightmost split dimension
+                    # (which will have split_id = len(group_shape) - 1)
+                    if cmd.group_shape[0] == shard_placement.split_factor:  # type: ignore[union-attr]
+                        # Mark this dimension as shardable on the last split output dimension
+                        # The actual conversion will happen in _rewrite_shard_dim
+                        shardable_dims[in_dim.input_dim] = [True] * mesh_ndim
+                    else:
+                        # Cannot convert - need redistribution
+                        shardable_dims[in_dim.input_dim] = [False] * mesh_ndim
+                        if strict_view:
+                            raise RuntimeError(
+                                f"Attempted to split _StridedShard dimension {in_dim.input_dim} with split_factor={shard_placement.split_factor} "  # type: ignore[union-attr]
+                                f"into subdimensions {cmd.group_shape}, but first dimension {cmd.group_shape[0]} != split_factor. "
+                                "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                            )
+                else:
+                    # Regular Shard case
+                    # 1. is this dimension shardable on each individual mesh dim?
+                    shardable_dims[in_dim.input_dim] = [
+                        out_size % mesh_dim_size == 0 for mesh_dim_size in mesh_sizes
+                    ]
+
+                    if strict_view and shard_mesh_dim is not None and not is_strided_shard:
+                        if not shardable_dims[in_dim.input_dim][shard_mesh_dim]:
+                            raise RuntimeError(
+                                f"Attempted to split the sharded dimension {in_dim.input_dim} into multiple subdimensions. ",
+                                "It cannot be performed without redistribution, which is disallowed by the current operator.",
+                            )
+
+                    # 2. here we special case things like [Shard(0), Shard(0)]
+                    submesh_size = 1
+                    for size, shard in zip(mesh_sizes, input_src_placements):
+                        if isinstance(shard, Shard) and not isinstance(shard, _StridedShard) and shard.dim == in_dim.input_dim:
+                            submesh_size *= size
+                    if submesh_size > 1 and not out_size % submesh_size == 0:
+                        raise AssertionError(
+                            f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
                         )
-
-                # 2. here we special case things like [Shard(0), Shard(0)]
-                submesh_size = 1
-                for size, shard in zip(mesh_sizes, input_src_placements):
-                    if isinstance(shard, Shard) and shard.dim == in_dim:
-                        submesh_size *= size
-                if not out_size % submesh_size == 0:
-                    raise AssertionError(
-                        f"Resulting dimension size {out_size} is not divisible by its mesh dimension {submesh_size}."
-                    )
 
             # we will only shard our first component of the split
             return in_dim if cmd.split_id == 0 else None
@@ -646,10 +671,30 @@ def propagate_shape_and_sharding(
 
     # for each output dim, find the corresponding input dim in terms of sharding prop
     shard_dim_map = {}
+    strided_shard_dim_map = {}  # Special map for _StridedShard -> rightmost split dim
     for dim, cmd in enumerate(rule):
         in_dim = get_in_dim_to_shard(cmd)
         if in_dim is not None:
             shard_dim_map[in_dim.input_dim] = dim
+
+        # Special handling for _StridedShard: map to the rightmost (last) split dimension
+        if isinstance(cmd, Split):
+            # Get the input dim from the Split command directly
+            split_in_dim = cmd.input_dim
+            if isinstance(split_in_dim, InputDim):
+                input_dim_idx = split_in_dim.input_dim
+            else:
+                # Handle nested cases (e.g., Split of Flatten)
+                # For now, we'll skip these complex cases
+                continue
+
+            # Check if this input dimension has a _StridedShard placement
+            for placement in input_src_placements:
+                if isinstance(placement, _StridedShard) and placement.dim == input_dim_idx:
+                    # Map to the rightmost split dimension (last split_id)
+                    if cmd.split_id == len(cmd.group_shape) - 1:
+                        strided_shard_dim_map[input_dim_idx] = dim
+
 
     input_tgt_placements = [
         (
@@ -663,21 +708,22 @@ def propagate_shape_and_sharding(
     def _rewrite_shard_dim(p: Shard):
         """
         Rewrite the shard dim to the corresponding tensor dim in output.
-        For ``_StridedShard``, we can safely keep the placement type and
-        ``split_factor`` unchanged and only rewrite the ``dim`` because:
-        1. ``_StridedShard`` has no impact on sharding (i.e. how
-            tensor is partitioned) compared to ``Shard``. It only changes
-            how shards permute across the devices.
-        2. ``view()`` op on DTensor strictly forbids shard redistribution
-            which means if ``view()`` may cause shard permutation across
-            devices, it should be rejected. This is enforced in today's
-            sharding prop for ``view()``.
-        3. Since DTensor ``view()`` won't introduce any redistribution,
-            it's certain that ``placements`` won't change except the
-            inner ``dim`` attribute of ``Shard`` or ``_StridedShard``.
+        For ``_StridedShard``, when splitting a dimension where the first split size
+        equals split_factor, we convert to regular ``Shard`` on the rightmost split dim.
+        Otherwise, we keep the placement type and ``split_factor`` unchanged and only
+        rewrite the ``dim``.
         """
         if isinstance(p, _StridedShard):
-            return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
+            # Check if we can convert _StridedShard to Shard (when splitting compatible with split_factor)
+            if p.dim in strided_shard_dim_map:
+                # Convert to regular Shard on the rightmost split dimension
+                return Shard(strided_shard_dim_map[p.dim])
+            elif p.dim in shard_dim_map:
+                # Keep as _StridedShard but update dim
+                return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
+            else:
+                # This shouldn't happen if shardable_dims is set correctly
+                raise AssertionError(f"_StridedShard dimension {p.dim} not found in shard_dim_map")
         else:
             return Shard(shard_dim_map[p.dim])
 

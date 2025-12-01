@@ -43,6 +43,24 @@ except ImportError:
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
 
+def stack_handler(
+    op_call: torch._ops.OpOverload,
+    args: tuple[object, ...],
+    kwargs: dict[str, object],
+):
+    import torch._prims_common as utils
+    tensors = args[0]
+    dim = 0 if len(args) == 1 else args[1]
+    wrapped_dim = utils.canonicalize_dim(tensors[0].ndim + 1, dim)
+    # Refs need sparse support to check other condition
+    if wrapped_dim < tensors[0].ndim:  # and not tensors[0].is_sparse:
+        result_sizes = list(tensors[0].shape)
+        result_sizes.insert(wrapped_dim, len(tensors))
+        out = torch.cat(tensors, wrapped_dim)
+        return out.view(result_sizes)
+
+    # If dim == tensors[0].ndim, view cannot efficiently handle it
+    return torch.cat([t.unsqueeze(wrapped_dim) for t in tensors], dim)
 
 def as_strided_handler(
     op_call: torch._ops.OpOverload,
@@ -153,6 +171,7 @@ class OpDispatcher:
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
+            aten.stack.default: stack_handler,
         }
 
     # ********************************************************************************************
