@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, NoReturn, Optional
+from typing import Any, NoReturn
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.dataframe.structures import DataChunkDF
@@ -454,7 +454,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
 
 @functional_datapipe("trace_as_dataframe")
 class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):  # type: ignore[misc]
-    source_datapipe: Optional[Any] = None
+    source_datapipe: Any | None = None
 
     # TODO(VitalyFedyunin): Must implement all special functions of datapipes
 

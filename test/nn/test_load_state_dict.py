@@ -310,7 +310,7 @@ class TestLoadStateDict(NNTestCase):
 
         # Make sure parameters and persistent buffers were assigned
         net_meta_state_dict = net_meta.state_dict(keep_vars=True)
-        for key in state_dict.keys():
+        for key in state_dict:
             if key in net_meta._parameters:
                 if keep_vars and not swap:
                     # state_dict[key] is an nn.Parameter

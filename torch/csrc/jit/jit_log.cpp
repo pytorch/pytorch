@@ -11,7 +11,6 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
 #include <torch/csrc/jit/api/function_impl.h>
-#include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/serialization/python_print.h>
@@ -159,9 +158,9 @@ std::string jit_log_prefix(
     int l,
     const std::string& in_str) {
   std::stringstream prefix_ss;
-  prefix_ss << "[";
-  prefix_ss << level << " ";
-  prefix_ss << c10::detail::StripBasename(std::string(fn)) << ":";
+  prefix_ss << '[';
+  prefix_ss << level << ' ';
+  prefix_ss << c10::detail::StripBasename(std::string(fn)) << ':';
   prefix_ss << std::setfill('0') << std::setw(3) << l;
   prefix_ss << "] ";
 
