@@ -10,6 +10,7 @@ import torch.fx as fx
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
 from torch._C import FileCheck
+from torch._dynamo.utils import counters
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -168,6 +169,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag2: mm2,  # mm2 hides ag2
         }
 
+        # Build collective info and scheduled
         collective_info = build_collective_info(traced.graph, hiding_annotations)
         scheduled = OrderedSet(traced.graph.nodes)
 
@@ -717,6 +719,107 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         f.check("pre_bucket_all_gather").check("wait_tensor").check(
             "%all_gather_into_tensor_out"
         ).run(graph_str)
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestCrossPGOverlap(InductorTestCase):
+    """
+    Tests for cross-PG overlap scheduling.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        cls.device = "cuda"
+
+        # Create two separate process groups for cross-PG testing
+        cls.pg1 = dist.new_group(ranks=[0, 1])
+        cls.pg2 = dist.new_group(ranks=[0, 1])
+        cls.pg1_name = cls.pg1.group_name
+        cls.pg2_name = cls.pg2.group_name
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group(cls.pg1)
+        dist.destroy_process_group(cls.pg2)
+        dist.destroy_process_group()
+
+    def test_cross_pg_prefetch_during_exposed_wait(self):
+        """
+        Test that ag2 on PG2 gets prefetched during exposed wait of ag1 on PG1.
+        """
+        pg1_name = self.pg1_name
+        pg2_name = self.pg2_name
+
+        def func(a, b):
+            group_size = 1
+
+            # First collective on PG1
+            ag1 = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, pg1_name
+            )
+            ag1_out = torch.ops._c10d_functional.wait_tensor(ag1)
+            mm1 = torch.mm(ag1_out[:4, :4], ag1_out[:4, :4])
+
+            # Second collective on PG2
+            ag2 = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, pg2_name
+            )
+            ag2_out = torch.ops._c10d_functional.wait_tensor(ag2)
+            mm2 = torch.mm(ag2_out[:4, :4], ag2_out[:4, :4])
+
+            return mm1 + mm2
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device) * 2
+
+            traced = make_fx(func)(a, b)
+
+        # Find nodes
+        ag1, ag2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        wait1, wait2 = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.wait_tensor.default,
+        )
+        mm1, mm2 = traced.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.mm.default
+        )
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            if "all_gather" in str(node.target):
+                return 10.0
+            return 0.0
+
+        # Run overlap scheduler
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=custom_runtime,
+            collective_estimator="analytical",
+        )
+        out = scheduler.run()
+        FileCheck().check("%all_gather_into_tensor").check(
+            "%all_gather_into_tensor"
+        ).check("%wait_tensor").run(str(out.graph))
+
+        self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
 
 
 if __name__ == "__main__":
