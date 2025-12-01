@@ -86,8 +86,8 @@ class AotAutograd:
                     reason="do not trace generated backwards pass",
                 )
 
-            _wrapped_bw_compiler._is_wrapped_bw_compiler = (
-                True  # pyrefly: ignore [missing-attribute]
+            _wrapped_bw_compiler._is_wrapped_bw_compiler = (  # pyrefly: ignore [missing-attribute]
+                True
             )
             return _wrapped_bw_compiler
 
