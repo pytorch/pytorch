@@ -4,15 +4,15 @@ on:
   pull_request:
     branches:
       - main
-  
 
 jobs:
-  sonar:
+  checkout:
     uses: ./.github/workflows/checkout.yaml
-  
+
+  sonar:
     name: SonarQube
     runs-on: ubuntu-latest
-    needs:sonar
+    needs: checkout
     steps:
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@v6
