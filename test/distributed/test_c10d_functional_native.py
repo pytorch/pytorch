@@ -343,6 +343,22 @@ class TestWithNCCL(MultiProcessTestCase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_tensor_out(self) -> None:
+        self._init_process_group()
+
+        input = torch.tensor(self.ranks, device=self.device)
+        out = torch.tensor([-1], device=self.device)
+        w = torch.ops._c10d_functional.reduce_scatter_tensor_out(
+            input,
+            "avg",
+            self.world_size,
+            "default",
+            out=out,
+        )
+        torch.ops._c10d_functional.wait_tensor(w)
+        assert out.eq(self.rank).all()
+
+    @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_coalesced(self) -> None:
         self._init_process_group()
 
