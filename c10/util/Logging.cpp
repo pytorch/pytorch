@@ -1,5 +1,4 @@
 #include <c10/util/Backtrace.h>
-#include <c10/util/FileSystem.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Lazy.h>
 #include <c10/util/Logging.h>
@@ -474,12 +473,13 @@ MessageLogger::MessageLogger(
   if (GLOBAL_RANK != -1) {
     stream_ << "[rank" << GLOBAL_RANK << "]:";
   }
-  stream_ << "[" << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
+  stream_ << '[' << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
           << (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-          << std::setfill('0') << " " << std::setw(2) << timeinfo->tm_hour
-          << ":" << std::setw(2) << timeinfo->tm_min << ":" << std::setw(2)
-          << timeinfo->tm_sec << "." << std::setw(9) << ns << " "
-          << c10::filesystem::path(file).filename() << ":" << line << "] ";
+          << std::setfill('0') << ' ' << std::setw(2) << timeinfo->tm_hour
+          << ':' << std::setw(2) << timeinfo->tm_min << ':' << std::setw(2)
+          << timeinfo->tm_sec << '.' << std::setw(9) << ns << ' '
+          << c10::detail::StripBasename(std::string(file)) << ':' << line
+          << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
@@ -488,7 +488,7 @@ MessageLogger::~MessageLogger() noexcept(false) {
     // Nothing needs to be logged.
     return;
   }
-  stream_ << "\n";
+  stream_ << '\n';
 #ifdef ANDROID
   static const int android_log_levels[] = {
       ANDROID_LOG_FATAL, // LOG_FATAL

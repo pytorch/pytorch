@@ -2,15 +2,12 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <ATen/Device.h>
 #include <c10/util/Exception.h>
 
-#include <structmember.h>
 #include <limits>
 #include <sstream>
 
@@ -29,14 +26,14 @@ PyObject* THPDevice_New(const at::Device& device) {
 
 static PyObject* THPDevice_repr(THPDevice* self) {
   std::ostringstream oss;
-  oss << "device(type=\'" << self->device.type() << "\'";
+  oss << "device(type=\'" << self->device.type() << '\'';
   if (self->device.has_index()) {
     // `self->device.index()` returns uint8_t which is treated as ascii while
     // printing, hence casting it to uint16_t.
     // https://stackoverflow.com/questions/19562103/uint8-t-cant-be-printed-with-cout
     oss << ", index=" << static_cast<uint16_t>(self->device.index());
   }
-  oss << ")";
+  oss << ')';
   return THPUtils_packString(oss.str().c_str());
 }
 
