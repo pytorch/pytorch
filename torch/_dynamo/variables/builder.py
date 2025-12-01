@@ -56,7 +56,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._guards import TracingContext
-from torch._higher_order_ops.flat_apply import flat_apply
+from torch._higher_order_ops.flat_apply import FlatApply
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
@@ -3170,7 +3170,7 @@ def handle_traced_output(example_value, tx, proxy, options, subclass_type, targe
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, (int, float, bool)) and (
         proxy.node.target is call_torchbind
-        or proxy.node.target is flat_apply
+        or isinstance(proxy.node.target, FlatApply)
         or (proxy.node.op == "call_method" and proxy.node.target == "item")
     ):
         set_example_value(proxy.node, example_value)

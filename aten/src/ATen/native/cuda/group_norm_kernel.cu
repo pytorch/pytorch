@@ -3,7 +3,6 @@
 
 #include <type_traits>
 
-#include <thrust/tuple.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
@@ -63,9 +62,7 @@ __global__ void RowwiseMomentsCUDAKernel(
         val_shared_ptr);
   }
   if (threadIdx.x == 0) {
-    T_ACC m1;
-    T_ACC m2;
-    thrust::tie(m2, m1) = welford_op.project(val);
+    auto [m2, m1] = welford_op.project(val);
     mean[i] = m1;
     rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
   }
@@ -460,7 +457,7 @@ __global__ void GammaBetaBackwardCUDAKernel2(
     }
   }
 
-  // Do warp reduce for the 2st 16 cols in the tile.
+  // Do warp reduce for the 2nd 16 cols in the tile.
   sum1 = g_shared[threadIdx.x][threadIdx.y + blockDim.y];
   sum2 = b_shared[threadIdx.x][threadIdx.y + blockDim.y];
   sum1 = cuda_utils::WarpReduceSum<T_ACC>(sum1);

@@ -1,5 +1,7 @@
-import torch
+# Owner(s): ["module: dynamo"]
 from dataclasses import dataclass
+
+import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -18,14 +20,11 @@ class TestDataclassFunction(TestCase):
         b = torch.randn(4, 4)
 
         @torch._dynamo.nonstrict_trace
-        def gn(
-            count, values
-        ) -> tuple[torch.Tensor, OutputData]:
+        def gn(count, values) -> tuple[torch.Tensor, OutputData]:
             output_tensor = a + b * count * values
 
             output_data = OutputData(
-                result1=output_tensor + count,
-                result2=output_tensor * (count + 1)
+                result1=output_tensor + count, result2=output_tensor * (count + 1)
             )
 
             return output_tensor, output_data
@@ -34,7 +33,6 @@ class TestDataclassFunction(TestCase):
             x = torch.sin(values)
             y, y_data = gn(count, values)
             return x + y + y_data.result1 + y_data.result2
-
 
         count = 5
         values = torch.randn(4, 4)

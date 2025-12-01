@@ -1,12 +1,18 @@
 import typing
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing_extensions import TypeIs
+from typing import Generic, overload, TypeAlias, TypeVar
+from typing_extensions import ParamSpec, TypeIs, TypeVarTuple, Unpack
 
 import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
+
+
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
+_Ts = TypeVarTuple("_Ts")
 
 
 def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
@@ -34,7 +40,9 @@ def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
     return flat_args, spec
 
 
-def from_graphable(flat_args: Iterable[object], spec: pytree.TreeSpec) -> pytree.PyTree:
+def from_graphable(
+    flat_args: tuple[Unpack[_Ts]], spec: pytree.TreeSpec
+) -> pytree.PyTree:
     """The inverse of to_graphable."""
     stuff = pytree.tree_unflatten(flat_args, spec)
     return stuff
@@ -51,10 +59,10 @@ def func_to_graphable(
 
 
 @dataclass(frozen=True)
-class _ConstantFunction:
-    func: Callable[..., object]
+class _ConstantFunction(Generic[_P, _R]):
+    func: Callable[_P, _R]
 
-    def __call__(self, *args: object, **kwargs: object):
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         return self.func(*args, **kwargs)
 
 
@@ -67,17 +75,32 @@ _OpTypes = (
 _op_types = typing.get_args(_OpTypes)
 
 
+_Base: TypeAlias = torch.fx.node.BaseArgumentTypes
+# pyrefly bug: pyrefly is complaining: Expected a type form, got instance of `Literal['_FXOutput']
+# pyrefly: ignore[not-a-type]
+_FXOutput = _Base | Sequence["_FXOutput"]
+
+
 class FlatApply(HigherOrderOperator):
-    def __init__(self) -> None:
+    # If True (default) then the output is flattened. If False then the output
+    # is returned verbatim (and must be valid graphable output).
+    flatten_output: bool = True
+
+    def __init__(self, *, flatten_output: bool = True) -> None:
         super().__init__("flat_apply")
+        self.out_spec: pytree.TreeSpec | None = None
+        self.flatten_output = flatten_output
 
     def __call__(
         self,
         func: _OpTypes | pytree.TreeSpec,
         in_spec: pytree.TreeSpec,
-        *flat_args: object,
+        *flat_args: tuple[Unpack[_Ts]],
+        # If True then the output is flattened. If False (the default) then the
+        # output is returned verbatim (and must be valid graphable output).
+        flatten_output: bool = False,
         **_unused: object,
-    ):
+    ) -> object:
         """
         Functions that take in non-graphable types cannot directly be put into FX graph.
 
@@ -89,7 +112,8 @@ class FlatApply(HigherOrderOperator):
         >>> def flat_apply_impl(func, in_spec, *flat_args):
         >>>     args, kwargs = pytree.tree_unflatten(flat_args, in_spec)
         >>>     output = func(*args, **kwargs)
-        >>>     return output
+        >>>     flat_output, self.out_spec = pytree.tree_flatten(output)
+        >>>     return flat_output
 
         flat_apply supports the following two cases:
         - an input type is a container type (e.g. of tensors) registered as a pytree.
@@ -98,86 +122,49 @@ class FlatApply(HigherOrderOperator):
         registered with pytree.register_constant. The constant type goes directly
         into the spec.
 
+        Output is handled in a similar, but reverse, fashion with the output
+        spec stored on the FlatApply object. Note that wrapped functions must
+        return the same pytree structure every time they're called.
         """
         assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
         assert len(_unused) == 0
-        return impl(func, in_spec, flat_args)
 
+        if isinstance(func, pytree.TreeSpec):
+            # assume _ConstantFunction
+            func = pytree._retrieve_constant(func)
+            assert isinstance(func, _ConstantFunction)
 
-def impl(
-    func: _OpTypes | pytree.TreeSpec,
-    in_spec: pytree.TreeSpec,
-    flat_args: tuple[object, ...],
-) -> object | tuple[object, pytree.TreeSpec]:
-    if not isinstance(func, _op_types):
-        # assume _ConstantFunction
-        func = pytree._retrieve_constant(func)
-        assert isinstance(func, _ConstantFunction)
+        # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
+        args, kwargs = from_graphable(flat_args, in_spec)
+        out = func(*args, **kwargs)
 
-    args, kwargs = from_graphable(flat_args, in_spec)
-    out = func(*args, **kwargs)
+        if flatten_output:
+            out, out_spec = to_graphable(out)
 
-    # Right now, all outputs must either be graphable or lists/tuples of graphables.
-    #
-    # If you need non-graphable outputs then use FlatApplyFlat and unflatten the
-    # result in-graph.
-    def is_valid_output(x: object) -> bool:
-        if isinstance(x, (tuple, list)):
-            return all(map(is_valid_output, x))
-        return is_graphable(x)
+            if self.out_spec is None:
+                self.out_spec = out_spec
+            elif self.out_spec != out_spec:
+                raise RuntimeError(
+                    "Invalid function passed to FlatApply. The called function returned a value with a different "
+                    "pytree shape on a subsequent call."
+                )
 
-    assert is_valid_output(out)
-    return out
+        assert _is_valid_output(out)
+        return out
 
 
 flat_apply = FlatApply()
 
 
-class FlatApplyFlat(HigherOrderOperator):
-    def __init__(self) -> None:
-        super().__init__("flat_apply_flat")
-        self.out_spec: pytree.TreeSpec | None = None
+@overload
+def _is_valid_output(x: tuple[object, ...]) -> TypeIs[tuple[_FXOutput, ...]]: ...
 
-    def __call__(
-        self,
-        func: _OpTypes | pytree.TreeSpec,
-        in_spec: pytree.TreeSpec,
-        *flat_args: tuple[object],
-        **_unused: object,
-    ):
-        """
-        See flat_apply. FlatApplyFlat works like FlatApply but also flattens the function output.
 
-        The semantics of flat_apply_flat(func, in_spec, *flat_args) are roughly equivalent to:
+@overload
+def _is_valid_output(x: Sequence[object]) -> TypeIs[Sequence[_FXOutput]]: ...
 
-        >>> def flat_apply_impl(func, in_spec, *flat_args):
-        >>>     args, kwargs = pytree.tree_unflatten(flat_args, in_spec)
-        >>>     output = func(*args, **kwargs)
-        >>>     flat_output, self.out_spec = pytree.tree_flatten(output)
-        >>>     return flat_output
 
-        Why is out_spec a constant on the HOP instead of a returned value? Like
-        in_spec we want the output to be constant so we can reconstruct the
-        output statically.
-        """
-        assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
-        assert len(_unused) == 0
-
-        if not isinstance(func, _op_types):
-            # assume _ConstantFunction
-            func = pytree._retrieve_constant(func)
-            assert isinstance(func, _ConstantFunction)
-
-        args, kwargs = from_graphable(flat_args, in_spec)
-        out = func(*args, **kwargs)
-
-        result, out_spec = to_graphable(out)
-
-        if self.out_spec is None:
-            self.out_spec = out_spec
-        elif self.out_spec != out_spec:
-            raise RuntimeError(
-                "Invalid function passed to FlatApplyFlat. The called function returned a value with a different pytree shape on a subsequent call."
-            )
-
-        return result
+def _is_valid_output(x: object) -> bool:
+    if isinstance(x, (tuple, list)):
+        return all(map(_is_valid_output, x))
+    return is_graphable(x)

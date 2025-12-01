@@ -63,7 +63,6 @@ from ..source import (
 )
 from ..utils import (
     check_unspec_or_constant_args,
-    get_fake_value,
     guard_if_dyn,
     has_torch_function,
     hashable,
@@ -1682,9 +1681,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        import torch._higher_order_ops.flat_apply as flat_apply
         from torch._higher_order_ops.flat_apply import (
-            FlatApplyFlat,
+            FlatApply,
             func_to_graphable,
             is_graphable_type,
         )
@@ -1816,8 +1814,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
         # the call and wrap output into a VariableTracker.
-        flat_apply = FlatApplyFlat()
-        proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
+        flat_apply = FlatApply()
+        proxy = tx.output.create_proxy(
+            "call_function", flat_apply, all_args, {"flatten_output": True}
+        )
 
         # Instead of calling tree_unflatten at runtime, symbolically trace it
         # just like we did for tree_flatten on inputs. This lets Dynamo
@@ -1834,7 +1834,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # Reuse the same pattern used above for tree_flatten: call the python
         # function through Dynamo so it symbolically interprets it.
         out_vt = variables.UserFunctionVariable(_pytree.tree_unflatten).call_function(
-            tx, [proxy_list_vt, out_spec_vt], {}
+            tx, [proxy_list_vt, out_spec_vt], unflatten_kwargs_vt
         )
 
         return out_vt
