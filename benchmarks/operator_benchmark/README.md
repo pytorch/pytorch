@@ -197,8 +197,8 @@ The [operator_microbenchmark.yml](../../.github/workflows/operator_microbenchmar
 
 To trigger a manual run of the benchmarks:
 
-1. Navigate to the [GitHub Actions workflows](https://github.com/pytorch/pytorch/actions)
-2. Select either `operator_benchmark` or `operator_microbenchmark`
+1. Navigate to the GitHub Actions workflows
+2. Select either [operator_benchmark](https://github.com/pytorch/pytorch/actions/workflows/operator_benchmark.yml) or [operator_microbenchmark](https://github.com/pytorch/pytorch/actions/workflows/operator_microbenchmark.yml)
 3. Click "Run workflow" in the top right
 4. For CPU benchmarks, optionally select a test mode (`short`, `long`, or `all`)
 5. Click "Run workflow" to start the benchmark run
