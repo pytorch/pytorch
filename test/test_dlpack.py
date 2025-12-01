@@ -1,7 +1,8 @@
 # Owner(s): ["module: tests"]
 
-import torch
 import numpy as np
+
+import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     deviceCountAtLeast,
