@@ -5,8 +5,6 @@ from __future__ import annotations
 import atexit
 import os
 import pickle
-import sys
-import unittest
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError, wait
 from contextlib import contextmanager
 from functools import wraps
@@ -376,7 +374,6 @@ class ContextTest(TestCase):
         """
         self.assertEqual(context._isolation_key(), context._isolation_key())
 
-    @unittest.skipIf(sys.version_info >= (3, 14), "Failing on Python 3.14+")
     def test_select_runtime_context_matches_forms_of_context(self) -> None:
         """
         Tests that the selected runtime context matches the forms of context.
@@ -390,7 +387,6 @@ class ContextTest(TestCase):
             set(context._RuntimeContext.forms_of_context()),
         )
 
-    @unittest.skipIf(sys.version_info >= (3, 14), "Failing on Python 3.14+")
     def test_select_compile_context_matches_forms_of_context(self) -> None:
         """
         Tests that the selected compile context matches the forms of context.
