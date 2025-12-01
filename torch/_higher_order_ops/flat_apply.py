@@ -1,12 +1,18 @@
 import typing
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing_extensions import TypeIs
+from typing import Generic, overload, TypeAlias, TypeVar
+from typing_extensions import ParamSpec, TypeIs, TypeVarTuple, Unpack
 
 import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
 from torch._ops import HigherOrderOperator
+
+
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
+_Ts = TypeVarTuple("_Ts")
 
 
 def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
@@ -34,7 +40,9 @@ def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
     return flat_args, spec
 
 
-def from_graphable(flat_args: Iterable[object], spec: pytree.TreeSpec) -> pytree.PyTree:
+def from_graphable(
+    flat_args: tuple[Unpack[_Ts]], spec: pytree.TreeSpec
+) -> pytree.PyTree:
     """The inverse of to_graphable."""
     stuff = pytree.tree_unflatten(flat_args, spec)
     return stuff
@@ -51,10 +59,10 @@ def func_to_graphable(
 
 
 @dataclass(frozen=True)
-class _ConstantFunction:
-    func: Callable[..., object]
+class _ConstantFunction(Generic[_P, _R]):
+    func: Callable[_P, _R]
 
-    def __call__(self, *args: object, **kwargs: object):
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         return self.func(*args, **kwargs)
 
 
@@ -67,6 +75,12 @@ _OpTypes = (
 _op_types = typing.get_args(_OpTypes)
 
 
+_Base: TypeAlias = torch.fx.node.BaseArgumentTypes
+# pyrefly bug: pyrefly is complaining: Expected a type form, got instance of `Literal['_FXOutput']
+# pyrefly: ignore[not-a-type]
+_FXOutput = _Base | Sequence["_FXOutput"]
+
+
 class FlatApply(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flat_apply")
@@ -75,9 +89,9 @@ class FlatApply(HigherOrderOperator):
         self,
         func: _OpTypes | pytree.TreeSpec,
         in_spec: pytree.TreeSpec,
-        *flat_args: object,
+        *flat_args: tuple[Unpack[_Ts]],
         **_unused: object,
-    ):
+    ) -> object:
         """
         Functions that take in non-graphable types cannot directly be put into FX graph.
 
@@ -104,16 +118,31 @@ class FlatApply(HigherOrderOperator):
         return impl(func, in_spec, flat_args)
 
 
+@overload
+def _is_valid_output(x: tuple[object, ...]) -> TypeIs[tuple[_FXOutput, ...]]: ...
+
+
+@overload
+def _is_valid_output(x: Sequence[object]) -> TypeIs[Sequence[_FXOutput]]: ...
+
+
+def _is_valid_output(x: object) -> bool:
+    if isinstance(x, (tuple, list)):
+        return all(map(_is_valid_output, x))
+    return is_graphable(x)
+
+
 def impl(
     func: _OpTypes | pytree.TreeSpec,
     in_spec: pytree.TreeSpec,
-    flat_args: tuple[object, ...],
-) -> object | tuple[object, pytree.TreeSpec]:
-    if not isinstance(func, _op_types):
+    flat_args: tuple[Unpack[_Ts]],
+) -> _FXOutput:
+    if isinstance(func, pytree.TreeSpec):
         # assume _ConstantFunction
         func = pytree._retrieve_constant(func)
         assert isinstance(func, _ConstantFunction)
 
+    # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
     args, kwargs = from_graphable(flat_args, in_spec)
     out = func(*args, **kwargs)
 
@@ -126,12 +155,8 @@ def impl(
     # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
     # in the latter case the tracers need to carry out the output specs
     # (they need to know how to reconstruct the object from just the flat_output).
-    def is_valid_output(x: object) -> bool:
-        if isinstance(x, (tuple, list)):
-            return all(map(is_valid_output, x))
-        return is_graphable(x)
 
-    assert is_valid_output(out)
+    assert _is_valid_output(out)
     return out
 
 
