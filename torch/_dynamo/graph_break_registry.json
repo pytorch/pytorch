@@ -3685,7 +3685,7 @@
       "Context": "is_python_hashable {self}",
       "Explanation": "Dynamo does not know whether the underlying python object for {self} is hashable",
       "Hints": [
-        "Consider using a different type of object as the dictionary key instead of {self.python_type()}.",
+        "Consider using a different type of object as the dictionary key instead of {type_self}.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

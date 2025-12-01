@@ -688,13 +688,18 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         Unlike the variable tracker's own __hash__, this method checks whether
         the underlying Python object referenced by this variable tracker is hashable.
         """
+        try:
+            type_self = self.python_type()
+        except NotImplementedError:
+            type_self = type(self)
+
         unimplemented(
             gb_type="Dynamo cannot determine whether the underlying object is hashable",
             context=f"is_python_hashable {self}",
             explanation=f"Dynamo does not know whether the underlying python object for {self} is hashable",
             hints=[
                 (
-                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
+                    f"Consider using a different type of object as the dictionary key instead of {type_self}."
                 ),
                 *graph_break_hints.SUPPORTABLE,
             ],

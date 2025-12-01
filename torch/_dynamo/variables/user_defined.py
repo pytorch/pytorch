@@ -2103,6 +2103,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     def install_dict_contains_guard(self):
         return self._dict_vt.install_dict_contains_guard()
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return False
+
 
 class UserDefinedSetVariable(UserDefinedObjectVariable):
     """
@@ -2176,6 +2180,18 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def install_dict_contains_guard(self):
         return self._set_vt.install_dict_contains_guard()
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return self._set_vt.is_python_hashable()
+
+    def get_python_hash(self):
+        return self._set_vt.get_python_hash()
+
+    def is_python_equal(self, other):
+        return isinstance(
+            other, UserDefinedSetVariable
+        ) and self._set_vt.is_python_equal(other._set_vt)
+
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
     """
@@ -2216,6 +2232,10 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
 
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._list_vt)
+
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return False
 
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable):
@@ -2264,6 +2284,18 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         if type(self.value).__iter__ is tuple.__iter__:
             return self._tuple_vt.unpack_var_sequence(tx)
         raise NotImplementedError
+
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return self._tuple_vt.is_python_hashable()
+
+    def get_python_hash(self):
+        return self._tuple_vt.get_python_hash()
+
+    def is_python_equal(self, other):
+        return isinstance(
+            other, UserDefinedTupleVariable
+        ) and self._tuple_vt.is_python_equal(other._tuple_vt)
 
 
 class MutableMappingVariable(UserDefinedObjectVariable):
