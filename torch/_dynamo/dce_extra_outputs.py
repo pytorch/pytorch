@@ -36,6 +36,11 @@ def dce_hop_extra_outputs(gm: torch.fx.GraphModule) -> bool:
     """
     Remove unused extra outputs from HOP calls recursively.
 
+    Processes graphs top-down: first DCE the current graph's HOP outputs,
+    then recursively process nested subgraphs. This ensures that when we
+    process a nested subgraph, the parent has already removed unused getitems,
+    so the nested subgraph sees the correct usage information.
+
     Args:
         gm: The GraphModule to optimize
 
@@ -43,31 +48,13 @@ def dce_hop_extra_outputs(gm: torch.fx.GraphModule) -> bool:
         True if any modifications were made, False otherwise
     """
     modified = False
-    graph = gm.graph
 
-    # STEP 1: recursively process all nested subgraphs (bottom-up)
-    for node in graph.nodes:
-        if node.op == "call_function" and node.target in _HOPS_WITH_EXTRA_OUTPUTS:
-            subgraph_attr = node.args[0]
-            if (
-                isinstance(subgraph_attr, torch.fx.Node)
-                and subgraph_attr.op == "get_attr"
-            ):
-                subgraph_name = subgraph_attr.target
-                assert isinstance(subgraph_name, str)
-                subgraph = getattr(gm, subgraph_name)
-                if isinstance(subgraph, torch.fx.GraphModule):
-                    # Recursively DCE the nested subgraph
-                    if dce_hop_extra_outputs(subgraph):
-                        modified = True
-
-    # STEP 2: Now DCE this graph's subgraphs
     # Group HOP nodes by subgraph name
     # Multiple invocations may share the same subgraph, so we need to check
     # which indices are used across ALL invocations before removing any
     subgraph_to_nodes: dict[str, list[torch.fx.Node]] = collections.defaultdict(list)
 
-    for node in graph.nodes:
+    for node in gm.graph.nodes:
         if node.op == "call_function" and node.target in _HOPS_WITH_EXTRA_OUTPUTS:
             subgraph_attr = node.args[0]
             if (
@@ -78,14 +65,23 @@ def dce_hop_extra_outputs(gm: torch.fx.GraphModule) -> bool:
                 assert isinstance(subgraph_name, str)
                 subgraph_to_nodes[subgraph_name].append(node)
 
-    # Process each unique subgraph
+    # STEP 1: DCE this graph's HOP outputs first (top-down)
     for subgraph_name, hop_nodes in subgraph_to_nodes.items():
         if _dce_subgraph(gm, subgraph_name, hop_nodes):
             modified = True
 
     if modified:
-        graph.lint()
+        gm.graph.lint()
         gm.recompile()
+
+    # STEP 2: Recursively process nested subgraphs
+    # After we've removed unused getitems from this graph, nested subgraphs
+    # will see the correct usage information
+    for subgraph_name in subgraph_to_nodes:
+        subgraph = getattr(gm, subgraph_name)
+        if isinstance(subgraph, torch.fx.GraphModule):
+            if dce_hop_extra_outputs(subgraph):
+                modified = True
 
     return modified
 

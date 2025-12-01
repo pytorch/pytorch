@@ -887,16 +887,15 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[8]"):
             wrap_body_0 = self.wrap_body_0
             tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False);  wrap_body_0 = l_x_ = None
-            getitem: "f32[8]" = tag_activation_checkpoint[0]
-            getitem_1: "f32[8]" = tag_activation_checkpoint[1];  tag_activation_checkpoint = getitem_1 = None
-            return (getitem,)
+            getitem_2: "f32[8]" = tag_activation_checkpoint[0];  tag_activation_checkpoint = None
+            return (getitem_2,)
 
         class wrap_body_0(torch.nn.Module):
             def forward(self, l_x_: "f32[8]"):
                 a: "f32[8]" = torch.sin(l_x_)
 
-                _: "f32[8]" = torch.cos(l_x_);  l_x_ = None
-                return (a, _)
+                _: "f32[8]" = torch.cos(l_x_);  l_x_ = _ = None
+                return (a,)
 """,
                 )
 
