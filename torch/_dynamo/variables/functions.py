@@ -654,7 +654,8 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 return super().call_function(tx, args, kwargs)
 
         if (
-            tx.output.current_tracer.under_activation_checkpoint
+            getattr(tx.output.current_tracer, "description", None)
+            == "torch.utils.checkpoint.checkpoint"
             and not tx.output.current_tracer.allow_side_effects_in_hop
         ):
             try:

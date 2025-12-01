@@ -2973,14 +2973,6 @@ class SubgraphTracer(fx.Tracer):
         self.dynamic_scalar_nodes: dict[int, torch.SymInt] = {}
 
         self.prev_inst = None
-        # True if this tracer is currently tracing into torch.utils.checkpoint
-        # as part of speculate_subgraph. This is automatically set based on the
-        # description parameter to identify checkpoint contexts.
-        self.under_activation_checkpoint = (
-            description == "torch.utils.checkpoint.checkpoint"
-            if description is not None
-            else False
-        )
         # True if we want to allow externally visible side-effects (doesn't throw error on their existence)
         # during this tracer's tracing. This is currently only used by experimental AC out-of-tree
         # via torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer.
