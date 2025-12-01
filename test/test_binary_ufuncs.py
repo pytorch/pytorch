@@ -2899,6 +2899,18 @@ class TestBinaryUfuncs(TestCase):
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected, exact_dtype=False)
 
+        if torch.device(device).type == "cuda":
+            # test using cpu scalar with cuda.
+            x = torch.randn(10, device=device).to(dtype)
+            y = torch.tensor(2.0).to(dtype)
+            actual1 = torch.hypot(x, y)
+            actual2 = torch.hypot(y, x)
+            expected = np.hypot(x.cpu().numpy(), 2.0)
+            self.assertTrue(actual1.is_cuda)
+            self.assertTrue(actual2.is_cuda)
+            self.assertEqual(actual1, expected, exact_dtype=False)
+            self.assertEqual(actual2, expected, exact_dtype=False)
+
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_gcd(self, device, dtype):
