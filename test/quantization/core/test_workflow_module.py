@@ -581,7 +581,7 @@ class _ReferenceHistogramObserver(HistogramObserver):
                     norm = norm + _get_norm(delta_begin, delta_end, density, norm_type)
             return norm
 
-        assert self.histogram.size()[0] == self.bins, "bins mistmatch"
+        assert self.histogram.size()[0] == self.bins, "bins mismatch"
         bin_width = (self.max_val - self.min_val) / self.bins
 
         # cumulative sum
@@ -808,7 +808,7 @@ class TestHistogramObserver(QuantizationTestCase):
     def test_histogram_observer_extreme_inputs(self):
         """
         Ensures that the HistogramObserver is able to work correctly in
-        a rare case: extreme samll max values
+        a rare case: extreme small max values
         """
         obs = HistogramObserver()
         test_input = torch.tensor(
@@ -1139,7 +1139,7 @@ class TestDistributed(QuantizationTestCase):
     def test_syncbn_preserves_qconfig(self):
         """
         Makes sure that if a BatchNorm is not fused and a qconfig exists,
-        convering the module to SyncBatchNorm preserves the qconfig.
+        converting the module to SyncBatchNorm preserves the qconfig.
         """
         m = nn.Sequential(
             nn.Conv2d(1, 1, 1),
