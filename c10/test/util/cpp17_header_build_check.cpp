@@ -1,6 +1,8 @@
 // Compile-only test to verify that c10 headers mirrored
 // to ExecuTorch build with C++17.
 
+#include <gtest/gtest.h>
+
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
@@ -23,6 +25,6 @@
 #include <torch/headeronly/util/complex.h>
 #include <torch/headeronly/util/floating_point_utils.h>
 
-int main() {
-  return 0;
+TEST(Cpp17HeaderBuildCheckTest, HeadersCompile) {
+  EXPECT_TRUE(true);
 }
