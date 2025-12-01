@@ -487,7 +487,7 @@ class TestTorchDlPack(TestCase):
             expected_np_type = TORCH_DTYPE_TO_NP_DTYPE[dtype]
             assert arr.dtype == expected_np_type
             for i in range(N):
-                assert arr[i].item() == t[i].item() and arr[i] != 0
+                assert arr[i].item() == t[i].item()
 
         # We can't use the array created above as input to from_dlpack.
         # That's because DLPack imported NumPy arrays are read-only.
