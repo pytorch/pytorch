@@ -10155,9 +10155,7 @@ def ___make_guard_fn():
             )
 
             @torch.library.impl("mylib::foo_validate_outputs_unbacked", "cpu", lib=lib)
-            @torch.library.register_fake(
-                "mylib::foo_validate_outputs_unbacked", lib=lib
-            )
+            @torch.library.register_fake("mylib::foo_validate_outputs_unbacked")
             def foo_impl(x, y):
                 return torch.cat([x, y])
 
