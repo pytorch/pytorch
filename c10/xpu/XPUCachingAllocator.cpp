@@ -544,7 +544,7 @@ class DeviceCachingAllocator {
 
     record_trace(
         TraceEntry::FREE_COMPLETED,
-        static_cast<size_t>(block->ptr),
+        reinterpret_cast<size_t>(block->ptr),
         block->requested_size,
         block->queue,
         block->device,
@@ -735,7 +735,7 @@ class DeviceCachingAllocator {
 
     record_trace(
         TraceEntry::SEGMENT_MAP,
-        static_cast<size_t>(mapped_range.ptr),
+        reinterpret_cast<size_t>(mapped_range.ptr),
         mapped_range.size,
         to_map->queue,
         to_map->device,
@@ -873,7 +873,7 @@ class DeviceCachingAllocator {
 
     record_trace(
         TraceEntry::SEGMENT_ALLOC,
-        static_cast<size_t>(p.block->ptr),
+        reinterpret_cast<size_t>(p.block->ptr),
         p.block->size,
         p.queue(),
         p.device(),
@@ -941,7 +941,7 @@ class DeviceCachingAllocator {
 
     record_trace(
         TraceEntry::SEGMENT_FREE,
-        static_cast<size_t>(block->ptr),
+        reinterpret_cast<size_t>(block->ptr),
         block->size,
         block->queue,
         block->device,
@@ -1021,7 +1021,7 @@ class DeviceCachingAllocator {
 
     record_trace(
         TraceEntry::SEGMENT_UNMAP,
-        static_cast<size_t>(unmapped.ptr),
+        reinterpret_cast<size_t>(unmapped.ptr),
         unmapped.size,
         block->queue,
         block->device,
@@ -1161,7 +1161,7 @@ class DeviceCachingAllocator {
     block->context_when_allocated = std::move(context);
     record_trace(
         TraceEntry::ALLOC,
-        int64_t(block->ptr),
+        reinterpret_cast<size_t>(block->ptr),
         orig_size,
         block->queue,
         block->device,
@@ -1366,7 +1366,7 @@ class DeviceCachingAllocator {
 
     record_trace(
         TraceEntry::FREE_REQUESTED,
-        static_cast<size_t>(block->ptr),
+        reinterpret_cast<size_t>(block->ptr),
         block->requested_size,
         block->queue,
         block->device,

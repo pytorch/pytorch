@@ -78,6 +78,9 @@ struct TraceEntry {
   }
   Action action_;
   c10::DeviceIndex device_;
+  // For most actions, this is a memory address. For OOM, it represents the
+  // amount of free memory (in bytes). For SNAPSHOT, it is an unused parameter
+  // (just set to 0).
   size_t addr_;
   std::shared_ptr<GatheredContext> context_;
   sycl::queue* queue_{};
