@@ -765,6 +765,33 @@ class PallasTestsMixin:
         for r, e in zip(result, expected):
             self.assertEqual(r, e)
 
+    def test_dtype_bitcast(self):
+        """Test dtype bitcast (view tensor as different dtype)."""
+
+        def fn(x):
+            # View float32 tensor as int32 (same byte size)
+            return x.view(torch.int32)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE, dtype=torch.float32)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_dtype_bitcast_float16_to_int16(self):
+        """Test dtype bitcast from float16 to int16."""
+
+        def fn(x):
+            return x.view(torch.int16)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE, dtype=torch.float16)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
 
 @unittest.skipUnless(has_cuda_pallas(), "requires jax and pallas")
 class PallasTestsCUDA(PallasTestsMixin, TestCase):
