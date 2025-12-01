@@ -22,8 +22,13 @@ import collections
 import functools
 import operator
 import types
-from collections.abc import Sequence
+import weakref
+from collections.abc import Hashable as py_Hashable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
+
+import torch
+from torch._subclasses.fake_tensor import is_fake
+
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -79,12 +84,12 @@ def is_hashable(x: VariableTracker) -> bool:
     # inserting the guard. To avoid this, lazyVT `is_hashable` methods looks at
     # the underlying value without realizing the VT. Consider updating the
     # lazyVT `is_hashable` method if you see unnecessary guarding for a key VT.
-    if (
-        isinstance(x, variables.LazyVariableTracker)
-        and not x.is_realized()
-        and x.is_hashable()
-    ):
-        return True
+    if isinstance(x, variables.LazyVariableTracker):
+        if not x.is_realized():
+            return x.is_hashable()
+        # If already realized, check hashability of the realized value
+        return is_hashable(x.unwrap())
+
     return x.is_python_hashable()
 
 
@@ -404,7 +409,6 @@ class ConstDictVariable(VariableTracker):
         #   3b) contains=False. There is no easy way to selectively apply this
         #   DICT_NOT_CONTAINS guard because our guard are represented via trees.
         #   Be conservative and add DICT_KEYS_MATCH guard.
-        from . import ConstantVariable
 
         if not self.source:
             return
@@ -413,18 +417,22 @@ class ConstDictVariable(VariableTracker):
             return
 
         contains = args[0] in self
-        if args[0].source is None and isinstance(args[0], ConstantVariable):
+        if args[0].source is None and args[0].is_python_constant():
             install_guard(
                 self.make_guard(
                     functools.partial(
                         type(self).CONTAINS_GUARD,
-                        key=args[0].value,
+                        key=args[0].as_python_constant(),
                         invert=not contains,
                     )
                 )
             )
         elif args[0].source:
+            # Realize the lookup key to install its guard
+            if isinstance(args[0], variables.LazyVariableTracker):
+                args[0].realize()
             if contains:
+                # Key is in the dict - realize the dict's key to install guard
                 self.realize_key_vt(args[0])
             else:
                 self.install_dict_keys_match_guard()
@@ -590,10 +598,10 @@ class ConstDictVariable(VariableTracker):
             if self.user_cls is collections.OrderedDict and (
                 len(args) == 1 or "last" in kwargs
             ):
-                if len(args) == 1 and isinstance(args[0], ConstantVariable):
-                    last = args[0].value
-                elif (v := kwargs.get("last")) and isinstance(v, ConstantVariable):
-                    last = v.value
+                if len(args) == 1 and args[0].is_python_constant():
+                    last = args[0].as_python_constant()
+                elif (v := kwargs.get("last")) and v.is_python_constant():
+                    last = v.as_python_constant()
                 else:
                     raise_args_mismatch(tx, name)
                 k, v = self.items.popitem(last=last)  # type: ignore[possibly-undefined]
@@ -698,15 +706,11 @@ class ConstDictVariable(VariableTracker):
                 raise_observed_exception(KeyError, tx)
 
             last = True
-            if len(args) == 2 and isinstance(args[1], ConstantVariable):
-                last = args[1].value
+            if len(args) == 2 and args[1].is_python_constant():
+                last = args[1].as_python_constant()
 
-            if (
-                kwargs
-                and "last" in kwargs
-                and isinstance(kwargs["last"], ConstantVariable)
-            ):
-                last = kwargs.get("last").value  # type: ignore[union-attr]
+            if kwargs and "last" in kwargs and kwargs["last"].is_python_constant():
+                last = kwargs.get("last").as_python_constant()  # type: ignore[union-attr]
 
             key = Hashable(args[0])
             self.items.move_to_end(key, last=last)
@@ -1012,8 +1016,19 @@ class SetVariable(ConstDictVariable):
         items: list[VariableTracker],
         **kwargs: Any,
     ) -> None:
+        # Items can be either VariableTrackers or _HashableTrackers (from set ops).
+        # For VariableTrackers, realize them to ensure aliasing guards are installed
+        # when the same object appears multiple times.
+        realized_items = []
+        for item in items:
+            if isinstance(item, ConstDictVariable._HashableTracker):
+                # Already a _HashableTracker from a set operation
+                realized_items.append(item)
+            else:
+                # VariableTracker - realize to install guards
+                realized_items.append(item.realize())
         # pyrefly: ignore[bad-assignment]
-        items = dict.fromkeys(items, SetVariable._default_value())
+        items = dict.fromkeys(realized_items, SetVariable._default_value())
         # pyrefly: ignore[bad-argument-type]
         super().__init__(items, **kwargs)
 
