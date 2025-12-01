@@ -235,10 +235,10 @@ def _extract_post_mm_ops(
         Returns (None, None) if validation fails
     """
 
-    def _is_pointwise(n):
+    def _is_unary_pointwise(n):
         return (
-            len(node.all_input_nodes) == 1
-            and len(node.users)
+            len(n.all_input_nodes) == 1
+            and len(n.users) == 1
             and torch.Tag.pointwise in getattr(n.target, "tags", ())
         )
 
@@ -274,7 +274,7 @@ def _extract_post_mm_ops(
             view3d_node = node
             continue
 
-        if not _is_pointwise(node):
+        if not _is_unary_pointwise(node):
             return None, None
 
         post_mm_ops.append(_PostMMOp(node))
@@ -289,7 +289,7 @@ def split_mm(
     g.owning_module
 
     for n in g.nodes:
-        if not (n.op == "call_function" and n.target == torch.ops.aten.mm.default):
+        if n.target != torch.ops.aten.mm.default:
             continue
 
         mm_n = n
@@ -345,7 +345,7 @@ class _ReduceScatterMatch:
 def _split_mm_rs(
     gm: torch.fx.GraphModule,
     num_chunks: list[int],
-    min_size_after_split: int = 2048,
+    min_size_after_split: int = 4096,
 ):
     """
     Splits matmul->reduce_scatter into chunks,
