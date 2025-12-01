@@ -81,7 +81,6 @@ TMA_TEST_XFAIL = dict.fromkeys(
         "test_broadcast_prefer_nd_tiling_False_x_size2_y_size2",
         "test_broadcast_prefer_nd_tiling_True_x_size0_y_size0",
         "test_broadcast_prefer_nd_tiling_True_x_size2_y_size2",
-        "test_broadcast_with_singleton_dims",
     ),
     TMA_XFAIL,
 )
@@ -168,8 +167,6 @@ class BlockDescriptorTestBase(InductorTestCase):
         self.assertEqual(len(code), expected_num_programs)
         count_code("@triton.jit", expected_num_triton_kernels)
         count_code(self.block_descriptor_constructor_str, expected_num_block_pointers)
-        # Verify that 1D shapes aren't being transposed for the TMA store.
-        count_code("tl.trans", 0)
 
         return result, code
 
@@ -912,7 +909,6 @@ class CommonTemplate:
         msg="AssertionError: Scalars are not equal!, "
         "https://github.com/intel/torch-xpu-ops/issues/2332"
     )
-    @xfail_if_use_tensor_descriptor  # Cannot use TMA API for store with no x dimension.
     @test_torchinductor.skip_if_triton_cpu  # Illegal instruction  File; cannot xfail because it crashes process
     def test_2d_reduction_multi_kernel(self):
         """
@@ -1023,7 +1019,6 @@ class CommonTemplate:
         # Check the code for multiple Rn_BLOCK's
         self._assert_reduction_ndims(code, 2 if tile_reductions else 1)
 
-    @xfail_if_use_tensor_descriptor
     def test_complex_reshape_block_ptr(self):
         def func(x, y):
             add_ = x + y
@@ -1242,7 +1237,6 @@ class CommonTemplate:
     #   dim_mod1_: 4, stride_mod1_: 1, stride_mod4_: 0, stride_mod2_: 0, stride_mod0_: 0
     # }
     # This is now fixed by ensuring that that wild symbols only match integers
-    @xfail_if_use_tensor_descriptor
     @skipIfXpu(
         msg="Triton issue exposed by new driver, will be resolved after next triton update."
     )
@@ -1412,9 +1406,50 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
     "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
+@instantiate_parametrized_tests
 class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
     block_descriptor_constructor_str = "tl.make_tensor_descriptor"
     device = GPU_TYPE
+
+    @config.patch({"triton.transpose_discontiguous_tensor_descriptor": True})
+    @parametrize(
+        "view_size,permute_order,num_tensor_descriptors,expect_transpose",
+        [
+            ((128,), (0,), 3, False),
+            ((128, 128), (0, 1), 3, False),
+            ((128, 64), (1, 0), 3, True),
+            ((256, 32, 16), (2, 0, 1), 3, True),
+            ((16, 32, 256), (2, 0, 1), 3, True),
+        ],
+    )
+    def test_match_with_transpose(
+        self,
+        view_size: tuple[int],
+        permute_order: tuple[int],
+        num_tensor_descriptors: int,
+        expect_transpose: bool,
+    ):
+        a = self._discontiguous_tensor(view_size, self.device)
+        pre_permute_size = [1] * len(view_size)
+        for i, value in zip(permute_order, view_size):
+            pre_permute_size[i] = value
+        b = self._discontiguous_tensor(pre_permute_size, self.device)
+        b = b.permute(permute_order)
+
+        def fn(a, b):
+            return a * b
+
+        result, (code,) = self._run_and_compare(
+            fn,
+            a,
+            b,
+            expected_num_block_pointers=num_tensor_descriptors,
+            expected_num_triton_kernels=1,
+            config_patches=tiled_reduction_config,
+        )
+
+        transpose_count = code.count("tl.trans")
+        self.assertEqual(transpose_count, 1 if expect_transpose else 0)
 
 
 test_torchinductor.copy_tests(
