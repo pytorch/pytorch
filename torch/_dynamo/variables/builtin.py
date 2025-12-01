@@ -1553,7 +1553,8 @@ class BuiltinVariable(VariableTracker):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is float and len(args) >= 1:
-            if args[0].is_python_constant():
+            # Only delegate to ConstantVariable, not other types that happen to be constants
+            if isinstance(args[0], ConstantVariable):
                 return ConstantVariable.create(
                     getattr(float, name)(args[0].as_python_constant())
                 )
@@ -3232,6 +3233,15 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
         return a.call_method(tx, "__contains__", [b], {})
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.fn)
+
+    def is_python_equal(self, other):
+        return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
 
 
 @contextlib.contextmanager
