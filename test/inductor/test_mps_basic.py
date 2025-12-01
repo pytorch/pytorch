@@ -155,6 +155,17 @@ class MPSBasicTests(TestCase):
         A = torch.diag(torch.tensor([20.0, 0.5, 5.0], dtype=torch.float32) ** 2)
         self.common(fn, (A,), check_lowp=False)
 
+    def test_layer_norm_dynamic(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/169290
+        def fn(x):
+            return torch.nn.functional.layer_norm(x, x.size()[1:], eps=1e-05)
+
+        x = torch.randn(1, 4, 8, 8, device=self.device)
+        opt_fn = torch.compile(fn, backend="inductor", dynamic=True)
+        expected = fn(x)
+        actual = opt_fn(x)
+        self.assertEqual(expected, actual)
+
 
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):
