@@ -922,7 +922,7 @@ class TestEinsum(TestCase):
         tp = np.tensordot(A, B, axes=(0, 0))
         assert_equal(es, tp)
         # The following is the original test case from the bug report,
-        # made repeatable by changing random arrays to aranges.
+        # made repeatable by changing random arrays to aranges.  # codespell:ignore aranges
         A = np.arange(3 * 3).reshape(3, 3).astype(np.float64)
         B = np.arange(3 * 3 * 64 * 64).reshape(3, 3, 64, 64).astype(np.float32)
         es = np.einsum("cl, cpxy->lpxy", A, B)
@@ -1092,7 +1092,7 @@ class TestEinsum(TestCase):
         self.optimize_compare("ab,cd,de->abcde")
         self.optimize_compare("ab,cd,de->be")
         self.optimize_compare("ab,bcd,cd->abcd")
-        self.optimize_compare("ab,bcd,cd->abd")
+        self.optimize_compare("ab,bcd,cd->abd")  # codespell:ignore
 
     def test_edge_cases(self):
         # Difficult edge cases for optimization
@@ -1105,7 +1105,7 @@ class TestEinsum(TestCase):
         self.optimize_compare("ed,fcd,ff,bcf->be")
         self.optimize_compare("baa,dcf,af,cde->be")
         self.optimize_compare("bd,db,eac->ace")
-        self.optimize_compare("fff,fae,bef,def->abd")
+        self.optimize_compare("fff,fae,bef,def->abd")  # codespell:ignore
         self.optimize_compare("efc,dbc,acf,fd->abe")
         self.optimize_compare("ba,ac,da->bcd")
 
