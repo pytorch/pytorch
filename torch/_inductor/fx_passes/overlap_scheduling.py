@@ -592,6 +592,10 @@ class OverlapScheduler:
             group_name = get_group_name(info.start_node)
             group_names.add(group_name)
 
+        import torch.distributed as dist
+
+        world_size = dist.get_world_size()
+
         # Align across all process groups if we have collectives
         if group_names:
             from torch._subclasses.fake_tensor import unset_fake_temporarily
