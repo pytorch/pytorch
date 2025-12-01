@@ -2259,7 +2259,7 @@ class AOTInductorTestsTemplate:
         program = exported_program.run_decompositions()
         gm = ReplaceViewOpsWithViewCopyOpsPass()(program.graph_module).graph_module
         with config.patch(
-            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON"}
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON,ATEN"}
         ):
             _ = torch._inductor.aot_compile(gm, example_input)
 
