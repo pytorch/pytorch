@@ -54,8 +54,10 @@ def _trace_fn_mm_rs_scatter_dim0(
     scatter_dim: int,
     orig_split_num_chunks: int,  # unused
     post_mm_ops,
+    add_requires_deps: bool,  # unused
 ):
     assert isinstance(num_chunks, int)
+    assert b.size(-1) % num_chunks == 0
     b_chunks = b.chunk(num_chunks, dim=-1)
     rs_outs = []
     for i in range(num_chunks):
@@ -69,8 +71,7 @@ def _trace_fn_mm_rs_scatter_dim0(
         rs_outs.append(rs_out_i)
 
     # B column wise split
-    rs_out = torch.cat(rs_outs, dim=-1)
-    return (rs_out,)
+    return torch.cat(rs_outs, dim=-1)
 
 
 def _trace_fn_mm_rs_scatter_dim_non0(
@@ -84,7 +85,14 @@ def _trace_fn_mm_rs_scatter_dim_non0(
     scatter_dim: int,
     orig_split_num_chunks: int,
     post_mm_ops,
+    add_requires_deps: bool,
 ):
+    """
+    Chunking replacement for pattern:
+    mm -> view(*, *, *) -> split (dim != 0) -> cat -> reduce_scatter
+
+    chunks matmul A argument rowwise and produces num_chunks similar patterns.
+    """
     assert isinstance(num_chunks, int)
     a_flat = a.flatten(0, -2)
     a_flat_chunks = a_flat.chunk(num_chunks)
@@ -96,6 +104,7 @@ def _trace_fn_mm_rs_scatter_dim_non0(
         device=orig_out.device,
     )
 
+    assert out.size(0) % num_chunks == 0
     out_chunks = out.chunk(num_chunks)
     ws = []
     for i in range(num_chunks):
@@ -108,6 +117,10 @@ def _trace_fn_mm_rs_scatter_dim_non0(
             cat, reduce_op, group_size, group_name, out=out_chunks[i]
         )
         ws.append(torch.ops._c10d_functional.wait_tensor(rso))
+
+    if not add_requires_deps:
+        # Test mode
+        return out
 
     # Waits must finish before out read
     return torch.ops.higher_order.requires_deps(ws, out)
@@ -124,6 +137,7 @@ def _mm_split_cat_rs_fn_view3d(
     scatter_dim: int,
     orig_split_num_chunks: int,
     post_mm_ops,
+    add_requires_deps: bool,
 ):
     assert isinstance(num_chunks, int)
     a_flat = a.flatten(0, -2)
@@ -134,6 +148,7 @@ def _mm_split_cat_rs_fn_view3d(
         dtype=orig_out.dtype,
         device=orig_out.device,
     )
+    assert out.size(0) % num_chunks == 0
     out_chunks = out.chunk(num_chunks)
     ws = []
     for i in range(num_chunks):
@@ -148,6 +163,10 @@ def _mm_split_cat_rs_fn_view3d(
             cat, reduce_op, group_size, group_name, out=out_chunks[i]
         )
         ws.append(torch.ops._c10d_functional.wait_tensor(rso))
+
+    if not add_requires_deps:
+        # Test mode
+        return out
 
     # Waits must finish before out read
     return torch.ops.higher_order.requires_deps(ws, out)
@@ -578,6 +597,7 @@ def _process_matmul_reduce_scatter(
         orig_scatter_dim,
         orig_split_num_chunks,
         post_mm_ops,
+        True,
     )
     _insert_fn_trace_before_node(
         g,

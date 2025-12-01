@@ -12,6 +12,11 @@ import torch.fx as fx
 # for some reason importing functional collectives after dynamo breaks collectives handling!
 from torch._C import FileCheck
 from torch._dynamo.utils import same
+from torch._inductor.fx_passes.decompose_mm import (
+    _trace_fn_mm_rs_scatter_dim0,
+    _trace_fn_mm_rs_scatter_dim_non0,
+    _ViewOp,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -23,6 +28,7 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._python_dispatch import TorchDispatchMode
 
 
 # flake8: noqa: B950
@@ -41,6 +47,46 @@ import torch
 import torch._dynamo
 import torch._dynamo.logging
 import torch._dynamo.test_case
+
+
+class _TestReduceScatterMode(TorchDispatchMode):
+    def __init__(self, group_size: int):
+        self.group_size = group_size
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        if func in (
+            torch.ops._c10d_functional.reduce_scatter_tensor.default,
+            torch.ops._c10d_functional.reduce_scatter_tensor,
+        ):
+            # args[0] is the input tensor
+            input_tensor = args[0]
+            # Simulate reduce_scatter by taking first chunk (rank 0's portion)
+            scatter_dim = 0  # reduce_scatter on dim 0
+            chunk_size = input_tensor.shape[scatter_dim] // self.group_size
+            output = input_tensor.narrow(scatter_dim, 0, chunk_size).clone()
+            return output
+        elif func in (
+            torch.ops._c10d_functional.reduce_scatter_tensor_out.default,
+            torch.ops._c10d_functional.reduce_scatter_tensor_out,
+        ):
+            # args[0] is the input tensor
+            # kwargs['out'] is the output tensor
+            input_tensor = args[0]
+            out_tensor = kwargs.get("out")
+            # Simulate reduce_scatter by taking first chunk (rank 0's portion)
+            scatter_dim = 0  # reduce_scatter on dim 0
+            chunk_size = input_tensor.shape[scatter_dim] // self.group_size
+            output_data = input_tensor.narrow(scatter_dim, 0, chunk_size)
+            out_tensor.copy_(output_data)
+            return out_tensor
+        elif func in (
+            torch.ops._c10d_functional.wait_tensor.default,
+            torch.ops._c10d_functional.wait_tensor,
+        ):
+            return args[0]
+
+        return func(*args, **kwargs)
 
 
 # for some reason importing functional collectives after dynamo breaks collectives handling!
@@ -93,6 +139,28 @@ def build_collective_info(graph, hiding_annotations):
         )
 
     return collective_info
+
+
+def compute_ancestors(graph):
+    """Compute ancestor sets for all nodes in the graph."""
+    node_ancestors = {}
+
+    for node in graph.nodes:
+        ancestors = OrderedSet()
+        stack = list(node.all_input_nodes)
+        visited = set()
+
+        while stack:
+            current = stack.pop()
+            if current in visited:
+                continue
+            visited.add(current)
+            ancestors.add(current)
+            stack.extend(current.all_input_nodes)
+
+        node_ancestors[node] = ancestors
+
+    return node_ancestors
 
 
 @requires_accelerator_dist_backend()
@@ -170,8 +238,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag2: mm2,  # mm2 hides ag2
         }
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing
@@ -182,6 +251,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
         bucketer.bucket_collectives()
@@ -256,8 +326,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag2: mm2,  # mm2 hides ag2
         }
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing
@@ -268,6 +339,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
         bucketer.bucket_collectives()
@@ -357,8 +429,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         if final_mm_hidden:
             hiding_annotations[rs] = mm2
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing logic to find buckets (without applying them, which would require process groups)
@@ -369,6 +442,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
 
@@ -441,6 +515,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 
         # Build collective info
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing
@@ -451,6 +526,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
         bucketer.bucket_collectives()
@@ -522,8 +598,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag2: mm2,  # mm2 hides ag2
         }
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing with multidtype mode
@@ -534,6 +611,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
             bucket_mode="custom_ops_multidtype",
         )
@@ -605,8 +683,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag2: [mm2, mm3],  # ag2 is hidden by mm2 and mm3
         }
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Verify hiding_nodes are correctly set
@@ -625,6 +704,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
         bucketer.bucket_collectives()
@@ -697,8 +777,9 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             ag3: mm,
         }
 
-        # Build collective info and scheduled
+        # Build collective info and ancestors
         collective_info = build_collective_info(traced.graph, hiding_annotations)
+        node_ancestors = compute_ancestors(traced.graph)
         scheduled = OrderedSet(traced.graph.nodes)
 
         # Run bucketing
@@ -709,6 +790,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         bucketer = OverlapPreservingBucketer(
             traced.graph,
             collective_info,
+            node_ancestors,
             scheduled,
         )
         bucketer.bucket_collectives()
@@ -920,6 +1002,101 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             num_chunks,
             exactly=True,
         ).run(graph_str)
+
+    @parametrize("group_size", [2, 4])
+    @parametrize("num_chunks", [2, 4])
+    def test_split_mm_trace_fn(self, group_size: int, num_chunks: int):
+        def _original_mm_rs_pattern(
+            a: torch.Tensor,
+            b: torch.Tensor,
+            group_size: int,
+        ) -> torch.Tensor:
+            mm = torch.mm(a, b)
+            return torch.ops._c10d_functional.wait_tensor.default(
+                torch.ops._c10d_functional.reduce_scatter_tensor.default(
+                    mm, "sum", group_size, ""
+                )
+            )
+
+        M, K, N = 64, 128, 1024
+        a = torch.randn(M, K, device=self.device)
+        b = torch.randn(K, N, device=self.device)
+        with _TestReduceScatterMode(group_size=group_size):
+            expected = _original_mm_rs_pattern(a, b, group_size=group_size)
+            result = _trace_fn_mm_rs_scatter_dim0(
+                a,
+                b,
+                num_chunks,
+                expected,
+                "sum",
+                group_size,
+                "",
+                0,
+                group_size,
+                [],
+                add_requires_deps=True,
+            )
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
+
+    @parametrize("group_size", [2, 4])
+    @parametrize("num_chunks", [2, 4])
+    @parametrize("scatter_dim", [1, 2])
+    def test_split_mm_trace_fn_non0_view3d(
+        self, group_size: int, num_chunks: int, scatter_dim: int
+    ):
+        def _original_mm_rs_pattern(
+            a: torch.Tensor,
+            b: torch.Tensor,
+            group_size: int,
+            scatter_dim: int,
+            orig_split_num_chunks: int,
+        ) -> torch.Tensor:
+            m1, m2, k = a.shape
+            a = a.flatten(0, -2)
+            mm = torch.mm(a, b)
+            mm = mm.reshape(m1, m2, -1)
+            mm_chunks = mm.chunk(orig_split_num_chunks, dim=scatter_dim)
+            cat = torch.cat(mm_chunks)
+            return torch.ops._c10d_functional.wait_tensor.default(
+                torch.ops._c10d_functional.reduce_scatter_tensor.default(
+                    cat, "sum", group_size, ""
+                )
+            )
+
+        M1, M2, K, N = 8, 16, 128, 256
+        a = torch.randn(M1, M2, K, device=self.device)
+        b = torch.randn(K, N, device=self.device)
+        with _TestReduceScatterMode(group_size=group_size):
+            expected = _original_mm_rs_pattern(
+                a,
+                b,
+                group_size=group_size,
+                scatter_dim=scatter_dim,
+                orig_split_num_chunks=group_size,
+            )
+            graph = None
+            view_node = torch.fx.Node(
+                graph,
+                "",
+                "call_function",
+                torch.ops.aten.reshape.default,
+                (None, (M1, M2, -1)),
+                {},
+            )
+            result = _trace_fn_mm_rs_scatter_dim_non0(
+                a,
+                b,
+                num_chunks,
+                expected,
+                "sum",
+                group_size,
+                "",
+                scatter_dim,
+                group_size,
+                [_ViewOp(view_node, chunk_dim=0)],
+                add_requires_deps=False,
+            )
+        torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
 
 
 if __name__ == "__main__":
