@@ -148,13 +148,18 @@ def check_file(
     filename: str,
     binary: str,
     build_dir: Path,
-    std: str | None = None,
+    std: str = "c++17",
 ) -> list[LintMessage]:
     # Explicitly pass include path for linters that only check headers.
     build_include_args = include_args + ["--extra-arg", f"-I{build_dir}"]
-    cmd = [binary, f"-p={build_dir}", *build_include_args, filename]
-    if std:
-        cmd.extend(["--", f"-std={std}"])
+    cmd = [
+        binary,
+        f"-p={build_dir}",
+        *build_include_args,
+        filename,
+        "--",
+        f"-std={std}",
+    ]
 
     try:
         proc = run_command(cmd)
@@ -225,7 +230,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--std",
-        default=None,
+        default="c++17",
         help="C++ standard to use for compilation (e.g., c++17, c++20)",
     )
     parser.add_argument(
