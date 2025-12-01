@@ -218,7 +218,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Get python values equivalent to the variable tracker args"""
 
         def map_arg(arg: Any) -> Any:
-            if isinstance(arg, VariableTracker) and arg.is_python_constant():
+            if isinstance(arg, ConstantVariable):
                 return arg.as_python_constant()
             elif isinstance(arg, ListVariable) and not arg.items:
                 return []

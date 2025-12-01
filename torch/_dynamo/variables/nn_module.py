@@ -824,7 +824,7 @@ class NNModuleVariable(VariableTracker):
 
             if type(module).__getitem__ not in builtin_supported:
                 if not (
-                    args[0].is_python_constant()
+                    isinstance(args[0], variables.ConstantVariable)
                     and isinstance(args[0].as_python_constant(), (str, int))
                 ):
                     unimplemented(

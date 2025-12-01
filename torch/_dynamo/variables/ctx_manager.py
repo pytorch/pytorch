@@ -1143,7 +1143,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         # The context manager accepts Union[Tensor, Tuple[Tensor]]
         if isinstance(self.tensors, variables.TensorVariable):
             self.tensors = variables.TupleVariable([self.tensors])
-        if self.prev_versions.is_symnode_like():
+        if isinstance(
+            self.prev_versions, (variables.ConstantVariable, variables.SymNodeVariable)
+        ):
             self.prev_versions = variables.TupleVariable([self.prev_versions])
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
