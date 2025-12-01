@@ -5,6 +5,7 @@
 import sys
 import unittest
 from itertools import product
+from unittest import skipIf
 
 import numpy as np
 
@@ -33,7 +34,11 @@ class TestNumPyInterop(TestCase):
         self.assertWarns(UserWarning, lambda: torch.from_numpy(arr))
 
     @onlyCPU
-    @unittest.skipIf(sys.version_info >= (3, 14), "Failing on Python 3.14+")
+    @skipIf(
+        sys.version_info[:2] == (3, 14)
+        and np.lib.NumpyVersion(np.__version__) < "2.4.0",
+        "Broken in older numpy versions, see https://github.com/numpy/numpy/issues/30265",
+    )
     def test_numpy_unresizable(self, device) -> None:
         x = np.zeros((2, 2))
         y = torch.from_numpy(x)  # noqa: F841
