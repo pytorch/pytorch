@@ -1348,11 +1348,13 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3  # It generates 2 getattr to unpack the array
         assert same(out, correct)
 
-    # This doesn't work in all cases, and now we properly loudly error.
-    # See: https://github.com/pytorch/pytorch/issues/151240
-    # When differentiable funcols are implemented can revert.
-    @unittest.expectedFailure
     def test_backwards(self):
+        """
+        It's probably not that common to need backwards support for collectives.
+
+        However, I wanted to at least see if it was possible to support it as a design goal.
+        """
+
         def func(inp):
             ar = _functional_collectives.all_reduce(inp, "sum", "0")
             return ar
@@ -1678,7 +1680,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, *inputs, **self.get_world_trs())
 
-        # shouldnt have bucketed
+        # shouldn't have bucketed
         FileCheck().check_count("wait_tensor.default(", 2, exactly=True).run(code)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
