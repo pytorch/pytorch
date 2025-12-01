@@ -39,14 +39,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download PMD
+      - name: Download and Run PMD
         run: |
           wget -O pmd.zip https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.19.0/pmd-dist-7.19.0-bin.zip
           unzip pmd.zip
           PMD_DIR=$(find . -maxdepth 1 -type d -name "pmd-dist*")
-          echo "PMD_DIR=$PMD_DIR" >> $GITHUB_ENV
-      
-      - name: Run PMD Scan
-        run: |
           $PMD_DIR/bin/run.sh pmd -d ./src -R rulesets/java/quickstart.xml -f text
 
