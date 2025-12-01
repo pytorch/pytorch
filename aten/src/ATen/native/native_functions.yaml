@@ -7273,6 +7273,15 @@
   structured_delegate: _addmm_activation.out
   variants: function, method
 
+- func: _addmm_gelu.out(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool materialize_pre_activation=False, Tensor(a!) out, Tensor(b!) pre_activation) -> (Tensor(a!), Tensor(b!))
+  structured: True
+  dispatch:
+    CUDA: addmm_gelu_out_cuda
+
+- func: _addmm_gelu(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1, bool materialize_pre_activation=False) -> (Tensor activation, Tensor pre_activation)
+  structured_delegate: _addmm_gelu.out
+  variants: function
+
 - func: _scaled_mm(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False) -> Tensor
   variants: function
   dispatch:

@@ -33,6 +33,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_addmm_activation_native.h>
+#include <ATen/ops/_addmm_gelu_native.h>
 #include <ATen/ops/_efficientzerotensor.h>
 #include <ATen/ops/_scaled_mm_native.h>
 #include <ATen/ops/_unsafe_view_native.h>
@@ -733,6 +734,20 @@ TORCH_IMPL_FUNC(addmm_activation_out_cuda)(const Tensor& self, const Tensor& mat
     beta,
     alpha,
     cublasLtEpilogueParams().set_activation(use_gelu ? Activation::GELU : Activation::RELU)
+  );
+}
+
+TORCH_IMPL_FUNC(addmm_gelu_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool materialize_pre_activation, const Tensor& result, const Tensor& pre_activation) {
+  auto epilogueParams = cublasLtEpilogueParams().set_activation(Activation::GELU);
+  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+  addmm_out_cuda_impl(
+    const_cast<Tensor&>(result),
+    self,
+    mat1,
+    mat2,
+    beta,
+    alpha,
+    materialize_pre_activation ? epilogueParams.set_pre_activation(const_cast<Tensor&>(pre_activation)) : epilogueParams
   );
 }
 

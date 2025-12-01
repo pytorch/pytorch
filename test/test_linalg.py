@@ -7480,6 +7480,23 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_addmm_gelu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "gelu", device, dtype)
 
+        if device == "cuda":
+            for materialize_pre_activation in (True, False):
+                def addmm_gelu(x, m1, m2, *, beta=1, alpha=1, use_gelu=True, out=None):
+                    res, pre_activation = torch._addmm_gelu(
+                        x, m1, m2,
+                        beta=beta, alpha=alpha, materialize_pre_activation=materialize_pre_activation, out=out
+                    )
+                    if materialize_pre_activation:
+                        self.assertEqual(x + m1 @ m2, pre_activation)
+                    else:
+                        self.assertEqual(pre_activation, None)
+
+                    return res
+
+                self._test_addmm_impl(addmm_gelu, "gelu", device, dtype)
+
+
     @skipIfRocmArch(MI300_ARCH)
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*floating_and_complex_types())
