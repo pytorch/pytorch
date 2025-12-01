@@ -58,7 +58,7 @@ jobs:
     name: aarch64-opbenchmark-build
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-jammy-aarch64-py3.10
+      build-environment: linux-noble-aarch64-py3.10
       runner: linux.arm64.m7g.4xlarge
       docker-image-name: ci-image:pytorch-linux-noble-aarch64-py3.10-gcc14
       test-matrix: |
@@ -72,7 +72,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: aarch64-opbenchmark-build
     with:
-      build-environment: linux-jammy-aarch64-py3.10
+      build-environment: linux-noble-aarch64-py3.10
       docker-image: ${{ needs.aarch64-opbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.aarch64-opbenchmark-build.outputs.test-matrix }}
     secrets: inherit
