@@ -655,7 +655,7 @@ void ImagingResampleHorizontalConvolution8u4x(
       // last element
       auto mmk = _mm256_set1_epi32(k[i]);
       // For num_channels == 3 (3 bytes = one pixel) we tolerate to read 4 bytes
-      // lines 0, 1 and 2 wont go out of allocated memory bounds
+      // lines 0, 1 and 2 won't go out of allocated memory bounds
       auto pix = _mm256_inserti128_si256(_mm256_castsi128_si256(
           mm_cvtepu8_epi32(lineIn0_min + stride * i, i32_aligned)),
           mm_cvtepu8_epi32(lineIn1_min + stride * i, i32_aligned), 1);
@@ -1312,7 +1312,7 @@ void ImagingResampleVerticalConvolution8u(
 
     // Here we write 4 bytes to the output even if num_channels < 4, e.g o = {r,g,b,X} for num_channels=3
     // It is OK to write 4th byte (e.g. X) as on the next step we will overwrite it with new data.
-    // We also wont go out of bounds of lineOut memory allocation
+    // We also won't go out of bounds of lineOut memory allocation
     std::memcpy(lineOut + j, (uint8_t *) &o, 4);
   }
 
