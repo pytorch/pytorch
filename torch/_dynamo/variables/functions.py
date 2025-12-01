@@ -807,15 +807,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return collected
         return None
 
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.fn)
-
-    def is_python_equal(self, other):
-        return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
-
 
 class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
@@ -1062,7 +1053,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             if self._is_generator_just_started() and len(args):
                 # can't send non-None value to a just-started generator
                 # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
-                if not all(arg.is_constant_none() for arg in args):
+                if not all(
+                    isinstance(arg, ConstantVariable) and arg.value is None
+                    for arg in args
+                ):
                     raise_observed_exception(TypeError, tx)
             tracer = self._get_inline_tracer(tx)
             tracer.push_many(args)
@@ -1969,15 +1963,6 @@ class SkipFunctionVariable(VariableTracker):
 
         return fn_var_getattr(tx, self.value, self.source, name)
 
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.value)
-
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
-
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
     def __init__(
@@ -2364,34 +2349,6 @@ class FunctoolsPartialVariable(VariableTracker):
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
 
-    def is_python_hashable(self) -> bool:
-        return (
-            self.func.is_python_hashable()
-            and all(arg.is_python_hashable() for arg in self.args)
-            and all(value.is_python_hashable() for value in self.keywords.values())
-        )
-
-    def get_python_hash(self):
-        func_hash = self.func.get_python_hash()
-        args_hash = (arg.get_python_hash() for arg in self.args)
-        values_hash = (value.get_python_hash() for value in self.keywords.values())
-        return hash((func_hash, *args_hash, *values_hash))
-
-    def is_python_equal(self, other):
-        return (
-            self.func.is_python_equal(other.func)
-            and all(
-                arg_a.is_python_equal(arg_b)
-                for (arg_a, arg_b) in zip(self.args, other.args)
-            )
-            and all(
-                value_a.is_python_equal(value_b)
-                for (value_a, value_b) in zip(
-                    self.keywords.values(), other.keywords.values()
-                )
-            )
-        )
-
 
 class PolyfilledFunctionVariable(VariableTracker):
     _nonvar_fields = {
@@ -2476,7 +2433,7 @@ class PolyfilledFunctionVariable(VariableTracker):
             and not kwargs
             and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
             and all(
-                (x.is_python_constant() and isinstance(x.as_python_constant(), int))
+                (isinstance(x, variables.ConstantVariable) and isinstance(x.value, int))
                 or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
                 for x in args[0].items
             )
@@ -2492,8 +2449,8 @@ class PolyfilledFunctionVariable(VariableTracker):
                 sym_num=torch.sym_sum(
                     [
                         (
-                            x.as_python_constant()
-                            if x.is_python_constant()
+                            x.value
+                            if isinstance(x, variables.ConstantVariable)
                             else x.sym_num  # type: ignore[attr-defined]
                         )
                         for x in args[0].items
@@ -2698,6 +2655,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         combined_args_raw: dict[str, Any],
         tx: "InstructionTranslator",
     ) -> "variables.ConstantVariable":
+        from .constant import ConstantVariable
         from .dicts import ConstDictVariable
 
         # as we can only pass tensors as non-const args in fx graph,
@@ -2731,12 +2689,12 @@ class DynamoTritonHOPifier(TritonHOPifier):
         constant_args = {
             k: v.as_python_constant()
             for k, v in combined_args_raw.items()
-            if isinstance(v, VariableTracker) and v.is_python_constant()
+            if isinstance(v, ConstantVariable)
         }
         non_constant_args = {
             k: v
             for k, v in combined_args.items()
-            if not (isinstance(v, VariableTracker) and v.is_python_constant())
+            if not isinstance(v, ConstantVariable)
         }
 
         for v in non_constant_args.values():
@@ -3037,7 +2995,9 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         if len(args) == 2:
             is_leaf = args[1]
 
-        if not is_leaf.is_constant_none():
+        if not (
+            isinstance(is_leaf, variables.ConstantVariable) and is_leaf.value is None
+        ):
             return super().call_function(tx, args, kwargs)
 
         # Optimize the case where is_leaf is None
