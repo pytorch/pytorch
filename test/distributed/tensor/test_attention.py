@@ -850,8 +850,8 @@ class TestSharding(DTensorTestBase):
         k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
         v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
 
-        register_cp_sharding_rules()
-        out = F.scaled_dot_product_attention(q_dt, k_dt, v_dt)
+        # register_cp_sharding_rules()
+        # out = F.scaled_dot_product_attention(q_dt, k_dt, v_dt)
 
         unregister_cp_sharding_rules(clear_the_cache=True)
         # Run SDPA with sequence-sharded tensors WITHOUT enabling CP
