@@ -22,8 +22,13 @@ import collections
 import functools
 import operator
 import types
-from collections.abc import Sequence
+import weakref
+from collections.abc import Hashable as py_Hashable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
+
+import torch
+from torch._subclasses.fake_tensor import is_fake
+
 
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
@@ -79,12 +84,12 @@ def is_hashable(x: VariableTracker) -> bool:
     # inserting the guard. To avoid this, lazyVT `is_hashable` methods looks at
     # the underlying value without realizing the VT. Consider updating the
     # lazyVT `is_hashable` method if you see unnecessary guarding for a key VT.
-    if (
-        isinstance(x, variables.LazyVariableTracker)
-        and not x.is_realized()
-        and x.is_hashable()
-    ):
-        return True
+    if isinstance(x, variables.LazyVariableTracker):
+        if not x.is_realized():
+            return x.is_hashable()
+        # If already realized, check hashability of the realized value
+        return is_hashable(x.unwrap())
+
     return x.is_python_hashable()
 
 
@@ -423,7 +428,11 @@ class ConstDictVariable(VariableTracker):
                 )
             )
         elif args[0].source:
+            # Realize the lookup key to install its guard
+            if isinstance(args[0], variables.LazyVariableTracker):
+                args[0].realize()
             if contains:
+                # Key is in the dict - realize the dict's key to install guard
                 self.realize_key_vt(args[0])
             else:
                 self.install_dict_keys_match_guard()
@@ -1007,8 +1016,19 @@ class SetVariable(ConstDictVariable):
         items: list[VariableTracker],
         **kwargs: Any,
     ) -> None:
+        # Items can be either VariableTrackers or _HashableTrackers (from set ops).
+        # For VariableTrackers, realize them to ensure aliasing guards are installed
+        # when the same object appears multiple times.
+        realized_items = []
+        for item in items:
+            if isinstance(item, ConstDictVariable._HashableTracker):
+                # Already a _HashableTracker from a set operation
+                realized_items.append(item)
+            else:
+                # VariableTracker - realize to install guards
+                realized_items.append(item.realize())
         # pyrefly: ignore[bad-assignment]
-        items = dict.fromkeys(items, SetVariable._default_value())
+        items = dict.fromkeys(realized_items, SetVariable._default_value())
         # pyrefly: ignore[bad-argument-type]
         super().__init__(items, **kwargs)
 

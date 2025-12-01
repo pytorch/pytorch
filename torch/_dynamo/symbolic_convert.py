@@ -4515,14 +4515,12 @@ class InstructionTranslator(InstructionTranslatorBase):
                     local_dynamism = None
                     if dynamism:
                         local_dynamism = frozenset(dynamism.get(name, {}).items())
-                    var = LazyVariableTracker.create(
-                        value,
-                        LocalSource(
-                            name,
-                            is_input=True,
-                            dynamism=local_dynamism,
-                        ),
+                    source = LocalSource(
+                        name,
+                        is_input=True,
+                        dynamism=local_dynamism,
                     )
+                    var = VariableTracker.build(self, value, source)
                     self.symbolic_locals[name] = var
 
             # Populate `symbolic_locals` with cells created by this frame,

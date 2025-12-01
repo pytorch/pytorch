@@ -215,7 +215,7 @@ from .higher_order_ops import (
     TorchHigherOrderOperatorVariable,
 )
 from .iter import ItertoolsVariable
-from .lazy import LazyVariableTracker
+from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -436,6 +436,7 @@ class VariableBuilder:
         self,
         tx,
         source: Source,
+        allow_lazy_constant: bool = True,
     ) -> None:
         assert source is not None, (
             "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
@@ -445,6 +446,10 @@ class VariableBuilder:
         self.tx = tx
         self.source = source
         self.name = source.name()
+        # allow_lazy_constant controls whether LazyConstantVariable can be returned
+        # for int/float/bool/str. Set to False when called from LazyCache.realize()
+        # to prevent double-wrapping (LazyVariableTracker containing LazyConstantVariable).
+        self.allow_lazy_constant = allow_lazy_constant
 
     def __call__(self, value):
         if value in self.tx.output.side_effects:
@@ -468,7 +473,13 @@ class VariableBuilder:
 
         cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
         if cached_vt:
-            return cached_vt
+            # If allow_lazy_constant=False but the cached VT is a lazy variable,
+            # we need to rebuild to get a non-lazy version. This happens when
+            # LazyConstantVariable.realize() calls VariableBuilder.
+            if self.allow_lazy_constant or not isinstance(
+                cached_vt, LazyVariableTracker
+            ):
+                return cached_vt
 
         vt = self._wrap(value)
 
@@ -2045,15 +2056,50 @@ class VariableBuilder:
                     )
                     return ConstantVariable.create(value=value, source=self.source)
 
-            return self.wrap_symint(value)
-        elif not config.specialize_float and type(value) is float:
-            return self.wrap_symfloat(value)
+                return self._wrap_symbolic_or_lazy_constant(value, self.wrap_symint)
+
+            return self._wrap_lazy_constant(value)
+        elif type(value) is float:
+            if not config.specialize_float:
+                return self._wrap_symbolic_or_lazy_constant(value, self.wrap_symfloat)
+
+            return self._wrap_lazy_constant(value)
+        elif type(value) in (bool, str):
+            return self._wrap_lazy_constant(value)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             result = ConstantVariable.create(value=value, source=self.source)
             if isinstance(value, (list, set)):
                 return self.tx.output.side_effects.track_mutable(value, result)
             return result
+
+    def _wrap_lazy_constant(
+        self, value: Union[int, float, bool, str]
+    ) -> VariableTracker:
+        """Wrap a primitive constant, deferring guard installation if allowed."""
+        if not self.allow_lazy_constant:
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
+        return LazyConstantVariable.create(value, source=self.source)
+
+    def _wrap_symbolic_or_lazy_constant(
+        self,
+        value: Union[int, float],
+        wrap_fn: Callable[[Union[int, float]], VariableTracker],
+    ) -> VariableTracker:
+        """Wrap a numeric constant as symbolic (unspecialized) or lazy constant."""
+        if not self.allow_lazy_constant:
+            return wrap_fn(value)
+
+        # Use LazyConstantVariable - will realize to wrap_fn when used
+        def _realize(
+            value: Union[int, float] = value, wrap_fn: Callable = wrap_fn
+        ) -> VariableTracker:
+            return wrap_fn(value)
+
+        return LazyConstantVariable.create(
+            value, source=self.source, realize_fn=_realize
+        )
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
         if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
