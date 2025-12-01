@@ -434,7 +434,6 @@ dtensor_fails = {
     xfail("signal.windows.hann"),
     xfail("signal.windows.nuttall"),
     xfail("signal.windows.kaiser"),
-    xfail("stack"),
     xfail("std_mean"),
     xfail("std_mean", "unbiased"),
     xfail("stft"),

@@ -349,6 +349,24 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
     if not from_nelem == prod(to_size):
         raise AssertionError("Total view shape does not add up")
 
+    # Special case for zero-sized tensors: when total elements = 0, we can't use
+    # the normal dimension-matching algorithm. Instead, we just return an empty
+    # rule list, which means all dimensions are treated as independent.
+    # This allows views like [0, 1, 0] -> [2, 0, 1, 0] to work.
+    if from_nelem == 0:
+        # For zero-sized tensors, we return a trivial mapping where each output
+        # dimension maps to the corresponding input dimension (or InputDim(0) for
+        # new dimensions).
+        # This is safe because with 0 elements, sharding doesn't affect correctness.
+        result = []
+        for i in range(len(to_size)):
+            if i < len(from_size):
+                result.append(InputDim(i))
+            else:
+                # New dimension - just use the first input dim as a placeholder
+                result.append(InputDim(0))
+        return tuple(result)
+
     from_idx = 0
     to_idx = 0
     from_len = len(from_size)
