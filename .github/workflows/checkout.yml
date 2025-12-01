@@ -1,15 +1,11 @@
-name: CI pipeline
+name: Reusable Checkout Workflow
 
 on:
-  push:
-    branches: ["main"]
-  pull_request:
-    branches: ["main"]
+  workflow_call:
 
 jobs:
-  scan:
+  checkout:
     runs-on: ubuntu-latest
-
     steps:
-      - name: checkout repo
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
