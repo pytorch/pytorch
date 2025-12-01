@@ -55,6 +55,12 @@ struct Block {
   Block* prev{nullptr}; // prev block if split from a larger allocation
   Block* next{nullptr}; // next block if split from a larger allocation
   int event_count{0}; // number of outstanding XPU events
+  // The stack context at the time this block was most recently allocated from
+  // the caching pool
+  std::shared_ptr<GatheredContext> context_when_allocated;
+  // Only set for the first block in a segment (when prev == nullptr). Record
+  // the stack context at the time the underlying memory segment was first
+  // allocated (e.g., via sycl::aligned_alloc_device and map).
   ExpandableSegment* expandable_segment{nullptr}; // owning expandable segment
 
   Block(
