@@ -15,10 +15,10 @@
 #include <ATen/ops/empty_like.h>
 #endif
 
-#include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/cuda/AsyncMM.cuh>
 
 #if defined(USE_ROCM) || (defined(CUDART_VERSION) && CUDART_VERSION >= 12030)
 
@@ -50,14 +50,14 @@
     }                                                                    \
   }
 
-#define DISPATCH_ALIGNMENTS_16_8_4(alignment, ...)                    \
-  switch (alignment) {                                                \
-    INT_SWITCH_CASE(k_alignment, 16, __VA_ARGS__);                    \
-    INT_SWITCH_CASE(k_alignment, 8, __VA_ARGS__);                     \
-    INT_SWITCH_CASE(k_alignment, 4, __VA_ARGS__);                     \
-    default: {                                                        \
+#define DISPATCH_ALIGNMENTS_16_8_4(alignment, ...)                     \
+  switch (alignment) {                                                 \
+    INT_SWITCH_CASE(k_alignment, 16, __VA_ARGS__);                     \
+    INT_SWITCH_CASE(k_alignment, 8, __VA_ARGS__);                      \
+    INT_SWITCH_CASE(k_alignment, 4, __VA_ARGS__);                      \
+    default: {                                                         \
       TORCH_CHECK(false, "Not implemented for alignment=", alignment); \
-    }                                                                 \
+    }                                                                  \
   }
 
 #define AT_DISPATCH_FLOAT_AND_BFLOAT16(scalar_type, name, ...)         \
@@ -84,8 +84,8 @@ size_t get_and_verify_alignment(const at::Tensor& input, const char* op_name) {
       min_alignment,
       "-byte aligned.");
 
-  const size_t size_alignment =
-      at::native::memory::get_alignment(static_cast<size_t>(input.numel() * input.element_size()));
+  const size_t size_alignment = at::native::memory::get_alignment(
+      static_cast<size_t>(input.numel() * input.element_size()));
   TORCH_CHECK(
       size_alignment >= min_alignment,
       op_name,
@@ -127,7 +127,7 @@ void init_elementwise_launch_config(
   }
 }
 
-#if !defined(USE_ROCM) //No multi-cast support on ROCm yet
+#if !defined(USE_ROCM) // No multi-cast support on ROCm yet
 template <typename T, int alignment>
 static __global__ void multimem_all_reduce_kernel(
     T* input_mc_ptr,
@@ -321,7 +321,7 @@ at::Tensor multimem_one_shot_all_reduce_out(
     std::string group_name,
     at::Tensor out) {
   auto group = c10d::resolve_process_group(group_name);
-  int root = group->getRank();  // each rank reduces to itself
+  int root = group->getRank(); // each rank reduces to itself
   return multimem_one_shot_reduce_out(input, reduce_op, root, group_name, out);
 }
 
@@ -426,7 +426,7 @@ at::Tensor multimem_all_gather_out(
   return out;
 }
 
-#endif //no multi-cast support on ROCm
+#endif // no multi-cast support on ROCm
 
 // One-shot all-reduce is register-intensive because it stages values loaded
 // from peers in registers before performing reduction. Setting the thread
@@ -451,8 +451,10 @@ static __launch_bounds__(one_shot_all_reduce_max_num_threads) __global__
   auto stride = blockDim.x * gridDim.x * numel_per_thread;
   if (input_ptr) {
     for (size_t i = offset; i < numel; i += stride) {
-      Vec<alignment> vec_st = at::native::memory::ld_vec<alignment>(input_ptr + i);
-      at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + i, vec_st);
+      Vec<alignment> vec_st =
+          at::native::memory::ld_vec<alignment>(input_ptr + i);
+      at::native::memory::st_vec<alignment>(
+          input_ptrs[rank] + input_offset + i, vec_st);
     }
   }
   // TODO make it sync with one block for no-copy case
@@ -646,7 +648,8 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
     if constexpr (reduce_scatter) {
       at::native::memory::st_vec<alignment>(output_ptr + i, vec);
     } else {
-      at::native::memory::st_vec<alignment>(input_ptrs[rank] + input_offset + start + i, vec);
+      at::native::memory::st_vec<alignment>(
+          input_ptrs[rank] + input_offset + start + i, vec);
     }
   }
 
@@ -662,9 +665,10 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
     for (size_t step = 0; step < k_world_size; ++step) {
       size_t remote_rank = (rank + step) % k_world_size;
       size_t remote_start = numel_per_rank * remote_rank;
-#if defined (USE_ROCM)
+#if defined(USE_ROCM)
       tmp[step] = at::native::memory::ld_vec<alignment>(
-          input_ptrs[remote_rank] + input_offset + min(remote_start + i, numel-1));
+          input_ptrs[remote_rank] + input_offset +
+          min(remote_start + i, numel - 1));
 #else
       if (remote_start + i >= numel) {
         continue;
@@ -680,7 +684,8 @@ static __launch_bounds__(two_shot_all_reduce_max_num_threads) __global__
       if (remote_start + i >= numel) {
         continue;
       }
-      at::native::memory::st_vec<alignment>(output_ptr + remote_start + i, tmp[step]);
+      at::native::memory::st_vec<alignment>(
+          output_ptr + remote_start + i, tmp[step]);
     }
   }
   // need to make sure all blocks exit simultaneously so that the data
@@ -991,6 +996,153 @@ at::Tensor reduce_scatter_out(
   }
   return output;
 }
+// Check if we're in CUDA graph capture mode
+bool is_cuda_graph_capturing() {
+  cudaStreamCaptureStatus capture_status;
+  C10_CUDA_CHECK(cudaStreamGetCaptureInfo(
+      at::cuda::getCurrentCUDAStream(), &capture_status, nullptr));
+  return capture_status != cudaStreamCaptureStatusNone;
+}
+
+at::Tensor all_gather_p2p_memcpy(
+    const at::Tensor& input,
+    const std::string& group_name,
+    at::Tensor out) {
+  auto symm_mem = c10d::symmetric_memory::rendezvous(out, group_name);
+  TORCH_CHECK(
+      symm_mem != nullptr,
+      "all_gather_p2p_memcpy: output must be allocated with empty_strided_p2p() "
+      "and rendezvous'd before calling this function.");
+
+  TORCH_CHECK(
+      input.is_contiguous(),
+      "all_gather_p2p_memcpy: input must be contiguous.");
+  TORCH_CHECK(
+      out.is_contiguous(), "all_gather_p2p_memcpy: output must be contiguous.");
+
+  TORCH_CHECK(
+      input.dim() == out.dim(),
+      "all_gather_p2p_memcpy: input/output dimension mismatch.");
+
+  int world_size = symm_mem->get_world_size();
+  TORCH_CHECK(
+      out.sizes()[0] == input.sizes()[0] * world_size,
+      "all_gather_p2p_memcpy: out.sizes()[0] must be equal to input.sizes[0] * world_size. (out.sizes():",
+      out.sizes(),
+      ", input.sizes(): ",
+      input.sizes(),
+      ", world_size: ",
+      world_size,
+      ")");
+
+  for (auto d = 1; d < input.dim(); ++d) {
+    TORCH_CHECK(
+        out.sizes()[d] == input.sizes()[d],
+        "all_gather_p2p_memcpy: all non-0th dimension of input and output must match.");
+  }
+
+  int rank = symm_mem->get_rank();
+
+  // Set device context for CUDA operations
+  c10::cuda::CUDAGuard guard(symm_mem->get_device());
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  // Pre-barrier: Ensure all ranks are ready to receive data (use channel 0)
+  symm_mem->barrier(/*channel=*/0, /*timeout_ms=*/0);
+
+  // Calculate offsets and sizes for the batch copy
+  int64_t out_storage_offset = out.storage_offset();
+  int64_t input_numel = input.numel();
+  size_t bytes_per_rank =
+      static_cast<size_t>(input_numel * input.element_size());
+
+  // Get buffer pointers for all ranks
+  std::vector<void*> buffer_ptrs = symm_mem->get_buffer_ptrs();
+
+  // Check if we're capturing a CUDA graph
+  bool capturing = is_cuda_graph_capturing();
+
+#if CUDART_VERSION >= 12080
+  if (!capturing) {
+    // Use cudaMemcpyBatchAsync for better copy engine utilization
+    // Build batch operation arrays
+    std::vector<void*> srcs(world_size);
+    std::vector<void*> dsts(world_size);
+    std::vector<size_t> sizes(world_size);
+
+    for (int r = 0; r < world_size; ++r) {
+      // Source is always this rank's input
+      srcs[r] = input.data_ptr();
+
+      // Destination is rank r's buffer at our rank's slot
+      // buffer_ptrs[r] points to the start of rank r's symmetric memory buffer
+      // We write to offset: (out_storage_offset + rank * input_numel) *
+      // element_size
+      dsts[r] = static_cast<char*>(buffer_ptrs[r]) +
+          (out_storage_offset + rank * input_numel) * input.element_size();
+
+      sizes[r] = bytes_per_rank;
+    }
+
+    // Set up copy engine attributes for compute overlap
+    cudaMemcpyAttributes attrs = {};
+    attrs.srcAccessOrder = cudaMemcpySrcAccessOrderStream;
+    // Prefer using copy engine to overlap with compute
+    attrs.flags = cudaMemcpyFlagPreferOverlapWithCompute;
+    size_t attrIdx = 0;
+
+    // Launch all copies in one batch via copy engine
+    // Note: cudaMemcpyBatchAsync has different signatures in different CUDA
+    // versions:
+    // - CUDA 13.0+: no failIdx parameter
+    // - CUDA 12.8-12.x: has failIdx parameter (we pass nullptr)
+#if CUDART_VERSION >= 13000
+    C10_CUDA_CHECK(cudaMemcpyBatchAsync(
+        dsts.data(),
+        srcs.data(),
+        sizes.data(),
+        static_cast<size_t>(world_size),
+        &attrs,
+        &attrIdx,
+        1, // numAttrs
+        stream));
+#else
+    C10_CUDA_CHECK(cudaMemcpyBatchAsync(
+        dsts.data(),
+        srcs.data(),
+        sizes.data(),
+        static_cast<size_t>(world_size),
+        &attrs,
+        &attrIdx,
+        1, // numAttrs
+        nullptr, // failIdx - not used
+        stream));
+#endif
+  } else
+#endif
+  {
+    // Fallback for CUDA graph capture or older CUDA versions:
+    // cudaMemcpyBatchAsync is not supported during graph capture
+    // Use individual cudaMemcpyAsync calls instead
+    for (int r = 0; r < world_size; ++r) {
+      void* dst_ptr = static_cast<char*>(buffer_ptrs[r]) +
+          (out_storage_offset + rank * input_numel) * input.element_size();
+
+      C10_CUDA_CHECK(cudaMemcpyAsync(
+          dst_ptr,
+          input.data_ptr(),
+          bytes_per_rank,
+          cudaMemcpyDeviceToDevice,
+          stream));
+    }
+  }
+
+  // Post-barrier: Ensure all copies are complete (use channel 1)
+  symm_mem->barrier(/*channel=*/1, /*timeout_ms=*/0);
+
+  return out;
+}
+
 } // namespace
 #elif defined(CUDART_VERSION) && CUDART_VERSION < 12030
 namespace {
@@ -1151,10 +1303,11 @@ at::Tensor memset32_(
       count,
       at::cuda::getCurrentCUDAStream()));
 #elif defined(USE_ROCM)
-  C10_HIP_CHECK(hipMemsetD32Async(reinterpret_cast<hipDeviceptr_t>(addr),
-                                   val,
-                                   count,
-                                   at::cuda::getCurrentCUDAStream()));
+  C10_HIP_CHECK(hipMemsetD32Async(
+      reinterpret_cast<hipDeviceptr_t>(addr),
+      val,
+      count,
+      at::cuda::getCurrentCUDAStream()));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -1209,10 +1362,7 @@ at::Tensor stream_write_value32_(
       0));
 #elif defined(USE_ROCM)
   C10_HIP_CHECK(hipStreamWriteValue32(
-                                      at::cuda::getCurrentCUDAStream(),
-                                      reinterpret_cast<void*>(addr),
-                                      val,
-                                      0));
+      at::cuda::getCurrentCUDAStream(), reinterpret_cast<void*>(addr), val, 0));
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -1247,10 +1397,10 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
   m.impl("multimem_one_shot_all_reduce", ::multimem_one_shot_all_reduce);
   m.impl(
       "multimem_one_shot_all_reduce_out", ::multimem_one_shot_all_reduce_out);
-  m.impl(
-      "multimem_one_shot_reduce_out", ::multimem_one_shot_reduce_out);
+  m.impl("multimem_one_shot_reduce_out", ::multimem_one_shot_reduce_out);
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
 #endif
+  m.impl("all_gather_p2p_memcpy", ::all_gather_p2p_memcpy);
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("memset32_", ::memset32_);
 }
