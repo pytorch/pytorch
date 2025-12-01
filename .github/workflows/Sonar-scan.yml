@@ -21,17 +21,23 @@ jobs:
 
   cpp-check:
       runs-on: ubuntu-latest
-      steps:
-        - uses: actions/checkout@v3
-        - name: Cppcheck Scan
-          run: cppcheck --enable=all --inconclusive --quiet .
-
+       steps:
+      - uses: actions/checkout@v3
+      - name: Install Cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+      - name: Run Cppcheck
+        run: cppcheck --enable=all --inconclusive --quiet .
   java-pmd:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - name: PMD Scan
+      - name: Download PMD
         run: |
-          curl -L -o pmd-bin.zip https://github.com/pmd/pmd/releases/download/pmd_releases/6.60.0/pmd-bin-6.60.0.zip
-          unzip pmd-bin.zip
-          ./pmd-bin-6.60.0/bin/run.sh pmd -d ./src -R java-basic -f text
+          cd $HOME
+          wget -O pmd.zip https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.19.0/pmd-dist-7.19.0-bin.zip
+          unzip pmd.zip
+
+      - name: Run PMD Scan
+        run: |
+          alias pmd="$HOME/pmd-bin-7.19.0/bin/pmd"
+          $HOME/pmd-bin-7.19.0/bin/run.sh pmd -d ./src -R rulesets/java/quickstart.xml -f text
