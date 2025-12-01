@@ -1725,6 +1725,48 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), foo(x))
 
+    def test_sdp_backend_serialization(self):
+        def fn(x, backend):
+            # Use the backend enum in a guard-producing way
+            if backend == torch.nn.attention.SDPBackend.MATH:
+                return x + 1
+            elif backend == torch.nn.attention.SDPBackend.FLASH_ATTENTION:
+                return x + 2
+            elif backend == torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION:
+                return x + 3
+            else:
+                return x + 4
+
+        x = torch.randn(3, 2)
+        backend = torch.nn.attention.SDPBackend.MATH
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, backend)
+
+        # Test with the same backend
+        self._test_check_fn(
+            ref, loaded, {"x": x, "backend": torch.nn.attention.SDPBackend.MATH}, True
+        )
+
+        # Test with different backends
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "backend": torch.nn.attention.SDPBackend.FLASH_ATTENTION},
+            False,
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "backend": torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION},
+            False,
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "backend": torch.nn.attention.SDPBackend.CUDNN_ATTENTION},
+            False,
+        )
+
 
 class SimpleModule(torch.nn.Module):
     def __init__(self, c):
