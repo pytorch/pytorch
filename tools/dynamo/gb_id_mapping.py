@@ -3,10 +3,10 @@ import ast
 import json
 import re
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 
-def get_source_segment(source: str, node: ast.AST) -> Optional[str]:
+def get_source_segment(source: str, node: ast.AST) -> str | None:
     return ast.get_source_segment(source, node)
 
 
@@ -48,7 +48,7 @@ def clean_string(s: Any) -> Any:
     return s
 
 
-def expand_hints(hints: list[str], dynamo_dir: Optional[str] = None) -> list[str]:
+def expand_hints(hints: list[str], dynamo_dir: str | None = None) -> list[str]:
     """
     Expands hint references to their actual values from graph_break_hints.
     Uses exec() to avoid import dependencies.
@@ -116,7 +116,7 @@ def extract_info_from_keyword(source: str, kw: ast.keyword) -> Any:
 
 
 def find_unimplemented_calls(
-    path: str, dynamo_dir: Optional[str] = None
+    path: str, dynamo_dir: str | None = None
 ) -> list[dict[str, Any]]:
     results = []
     path_obj = Path(path)
