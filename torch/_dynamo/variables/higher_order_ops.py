@@ -1348,7 +1348,7 @@ def speculate_subgraph_with_auto_output_flattening(
             (f, sub_args, sub_kwargs),
         )
 
-        with tx.output.subtracer(source_target, tracer) as subtracer:
+        with tx.output.subtracer(source_target, tracer, description) as subtracer:
             args = get_hop_args(
                 tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
             )
@@ -1573,7 +1573,7 @@ def speculate_subgraph(
             (f, sub_args, sub_kwargs),
         )
 
-        with tx.output.subtracer(source_target, tracer) as subtracer:
+        with tx.output.subtracer(source_target, tracer, description) as subtracer:
             args = get_hop_args(
                 tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
             )
@@ -3343,26 +3343,6 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
         self.restore_side_effects = (
             not torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
         )
-
-    def create_wrapped_node(
-        self,
-        tx: "InstructionTranslator",
-        fn_vt,
-        fn_args_vt,
-        kwargs,
-        description,
-        *,
-        subgraph_name="wrap_body",
-    ):
-        # Set under_activation_checkpoint flag on tracer for checkpoint-specific logic
-        orig_val = tx.output.current_tracer.under_activation_checkpoint
-        try:
-            tx.output.current_tracer.under_activation_checkpoint = True
-            return super().create_wrapped_node(
-                tx, fn_vt, fn_args_vt, kwargs, description, subgraph_name=subgraph_name
-            )
-        finally:
-            tx.output.current_tracer.under_activation_checkpoint = orig_val
 
     def _call_function(
         self,
