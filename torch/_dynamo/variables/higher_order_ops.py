@@ -195,13 +195,13 @@ def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
 
 
 @contextlib.contextmanager
-def dynamo_allow_side_effects_with_extra_outputs(tx: "InstructionTranslator"):
-    orig_val = tx.output.current_tracer.allow_side_effects_with_extra_outputs
+def dynamo_allow_side_effects_in_hop(tx: "InstructionTranslator"):
+    orig_val = tx.output.current_tracer.allow_side_effects_in_hop
     try:
-        tx.output.current_tracer.allow_side_effects_with_extra_outputs = True
+        tx.output.current_tracer.allow_side_effects_in_hop = True
         yield
     finally:
-        tx.output.current_tracer.allow_side_effects_with_extra_outputs = orig_val
+        tx.output.current_tracer.allow_side_effects_in_hop = orig_val
 
 
 def find_mismatched_vars(var, types, allow_none=False):
@@ -1255,14 +1255,13 @@ def trace_hop_function(
     sub_kwargs,
 ):
     enable_side_effects_with_extra_outputs = not restore_side_effects
-
     autograd_ctx = (
         dynamo_enable_grad(tx, enable_grad)
         if enable_grad is not None
         else contextlib.nullcontext()
     )
     side_effects_ctx = (
-        dynamo_allow_side_effects_with_extra_outputs(tx)
+        dynamo_allow_side_effects_in_hop(tx)
         if enable_side_effects_with_extra_outputs
         else contextlib.nullcontext()
     )
