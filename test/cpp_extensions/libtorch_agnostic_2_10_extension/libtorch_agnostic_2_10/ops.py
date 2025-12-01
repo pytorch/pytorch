@@ -156,20 +156,24 @@ def test_get_num_threads() -> int:
     return torch.ops.libtorch_agnostic_2_10.test_get_num_threads.default()
 
 
-def my_empty(size, dtype=None, device=None, pin_memory=None) -> Tensor:
+def my_empty(
+    size, dtype=None, layout=None, device=None, pin_memory=None, memory_format=None
+) -> Tensor:
     """
-    Creates an empty tensor with the specified size, dtype, device, and pin_memory.
+    Creates an empty tensor with the specified size, dtype, layout, device, pin_memory, and memory_format.
 
     Args:
         size: list[int] - size of the tensor to create
         dtype: ScalarType or None - data type of the tensor
+        layout: Layout or None - layout of the tensor
         device: Device or None - device on which to create the tensor
         pin_memory: bool or None - whether to use pinned memory
+        memory_format: MemoryFormat or None - memory format of the tensor
 
     Returns: Tensor - an uninitialized tensor with the specified properties
     """
     return torch.ops.libtorch_agnostic_2_10.my_empty.default(
-        size, dtype, device, pin_memory
+        size, dtype, layout, device, pin_memory, memory_format
     )
 
 
@@ -235,3 +239,29 @@ def get_template_any_data_ptr(t, dtype, mutable) -> int:
     return torch.ops.libtorch_agnostic_2_10.get_template_any_data_ptr.default(
         t, dtype, mutable
     )
+
+
+def my_get_curr_cuda_blas_handle() -> int:
+    """
+    Return the current cuBlasHandle_t pointer value.
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_get_curr_cuda_blas_handle.default()
+
+
+def my_string_op(t, accessor, passthru) -> tuple[list[str], int]:
+    """
+    The purpose of this op is to test inputting and outputting strings in a
+    stable custom op. This particular op takes in a Tensor, a string denoting
+    which tensor metadata API to call, and a pass through string to return a
+    string list and the value of the tensor metadata.
+
+    If accessor is "size" or "stride", query along the 0th dim.
+
+    Args:
+        t: Tensor - input tensor to query
+        accessor: str - which property to access ("dim", "size", or "stride")
+        passthru: str - a string that gets returned as the last element of the list
+
+    Returns: tuple - (list of [accessor, value, passthru] as strings, value)
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_string_op.default(t, accessor, passthru)
