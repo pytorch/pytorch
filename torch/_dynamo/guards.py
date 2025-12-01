@@ -2048,7 +2048,12 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         id_val = self.id_ref(val, guard.name)
-        type_repr = repr(val)
+        try:
+            type_repr = repr(val)
+        except Exception:
+            # During deepcopy reconstruction or other state transitions,
+            # objects may be in an incomplete state where repr() fails
+            type_repr = f"<{type(val).__name__}>"
         code = f"___check_obj_id({ref}, {id_val}), type={type_repr}"
         self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
         self.get_guard_manager(guard).add_id_match_guard(
