@@ -3,7 +3,7 @@ import contextlib
 import logging
 import warnings
 from collections.abc import Sequence
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.distributed as dist
@@ -518,7 +518,7 @@ class OpDispatcher:
         kwargs_schema: dict[str, object] = {}
         local_args: list[object] = []
         local_kwargs: dict[str, object] = {}
-        compute_mesh: Optional[DeviceMesh] = None
+        compute_mesh: DeviceMesh | None = None
 
         for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
