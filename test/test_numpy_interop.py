@@ -3,7 +3,6 @@
 # Owner(s): ["module: numpy"]
 
 import sys
-import unittest
 from itertools import product
 from unittest import skipIf
 
