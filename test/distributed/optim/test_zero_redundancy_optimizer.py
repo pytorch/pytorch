@@ -56,7 +56,11 @@ except ImportError:
     HAS_TORCHVISION = False
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 
 
 @contextmanager
