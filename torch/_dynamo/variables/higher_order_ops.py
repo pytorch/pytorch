@@ -1310,10 +1310,6 @@ def speculate_subgraph_with_auto_output_flattening(
     if sub_kwargs is None:
         sub_kwargs = {}
 
-    # Compute enable_side_effects_with_extra_outputs from restore_side_effects.
-    # When restore_side_effects is False, we allow side effects by returning extra outputs.
-    # enable_side_effects_with_extra_outputs = not restore_side_effects
-
     assert set_subgraph_inputs in {
         "automatic",
         "semi_automatic",
@@ -4189,6 +4185,7 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     supports_input_mutation = True
     supports_aliasing = False
+    # TODO (tmanlaibaatar) This is in preparation for supporting side effects in invoke_subgraph.
     # invoke_subgraph does not support side effects, so we restore them (default behavior).
     # This means enable_side_effects_with_extra_outputs will be False.
     restore_side_effects = True
