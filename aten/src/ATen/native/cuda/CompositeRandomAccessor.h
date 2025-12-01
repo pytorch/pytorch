@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/cuda/cub.cuh>
 #include <ATen/native/CompositeRandomAccessorCommon.h>
 
 #ifndef USE_ROCM

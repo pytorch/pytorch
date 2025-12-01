@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>

@@ -9,9 +9,11 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/OpMathType.h>
 #if defined(__CUDACC__)
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #elif defined(__HIPCC__)
+#include <ATen/hip/cub.cuh>
 #include <ATen/hip/DeviceUtils.cuh>
 #include <ATen/native/hip/DeviceSqrt.cuh>
 #endif

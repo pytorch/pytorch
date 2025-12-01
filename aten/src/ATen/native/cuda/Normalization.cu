@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/Normalization.h>

@@ -8,6 +8,7 @@
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
 #include <ATen/detail/FunctionTraits.h>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/native/cuda/thread_constants.h>
 

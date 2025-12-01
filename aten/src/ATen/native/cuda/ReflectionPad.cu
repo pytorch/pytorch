@@ -3,6 +3,7 @@
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cuda/Atomic.cuh>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/TensorUtils.h>

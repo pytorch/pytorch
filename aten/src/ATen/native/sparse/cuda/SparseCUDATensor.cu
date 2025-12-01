@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>

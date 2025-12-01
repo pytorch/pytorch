@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/OpMathType.h>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
