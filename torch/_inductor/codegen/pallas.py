@@ -202,6 +202,14 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.asarray({x}).astype({jax_dtype})"
 
     @staticmethod
+    def to_dtype_bitcast(x: str, dtype: torch.dtype, src_dtype: torch.dtype) -> str:
+        """Bitcast a value from one dtype to another with the same size."""
+        jax_dtype = torch_dtype_to_jax(dtype)
+        jax_src_dtype = torch_dtype_to_jax(src_dtype)
+        # First ensure the value is the correct source dtype, then bitcast
+        return f"jax.lax.bitcast_convert_type(jnp.asarray({x}).astype({jax_src_dtype}), {jax_dtype})"
+
+    @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
         """Convert a sympy expression to a JAX array indexing expression."""
         from ..utils import get_bounds_index_expr
