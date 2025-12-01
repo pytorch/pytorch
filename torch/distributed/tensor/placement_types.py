@@ -46,6 +46,19 @@ class Shard(torch._C._distributed.Shard):
         evenly divisible on a DeviceMesh dimension is currently experimental and subject to change.
     """
 
+    def _custom_chunk(self, tensor, num_chunks, dim):
+        assert tensor.dim() > 0
+        assert num_chunks > 0
+
+        dim_size = tensor.size(dim)
+        split_size = (dim_size + num_chunks - 1) // num_chunks
+        chunks = []
+        for i in range(num_chunks):
+            start = torch.sym_min(split_size * i, dim_size)
+            end = torch.sym_min(split_size * (i + 1), dim_size)
+            chunks.append(tensor.narrow(dim, start, end - start))
+        return chunks
+    
     def _split_tensor(
         self,
         tensor: torch.Tensor,
@@ -68,10 +81,7 @@ class Shard(torch._C._distributed.Shard):
         )
 
         # chunk tensor over dimension `dim` into n slices
-        tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
-        tensor_list = fill_empty_tensor_to_shards(
-            tensor_list, self.dim, num_chunks - len(tensor_list)
-        )
+        tensor_list = self._custom_chunk(tensor, num_chunks, dim=self.dim)
 
         # compute the chunk size inline with ``torch.chunk`` to calculate padding
         full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
