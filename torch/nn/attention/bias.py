@@ -232,15 +232,7 @@ class CausalBias(torch.Tensor):
                 query, key, value, None, dropout_p, is_causal, enable_gqa
             )
             if can_use_flash_attention(sdpa_params):
-                device_type = query.device.type
-                if device_type == "cuda":
-                    alignment = 8
-                elif device_type == "xpu":
-                    alignment = 64
-                else:
-                    raise RuntimeError(
-                        "Flash Attention is only supported on CUDA and XPU devices."
-                    )
+                alignment = 64 if query.device.type == "xpu" else 8
                 og_head_size = query.size(-1)
                 og_scale = _calculate_scale(og_head_size, scale)
                 needs_padding = og_head_size % alignment != 0
