@@ -2,8 +2,6 @@
 # implement matrix related ops for distributed tensor
 
 
-from typing import Optional
-
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -671,7 +669,7 @@ def _scaled_dot_product_cudnn_attention_base_strategies(
     ) = op_schema.args_schema
     return_debug_mask = len(op_schema.args_schema) >= 8 and rest_args[2]
     has_attn_bias = attn_bias_strategy is not None
-    debug_attn_mask_sharding: Optional[Placement] = (
+    debug_attn_mask_sharding: Placement | None = (
         Replicate() if return_debug_mask else None
     )
 
@@ -1020,7 +1018,7 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     def valid_grouped_mm_strides(
-        input_specs: list[DTensorSpec], output_specs: tuple[Optional[DTensorSpec], ...]
+        input_specs: list[DTensorSpec], output_specs: tuple[DTensorSpec | None, ...]
     ) -> bool:
         # 1. compute the local-tensor shape/strides given this sharding proposal
         # 2. apply the logic from the groped_mm meta function
