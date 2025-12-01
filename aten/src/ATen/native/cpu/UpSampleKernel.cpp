@@ -1017,7 +1017,7 @@ struct HelperInterpBase {
       while (aligned_interp_size % sizeof(int32_t) != 0) {
         aligned_interp_size += 1;
       }
-      // assert that we wont go out of bounds
+      // assert that we won't go out of bounds
       TORCH_INTERNAL_ASSERT(aligned_interp_size * sizeof(int16_t) < interp_size * sizeof(double));
     }
 

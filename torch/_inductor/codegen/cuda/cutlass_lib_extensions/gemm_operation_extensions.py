@@ -1,5 +1,5 @@
 # mypy: ignore-errors
-from ..utils import try_import_cutlass
+from ..cutlass_utils import try_import_cutlass
 
 
 # copied / modified from original at
