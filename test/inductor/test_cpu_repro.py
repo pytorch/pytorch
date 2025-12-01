@@ -2,6 +2,8 @@
 import contextlib
 import copy
 import functools
+import ctypes
+import ctypes.util
 import itertools
 import math
 import os
@@ -5813,6 +5815,60 @@ class CPUReproTests(TestCase):
         compiled_func = torch.compile(fn, backend="inductor")
         result = compiled_func(xs, Ls)
         torch.testing.assert_close(result, expected)
+
+    def test_max_autotune_bmm_omp_dynamic(self):
+        # Simulate the issue where omp_set_dynamic(1) causes wrong results
+        # when combined with max_autotune and specific threading.
+        # This requires finding the OpenMP library and calling the C function directly.
+        
+        lib_names = ['omp', 'gomp', 'iomp5']
+        lib_path = None
+        for name in lib_names:
+            path = ctypes.util.find_library(name)
+            if path:
+                lib_path = path
+                break
+                
+        if not lib_path:
+            self.skipTest("OpenMP library not found")
+
+        try:
+            omp = ctypes.CDLL(lib_path)
+        except OSError:
+             self.skipTest(f"Could not load OpenMP library: {lib_path}")
+
+        if not hasattr(omp, 'omp_set_dynamic'):
+             self.skipTest("omp_set_dynamic not found in OpenMP library")
+
+        def fn(x, y):
+            return torch.bmm(x, y)
+
+        # Create inputs
+        # Sizes chosen to trigger the specific GEMM template
+        B, M, K, N = 1, 32, 32, 32
+        x = torch.randn(B, M, K)
+        y = torch.randn(B, K, N)
+
+        # Compile with max_autotune
+        # We need to ensure we hit the GEMM template that uses OpenMP
+        with config.patch({"max_autotune": True}):
+            compiled_fn = torch.compile(fn)
+            
+            # Set dynamic threading to 1 (enabled)
+            # This simulates what cv2 import does
+            omp.omp_set_dynamic(1)
+            
+            try:
+                # Set num threads to something > 1
+                # The bug happens when we ask for N threads but OpenMP gives fewer
+                # because dynamic is enabled.
+                with set_num_threads(4):
+                    actual = compiled_fn(x, y)
+                    expected = fn(x, y)
+                    torch.testing.assert_close(actual, expected)
+            finally:
+                # Reset dynamic threading
+                omp.omp_set_dynamic(0)
 
 
 if __name__ == "__main__":
