@@ -1490,6 +1490,8 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             codegen.store_attr(name)
 
     def _is_method_overridden(self, method_name: str) -> bool:
+        if len(self.tuple_cls.__mro__) < 3:
+            raise ValueError("NamedTuple should inherit from Tuple and Object.")
         if getattr(self.tuple_cls, method_name, None) == getattr(
             self.tuple_cls.__mro__[-3], method_name, None
         ):
