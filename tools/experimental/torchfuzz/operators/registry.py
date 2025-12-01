@@ -1,7 +1,5 @@
 """Operator registry for mapping operation names to operator instances."""
 
-from typing import Optional
-
 from torchfuzz.operators.arg import ArgOperator
 from torchfuzz.operators.argsort import ArgsortOperator
 from torchfuzz.operators.base import Operator
@@ -145,7 +143,7 @@ class OperatorRegistry:
         """Register an operator in the registry."""
         self._operators[operator.name] = operator
 
-    def get(self, op_name: str) -> Optional[Operator]:
+    def get(self, op_name: str) -> Operator | None:
         """Get an operator by name."""
         # Handle special arg_ operations by mapping them to the ArgOperator
         if op_name.startswith("arg_"):
@@ -161,7 +159,7 @@ class OperatorRegistry:
 _global_registry = OperatorRegistry()
 
 
-def get_operator(op_name: str) -> Optional[Operator]:
+def get_operator(op_name: str) -> Operator | None:
     """Get an operator from the global registry."""
     return _global_registry.get(op_name)
 
