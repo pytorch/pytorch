@@ -212,7 +212,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
       std::nullopt /* memory format */
   );
   at::cuda::memcpy_and_sync(
-      pinned_num_nonzeros_h.data_ptr<int>(),
+      pinned_num_nonzeros_h.template data_ptr<int>(),
       num_nonzeros.get(),
       sizeof(int) * num_chunks,
       cudaMemcpyDeviceToHost,
@@ -220,7 +220,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   int64_t num_nonzeros_h = 0;
 
   for (int64_t idx = 0; idx < num_chunks; idx++) {
-    num_nonzeros_h += (int)*(pinned_num_nonzeros_h.const_data_ptr<int>() + idx);
+    num_nonzeros_h += pinned_num_nonzeros_h.template const_data_ptr<int>()[idx];
   }
   // num_nonzeros_h = (int)*(pinned_num_nonzeros_h.const_data_ptr<int>());
   // expected output size is num_nonzeros x ndim
@@ -267,8 +267,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
           ((int*)num_nonzeros.get()) + idx,
           remaining,
           stream));
-      curr_nonzeros +=
-          (int)*(pinned_num_nonzeros_h.const_data_ptr<int>() + idx);
+      curr_nonzeros += pinned_num_nonzeros_h.template const_data_ptr<int>()[idx];
     }
     if (num_nonzeros_h > 0 && self.dim() > 1) {
       TensorDims<int64_t> dims;

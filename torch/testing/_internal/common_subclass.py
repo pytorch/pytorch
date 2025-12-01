@@ -200,9 +200,6 @@ class SparseTensor(WrapperTensor):
         rs = tree_map(wrap, func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs or {})))
         return rs
 
-    # To show how things happen later
-    def __rmul__(self, other):
-        return super().__rmul__(other)
 
     _SPECIAL_IMPLS = {}
 
