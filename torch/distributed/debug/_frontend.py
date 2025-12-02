@@ -10,8 +10,17 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
 from jinja2 import DictLoader, Environment
+from tabulate import tabulate
 
 from torch.distributed.debug._store import get_world_size, tcpstore_client
+from torch.distributed.flight_recorder.components.builder import build_db
+from torch.distributed.flight_recorder.components.config_manager import JobConfig
+from torch.distributed.flight_recorder.components.types import (
+    Collective,
+    Group,
+    Membership,
+    NCCLCall,
+)
 
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -21,6 +30,13 @@ logger: logging.Logger = logging.getLogger(__name__)
 class Response:
     status_code: int
     text: str
+
+    def raise_for_status(self):
+        if self.status_code != 200:
+            raise RuntimeError(f"HTTP {self.status_code}: {self.text}")
+
+    def json(self):
+        return json.loads(self.text)
 
 
 def fetch_thread_pool(urls: list[str]) -> Iterable[Response]:
@@ -132,8 +148,10 @@ templates = {
 
     <a href="/">Home</a> <!--@lint-ignore-->
     <a href="/stacks">Python Stack Traces</a> <!--@lint-ignore-->
-    <a href="/fr_trace">FlightRecorder</a> <!--@lint-ignore-->
+    <a href="/fr_trace">FlightRecorder CPU</a> <!--@lint-ignore-->
+    <a href="/fr_trace_json">(JSON)</a> <!--@lint-ignore-->
     <a href="/fr_trace_nccl">FlightRecorder NCCL</a> <!--@lint-ignore-->
+    <a href="/fr_trace_nccl_json">(JSON)</a> <!--@lint-ignore-->
     <a href="/profile">torch profiler</a> <!--@lint-ignore-->
     <a href="/wait_counters">Wait Counters</a> <!--@lint-ignore-->
     <a href="/tcpstore">TCPStore</a> <!--@lint-ignore-->
@@ -264,6 +282,22 @@ Hi
     </pre>
 {% endblock %}
     """,
+    "fr_trace.html": """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}{{ title }}{% endblock %}</h1>
+{% endblock %}
+{% block content %}
+    <h2>Groups</h2>
+    {{ groups | safe }}
+    <h2>Memberships</h2>
+    {{ memberships | safe }}
+    <h2>Collectives</h2>
+    {{ collectives | safe }}
+    <h2>NCCL Calls</h2>
+    {{ ncclcalls | safe }}
+{% endblock %}
+    """,
 }
 
 
@@ -274,6 +308,13 @@ class _IPv6HTTPServer(ThreadingHTTPServer):
 
 class HTTPRequestHandler(BaseHTTPRequestHandler):
     frontend: "FrontendServer"
+
+    def log_message(self, format, *args):
+        logger.info(
+            "%s %s",
+            self.client_address[0],
+            format % args,
+        )
 
     def do_GET(self):
         self.frontend._handle_request(self)
@@ -309,7 +350,9 @@ class FrontendServer:
             "/": self._handle_index,
             "/stacks": self._handle_stacks,
             "/fr_trace": self._handle_fr_trace,
+            "/fr_trace_json": self._handle_fr_trace_json,
             "/fr_trace_nccl": self._handle_fr_trace_nccl,
+            "/fr_trace_nccl_json": self._handle_fr_trace_nccl_json,
             "/profile": self._handle_profiler,
             "/wait_counters": self._handle_wait_counters,
             "/tcpstore": self._handle_tcpstore,
@@ -336,7 +379,7 @@ class FrontendServer:
         try:
             self._server.serve_forever()
         except Exception:
-            logger.exception("got exception in checkpoint server")
+            logger.exception("got exception in frontend server")
 
     def join(self) -> None:
         self._thread.join()
@@ -350,12 +393,13 @@ class FrontendServer:
         handler = self._routes[path]
         try:
             resp = handler(req)
-        except Exception as e:
+        # Catch SystemExit to not crash when FlightRecorder errors.
+        except (Exception, SystemExit) as e:
             logger.exception(
-                "Exception in checkpoint server when handling %s",
+                "Exception in frontend server when handling %s",
                 path,
             )
-            req.send_error(500, str(e))
+            req.send_error(500, f"Exception: {repr(e)}")
             return
 
         req.send_response(200)
@@ -375,7 +419,48 @@ class FrontendServer:
             "raw_resp.html", title="Stacks", addrs=addrs, resps=resps
         )
 
+    def _render_fr_trace(self, addrs: list[str], resps: list[Response]) -> bytes:
+        config = JobConfig()
+        # pyrefly: ignore [bad-assignment]
+        args = config.parse_args(args=[])
+        args.allow_incomplete_ranks = True
+        args.verbose = True
+
+        details = {}
+        for rank, resp in enumerate(resps):
+            resp.raise_for_status()
+            dump = {
+                "rank": rank,
+                "host_name": addrs[rank],
+                **resp.json(),
+            }
+            if "entries" not in dump:
+                dump["entries"] = []
+            details[f"rank{rank}.json"] = dump
+
+        version = next(iter(details.values()))["version"]
+
+        db = build_db(details, args, version)
+
+        return self._render_template(
+            "fr_trace.html",
+            title="FlightRecorder",
+            groups=tabulate(db.groups, headers=Group._fields, tablefmt="html"),
+            memberships=tabulate(
+                db.memberships, headers=Membership._fields, tablefmt="html"
+            ),
+            collectives=tabulate(
+                db.collectives, headers=Collective._fields, tablefmt="html"
+            ),
+            ncclcalls=tabulate(db.ncclcalls, headers=NCCLCall._fields, tablefmt="html"),
+        )
+
     def _handle_fr_trace(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("fr_trace_json")
+
+        return self._render_fr_trace(addrs, list(resps))
+
+    def _handle_fr_trace_json(self, req: HTTPRequestHandler) -> bytes:
         addrs, resps = fetch_all("fr_trace_json")
 
         return self._render_template(
@@ -386,6 +471,11 @@ class FrontendServer:
         )
 
     def _handle_fr_trace_nccl(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("dump_nccl_trace_json", "onlyactive=true")
+
+        return self._render_fr_trace(addrs, list(resps))
+
+    def _handle_fr_trace_nccl_json(self, req: HTTPRequestHandler) -> bytes:
         addrs, resps = fetch_all("dump_nccl_trace_json", "onlyactive=true")
 
         return self._render_template(
@@ -417,6 +507,8 @@ class FrontendServer:
 
 
 def main(port: int) -> None:
+    logger.setLevel(logging.INFO)
+
     server = FrontendServer(port=port)
     logger.info("Frontend server started on port %d", server._server.server_port)
     server.join()
