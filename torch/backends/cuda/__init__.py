@@ -12,6 +12,7 @@ __all__ = [
     "cuFFTPlanCache",
     "cuFFTPlanCacheManager",
     "cuBLASModule",
+    "MathSDPModule",
     "preferred_linalg_library",
     "preferred_blas_library",
     "preferred_rocm_fa_library",
