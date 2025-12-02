@@ -4266,7 +4266,7 @@ class TestSDPAXpuOnly(NNTestCase):
         with sdpa_kernel([SDPBackend.OVERRIDEABLE]):
             actual = F.scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
-        
+
         with sdpa_kernel([SDPBackend.MATH]):
             math_ref = F.scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
@@ -4382,7 +4382,7 @@ class TestSDPAXpuOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
             actual = torch.nn.functional.scaled_dot_product_attention(
                 query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
-            
+
         with sdpa_kernel(backends=[SDPBackend.MATH]):
             math_ref = torch.nn.functional.scaled_dot_product_attention(
                 query.contiguous(), key.contiguous(), value.contiguous(), attn_mask=None, dropout_p=0.0, is_causal=False)
@@ -4514,7 +4514,7 @@ class TestSDPAXpuOnly(NNTestCase):
             q2, k2, v2, attn_mask=attn_mask2, dropout_p=0.0, is_causal=is_causal)[0]
 
         self.assertEqual(actual.float(), math_ref, atol=tol.atol, rtol=tol.rtol)
-    
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_XPU_FLASH_ATTENTION, "XPU Flash Attention is not supported")
     @parametrize("dtype", [torch.float32, torch.float64])
     def test_flash_attention_unsupport_dtypes(self, device, dtype):
@@ -4532,7 +4532,7 @@ class TestSDPAXpuOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
             with self.assertRaisesRegex(RuntimeError, "No available kernel"):
                 F.scaled_dot_product_attention(q, k, v)
-        
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_XPU_FLASH_ATTENTION, "XPU Flash Attention is not supported")
     def test_flash_attention_unsupport_dropout(self, device):
         dtype = torch.bfloat16
@@ -4583,7 +4583,7 @@ class TestSDPAXpuOnly(NNTestCase):
         dtype = torch.bfloat16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
         batch, num_heads, seqlen = 32, 2, 32
-        
+
         max_supported_head_dim = 192
         q_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)
         k_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim)

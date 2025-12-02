@@ -743,7 +743,7 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::flash_attention: {
-      if(query_device_type == DeviceType::CUDA || 
+      if(query_device_type == DeviceType::CUDA ||
          query_device_type == DeviceType::XPU) {
         c10::SymInt og_size = query_.sym_size(-1);
         int alignment_size = (query_device_type == DeviceType::XPU) ? 64 : 8;

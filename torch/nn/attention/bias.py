@@ -12,7 +12,7 @@ from torch.backends.cuda import (
     is_flash_attention_available,
     SDPAParams,
 )
-from torch.nn.attention import sdpa_kernel, SDPBackend, _raise_kernel_warnings
+from torch.nn.attention import _raise_kernel_warnings
 from torch.nn.attention._utils import (
     _calculate_scale,
     _input_requires_grad,
