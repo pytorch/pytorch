@@ -40,6 +40,7 @@ class TestDebug(TestCase):
         self.assertIn("View 0", fetch("/profile?duration=0.01"))
         self.assertIn("test_basics", fetch("/stacks"))
         self.assertIn("pg_status", fetch("/fr_trace"))
+        self.assertIn("Rank 0", fetch("/wait_counters"))
 
         if torch.cuda.is_available():
             self.assertIn("pg_status", fetch("/fr_trace_nccl"))

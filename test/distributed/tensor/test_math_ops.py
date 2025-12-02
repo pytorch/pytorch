@@ -1037,6 +1037,7 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertTrue(out_with_redistribute.placements[0].is_replicate())
         self.assertEqual(out_without_redistribute, out_with_redistribute)
 
+    @skip_if_lt_x_gpu(4)
     @with_comms
     def test_std(self):
         mesh = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))

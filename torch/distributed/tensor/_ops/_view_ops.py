@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -15,12 +15,12 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     StrategyType,
 )
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     normalize_dim,
     normalize_dims,
     prod,
-    register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -216,7 +216,7 @@ def expand(input_shape: Shape, shape: Shape) -> DimMap:
     return tuple(mapping)
 
 
-def normalize_sizes(sizes: Union[Shape, tuple[Shape]]) -> Shape:
+def normalize_sizes(sizes: Shape | tuple[Shape]) -> Shape:
     if isinstance(sizes[0], int):
         return cast(Shape, sizes)
     elif len(sizes) == 1:
@@ -428,7 +428,7 @@ def dim_transpose(ndim: int, dim1: int, dim2: int) -> DimMap:
     return tuple(dimmap)
 
 
-def dim_squeeze(shape: Shape, dim: Optional[int] = None) -> DimMap:
+def dim_squeeze(shape: Shape, dim: int | None = None) -> DimMap:
     # FIXME: this is wrong when dim=None and one of the dimensions
     # equals size of the mesh. For example squeeze(DTensor(tensor(4), Shard[0])) could
     # end up as squeeze(tensor(1)) if we have 4 devices; this would lead to
@@ -457,7 +457,7 @@ def dim_view_as_real(shape: Shape) -> DimMap:
     return tuple(results)
 
 
-def dim_reduction(ndim: int, dim_or_dims: Optional[DimsType], keepdim: bool) -> DimMap:
+def dim_reduction(ndim: int, dim_or_dims: DimsType | None, keepdim: bool) -> DimMap:
     """
     General fallback for reduction ops where Partial() does not apply.
 
@@ -542,7 +542,7 @@ def propagate_shape_and_sharding(
 
     def maybe_get_shard_mesh_dim_and_placement(
         input_dim: InputDim,
-    ) -> tuple[Optional[int], Optional[Shard]]:
+    ) -> tuple[int | None, Shard | None]:
         # if input_dim is sharded, return the mesh_dim and shard placement
         for i, placement in enumerate(input_src_placements):
             if isinstance(placement, Shard) and placement.dim == input_dim.input_dim:
@@ -556,7 +556,7 @@ def propagate_shape_and_sharding(
     # 1 and 2 doesn't require the info of whether current input is sharded.
     # 3 requires that info, to decide whether we can error out. Maybe we can refactor
     # to make this function purely "theoretical".
-    def get_in_dim_to_shard(cmd: DimSpec) -> Optional[InputDim]:
+    def get_in_dim_to_shard(cmd: DimSpec) -> InputDim | None:
         if isinstance(cmd, InputDim):
             return cmd
         elif isinstance(cmd, Flatten):
@@ -692,7 +692,7 @@ def propagate_shape_and_sharding(
 def register_op_strategy_map(
     aten_op_overload: torch._ops.OpOverload,
     local_op_name: Callable[..., torch.Tensor],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
+    schema_info: RuntimeSchemaInfo | None = None,
     strict_view: bool = False,
 ) -> None:
     """
