@@ -10486,6 +10486,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.bool,),
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_unary_op_tensors_on_different_devices",
+                device_type="xpu",
+                dtypes=(torch.bool,),
+            ),
         ),
     ),
     ForeachFuncInfo(
@@ -10596,6 +10603,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.complex128,),
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
+                dtypes=(torch.complex128,),
+            ),
         ),
     ),
     ForeachFuncInfo(
@@ -10649,6 +10663,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.complex128,),
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
+                dtypes=(torch.complex128,),
+            ),
         ),
     ),
     ForeachFuncInfo(
@@ -10700,6 +10721,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
+                dtypes=(torch.complex128,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -10784,6 +10812,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.complex128,),
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
+                dtypes=(torch.complex128,),
+            ),
         ),
     ),
     ForeachFuncInfo(
@@ -10865,6 +10900,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.complex128,),
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
+                dtypes=(torch.complex128,),
+            ),
         ),
     ),
     ForeachFuncInfo(
@@ -10916,6 +10958,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
+                dtypes=(torch.complex128,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -11027,6 +11076,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
+                dtypes=(torch.complex128,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -11157,6 +11213,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=(torch.complex128,),
             ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
+                dtypes=(torch.complex128,),
+            ),
         ),
     ),
     ForeachFuncInfo(
@@ -11213,6 +11276,13 @@ foreach_unary_op_db: list[OpInfo] = [
                 "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
+                dtypes=(torch.complex128,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
                 dtypes=(torch.complex128,),
             ),
         ),
@@ -11338,6 +11408,13 @@ foreach_binary_op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
+                dtypes=(torch.complex128,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
                 "test_binary_op_scalar_with_overlapping_tensors",
                 dtypes=complex_types(),
             ),
@@ -11372,6 +11449,13 @@ foreach_binary_op_db: list[OpInfo] = [
                 "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
+                dtypes=(torch.complex128,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
@@ -11417,6 +11501,13 @@ foreach_binary_op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure,
                 "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
+                dtypes=(torch.complex128,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
                 "test_binary_op_scalar_with_overlapping_tensors",
                 dtypes=complex_types(),
             ),
@@ -11452,6 +11543,13 @@ foreach_binary_op_db: list[OpInfo] = [
                 "TestForeach",
                 "test_autodiff",
                 device_type="cuda",
+                dtypes=(torch.complex128,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                device_type="xpu",
                 dtypes=(torch.complex128,),
             ),
             DecorateInfo(
@@ -11498,6 +11596,14 @@ foreach_binary_op_db: list[OpInfo] = [
                 "TestForeach",
                 "test_binary_op_with_scalar_self_support",
                 device_type="cuda",
+                dtypes=(torch.bool,),
+                active_if=lambda kwargs: kwargs["is_fastpath"],
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_binary_op_with_scalar_self_support",
+                device_type="xpu",
                 dtypes=(torch.bool,),
                 active_if=lambda kwargs: kwargs["is_fastpath"],
             ),
@@ -11650,6 +11756,13 @@ foreach_reduce_op_db: list[ForeachFuncInfo] = [
             # AssertionError: RuntimeError not raised : Expected RuntimeError when doing an unsafe
             # cast from a result of dtype torch.float32 into an out= with dtype torch.long
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_foreach_reduce_large_input",
+                device_type="xpu",
+                dtypes=integral_types_and(torch.bool),
+            ),
         ),
     ),
 ]
