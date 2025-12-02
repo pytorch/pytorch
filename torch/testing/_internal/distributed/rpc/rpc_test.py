@@ -44,6 +44,7 @@ from torch.testing._internal.common_utils import (
     load_tests,
     skip_but_pass_in_sandcastle_if,
     TemporaryFileName,
+    TEST_CUDA,
 )
 from torch.testing._internal.dist_utils import (
     dist_init,
@@ -54,17 +55,25 @@ from torch.testing._internal.dist_utils import (
     wait_until_pending_futures_and_users_flushed,
     worker_name,
 )
+from torch.testing._internal.distributed.rpc.common_utils import _get_device_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
 
 
 def foo_add():
-    return torch.add(torch.ones(1), torch.ones(1))
+    return torch.add(
+        torch.ones(1).to(_get_device_name(-1)), torch.ones(1).to(_get_device_name(-1))
+    )
 
 
 def udf_with_torch_ops(device=-1, use_record_function=False):
-    device_ctx = contextlib.nullcontext() if device == -1 else torch.cuda.device(device)
+    device_ctx = contextlib.nullcontext()
+    if device != -1:
+        if TEST_CUDA:
+            device_ctx = torch.cuda.device(device)
+        else:
+            raise ValueError(f"Unsupported feature for {_get_device_name(device)}")
     record_function_ctx = (
         torch.autograd.profiler.record_function("##forward##")
         if use_record_function
@@ -581,13 +590,20 @@ def async_add_multi_fanout(to, x, num, step):
 
 
 @rpc.functions.async_execution
-def async_cuda_sleep_and_set_to_one(t):
+def async_device_sleep_and_set_to_one(t):
     device = t.device
-    original_stream = torch.cuda.current_stream(device)
-    new_stream = torch.cuda.Stream(device)
+    original_stream = torch.get_device_module(_get_device_name(-1)).current_stream(
+        device
+    )
+    new_stream = torch.get_device_module(_get_device_name(-1)).Stream(device)
     new_stream.wait_stream(original_stream)
-    with torch.cuda.stream(new_stream):
-        torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+    with torch.get_device_module(_get_device_name(-1)).stream(new_stream):
+        if TEST_CUDA:
+            torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        else:
+            raise ValueError(
+                f"Unsupported feature(_sleep) for {_get_device_name(device.index)}"
+            )
         t.fill_(1)
         fut = Future(devices=[device])
         fut.set_result(t)
@@ -595,9 +611,12 @@ def async_cuda_sleep_and_set_to_one(t):
 
 
 @rpc.functions.async_execution
-def async_cuda_nested_add(to, x, y, z):
+def async_device_nested_add(to, x, y, z):
     def cb(fut):
-        torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        if TEST_CUDA:
+            torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        else:
+            raise ValueError(f"Unsupported feature(_sleep) for {_get_device_name(-1)}")
         return fut.value() + z
 
     return rpc.rpc_async(to, torch.add, args=(x, y)).then(cb)
@@ -612,7 +631,9 @@ class TensorWrapper:
         self.tensor = t
         # Add one non-picklable field, to ensure it's ignored/skipped.
         self.lock = Lock()
-        self.event = torch.cuda.Event(enable_timing=True)
+        self.event = torch.get_device_module(_get_device_name(-1)).Event(
+            enable_timing=True
+        )
         self.thread = threading.Thread()
         self.thread.start()
 
@@ -732,9 +753,16 @@ class MyConvNetForMNIST(nn.Module):
 
     def forward(self, x, is_rref=False):
         x = x.to_here() if is_rref else x
-        with torch.cuda.stream(torch.cuda.current_stream(self.device)):
-            # intentionally adding delay to current CUDA stream
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+        with torch.get_device_module(_get_device_name(-1)).stream(
+            torch.get_device_module(_get_device_name(-1)).current_stream(self.device)
+        ):
+            # intentionally adding delay to current DEVICE stream
+            if TEST_CUDA:
+                torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            else:
+                raise ValueError(
+                    f"Unsupported feature(_sleep) for {_get_device_name(-1)}"
+                )
             return self.net(x)
 
     def __getstate__(self):
@@ -1067,28 +1095,33 @@ class RpcTestCommon:
         ]
         torch.futures.wait_all(futures)
 
-    def _test_cuda_future_extraction(self, wrapper, unwrapper, sparse_tensor):
+    def _test_device_future_extraction(self, wrapper, unwrapper, sparse_tensor):
         # We check proper CUDA stream synchronization by adding to the tensor
         # in one stream to get the expected value, and reading it from another stream.
-        future = Future(devices=["cuda:0"])
-        with torch.cuda.device("cuda:0"):
-            stream = torch.cuda.Stream()
-            another_stream = torch.cuda.Stream()
-            with torch.cuda.stream(stream):
+        future = Future(devices=[_get_device_name(0)])
+        with torch.device(_get_device_name(0)):
+            stream = torch.get_device_module(_get_device_name(-1)).Stream()
+            another_stream = torch.get_device_module(_get_device_name(-1)).Stream()
+            with torch.get_device_module(_get_device_name(-1)).stream(stream):
                 if sparse_tensor:
-                    tensor = build_sparse_tensor().to("cuda:0")
-                    add_tensor = build_sparse_tensor().to("cuda:0")
+                    tensor = build_sparse_tensor().to(_get_device_name(0))
+                    add_tensor = build_sparse_tensor().to(_get_device_name(0))
                     expected_tensor = (tensor + add_tensor).coalesce()
                 else:
-                    tensor = torch.zeros((100,), device="cuda:0")
-                    add_tensor = torch.ones((100,), device="cuda:0")
+                    tensor = torch.zeros((100,), device=_get_device_name(0))
+                    add_tensor = torch.ones((100,), device=_get_device_name(0))
                     expected_tensor = tensor + add_tensor
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                if TEST_CUDA:
+                    torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                else:
+                    raise ValueError(
+                        f"Unsupported feature(_sleep) for {_get_device_name(0)}"
+                    )
                 tensor += add_tensor
                 if sparse_tensor:
                     tensor = tensor.coalesce()
                 future.set_result(wrapper(tensor))
-            with torch.cuda.stream(another_stream):
+            with torch.get_device_module(_get_device_name(-1)).stream(another_stream):
                 tensor = unwrapper(future.wait())
                 if sparse_tensor:
                     self.assertTrue(
@@ -2003,17 +2036,17 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_rpc_profiling_async_function(self):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         self._run_rpc_profiling_async_function()
-        if torch.cuda.is_available():
+        if torch.get_device_module(_get_device_name(-1)).is_available():
             dist.barrier()
-            self._run_rpc_profiling_async_function(device="cuda:0")
+            self._run_rpc_profiling_async_function(device=_get_device_name(0))
 
     @dist_init
     def test_rpc_profiling_async_function_single_threaded(self):
         initialize_pg(self.file_init_method, self.rank, self.world_size)
         self._run_rpc_profiling_async_function()
-        if torch.cuda.is_available():
+        if torch.get_device_module(_get_device_name(-1)).is_available():
             dist.barrier()
-            self._run_rpc_profiling_async_function(device="cuda:0")
+            self._run_rpc_profiling_async_function(device=_get_device_name(0))
 
     @dist_init
     def test_rpc_profiling_remote_record_function(self):
@@ -3701,11 +3734,14 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @staticmethod
     def _return_gpu_tensor():
-        return torch.rand(3, 3).cuda(0)
+        return torch.rand(3, 3).to(_get_device_name(0))
 
     @staticmethod
     def _return_gpu_tensor_list():
-        return [torch.rand(3, 3).cuda(0), torch.rand(3, 3).cuda(1)]
+        return [
+            torch.rand(3, 3).to(_get_device_name(0)),
+            torch.rand(3, 3).to(_get_device_name(1)),
+        ]
 
     @staticmethod
     def _gpu_tensor_list_arg(tensor_list):
@@ -4495,21 +4531,21 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         self._my_parameter_server(False)
 
 
-class CudaRpcTest(RpcAgentTestFixture):
+class DeviceRpcTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(2)
     @dist_init
-    def test_profiler_remote_cuda(self):
+    def test_profiler_remote_device(self):
         if self.rank != 1:
             return
 
-        dst_cuda_0 = (self.rank + 1) % self.world_size
-        dst_cuda_1 = (self.rank + 2) % self.world_size
-        dst_worker_cuda_0 = worker_name(dst_cuda_0)
-        dst_worker_cuda_1 = worker_name(dst_cuda_1)
+        dst_device_0 = (self.rank + 1) % self.world_size
+        dst_device_1 = (self.rank + 2) % self.world_size
+        dst_worker_device_0 = worker_name(dst_device_0)
+        dst_worker_device_1 = worker_name(dst_device_1)
 
         with _profile(use_cuda=True) as p:
-            fut1 = rpc.rpc_async(dst_worker_cuda_0, udf_with_torch_ops, args=(0,))
-            fut2 = rpc.rpc_async(dst_worker_cuda_1, udf_with_torch_ops, args=(1,))
+            fut1 = rpc.rpc_async(dst_worker_device_0, udf_with_torch_ops, args=(0,))
+            fut2 = rpc.rpc_async(dst_worker_device_1, udf_with_torch_ops, args=(1,))
             fut1.wait()
             fut2.wait()
 
@@ -4525,14 +4561,14 @@ class CudaRpcTest(RpcAgentTestFixture):
             else:
                 if event.node_id == 1:
                     continue
-                self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
+                self.assertTrue(event.node_id in [dst_device_0, dst_device_1])
                 if get_name(event) in EXPECTED_REMOTE_EVENTS:
                     self.assertGreater(event.device_time_total, 0)
                     self.assertEqual(1, len(event.kernels))
                     kernel = event.kernels[0]
-                    if event.node_id == dst_cuda_0:
+                    if event.node_id == dst_device_0:
                         self.assertEqual(kernel.device, 0)
-                    if event.node_id == dst_cuda_1:
+                    if event.node_id == dst_device_1:
                         self.assertEqual(kernel.device, 1)
                     self.assertGreater(event.device_time, 0)
 
@@ -5090,7 +5126,7 @@ class TensorPipeAgentRpcTest(RpcAgentTestFixture, RpcTestCommon):
                 )
 
 
-class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
+class TensorPipeAgentDeviceRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def _test_device_maps(self, options, errMsg):
         with self.assertRaisesRegex(ValueError, errMsg):
             rpc.init_rpc(
@@ -5117,7 +5153,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_device_maps_invalid_max_local_device(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {torch.cuda.device_count(): 0})
+        options.set_device_map(
+            dst, {torch.get_device_module(_get_device_name(-1)).device_count(): 0}
+        )
 
         self._test_device_maps(
             options,
@@ -5128,7 +5166,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_device_maps_invalid_max_remote_device(self):
         options = self.rpc_backend_options
         dst = worker_name((self.rank + 1) % self.world_size)
-        options.set_device_map(dst, {0: torch.cuda.device_count()})
+        options.set_device_map(
+            dst, {0: torch.get_device_module(_get_device_name(-1)).device_count()}
+        )
 
         self._test_device_maps(
             options,
@@ -5171,7 +5211,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     @staticmethod
     def _gpu_add(x, y):
         if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 1]):
-            return (x + y).to(0)
+            return (x + y).to(_get_device_name(0))
         else:
             raise ValueError("Wrong device affinity")
 
@@ -5191,17 +5231,21 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         ret = rpc.rpc_sync(
             dst,
-            TensorPipeAgentCudaRpcTest._gpu_add,
-            args=(torch.zeros(2).to(0), torch.ones(2).to(0)),
+            TensorPipeAgentDeviceRpcTest._gpu_add,
+            args=(
+                torch.zeros(2).to(_get_device_name(0)),
+                torch.ones(2).to(_get_device_name(0)),
+            ),
         )
         self.assertEqual(ret.device, torch.device(1))
-        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(1))
+        self.assertEqual(ret, (torch.zeros(2) + torch.ones(2)).to(_get_device_name(1)))
         rpc.shutdown()
 
     @staticmethod
     def _gpu_add_given_devices(x, y, x_to, y_to, z_to):
         x_device = "cpu" if x.device.type == "cpu" else x.device.index
         y_device = "cpu" if y.device.type == "cpu" else y.device.index
+        z_to = "cpu" if z_to == "cpu" else _get_device_name(z_to)
         if x_device == x_to and y_device == y_to:
             return x.to(z_to) + y.to(z_to)
         else:
@@ -5210,7 +5254,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def _test_device_maps_gpu(
         self, x_from, y_from, z_to, device_map, dst=None, fn=None
     ):
-        fn = TensorPipeAgentCudaRpcTest._gpu_add_given_devices if fn is None else fn
+        fn = TensorPipeAgentDeviceRpcTest._gpu_add_given_devices if fn is None else fn
         x_to = device_map[x_from]
         y_to = device_map[y_from]
 
@@ -5234,7 +5278,10 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         reverse_device_map = {device_map[k]: k for k in device_map}
         z_from = reverse_device_map[z_to]
 
-        ret_device = "cpu" if ret.device.type == "cpu" else ret.device.index
+        ret_device = (
+            "cpu" if ret.device.type == "cpu" else _get_device_name(ret.device.index)
+        )
+        z_from = "cpu" if ret.device.type == "cpu" else _get_device_name(z_from)
         self.assertEqual(ret_device, z_from)
         self.assertEqual(ret, torch.ones(2).to(z_from))
 
@@ -5246,7 +5293,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             y_from="cpu",
             z_to="cpu",
             device_map={"cpu": "cpu"},
-            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+            fn=TensorPipeAgentDeviceRpcTest._gpu_add_given_devices,
         )
 
     @skip_if_lt_x_gpu(1)
@@ -5256,7 +5303,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             y_from="cpu",
             z_to=0,
             device_map={"cpu": 0},
-            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+            fn=TensorPipeAgentDeviceRpcTest._gpu_add_given_devices,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -5266,7 +5313,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             y_from="cpu",
             z_to=1,
             device_map={"cpu": 1},
-            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+            fn=TensorPipeAgentDeviceRpcTest._gpu_add_given_devices,
         )
 
     @skip_if_lt_x_gpu(1)
@@ -5276,7 +5323,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             y_from=0,
             z_to="cpu",
             device_map={0: "cpu"},
-            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+            fn=TensorPipeAgentDeviceRpcTest._gpu_add_given_devices,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -5286,7 +5333,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             y_from=1,
             z_to="cpu",
             device_map={1: "cpu"},
-            fn=TensorPipeAgentCudaRpcTest._gpu_add_given_devices,
+            fn=TensorPipeAgentDeviceRpcTest._gpu_add_given_devices,
         )
 
     @skip_if_lt_x_gpu(2)
@@ -5420,7 +5467,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     @staticmethod
     def _gpu_add_multi_gpu(x, y):
         if all([x.is_cuda, x.device.index == 1, y.is_cuda, y.device.index == 0]):
-            return x.to(0) + y, x - y.to(1)
+            return x.to(_get_device_name(0)) + y, x - y.to(_get_device_name(1))
         else:
             raise ValueError("Wrong device affinity")
 
@@ -5437,16 +5484,20 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=options,
         )
 
-        x = torch.zeros(2).to(0)
-        y = torch.ones(2).to(1)
+        x = torch.zeros(2).to(_get_device_name(0))
+        y = torch.ones(2).to(_get_device_name(1))
         rets = rpc.rpc_sync(
-            dst, TensorPipeAgentCudaRpcTest._gpu_add_multi_gpu, args=(x, y)
+            dst, TensorPipeAgentDeviceRpcTest._gpu_add_multi_gpu, args=(x, y)
         )
 
-        self.assertEqual(rets[0].device, torch.device(1))
-        self.assertEqual(rets[1].device, torch.device(0))
-        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))
-        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
+        self.assertEqual(rets[0].device, torch.device(_get_device_name(1)))
+        self.assertEqual(rets[1].device, torch.device(_get_device_name(0)))
+        self.assertEqual(
+            rets[0], (torch.zeros(2) + torch.ones(2)).to(_get_device_name(1))
+        )
+        self.assertEqual(
+            rets[1], (torch.zeros(2) - torch.ones(2)).to(_get_device_name(0))
+        )
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(2)
@@ -5462,7 +5513,12 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     @staticmethod
     def _gpu_add_return_to_gpu(x, y):
         if x.device.type == "cpu" and y.device.type == "cpu":
-            return (x + y).to(0), (x - y).to(1), (x * y).to(2), (x / y).to(3)
+            return (
+                (x + y).to(_get_device_name(0)),
+                (x - y).to(_get_device_name(1)),
+                (x * y).to(_get_device_name(2)),
+                (x / y).to(_get_device_name(3)),
+            )
         else:
             raise ValueError("Wrong device affinity")
 
@@ -5486,13 +5542,20 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         rets = rpc.rpc_sync(
             dst,
-            TensorPipeAgentCudaRpcTest._gpu_add_multi_gpu,
-            args=(torch.zeros(2).to(0), torch.ones(2).to(1)),
+            TensorPipeAgentDeviceRpcTest._gpu_add_multi_gpu,
+            args=(
+                torch.zeros(2).to(_get_device_name(0)),
+                torch.ones(2).to(_get_device_name(1)),
+            ),
         )
-        self.assertEqual(rets[0].device, torch.device(1))
-        self.assertEqual(rets[1].device, torch.device(0))
-        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(1))
-        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
+        self.assertEqual(rets[0].device, torch.device(_get_device_name(1)))
+        self.assertEqual(rets[1].device, torch.device(_get_device_name(0)))
+        self.assertEqual(
+            rets[0], (torch.zeros(2) + torch.ones(2)).to(_get_device_name(1))
+        )
+        self.assertEqual(
+            rets[1], (torch.zeros(2) - torch.ones(2)).to(_get_device_name(0))
+        )
         rpc.shutdown()
 
     def _test_device_maps_return_to_gpu(self, dst):
@@ -5513,15 +5576,25 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         rets = rpc.rpc_sync(
             dst,
-            TensorPipeAgentCudaRpcTest._gpu_add_return_to_gpu,
+            TensorPipeAgentDeviceRpcTest._gpu_add_return_to_gpu,
             args=(torch.zeros(2), torch.ones(2)),
         )
         for i in range(len(rets)):
-            self.assertEqual(rets[i].device, torch.device((3 + i) % 4))
-        self.assertEqual(rets[0], (torch.zeros(2) + torch.ones(2)).to(3))
-        self.assertEqual(rets[1], (torch.zeros(2) - torch.ones(2)).to(0))
-        self.assertEqual(rets[2], (torch.zeros(2) * torch.ones(2)).to(1))
-        self.assertEqual(rets[3], (torch.zeros(2) / torch.ones(2)).to(2))
+            self.assertEqual(
+                rets[i].device, torch.device(_get_device_name((3 + i) % 4))
+            )
+        self.assertEqual(
+            rets[0], (torch.zeros(2) + torch.ones(2)).to(_get_device_name(3))
+        )
+        self.assertEqual(
+            rets[1], (torch.zeros(2) - torch.ones(2)).to(_get_device_name(0))
+        )
+        self.assertEqual(
+            rets[2], (torch.zeros(2) * torch.ones(2)).to(_get_device_name(1))
+        )
+        self.assertEqual(
+            rets[3], (torch.zeros(2) / torch.ones(2)).to(_get_device_name(2))
+        )
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(4)
@@ -5536,7 +5609,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @staticmethod
     def _add_to_gpu(x, y):
-        return (x + y).to(0)
+        return (x + y).to(_get_device_name(0))
 
     def _test_device_maps_missing_config(self, mode):
         dst = worker_name((self.rank + 1) % self.world_size)
@@ -5547,9 +5620,13 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         with self.assertRaisesRegex(RuntimeError, errMsg):
             if mode == RPCExecMode.SYNC:
-                rpc.rpc_sync(dst, torch.add, args=(torch.zeros(2).to(0), 1))
+                rpc.rpc_sync(
+                    dst, torch.add, args=(torch.zeros(2).to(_get_device_name(0)), 1)
+                )
             elif mode == RPCExecMode.REMOTE:
-                rpc.remote(dst, torch.add, args=(torch.zeros(2).to(0), 1)).to_here()
+                rpc.remote(
+                    dst, torch.add, args=(torch.zeros(2).to(_get_device_name(0)), 1)
+                ).to_here()
             else:
                 raise ValueError(f"unexpected mode {mode}")
 
@@ -5565,13 +5642,13 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             if mode == RPCExecMode.SYNC:
                 rpc.rpc_sync(
                     dst,
-                    TensorPipeAgentCudaRpcTest._add_to_gpu,
+                    TensorPipeAgentDeviceRpcTest._add_to_gpu,
                     args=(torch.zeros(2), 1),
                 )
             elif mode == RPCExecMode.REMOTE:
                 rpc.remote(
                     dst,
-                    TensorPipeAgentCudaRpcTest._add_to_gpu,
+                    TensorPipeAgentDeviceRpcTest._add_to_gpu,
                     args=(torch.zeros(2), 1),
                 ).to_here()
             else:
@@ -5647,23 +5724,28 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         )
 
         rref = rpc.remote(
-            dst, TensorPipeAgentCudaRpcTest._add_to_gpu, args=(torch.zeros(2), 1)
+            dst, TensorPipeAgentDeviceRpcTest._add_to_gpu, args=(torch.zeros(2), 1)
         )
 
         self.assertEqual(rref.to_here().device.index, 1)
-        self.assertEqual(rref.to_here(), torch.ones(2).to(1))
+        self.assertEqual(rref.to_here(), torch.ones(2).to(_get_device_name(1)))
 
         rpc.shutdown()
 
     @staticmethod
     def _slow_add_on_user_stream(x, y):
-        s0 = torch.cuda.current_stream(x.device)
-        s1 = torch.cuda.Stream(device=x.device)
+        s0 = torch.get_device_module(_get_device_name(-1)).current_stream(x.device)
+        s1 = torch.get_device_module(_get_device_name(-1)).Stream(device=x.device)
         s1.wait_stream(s0)
         x.record_stream(s1)
         y.record_stream(s1)
-        with torch.cuda.stream(s1):
-            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+        with torch.get_device_module(_get_device_name(-1)).stream(s1):
+            if TEST_CUDA:
+                torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+            else:
+                raise ValueError(
+                    f"Unsupported feature(_sleep) for {_get_device_name(x.device.index)}"
+                )
             z = x + y
         s0.wait_stream(s1)
         z.record_stream(s0)
@@ -5687,51 +5769,57 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.shutdown()
 
     def _test_stream_sync(self, dst):
-        x = torch.ones(2, 2).to(0)
+        x = torch.ones(2, 2).to(_get_device_name(0))
         ret = rpc.rpc_sync(
-            dst, TensorPipeAgentCudaRpcTest._slow_add_on_user_stream, args=(x, x)
+            dst, TensorPipeAgentDeviceRpcTest._slow_add_on_user_stream, args=(x, x)
         )
         self.assertEqual(ret, 2 * x)
 
     @skip_if_lt_x_gpu(2)
     def test_custom_stream(self):
-        self._test_custom_stream(self._test_stream_sync, {"cuda:0": "cuda:1"})
+        self._test_custom_stream(
+            self._test_stream_sync, {_get_device_name(0): _get_device_name(1)}
+        )
 
     def _test_stream_multi_async(self, dst):
         futs = []
         for i in range(20):
-            x = torch.ones(2, 2).to(0) * i
+            x = torch.ones(2, 2).to(_get_device_name(0)) * i
             futs.append(
                 rpc.rpc_async(
                     dst,
-                    TensorPipeAgentCudaRpcTest._slow_add_on_user_stream,
+                    TensorPipeAgentDeviceRpcTest._slow_add_on_user_stream,
                     args=(x, x),
                 )
             )
 
         for i in range(20):
-            self.assertEqual(futs[i].wait(), 2 * torch.ones(2, 2).to(0) * i)
+            self.assertEqual(
+                futs[i].wait(), 2 * torch.ones(2, 2).to(_get_device_name(0)) * i
+            )
 
     @skip_if_lt_x_gpu(2)
     def test_custom_stream_multi(self):
-        self._test_custom_stream(self._test_stream_multi_async, {"cuda:0": "cuda:1"})
+        self._test_custom_stream(
+            self._test_stream_multi_async, {_get_device_name(0): _get_device_name(1)}
+        )
 
     @staticmethod
     def _nested_slow_add_on_user_stream(dst, x, y, z):
         ret = rpc.rpc_sync(
-            dst, TensorPipeAgentCudaRpcTest._slow_add_on_user_stream, args=(x, y)
+            dst, TensorPipeAgentDeviceRpcTest._slow_add_on_user_stream, args=(x, y)
         )
 
-        return TensorPipeAgentCudaRpcTest._slow_add_on_user_stream(ret, z)
+        return TensorPipeAgentDeviceRpcTest._slow_add_on_user_stream(ret, z)
 
     def _test_stream_nested_sync(self, dst):
-        x = torch.ones(2, 2).to(0)
-        y = torch.ones(2, 2).to(0) * 2
-        z = torch.ones(2, 2).to(0) * 3
+        x = torch.ones(2, 2).to(_get_device_name(0))
+        y = torch.ones(2, 2).to(_get_device_name(0)) * 2
+        z = torch.ones(2, 2).to(_get_device_name(0)) * 3
         nested_dst = worker_name((self.rank + 2) % self.world_size)
         ret = rpc.rpc_sync(
             dst,
-            TensorPipeAgentCudaRpcTest._nested_slow_add_on_user_stream,
+            TensorPipeAgentDeviceRpcTest._nested_slow_add_on_user_stream,
             args=(nested_dst, x, y, z),
         )
         self.assertEqual(ret, 6 * x)
@@ -5739,7 +5827,11 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     @skip_if_lt_x_gpu(2)
     def test_custom_stream_nested(self):
         self._test_custom_stream(
-            self._test_stream_nested_sync, {"cuda:0": "cuda:1", "cuda:1": "cuda:0"}
+            self._test_stream_nested_sync,
+            {
+                _get_device_name(0): _get_device_name(1),
+                _get_device_name(1): _get_device_name(0),
+            },
         )
 
     def _test_stream_nested_multi_async(self, dst):
@@ -5748,9 +5840,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             n = 5
             xs, ys, zs = [], [], []
             for i in range(n):
-                x = torch.ones(2, 2).to(0) * (i - 1)
-                y = torch.ones(2, 2).to(0) * i
-                z = torch.ones(2, 2).to(0) * (i + 1)
+                x = torch.ones(2, 2).to(_get_device_name(0)) * (i - 1)
+                y = torch.ones(2, 2).to(_get_device_name(0)) * i
+                z = torch.ones(2, 2).to(_get_device_name(0)) * (i + 1)
                 xs.append(x)
                 ys.append(y)
                 zs.append(z)
@@ -5758,7 +5850,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
                 futs.append(
                     rpc.rpc_async(
                         dst,
-                        TensorPipeAgentCudaRpcTest._nested_slow_add_on_user_stream,
+                        TensorPipeAgentDeviceRpcTest._nested_slow_add_on_user_stream,
                         args=(nested_dst, x, y, z),
                     )
                 )
@@ -5770,13 +5862,18 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
     def test_custom_stream_nested_multi(self):
         self._test_custom_stream(
             self._test_stream_nested_multi_async,
-            {"cuda:0": "cuda:1", "cuda:1": "cuda:0"},
+            {
+                _get_device_name(0): _get_device_name(1),
+                _get_device_name(1): _get_device_name(0),
+            },
         )
 
     @staticmethod
     def _gpu_add_wrong_gpus(x, y):
-        if x.is_cuda and y.is_cuda:
-            return x.cpu() + y.cuda()
+        if x.device.type == _get_device_name(-1) and y.device.type == _get_device_name(
+            -1
+        ):
+            return x.cpu() + y.to(_get_device_name(-1))
         else:
             raise ValueError("Wrong device affinity")
 
@@ -5794,15 +5891,15 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=options,
         )
 
-        x = torch.zeros(2).to(0)
-        y = torch.ones(2).to(0)
+        x = torch.zeros(2).to(_get_device_name(0))
+        y = torch.ones(2).to(_get_device_name(0))
 
         with self.assertRaisesRegex(
             RuntimeError,
             "Expected all tensors to be on the same device, but found at least two devices",
         ):
             rpc.rpc_sync(
-                dst, TensorPipeAgentCudaRpcTest._gpu_add_wrong_gpus, args=(x, y)
+                dst, TensorPipeAgentDeviceRpcTest._gpu_add_wrong_gpus, args=(x, y)
             )
 
         rpc.shutdown()
@@ -5837,19 +5934,19 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @skip_if_lt_x_gpu(1)
     def test_rref_to_here_synchronization1(self):
-        self._test_rref_synchronization("cuda:0", "cuda:0")
+        self._test_rref_synchronization(_get_device_name(0), _get_device_name(0))
 
     @skip_if_lt_x_gpu(2)
     def test_rref_to_here_synchronization2(self):
-        self._test_rref_synchronization("cuda:1", "cuda:0")
+        self._test_rref_synchronization(_get_device_name(1), _get_device_name(0))
 
     @skip_if_lt_x_gpu(2)
     def test_rref_to_here_synchronization3(self):
-        self._test_rref_synchronization("cuda:1", "cuda:1")
+        self._test_rref_synchronization(_get_device_name(1), _get_device_name(1))
 
     @skip_if_lt_x_gpu(2)
     def test_rref_to_here_synchronization4(self):
-        self._test_rref_synchronization("cuda:0", "cuda:1")
+        self._test_rref_synchronization(_get_device_name(0), _get_device_name(1))
 
     def _test_rref_as_arg_synchronization(
         self, local_device, remote_device, devicesOptions=None
@@ -5889,26 +5986,26 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @skip_if_lt_x_gpu(1)
     def test_rref_as_arg_synchronization1(self):
-        self._test_rref_as_arg_synchronization("cuda:0", "cuda:0")
+        self._test_rref_as_arg_synchronization(_get_device_name(0), _get_device_name(0))
 
     @skip_if_lt_x_gpu(2)
     def test_rref_as_arg_synchronization2(self):
-        self._test_rref_as_arg_synchronization("cuda:1", "cuda:0")
+        self._test_rref_as_arg_synchronization(_get_device_name(1), _get_device_name(0))
 
     @skip_if_lt_x_gpu(2)
     def test_rref_as_arg_synchronization3(self):
-        self._test_rref_as_arg_synchronization("cuda:1", "cuda:1")
+        self._test_rref_as_arg_synchronization(_get_device_name(1), _get_device_name(1))
 
     @skip_if_lt_x_gpu(2)
     def test_rref_as_arg_synchronization4(self):
-        self._test_rref_as_arg_synchronization("cuda:0", "cuda:1")
+        self._test_rref_as_arg_synchronization(_get_device_name(0), _get_device_name(1))
 
     @skip_if_lt_x_gpu(1)
     def test_rref_as_arg_synchronization5(self):
         self._test_rref_as_arg_synchronization(
-            "cuda:0",
-            "cuda:0",
-            [["cuda:0"] for _ in range(4)],  # devicesOptions
+            _get_device_name(0),
+            _get_device_name(0),
+            [[_get_device_name(0)] for _ in range(4)],  # devicesOptions
         )
 
     @staticmethod
@@ -5958,7 +6055,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
                 rref_input = RRef(torch.randn(200, 1, 28, 28).to(local_device))
                 rref_out = rref.remote().forward(rref_input, True)
                 out = rpc.remote(
-                    out_relay, TensorPipeAgentCudaRpcTest._rref_relay, args=(rref_out,)
+                    out_relay,
+                    TensorPipeAgentDeviceRpcTest._rref_relay,
+                    args=(rref_out,),
                 ).to_here()
                 expected = rref.rpc_sync().forward(rref_input, True)
                 self.assertEqual(out, expected)
@@ -5967,19 +6066,27 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @skip_if_lt_x_gpu(1)
     def test_rref_forward_synchronization1(self):
-        self._test_rref_forward_synchronization("cuda:0", "cuda:0")
+        self._test_rref_forward_synchronization(
+            _get_device_name(0), _get_device_name(0)
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_rref_forward_synchronization2(self):
-        self._test_rref_forward_synchronization("cuda:0", "cuda:1")
+        self._test_rref_forward_synchronization(
+            _get_device_name(0), _get_device_name(1)
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_rref_forward_synchronization3(self):
-        self._test_rref_forward_synchronization("cuda:1", "cuda:0")
+        self._test_rref_forward_synchronization(
+            _get_device_name(1), _get_device_name(0)
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_rref_forward_synchronization4(self):
-        self._test_rref_forward_synchronization("cuda:1", "cuda:1")
+        self._test_rref_forward_synchronization(
+            _get_device_name(1), _get_device_name(1)
+        )
 
     def _test_owner_rref_forward_synchronization(self, local_device, remote_device):
         if self.rank == 0:
@@ -6005,24 +6112,35 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
     @skip_if_lt_x_gpu(1)
     def test_owner_rref_forward_synchronization1(self):
-        self._test_owner_rref_forward_synchronization("cuda:0", "cuda:0")
+        self._test_owner_rref_forward_synchronization(
+            _get_device_name(0), _get_device_name(0)
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_owner_rref_forward_synchronization2(self):
-        self._test_owner_rref_forward_synchronization("cuda:0", "cuda:1")
+        self._test_owner_rref_forward_synchronization(
+            _get_device_name(0), _get_device_name(1)
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_owner_rref_forward_synchronization3(self):
-        self._test_owner_rref_forward_synchronization("cuda:1", "cuda:0")
+        self._test_owner_rref_forward_synchronization(
+            _get_device_name(1), _get_device_name(0)
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_owner_rref_forward_synchronization4(self):
-        self._test_owner_rref_forward_synchronization("cuda:1", "cuda:1")
+        self._test_owner_rref_forward_synchronization(
+            _get_device_name(1), _get_device_name(1)
+        )
 
     @staticmethod
     def _return_tensor_view(i):
-        x = torch.ones(1000, 200).cuda(0) * i
-        torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+        x = torch.ones(1000, 200).to(_get_device_name(0)) * i
+        if TEST_CUDA:
+            torch.cuda._sleep(10 * FIFTY_MIL_CYCLES)
+        else:
+            raise ValueError(f"Unsupported feature(_sleep) for {_get_device_name(-1)}")
         # serialization of the return value will create a new tensor from the
         # view, which is done outside of the user function.
         return x.split(100)[0]
@@ -6043,7 +6161,7 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
 
         futs = [
             rpc.rpc_async(
-                dst, TensorPipeAgentCudaRpcTest._return_tensor_view, args=(i,)
+                dst, TensorPipeAgentDeviceRpcTest._return_tensor_view, args=(i,)
             )
             for i in range(5)
         ]
@@ -6100,49 +6218,49 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_device_as_int(self):
+    def test_device_future_device_as_int(self):
         Future(devices=[0])
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_device_as_str(self):
-        Future(devices=["cuda:0"])
+    def test_device_future_device_as_str(self):
+        Future(devices=[_get_device_name(0)])
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_device_as_device(self):
-        Future(devices=[torch.device("cuda", 0)])
+    def test_device_future_device_as_device(self):
+        Future(devices=[torch.device(_get_device_name(0))])
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_device_not_cuda(self):
+    def test_device_future_device_not_device(self):
         with self.assertRaisesRegex(
             ValueError, "Expected devices to have indices, got cpu"
         ):
             Future(devices=["cpu"])
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_can_extract_cuda_tensor(self):
-        self._test_cuda_future_extraction(
+    def test_device_future_can_extract_device_tensor(self):
+        self._test_device_future_extraction(
             wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_can_extract_list_with_cuda_tensor(self):
-        self._test_cuda_future_extraction(
+    def test_device_future_can_extract_list_with_device_tensor(self):
+        self._test_device_future_extraction(
             wrapper=lambda t: [t], unwrapper=operator.itemgetter(0), sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_can_extract_custom_class_with_cuda_tensor(self):
-        self._test_cuda_future_extraction(
+    def test_device_future_can_extract_custom_class_with_device_tensor(self):
+        self._test_device_future_extraction(
             wrapper=TensorWrapper, unwrapper=lambda v: v.tensor, sparse_tensor=False
         )
 
     @skip_if_lt_x_gpu(2)
-    def test_cuda_future_callback_changes_devices(self):
+    def test_device_future_callback_changes_devices(self):
         # We check proper CUDA stream synchronization by filling the tensor with
         # the expected value in one stream, and reading it from another stream.
-        tensor0 = torch.zeros((100,), device="cuda:0")
-        tensor1 = torch.zeros((100,), device="cuda:1")
-        parent_future = Future(devices=["cuda:0", "cuda:1"])
+        tensor0 = torch.zeros((100,), device=_get_device_name(0))
+        tensor1 = torch.zeros((100,), device=_get_device_name(1))
+        parent_future = Future(devices=[_get_device_name(0), _get_device_name(1)])
 
         def cb(fut):
             t0 = fut.value()
@@ -6150,55 +6268,70 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             return tensor1
 
         child_future = parent_future.then(cb)
-        with torch.cuda.device("cuda:0"):
-            stream = torch.cuda.Stream()
-            with torch.cuda.stream(stream):
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        with torch.device(_get_device_name(0)):
+            stream = torch.get_device_module(_get_device_name(-1)).Stream()
+            with torch.get_device_module(_get_device_name(-1)).stream(stream):
+                if TEST_CUDA:
+                    torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                else:
+                    raise ValueError(
+                        f"Unsupported feature(_sleep) for {_get_device_name(0)}"
+                    )
                 tensor0.fill_(1)
                 parent_future.set_result(tensor0)
-        with torch.cuda.device("cuda:1"):
-            another_stream = torch.cuda.Stream()
-            with torch.cuda.stream(another_stream):
+        with torch.device(_get_device_name(1)):
+            another_stream = torch.get_device_module(_get_device_name(-1)).Stream()
+            with torch.get_device_module(_get_device_name(-1)).stream(another_stream):
                 self.assertTrue(torch.eq(child_future.wait(), 1).all().item())
 
     @skip_if_lt_x_gpu(2)
-    def test_cuda_future_value_on_bad_device(self):
-        tensor0 = torch.zeros((100,), device="cuda:0")
-        tensor1 = torch.zeros((100,), device="cuda:1")
-        parent_future = Future(devices=["cuda:1"])
+    def test_device_future_value_on_bad_device(self):
+        tensor0 = torch.zeros((100,), device=_get_device_name(0))
+        tensor1 = torch.zeros((100,), device=_get_device_name(1))
+        parent_future = Future(devices=[_get_device_name(1)])
 
         # As a plus, we test that futures still invoke callbacks even in case of
         # error, and that the child futures are successful if those callbacks
         # don't access the parent future.
         def cb(fut):
-            with torch.cuda.device("cuda:1"):
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+            with torch.device(_get_device_name(1)):
+                if TEST_CUDA:
+                    torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                else:
+                    raise ValueError(
+                        f"Unsupported feature(_sleep) for {_get_device_name(-1)}"
+                    )
                 tensor1.fill_(1)
                 return tensor1
 
         child_future = parent_future.then(cb)
-        with torch.cuda.device("cuda:0"):
-            stream = torch.cuda.Stream()
-            with torch.cuda.stream(stream):
-                torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+        with torch.device(_get_device_name(0)):
+            stream = torch.get_device_module(_get_device_name(-1)).Stream()
+            with torch.get_device_module(_get_device_name(-1)).stream(stream):
+                if TEST_CUDA:
+                    torch.cuda._sleep(int(1000 * get_cycles_per_ms()))
+                else:
+                    raise ValueError(
+                        f"Unsupported feature(_sleep) for {_get_device_name(-1)}"
+                    )
                 tensor0.fill_(1)
                 parent_future.set_result(tensor0)
         with self.assertRaisesRegex(
             ValueError,
-            r"The result contained tensors residing on device\(s\) cuda:0 "
-            r"which are not among the expected device\(s\) cuda:1",
+            rf"The result contained tensors residing on device\(s\) {_get_device_name(0)} "
+            rf"which are not among the expected device\(s\) {_get_device_name(1)}",
         ):
             parent_future.wait()
-        with torch.cuda.device("cuda:1"):
-            another_stream = torch.cuda.Stream()
-            with torch.cuda.stream(another_stream):
+        with torch.device(_get_device_name(1)):
+            another_stream = torch.get_device_module(_get_device_name(-1)).Stream()
+            with torch.get_device_module(_get_device_name(-1)).stream(another_stream):
                 self.assertTrue(torch.eq(child_future.wait(), 1).all().item())
 
     @skip_if_lt_x_gpu(1)
-    def test_async_execution_with_cuda_future(self):
+    def test_async_execution_with_device_future(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         options = self.rpc_backend_options
-        options.set_device_map(dst, {"cuda:0": "cuda:0"})
+        options.set_device_map(dst, {_get_device_name(0): _get_device_name(0)})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -6208,20 +6341,22 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=options,
         )
 
-        t = torch.zeros((100,), device="cuda:0")
-        fut = rpc.rpc_async(dst, async_cuda_sleep_and_set_to_one, args=(t,))
-        another_stream = torch.cuda.Stream("cuda:0")
-        with torch.cuda.stream(another_stream):
+        t = torch.zeros((100,), device=_get_device_name(0))
+        fut = rpc.rpc_async(dst, async_device_sleep_and_set_to_one, args=(t,))
+        another_stream = torch.get_device_module(_get_device_name(-1)).Stream(
+            _get_device_name(0)
+        )
+        with torch.get_device_module(_get_device_name(-1)).stream(another_stream):
             self.assertTrue(torch.eq(fut.wait(), 1).all().item())
 
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
-    def test_async_execution_nested_with_cuda_future(self):
+    def test_async_execution_nested_with_device_future(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         nested_dst = worker_name((self.rank + 2) % self.world_size)
         options = self.rpc_backend_options
-        options.set_device_map(dst, {"cuda:0": "cuda:0"})
+        options.set_device_map(dst, {_get_device_name(0): _get_device_name(0)})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -6231,20 +6366,22 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=options,
         )
 
-        a = torch.ones((100,), device="cuda:0")
-        b = torch.ones((100,), device="cuda:0")
-        c = torch.ones((100,), device="cuda:0")
-        fut = rpc.rpc_async(dst, async_cuda_nested_add, args=(nested_dst, a, b, c))
-        another_stream = torch.cuda.Stream("cuda:0")
-        with torch.cuda.stream(another_stream):
+        a = torch.ones((100,), device=_get_device_name(0))
+        b = torch.ones((100,), device=_get_device_name(0))
+        c = torch.ones((100,), device=_get_device_name(0))
+        fut = rpc.rpc_async(dst, async_device_nested_add, args=(nested_dst, a, b, c))
+        another_stream = torch.get_device_module(_get_device_name(-1)).Stream(
+            _get_device_name(0)
+        )
+        with torch.get_device_module(_get_device_name(-1)).stream(another_stream):
             self.assertTrue(torch.eq(fut.wait(), 3).all().item())
 
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_modify_tensor_inplace(self):
-        tensor = torch.zeros((100,), device="cuda:0")
-        future = Future(devices=["cuda:0"])
+    def test_device_future_modify_tensor_inplace(self):
+        tensor = torch.zeros((100,), device=_get_device_name(0))
+        future = Future(devices=[_get_device_name(0)])
         future.set_result(tensor)
         # It's weird to modify the value of a future once it's complete, but
         # technically possible. Currently this is considered undefined behavior
@@ -6256,9 +6393,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         future.wait()
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_replace_tensor(self):
-        tensor_list = [torch.zeros((100,), device="cuda:0")]
-        future = Future(devices=["cuda:0"])
+    def test_device_future_replace_tensor(self):
+        tensor_list = [torch.zeros((100,), device=_get_device_name(0))]
+        future = Future(devices=[_get_device_name(0)])
         future.set_result(tensor_list)
         # It's weird to modify the value of a future once it's complete, but
         # technically possible. Currently this is considered undefined behavior
@@ -6269,14 +6406,14 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         # We set things up so that the original tensor contained in the list
         # gets deleted once we replace it with the other one. This will
         # invalidate any cached information held by the future.
-        tensor_list[0] = torch.ones((100,), device="cuda:0")
+        tensor_list[0] = torch.ones((100,), device=_get_device_name(0))
         future.wait()
 
     @skip_if_lt_x_gpu(1)
     def test_rref_with_unpickleable_attributes(self):
         dst = worker_name((self.rank + 1) % self.world_size)
         options = self.rpc_backend_options
-        options.set_device_map(dst, {"cuda:0": "cuda:0"})
+        options.set_device_map(dst, {_get_device_name(0): _get_device_name(0)})
 
         rpc.init_rpc(
             name=worker_name(self.rank),
@@ -6286,7 +6423,9 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
             rpc_backend_options=options,
         )
 
-        rref = rpc.remote(dst, TensorWrapper, args=(torch.zeros(42, device="cuda:0"),))
+        rref = rpc.remote(
+            dst, TensorWrapper, args=(torch.zeros(42, device=_get_device_name(0)),)
+        )
         rref.rpc_sync().increase(1)
         ret = rref.rpc_sync().sum()
         self.assertEqual(ret, 42)
@@ -6294,19 +6433,19 @@ class TensorPipeAgentCudaRpcTest(RpcAgentTestFixture, RpcTestCommon):
         rpc.shutdown()
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_can_extract_cuda_sparse_tensor(self):
-        self._test_cuda_future_extraction(
+    def test_device_future_can_extract_device_sparse_tensor(self):
+        self._test_device_future_extraction(
             wrapper=lambda t: t, unwrapper=lambda v: v, sparse_tensor=True
         )
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_can_extract_list_with_cuda_sparse_tensor(self):
-        self._test_cuda_future_extraction(
+    def test_device_future_can_extract_list_with_device_sparse_tensor(self):
+        self._test_device_future_extraction(
             wrapper=lambda t: [t], unwrapper=operator.itemgetter(0), sparse_tensor=True
         )
 
     @skip_if_lt_x_gpu(1)
-    def test_cuda_future_can_extract_custom_class_with_cuda_sparse_tensor(self):
-        self._test_cuda_future_extraction(
+    def test_device_future_can_extract_custom_class_with_device_sparse_tensor(self):
+        self._test_device_future_extraction(
             wrapper=TensorWrapper, unwrapper=lambda v: v.tensor, sparse_tensor=True
         )
