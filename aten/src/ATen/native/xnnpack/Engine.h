@@ -74,6 +74,18 @@ bool use_global_average_pool(const Tensor& input);
 Tensor global_average_pool(const Tensor& input);
 
 //
+// Channel Shuffle
+//
+
+bool use_channel_shuffle(
+    const Tensor& input,
+    const int64_t groups);
+
+Tensor channel_shuffle(
+    const Tensor& input,
+    const int64_t groups);
+
+//
 // Activations
 //
 bool use_hardswish(const Tensor& input);
