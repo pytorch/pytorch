@@ -174,13 +174,6 @@ IF(NOT MKLDNN_FOUND)
     RETURN()
   ENDIF(NOT TARGET dnnl)
 
-  target_compile_options(dnnl PRIVATE
-    -Os
-    -fno-function-sections
-    -fno-data-sections
-    -mlong-calls
-  )
-
   IF(NOT APPLE AND CMAKE_COMPILER_IS_GNUCC)
     TARGET_COMPILE_OPTIONS(dnnl PRIVATE -Wno-maybe-uninitialized)
     TARGET_COMPILE_OPTIONS(dnnl PRIVATE -Wno-strict-overflow)
