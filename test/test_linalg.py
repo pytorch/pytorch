@@ -3744,8 +3744,8 @@ class TestLinalg(TestCase):
             if a.ndim > 2:
                 tolerances.append(make_tensor(a.shape[-3], dtype=torch.float32, device=device, low=0))
             for tol_ in tolerances:
-                actual = torch.linalg.matrix_rank(a, atol=tol)
-                actual_tol = torch.linalg.matrix_rank(a, tol=tol)
+                actual = torch.linalg.matrix_rank(a, atol=tol_)
+                actual_tol = torch.linalg.matrix_rank(a, tol=tol_)
                 self.assertEqual(actual, actual_tol)
                 numpy_tol = tol_ if isinstance(tol_, float) else tol_.cpu().numpy()
                 expected = np.linalg.matrix_rank(a.cpu().numpy(), tol=numpy_tol)
