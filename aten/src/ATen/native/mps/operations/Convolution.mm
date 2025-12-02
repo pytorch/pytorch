@@ -638,58 +638,55 @@ Tensor _mps_convolution_transpose(const Tensor& input_t,
   const int64_t k = stride.size();
   if (k == 3) {
     // 3D convolution
-    TORCH_CHECK(
-        (output_padding[0] < stride[0] || output_padding[0] < dilation[0]) &&
-            (output_padding[1] < stride[1] || output_padding[1] < dilation[1]) &&
-            (output_padding[2] < stride[2] || output_padding[2] < dilation[2]),
-        "output padding must be smaller than either stride or dilation, "
-        "but got output_padding_depth: ",
-        output_padding[0],
-        " output_padding_height: ",
-        output_padding[1],
-        " output_padding_width: ",
-        output_padding[2],
-        " stride_depth: ",
-        stride[0],
-        " stride_height: ",
-        stride[1],
-        " stride_width: ",
-        stride[2],
-        " dilation_depth: ",
-        dilation[0],
-        " dilation_height: ",
-        dilation[1],
-        " dilation_width: ",
-        dilation[2]);
+    TORCH_CHECK((output_padding[0] < stride[0] || output_padding[0] < dilation[0]) &&
+                    (output_padding[1] < stride[1] || output_padding[1] < dilation[1]) &&
+                    (output_padding[2] < stride[2] || output_padding[2] < dilation[2]),
+                "output padding must be smaller than either stride or dilation, "
+                "but got output_padding_depth: ",
+                output_padding[0],
+                " output_padding_height: ",
+                output_padding[1],
+                " output_padding_width: ",
+                output_padding[2],
+                " stride_depth: ",
+                stride[0],
+                " stride_height: ",
+                stride[1],
+                " stride_width: ",
+                stride[2],
+                " dilation_depth: ",
+                dilation[0],
+                " dilation_height: ",
+                dilation[1],
+                " dilation_width: ",
+                dilation[2]);
   } else if (k == 2) {
     // 2D convolution
-    TORCH_CHECK(
-        (output_padding[0] < stride[0] || output_padding[0] < dilation[0]) &&
-            (output_padding[1] < stride[1] || output_padding[1] < dilation[1]),
-        "output padding must be smaller than either stride or dilation, "
-        "but got output_padding_height: ",
-        output_padding[0],
-        " output_padding_width: ",
-        output_padding[1],
-        " stride_height: ",
-        stride[0],
-        " stride_width: ",
-        stride[1],
-        " dilation_height: ",
-        dilation[0],
-        " dilation_width: ",
-        dilation[1]);
+    TORCH_CHECK((output_padding[0] < stride[0] || output_padding[0] < dilation[0]) &&
+                    (output_padding[1] < stride[1] || output_padding[1] < dilation[1]),
+                "output padding must be smaller than either stride or dilation, "
+                "but got output_padding_height: ",
+                output_padding[0],
+                " output_padding_width: ",
+                output_padding[1],
+                " stride_height: ",
+                stride[0],
+                " stride_width: ",
+                stride[1],
+                " dilation_height: ",
+                dilation[0],
+                " dilation_width: ",
+                dilation[1]);
   } else if (k == 1) {
     // 1D convolution
-    TORCH_CHECK(
-        output_padding[0] < stride[0] || output_padding[0] < dilation[0],
-        "output padding must be smaller than either stride or dilation, "
-        "but got output_padding_height: 0 output_padding_width: ",
-        output_padding[0],
-        " stride_height: 1 stride_width: ",
-        stride[0],
-        " dilation_height: 1 dilation_width: ",
-        dilation[0]);
+    TORCH_CHECK(output_padding[0] < stride[0] || output_padding[0] < dilation[0],
+                "output padding must be smaller than either stride or dilation, "
+                "but got output_padding_height: 0 output_padding_width: ",
+                output_padding[0],
+                " stride_height: 1 stride_width: ",
+                stride[0],
+                " dilation_height: 1 dilation_width: ",
+                dilation[0]);
   }
 
   auto output_t =
