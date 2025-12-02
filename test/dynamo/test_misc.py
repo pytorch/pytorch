@@ -14203,6 +14203,7 @@ class DynamoOpPromotionTests(torch._dynamo.test_case.TestCase):
             eager_result2 = container_eager(inp1)
             same(compiled_result2, eager_result2)
 
+    @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
     def test_module_to_move_compile(self):
         class Model(torch.nn.Module):
             def __init__(self):
