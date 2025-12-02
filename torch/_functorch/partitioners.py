@@ -47,6 +47,7 @@ from . import config
 from ._activation_checkpointing.graph_info_provider import GraphInfoProvider
 from ._activation_checkpointing.knapsack import (
     dp_knapsack,
+    dp_knapsack_sliding_hirschberg,
     greedy_knapsack,
     ilp_knapsack,
 )
@@ -1109,6 +1110,12 @@ def default_partition(
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
             continue
+        if node.op == "get_attr" and node.name in (
+            k for k, v in joint_module.named_modules()
+        ):
+            continue
+        if node.target is torch.ops.aten._assert_scalar.default:
+            continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
@@ -1164,13 +1171,7 @@ def default_partition(
 
     # Run DCE while overriding the definition of is_impure_node
     def is_not_collective(node):
-        if not distributed_enabled:
-            return True
-        if node.target is torch.ops._c10d_functional.wait_tensor.default:
-            return False
-        if node.target is torch.ops._c10d_functional.all_gather_into_tensor.default:
-            return False
-        return True
+        return getattr(node.target, "namespace", None) != "_c10d_functional"
 
     fw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
     bw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
@@ -2363,6 +2364,8 @@ def _optimize_runtime_with_given_memory(
         return ilp_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "dp":
         return dp_knapsack(memory, runtimes, max_memory)
+    elif SOLVER == "dp_knapsack_sliding_hirschberg":
+        return dp_knapsack_sliding_hirschberg(memory, runtimes, max_memory)
     elif SOLVER == "dynamic_memory_budget_dp":
         log.warning(
             "dynamic_memory_budget_dp is an experimental solver. "
