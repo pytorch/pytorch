@@ -11,7 +11,14 @@ from typing import Optional
 import torch
 
 
-from torch.nn.functional import pad, scaled_mm, scaled_grouped_mm, ScalingType, SwizzleType
+from torch.nn.functional import (
+    grouped_mm,
+    pad,
+    scaled_mm,
+    scaled_grouped_mm,
+    ScalingType,
+    SwizzleType,
+)
 from torch.testing._internal.common_cuda import (
     IS_SM90,
     _get_torch_cuda_version,
@@ -20,6 +27,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MX_GEMM,
     PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
     SM100OrLater,
+    SM120OrLater,
     SM89OrLater,
     SM90OrLater,
     with_tf32_off,
@@ -53,6 +61,7 @@ from torch.testing._internal.common_quantized import (
 
 
 _IS_SM8X = False
+
 if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
@@ -736,6 +745,10 @@ class TestFP8Matmul(TestCase):
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     def test_mxfp8_nvfp4_scaled_grouped_mm_2d_2d(self, G, M, N, K, format):
         torch.manual_seed(42)
+
+        if format == "mxfp4" and SM120OrLater:
+            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+
         total_K = K  # Alias for clarity, communicating this consists of several groups along this dim
         input_group_end_offsets = generate_jagged_offs(
             G, total_K, multiple_of=32, device="cuda"
@@ -779,7 +792,7 @@ class TestFP8Matmul(TestCase):
         )
 
         # bf16 reference output
-        y_bf16 = torch._grouped_mm(
+        y_bf16 = grouped_mm(
             # Note: Reference result should be on reconstructed, not original values.
             #       as-in float(fp4(t)) not t itself.
             xh, wh.t(), offs=input_group_end_offsets, out_dtype=torch.bfloat16
@@ -799,6 +812,10 @@ class TestFP8Matmul(TestCase):
     @parametrize("format", ["mxfp8"] + (["nvfp4", "mxfp4"] if torch.version.cuda else []))
     def test_mxfp8_scaled_grouped_mm_2d_3d(self, G, M, N, K, format):
         torch.manual_seed(42)
+
+        if format == "mxfp4" and SM120OrLater:
+            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
+
         # Simulate 2d-3d grouped gemm `out = input @ weight.t()`
         # 2D inputs with groups along M, 3D weights.
         block_size = 32
@@ -921,7 +938,7 @@ class TestFP8Matmul(TestCase):
         # Compute reference bf16 grouped gemm.
         # Note: Reference result should be on reconstructed, not original values.
         #       as-in float(fp4(t)) not t itself.
-        y_bf16 = torch._grouped_mm(
+        y_bf16 = grouped_mm(
             xh,
             wh.transpose(-2, -1),
             offs=input_group_end_offsets,
@@ -1243,8 +1260,12 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8 or IS_WINDOWS, f8_msg)
     @unittest.skipIf(not SM89OrLater, "rowwise implementation is currently sm89-sm100 specific")
     @parametrize("base_dtype", [torch.bfloat16, torch.float16, torch.float32])
+    @parametrize("shapes", [
+        (128, 512, 256),
+    ])
     @with_tf32_off
-    def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):
+    def test_scaled_mm_vs_emulated_row_wise(self, base_dtype, shapes):
+        M, K, N = shapes
         # Fp32 out_dtype is only supported by cuBLAS, which however only started
         # shipping row-wise kernels in CUDA 12.9, and only for sm90+.
         if base_dtype is torch.float32:
@@ -1265,11 +1286,11 @@ class TestFP8Matmul(TestCase):
         input_dtype = e4m3_type
         output_dtype = base_dtype
 
-        x = torch.randn(16, 16, device="cuda", dtype=base_dtype)
-        y = torch.randn(32, 16, device="cuda", dtype=base_dtype).t()
+        x = torch.randn(M, K, device="cuda", dtype=base_dtype)
+        y = torch.randn(N, K, device="cuda", dtype=base_dtype).t()
         bias = None
         if base_dtype in {torch.bfloat16, torch.float16}:
-            bias = torch.randn((32,), device="cuda", dtype=base_dtype)
+            bias = torch.randn((N,), device="cuda", dtype=base_dtype)
 
         x_scales = tensor_to_scale(x, input_dtype, dim=1).float()
         y_scales = tensor_to_scale(y, input_dtype, dim=0).float()
@@ -1299,6 +1320,11 @@ class TestFP8Matmul(TestCase):
                 atol, rtol = 2e-3, 2e-3
 
             self.assertEqual(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
+
+            cosine_sim = torch.nn.functional.cosine_similarity(
+                out_emulated.flatten().float(), out_scaled_mm.flatten().float(), dim=0
+            )
+            self.assertGreaterEqual(float(cosine_sim), 0.999)
 
         # only cuBLAS supports rowwise with fp32 output and cuBLAS only supports
         # rowwise on SM 9.0
@@ -1870,6 +1896,8 @@ class TestFP8Matmul(TestCase):
             raise unittest.SkipTest("nvfp4 not supported on ROCm, skipping")
         if (recipe == "nvfp4" or recipe == "mxfp4") and fast_accum:
             raise unittest.SkipTest("fast_accum not supported in nvfp4/mxfp4 cublas gemm, skipping")
+        if recipe == "mxfp4" and SM120OrLater:
+            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
 
         device = "cuda"
         M, K, N = mkn
@@ -2090,6 +2118,8 @@ class TestFP8Matmul(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MX_GEMM or IS_WINDOWS, mx_skip_msg)
     @parametrize("recipe", ["mxfp8", "mxfp4" if torch.version.hip else "nvfp4"])
     def test_blockwise_mxfp8_nvfp4_error_messages(self, device, recipe) -> None:
+        if recipe == "mxfp4" and SM120OrLater:
+            raise unittest.SkipTest("MXFP4 on CUDA only supported on B200/B300")
         M, K, N = (1024, 512, 2048)
         BLOCK_SIZE_K = 16 if recipe == "nvfp4" else 32
         BLOCK_SIZE_MN = 128

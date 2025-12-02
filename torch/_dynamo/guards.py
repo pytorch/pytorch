@@ -130,6 +130,7 @@ from .source import (
     ChainedSource,
     ClosureSource,
     CodeSource,
+    CollectionsSource,
     ConstantSource,
     ConstDictKeySource,
     CurrentStreamSource,
@@ -1442,6 +1443,13 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, CollectionsSource):
+            out = root_guard_manager.lambda_manager(
+                python_lambda=lambda _: collections,
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, TorchFunctionModeStackSource):
             out = root_guard_manager.lambda_manager(
                 python_lambda=lambda _: get_torch_function_mode_stack_at(
@@ -1937,7 +1945,8 @@ class GuardBuilder(GuardBuilderBase):
             guard._unserializable = True
 
         obj_id = self.id_ref(t, f"type({guard.name})")
-        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
+        type_repr = repr(t)
+        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})  # {type_repr}"
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_type_match_guard(
@@ -2507,11 +2516,29 @@ class GuardBuilder(GuardBuilderBase):
     def DETERMINISTIC_ALGORITHMS(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
 
-    def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
-        pass  # we always guard on this via GlobalStateGuard()
-
     def FSDP_TRAINING_STATE(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
+
+    def GLOBAL_STATE(self, guard: Guard) -> None:
+        output_graph = self.check_fn_manager.output_graph
+        assert output_graph is not None
+        global_state = output_graph.global_state_guard
+        self.check_fn_manager.global_state = global_state
+        self.guard_manager.root.add_global_state_guard(
+            global_state, ["___check_global_state()"]
+        )
+
+    def TORCH_FUNCTION_STATE(self, guard: Guard) -> None:
+        assert self.check_fn_manager.torch_function_mode_stack is not None
+        self.check_fn_manager.torch_function_mode_stack_check_fn = (
+            make_torch_function_mode_stack_guard(
+                self.check_fn_manager.torch_function_mode_stack
+            )
+        )
+        self.guard_manager.root.add_torch_function_mode_stack_guard(
+            self.check_fn_manager.torch_function_mode_stack,
+            ["___check_torch_function_mode_stack()"],
+        )
 
     def DEFAULT_DEVICE(self, guard: Guard) -> None:
         """Guard on CURRENT_DEVICE per torch.utils._device"""
@@ -3299,6 +3326,11 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
         return types.MethodType(func, base)
 
+    @staticmethod
+    def _unpickle_sdp_backend(name: str):
+        # Reconstruct from the Python-facing enum namespace
+        return getattr(torch.nn.attention.SDPBackend, name)
+
     @classmethod
     def _unpickle_cell(cls, val: Any) -> Any:
         def _() -> Any:
@@ -3439,6 +3471,9 @@ class GuardsStatePickler(pickle.Pickler):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("distributed_c10d.Work",)
 
+        if isinstance(obj, torch.nn.attention.SDPBackend):
+            return type(self)._unpickle_sdp_backend, (obj.name,)
+
         if type(obj).__qualname__ != type(obj).__name__:
             raise torch._dynamo.exc.PackageError(
                 f"Type {type(obj)} for object {obj} cannot be saved "
@@ -3532,6 +3567,8 @@ class CheckFunctionManager:
         self.additional_used_local_vars: OrderedSet[str] = OrderedSet()
         self.additional_used_global_vars: OrderedSet[str] = OrderedSet()
         self.runtime_global_scope = runtime_global_scope
+        self.global_state: Optional[torch._C._dynamo.guards.GlobalStateGuard] = None
+        self.torch_function_mode_stack_check_fn: Optional[Callable[[], bool]] = None
 
         if not justknobs_check("pytorch/compiler:guard_nn_modules"):
             log.warning("guard_nn_modules is turned off using justknobs killswitch")
@@ -3657,6 +3694,7 @@ class CheckFunctionManager:
                     self.guard_manager,
                     output_graph.local_scope,
                     CompileContext.current_compile_id(),
+                    backend=None,  # no need to set this because we are trying to find the offending guard entry
                 )
                 raise AssertionError(
                     "Guard failed on the same frame it was created. This is a bug - please create an issue."
@@ -3833,7 +3871,7 @@ class CheckFunctionManager:
             },
             global_scope=global_scope_state,
             _guards=torch._guards.GuardsSet(
-                {
+                OrderedSet(
                     dataclasses.replace(
                         guard,
                         obj_weakref=None,
@@ -3841,7 +3879,7 @@ class CheckFunctionManager:
                         create_fn=normalize_create_fn(guard.create_fn),
                     )
                     for guard in sorted_guards
-                }
+                )
             ),
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
@@ -3939,27 +3977,11 @@ class CheckFunctionManager:
         verbose_code_parts = []
         structured_guard_fns: list[Callable[[], dict[str, Any]]] = []
 
-        assert self.torch_function_mode_stack is not None
-        torch_function_mode_stack_check_fn = make_torch_function_mode_stack_guard(
-            self.torch_function_mode_stack
-        )
-
         # Add compile id info in the guard manager for debugging purpose
         self.guard_manager.root.attach_compile_id(
             str(CompileContext.current_compile_id())
         )
 
-        # Insert the global_state guard
-        assert self.output_graph is not None
-        global_state = self.output_graph.global_state_guard
-        self.guard_manager.root.add_global_state_guard(
-            global_state, ["___check_global_state()"]
-        )
-
-        self.guard_manager.root.add_torch_function_mode_stack_guard(
-            self.torch_function_mode_stack,
-            ["___check_torch_function_mode_stack()"],
-        )
         # Clear references to torch_function modes held in the list
         self.torch_function_mode_stack = None
 
@@ -4105,12 +4127,14 @@ class CheckFunctionManager:
 
         if convert_frame.initial_global_state is None:
             # we should only hit this case in NopTests()
-            global_state = convert_frame.GlobalStateGuard()
+            check_global_state = convert_frame.GlobalStateGuard().check
+        else:
+            check_global_state = getattr(self.global_state, "check", None)
         closure_vars = {
             "___check_tensors": check_tensors_fn,
             "___check_tensors_verbose": check_tensors_verbose_fn,
-            "___check_global_state": global_state.check,
-            "___check_torch_function_mode_stack": torch_function_mode_stack_check_fn,
+            "___check_global_state": check_global_state,
+            "___check_torch_function_mode_stack": self.torch_function_mode_stack_check_fn,
             **SYMPY_INTERP,
             **_get_closure_vars(),
         }
@@ -4288,6 +4312,7 @@ def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
     compile_id: Optional[CompileId],
+    backend: Optional[Callable],
 ) -> str:
     """
     Return the reason why `guard_manager` failed.
@@ -4299,6 +4324,10 @@ def get_guard_fail_reason_helper(
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
     scope.update(guard_manager.closure_vars)
     reasons: list[str] = []
+
+    cache_entry_backend = None
+    if guard_manager.cache_entry:
+        cache_entry_backend = guard_manager.cache_entry.backend
 
     no_tensor_aliasing_check_failed = False
 
@@ -4322,6 +4351,24 @@ def get_guard_fail_reason_helper(
             else:
                 reasons = verbose_code_parts
                 verbose_code_parts = []
+    elif cache_entry_backend != backend:
+        # None of the guard entries failed - a backend match issue
+        reason = (
+            "BACKEND_MATCH failure: torch.compile detected different backend callables."
+            " If this is unexpected, wrap your backend in functools.partial (or reuse the"
+            " same cached backend) to avoid creating a new backend function each time."
+            " More details: https://github.com/pytorch/pytorch/issues/168373"
+        )
+        reasons.append(reason)
+    else:
+        # Unexpected recompilation - points to a bug
+        reason = (
+            "Unexpected recompilation: runtime guards failed even though they passed"
+            " during recompilation-reason analysis."
+            " Please open an issue with a minimal repro:"
+            " https://github.com/pytorch/pytorch"
+        )
+        reasons.append(reason)
 
     if no_tensor_aliasing_check_failed:
         reasons = recompilation_reason_for_no_tensor_aliasing_guard(
@@ -4358,11 +4405,14 @@ def get_guard_fail_reason(
     code: types.CodeType,
     f_locals: dict[str, object],
     compile_id: CompileId,
+    backend: Callable,
     skip_logging: bool = False,
 ) -> str:
     if isinstance(guard_manager, DeletedGuardManagerWrapper):
         return f"{compile_id}: {guard_manager.invalidation_reason}"
-    reason_str = get_guard_fail_reason_helper(guard_manager, f_locals, compile_id)
+    reason_str = get_guard_fail_reason_helper(
+        guard_manager, f_locals, compile_id, backend
+    )
     if skip_logging:
         return reason_str
     guard_failures[orig_code_map[code]].append(reason_str)
@@ -4383,6 +4433,7 @@ def get_guard_fail_reason(
 def get_and_maybe_log_recompilation_reasons(
     cache_entry: Optional[CacheEntry],
     frame: DynamoFrameType,
+    backend: Callable,
     skip_logging: bool = False,
 ) -> list[str]:
     """
@@ -4397,6 +4448,7 @@ def get_and_maybe_log_recompilation_reasons(
             cache_entry.code,
             frame.f_locals,
             cache_entry.compile_id,
+            backend,
             skip_logging,
         )
         if reason:

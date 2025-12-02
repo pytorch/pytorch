@@ -14,6 +14,7 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
+import torch.fx.graph as fx_graph
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
@@ -303,6 +304,26 @@ pytree.register_constant(CustomConstantType)
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        self._fx_magic_methods_snapshot = fx_graph.magic_methods.copy()
+        self._saved_default_device_context = getattr(
+            torch._GLOBAL_DEVICE_CONTEXT, "device_context", None
+        )
+
+    def tearDown(self):
+        fx_graph.magic_methods.clear()
+        fx_graph.magic_methods.update(self._fx_magic_methods_snapshot)
+
+        current_ctx = getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+        if current_ctx is not self._saved_default_device_context:
+            if self._saved_default_device_context is None:
+                torch.set_default_device(None)
+            else:
+                torch.set_default_device(self._saved_default_device_context.device)
+
+        super().tearDown()
+
     def _tracefunc(self, frame, event, arg):
         if event != "call":
             return
@@ -339,7 +360,7 @@ class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
         # NB: This is super janky and might cause unforeseen problems
         if kwarg_gen_fn is not None:
             kwargs = kwarg_gen_fn()
-            for key in self._frame_state.f_locals.keys():
+            for key in self._frame_state.f_locals:
                 if key in kwargs and isinstance(kwargs[key], Iterator):
                     self._frame_state.f_locals[key] = kwargs[key]
 
@@ -1214,7 +1235,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         x = torch.randn(3, 2)
         with torch.enable_grad():
-            ref, loaded = self._test_serialization("GRAD_MODE", fn, x)
+            ref, loaded = self._test_serialization("GLOBAL_STATE", fn, x)
         with torch.no_grad():
             self._test_check_fn(ref, loaded, {"x": x}, False)
         with torch.enable_grad():
@@ -1226,7 +1247,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
 
         x = torch.randn(3, 2)
         with torch.enable_grad():
-            ref, _ = self._test_serialization("GRAD_MODE", fn, x)
+            ref, _ = self._test_serialization("GLOBAL_STATE", fn, x)
         with torch.no_grad():
             # Ensure guards state loading is not affected by the current global grad mode.
             guards_state = pickle.loads(self._cached_guards_state)
@@ -1246,7 +1267,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         try:
             x = torch.randn(3, 2)
             torch.use_deterministic_algorithms(True)
-            ref, loaded = self._test_serialization("DETERMINISTIC_ALGORITHMS", fn, x)
+            ref, loaded = self._test_serialization("GLOBAL_STATE", fn, x)
             torch.use_deterministic_algorithms(False)
             self._test_check_fn(ref, loaded, {"x": x}, False)
             torch.use_deterministic_algorithms(True)
@@ -1270,6 +1291,9 @@ class TestGuardSerialization(TestGuardSerializationBase):
             ref, loaded = self._test_serialization("TORCH_FUNCTION_STATE", fn, x)
             self._test_check_fn(ref, loaded, {"x": x}, True)
         self._test_check_fn(ref, loaded, {"x": x}, False)
+        with GlobalTorchFunctionMode():
+            ref, loaded = self._test_serialization("GLOBAL_STATE", fn, x)
+            self._test_check_fn(ref, loaded, {"x": x}, True)
         with GlobalTorchFunctionMode():
             with torch._C.DisableTorchFunction():
                 self._test_check_fn(ref, loaded, {"x": x}, False)
@@ -1306,7 +1330,7 @@ class TestGuardSerialization(TestGuardSerializationBase):
         x = torch.randn(3, 2)
 
         with torch.enable_grad():
-            ref, loaded = self._test_serialization("FSDP_TRAINING_STATE", fn, x)
+            ref, loaded = self._test_serialization("GLOBAL_STATE", fn, x)
         with torch.no_grad():
             self._test_check_fn(ref, loaded, {"x": x}, False)
         with torch.enable_grad():
@@ -1688,6 +1712,80 @@ class TestGuardSerialization(TestGuardSerializationBase):
         )
         self._test_check_fn(
             ref, loaded, {"x": x, "d": ModWithDict({"b": 1e-9, "a": 1e9})}, False
+        )
+
+    def test_global_state_guard_filter(self):
+        def foo(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+
+        with torch.no_grad():
+            compiled_fn = torch.compile(
+                foo, options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe}
+            )
+            compiled_fn(x)
+
+        # Check global guards are gone.
+        with torch.enable_grad(), torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), foo(x))
+
+    def test_torch_function_state_filter(self):
+        def foo(x):
+            return x + 1
+
+        x = torch.randn(3, 2)
+
+        with GlobalTorchFunctionMode():
+            compiled_fn = torch.compile(
+                foo, options={"guard_filter_fn": torch.compiler.skip_all_guards_unsafe}
+            )
+            compiled_fn(x)
+
+        # Check global guards are gone.
+        with torch.compiler.set_stance("fail_on_recompile"):
+            self.assertEqual(compiled_fn(x), foo(x))
+
+    def test_sdp_backend_serialization(self):
+        def fn(x, backend):
+            # Use the backend enum in a guard-producing way
+            if backend == torch.nn.attention.SDPBackend.MATH:
+                return x + 1
+            elif backend == torch.nn.attention.SDPBackend.FLASH_ATTENTION:
+                return x + 2
+            elif backend == torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION:
+                return x + 3
+            else:
+                return x + 4
+
+        x = torch.randn(3, 2)
+        backend = torch.nn.attention.SDPBackend.MATH
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, backend)
+
+        # Test with the same backend
+        self._test_check_fn(
+            ref, loaded, {"x": x, "backend": torch.nn.attention.SDPBackend.MATH}, True
+        )
+
+        # Test with different backends
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "backend": torch.nn.attention.SDPBackend.FLASH_ATTENTION},
+            False,
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "backend": torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION},
+            False,
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "backend": torch.nn.attention.SDPBackend.CUDNN_ATTENTION},
+            False,
         )
 
 
