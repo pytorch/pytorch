@@ -3805,7 +3805,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         expected = fn(*inputs1)
         actual = fn_opt(*inputs2)
         self.assertTrue(same(actual, expected))
-        self.assertEqual(cnt.op_count, 1)
+        self.assertEqual(cnt.op_count, 2)
         self.assertEqual(cnt.frame_count, 1)
         cnt.clear()
         counters.clear()

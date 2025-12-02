@@ -743,20 +743,14 @@ class AutogradFunctionApply(HigherOrderOperator):
 
     def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
-        args_tensor_mask = fwd_kwargs["args_tensor_mask"]
         non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
-        length_of_tensor_args = sum(args_tensor_mask)
-        # Filter out the original tensor args from fwd_args,
-        # lifted freevars should not be args of ApplyTemplate.apply
-        # since we don't need to calculate the gradients of them.
-        new_fwd_args = fwd_args[:length_of_tensor_args]
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
             # pyrefly: ignore [bad-override]
             def forward(ctx, *args):
                 nonlocal saved_values
-                output, saved_values = fwd(None, *fwd_args)
+                output, saved_values = fwd(*args)
 
                 # If users call ctx.mark_non_differentiable() in the original fwd function.
                 if len(non_differentiable_idx) > 0:
@@ -770,9 +764,57 @@ class AutogradFunctionApply(HigherOrderOperator):
 
             @staticmethod
             def backward(ctx, *grad):
-                return bwd(None, *grad, *saved_values)
+                return bwd(*grad, *saved_values)
 
-        return ApplyTemplate.apply(*new_fwd_args)
+        return ApplyTemplate.apply(*fwd_args)
 
 
 autograd_function_apply = AutogradFunctionApply()
+
+
+class DynamoAutogradFunctionTraceHelper:
+    @staticmethod
+    def fwd_trace_helper(orig_fwd):
+        # autograd.Function forward does more than just running the forward method. Most
+        # of this logic is in C++. Here, we rewrite that functionality in python and let
+        # Dynamo trace it.
+        def inner(*args, **kwargs):
+            with torch.no_grad():
+                outs = orig_fwd(*args, **kwargs)
+
+            # Handle the case where if the input is passed on directly to the output, we call view_as
+            # Refer to https://github.com/pytorch/pytorch/blob/main/torch/csrc/autograd/custom_function.cpp#L254
+            tensor_args = {arg for arg in args if isinstance(arg, torch.Tensor)}
+            if isinstance(outs, torch.Tensor):
+                if outs in tensor_args:
+                    return outs.view_as(outs)
+                else:
+                    return outs
+
+            new_outs = []
+            for out in outs:
+                if isinstance(out, torch.Tensor):
+                    if out in tensor_args:
+                        new_outs.append(out.view_as(out))
+                    else:
+                        new_outs.append(out)
+                else:
+                    new_outs.append(out)
+            return tuple(new_outs)
+
+            # TODO - there is missing functionality here, where autograd.Function
+            # overwrites the requires_grad_ of the output tensors depending on the
+            # `mark_non_differentiable`. Currently, this is handled hackily in
+            # Dynamo, where we just overwrite the variable trackers requires_grad.
+
+        return inner
+
+    @staticmethod
+    def bwd_trace_helper(orig_bwd):
+        # TODO - This is not used today because it causes some expected inline
+        # tests to fail. But it will be cleaner to use this future.
+        def inner(*args, **kwargs):
+            with torch.no_grad():
+                return orig_bwd(*args, **kwargs)
+
+        return inner
