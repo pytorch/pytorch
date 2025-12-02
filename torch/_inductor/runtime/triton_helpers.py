@@ -136,8 +136,7 @@ def minimum_with_index(a_value, a_index, b_value, b_index):
     if is_floating(a_value):
         a_isnan = a_value != a_value
         b_isnan = b_value != b_value
-        # Use tl.where to avoid type issues for cpu_triton backend
-        mask = tl.where(b_isnan, mask, mask | a_isnan)
+        mask |= a_isnan & (not b_isnan)
         # Consider NaNs as equal
         equal |= a_isnan & b_isnan
 
@@ -153,7 +152,7 @@ def maximum_with_index(a_value, a_index, b_value, b_index):
     if is_floating(a_value):
         a_isnan = a_value != a_value
         b_isnan = b_value != b_value
-        mask = tl.where(b_isnan, mask, mask | a_isnan)
+        mask |= a_isnan & (not b_isnan)
         # Consider NaNs as equal
         equal |= a_isnan & b_isnan
 
