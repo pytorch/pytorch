@@ -10273,6 +10273,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @skipIfXpu(msg="Incorrect XPU reference")
+    @config.patch("combo_kernels", True)
     def test_argmax_argmin2(self):
         def fn(x):
             return (
