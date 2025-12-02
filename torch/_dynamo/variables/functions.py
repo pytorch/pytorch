@@ -21,6 +21,7 @@ The variable trackers here work together with the rest of Dynamo to enable
 accurate graph capture while handling Python's various function-related behaviors.
 """
 
+import contextlib
 import builtins
 import functools
 import inspect
@@ -372,7 +373,6 @@ def fn_var_getattr(
         return variables.LazyVariableTracker.create(subobj, source)
     return VariableTracker.build(tx, subobj)
 
-
 class BaseUserFunctionVariable(VariableTracker):
     def get_filename(self) -> str:
         return self.get_code().co_filename  # type: ignore[attr-defined]
@@ -389,7 +389,30 @@ class BaseUserFunctionVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
+        ctx = contextlib.nullcontext()
+
+        obj = None if not hasattr(self, "obj") else self.obj
+
+        from .nn_module import (NNModuleVariable,
+            UnspecializedNNModuleVariable,
+            UnspecializedBuiltinNNModuleVariable,
+            FSDPManagedNNModuleVariable,
+            record_nn_module_stack,
+            )
+
+        if isinstance(obj, (
+            NNModuleVariable,
+            UnspecializedNNModuleVariable,
+            UnspecializedBuiltinNNModuleVariable,
+            FSDPManagedNNModuleVariable,
+        )):
+            mod = obj.value
+            if isinstance(mod, torch.nn.Module):
+                ctx = record_nn_module_stack(
+                    str(id(mod)), obj.get_nn_module_stack_source(), tx, mod
+                )
+        with ctx:
+            return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)  # type: ignore[attr-defined]
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str

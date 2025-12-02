@@ -2053,6 +2053,36 @@ class TestFX(JitTestCase):
                 self.assertEqual(node.meta["stack_trace"], "stack_trace")
                 self.assertEqual(node.meta["source_fn_stack"], "source_fn_stack")
 
+
+    def test_nn_module_on_module_method(self):
+        class SimpleLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.my_linear = torch.nn.Linear(3, 2)
+
+            def forward(self, x):
+
+                def fn():
+                    return self.my_linear.forward
+
+                y = fn()(x)
+                return y - 1
+        inputs = (torch.randn(4, 3),)
+        model = SimpleLinear()
+
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+        gm = dynamo_graph_capture_for_export(model)(*inputs)
+        expected_stack = [
+            (str(id(model.my_linear)), ("L['self'].my_linear", type(model.my_linear))),
+        ]
+        for node in gm.graph.nodes:
+            mod_stack = node.meta.get("nn_module_stack", {})
+            if mod_stack:
+                break
+        stack_list = list(mod_stack.items())
+        self.assertEqual(stack_list, expected_stack)
+
+
     def test_interpreter(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
