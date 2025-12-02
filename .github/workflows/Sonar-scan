@@ -1,0 +1,20 @@
+name: Sonar-scan
+
+on:
+  pull_request:
+    branches:
+      - main
+  
+
+jobs:
+  sonar:
+    uses: ./.github/workflows/checkout.yaml
+  
+    name: SonarQube
+    runs-on: ubuntu-latest
+    needs:sonar
+    steps:
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
