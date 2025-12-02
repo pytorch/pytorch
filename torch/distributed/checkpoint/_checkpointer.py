@@ -1,5 +1,5 @@
 from concurrent.futures import Future
-from typing import Any, Optional
+from typing import Any
 
 import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict_loader as loader
@@ -34,11 +34,11 @@ class _Checkpointer:
         storage_writer: StorageWriter,
         storage_reader: StorageReader,
         *,
-        process_group: Optional[dist.ProcessGroup] = None,
+        process_group: dist.ProcessGroup | None = None,
         coordinator_rank: int = 0,
         no_dist: bool = False,
-        load_planner: Optional[LoadPlanner] = None,
-        save_planner: Optional[SavePlanner] = None,
+        load_planner: LoadPlanner | None = None,
+        save_planner: SavePlanner | None = None,
     ):
         """Initializes the Checkpointer instance.
 

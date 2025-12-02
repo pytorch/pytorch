@@ -2,7 +2,6 @@
 import copy
 import itertools
 import math
-from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -33,7 +32,7 @@ def _create_chunk_sharded_tensor(
     world_size: int,
     num_devices_per_node: int,
     pg: dist.ProcessGroup,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
 ) -> ShardedTensor:
     """
     Shard a tensor to chunks along the first dimension. The local rank will gets its
@@ -120,7 +119,7 @@ def _create_chunk_dtensor(
 
 def _all_gather_dtensor(
     tensor: DTensor,
-    root_mesh: Optional[DeviceMesh],
+    root_mesh: DeviceMesh | None,
 ) -> torch.Tensor:
     """
     All gather a DTensor in its sharded dimension and return the local tensor.

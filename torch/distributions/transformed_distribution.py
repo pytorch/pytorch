@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -53,8 +52,8 @@ class TransformedDistribution(Distribution):
     def __init__(
         self,
         base_distribution: Distribution,
-        transforms: Union[Transform, list[Transform]],
-        validate_args: Optional[bool] = None,
+        transforms: Transform | list[Transform],
+        validate_args: bool | None = None,
     ) -> None:
         if isinstance(transforms, Transform):
             self.transforms = [
@@ -171,7 +170,7 @@ class TransformedDistribution(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         event_dim = len(self.event_shape)
-        log_prob: Union[Tensor, float] = 0.0
+        log_prob: Tensor | float = 0.0
         y = value
         for transform in reversed(self.transforms):
             x = transform.inv(y)

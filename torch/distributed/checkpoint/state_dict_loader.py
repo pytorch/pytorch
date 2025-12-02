@@ -4,7 +4,7 @@ import inspect
 import logging
 import os
 import warnings
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -36,10 +36,10 @@ logger = logging.getLogger()
 def load_state_dict(
     state_dict: dict[str, Any],
     storage_reader: StorageReader,
-    process_group: Optional[dist.ProcessGroup] = None,
+    process_group: dist.ProcessGroup | None = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[LoadPlanner] = None,
+    planner: LoadPlanner | None = None,
 ) -> None:
     """This method is deprecated. Please switch to 'load'."""
     storage_reader.reset()
@@ -60,10 +60,10 @@ def load_state_dict(
 def load(
     state_dict: dict[str, Any],
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
-    storage_reader: Optional[StorageReader] = None,
-    planner: Optional[LoadPlanner] = None,
-    process_group: Optional[dist.ProcessGroup] = None,
+    checkpoint_id: str | os.PathLike | None = None,
+    storage_reader: StorageReader | None = None,
+    planner: LoadPlanner | None = None,
+    process_group: dist.ProcessGroup | None = None,
     no_dist: bool = False,
 ) -> None:
     """
@@ -205,10 +205,10 @@ def load(
 def _load_state_dict(
     state_dict: dict[str, Any],
     storage_reader: StorageReader,
-    process_group: Optional[dist.ProcessGroup] = None,
+    process_group: dist.ProcessGroup | None = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[LoadPlanner] = None,
+    planner: LoadPlanner | None = None,
 ) -> None:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
@@ -222,7 +222,7 @@ def _load_state_dict(
         ckpt_kwargs["process_group"] = distW.group
 
     use_collectives = True
-    metadata: Optional[Metadata] = None
+    metadata: Metadata | None = None
 
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
@@ -278,7 +278,7 @@ def _load_state_dict(
         all_local_plans = storage_reader.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan: Optional[LoadPlan] = None
+    central_plan: LoadPlan | None = None
     if use_collectives:
         central_plan = distW.reduce_scatter("plan", local_step, global_step)
     else:
@@ -306,11 +306,11 @@ def _load_state_dict(
 
 
 def _load_state_dict_from_keys(
-    keys: Optional[Union[set[str], str]] = None,
+    keys: set[str] | str | None = None,
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
-    storage_reader: Optional[StorageReader] = None,
-    process_group: Optional[dist.ProcessGroup] = None,
+    checkpoint_id: str | os.PathLike | None = None,
+    storage_reader: StorageReader | None = None,
+    process_group: dist.ProcessGroup | None = None,
 ) -> dict[str, Any]:
     """
     Load only the specified keys from the checkpoint, if no keys are specified, the entire

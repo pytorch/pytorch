@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 
 r"""
@@ -207,10 +207,10 @@ class _DependentProperty(property, _Dependent):
 
     def __init__(
         self,
-        fn: Optional[Callable[..., Any]] = None,
+        fn: Callable[..., Any] | None = None,
         *,
-        is_discrete: Optional[bool] = NotImplemented,
-        event_dim: Optional[int] = NotImplemented,
+        is_discrete: bool | None = NotImplemented,
+        event_dim: int | None = NotImplemented,
     ) -> None:
         super().__init__(fn)
         self._is_discrete = is_discrete
