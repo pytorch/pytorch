@@ -677,6 +677,11 @@ class OutputGraph(OutputGraphCommon):
         # back for backend errors.
         self.has_user_defined_allowed_in_graph = False
 
+        # Tracks if torch.autograd.grad is used in the graph. This is set during
+        # tracing when we encounter a call to torch.autograd.grad, and is used
+        # to validate that graph inputs are leaf tensors (no external grad_fn).
+        self.uses_autograd_grad = False
+
         # Tracks a list of called ops that were not tagged with "pt2_compliant_tag".
         # This information is useful for logging.
         self.non_compliant_ops: set[torch._ops.OpOverload] = set({})
@@ -2078,25 +2083,12 @@ class OutputGraph(OutputGraphCommon):
         This checks that tensors passed as inputs to the compiled function are leaf tensors
         when torch.autograd.grad is used anywhere in the graph or its subgraphs.
         """
-
-        # Check if torch.autograd.grad is used anywhere in this graph or subgraphs
-        def has_autograd_grad_in_graph(graph_module):
-            """Recursively check if torch.autograd.grad is in graph or subgraphs."""
-            for node in graph_module.graph.nodes:
-                if node.op == "call_function" and node.target == torch.autograd.grad:  # pylint: disable=comparison-with-callable
-                    return True
-                # Check subgraphs (e.g., from torch.cond, torch.map, etc.)
-                if node.op == "get_attr":
-                    submod = graph_module.get_submodule(node.target)
-                    if isinstance(submod, torch.fx.GraphModule):
-                        if has_autograd_grad_in_graph(submod):
-                            return True
-            return False
-
-        if not has_autograd_grad_in_graph(gm):
+        # uses_autograd_grad is set during tracing when we encounter torch.autograd.grad
+        if not self.uses_autograd_grad:
             return
 
         # If torch.autograd.grad is used, check ALL graphargs for external grad_fn
+        from . import graph_break_hints
         from .variables.tensor import TensorVariable
 
         for grapharg in self.graphargs:
@@ -2106,11 +2098,16 @@ class OutputGraph(OutputGraphCommon):
             ):
                 var = self.input_source_to_var[grapharg.source]
                 if isinstance(var, TensorVariable) and var.has_grad_fn:
-                    raise RuntimeError(
-                        "Compiled function receives an input with external grad_fn "
-                        "(created by operations outside the compiled region). "
-                        "When torch.autograd.grad is used, all inputs must be leaf tensors "
-                        "because the autograd graph cannot extend beyond the compiled region."
+                    unimplemented(
+                        gb_type="autograd.grad with external grad_fn input",
+                        context="",
+                        explanation=(
+                            "Compiled function receives an input with external grad_fn "
+                            "(created by operations outside the compiled region). "
+                            "When torch.autograd.grad is used, all inputs must be leaf tensors "
+                            "because the autograd graph cannot extend beyond the compiled region."
+                        ),
+                        hints=[*graph_break_hints.USER_ERROR],
                     )
 
     def compile_and_call_fx_graph(

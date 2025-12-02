@@ -1423,6 +1423,13 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
             )
 
+        @register(torch.autograd.grad)
+        def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
+            # Mark that we use autograd.grad, used later in _validate_autograd_grad_inputs
+            tx.output.uses_autograd_grad = True
+            # Return None to fall through to default handling
+            return None
+
         return handlers
 
     def call_function(

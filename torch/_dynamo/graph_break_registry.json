@@ -3711,5 +3711,15 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0367": [
+    {
+      "Gb_type": "autograd.grad with external grad_fn input",
+      "Context": "",
+      "Explanation": "Compiled function receives an input with external grad_fn (created by operations outside the compiled region). When torch.autograd.grad is used, all inputs must be leaf tensors because the autograd graph cannot extend beyond the compiled region.",
+      "Hints": [
+        "You should only pass in leaf tensors as input to compiled region when autograd.grad is present."
+      ]
+    }
   ]
 }
