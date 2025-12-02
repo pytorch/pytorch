@@ -14809,6 +14809,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ),
         )
 
+    @config.patch(combo_kernels=True)
+    def test_combo_kernel_filter_cpu(self):
+        def fn(a, b, c, d):
+            # Pointwise ops that should be fused
+            a = a * 4
+            b = b + 8
+            return a, b, c.min(-1), d.max(-1)
+
+        inps = [
+            torch.rand(20, 20, device=self.device),
+            torch.rand(30, 30, device=self.device),
+            torch.rand(256, 256, device=self.device),
+            torch.rand(256, 256, device=self.device),
+        ]
+        torch._inductor.metrics.reset()
+        compiled_fn = torch.compile(fn)
+        result = compiled_fn(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(result, expected)
+        # on cuda combo kernel fuses (a, b) into one kernel and (c, d) into another (total 2)
+        # on cpu combo kernel is skipped (a), (b), (c), (d) each run as separate kernels (total 4)
+        if self.device.lower() == "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+
+        if self.device.lower() == "cuda":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
     # end of class CommonTemplate - add new tests here
 
 
