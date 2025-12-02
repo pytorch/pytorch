@@ -23,7 +23,6 @@
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
-#include <ATen/ops/_async_error_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
 #include <ATen/ops/_functional_assert_scalar_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
@@ -480,14 +479,6 @@ Tensor isfinite(const Tensor& self) {
   });
 }
 
-void _async_error(std::string_view msg) {
-  TORCH_CHECK(0, msg);
-}
-
-void _async_error_meta(std::string_view msg) {
-  // Do NOT error, it's an async error!
-}
-
 void _assert_async_cpu(const Tensor& self) {
   TORCH_CHECK(
       native::is_nonzero(self),
@@ -523,7 +514,7 @@ Tensor _functional_assert_async_msg_cpu(
 }
 
 void _print(std::string_view s) {
-  std::cout << s << "\n";
+  std::cout << s << '\n';
 }
 
 // Sorting-based algorithm for isin(); used when the number of test elements is

@@ -1,7 +1,7 @@
 """torch.ops.aten operators under the `core` module."""
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
 # pyrefly: ignore-errors
-# ruff: noqa: TCH001,TCH002
+# ruff: noqa: TC001,TC002
 # flake8: noqa: B950
 
 from __future__ import annotations
@@ -117,7 +117,7 @@ def aten_scaled_dot_product_attention_23(
             else attn_mask
         )
         attn_weight = torch.softmax(
-            (Q @ K.transpose(-2, -1) *  attn_mask, dim=-1
+            (Q @ K.transpose(-2, -1) * scale_factor) + attn_mask, dim=-1
         )
         attn_weight = torch.dropout(attn_weight, dropout_p)
         return attn_weight @ V
