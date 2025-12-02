@@ -1,9 +1,45 @@
 #include <ATen/cuda/CUDAContextLight.h>
+#include <c10/cuda/CUDAException.h>
+#include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/stable/c/shim.h>
+#include <torch/csrc/utils/cpp_stacktraces.h>
+#include <cstring>
 
 AOTITorchError torch_get_current_cuda_blas_handle(void** ret_handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     *(cublasHandle_t*)(ret_handle) = at::cuda::getCurrentCUDABlasHandle();
   });
+}
+
+AOTITorchError torch_c10_cuda_check_msg(
+    int32_t err,
+    const char* filename,
+    const char* function_name,
+    uint32_t line_number,
+    bool include_device_assertions,
+    char** error_msg) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    *error_msg = nullptr;
+
+    try {
+      c10::cuda::c10_cuda_check_implementation(
+          err, filename, function_name, line_number, include_device_assertions);
+    } catch (const c10::AcceleratorError& e) {
+      // Match the behavior of Python exception translation:
+      // use what() if C++ stacktraces are enabled, otherwise
+      // what_without_backtrace()
+      const char* what_str = torch::get_cpp_stacktraces_enabled()
+          ? e.what()
+          : e.what_without_backtrace();
+      size_t msg_len = std::strlen(what_str);
+      *error_msg = new char[msg_len + 1];
+      std::memcpy(*error_msg, what_str, msg_len + 1);
+    }
+  });
+}
+
+void torch_c10_cuda_free_error_msg(char* error_msg) {
+  delete[] error_msg;
 }

@@ -859,6 +859,51 @@ if not IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "Unsupported accessor value: "):
                 libtorch_agnostic.ops.my_string_op(t, "invalid", "")
 
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_std_cuda_check_success(self, device):
+            """Test that STD_CUDA_CHECK works correctly for successful CUDA calls."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            result = libtorch_agnostic.ops.test_std_cuda_check_success()
+            expected_device = torch.cuda.current_device()
+            self.assertEqual(result, expected_device)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_std_cuda_check_error(self, device):
+            """Test that STD_CUDA_CHECK throws std::runtime_error with CUDA error message."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            # This should raise a RuntimeError with the full CUDA error message
+            # including "invalid device ordinal" and help text
+            # Use [\s\S]* to match across newlines
+            with self.assertRaisesRegex(
+                RuntimeError,
+                r"CUDA error: invalid device ordinal[\s\S]*"
+                r"GPU device may be out of range, do you have enough GPUs\?",
+            ):
+                libtorch_agnostic.ops.test_std_cuda_check_error()
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_std_cuda_kernel_launch_check_success(self, device):
+            """Test that STD_CUDA_KERNEL_LAUNCH_CHECK works correctly for successful kernel launches."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_success()
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_std_cuda_kernel_launch_check_error(self, device):
+            """Test that STD_CUDA_KERNEL_LAUNCH_CHECK throws std::runtime_error for invalid kernel launches."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            with self.assertRaisesRegex(
+                RuntimeError, r"CUDA error: invalid configuration argument"
+            ):
+                libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_error()
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
