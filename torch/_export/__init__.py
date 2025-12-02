@@ -16,7 +16,8 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from functools import lru_cache
 
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
 from unittest.mock import patch
 
 import torch
@@ -78,7 +79,7 @@ def aot_compile_warning():
 
 def aot_compile(
     f: Callable,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
     dynamic_shapes: Optional[dict[str, Any]] = None,

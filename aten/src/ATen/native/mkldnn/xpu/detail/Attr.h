@@ -34,7 +34,7 @@ namespace at::native::onednn {
 
 /*
    oneDNN postops usage:
-   Currently, oneDNN supports 5 kinds of post ops. More details can be refered
+   Currently, oneDNN supports 5 kinds of post ops. More details can be referred
 to oneDNN doc.
    https://oneapi-src.github.io/oneDNN/dev_guide_attributes_post_ops.html#doxid-dev-guide-attributes-post-ops-1dev-guide-attributes-post-ops-eltwise
 
@@ -345,7 +345,7 @@ class Attr {
         dnnl::memory binary_m;
         auto binary = ops_params_[i].binary_;
         auto md = ops_params_[i].meta_;
-        // qeury expected_md to achieve peak performance
+        // query expected_md to achieve peak performance
         auto expected_md = pd.query_md(
             dnnl::query::exec_arg_md,
             DNNL_ARG_ATTR_MULTIPLE_POST_OP(i) | DNNL_ARG_SRC_1);
@@ -399,7 +399,7 @@ static inline void construct_attr_for_unary(
   } else {
     TORCH_CHECK(
         unary_post_op == "none",
-        "onednn qlinear: unspported unary post op",
+        "onednn qlinear: unsupported unary post op",
         unary_post_op);
   }
 }

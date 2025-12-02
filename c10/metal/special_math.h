@@ -1,4 +1,4 @@
-// Implementation of specal math functions for Metal
+// Implementation of special math functions for Metal
 #pragma once
 #include <c10/metal/expm1f.h>
 #include <c10/metal/igamma.h>
@@ -622,6 +622,64 @@ inline T spherical_bessel_j0(T x) {
   }
 
   return static_cast<T>(::metal::sin(x) / x);
+}
+
+template <typename T>
+inline ::metal::enable_if_t<is_scalar_floating_point_v<T>, T> logaddexp(
+    T a,
+    T b) {
+  float a0 = static_cast<float>(a);
+  float b0 = static_cast<float>(b);
+  if (::metal::isinf(a0) && a0 == b0) {
+    return static_cast<T>(a0);
+  } else {
+    float m0 = ::metal::max(a0, b0);
+    return static_cast<T>(
+        m0 + ::c10::metal::log1p(::metal::exp(-::metal::abs(a0 - b0))));
+  }
+}
+
+// The function is ported from mlx
+template <typename T>
+inline ::metal::enable_if_t<is_complex_v<T>, T> logaddexp(T a, T b) {
+  if (::metal::isnan(a.x) || ::metal::isnan(a.y) || ::metal::isnan(b.x) ||
+      ::metal::isnan(b.y)) {
+    return T(NAN, NAN);
+  }
+
+  T maxval = a.x > b.x ? a : b;
+  T minval = a.x < b.x ? a : b;
+  constexpr auto inf = ::metal::numeric_limits<T>::infinity().x;
+
+  if (minval.x == -inf || maxval.x == inf) {
+    return maxval;
+  }
+
+  float2 maxval_ = static_cast<float2>(maxval);
+  float2 minval_ = static_cast<float2>(minval);
+  float m = ::metal::exp(minval_.x - maxval_.x);
+  float2 dexp{
+      m * ::metal::cos(minval_.y - maxval_.y),
+      m * ::metal::sin(minval_.y - maxval_.y),
+  };
+  return static_cast<T>(maxval_ + ::c10::metal::log1p(dexp));
+}
+
+template <typename T>
+inline T logaddexp2(T a, T b) {
+  constexpr auto log_2 = float(0.693147180559945309417232121458176);
+  constexpr auto inv_log_2 = float(1) / log_2;
+  float a0 = static_cast<float>(a);
+  float b0 = static_cast<float>(b);
+  if (::metal::isinf(a0) && a0 == b0) {
+    return static_cast<T>(a0);
+  } else {
+    float m0 = ::metal::max(a0, b0);
+    return static_cast<T>(
+        m0 +
+        ::c10::metal::log1p(::metal::pow(float(2), -::metal::abs(a0 - b0))) *
+            inv_log_2);
+  }
 }
 
 template <typename T>

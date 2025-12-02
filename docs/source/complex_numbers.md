@@ -45,7 +45,7 @@ supported for complex tensors.
 ## Transition from the old representation
 
 Users who currently worked around the lack of complex tensors with real tensors of shape {math}`(..., 2)`
-can easily to switch using the complex tensors in their code using {func}`torch.view_as_complex`
+can easily switch to using the complex tensors in their code using {func}`torch.view_as_complex`
 and {func}`torch.view_as_real`. Note that these functions don’t perform any copy and return a
 view of the input tensor.
 
@@ -140,7 +140,7 @@ through the same optimizer on the {func}`torch.view_as_real` equivalent of the c
 
 `real_optim` and `complex_optim` will compute the same updates on the parameters, though there may be slight numerical
 discrepancies between the two optimizers, similar to numerical discrepancies between foreach vs forloop optimizers
-and capturable vs default optimizers. For more details, see [numbercial accuracy](https://pytorch.org/docs/stable/notes/numerical_accuracy.html).
+and capturable vs default optimizers. For more details, see [numerical accuracy](https://pytorch.org/docs/stable/notes/numerical_accuracy.html).
 
 Specifically, while you can think of our optimizer's handling of complex tensors as the same as optimizing over their
 `p.real` and `p.imag` pieces separately, the implementation details are not precisely that. Note that the

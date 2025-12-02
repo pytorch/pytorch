@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import functools
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, TYPE_CHECKING, TypeVar
 
 import torchgen.local as local
 from torchgen.model import (
@@ -16,7 +16,7 @@ from torchgen.utils import context, S, T
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Callable, Iterator
 
 
 # Helper functions for defining generators on things in the model
@@ -26,15 +26,15 @@ F = TypeVar(
     NativeFunction,
     NativeFunctionsGroup,
     NativeFunctionsViewGroup,
-    Union[NativeFunction, NativeFunctionsGroup],
-    Union[NativeFunction, NativeFunctionsViewGroup],
+    NativeFunction | NativeFunctionsGroup,
+    NativeFunction | NativeFunctionsViewGroup,
 )
 
 F2 = TypeVar(
     "F2",
     NativeFunction,
     NativeFunctionsGroup,
-    Optional[NativeFunction],
+    NativeFunction | None,
     bool,
     str,
 )

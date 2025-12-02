@@ -85,7 +85,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/setup-python@main
         with:
           python-version: ${{ inputs.python-version }}
-          pip-requirements-file: .github/requirements/pip-requirements-macOS.txt
+          pip-requirements-file: .ci/docker/requirements-ci.txt
 
       - name: Install sccache (only for non-forked PRs, and pushes to trunk)
         uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0

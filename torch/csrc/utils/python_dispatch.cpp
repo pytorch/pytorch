@@ -1,14 +1,11 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
-#include <ATen/ATen.h>
 #include <ATen/DTensorState.h>
-#include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
-#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
@@ -16,26 +13,19 @@
 
 #include <c10/core/SafePyObject.h>
 #include <torch/csrc/PyInterpreter.h>
+#include <torch/csrc/autograd/autograd_not_implemented_fallback.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/flat_hash_map.h>
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
-#include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <utility>
 
 namespace py = pybind11;
-
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10::DispatchKey)
-TORCH_MAKE_PYBIND_ENUM_FASTER(c10::impl::TorchDispatchModeKey)
 
 namespace torch::impl::dispatch {
 
@@ -83,6 +73,40 @@ inline static torch::CppFunction dispatch_str(const char* key, Func&& raw_f) {
     return f;
   }
 }
+
+struct EnableHermeticPyObject {
+  EnableHermeticPyObject()
+      : old_(c10::impl::HermeticPyObjectTLS::get_state()),
+        old_excluded_python_(
+            c10::impl::tls_is_dispatch_key_excluded(at::DispatchKey::Python)),
+        old_python_(
+            c10::impl::tls_is_dispatch_key_included(at::DispatchKey::Python)),
+        old_python_snapshot_(c10::impl::tls_is_dispatch_key_included(
+            at::DispatchKey::PythonTLSSnapshot)) {
+    c10::impl::HermeticPyObjectTLS::set_state(true);
+    c10::impl::tls_set_dispatch_key_excluded(at::DispatchKey::Python, true);
+    c10::impl::tls_set_dispatch_key_included(at::DispatchKey::Python, false);
+    c10::impl::tls_set_dispatch_key_included(
+        at::DispatchKey::PythonTLSSnapshot, false);
+  }
+  ~EnableHermeticPyObject() {
+    c10::impl::HermeticPyObjectTLS::set_state(old_);
+    c10::impl::tls_set_dispatch_key_excluded(
+        at::DispatchKey::Python, old_excluded_python_);
+    c10::impl::tls_set_dispatch_key_included(
+        at::DispatchKey::Python, old_python_);
+    c10::impl::tls_set_dispatch_key_included(
+        at::DispatchKey::PythonTLSSnapshot, old_python_snapshot_);
+  }
+  EnableHermeticPyObject(const EnableHermeticPyObject&) = delete;
+  EnableHermeticPyObject(EnableHermeticPyObject&&) = delete;
+  EnableHermeticPyObject& operator=(const EnableHermeticPyObject&) = delete;
+  EnableHermeticPyObject& operator=(EnableHermeticPyObject&&) = delete;
+  bool old_;
+  bool old_excluded_python_;
+  bool old_python_;
+  bool old_python_snapshot_;
+};
 
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
@@ -463,7 +487,20 @@ void initDispatchBindings(PyObject* module) {
           "",
           py::arg("dispatch"),
           py::arg("func"),
-          py::arg("with_keyset") = false);
+          py::arg("with_keyset") = false)
+      .def(
+          "register_ad_inplace_or_view_fallback",
+          [](const py::object& self, const char* name) {
+            HANDLE_TH_ERRORS
+            auto& lib = self.cast<torch::Library&>();
+            lib.impl(
+                name,
+                c10::DispatchKey::ADInplaceOrView,
+                torch::autograd::autogradNotImplementedInplaceOrViewFallback());
+            END_HANDLE_TH_ERRORS_PYBIND
+          },
+          "",
+          py::arg("name"));
 
   m.def(
       "_dispatch_library",
@@ -647,7 +684,7 @@ void initDispatchBindings(PyObject* module) {
       std::stringstream ss;
       ss << op.name;
       if (!op.overload_name.empty()) {
-        ss << "." << op.overload_name;
+        ss << '.' << op.overload_name;
       }
       names.emplace_back(std::move(ss).str());
     }

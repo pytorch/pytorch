@@ -1,6 +1,7 @@
 #ifdef USE_C10D_GLOO
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGlooDetail.hpp>
+#include <utility>
 
 #include <gloo/cuda_allreduce_ring_chunked.h>
 
@@ -24,7 +25,7 @@ class AsyncAllreduceCUDADeviceWork : public ProcessGroupGloo::AsyncWork {
             "gloo:all_reduce",
             inputs),
         inputs_(inputs),
-        reduceOp_(reduceOp) {}
+        reduceOp_(std::move(reduceOp)) {}
 
   template <typename T>
   void createAlgorithm(std::unique_ptr<gloo::Algorithm>& algo) {
@@ -125,8 +126,8 @@ class AsyncAllreduceCUDAHostWork : public AsyncAllreduceWork {
   }
 
   std::vector<at::Tensor> tmp;
-  std::vector<c10::Stream> streams{};
-  std::vector<c10::Event> events{};
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
 
 class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
@@ -179,9 +180,9 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     }
   }
 
-  std::vector<at::Tensor> tmp{};
-  std::vector<c10::Stream> streams{};
-  std::vector<c10::Event> events{};
+  std::vector<at::Tensor> tmp;
+  std::vector<c10::Stream> streams;
+  std::vector<c10::Event> events;
 };
 
 static c10::intrusive_ptr<ProcessGroupGloo::AsyncWork> makeAllreduceCUDAWork(

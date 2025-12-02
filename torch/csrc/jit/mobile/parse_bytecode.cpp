@@ -6,10 +6,9 @@
 #include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/import_export_constants.h>
 #include <torch/csrc/jit/serialization/import_export_functions.h>
-#include <torch/custom_class_detail.h>
 
 namespace torch::jit {
-OpCode parseOpCode(const char* str);
+
 using c10::IValue;
 
 IValue expect_field(

@@ -1,11 +1,16 @@
 import glob
 import gzip
+import json
 import os
 import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from filelock import FileLock, Timeout
+
+from tools.stats.upload_test_stats import parse_xml_report
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -36,11 +41,13 @@ def concated_logs() -> str:
     for log_file in glob.glob(
         f"{REPO_ROOT}/test/test-reports/**/*.log", recursive=True
     ):
+        # pyrefly: ignore [bad-argument-type]
         logs.append(f"=== {log_file} ===")
         with open(log_file) as f:
             # For every line, prefix with fake timestamp for log classifier
             for line in f:
                 line = line.rstrip("\n")  # Remove any trailing newline
+                # pyrefly: ignore [bad-argument-type]
                 logs.append(f"2020-01-01T00:00:00.0000000Z {line}")
     return "\n".join(logs)
 
@@ -138,3 +145,108 @@ def trigger_upload_test_stats_intermediate_workflow() -> None:
         },
     )
     print(x.text)
+
+
+def parse_xml_and_upload_json() -> None:
+    """
+    Parse xml test reports that do not yet have a corresponding json report
+    uploaded to s3, and upload the json reports to s3. Use filelock to avoid
+    uploading the same file from multiple processes.
+    """
+    try:
+        job_id: int | None = int(os.environ.get("JOB_ID", 0))
+        if job_id == 0:
+            job_id = None
+    except (ValueError, TypeError):
+        job_id = None
+
+    try:
+        for xml_file in glob.glob(
+            f"{REPO_ROOT}/test/test-reports/**/*.xml", recursive=True
+        ):
+            xml_path = Path(xml_file)
+            json_file = xml_path.with_suffix(".json")
+            lock = FileLock(str(json_file) + ".lock")
+
+            try:
+                lock.acquire(timeout=0)  # immediately fails if already locked
+                if json_file.exists():
+                    continue  # already uploaded
+                test_cases = parse_xml_report(
+                    "testcase",
+                    xml_path,
+                    int(os.environ.get("GITHUB_RUN_ID", "0")),
+                    int(os.environ.get("GITHUB_RUN_ATTEMPT", "0")),
+                    job_id,
+                )
+                line_by_line_jsons = "\n".join([json.dumps(tc) for tc in test_cases])
+
+                gzipped = gzip.compress(line_by_line_jsons.encode("utf-8"))
+                s3_key = (
+                    json_file.relative_to(REPO_ROOT / "test/test-reports")
+                    .as_posix()
+                    .replace("/", "_")
+                )
+
+                get_s3_resource().put_object(
+                    Body=gzipped,
+                    Bucket="gha-artifacts",
+                    Key=f"test_jsons_while_running/{os.environ.get('GITHUB_RUN_ID')}/{job_id}/{s3_key}",
+                    ContentType="application/json",
+                    ContentEncoding="gzip",
+                )
+
+                # We don't need to save the json file locally, but doing so lets us
+                # track which ones have been uploaded already. We could probably also
+                # check S3
+                with open(json_file, "w") as f:
+                    f.write(line_by_line_jsons)
+            except Timeout:
+                continue  # another process is working on this file
+            finally:
+                if lock.is_locked:
+                    lock.release()
+    except Exception as e:
+        print(f"Failed to parse and upload json test reports: {e}")
+
+
+def upload_adhoc_failure_json(invoking_file: str, current_failure: str) -> None:
+    """
+    manually upload a json to s3 indicating that the entire test file failed
+    since xml was probably not generated in this case
+    """
+    try:
+        job_id = int(os.environ["JOB_ID"])
+        workflow_id = int(os.environ["GITHUB_RUN_ID"])
+    except Exception as e:
+        print(f"Failed to get job_id or workflow_id: {e}")
+        return
+
+    split_failure = current_failure.split("::")
+    if len(split_failure) >= 2:
+        className = split_failure[-2]
+        testName = split_failure[-1]
+    else:
+        testName = current_failure
+        className = ""
+
+    message = "The test file failed but pytest did not generate xml.  The most likely cause is a segfault"
+    j = {
+        "invoking_file": invoking_file,
+        "file": f"{invoking_file}.py",
+        "name": testName,
+        "classname": className,
+        "workflow_id": workflow_id,
+        "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+        "job_id": job_id,
+        "failure": {"message": message, "text": message},
+    }
+    gzipped = gzip.compress(json.dumps(j).encode("utf-8"))
+    s3_key = f"{invoking_file.replace('/', '_')}_{os.urandom(8).hex()}.json"
+    get_s3_resource().put_object(
+        Body=gzipped,
+        Bucket="gha-artifacts",
+        Key=f"test_jsons_while_running/{workflow_id}/{job_id}/{s3_key}",
+        ContentType="application/json",
+        ContentEncoding="gzip",
+    )

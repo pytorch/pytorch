@@ -2,7 +2,7 @@
 import warnings
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 import torch
 import torch.distributed as dist
@@ -210,6 +210,7 @@ class Join:
         """
         process_group = None
         device = None
+        # pyrefly: ignore [bad-assignment]
         for joinable in self._joinables:
             if process_group is None:
                 process_group = joinable.join_process_group
@@ -227,9 +228,9 @@ class Join:
 
     def __exit__(
         self,
-        type: Optional[type[BaseException]],
-        value: Optional[BaseException],
-        traceback: Optional[TracebackType],
+        type: type[BaseException] | None,
+        value: BaseException | None,
+        traceback: TracebackType | None,
     ):
         r"""
         Repeatedly runs the main hooks until all processes join; then, runs the post-hooks.
@@ -256,7 +257,8 @@ class Join:
                     f"{self._rank} has at least {WARN_THRESHOLD} "
                     f"fewer inputs than other currently-active ranks. "
                     "This level of skew could lead to performance "
-                    "degradation during training."
+                    "degradation during training.",
+                    stacklevel=2,
                 )
             # Shadow the all-reduce in non-joined processes
             num_nonjoined_procs = self._get_num_nonjoined_procs()

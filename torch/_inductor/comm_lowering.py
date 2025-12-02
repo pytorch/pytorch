@@ -151,7 +151,7 @@ def _should_lower_as_one_shot_all_reduce(
         config._collective.auto_select
         and is_symm_mem_enabled_for_group(group_name)
         and can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM)
-        and reduce_op in ("sum",)
+        and reduce_op == "sum"
         and inp_size <= config._collective.one_shot_all_reduce_threshold_bytes
     )
 
@@ -208,6 +208,7 @@ def register_comm_lowerings():
             # in-place reuse. Therefore, we tell the scheduler to not fuse it.
             inp.realize()
             V.graph.no_fuse_buffer_names.add(inp.get_name())
+        # pyrefly: ignore [bad-assignment]
         inp = ir.ExternKernel.require_contiguous(inp)
         # Because we are lowering as inplace c10d.all_reduce_, we should generate
         # _AllReduce_Kernel instead of _AllReduceKernel.
@@ -232,6 +233,7 @@ def register_comm_lowerings():
             return inp
 
         # Lower as c10d.all_reduce_
+        # pyrefly: ignore [bad-assignment]
         inp = ir.ExternKernel.require_contiguous(inp)
         ir._AllReduce_Kernel.create_inplace(
             c10d.all_reduce_.default,
@@ -308,6 +310,18 @@ def register_comm_lowerings():
             group_size,
             group_name,
         )
+
+    @register_comm_lowering(c10d.reduce_scatter_tensor_out)
+    def _reduce_scatter_tensor_out(inp, reduce_op, group_size, group_name, *, out):
+        ir._CollectiveKernel.create_inplace(
+            c10d.reduce_scatter_tensor_out.default,
+            inp,
+            reduce_op,
+            group_size,
+            group_name,
+            out=out,
+        )
+        return out
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_coalesced)
     def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):

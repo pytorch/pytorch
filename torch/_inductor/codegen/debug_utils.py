@@ -5,7 +5,7 @@ import functools
 import logging
 import os
 from enum import Enum
-from typing import Callable, Optional
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import dtype as torch_dtype
@@ -13,6 +13,10 @@ from torch import dtype as torch_dtype
 from .. import config
 from ..virtualized import V
 from .multi_kernel import MultiKernel
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 log = logging.getLogger(__name__)
@@ -157,7 +161,9 @@ class DebugPrinterManager:
         # TODO: Find a more reliable way to detect kernel args types to print for extern kernel calls
         if kernel_type == "extern":
             args_to_print_or_save_extern = [
-                arg for arg in args_to_print_or_save if arg.startswith(("buf", "arg"))
+                arg
+                for arg in args_to_print_or_save
+                if isinstance(arg, str) and arg.startswith(("buf", "arg"))
             ]
             self.args_to_print_or_save = args_to_print_or_save_extern
         elif kernel_type == "cpp":
@@ -168,7 +174,7 @@ class DebugPrinterManager:
                     else arg
                 )
                 for arg in args_to_print_or_save
-                if arg.startswith(("buf", "arg"))
+                if isinstance(arg, str) and arg.startswith(("buf", "arg"))
             ]
         else:
             self.args_to_print_or_save = args_to_print_or_save
@@ -274,7 +280,7 @@ class DebugPrinterManager:
                         f'printf("[  {launch_prefix} - {kernel_name} - {arg}: %ld  ]", {arg}); printf("\\\\n");'
                     )
                 else:
-                    if arg_signatures is None and self.kernel_type == "cpp" or "extern":
+                    if arg_signatures is None and self.kernel_type in ("cpp", "extern"):
                         V.graph.wrapper_code.writeline(
                             f'aoti_torch_print_tensor_handle({arg}, "{launch_prefix} - {kernel_name} - {arg}");'
                         )
