@@ -906,7 +906,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
     def __init__(self) -> None:
         super().__init__()
-
         self.sm_120_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 2, 4),
             (torch.float32, 128): FlexConfig(128, 32, 2, 4),
@@ -981,7 +980,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
-                default_config = FlexConfig(128, 64, 3, 4)
+                default_config = FlexConfig(64, 64, 3, 4)
             if capability >= (12, 0):
                 default_config = self.sm_120_default_flex_config.get(
                     (dtype, head_dim), default_config
@@ -1014,7 +1013,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
     ) -> list[FlexBwDConfig]:
         capability = torch.cuda.get_device_capability()
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
-
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
@@ -1023,6 +1021,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         major, minor = capability
         if dtype == torch.float32:
             capability_class = "float32"
+        elif major == 12:
+            capability_class = "sm12x"
         elif major >= 10:
             capability_class = "sm10x"
         elif capability == (9, 0):
@@ -1047,6 +1047,13 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 FlexBwDConfig(64, 64, 64, 64, 1, 4)
             ),
             "sm8x": lambda h: (
+                FlexBwDConfig(32, 128, 128, 32, 3, 4)
+                if h < 64
+                else FlexBwDConfig(
+                    64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
+                )
+            ),
+            "sm12x": lambda h: (
                 FlexBwDConfig(32, 128, 128, 32, 3, 4)
                 if h < 64
                 else FlexBwDConfig(
