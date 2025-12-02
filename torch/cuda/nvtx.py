@@ -53,7 +53,7 @@ def range_start(msg) -> int:
     Args:
         msg (str): ASCII message to associate with the range.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return _nvtx.rangeStartA(msg)
 
 
@@ -64,7 +64,7 @@ def range_end(range_id) -> None:
     Args:
         range_id (int): an unique handle for the start range.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     _nvtx.rangeEnd(range_id)
 
 
@@ -85,7 +85,7 @@ def _device_range_start(msg: str, stream: int = 0) -> object:
         msg (str): ASCII message to associate with the range.
         stream (int): CUDA stream id.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return _nvtx.deviceRangeStart(msg, stream)
 
 
@@ -98,7 +98,7 @@ def _device_range_end(range_handle: object, stream: int = 0) -> None:
         range_handle: an unique handle for the start range.
         stream (int): CUDA stream id.
     """
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     _nvtx.deviceRangeEnd(range_handle, stream)
 
 

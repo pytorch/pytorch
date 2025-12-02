@@ -21,6 +21,7 @@ from torch._dynamo import config as dynamo_config
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
+from torch._export.passes import ReplaceViewOpsWithViewCopyOpsPass
 from torch._inductor import config
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.cpp_builder import normalize_path_separator
@@ -67,12 +68,10 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     MACOS_VERSION,
-    MI300_ARCH,
     parametrize,
     runOnRocm,
     skipIfMPS,
     skipIfRocm,
-    skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -80,7 +79,12 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.custom_tensor import CustomTensorPlainOut
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    HAS_XPU_AND_TRITON,
+    IS_BIG_GPU,
+)
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils import _pytree as pytree
@@ -170,11 +174,8 @@ def get_module_ext_type():
 
 
 class AOTInductorTestsTemplate:
-    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
-    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
-    @skipIfRocmArch(MI300_ARCH)
     def test_simple(self, embed_kernel_binary, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -241,12 +242,12 @@ class AOTInductorTestsTemplate:
         "toolchain doesn't support ptx to fatbin",
     )
     @skipIfMPS
-    @skipIfRocm
     # Skip embed_kernel_binary == True for now as it shows random
     # failure on CI
     @common_utils.parametrize("embed_kernel_binary", [False])
     @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+        torch.version.hip is None and _get_torch_cuda_version() < (12, 8),
+        "Test is only supported on CUDA 12.8+",
     )
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
@@ -276,7 +277,11 @@ class AOTInductorTestsTemplate:
                 _, code = run_and_get_cpp_code(
                     AOTIRunnerUtil.compile, model, example_inputs
                 )
-                file_extension = ".spv" if self.device == "xpu" else ".fatbin"
+                file_extension = (
+                    ".spv"
+                    if self.device == "xpu"
+                    else (".hsaco" if torch.version.hip else ".fatbin")
+                )
                 FileCheck().check(file_extension).run(code)
 
     def test_small_constant(self):
@@ -661,6 +666,49 @@ class AOTInductorTestsTemplate:
             FileCheck().check_not("torch::aot_inductor::ConstantType::Unknown").run(
                 code
             )
+
+    @requires_gpu
+    def test_device_moved_constant(self):
+        # testing both directions
+        device_movements = [
+            (torch.device(type=GPU_TYPE, index=0), torch.device("cpu")),
+            (torch.device("cpu"), torch.device(type=GPU_TYPE, index=0)),
+        ]
+
+        class Model(torch.nn.Module):
+            def __init__(self, from_device):
+                super().__init__()
+                self.register_buffer("_buf", torch.randn(6, 7, device=from_device))
+                self._param = torch.nn.Parameter(
+                    torch.rand(6, 7, device=from_device), requires_grad=False
+                )
+
+            def forward(self, x):
+                to_device = x.device
+                moved_buf = self._buf.to(to_device)
+                moved_param = self._param.to(to_device)
+                return moved_buf, moved_param
+
+        with config.patch(
+            {
+                "aot_inductor.use_runtime_constant_folding": False,
+            }
+        ):
+            for from_device, to_device in device_movements:
+                model = Model(from_device)
+                example_inputs = (torch.randn(6, 7, device=to_device),)
+                _, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, model, example_inputs
+                )
+                FileCheck().check_not("torch::aot_inductor::ConstantType::Unknown").run(
+                    code
+                )
+                FileCheck().check_count(
+                    "torch::aot_inductor::ConstantType::Buffer", 2, exactly=True
+                ).run(code)
+                FileCheck().check_count(
+                    "torch::aot_inductor::ConstantType::Parameter", 2, exactly=True
+                ).run(code)
 
     def test_subclasses(self):
         device_to_init = self.device
@@ -1544,7 +1592,10 @@ class AOTInductorTestsTemplate:
         )
 
     # scaled_dot_product_flash_attention
-    @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
+    @unittest.skipIf(
+        not SM80OrLater and not HAS_XPU_AND_TRITON,
+        "bfloat16 only supported in sm80+ or XPU",
+    )
     def test_sdpa(self):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1560,7 +1611,10 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @unittest.skipIf(not SM80OrLater, "bfloat16 only supported in sm80+")
+    @unittest.skipIf(
+        not SM80OrLater and not HAS_XPU_AND_TRITON,
+        "bfloat16 only supported in sm80+ or XPU",
+    )
     @unittest.skipIf(
         # for archs where this isn't lowered to flash attention, the math
         # backend will be used and it doesn't work for bfloat16
@@ -2175,6 +2229,39 @@ class AOTInductorTestsTemplate:
             prepend_predicates(inputs),
             dynamic_shapes=dynamic_shapes,
         )
+
+    @requires_gpu
+    def test_cond_with_replace_view_ops(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class CondModelWithViewAndLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, cache, x):
+                def true_fn(cache, x):
+                    return cache + 1.0
+
+                def false_fn(cache, x):
+                    return self.linear(x).view(1, 2, 4, 4)
+
+                cache_is_initialized = (cache != 0).any()
+                return torch.cond(cache_is_initialized, false_fn, false_fn, [cache, x])
+
+        example_input = (
+            torch.zeros(1, 2, 4, 4, dtype=torch.float32, device=self.device),
+            torch.randn(8, 4, dtype=torch.float32, device=self.device),
+        )
+        model = CondModelWithViewAndLinear().to(device=self.device)
+        exported_program = torch.export.export(model, example_input)
+        program = exported_program.run_decompositions()
+        gm = ReplaceViewOpsWithViewCopyOpsPass()(program.graph_module).graph_module
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON,ATEN"}
+        ):
+            _ = torch._inductor.aot_compile(gm, example_input)
 
     def test_cond_with_multiple_outputs(self):
         inputs = (
@@ -4862,7 +4949,7 @@ class AOTInductorTestsTemplate:
                 return result
 
         inputs = []
-        for i in range(1000):
+        for _ in range(1000):
             inputs.append(torch.ones(8, 8, 8, dtype=torch.float16, device=self.device))
         inputs = tuple(inputs)
         model = Model()
@@ -5154,10 +5241,7 @@ class AOTInductorTestsTemplate:
             )
             self.assertTrue(same(model(*example_input), actual))
 
-    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
-    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("max_autotune", [True, False])
-    @skipIfRocmArch(MI300_ARCH)
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -5575,8 +5659,8 @@ class AOTInductorTestsTemplate:
                 ).run(code)
 
     def test_aoti_debug_printing_model_inputs_codegen(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/XPU")
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -5915,8 +5999,8 @@ class AOTInductorTestsTemplate:
     @requires_gpu
     def test_d2h_copy(self):
         # device to copy host should always have the same stride
-        if "cuda" not in self.device:
-            raise unittest.SkipTest("This test is only for CUDA")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("This test is only for CUDA or XPU")
 
         class ToCpuModel(nn.Module):
             def forward(self, x):
@@ -6368,8 +6452,8 @@ class AOTInductorTestsTemplate:
         runner.free_inactive_constant_buffer()
 
     def test_update_user_managed_buffer(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/XPU")
 
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
@@ -6413,10 +6497,10 @@ class AOTInductorTestsTemplate:
             "L__self___weight": torch.randn(N, K, device=self.device),
             "L__self___bias": torch.randn(N, device=self.device),
         }
-        mem_before, _ = torch.cuda.mem_get_info(self.device)
+        mem_before, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
         # Do not use user managed_buffer, should have less free memory.
         runner.update_constant_buffer(new_weights, True, False, False)
-        mem_after, _ = torch.cuda.mem_get_info(self.device)
+        mem_after, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
         self.assertGreater(mem_before, mem_after)
 
         runner.swap_constant_buffer()
@@ -6448,10 +6532,10 @@ class AOTInductorTestsTemplate:
             "L__self___weight": torch.randn(N, K, device=self.device),
             "L__self___bias": torch.randn(N, device=self.device),
         }
-        mem_before, _ = torch.cuda.mem_get_info(self.device)
+        mem_before, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
         # Try user managed_buffer, should have same free memory.
         runner.update_constant_buffer(new_weights, True, False, True)
-        mem_after, _ = torch.cuda.mem_get_info(self.device)
+        mem_after, _ = getattr(torch, GPU_TYPE).mem_get_info(self.device)
         self.assertEqual(mem_before, mem_after, atol=1e-3, rtol=1e-3)
 
         runner.swap_constant_buffer()
@@ -6523,8 +6607,8 @@ class AOTInductorTestsTemplate:
         "To enable after the C shim FC window ends",
     )
     def test_misaligned_input_1(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("CUDA test only")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("CUDA/XPU test only")
 
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -6550,8 +6634,8 @@ class AOTInductorTestsTemplate:
         torch.testing.assert_close(actual, expected)
 
     def test_misaligned_input_2(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("CUDA test only")
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("GPU test only")
 
         class Model(torch.nn.Module):
             def forward(self, x):
@@ -7107,8 +7191,8 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
     def test_sym_expr_indexing(self):
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device not in ["cuda", "xpu"]:
+            raise unittest.SkipTest("requires CUDA/XPU")
 
         class Repro(torch.nn.Module):
             def __init__(self) -> None:
@@ -7126,7 +7210,7 @@ class AOTInductorTestsTemplate:
                 arange_1 = torch.ops.aten.arange.start(
                     180,
                     181,
-                    device=torch.device(type="cuda", index=0),
+                    device=torch.device(type=GPU_TYPE, index=0),
                     pin_memory=False,
                 )
                 add_14 = torch.ops.aten.add.Tensor(arange_1, 198)
@@ -7422,6 +7506,54 @@ class AOTInductorTestsTemplate:
             "RAIIAtenTensorHandle buf0(buf0_handle_restrided);"
         ).run(code)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "different behavior in fbcode",
+    )
+    def test_codegen_int_array_var_fix_memory_leak(self):
+        """
+        Fix https://github.com/pytorch/pytorch/issues/167630
+        """
+        if self.device != "cuda":
+            raise unittest.SkipTest("test is only for cuda")
+
+        def make_mlp(in_dim=128, hidden=256, out_dim=64, depth=3):
+            layers = []
+            d = in_dim
+            for _ in range(depth):
+                layers += [nn.Linear(d, hidden), nn.ReLU()]
+                d = hidden
+            layers += [nn.Linear(d, out_dim)]
+            return nn.Sequential(*layers)
+
+        batch = 32
+        in_dim = 2048
+        hidden = 512
+        out_dim = 10
+        depth = 6
+
+        import gc
+
+        allocated_memory = []
+        for _ in range(3):
+            torch.cuda.reset_peak_memory_stats()
+
+            model = make_mlp(in_dim, hidden, out_dim, depth).to(self.device)
+            example_inputs = (torch.randn(batch, in_dim, device=self.device),)
+            ep = torch.export.export(
+                model,
+                example_inputs,
+            )
+            torch._inductor.aoti_compile_and_package(ep)
+
+            del model, example_inputs, ep
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+            gc.collect()
+            allocated_memory.append(torch.cuda.memory_allocated())
+
+        self.assertTrue(allocated_memory[1] == allocated_memory[2])
+
     @unittest.skipIf(IS_MACOS, "might have no readelf on Mac")
     def test_libtorch_free_so(self):
         class Model(torch.nn.Module):
@@ -7510,6 +7642,38 @@ class AOTInductorTestsTemplate:
 
         eager_outputs = model(*example_inputs)
         torch.testing.assert_close(eager_outputs, compiled_outputs)
+
+    @requires_gpu
+    def test_mixed_device_1(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Buffers are on CPU
+                self.register_buffer(
+                    "index", torch.tensor([1, 4, 1, 7], device="cpu", dtype=torch.int64)
+                )
+                self.register_buffer(
+                    "src", torch.ones(4, device="cpu", dtype=torch.int64)
+                )
+
+            def forward(self, matrix, vector):
+                # Inputs are on CUDA
+                # 1. Operation on CPU tensors
+                z = torch.zeros((vector.shape[0],), device="cpu", dtype=torch.int64)
+                scatter_result = z.scatter_add(0, self.index, self.src)
+
+                # 2. Move result to CUDA and continue on CUDA
+                v = vector + scatter_result.to(vector.dtype).to(GPU_TYPE)
+                return torch.matmul(matrix, v)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, device=self.device),
+        )
+        self.check_model(Model(), example_inputs, move_model_to_device=False)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):
@@ -7645,8 +7809,6 @@ GPU_TEST_FAILURES = {
     "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
     # No scaled_dot_product_efficient_attention implementation for XPU yet.
     "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
-    # No fft implementation for XPU yet.
-    "test_fft_c2c": fail_gpu(("xpu",), is_skip=True),
 }
 
 MPS_TEST_FAILURES = {

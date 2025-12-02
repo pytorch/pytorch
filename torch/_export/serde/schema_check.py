@@ -88,7 +88,7 @@ def _staged_schema():
                         f"std::optional<{cpp_type}>",
                         f"optional {thrift_type}",
                     )
-                elif o == Annotated:
+                elif o is Annotated:
                     return dump_type(t.__origin__, level)
                 else:
                     raise AssertionError(f"Type {t} is not supported in export schema.")
@@ -129,7 +129,7 @@ def _staged_schema():
             t, cpp_type, thrift_type = dump_type(f.type, 0)
             ret = {"type": t}
             cpp_default: Optional[str] = None
-            assert typing.get_origin(f.type) == Annotated, (
+            assert typing.get_origin(f.type) is Annotated, (
                 f"Field {f.name} must be annotated with an integer id."
             )
             thrift_id = f.type.__metadata__[0]
@@ -623,9 +623,9 @@ class _Commit:
 def update_schema():
     import importlib.resources
 
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     if importlib.resources.is_resource(__package__, "schema.yaml"):
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         content = importlib.resources.read_text(__package__, "schema.yaml")
         match = re.search("checksum<<([A-Fa-f0-9]{64})>>", content)
         _check(match is not None, "checksum not found in schema.yaml")
@@ -633,7 +633,7 @@ def update_schema():
         checksum_head = match.group(1)
 
         thrift_content = importlib.resources.read_text(
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             __package__,
             "export_schema.thrift",
         )
@@ -658,9 +658,9 @@ def update_schema():
 
     src, cpp_header, thrift_schema = _staged_schema()
     additions, subtractions = _diff_schema(dst, src)
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     yaml_path = __package__.replace(".", "/") + "/schema.yaml"
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     thrift_schema_path = __package__.replace(".", "/") + "/export_schema.thrift"
     torch_prefix = "torch/"
     assert yaml_path.startswith(torch_prefix)  # sanity check

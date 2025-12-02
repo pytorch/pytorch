@@ -8,7 +8,7 @@ import weakref
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import cache
-from typing import cast, NamedTuple, Optional
+from typing import cast, NamedTuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -88,7 +88,7 @@ class DTensorRedistributePlanner:
     class DistState:
         placements: tuple[Placement, ...]
         tensor_dim_to_mesh_dim: ShardOrder
-        _hash: Optional[int] = dataclasses.field(
+        _hash: int | None = dataclasses.field(
             default=None, init=False, repr=False, compare=False
         )
 
@@ -161,7 +161,7 @@ class DTensorRedistributePlanner:
         mesh: DeviceMesh,
         transform_infos: Sequence[_TransformInfo],
         src_placement: tuple[Placement, ...],
-        src_shard_order: Optional[ShardOrder] = None,
+        src_shard_order: ShardOrder | None = None,
     ) -> str:
         """
         Generate a string representation of the sequence of state transitions
@@ -592,7 +592,7 @@ class DTensorRedistributePlanner:
                 current = current_placements[mesh_dim]
                 target = target_placements[mesh_dim]
                 # If target is not Shard, we can directly redistribute since we
-                # are traversing from innner to outer placements here
+                # are traversing from inner to outer placements here
                 if isinstance(target, Shard):
                     # If target is Shard, check for nested sharding on the
                     # tensor dim BEFORE the current mesh_dim
@@ -646,7 +646,7 @@ class DTensorRedistributePlanner:
 def _gen_transform_infos_non_cached(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
     transform_infos: list[_TransformInfo] = []
     device_mesh = src_spec.device_mesh
@@ -678,7 +678,7 @@ def _gen_transform_infos_non_cached(
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
     return _gen_transform_infos_non_cached(
         src_spec, dst_spec, use_graph_based_transform
@@ -692,7 +692,7 @@ def redistribute_local_tensor(
     *,
     async_op: bool = False,
     is_backward: bool = False,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> torch.Tensor:
     """
     This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
@@ -846,8 +846,8 @@ class Redistribute(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
         async_op: bool = False,
-        forward_dtype: Optional[torch.dtype] = None,
-        backward_dtype: Optional[torch.dtype] = None,
+        forward_dtype: torch.dtype | None = None,
+        backward_dtype: torch.dtype | None = None,
     ):
         ctx.async_op = async_op
         ctx.backward_dtype = backward_dtype
@@ -883,9 +883,12 @@ class Redistribute(torch.autograd.Function):
             output = local_tensor
             target_spec = current_spec
 
+        # pyrefly: ignore [bad-argument-type]
         return dtensor.DTensor(
+            # pyrefly: ignore [bad-argument-count]
             output,
             target_spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=input.requires_grad,
         )
 
@@ -944,9 +947,12 @@ class Redistribute(torch.autograd.Function):
                 dtype=output.dtype,
             ),
         )
+        # pyrefly: ignore [bad-argument-type]
         output_dtensor = dtensor.DTensor(
+            # pyrefly: ignore [bad-argument-count]
             output,
             spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=grad_output.requires_grad,
         )
 

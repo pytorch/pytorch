@@ -1516,7 +1516,7 @@ class precisionOverride:
         assert isinstance(d, dict), (
             "precisionOverride not given a dtype : precision dict!"
         )
-        for dtype in d.keys():
+        for dtype in d:
             assert isinstance(dtype, torch.dtype), (
                 f"precisionOverride given unknown dtype {dtype}"
             )

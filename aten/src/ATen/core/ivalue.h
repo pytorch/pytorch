@@ -18,6 +18,8 @@
 #include <unordered_set>
 #include <utility>
 
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-default")
+
 namespace torch {
 class TORCH_API CustomClassHolder : public c10::intrusive_ptr_target {};
 namespace jit {
@@ -1176,7 +1178,7 @@ struct TORCH_API IValue final {
   using HashIdentityIValueMap =
       std::unordered_map<IValue, IValue, HashIdentityIValue, CompIdentityIValues>;
 
-  // Chechs if this and rhs has a subvalues in common.
+  // Checks if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
   bool overlaps(const IValue& rhs) const;
 
@@ -1629,5 +1631,7 @@ struct TORCH_API WeakOrStrongTypePtr {
 };
 
 } // namespace c10
+
+C10_DIAGNOSTIC_POP()
 
 #include <ATen/core/ivalue_inl.h> // IWYU pragma: keep

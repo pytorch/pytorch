@@ -152,7 +152,7 @@ class TestPeephole(JitTestCase):
         self.run_pass("peephole", test.graph)
         FileCheck().check_not("prim::unchecked_cast").run(test.graph)
 
-        # refinement not optimzied out
+        # refinement not optimized out
         def is_int_tensor(x):
             scalar = x.item()
             if isinstance(scalar, int):
@@ -360,7 +360,7 @@ class TestPeephole(JitTestCase):
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
         torch._C._jit_pass_constant_propagation(foo.graph)
-        # cant infer anything
+        # can't infer anything
         test_const_tuple_output(foo.graph, [])
 
         @torch.jit.script
@@ -374,7 +374,7 @@ class TestPeephole(JitTestCase):
 
         torch._C._jit_pass_peephole_list_idioms(foo.graph, refine_list_len=True)
         torch._C._jit_pass_constant_propagation(foo.graph)
-        # we cant infer anything, only len(b) != 4
+        # we can't infer anything, only len(b) != 4
         test_const_tuple_output(foo.graph, [])
 
         @torch.jit.script
