@@ -208,7 +208,22 @@ def all_gather_tensor(
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
             res = res.wait()  # type: ignore[attr-defined]
-        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+
+        # Optimization: When the product of dimensions [0..gather_dim) equals group_size,
+        # we can use a pure view instead of split + cat.
+        # This works because the data is already contiguous in the right layout.
+        # Example: shape [4, d1, d2] with group_size=4, gather_dim=1 -> [1, 4*d1, d2]
+        # Example: shape [2, 2, d2] with group_size=4, gather_dim=2 -> [1, 2, 2*d2]
+        import math
+        numel_prefix = math.prod(res.shape[:gather_dim])
+        if numel_prefix == group_size:
+            shape = list(res.shape)
+            # All dimensions [0:gather_dim) become 1, dimension gather_dim gets multiplied
+            final_shape = [1] * gather_dim + [numel_prefix * shape[gather_dim]] + shape[gather_dim + 1:]
+            res = res.view(final_shape)
+        else:
+            # General case: fall back to split + cat
+            res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
     return res
 
 
