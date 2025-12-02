@@ -44,6 +44,7 @@ jobs:
         run: |
           wget https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.19.0/pmd-dist-7.19.0-bin.zip
           unzip pmd-dist-7.19.0-bin.zip
+          ls -R .
       
       - name: Run PMD Quality Scan
         run: |
