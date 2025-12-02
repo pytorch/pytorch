@@ -1,15 +1,11 @@
 # mypy: allow-untyped-defs
 import copy
 import warnings
-from dataclasses import asdict
 from typing import Any
 
 import torch
 from torch._subclasses import FakeTensor
 from torch.ao.quantization import (
-    _DerivedObserverOrFakeQuantize,
-    FixedQParamsFakeQuantize,
-    FixedQParamsObserver,
     ObserverBase,
     ObserverOrFakeQuantize,
     PlaceholderObserver,
@@ -24,7 +20,7 @@ from torch.ao.quantization.backend_config.utils import (
     get_module_to_qat_module,
     get_pattern_to_dtype_configs,
 )
-from torch.ao.quantization.observer import _is_activation_post_process, _PartialWrapper
+from torch.ao.quantization.observer import _is_activation_post_process
 from torch.ao.quantization.qconfig import _is_reuse_input_qconfig, QConfigAny
 from torch.ao.quantization.qconfig_mapping import QConfigMapping
 from torch.ao.quantization.quantize import convert, propagate_qconfig_

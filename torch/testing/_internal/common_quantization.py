@@ -41,14 +41,12 @@ from torch.ao.quantization import (
     QuantType,
     QuantWrapper,
 )
-from torch.ao.quantization.backend_config import get_executorch_backend_config
 from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
 )
 
-from torch.export import export
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
@@ -70,7 +68,6 @@ try:
 except ImportError:
     HAS_FX = False
 
-import contextlib
 import copy
 import functools
 import io
