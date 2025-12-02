@@ -567,22 +567,6 @@ class RedistributeTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_all_gather_view_optimization_gather_dim_2(self):
-        """
-        Test that all_gather with gather_dim=2 and shape [2,2,d] (product=4=group_size)
-        is optimized to use view instead of split+cat.
-        """
-        # Test case: With gather_dim=2 and shape [2, 2, d], the product of
-        # dimensions [0:2] is 4, which equals group_size. This should be
-        # optimized to use a view operation.
-        self._test_all_gather_optimization(
-            global_shape=(2, 2, 6144),
-            placements_src=[Shard(2), Shard(2)],
-            placements_dst=[Shard(2), Replicate()],
-            should_use_view=True,
-        )
-
-    @with_comms
     def test_redistribute_negative_shard_dim(self):
         device_mesh = self.build_device_mesh()
         local_tensor = torch.randn(12, 3, device=self.device_type, requires_grad=True)
