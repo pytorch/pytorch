@@ -52,7 +52,7 @@ from torch.futures import Future
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
-BuiltinUnionType: Union[type, tuple[type, ...]] = types.UnionType
+BuiltinUnionType: type | tuple[type, ...] = types.UnionType
 
 LockType: type
 try:
@@ -1236,7 +1236,7 @@ def _try_get_dispatched_fn(fn):
 
 def _get_named_tuple_properties(
     obj,
-    loc: Optional[torch._C._jit_tree_views.SourceRange] = None,
+    loc: torch._C._jit_tree_views.SourceRange | None = None,
     rcb=None,
 ):
     if loc is None:
@@ -1531,7 +1531,7 @@ def _extract_tensors(obj):
     return tensors
 
 
-def _get_model_id(obj) -> Optional[str]:
+def _get_model_id(obj) -> str | None:
     if isinstance(obj, torch.jit.ScriptModule):
         return str(obj._c._type())
     elif isinstance(obj, torch.jit.ScriptFunction):
