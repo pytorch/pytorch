@@ -54,7 +54,7 @@ from torch._inductor.codegen.common import (
     custom_backend_passes,
     init_backend_registration,
 )
-from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor.codegen.cuda import compile_utils as cuda_compile_utils
 from torch._inductor.codegen.rocm.compile_command import (
     rocm_compile_command,
     rocm_compiler,
@@ -64,7 +64,6 @@ from torch._inductor.cpp_builder import (
     _LINKER_SCRIPT,
     _set_gpu_runtime_env,
     _TORCH_PATH,
-    _transform_cuda_paths,
     convert_cubin_to_obj,
     CppBuilder,
     CppOptions,
@@ -119,10 +118,6 @@ from .triton_bundler import TritonBundler
 from .virtualized import V
 
 
-if config.is_fbcode():
-    from triton.fb.build import build_paths
-
-
 T = TypeVar("T")
 
 if TYPE_CHECKING:
@@ -146,17 +141,6 @@ LOCK_TIMEOUT = config.file_lock_timeout
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
-
-
-def use_re_build() -> bool:
-    """
-    Use for CUTLASS compilation only right now.
-    """
-    if config.is_fbcode() and not cuda_env.nvcc_exist(_cuda_compiler()):
-        from triton.fb.re_build_helper import should_build_locally
-
-        return not should_build_locally()
-    return False
 
 
 def get_cpp_wrapper_cubin_path_name() -> str:
@@ -2396,10 +2380,12 @@ end
                         and device_type == "cuda"
                     ):
                         if torch.version.hip is None:
-                            current_arch = _nvcc_arch_as_compile_option()
+                            current_arch = (
+                                cuda_compile_utils._nvcc_arch_as_compile_option()
+                            )
                             cmd = (
                                 # pyrefly: ignore [unbound-name]
-                                f"{_cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
+                                f"{cuda_compile_utils._cuda_compiler()} -fatbin {asm_file} -o {cubin_file} "
                                 # Triton only allows generating PTX version as same as the current arch
                                 f"-gencode arch=compute_{current_arch},code=compute_{current_arch} "
                                 # Include SASS for the current specific arch
@@ -3741,55 +3727,6 @@ def _load_triton_kernel_from_source(
     return getattr(PyCodeCache.load(source_code), kernel_name)
 
 
-def _cuda_compiler() -> Optional[str]:
-    if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
-        return config.cuda.cuda_cxx
-    if config.is_fbcode():
-        return os.path.join(build_paths.sdk_home, "bin", "nvcc")
-    if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
-        return os.getenv("CUDACXX", "")
-    if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
-        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
-    return "nvcc"
-
-
-def _cutlass_path() -> str:
-    if config.is_fbcode():
-        from libfb.py import parutil
-
-        return parutil.get_dir_path("cutlass-4-headers")
-    else:
-        return config.cutlass.cutlass_dir
-
-
-def _cutlass_paths() -> list[str]:
-    return [
-        "include",
-        "tools/library/include",
-        "tools/library/src",
-        "tools/util/include",
-    ]
-
-
-def _clone_cutlass_paths(build_root: str) -> list[str]:
-    paths = _cutlass_paths()
-    cutlass_root = _cutlass_path()
-    for path in _cutlass_paths():
-        old_path = os.path.join(cutlass_root, path)
-        new_path = os.path.join(build_root, path)
-        shutil.copytree(old_path, new_path, dirs_exist_ok=True)
-    return paths
-
-
-def _cutlass_include_paths() -> list[str]:
-    cutlass_path = _cutlass_path()
-    return [
-        # Use realpath to get canonical absolute paths, in order not to mess up cache keys
-        os.path.realpath(os.path.join(cutlass_path, path))
-        for path in _cutlass_paths()
-    ]
-
-
 @torch_key_cache
 def cutlass_key() -> bytes:
     """
@@ -3809,147 +3746,6 @@ def cutlass_key() -> bytes:
     combined_hash = hashlib.sha256()
     build_code_hash([config.cutlass.cutlass_dir], "", combined_hash)
     return combined_hash.digest()
-
-
-def _cuda_lib_options() -> list[str]:
-    """
-    Util function for CUTLASS backend to find the correct CUDA libraries.
-    """
-    _set_gpu_runtime_env()  # cpp_extension consults the env
-    from torch.utils import cpp_extension
-
-    lpaths = cpp_extension.library_paths(device_type="cuda")
-    if use_re_build():
-        lpaths += [
-            build_paths.sdk_lib,
-            os.path.join(build_paths.sdk_lib, "stubs"),
-        ]
-    extra_ldflags: list[str] = []
-    if is_linux():
-        _transform_cuda_paths(lpaths)
-        for path in lpaths:
-            if "torch/lib" in path:
-                # don't want to depend on pytorch
-                continue
-            extra_ldflags.append(f"-L{path}")
-            # -rpath ensures the DLL can find its dependencies when loaded, even
-            # if the library path is non-standard.
-            # But do not add the stubs folder to rpath as the driver is expected to be found at runtime
-            if os.path.basename(path) != "stubs":
-                extra_ldflags.extend(["-Xlinker", f"-rpath={path}"])
-        extra_ldflags.append("-lcuda")
-        extra_ldflags.append("-lcudart")
-    else:
-        raise NotImplementedError(
-            "Unsupported env, failed to find cuda libs! Currently only Linux is supported."
-        )
-    return extra_ldflags
-
-
-def _nvcc_host_compiler_options() -> list[str]:
-    return [
-        "-fPIC",
-        "-fno-strict-aliasing",
-        "-fvisibility=hidden",
-        "-Wconversion",
-    ]
-
-
-def _nvcc_arch_as_compile_option() -> str:
-    arch = cuda_env.get_cuda_arch()
-    if arch == "90":
-        # Required by cutlass compilation.
-        return "90a"
-    if arch == "100":
-        return "100a"
-    return arch
-
-
-def _nvcc_compiler_options() -> list[str]:
-    arch = _nvcc_arch_as_compile_option()
-    code = [f"sm_{arch}", f"compute_{arch}"]
-    if config.cuda.enable_cuda_lto:
-        code += [f"lto_{arch}"]
-    options = [
-        "-t=0",
-        "-DCUTLASS_ENABLE_TENSOR_CORE_MMA=1",
-        "-DCUTLASS_ENABLE_SM90_EXTENDED_MMA_SHAPES=1",
-        "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED",
-        "-w",
-        f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
-        config.cutlass.compile_opt_level,
-        "-std=c++17",
-        "--expt-relaxed-constexpr",
-        "-DNDEBUG",
-    ]
-    if config.is_fbcode():
-        options.extend(["-ccbin", os.path.dirname(build_paths.gcc)])
-    if config.cutlass.enable_debug_info:
-        options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
-    if config.cuda.enable_ptxas_info:
-        options.extend(
-            [
-                "--keep",  # Keep the intermediate files for debugging (including ptx, sass, cubin etc.)
-                "--ptxas-options=--warn-on-local-memory-usage",  # warn us if local memory is used in CUDA Kernels
-                "--ptxas-options=--warn-on-spills",  # warn us if register spilling happens in CUDA Kernels
-                "--resource-usage",  # Report on CUDA resource usage (shared mem, registers etc.)
-                "--source-in-ptx",
-            ]
-        )  # Annotate the ptx file with source information
-    if config.cutlass.use_fast_math:
-        options.extend(
-            [
-                "--use_fast_math",
-                "-DCUTLASS_USE_TANH_FOR_SIGMOID=1",
-            ]
-        )
-    return options
-
-
-def cuda_compile_command(
-    src_files: list[str],
-    dst_file: str,
-    dst_file_ext: str,
-    extra_args: list[str] | None = None,
-) -> str:
-    if extra_args is None:
-        extra_args = []
-    if use_re_build():
-        build_path = os.path.dirname(dst_file)
-        include_paths = _clone_cutlass_paths(build_path)
-        src_files = [os.path.basename(src_file) for src_file in src_files]
-        dst_file = os.path.basename(dst_file)
-    else:
-        include_paths = _cutlass_include_paths()
-    cuda_lib_options = _cuda_lib_options()
-    nvcc_host_compiler_options = _nvcc_host_compiler_options()
-    nvcc_compiler_options = _nvcc_compiler_options()
-    options = (
-        nvcc_compiler_options
-        + extra_args
-        + [
-            f"-Xcompiler {opt}" if "=" in opt else f"-Xcompiler={opt}"
-            for opt in nvcc_host_compiler_options
-        ]
-        + ["-I" + path for path in include_paths]
-        + cuda_lib_options
-    )
-    src_file = " ".join(src_files)
-    res = ""
-    if dst_file_ext == "o":
-        res = f"{_cuda_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
-    elif dst_file_ext == "so":
-        options.append("-shared")
-        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
-    elif dst_file_ext == "exe":
-        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
-    else:
-        raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
-    if log.isEnabledFor(logging.DEBUG):
-        log.debug("CUDA command: %s", res)
-    else:
-        autotuning_log.debug("CUDA command: %s", res)
-    return res
 
 
 class DLLWrapper:
@@ -4035,10 +3831,9 @@ def binary_error_path(output_path: str) -> str:
     return output_path + ".error"
 
 
-@clear_on_fresh_cache
-class CUDACodeCache:
+class CUTLASSCodeCache:
     """
-    A cache for managing the compilation and loading of CUDA source code specifically for CUTLASS.
+    A cache for managing the compilation and loading source code specifically for CUTLASS.
     This class handles writing source code to files, compiling them into shared objects, and caching
     the results to avoid redundant compilations. It also manages error handling and logging for the
     compilation process.
@@ -4052,12 +3847,14 @@ class CUDACodeCache:
 
     cache: dict[str, CacheEntry] = {}
     aot_kernels_o: list[str] = []
-    _SOURCE_CODE_SUFFIX = "cu"
 
-    @staticmethod
-    def cache_clear() -> None:
-        CUDACodeCache.cache.clear()
-        CUDACodeCache.aot_kernels_o.clear()
+    _SOURCE_CODE_SUFFIX: str = ""
+    _BACKEND: str = ""
+
+    @classmethod
+    def cache_clear(cls) -> None:
+        cls.cache.clear()
+        cls.aot_kernels_o.clear()
 
     @staticmethod
     @lru_cache(maxsize=4)
@@ -4093,6 +3890,24 @@ class CUDACodeCache:
             return None
 
     @classmethod
+    def _use_re_build(cls) -> bool:
+        raise NotImplementedError
+
+    @classmethod
+    def _compile_command(
+        cls,
+        src_files: list[str],
+        dst_file: str,
+        dst_file_ext: str,
+        extra_args: Optional[list[str]] = None,
+    ) -> str:
+        raise NotImplementedError
+
+    @classmethod
+    def _source_code_extra(cls) -> str:
+        raise NotImplementedError
+
+    @classmethod
     @lru_cache(None)
     def write(cls, source_code: str, dst_file_ext: str) -> tuple[str, str]:
         """
@@ -4101,24 +3916,13 @@ class CUDACodeCache:
         """
 
         if config.cutlass.cutlass_hash_with_compile_cmd:
-            cuda_command = repr(
-                cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
+            compile_command = repr(
+                cls._compile_command(["dummy_input"], "dummy_output", dst_file_ext)
             )
-            extra = cuda_command
+            extra = compile_command
         else:
-            extra = repr(
-                [
-                    # nvcc and cuda hash
-                    _cuda_compiler(),
-                    # cutlass flags and gcc hash
-                    _nvcc_compiler_options(),
-                    # flags
-                    _nvcc_host_compiler_options(),
-                    # cutlass key
-                    cutlass_key(),
-                    # hack to deal with AOTI .o compilation
-                ]
-            )
+            extra = cls._source_code_extra()
+
         key, input_path = write(source_code, cls._SOURCE_CODE_SUFFIX, extra=extra)
         return key, input_path
 
@@ -4174,22 +3978,22 @@ class CUDACodeCache:
                         binary_remote_cache.put(
                             error_path, config.cutlass.binary_remote_cache_force_write
                         )
-                    cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
+                    cls.cache[key_with_ext] = cls.CacheEntry(
                         input_path, output_path, error_json
                     )
                     raise exc.CUDACompileError(cmd_parts, error_output)
                 if not os.path.exists(output_path):
-                    cmd = cuda_compile_command(
+                    cmd = cls._compile_command(
                         src_files, output_path, dst_file_ext, extra_args
                     )
                     with open(input_path, "a") as f:
                         f.write("\n")
-                        f.write(f"// CUDA {operation_name} cmd\n// {cmd}\n")
+                        f.write(f"// {cls._BACKEND} {operation_name} cmd\n// {cmd}\n")
                     start_time = time()
-                    log.debug("CUDA %s: %s", operation_name, cmd)
+                    log.debug("%s %s: %s", cls._BACKEND, operation_name, cmd)
                     cmd_parts = cmd.split(" ")
                     try:
-                        if use_re_build():
+                        if cls._use_re_build():
                             from triton.fb.re_build_helper import run_build_command
 
                             run_build_command(
@@ -4202,7 +4006,7 @@ class CUDACodeCache:
                                 cmd_parts, stderr=subprocess.STDOUT, env=os.environ
                             )
                     except subprocess.CalledProcessError as error:
-                        cls._record_cuda_compile_error(
+                        cls._record_compile_error(
                             error.output.decode("utf-8"),
                             key_with_ext,
                             cmd_parts,
@@ -4213,7 +4017,7 @@ class CUDACodeCache:
                         raise exc.CUDACompileError(cmd_parts, error.output) from error
                     except Exception as error:
                         if "COMPILE FAILED WITH" in str(error):
-                            cls._record_cuda_compile_error(
+                            cls._record_compile_error(
                                 str(error),
                                 key_with_ext,
                                 cmd_parts,
@@ -4224,12 +4028,13 @@ class CUDACodeCache:
                             raise exc.CUDACompileError(cmd_parts, str(error)) from error
                         raise error
                     end_time = time()
-                    log_duration_msg = f"CUDA {operation_name} took {end_time - start_time} seconds. Command: {cmd}"
+                    log_duration_msg = f"{cls._BACKEND} {operation_name} took {end_time - start_time} seconds. Command: {cmd}"
                     log.info(log_duration_msg)
 
                 else:
                     log.debug(
-                        "CUDA %s skipped: %s since output already exists",
+                        "%s %s skipped: %s since output already exists",
+                        cls._BACKEND,
                         operation_name,
                         output_path,
                     )
@@ -4242,11 +4047,9 @@ class CUDACodeCache:
                     binary_remote_cache.put(
                         output_path, config.cutlass.binary_remote_cache_force_write
                     )
-                cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
-                    input_path, output_path, None
-                )
+                cls.cache[key_with_ext] = cls.CacheEntry(input_path, output_path, None)
 
-        cache_entry: CUDACodeCache.CacheEntry = cls.cache[key_with_ext]
+        cache_entry: CUTLASSCodeCache.CacheEntry = cls.cache[key_with_ext]
         if cache_entry.error_json is not None:
             # Restore cached Exception and raise it as if we had compiled
             cmd_parts, error_output = json.loads(cache_entry.error_json)
@@ -4271,7 +4074,7 @@ class CUDACodeCache:
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
 
     @classmethod
-    def _record_cuda_compile_error(
+    def _record_compile_error(
         cls,
         error_str: str,
         key_with_ext: str,
@@ -4283,9 +4086,7 @@ class CUDACodeCache:
         binary_remote_cache: Any = None,
     ) -> None:
         error_json = json.dumps([cmd_parts, error_str])
-        cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
-            input_path, output_path, error_json
-        )
+        cls.cache[key_with_ext] = cls.CacheEntry(input_path, output_path, error_json)
         error_path = binary_error_path(output_path)
         with open(error_path, "w", encoding="utf-8") as fh:
             fh.write(error_json)
@@ -4298,6 +4099,45 @@ class CUDACodeCache:
             binary_remote_cache.put(
                 error_path, config.cutlass.binary_remote_cache_force_write
             )
+
+
+@clear_on_fresh_cache
+class CUDACodeCache(CUTLASSCodeCache):
+    _SOURCE_CODE_SUFFIX = "cu"
+    _BACKEND = "CUDA"
+
+    @classmethod
+    def _use_re_build(cls) -> bool:
+        return cuda_compile_utils.use_re_build()
+
+    @classmethod
+    def _compile_command(
+        cls,
+        src_files: list[str],
+        dst_file: str,
+        dst_file_ext: str,
+        extra_args: Optional[list[str]] = None,
+    ) -> str:
+        return cuda_compile_utils.cuda_compile_command(
+            src_files, dst_file, dst_file_ext, extra_args=extra_args
+        )
+
+    @classmethod
+    def _source_code_extra(cls) -> str:
+        extra = repr(
+            [
+                # nvcc and cuda hash
+                cuda_compile_utils._cuda_compiler(),
+                # cutlass flags and gcc hash
+                cuda_compile_utils._nvcc_compiler_options(),
+                # flags
+                cuda_compile_utils._nvcc_host_compiler_options(),
+                # cutlass key
+                cutlass_key(),
+                # hack to deal with AOTI .o compilation
+            ]
+        )
+        return extra
 
 
 @clear_on_fresh_cache
