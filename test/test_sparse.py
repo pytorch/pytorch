@@ -1519,6 +1519,24 @@ class TestSparse(TestSparseBase):
         test_shape(10, 10, 100, 0, 20)
 
     @onlyCUDA
+    @dtypes(torch.float32, torch.double)
+    @unittest.skipIf(
+        IS_WINDOWS,
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+    )
+    def test_bmm_large_sparse_dimensions(self, device, dtype):
+        """Test bmm with large sparse dimension to catch memory access issues.
+
+        Regression test for compute-sanitizer detected memory access issues
+        with large sparse dimensions.
+        """
+        m1 = torch.randn(2, 291105, 1, dtype=dtype, device=device).to_sparse()
+        m2 = torch.randn(2, 1, 1, dtype=dtype, device=device)
+        result = torch.bmm(m1, m2)
+
+        self.assertEqual(result.shape, torch.Size([2, 291105, 1]))
+
+    @onlyCUDA
     @unittest.skipIf(
         IS_WINDOWS and TEST_CUDA,
         "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"

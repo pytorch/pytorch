@@ -70,6 +70,16 @@ namespace {
   }
 }
 
+namespace {
+
+  template <typename T>
+  inline bool is_aligned(const T* ptr, size_t alignment = 16) {
+    return (reinterpret_cast<uintptr_t>(ptr) % alignment) == 0;
+  }
+
+}
+
+
 // NB: Deleted spaddcmul (aka addcmul_, but not actually wired up), spaddcdiv (not
 // wired at all)
 
@@ -837,6 +847,15 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
       scalar_t* values_start_ptr = reinterpret_cast<scalar_t*>(values.data_ptr());
       scalar_t* mat2_start_ptr = reinterpret_cast<scalar_t*>(mat2_contig.data_ptr());
       scalar_t* result_start_ptr = reinterpret_cast<scalar_t*>(tmp_result.data_ptr());
+
+      // Temporary buffers for handling misaligned sparse data
+      // cuSPARSE requires 16-byte aligned pointers for vectorized operations.
+      Tensor row_indices_buffer;
+      Tensor col_indices_buffer;
+      Tensor values_buffer;
+      int64_t buffer_capacity = 0;
+      constexpr size_t kRequiredAlignment = 16;
+
       for (
         int64_t cur_mat_num = 0;
         (cur_mat_num < num_matrices);
@@ -854,6 +873,47 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
           uint32_t* row_indices_ptr = &row_indices_start_ptr[mat_el_begin_idx];
           uint32_t* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
           scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
+
+          bool needs_aligned_copy = !is_aligned(row_indices_ptr, kRequiredAlignment) ||
+                                   !is_aligned(col_indices_ptr, kRequiredAlignment) ||
+                                   !is_aligned(values_ptr, kRequiredAlignment);
+
+          if (needs_aligned_copy) {
+            if (sparse_nnz > buffer_capacity) {
+              row_indices_buffer = at::empty({sparse_nnz}, indices_dim1.options());
+              col_indices_buffer = at::empty({sparse_nnz}, indices_dim2.options());
+              values_buffer = at::empty({sparse_nnz}, values.options());
+              buffer_capacity = sparse_nnz;
+            }
+
+            // Copy data to aligned buffers
+            AT_CUDA_CHECK(cudaMemcpyAsync(
+              row_indices_buffer.data_ptr(),
+              row_indices_ptr,
+              sparse_nnz * sizeof(uint32_t),
+              cudaMemcpyDeviceToDevice,
+              at::cuda::getCurrentCUDAStream()
+            ));
+            AT_CUDA_CHECK(cudaMemcpyAsync(
+              col_indices_buffer.data_ptr(),
+              col_indices_ptr,
+              sparse_nnz * sizeof(uint32_t),
+              cudaMemcpyDeviceToDevice,
+              at::cuda::getCurrentCUDAStream()
+            ));
+            AT_CUDA_CHECK(cudaMemcpyAsync(
+              values_buffer.data_ptr(),
+              values_ptr,
+              sparse_nnz * sizeof(scalar_t),
+              cudaMemcpyDeviceToDevice,
+              at::cuda::getCurrentCUDAStream()
+            ));
+
+            // Use the aligned buffer pointers for cuSPARSE
+            row_indices_ptr = reinterpret_cast<uint32_t*>(row_indices_buffer.data_ptr());
+            col_indices_ptr = reinterpret_cast<uint32_t*>(col_indices_buffer.data_ptr());
+            values_ptr = reinterpret_cast<scalar_t*>(values_buffer.data_ptr());
+          }
 
           cusparseSpMatDescr_t sparse_descr;
           TORCH_CUDASPARSE_CHECK(cusparseCreateCoo(
