@@ -39,6 +39,10 @@ def manual_seed(seed) -> torch._C.Generator:
             is raised. Negative inputs are remapped to positive values with the formula
             `0xffff_ffff_ffff_ffff + seed`.
     """
+    return _manual_seed_impl(seed, update_local_tensor_states=True)
+
+
+def _manual_seed_impl(seed, update_local_tensor_states) -> torch._C.Generator:
     seed = int(seed)
     import torch.cuda
 

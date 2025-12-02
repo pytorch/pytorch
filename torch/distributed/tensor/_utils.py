@@ -1,7 +1,7 @@
 import threading
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -159,7 +159,7 @@ def compute_local_shape_and_global_offset(
 def _compute_local_shape_and_global_offset(
     global_shape: ShapeType,
     mesh_shape: ShapeType,
-    my_coordinate: Optional[list[int]],
+    my_coordinate: list[int] | None,
     placements: Sequence[Placement],
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
     """

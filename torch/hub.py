@@ -12,7 +12,7 @@ import uuid
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse  # noqa: F401
@@ -91,7 +91,7 @@ DEFAULT_CACHE_DIR = "~/.cache"
 VAR_DEPENDENCY = "dependencies"
 MODULE_HUBCONF = "hubconf.py"
 READ_DATA_CHUNK = 128 * 1024
-_hub_dir: Optional[str] = None
+_hub_dir: str | None = None
 
 
 @contextlib.contextmanager
@@ -417,7 +417,7 @@ def get_dir() -> str:
     return os.path.join(_get_torch_home(), "hub")
 
 
-def set_dir(d: Union[str, os.PathLike]) -> None:
+def set_dir(d: str | os.PathLike) -> None:
     r"""
     Optionally set the Torch Hub directory used to save downloaded models & weights.
 
@@ -694,7 +694,7 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
 def download_url_to_file(
     url: str,
     dst: str,
-    hash_prefix: Optional[str] = None,
+    hash_prefix: str | None = None,
     progress: bool = True,
 ) -> None:
     r"""Download object at the given URL to a local path.
@@ -736,7 +736,7 @@ def download_url_to_file(
     for _ in range(tempfile.TMP_MAX):
         tmp_dst = dst + "." + uuid.uuid4().hex + ".partial"
         try:
-            f = open(tmp_dst, "w+b")
+            f = open(tmp_dst, "w+b")  # noqa: SIM115
         except FileExistsError:
             continue
         break
@@ -816,11 +816,11 @@ def _legacy_zip_load(
 
 def load_state_dict_from_url(
     url: str,
-    model_dir: Optional[str] = None,
+    model_dir: str | None = None,
     map_location: MAP_LOCATION = None,
     progress: bool = True,
     check_hash: bool = False,
-    file_name: Optional[str] = None,
+    file_name: str | None = None,
     weights_only: bool = False,
 ) -> dict[str, Any]:
     r"""Loads the Torch serialized object at the given URL.

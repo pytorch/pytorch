@@ -2987,7 +2987,7 @@ class TestTorchDeviceType(TestCase):
             t_np = t.cpu().numpy()
 
             actual = torch.gradient(t, spacing=spacing, dim=dims, edge_order=edge_order)
-            if space_fn == create_coordinate_tensors and spacing[0].device != 'cpu':
+            if space_fn is create_coordinate_tensors and spacing[0].device != 'cpu':
                 spacing = [space.cpu().detach().numpy() for space in spacing]
             expected = np.gradient(t_np, *self._wrap_to_list(spacing), axis=dims, edge_order=edge_order)
             actual, expected = self._inf_nan_preprocess(list(actual), self._wrap_to_list(expected))
@@ -7463,6 +7463,9 @@ class TestTorch(TestCase):
         self.assertRaisesRegex(TypeError,
                                "missing 1 required positional arguments",
                                lambda: torch.tensor().new_zeros((5, 5), 0))
+
+        # ensure ones() throws an error when extra positional (non-keyword) arguments are given.
+        self.assertRaises(TypeError, lambda: torch.ones((3, 3), torch.float32))
 
     def test_from_buffer(self):
         a = bytearray([1, 2, 3, 4])

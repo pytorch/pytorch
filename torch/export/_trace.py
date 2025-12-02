@@ -851,7 +851,9 @@ def _export_to_torch_ir(
                             f, constraints=constraints, dynamic_shapes=dynamic_shapes
                         )
                     else:
-                        dynamo_graph_capture = dynamo_graph_capture_for_export(f)
+                        dynamo_graph_capture = torch._dynamo.config.patch(
+                            replay_side_effects=False
+                        )(dynamo_graph_capture_for_export(f))
                     # We can't serialize entire fake mode yet, so this is to make sure
                     # things like copy.deepcopy(ep.graph_module) not crash.
                     # see test_export.py::test_custom_tag_metadata_re_export

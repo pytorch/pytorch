@@ -968,7 +968,7 @@ def forward(self, x):
     view_3 = torch.ops.aten.view.default(linear_3, [2, 1, 128, 64]);  linear_3 = None
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(view_1, view_2, view_3, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  view_1 = view_2 = view_3 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
+    flex_attention = torch.ops.higher_order.flex_attention(view_1, view_2, view_3, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  view_1 = view_2 = view_3 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
     getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
@@ -1235,14 +1235,8 @@ graph():
     %p_block_linear2_bias : [num_users=1] = placeholder[target=p_block_linear2_bias]
     %x : [num_users=1] = placeholder[target=x]
     %wrap_body0 : [num_users=1] = get_attr[target=wrap_body0]
-    %tag_activation_checkpoint : [num_users=7] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
+    %tag_activation_checkpoint : [num_users=1] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
     %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 0), kwargs = {})
-    %getitem_1 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 1), kwargs = {})
-    %getitem_2 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 2), kwargs = {})
-    %getitem_3 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 3), kwargs = {})
-    %getitem_4 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 4), kwargs = {})
-    %getitem_5 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 5), kwargs = {})
-    %getitem_6 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 6), kwargs = {})
     return (getitem,)""",
         )
 
@@ -1251,14 +1245,14 @@ graph():
             """\
 graph():
     %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
-    %arg1_1 : [num_users=2] = placeholder[target=arg1_1]
-    %arg2_1 : [num_users=2] = placeholder[target=arg2_1]
-    %arg3_1 : [num_users=2] = placeholder[target=arg3_1]
-    %arg4_1 : [num_users=2] = placeholder[target=arg4_1]
-    %linear : [num_users=2] = call_function[target=torch.ops.aten.linear.default](args = (%arg0_1, %arg1_1, %arg2_1), kwargs = {})
-    %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
+    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+    %arg2_1 : [num_users=1] = placeholder[target=arg2_1]
+    %arg3_1 : [num_users=1] = placeholder[target=arg3_1]
+    %arg4_1 : [num_users=1] = placeholder[target=arg4_1]
+    %linear : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%arg0_1, %arg1_1, %arg2_1), kwargs = {})
+    %relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
     %linear_1 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%relu, %arg3_1, %arg4_1), kwargs = {})
-    return (linear_1, arg1_1, arg2_1, linear, relu, arg3_1, arg4_1)""",
+    return (linear_1,)""",
         )
 
         stack = contextlib.ExitStack()
@@ -16142,8 +16136,6 @@ def forward(self, x):
                     # expected 3*..., but got 8
                     ep.module()(torch.randn(4, 2))
 
-    @testing.expectedFailureSerDer  # T195866111
-    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureStrictV2
     def test_hints_wrapper(self):
         strict = True
@@ -16483,7 +16475,7 @@ class GraphModule(torch.nn.Module):
 
         # Expect builtin round in the export graph
         round_nodes = [
-            n for n in ep.graph.nodes if n.op == "call_function" and n.target == round
+            n for n in ep.graph.nodes if n.op == "call_function" and n.target is round
         ]
         self.assertEqual(len(round_nodes), 1)
 

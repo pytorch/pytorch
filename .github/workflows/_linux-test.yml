@@ -327,6 +327,7 @@ jobs:
           SCCACHE_REGION: ${{ !contains(matrix.runner, 'b200') && 'us-east-1' || '' }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
           DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          DOCKER_IMAGE_S390X: ${{ inputs.docker-image }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PYTORCH_TEST_CUDA_MEM_LEAK_CHECK: ${{ matrix.mem_leak_check && '1' || '0' }}
@@ -360,10 +361,12 @@ jobs:
             # if for some reason cleanup action doesn't stop container
             # when job is cancelled
             DOCKER_SHELL_CMD="sleep 12h"
+            USED_IMAGE="${DOCKER_IMAGE_S390X}"
           else
             SHM_OPTS="--shm-size=${SHM_SIZE}"
             JENKINS_USER="--user jenkins"
             DOCKER_SHELL_CMD=
+            USED_IMAGE="${DOCKER_IMAGE}"
           fi
 
           # detached container should get cleaned up by teardown_ec2_linux
@@ -426,7 +429,7 @@ jobs:
             ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
+            "${USED_IMAGE}" \
             ${DOCKER_SHELL_CMD}
           )
           echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"

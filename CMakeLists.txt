@@ -171,6 +171,7 @@ endif()
 set(CPU_AARCH64 OFF)
 set(CPU_INTEL OFF)
 set(CPU_POWER OFF)
+set(CPU_RISCV OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
   set(CPU_INTEL ON)
@@ -178,6 +179,8 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
   set(CPU_AARCH64 ON)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(riscv64)")
+  set(CPU_RISCV ON)
 endif()
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default. It is not
@@ -327,8 +330,8 @@ cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
 # Ensure that an MKLDNN build is the default for x86 CPUs but optional for
 # AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, and ppc64le."
-  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, ppc64le and riscv64."
+  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER OR CPU_RISCV" OFF)
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
@@ -1212,41 +1215,6 @@ else()
   append_cxx_flag_if_supported("/wd4804" CMAKE_CXX_FLAGS)
   # inconsistent dll linkage
   append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
-endif()
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  check_c_source_compiles(
-    "#include <arm_neon.h>
-int main() {
-  float a[] = {1.0, 1.0};
-  float32x4x2_t v;
-  v.val[0] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
-  v.val[1] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
-  vst1q_f32_x2(a, v);
-  return 0;
-}"
-    HAS_VST1)
-
-  if(NOT HAS_VST1)
-    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VST1")
-  endif()
-endif()
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  check_c_source_compiles(
-    "#include <arm_neon.h>
-int main() {
-  float a[] = {1.0, 1.0};
-  vld1q_f32_x2(a);
-  return 0;
-}"
-    HAS_VLD1)
-
-  if(NOT HAS_VLD1)
-    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VLD1")
-  endif()
 endif()
 
 # Add code coverage flags to supported compilers

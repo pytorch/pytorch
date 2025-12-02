@@ -2472,7 +2472,7 @@ class BenchmarkRunner:
                     for refi, resi in zip(ref, res):
                         dump_max_mean_values(tol, refi, resi)
                 elif isinstance(ref, dict):
-                    for k in ref.keys():
+                    for k in ref:
                         dump_max_mean_values(tol, ref[k], res[k])
                 elif isinstance(ref, torch.Tensor):
                     res = res.to(base_device)

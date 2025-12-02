@@ -1738,6 +1738,15 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.as_python_constant())
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
+
 
 class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     """
@@ -3159,7 +3168,7 @@ class HintsWrapperHigherOrderVariable(WrapHigherOrderVariable):
         # to (body_node, lifted_args_tuple, {})
         body_node = p_args[0]
         lifted_args = p_args[1:]
-        p_args = (body_node, lifted_args, {})
+        p_args = (body_node, tuple(lifted_args), {})
 
         # add hints into p_kwargs
         p_kwargs = {}

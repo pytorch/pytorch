@@ -1,4 +1,4 @@
-ARG CUDA_VERSION=12.8.1
+ARG CUDA_VERSION=12.9.1
 ARG PYTHON_VERSION=3.12
 
 # BUILD_BASE_IMAGE: used to setup python build xformers, and vllm wheels, It can be replaced with a different base image from local machine,
@@ -124,7 +124,7 @@ RUN --mount=type=cache,target=/root/.cache/uv bash - <<'BASH'
     git clone https://github.com/facebookresearch/xformers.git
 
     pushd xformers
-    git checkout v0.0.32.post2
+    git checkout v0.0.33.post1
     git submodule update --init --recursive
     python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose
     popd
@@ -256,7 +256,7 @@ ENV UV_INDEX_STRATEGY="unsafe-best-match"
 # Use copy mode to avoid hardlink failures with Docker cache mounts
 ENV UV_LINK_MODE=copy
 
-# Install build and runtime dependencies, this is needed for flashinfer install
+# Install build and runtime dependencies
 COPY requirements/build.txt requirements/build.txt
 COPY use_existing_torch.py use_existing_torch.py
 RUN python3 use_existing_torch.py
@@ -294,33 +294,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/xformers/*.whl --verbose
 
-# Build FlashInfer from source
-ARG torch_cuda_arch_list='8.0;8.9;9.0a;10.0a;12.0'
-ENV TORCH_CUDA_ARCH_LIST=${torch_cuda_arch_list}
-
-# TODO(elainewy): remove this once vllm commit is updated, and install flashinfer from pip
-# see https://github.com/pytorch/pytorch/pull/165274#issuecomment-3408531784
-ARG FLASHINFER_GIT_REPO="https://github.com/flashinfer-ai/flashinfer.git"
-ARG FLASHINFER_GIT_REF="v0.2.14.post1"
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    git clone --depth 1 --recursive --shallow-submodules \
-        --branch ${FLASHINFER_GIT_REF} \
-        ${FLASHINFER_GIT_REPO} flashinfer \
-    && echo "Building FlashInfer with AOT for arches: ${torch_cuda_arch_list}" \
-    && cd flashinfer \
-    && python3 -m flashinfer.aot \
-    && python3 -m build --no-isolation --wheel --outdir ../wheels/flashinfer \
-    && cd .. \
-    && rm -rf flashinfer
-
-# Install FlashInfer
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system wheels/flashinfer/*.whl --verbose
-
 # Logging to confirm the torch versions
-RUN pip freeze | grep -E 'torch|xformers|vllm|flashinfer'
-RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio\|^xformers\|^vllm\|^flashinfer' > build_summary.txt
+RUN pip freeze | grep -E 'torch|xformers|vllm'
+RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio\|^xformers\|^vllm' > build_summary.txt
 ################### VLLM INSTALLED IMAGE ####################
 
 
@@ -331,4 +307,3 @@ FROM scratch as export-wheels
 COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
 COPY --from=vllm-base /workspace/build_summary.txt /wheels/build_summary.txt
-COPY --from=vllm-base /workspace/wheels/flashinfer /wheels/flashinfer-python

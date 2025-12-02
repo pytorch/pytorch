@@ -4,7 +4,7 @@ import logging
 import operator
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, Union
 
 import torch
 import torch.distributed as dist
@@ -99,7 +99,7 @@ InputInfo = Union[_RecvInfo, _RootArgPlaceholder]
 
 
 def _make_tensor_from_meta(
-    example: Union[torch.Tensor, FakeTensor],
+    example: torch.Tensor | FakeTensor,
     device: torch.device,
 ) -> torch.Tensor:
     """
@@ -126,8 +126,8 @@ class _PipelineStageBase(ABC):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        group: Optional[dist.ProcessGroup] = None,
-        dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
+        group: dist.ProcessGroup | None = None,
+        dw_builder: Callable[[], Callable[..., None]] | None = None,
     ):
         """
         Args:
@@ -176,11 +176,11 @@ class _PipelineStageBase(ABC):
             )
 
         # Run time states
-        self._outputs_meta: Optional[tuple[torch.Tensor, ...]] = None
+        self._outputs_meta: tuple[torch.Tensor, ...] | None = None
         # map microbatch ID to list of forward tensor args
         self.fwd_cache: dict[int, tuple[Any, list[torch.Tensor]]] = {}
         # map microbatch ID to list of backward grad tensor args
-        self.bwd_cache: dict[int, tuple[Optional[torch.Tensor], ...]] = {}
+        self.bwd_cache: dict[int, tuple[torch.Tensor | None, ...]] = {}
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: list[Any] = []
 
@@ -196,10 +196,10 @@ class _PipelineStageBase(ABC):
 
         # Backward infra will created lazily
         self.grad_recv_info: dict = {}
-        self.grad_send_info: Optional[list] = None
+        self.grad_send_info: list | None = None
 
         # To be populated later by the Schedule
-        self.chunks: Optional[int] = None
+        self.chunks: int | None = None
         self.stage_index_to_group_rank: dict[int, int] = {
             i: i % self.group_size for i in range(self.num_stages)
         }
@@ -261,11 +261,11 @@ class _PipelineStageBase(ABC):
     def _create_grad_send_info(
         self,
         args_recv_info: tuple,
-    ) -> list[Optional[int]]:
+    ) -> list[int | None]:
         """
         Create a list of stage indices to send gradients to.
         """
-        grad_send_info: list[Optional[int]] = []
+        grad_send_info: list[int | None] = []
 
         def map_recv_to_send(a):
             # Note: we send gradients back to previous stage as long as in
@@ -288,7 +288,7 @@ class _PipelineStageBase(ABC):
         self,
         num_microbatches: int,
         args: tuple[Any, ...],
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
     ) -> tuple[Any, ...]:
         raise NotImplementedError
 
@@ -388,7 +388,7 @@ class _PipelineStageBase(ABC):
         return self.bwd_cache.pop(mb_index)
 
     def set_local_bwd_input(
-        self, next_stage_bwd_outputs: tuple[Optional[torch.Tensor], ...], mb_index: int
+        self, next_stage_bwd_outputs: tuple[torch.Tensor | None, ...], mb_index: int
     ) -> None:
         """
         Moves 'grad input' tensors from the next stage to 'grad_output' on this stage, avoiding a copy or send/recv.
@@ -588,7 +588,7 @@ class _PipelineStageBase(ABC):
         backward_type,
         bwd_kwargs: dict,
         last_backward: bool = False,
-    ) -> tuple[tuple[Optional[torch.Tensor], ...], Optional[list[dict[str, Any]]]]:
+    ) -> tuple[tuple[torch.Tensor | None, ...], list[dict[str, Any]] | None]:
         """
         Whether using PP with FSDP, DDP, or replicate there are some runtime differences between the last backward step and the
         other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
@@ -600,7 +600,7 @@ class _PipelineStageBase(ABC):
             backward_type,
         ) -> Callable[
             [],
-            tuple[tuple[Optional[torch.Tensor], ...], Optional[list[dict[str, Any]]]],
+            tuple[tuple[torch.Tensor | None, ...], list[dict[str, Any]] | None],
         ]:
             if backward_type == "full":
                 return lambda: (
@@ -663,7 +663,7 @@ class _PipelineStageBase(ABC):
         self,
         fwd_chunk_id: int,
         args: tuple[Any, ...],
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
         save_forward_output: bool = True,
     ):
         """
@@ -779,7 +779,7 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
-        grads_input: tuple[Optional[torch.Tensor], ...] = ()
+        grads_input: tuple[torch.Tensor | None, ...] = ()
 
         # Custom backward function
         if self.dw_builder:
@@ -1019,7 +1019,7 @@ class _PipelineStage(_PipelineStageBase):
         stage_index: int,
         pipe_info: PipeInfo,
         device: torch.device,
-        group: Optional[dist.ProcessGroup] = None,
+        group: dist.ProcessGroup | None = None,
     ):
         """
         Create a pipeline stage given a stage_module to be wrapped by this stage
@@ -1086,7 +1086,7 @@ class _PipelineStage(_PipelineStageBase):
         self,
         num_microbatches: int,
         args: tuple[Any, ...],
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
     ) -> tuple[Any, ...]:
         """
         Create send/recv infrastructures for activations (during forward)
@@ -1183,7 +1183,7 @@ class _PipelineStage(_PipelineStageBase):
     def find_dst_rank(
         self,
         user: fx.Node,
-    ) -> Optional[int]:
+    ) -> int | None:
         """
         Find the destination rank of a `user` node.
         If the `user` is not a submod, `None` may be returned.
@@ -1293,7 +1293,7 @@ def build_stage(
     stage_index: int,
     pipe_info: PipeInfo,
     device: torch.device,
-    group: Optional[dist.ProcessGroup] = None,
+    group: dist.ProcessGroup | None = None,
 ) -> _PipelineStage:
     """
     Create a pipeline stage given a stage_module to be wrapped by this stage
@@ -1347,14 +1347,14 @@ class PipelineStage(_PipelineStageBase):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        input_args: Optional[Union[torch.Tensor, tuple[torch.Tensor, ...]]] = None,
-        output_args: Optional[Union[torch.Tensor, tuple[torch.Tensor, ...]]] = None,
-        group: Optional[dist.ProcessGroup] = None,
-        dw_builder: Optional[Callable[[], Callable[..., None]]] = None,
+        input_args: torch.Tensor | tuple[torch.Tensor, ...] | None = None,
+        output_args: torch.Tensor | tuple[torch.Tensor, ...] | None = None,
+        group: dist.ProcessGroup | None = None,
+        dw_builder: Callable[[], Callable[..., None]] | None = None,
     ):
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
-        self.inputs: Optional[list[torch.Tensor]] = None
-        self.inputs_meta: Optional[tuple[torch.Tensor, ...]] = None
+        self.inputs: list[torch.Tensor] | None = None
+        self.inputs_meta: tuple[torch.Tensor, ...] | None = None
         # Note: inputs and submod should ideally be on meta device. We decided not to assert this (yet) because it
         # might be breaking for existing users.
         if input_args is None:
@@ -1410,7 +1410,7 @@ class PipelineStage(_PipelineStageBase):
     def _shape_inference(
         self,
         args: tuple[Any, ...],
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
     ):
         if kwargs is None:
             kwargs = {}
@@ -1522,7 +1522,7 @@ class PipelineStage(_PipelineStageBase):
         self,
         num_microbatches: int,
         args: tuple[Any, ...],
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
     ) -> tuple[Any, ...]:
         # TODO move self.device to an argument from step API (from its input tensors)?
         assert num_microbatches is not None, "TODO fix num_microbatches"

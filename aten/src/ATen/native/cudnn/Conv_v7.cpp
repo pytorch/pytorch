@@ -774,7 +774,7 @@ void raw_cudnn_convolution_forward_out_32bit(
             args,
             "Forward algorithm: ",
             static_cast<int>(fwdAlgPerf.algo),
-            "\n");
+            '\n');
       });
 }
 

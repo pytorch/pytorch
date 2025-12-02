@@ -21,6 +21,7 @@ from torch._dynamo import config as dynamo_config
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
+from torch._export.passes import ReplaceViewOpsWithViewCopyOpsPass
 from torch._inductor import config
 from torch._inductor.codecache import WritableTempFile
 from torch._inductor.cpp_builder import normalize_path_separator
@@ -67,12 +68,10 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
     MACOS_VERSION,
-    MI300_ARCH,
     parametrize,
     runOnRocm,
     skipIfMPS,
     skipIfRocm,
-    skipIfRocmArch,
     skipIfWindows,
     skipIfWindowsXPU,
     skipIfXpu,
@@ -175,11 +174,8 @@ def get_module_ext_type():
 
 
 class AOTInductorTestsTemplate:
-    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
-    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
-    @skipIfRocmArch(MI300_ARCH)
     def test_simple(self, embed_kernel_binary, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -250,8 +246,8 @@ class AOTInductorTestsTemplate:
     # failure on CI
     @common_utils.parametrize("embed_kernel_binary", [False])
     @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 6),
-        "Test is only supported on CUDA 12.6+",
+        torch.version.hip is None and _get_torch_cuda_version() < (12, 8),
+        "Test is only supported on CUDA 12.8+",
     )
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
@@ -670,6 +666,49 @@ class AOTInductorTestsTemplate:
             FileCheck().check_not("torch::aot_inductor::ConstantType::Unknown").run(
                 code
             )
+
+    @requires_gpu
+    def test_device_moved_constant(self):
+        # testing both directions
+        device_movements = [
+            (torch.device(type=GPU_TYPE, index=0), torch.device("cpu")),
+            (torch.device("cpu"), torch.device(type=GPU_TYPE, index=0)),
+        ]
+
+        class Model(torch.nn.Module):
+            def __init__(self, from_device):
+                super().__init__()
+                self.register_buffer("_buf", torch.randn(6, 7, device=from_device))
+                self._param = torch.nn.Parameter(
+                    torch.rand(6, 7, device=from_device), requires_grad=False
+                )
+
+            def forward(self, x):
+                to_device = x.device
+                moved_buf = self._buf.to(to_device)
+                moved_param = self._param.to(to_device)
+                return moved_buf, moved_param
+
+        with config.patch(
+            {
+                "aot_inductor.use_runtime_constant_folding": False,
+            }
+        ):
+            for from_device, to_device in device_movements:
+                model = Model(from_device)
+                example_inputs = (torch.randn(6, 7, device=to_device),)
+                _, code = run_and_get_cpp_code(
+                    AOTIRunnerUtil.compile, model, example_inputs
+                )
+                FileCheck().check_not("torch::aot_inductor::ConstantType::Unknown").run(
+                    code
+                )
+                FileCheck().check_count(
+                    "torch::aot_inductor::ConstantType::Buffer", 2, exactly=True
+                ).run(code)
+                FileCheck().check_count(
+                    "torch::aot_inductor::ConstantType::Parameter", 2, exactly=True
+                ).run(code)
 
     def test_subclasses(self):
         device_to_init = self.device
@@ -2190,6 +2229,39 @@ class AOTInductorTestsTemplate:
             prepend_predicates(inputs),
             dynamic_shapes=dynamic_shapes,
         )
+
+    @requires_gpu
+    def test_cond_with_replace_view_ops(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("requires GPU")
+
+        class CondModelWithViewAndLinear(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, cache, x):
+                def true_fn(cache, x):
+                    return cache + 1.0
+
+                def false_fn(cache, x):
+                    return self.linear(x).view(1, 2, 4, 4)
+
+                cache_is_initialized = (cache != 0).any()
+                return torch.cond(cache_is_initialized, false_fn, false_fn, [cache, x])
+
+        example_input = (
+            torch.zeros(1, 2, 4, 4, dtype=torch.float32, device=self.device),
+            torch.randn(8, 4, dtype=torch.float32, device=self.device),
+        )
+        model = CondModelWithViewAndLinear().to(device=self.device)
+        exported_program = torch.export.export(model, example_input)
+        program = exported_program.run_decompositions()
+        gm = ReplaceViewOpsWithViewCopyOpsPass()(program.graph_module).graph_module
+        with config.patch(
+            {"max_autotune": True, "max_autotune_gemm_backends": "TRITON,ATEN"}
+        ):
+            _ = torch._inductor.aot_compile(gm, example_input)
 
     def test_cond_with_multiple_outputs(self):
         inputs = (
@@ -5169,10 +5241,7 @@ class AOTInductorTestsTemplate:
             )
             self.assertTrue(same(model(*example_input), actual))
 
-    # Temporarily skipping test as pytorch/cpuinfo not able to retrieve cache size for
-    # AMD EPYC 9575F 64-Core Processor CPU in gfx942 VM Runners
     @common_utils.parametrize("max_autotune", [True, False])
-    @skipIfRocmArch(MI300_ARCH)
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -7437,6 +7506,10 @@ class AOTInductorTestsTemplate:
             "RAIIAtenTensorHandle buf0(buf0_handle_restrided);"
         ).run(code)
 
+    @unittest.skipIf(
+        IS_FBCODE,
+        "different behavior in fbcode",
+    )
     def test_codegen_int_array_var_fix_memory_leak(self):
         """
         Fix https://github.com/pytorch/pytorch/issues/167630

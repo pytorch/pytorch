@@ -84,7 +84,6 @@ class VllmTestRunner(BaseRunner):
         self.VLLM_TEST_WHLS_REGEX = [
             "xformers/*.whl",
             "vllm/vllm*.whl",
-            "flashinfer-python/flashinfer*.whl",
         ]
 
     def prepare(self):

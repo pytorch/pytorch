@@ -11,6 +11,8 @@
 #include <utility>
 #include <vector>
 
+#include <torch/csrc/distributed/c10d/control_plane/WaitCounterHandler.hpp>
+
 namespace c10d::control_plane {
 
 namespace {
@@ -72,6 +74,22 @@ RegisterHandler frTracehandler(
       res.setContent(std::move(trace), "application/json");
       res.setStatus(200);
     });
+
+RegisterHandler waitCounterHandler{
+    "wait_counter_values",
+    [](const Request&, Response& res) {
+      // Get all wait counter values from our tracking backend
+      res.setContent(getWaitCounterValuesJson(), "application/json");
+      res.setStatus(200);
+    }};
+
+#if !defined(FBCODE_CAFFE2)
+// Initialize the wait counter backend
+[[maybe_unused]] static bool init_backend = []() {
+  ensureWaitCounterBackendRegistered();
+  return true;
+}();
+#endif
 
 } // namespace
 

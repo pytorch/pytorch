@@ -5,8 +5,6 @@
 #include <torch/csrc/jit/ir/node_hashing.h>
 #include <torch/csrc/jit/jit_log.h>
 
-#include <unordered_map>
-
 namespace torch::jit {
 namespace {
 

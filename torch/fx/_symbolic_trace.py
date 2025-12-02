@@ -881,7 +881,7 @@ class Tracer(TracerBase):
 
             self.submodule_paths = None
         except RuntimeError as e:
-            if isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
+            if e.args and isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
                 partial_fx_graph = self.graph.python_code(
                     root_module="self",
                     verbose=True,

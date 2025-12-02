@@ -1687,7 +1687,9 @@ bool FunctionSignature::parse(
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
        params[0].type_ == ParameterType::SYM_INT_LIST)) {
-    allow_varargs_intlist = true;
+    int64_t failed_idx = -1;
+    allow_varargs_intlist = is_int_or_symint_list(
+        args, params[0].size, &failed_idx, &overloaded_args);
   }
 
   if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {

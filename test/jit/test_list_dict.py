@@ -1773,7 +1773,7 @@ class TestDict(JitTestCase):
             return x
 
         self.checkScript(setdefault, (self.dict(), "a", torch.randn(2, 2)))
-        self.checkScript(setdefault, (self.dict(), "nonexistant", torch.randn(2, 2)))
+        self.checkScript(setdefault, (self.dict(), "nonexistent", torch.randn(2, 2)))
 
     @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
     def test_update(self):
@@ -1894,9 +1894,13 @@ class TestDict(JitTestCase):
 
         @torch.jit.script
         def missing_index(x: Dict[str, int]) -> int:
-            return x["dne"]
+            return x["dne"]  # codespell:ignore
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", 'x["dne"'):
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError,
+            "KeyError",
+            'x["dne"',  # codespell:ignore
+        ):
             missing_index({"item": 20, "other_item": 120})
 
         code = dedent(
@@ -2368,7 +2372,7 @@ class TestScriptDict(JitTestCase):
 
     The vast majority of tests are for making sure that objects returned
     by torch.jit.script behave like dictionaries do so that they are fungible
-    in almost all cirumstances with regular dictionaries.
+    in almost all circumstances with regular dictionaries.
     """
 
     def _script_dict_add(self, d: torch._C.ScriptDict, k: int, v: int):
@@ -2605,7 +2609,7 @@ class TestScriptList(JitTestCase):
 
     The vast majority of tests are for making sure that instances of
     torch._C.ScriptList behave like lists do so that they are fungible
-    in almost all cirumstances with regular list.
+    in almost all circumstances with regular list.
     """
 
     def _script_list_add(self, l: torch._C.ScriptList, e: int):

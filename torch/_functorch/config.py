@@ -162,8 +162,9 @@ activation_memory_budget = 1.0
 activation_memory_budget_runtime_estimator = "flops"
 
 # This controls the solver used for the 0-1 knapsack. By default we use a
-# quantized DP solution ("dp"). The other approaches are a "greedy" and a "ilp"
-# (which has a scipy dependency).
+# quantized DP solution ("dp"). The other approaches are a "greedy", a "ilp"
+# (which has a scipy dependency) and "dp_knapsack_sliding_hirschberg", which
+# used memory-efficient quantized DP solution
 activation_memory_budget_solver = "dp"
 
 # This dumps out a SVG visualization of the expected runtime vs. activation
