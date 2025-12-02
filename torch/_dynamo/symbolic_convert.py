@@ -2034,19 +2034,6 @@ class InstructionTranslatorBase(
         assert inst.target is not None
         self.block_stack.append(BlockStackEntry(inst, inst.target, len(self.stack)))
 
-    def BEGIN_FINALLY(self, inst: Instruction) -> None:
-        self.push(ConstantVariable.create(None))
-
-    def WITH_CLEANUP_START(self, inst: Instruction) -> None:
-        exit, exc = self.popn(2)
-        assert isinstance(exc, ConstantVariable) and exc.value is None
-        self.push(exc)
-        self.push(exit.call_function(self, [ConstantVariable.create(None)] * 3, {}))
-
-    def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
-        self.popn(2)
-        self.push(ConstantVariable.create(None))
-
     def FOR_ITER(self, inst: Instruction) -> None:
         it = self.pop().realize()
         self.push(it)
@@ -2599,15 +2586,14 @@ class InstructionTranslatorBase(
             self.PUSH_NULL(inst)
             self.push(obj)
         else:
-            self.push(obj)
-            self.push(ConstantVariable.create(None))
+            raise AssertionError(
+                "LOAD_METHOD should have been rewritten to LOAD_ATTR. We should never reach here."
+            )
 
     def CALL_METHOD(self, inst: Instruction) -> None:
-        args = self.popn(inst.argval)
-        dummy = self.pop()
-        assert isinstance(dummy, ConstantVariable) and dummy.value is None
-        fn = self.pop()
-        self.call_function(fn, args, {})
+        raise AssertionError(
+            "CALL_METHOD should have been rewritten to CALL_FUNCTION. This function should never be called."
+        )
 
     def _load_attr(self, attr: Any) -> None:
         obj = self.pop()
