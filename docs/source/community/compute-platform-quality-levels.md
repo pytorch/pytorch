@@ -4,7 +4,7 @@ As a leading deep learning framework PyTorch capabilities are regularly expanded
 
 ## Quality Levels
 
-Compute Platform is hardware and software environment where computations are executed. In this document the compute platform is understood as a platform which consists of PyTorch backend implementation, underlying software stack (compilers, runtime libraries, drivers and other components) and hardware. Each compute platform can be assessed according to the scoring tables defined below in this document. Scoring covers requirements for platform hardware and software availability, maturity, support obligations, platform features, ci coverage, etc. Each requirement is marked with its relative priority (P0, P1 or P2) and the Score.
+Compute Platform is hardware and software environment where computations are executed. In this document the compute platform is understood as a platform which consists of PyTorch backend implementation, underlying software stack (compilers, runtime libraries, drivers and other components) and hardware. The compute platform must be versioned to reflect respective changes in the platform ingredients such as updated versions of software components or new hardware generations being supported. Minor changes of the platform ingredients which are done within the same software or hardware architecture paragidms correspond to different versions of the same platform. It is recommended however to differentiate platforms per the type of supported operating system as different OS typically comes with significantly different driver stacks and often has different set of supported features. Each compute platform can be assessed according to the scoring tables defined below in this document. Scoring covers requirements for platform hardware and software availability, maturity, support obligations, platform features, ci coverage, etc. Each requirement is marked with its relative priority (P0, P1 or P2) and the Score.
 
 Compute Platforms quality levels are defined as follows:
 
@@ -22,9 +22,9 @@ Compute Platforms quality levels are defined as follows:
      - Requirements
    * - **Stable**
      - * Satisfy all 100% P0 requirements
-       * Reach 80% overall score (105 points out of 132)
+       * Reach 80% overall score (99 points out of 124)
    * - **Unstable**
-     - * Reach 70% overall score (92 points out of 132)
+     - * Reach 70% overall score (86 points out of 124)
    * - **Engineering**
      - * Less than 70% overall score
 ```
@@ -33,11 +33,13 @@ Compute Platforms quality levels are defined as follows:
 
 To first introduce a new compute platform (as **Engineering** Platform) to PyTorch:
 
-* Raise an RFC [issue](https://github.com/pytorch/pytorch/issues) at PyTorch Github repository. Describe proposed platform software, hardware, its availability and plans to develop respective support in PyTorch. Emphasize if new PyTorch backend is being proposed and what are development plans.
+* Raise an RFC [issue](https://github.com/pytorch/pytorch/issues) at PyTorch Github repository. Describe proposed platform software, hardware, its availability and plans to develop respective support in PyTorch. Emphasize if a new PyTorch backend is being proposed and what are development plans.
 
 * Wait for the RFC review and acceptance by PyTorch Core [maintainers](https://docs.pytorch.org/docs/stable/community/persons_of_interest.html)
 
-* Submit PR(s) to add support for the new platform
+* For the in-tree platforms, submit PR(s) to add support for the new platform
+
+* Submit PR(s) or documentation change requests to update PyTorch side documentation with the descriptions of the new platform
 
 * Once support for the platform has landed, submit a [New Feature for Release](https://github.com/pytorch/pytorch/issues) issue to request announcement of the new platform in the PyTorch release blog and marketing materials
 
@@ -49,7 +51,7 @@ To change existing platform level (to **Unstable** or **Stable**) and reflect th
 
 * Post PR(s) to modify PyTorch documentation as needed and link them to the raised issue
 
-Note that with the evolution of PyTorch some platforms might need to be added and some removed from the PyTorch documentation. It is recommended to periodically assess quality levels of the compute platforms supported by PyTorch. When making decision to add or remove a platform from documentation use the following guideline:
+Note that with the evolution of PyTorch some platforms might need to be added and some removed from the PyTorch documentation. It is required to periodically assess quality levels of the compute platforms supported by PyTorch. When making decision to add or remove a platform from documentation use the following guideline:
 
 * If adding platform:
   * Require platform to grade as Unstable platform for 2 consecutive PyTorch releases to be added to documentation as Unstable platform
@@ -80,7 +82,7 @@ As the most popular deep learning framework currently, PyTorch primary goal is t
        * In case of HW accelerators, full environment setup for compute stack without the access to hardware (``--runtime-error-check disabled`` might be needed for ``smoke_test.py``)
        * Minimal OS environment without fully installed compute stack (``--runtime-error-check disabled`` might be needed for ``smoke_test.py``)
 
-       As overall guidance, PyTorch users should be able at a baseline to ``import torch`` and run basic things like a ``print(torch.__version__)`` after installing PyTorch regardless if compute platform was configured or not.
+       As overall guidance, PyTorch users should be able at a baseline to ``import torch`` and run basic things like a ``print(torch.__version__)`` after installing PyTorch regardless if the compute platform was configured or not.
      - **P0**
      - 8
    * - 2
@@ -186,14 +188,6 @@ Compute platform software stack includes:
      - As measured by
      - Priority
      - Score
-   * - 1
-     - Usability
-     - Compute platform supports:
-
-       * Linux : \+1
-       * Windows : \+1
-     - P1
-     - 2
    * - 2
      - Usability
      - Compute platform supports data type:
@@ -258,7 +252,7 @@ Compute platform software stack includes:
      -
      -
      -
-     - 20
+     - 18
 ```
 
 ## Testing Coverage
@@ -328,20 +322,11 @@ Test coverage for a new compute platform should vary depending on the positionin
      - Distributed mode is tested (only applicable to new compute platforms targeting distributed usage scenarios).
      - P1
      - 4
-   * - 6
-     - OS
-     - Compute platform is validated on:
-
-       * Linux (at least one distro): \+2
-       * Windows: \+1
-       * Additionally compute platform is validated on: WSL2: \+1
-     - P2
-     - 4
    * - Total
      -
      -
      -
-     - 30
+     - 26
 ```
 
 ## User Experience
