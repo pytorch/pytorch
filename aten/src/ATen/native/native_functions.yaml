@@ -9472,6 +9472,7 @@
     QuantizedCUDA: index_select_quantized_cuda
     SparseCPU: index_select_sparse_cpu
     SparseCUDA: index_select_sparse_cuda
+    SparseMPS: index_select_sparse_mps
     MPS: index_select_mps
   tags: core
 

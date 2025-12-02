@@ -1316,7 +1316,6 @@ class TestSparse(TestSparseBase):
             self.assertEqual(t.dtype, t[0, 0].dtype)
             self.assertEqual(t.dtype, t[1, 1].dtype)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1370,7 +1369,6 @@ class TestSparse(TestSparseBase):
                     small_sparse_result = t_small_sparse.index_select(d, t_idx)
                     self.assertEqual(small_dense_result, small_sparse_result)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1378,7 +1376,6 @@ class TestSparse(TestSparseBase):
         # will trigger brute-force algo
         self._test_index_select_exhaustive_index((3, 3, 4), range(3), device, dtype, coalesced)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
@@ -1386,7 +1383,6 @@ class TestSparse(TestSparseBase):
         # will trigger more sophisticated algos
         self._test_index_select_exhaustive_index((100, 50, 3, 3), (2, 3), device, dtype, coalesced)
 
-    @expectedFailureMPS
     @coalescedonoff
     @dtypes(torch.double, torch.cdouble)
     @dtypesIfMPS(torch.float32, torch.complex64)
