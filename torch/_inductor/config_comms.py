@@ -67,5 +67,7 @@ sink_waits_iterative_unsafe_collectives_reorder: bool = True
 reorder_iterative_group_with_collectives: bool = False
 sink_waits_iterative_swap_with_collectives: bool = False
 
+reorder_sink_verbose_logging: bool = False
+
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
