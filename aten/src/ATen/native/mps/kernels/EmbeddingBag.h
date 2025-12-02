@@ -20,6 +20,7 @@ struct EmbeddingBagParams {
   idx_type_t num_indices;
   idx_type_t num_bags;
   idx_type_t feature_size;
+  idx_type_t num_weights;
 
   EmbeddingBagMode mode;
   int64_t padding_idx;
