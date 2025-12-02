@@ -2,11 +2,11 @@ import collections
 import functools
 import inspect
 from collections.abc import Callable
-from typing import Any, final, Optional, Union
+from typing import Any, Optional, Union
 from typing_extensions import Self
 
 from ..utils import is_function_or_wrapper
-from .base import VariableTracker
+from .base import VariableTracker, VariableTrackerMeta
 from .tensor import SymNodeVariable
 
 
@@ -42,8 +42,8 @@ class LazyCache:
         del self.name_hint
 
 
-@final
-class LazyVariableTracker(VariableTracker):
+# Flag to prevent implicit realization in isinstance checks (inherited by subclasses)
+class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     """
     A structure that defers the creation of the actual VariableTracker
     for a given underlying value until it is accessed.
@@ -57,6 +57,7 @@ class LazyVariableTracker(VariableTracker):
     VariableTrackers right away.
     """
 
+    _no_implicit_realize = True
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
