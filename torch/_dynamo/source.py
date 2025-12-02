@@ -163,7 +163,7 @@ class TempLocalSource(Source):
     def guard_source(self) -> GuardSource:
         return GuardSource.TEMP_LOCAL
 
-    @functools.cached_property
+    @property
     def name(self) -> str:
         raise NotImplementedError(
             "Cannot create guard on TempLocalSource - this is an internal Dynamo bug. Please file an issue on GitHub."
@@ -458,7 +458,7 @@ class SkipGuardSource(ChainedSource):
     def guard_source(self) -> GuardSource:
         return self.base.guard_source()
 
-    @functools.cached_property
+    @property
     def name(self) -> str:
         return self.base.name
 
@@ -1006,7 +1006,7 @@ class FSDPNNModuleSource(NNModuleSource):
 
 @dataclasses.dataclass(frozen=True)
 class GlobalStateSource(Source):
-    @functools.cached_property
+    @property
     def name(self) -> str:
         return ""
 
@@ -1025,7 +1025,7 @@ class TorchSource(Source):
 
         install_guard(self.make_guard(GuardBuilder.ID_MATCH))
 
-    @functools.cached_property
+    @property
     def name(self) -> str:
         return "__import__('torch')"
 
@@ -1053,7 +1053,7 @@ class CollectionsSource(Source):
 
         install_guard(self.make_guard(GuardBuilder.ID_MATCH))
 
-    @functools.cached_property
+    @property
     def name(self) -> str:
         return "__import__('collections')"
 
@@ -1166,7 +1166,7 @@ class CallMethodItemSource(ChainedSource):
 # guard contents from the ambient ShapeEnv
 @dataclasses.dataclass(frozen=True)
 class ShapeEnvSource(Source):
-    @functools.cached_property
+    @property
     def name(self) -> str:
         return ""
 
@@ -1201,7 +1201,7 @@ class CurrentStreamSource(Source):
 
 @dataclasses.dataclass(frozen=True)
 class BackwardStateSource(Source):
-    @functools.cached_property
+    @property
     def name(self) -> str:
         return ""
 
