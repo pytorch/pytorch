@@ -47,7 +47,7 @@ class PartitionArgs:
     BLOCK_K: gl.constexpr
     store_layout: gl.constexpr
     NUM_BLOCKS: gl.constexpr
-    num_warps: gl.constexpr
+    NUM_STORE_WARPS: gl.constexpr
 
     @gluon.constexpr_function
     def __init__(
@@ -76,7 +76,7 @@ class PartitionArgs:
         BLOCK_K,
         store_layout,
         NUM_BLOCKS,
-        num_warps,
+        NUM_STORE_WARPS,
     ):
         self.a_desc = a_desc
         self.b_desc = b_desc
@@ -102,7 +102,7 @@ class PartitionArgs:
         self.BLOCK_K = gl.constexpr(BLOCK_K)
         self.store_layout = gl.constexpr(store_layout)
         self.NUM_BLOCKS = gl.constexpr(NUM_BLOCKS)
-        self.num_warps = gl.constexpr(num_warps)
+        self.NUM_STORE_WARPS = gl.constexpr(NUM_STORE_WARPS)
 
 
 # Counter abstraction for tracking barrier index and phase.
@@ -310,7 +310,7 @@ def store_partition(pargs: PartitionArgs):
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
-    num_warps: gl.constexpr = pargs.num_warps
+    NUM_STORE_WARPS: gl.constexpr = pargs.NUM_STORE_WARPS
 
     acc_buf_empty_bars = pargs.acc_buf_empty_bars
     acc_buf_full_bars = pargs.acc_buf_full_bars
@@ -319,7 +319,7 @@ def store_partition(pargs: PartitionArgs):
         gl.float32,
         [BLOCK_M, BLOCK_N],
         TensorMemoryLayout(block=[BLOCK_M, BLOCK_N], col_stride=1),
-        num_warps,
+        NUM_STORE_WARPS,
         instr_variant="32x32b",
     )
 
@@ -486,10 +486,14 @@ def grouped_mm_kernel(
     G: gl.constexpr,
     store_layout: gl.constexpr,
     NUM_BLOCKS: gl.constexpr,
-    num_load_buffers: gl.constexpr,
-    num_acc_buffers: gl.constexpr,
+    NUM_LOAD_BUFFERS: gl.constexpr,
+    NUM_ACC_BUFFERS: gl.constexpr,
+    NUM_LOAD_WARPS: gl.constexpr,
+    NUM_COMPUTE_WARPS: gl.constexpr,
     num_warps: gl.constexpr,
 ):
+    NUM_STORE_WARPS: gl.constexpr = num_warps
+
     a_desc = tma.make_tensor_descriptor(
         a_ptr,
         shape=[M, K],
@@ -515,18 +519,18 @@ def grouped_mm_kernel(
     )
 
     a_smem_bufs = gl.allocate_shared_memory(
-        dtype, [num_load_buffers, BLOCK_M, BLOCK_K], a_layout
+        dtype, [NUM_LOAD_BUFFERS, BLOCK_M, BLOCK_K], a_layout
     )
     b_smem_bufs = gl.allocate_shared_memory(
-        dtype, [num_load_buffers, 1, BLOCK_N, BLOCK_K], b_layout
+        dtype, [NUM_LOAD_BUFFERS, 1, BLOCK_N, BLOCK_K], b_layout
     )
     load_buf_empty_bars = gl.allocate_shared_memory(
-        gl.int64, [num_load_buffers, 1], mbarrier.MBarrierLayout()
+        gl.int64, [NUM_LOAD_BUFFERS, 1], mbarrier.MBarrierLayout()
     )
     load_buf_full_bars = gl.allocate_shared_memory(
-        gl.int64, [num_load_buffers, 1], mbarrier.MBarrierLayout()
+        gl.int64, [NUM_LOAD_BUFFERS, 1], mbarrier.MBarrierLayout()
     )
-    for i in gl.static_range(num_load_buffers):
+    for i in gl.static_range(NUM_LOAD_BUFFERS):
         mbarrier.init(load_buf_empty_bars.index(i), count=1)
         mbarrier.init(load_buf_full_bars.index(i), count=1)
 
@@ -534,16 +538,16 @@ def grouped_mm_kernel(
         block=[BLOCK_M, BLOCK_N], col_stride=1
     )
     acc_tmem_bufs = allocate_tensor_memory(
-        gl.float32, [num_acc_buffers, BLOCK_M, BLOCK_N], tmem_layout
+        gl.float32, [NUM_ACC_BUFFERS, BLOCK_M, BLOCK_N], tmem_layout
     )
 
     acc_buf_empty_bars = gl.allocate_shared_memory(
-        gl.int64, [num_acc_buffers, 1], mbarrier.MBarrierLayout()
+        gl.int64, [NUM_ACC_BUFFERS, 1], mbarrier.MBarrierLayout()
     )
     acc_buf_full_bars = gl.allocate_shared_memory(
-        gl.int64, [num_acc_buffers, 1], mbarrier.MBarrierLayout()
+        gl.int64, [NUM_ACC_BUFFERS, 1], mbarrier.MBarrierLayout()
     )
-    for i in gl.static_range(num_acc_buffers):
+    for i in gl.static_range(NUM_ACC_BUFFERS):
         mbarrier.init(acc_buf_empty_bars.index(i), count=1)
         mbarrier.init(acc_buf_full_bars.index(i), count=1)
 
@@ -572,7 +576,7 @@ def grouped_mm_kernel(
         BLOCK_K,
         store_layout,
         NUM_BLOCKS,
-        num_warps,
+        NUM_STORE_WARPS,
     )
 
     gl.warp_specialize(
@@ -581,6 +585,6 @@ def grouped_mm_kernel(
             (load_partition, (pargs,)),
             (compute_partition, (pargs,)),
         ],
-        [2, 2],
+        [NUM_LOAD_WARPS, NUM_COMPUTE_WARPS],
         [24, 24],
     )

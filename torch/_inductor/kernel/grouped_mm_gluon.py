@@ -95,7 +95,10 @@ def grouped_mm(
     BLOCK_K,
     num_load_buffers,
     num_acc_buffers,
-    num_warps,
+    num_load_warps=1,
+    num_compute_warps=1,
+    num_store_warps=4,
+    maxnreg=128,
 ):
     device = C.device
     dtype = torch.int8
@@ -122,7 +125,7 @@ def grouped_mm(
     store_layout = gl.BlockedLayout(
         size_per_thread=[BLOCK_M // 1, BLOCK_N // 32],
         threads_per_warp=[1, 32],
-        warps_per_cta=[num_warps, 1],
+        warps_per_cta=[num_store_warps, 1],
         order=[1, 0],
     )
 
@@ -154,10 +157,12 @@ def grouped_mm(
         G=G,
         store_layout=store_layout,
         NUM_BLOCKS=NUM_BLOCKS,
-        num_load_buffers=num_load_buffers,
-        num_acc_buffers=num_acc_buffers,
-        num_warps=num_warps,
-        maxnreg=128,
+        NUM_LOAD_BUFFERS=num_load_buffers,
+        NUM_ACC_BUFFERS=num_acc_buffers,
+        NUM_LOAD_WARPS=num_load_warps,
+        NUM_COMPUTE_WARPS=num_compute_warps,
+        num_warps=num_store_warps,
+        maxnreg=maxnreg,
     )
 
     torch.cuda.synchronize()
@@ -165,12 +170,11 @@ def grouped_mm(
 
 @pytest.mark.parametrize("G, M, N, K", [(4, 208, 416, 304), (5, 2000, 1000, 2000)])
 @pytest.mark.parametrize("BLOCK_M, BLOCK_N, BLOCK_K", [(128, 256, 64)])
-@pytest.mark.parametrize("num_load_buffers", [1, 2, 3])
-@pytest.mark.parametrize("num_acc_buffers", [1, 2, 3])
-@pytest.mark.parametrize("num_warps", [4])
+@pytest.mark.parametrize("num_load_buffers", [1, 2])
+@pytest.mark.parametrize("num_acc_buffers", [1, 2])
 @pytest.mark.skipif(not is_sm100(), reason="Requires Hopper or Blackwell")
 def test_grouped_mm(
-    G, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, num_load_buffers, num_acc_buffers, num_warps
+    G, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, num_load_buffers, num_acc_buffers
 ):
     device = "cuda"
     dtype = torch.bfloat16
@@ -197,7 +201,6 @@ def test_grouped_mm(
         BLOCK_K,
         num_load_buffers,
         num_acc_buffers,
-        num_warps,
     )
 
     torch.testing.assert_close(C, C_ref)
@@ -209,7 +212,7 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
     dtype_acc_bytes = torch.tensor([], dtype=dtype_acc).element_size()
 
     SMEM_PER_SM = 228 * 1024  # 228 KB shared memory
-    TMEM_PER_SM = 64 * 1024  # 64K cells of fp32 tensor memory
+    TMEM_MAX_COLUMNS = 512  # 512 columns per CTA (Blackwell)
     REGS_PER_SM = 65536  # 64K registers
 
     # Reserve SMEM for mbarriers, barriers, and compiler overhead
@@ -246,9 +249,12 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
     BLOCK_N_vals = [32, 64, 128]
     BLOCK_K_vals = [32, 64, 128, 256]
 
-    num_load_buffers_vals = [4, 5, 6, 7]
-    num_acc_buffers_vals = [3, 4, 5, 6]
-    num_warps_vals = [4, 8]
+    NUM_LOAD_BUFFER_vals = [4, 5, 6, 7]
+    NUM_ACC_BUFFER_vals = [3, 4, 5, 6]
+    NUM_LOAD_WARP_vals = [1, 2]
+    NUM_COMPUTE_WARP_vals = [1, 2]
+    NUM_STORE_WARP_vals = [4, 8]
+    MAXNREG_vals = [128]
 
     for (
         BLOCK_M,
@@ -256,14 +262,20 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
         BLOCK_K,
         num_load_buffers,
         num_acc_buffers,
-        num_warps,
+        num_load_warps,
+        num_compute_warps,
+        num_store_warps,
+        maxnreg,
     ) in itertools.product(
         BLOCK_M_vals,
         BLOCK_N_vals,
         BLOCK_K_vals,
-        num_load_buffers_vals,
-        num_acc_buffers_vals,
-        num_warps_vals,
+        NUM_LOAD_BUFFER_vals,
+        NUM_ACC_BUFFER_vals,
+        NUM_LOAD_WARP_vals,
+        NUM_COMPUTE_WARP_vals,
+        NUM_STORE_WARP_vals,
+        MAXNREG_vals,
     ):
         # === SMEM Calculation ===
         # A and B buffers (double-buffered for load/compute overlap)
@@ -281,31 +293,30 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
 
         # === TMEM Calculation ===
         # Accumulators are stored in TMEM (fp32)
-        tmem_usage = BLOCK_M * BLOCK_N * num_acc_buffers
+        # TMEM is per-CTA resource measured in "columns"
+        # For TensorMemoryLayout with col_stride=1: each [BLOCK_M, BLOCK_N] buffer uses BLOCK_N columns
+        # Hardware limit: 512 columns per CTA
+        tmem_usage_columns = BLOCK_N * num_acc_buffers
 
         # === Register Estimation ===
-        # Conservative estimate based on warp specialization
-        # Load warp: mostly addresses and loop counters (~32 regs/thread)
-        # Compute warp: MMA operands and loop state (~64 regs/thread)
-        # Store warp: converted data and addresses (~48 regs/thread per warp)
-        load_regs = 1 * 32 * 32  # 1 warp * 32 threads * 32 regs
-        compute_regs = 1 * 32 * 64  # 1 warp * 32 threads * 64 regs
-        store_regs = (num_warps - 2) * 32 * 48  # Remaining warps * 32 threads * 48 regs
-        total_regs = load_regs + compute_regs + store_regs
+        total_regs = (
+            (num_load_warps + num_compute_warps + num_store_warps) * 32 * maxnreg
+        )
 
         # === Occupancy Calculation ===
-        # Maximum CTAs per SM limited by each resource
+        # TMEM is a per-CTA hard limit - either fits or doesn't
+        if tmem_usage_columns > TMEM_MAX_COLUMNS:
+            continue  # Config exceeds TMEM limit, skip it
+
+        # Maximum CTAs per SM limited by SMEM and registers (shared resources)
         max_ctas_by_smem = SMEM_PER_SM // total_smem if total_smem > 0 else 0
-        max_ctas_by_tmem = TMEM_PER_SM // tmem_usage if tmem_usage > 0 else 0
         max_ctas_by_regs = REGS_PER_SM // total_regs if total_regs > 0 else 0
 
         # Also limited by max CTAs per SM (hardware limit, typically 32 on recent GPUs)
         MAX_CTAS_PER_SM = 32
 
-        # Actual occupancy is minimum across all resources
-        estimated_occupancy = min(
-            max_ctas_by_smem, max_ctas_by_tmem, max_ctas_by_regs, MAX_CTAS_PER_SM
-        )
+        # Actual occupancy is minimum across shared resources
+        estimated_occupancy = min(max_ctas_by_smem, max_ctas_by_regs, MAX_CTAS_PER_SM)
 
         # Filter out invalid configs (occupancy < 1 means doesn't fit)
         if estimated_occupancy < 1:
@@ -322,7 +333,10 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
                 BLOCK_K,
                 num_load_buffers,
                 num_acc_buffers,
-                num_warps,
+                num_load_warps,
+                num_compute_warps,
+                num_store_warps,
+                maxnreg,
                 estimated_occupancy,
             )
         )
@@ -517,7 +531,10 @@ if __name__ == "__main__":
                 BLOCK_K,
                 num_load_buffers,
                 num_acc_buffers,
-                num_warps,
+                num_load_warps,
+                num_compute_warps,
+                num_store_warps,
+                maxnreg,
                 occupancy,
             ) = config
 
@@ -533,7 +550,10 @@ if __name__ == "__main__":
                     BLOCK_K,
                     num_load_buffers,
                     num_acc_buffers,
-                    num_warps,
+                    num_load_warps,
+                    num_compute_warps,
+                    num_store_warps,
+                    maxnreg,
                 )
                 ms_curr = triton.testing.do_bench(fn, warmup=2, rep=20)
 
@@ -548,6 +568,14 @@ if __name__ == "__main__":
                 print(
                     f"Error with config: BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}, BLOCK_K={BLOCK_K}"
                 )
+                print(
+                    f"  num_load_buffers={num_load_buffers}, num_acc_buffers={num_acc_buffers}"
+                )
+                print(
+                    f"  num_load_warps={num_load_warps}, num_compute_warps={num_compute_warps}, num_store_warps={num_store_warps}"
+                )
+                tmem_calc = BLOCK_N * num_acc_buffers
+                print(f"  Calculated TMEM usage: {tmem_calc} columns (limit: 512)")
                 traceback.print_exc()
                 print("=" * 60)
                 continue
@@ -563,7 +591,10 @@ if __name__ == "__main__":
                 BLOCK_K,
                 num_load_buffers,
                 num_acc_buffers,
-                num_warps,
+                num_load_warps,
+                num_compute_warps,
+                num_store_warps,
+                maxnreg,
                 occupancy,
             ) = best_config
 
@@ -576,7 +607,7 @@ if __name__ == "__main__":
             # Print config
             print(
                 f"  Best config: BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}, BLOCK_K={BLOCK_K}, "
-                f"num_load_buffers={num_load_buffers}, num_acc_buffers={num_acc_buffers}, num_warps={num_warps}, occupancy={occupancy}"
+                f"num_load_buffers={num_load_buffers}, num_acc_buffers={num_acc_buffers}, num_load_warps={num_load_warps}, num_compute_warps={num_compute_warps}, num_store_warps={num_store_warps}, maxnreg={maxnreg}, occupancy={occupancy}"
             )
 
             # Verify correctness with best config
@@ -629,7 +660,10 @@ if __name__ == "__main__":
                         BLOCK_K,
                         num_load_buffers,
                         num_acc_buffers,
-                        num_warps,
+                        num_load_warps,
+                        num_compute_warps,
+                        num_store_warps,
+                        maxnreg,
                     )
                 proton.finalize(sid)
         else:
