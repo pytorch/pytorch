@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.optim._functional as F
@@ -64,7 +63,7 @@ class _FunctionalAdamax:
         # param group as it's not a common use case.
         self.param_group = {"params": params}
 
-    def step(self, gradients: list[Optional[Tensor]]):
+    def step(self, gradients: list[Tensor | None]):
         params = self.param_group["params"]
         params_with_grad = []
         grads = []

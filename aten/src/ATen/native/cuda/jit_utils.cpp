@@ -12,7 +12,7 @@
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/native/cuda/reduction_template.cuh>
-
+#include <c10/util/Exception.h>
 #include <sstream>
 #include <fstream>
 #include <cstdio>
@@ -1556,19 +1556,19 @@ NvrtcFunction jit_pwise_function(
     ss << '_' << hash_code;
     file_path = ss.str();
 
-    std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
-    if (readin.fail()) {
+    std::ifstream read_stream{file_path, std::ios::in | std::ifstream::binary};
+    if (read_stream.fail()) {
       // NOTE: this does not warn because the file might not exist
       // TODO: consider if this should explicitly check for the file's existence or not to throw
       //   an informative warning
-      readin.close();
+      read_stream.close();
     } else {
       // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
-      std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+      std::vector<char> buffer(std::istreambuf_iterator<char>(read_stream), {});
       AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
       AT_CUDA_DRIVER_CHECK(
         nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-      readin.close();
+      read_stream.close();
       return compiled_kernel_;
     }
   }
@@ -1615,7 +1615,7 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
     std::string log(logsize, '\0');
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, &log[0]));
-    throw std::runtime_error(code + log);
+    TORCH_CHECK(false, code + log);
   }
 
   size_t ptx_size = 0;
