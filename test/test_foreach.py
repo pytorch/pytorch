@@ -12,7 +12,7 @@ from numbers import Number
 import torch
 from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
-from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     parametrize,
     run_tests,
+    serialTest,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
@@ -70,21 +71,19 @@ class RegularFuncWrapper:
 
 
 class ForeachFuncWrapper:
-    def __init__(self, func):
+    def __init__(self, func, skip_profiler_check=False):
         self.func = func
         # Some foreach functions don't have in-place implementations.
         self.is_inplace = False if func is None else func.__name__.endswith("_")
+        self.skip_profiler_check = skip_profiler_check
 
     def __call__(self, inputs, is_cuda, expect_fastpath, **kwargs):
         actual = None
         zero_size = kwargs.pop("zero_size", False)
 
-        # Skip profiler check for CUDA 12.6, 12.8 as the upgrade makes profiler results flaky
-        # https://github.com/pytorch/pytorch/issues/148681. TODO: ADD IT BACK!!!
-        skip_profiler_check = _get_torch_cuda_version() in [(12, 6), (12, 8)]
         if (
             is_cuda
-            and not skip_profiler_check
+            and not self.skip_profiler_check
             and torch.autograd.kineto_available()
             and torch.profiler.ProfilerActivity.CUDA
             in torch.profiler.supported_activities()
@@ -151,11 +150,11 @@ class TestForeach(TestCase):
     def is_cuda(self):
         return self.device_type == "cuda"
 
-    def _get_funcs(self, op):
+    def _get_funcs(self, op, skip_profiler_check=False):
         return (
-            ForeachFuncWrapper(op.method_variant),
+            ForeachFuncWrapper(op.method_variant, skip_profiler_check),
             RegularFuncWrapper(op.ref),
-            ForeachFuncWrapper(op.inplace_variant),
+            ForeachFuncWrapper(op.inplace_variant, skip_profiler_check),
             RegularFuncWrapper(op.ref_inplace),
         )
 
@@ -174,6 +173,7 @@ class TestForeach(TestCase):
         + foreach_other_op_db,
         dtypes=(torch.float32,),
     )
+    @serialTest()
     def test_all_zero_size_tensors_do_not_launch_kernel(self, device, dtype, op):
         wrapped_op, _, inplace_op, _ = self._get_funcs(op)
 
@@ -209,6 +209,7 @@ class TestForeach(TestCase):
             "fastpath" if not x else "slowpath", "inplace" if y else "outplace"
         ),
     )
+    @serialTest()
     def test_parity(self, device, dtype, op, noncontiguous, inplace):
         if inplace:
             _, _, func, ref = self._get_funcs(op)
@@ -307,6 +308,7 @@ class TestForeach(TestCase):
                     self.assertEqual(expected, actual)
 
     @ops(filter(lambda op: op.supports_scalar_self_arg, foreach_binary_op_db))
+    @serialTest()
     @parametrize("is_fastpath", (True, False))
     def test_binary_op_with_scalar_self_support(self, device, dtype, op, is_fastpath):
         def clone(arg):
@@ -359,6 +361,7 @@ class TestForeach(TestCase):
                         [t.grad for t in tensors], [t.grad for t in ref_tensors]
                     )
 
+    @serialTest()
     @ops(foreach_pointwise_op_db)
     @parametrize("is_fastpath", (True, False))
     def test_pointwise_op_with_tensor_of_scalarlist_overload(
@@ -375,7 +378,9 @@ class TestForeach(TestCase):
             inputs = [sample.input, *sample.args]
             kwargs = sample.kwargs.copy()
             disable_fastpath = sample.disable_fastpath and is_fastpath
-            wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(op)
+            wrapped_op, ref, inplace_op, inplace_ref = self._get_funcs(
+                op, skip_profiler_check=True
+            )
             scalars = kwargs.pop("scalars", None)
 
             if is_fastpath and scalars:
@@ -556,6 +561,7 @@ class TestForeach(TestCase):
             torch._foreach_mul_(tensors, 1)
 
     @onlyCUDA
+    @serialTest()
     @dtypes(torch.float32)
     def test_foreach_check_stride_ignore_dims_of_one(self, device, dtype):
         # default tensor stride is (9, 9, 3, 1).
@@ -703,6 +709,7 @@ class TestForeach(TestCase):
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=OpDTypes.supported,
     )
+    @serialTest()
     def test_binary_op_list_slow_path(self, device, dtype, op):
         foreach_op, native_op, foreach_op_, native_op_ = self._get_funcs(op)
         # 0-strides
@@ -817,6 +824,7 @@ class TestForeach(TestCase):
         filter(lambda op: op.supports_out, foreach_binary_op_db),
         dtypes=floating_types_and(torch.half, torch.bfloat16),
     )
+    @serialTest()
     def test_binary_op_float_inf_nan(self, device, dtype, op):
         inputs = (
             [
@@ -852,6 +860,7 @@ class TestForeach(TestCase):
     # but tensors of the same index are on the same device, e.g., ['cuda', 'cpu].
     @onlyCUDA
     @ops(foreach_unary_op_db)
+    @serialTest()
     def test_unary_op_tensors_on_different_devices(self, device, dtype, op):
         method, ref, inplace_method, ref_inplace = self._get_funcs(op)
         # tensors: ['cuda', 'cpu]
@@ -977,6 +986,7 @@ class TestForeach(TestCase):
     # note: BFloat16 has the same number of exponent bits as FP32
     # so if squared L2 norm overflows in BF16, then it also overflows in FP32.
     @onlyCUDA
+    @serialTest()
     @ops(
         [o for o in foreach_reduce_op_db if "norm" in o.name],
         allowed_dtypes=(torch.half, torch.bfloat16),
@@ -1022,6 +1032,7 @@ class TestForeach(TestCase):
         self.assertEqual(expect, actual, equal_nan=False)
 
     @onlyCUDA
+    @serialTest()
     @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
     @parametrize("use_cuda_graph", (False, True))
     @parametrize("w_empty", (False, True))
@@ -1078,6 +1089,7 @@ class TestForeach(TestCase):
             self.assertEqual(expect, actual, equal_nan=True)
 
     @onlyCUDA
+    @serialTest()
     @ops(foreach_reduce_op_db)
     @parametrize("w_empty", (False, True))
     def test_foreach_reduce_large_input(self, device, dtype, op, w_empty):
@@ -1156,6 +1168,7 @@ class TestForeach(TestCase):
         ),
         dtypes=(torch.float,),
     )
+    @serialTest()
     def test_outplace_with_invalid_grads(self, device, dtype, op):
         func, *_ = self._get_funcs(op)
         sample = next(
@@ -1190,6 +1203,7 @@ class TestForeach(TestCase):
         ),
         dtypes=(torch.float32,),
     )
+    @serialTest()
     def test_lifetime_of_grad_fn_when_result_is_saved(self, device, dtype, op):
         def get_ref(func, sample):
             class Foo:
@@ -1337,6 +1351,7 @@ class TestForeach(TestCase):
                     self.assertEqual(ref_input, sample.input)
 
     @onlyCUDA
+    @serialTest()
     @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
     def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
         # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
@@ -1361,6 +1376,7 @@ class TestForeach(TestCase):
                     self.assertTrue(torch.equal(t, ref_t))
 
     @onlyCUDA
+    @serialTest()
     @largeTensorTest("40GB", device="cuda")
     def test_foreach_copy_with_multi_dtypes_large_input(self):
         # see https://github.com/pytorch/pytorch/issues/156261
