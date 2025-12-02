@@ -125,27 +125,27 @@ class OptionalArrayRef final {
 
   // Observers
 
-  constexpr ArrayRef<T>* operator->() noexcept {
+  constexpr ArrayRef<T>* operator->() {
     return &wrapped_opt_array_ref.value();
   }
 
-  constexpr const ArrayRef<T>* operator->() const noexcept {
+  constexpr const ArrayRef<T>* operator->() const {
     return &wrapped_opt_array_ref.value();
   }
 
-  constexpr ArrayRef<T>& operator*() & noexcept {
+  constexpr ArrayRef<T>& operator*() & {
     return wrapped_opt_array_ref.value();
   }
 
-  constexpr const ArrayRef<T>& operator*() const& noexcept {
+  constexpr const ArrayRef<T>& operator*() const& {
     return wrapped_opt_array_ref.value();
   }
 
-  constexpr ArrayRef<T>&& operator*() && noexcept {
+  constexpr ArrayRef<T>&& operator*() && {
     return std::move(wrapped_opt_array_ref.value());
   }
 
-  constexpr const ArrayRef<T>&& operator*() const&& noexcept {
+  constexpr const ArrayRef<T>&& operator*() const&& {
     return std::move(wrapped_opt_array_ref.value());
   }
 
@@ -213,22 +213,17 @@ class OptionalArrayRef final {
     return wrapped_opt_array_ref.emplace(il, std::forward<Args>(args)...);
   }
 
+  constexpr bool operator==(const IntArrayRef& other) const noexcept {
+    return wrapped_opt_array_ref == other;
+  }
+
  private:
   std::optional<ArrayRef<T>> wrapped_opt_array_ref;
 };
 
 using OptionalIntArrayRef = OptionalArrayRef<int64_t>;
 
-inline bool operator==(
-    const OptionalIntArrayRef& a1,
-    const IntArrayRef& other) {
-  if (!a1.has_value()) {
-    return false;
-  }
-  return a1.value() == other;
-}
-
-inline bool operator==(
+inline constexpr bool operator==(
     const c10::IntArrayRef& a1,
     const c10::OptionalIntArrayRef& a2) {
   return a2 == a1;
