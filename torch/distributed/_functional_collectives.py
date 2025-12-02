@@ -208,7 +208,11 @@ def all_gather_tensor(
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
             res = res.wait()  # type: ignore[attr-defined]
-        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+        chunk_size = res.size(0) // group_size
+        chunks = [
+            torch.narrow(res, 0, i * chunk_size, chunk_size) for i in range(group_size)
+        ]
+        res = torch.cat(chunks, dim=gather_dim)
     return res
 
 
@@ -275,7 +279,11 @@ def reduce_scatter_tensor(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size})"
         )
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
+        chunk_size = self.size(scatter_dim) // group_size
+        tensor_list = [
+            torch.narrow(self, scatter_dim, i * chunk_size, chunk_size)
+            for i in range(group_size)
+        ]
         self = torch.cat(tensor_list)
 
     tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
@@ -315,7 +323,11 @@ def reduce_scatter_tensor_autograd(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
         )
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
+        chunk_size = self.size(scatter_dim) // group_size
+        tensor_list = [
+            torch.narrow(self, scatter_dim, i * chunk_size, chunk_size)
+            for i in range(group_size)
+        ]
         self = torch.cat(tensor_list)
 
     tensor = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
