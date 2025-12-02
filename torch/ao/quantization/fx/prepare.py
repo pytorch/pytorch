@@ -34,7 +34,6 @@ from torch.ao.quantization.utils import (
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 from torch.fx.node import Argument
-
 from ._equalize import is_equalization_observer, node_supports_equalization
 from .custom_config import PrepareCustomConfig, StandaloneModuleConfigEntry
 from .match_utils import _find_matches, _MatchResultWithQConfig
@@ -102,6 +101,7 @@ _DEFAULT_QUINT8_QCONFIG_FOR_TARGET_DTYPE_INFO = {
     "input_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation,
     "output_act_obs_or_fq_ctr": torch.ao.quantization.qconfig._default_quint8_placeholder_qconfig.activation,
 }
+
 
 def _needs_obs_or_fq(
     prev_output_dtype: Any,
@@ -181,7 +181,7 @@ def _is_input_arg_dtype_supported_by_backend(
     """Check if the configured qconfig for the argument
     is supported by the backend or not
     """
-    if isinstance(arg, (list, tuple)):
+    if isinstance(arg, (list, tuple)):  # noqa: UP038
         return all(
             _is_input_arg_dtype_supported_by_backend(
                 a, node, qconfig, dtype_config, backend_config
@@ -280,8 +280,12 @@ def _is_output_dtype_supported_by_backend(
 
 
 from typing import Annotated
+
 from torch.fx import Node
+
+
 EdgeOrNode = Annotated[tuple[Node, Node] | Node, None]
+
 
 def _is_observer_in_same_graph(
     node: Node,
@@ -387,7 +391,7 @@ def _qat_swap_modules(
 def _add_matched_node_name_to_set(matched_node_pattern: NodePattern, s: set[str]):
     if isinstance(matched_node_pattern, Node):
         s.add(matched_node_pattern.name)
-    elif isinstance(matched_node_pattern, (list, tuple)):
+    elif isinstance(matched_node_pattern, (list, tuple)):  # noqa: UP038
         for maybe_node in matched_node_pattern:
             _add_matched_node_name_to_set(maybe_node, s)
 
@@ -437,7 +441,7 @@ def _set_target_dtype_info_for_matched_node_pattern(
     """Sets the target_dtype_info for each node in matched_node_pattern
     Note: processed_nodes is used to ensure we only process each node once
     """
-    if isinstance(matched_node_pattern, (list, tuple)):
+    if isinstance(matched_node_pattern, (list, tuple)):  # noqa: UP038
         for node_pattern in matched_node_pattern:
             _set_target_dtype_info_for_matched_node_pattern(
                 node_pattern,
@@ -597,8 +601,9 @@ def _get_output_act_obs_or_fq(
     if not isinstance(arg, Node):
         raise AssertionError("arg must be a Node")
 
-    assert "quantization_annotation" not in arg.meta, \
+    assert "quantization_annotation" not in arg.meta, (
         "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+    )
 
     # Custom module LSTM output is a tuple that we broke down into the internal nodes in order
     # to insert DeQuantStubs (see `_insert_dequant_stubs_for_custom_module_lstm_output`).
@@ -620,13 +625,12 @@ def _get_output_act_obs_or_fq(
         observed_arg = arg.args[0]
         if not isinstance(observed_arg, Node):
             raise AssertionError("Currently we only support observing Node")
-        assert "quantization_annotation" not in observed_arg.meta, \
+        assert "quantization_annotation" not in observed_arg.meta, (
             "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+        )
 
         if "target_dtype_info" not in observed_arg.meta:
-            raise AssertionError(
-                "expected 'target_dtype_info' in observed_arg.meta"
-            )
+            raise AssertionError("expected 'target_dtype_info' in observed_arg.meta")
         output_act_obs_or_fq_ctr = observed_arg.meta["target_dtype_info"][
             "output_act_obs_or_fq_ctr"
         ]
@@ -675,8 +679,9 @@ def _get_arg_as_input_act_obs_or_fq(
     if not isinstance(arg, Node):
         raise AssertionError("arg must be a Node")
 
-    assert "quantization_annotation" not in node.meta, \
+    assert "quantization_annotation" not in node.meta, (
         "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+    )
 
     # we can remove the following path in the future if fx graph mode quantization is
     # no longer used
@@ -720,7 +725,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
     """
     # for ops such as torch.cat([x0, x1]),
     # traverse through the list
-    if isinstance(arg, (list, tuple)):
+    if isinstance(arg, (list, tuple)):  # noqa: UP038
         new_arg_to_return = []
         for inner_arg in arg:
             new_inner_arg = _maybe_insert_input_observer_for_arg_or_kwarg(
@@ -754,8 +759,9 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         # node.meta now
         # regular flow for most nodes, except standalone modules
 
-        assert "quantization_annotation" not in node.meta, \
+        assert "quantization_annotation" not in node.meta, (
             "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+        )
 
         if "target_dtype_info" not in node.meta:
             raise AssertionError("expected 'target_dtype_info' in node.meta")
@@ -764,9 +770,7 @@ def _maybe_insert_input_observer_for_arg_or_kwarg(
         target_dtype_info = node.meta["target_dtype_info"]
         # for nodes that doesn't have `reuse_input_obs_or_fq` configured,
         # we'll default to False, this makes configuring this field optional for users
-        reuse_input_obs_or_fq = target_dtype_info.get(
-            "reuse_input_obs_or_fq", False
-        )
+        reuse_input_obs_or_fq = target_dtype_info.get("reuse_input_obs_or_fq", False)
         arg_as_input_act_obs_or_fq = _get_arg_as_input_act_obs_or_fq(
             arg, node, named_modules, obs_or_fq_map, is_qat
         )
@@ -1012,8 +1016,9 @@ def _maybe_insert_output_observer_for_node(
         raise AssertionError("observer insertion for outputs is handled elsewhere")
 
     is_standalone_module = False
-    assert "quantization_annotation" not in node.meta, \
+    assert "quantization_annotation" not in node.meta, (
         "Please use torchao (https://github.com/pytorch/ao) for pt2e quantization flow"
+    )
 
     if "target_dtype_info" not in node.meta:
         raise AssertionError("expected 'target_dtype_info' in node.meta")
@@ -1139,7 +1144,7 @@ def _maybe_insert_observers_before_graph_output(
                 return observer_node
             else:
                 return maybe_node
-        elif isinstance(maybe_node, (list, tuple)):
+        elif isinstance(maybe_node, (list, tuple)):  # noqa: UP038
             results = [
                 _recursive_maybe_replace_node_with_obs(
                     inner_node, model, named_modules, graph
@@ -1228,7 +1233,7 @@ def propagate_dtypes_for_known_nodes(
 
                 # when an argument is a tuple, it does not show up as another node so we need to go through
                 # all elements of the tuple manually
-                if isinstance(arg, (tuple, list)):
+                if isinstance(arg, (tuple, list)):  # noqa: UP038
                     arg_list = list(arg)
                 else:
                     arg_list = [arg]
@@ -1263,7 +1268,7 @@ def _maybe_make_input_output_share_observers(
     first_arg = None
     # find the first non-Tensor arg
     for i in range(len(node.args)):
-        if isinstance(node.args[i], (Node, list, tuple)):
+        if isinstance(node.args[i], (Node, list, tuple)):  # noqa: UP038
             first_arg = node.args[i]
             break
 
@@ -1271,7 +1276,7 @@ def _maybe_make_input_output_share_observers(
     if first_arg is None:
         return False
 
-    if isinstance(first_arg, (list, tuple)):
+    if isinstance(first_arg, (list, tuple)):  # noqa: UP038
         first_arg_arg = first_arg[0]
     elif isinstance(first_arg, Node):
         first_arg_arg = first_arg
@@ -1309,7 +1314,7 @@ def _maybe_make_input_output_share_observers(
         raise AssertionError("target_to_use must be a string")
     obs_mod_to_use = named_modules[target_to_use]
 
-    if isinstance(first_arg, (list, tuple)):
+    if isinstance(first_arg, (list, tuple)):  # noqa: UP038
         # set all other input observer nodes to use that module
         for input_idx, input_arg in enumerate(first_arg):
             if input_idx == 0:

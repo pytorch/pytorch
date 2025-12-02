@@ -5,7 +5,6 @@ import itertools
 import unittest
 
 import torch
-import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
@@ -196,6 +195,8 @@ class TestPatternMatcherBase(TestCase):
             assert check_autocast == torch.float32
             maybe_autocast = contextlib.nullcontext()
         if check_quantization:
+            raise NotImplementedError("not supported, please migrate to torchao")
+            """
             if quantization_with_autocast:
                 with maybe_autocast:
                     convert_model = _generate_qdq_quantized_model(
@@ -208,6 +209,7 @@ class TestPatternMatcherBase(TestCase):
             with torch.no_grad(), maybe_autocast:
                 _ = torch.compile(convert_model)(*inputs)
                 matcher_check_fn()
+            """
         else:
             with torch.no_grad(), maybe_autocast:
                 clone_inputs = self._clone_inputs(inputs)
@@ -237,7 +239,10 @@ class TestPatternMatcherBase(TestCase):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
             if check_quantization:
+                raise NotImplementedError("not supported, please migrate to torchao")
+                """
                 mod = _generate_qdq_quantized_model(mod, inputs, quantizer=quantizer)
+                """
             expected = mod(*inputs)
             actual, (source_code,) = run_and_get_code(
                 torch.compile(mod, fullgraph=True, dynamic=check_dynamic),
@@ -4295,6 +4300,8 @@ class TestQuantizedPatternMatcher(TestPatternMatcherBase):
                     return self.relu(self.linear(x))
                 return self.linear(x)
 
+        raise NotImplementedError("not supported, please migrate to torchao")
+        """
         quantizer = X86InductorQuantizer().set_global(
             xiq.get_default_x86_inductor_quantization_config()
         )
@@ -4355,6 +4362,7 @@ class TestQuantizedPatternMatcher(TestPatternMatcherBase):
                 check_quantization=True,
                 quantizer=quantizer,
             )
+        """
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
@@ -4803,6 +4811,9 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 )
                 return self.dense(weighted)
 
+        raise NotImplementedError("not supported, please migrate to torchao")
+
+        """
         for annotate_matmul in [True, False]:
             mod = SelfAttnLikeModule(
                 input_dim=64 * 16,
@@ -4839,6 +4850,7 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 check_quantization=True,
                 quantizer=quantizer,
             )
+        """
 
 
 instantiate_device_type_tests(
