@@ -125,6 +125,17 @@ AttentionType = Literal[
 ]
 DtypeString = Literal["bfloat16", "float16", "float32"]
 SpeedupType = Literal["fwd", "bwd"]
+# Operator Name mapping
+backend_to_operator_name = {
+    "math": "math attention kernel",
+    "efficient": "efficient attention kernel",
+    "cudnn": "cudnn attention kernel",
+    "fav2": "flash attention 2 kernel",
+    "fav3": "flash attention 3 kernel",
+    "fakv": "flash attention kv cache kernel",
+    "og-eager": "eager attention kernel",
+    "flex": "flex attention kernel",
+}
 
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
@@ -136,7 +147,7 @@ def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) ->
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    shape: tuple[int]  # [B, Hq, M, Hkv, N, D]
+    shape: tuple[int, ...]  # [B, Hq, M, Hkv, N, D]
     attn_type: str
     dtype: torch.dtype
     calculate_bwd_time: bool
@@ -246,7 +257,7 @@ def generate_inputs(
 
 
 def generate_jagged_inputs(
-    shape: tuple[int],
+    shape: tuple[int, ...],
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -709,7 +720,7 @@ softcap_value = 50
 dropout_p = 0.0
 
 
-def generate_score_mod(attn_type: str, shape: tuple[int]) -> Callable | None:
+def generate_score_mod(attn_type: str, shape: tuple[int, ...]) -> Callable | None:
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
     from attn_gym.mods import generate_alibi_bias, generate_tanh_softcap
@@ -751,7 +762,7 @@ sliding_window_size = 512
 prefix_length = 512
 
 
-def generate_block_mask(attn_type: str, shape: tuple[int]):
+def generate_block_mask(attn_type: str, shape: tuple[int, ...]):
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
 
@@ -826,7 +837,7 @@ def generate_block_mask(attn_type: str, shape: tuple[int]):
     return block_mask, mask_mod_kwargs
 
 
-def get_kernel_options(attn_type: str, shape: tuple[int]):
+def get_kernel_options(attn_type: str, shape: tuple[int, ...]):
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
     kernel_opt_training_dict = {
@@ -913,7 +924,7 @@ def get_backend_context(backend: str):
 
 
 def generate_FA_callable(
-    attn_type: str, shape: tuple[int], dtype: torch.dtype, backend: str, **kwargs
+    attn_type: str, shape: tuple[int, ...], dtype: torch.dtype, backend: str, **kwargs
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
@@ -972,7 +983,7 @@ def generate_FA_callable(
 
 
 def generate_FD_callable(
-    attn_type: str, shape: tuple[int], dtype: torch.dtype
+    attn_type: str, shape: tuple[int, ...], dtype: torch.dtype
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
@@ -1019,7 +1030,10 @@ def generate_FD_callable(
 
 
 def generate_attn_mask_linear_score_mod(
-    shape: tuple[int], block_mask: BlockMask, score_mod: Callable, dtype: torch.dtype
+    shape: tuple[int, ...],
+    block_mask: BlockMask,
+    score_mod: Callable,
+    dtype: torch.dtype,
 ):
     B, Hq, M, N = shape
     if block_mask is None and score_mod is None:
@@ -1044,7 +1058,7 @@ def generate_attn_mask_linear_score_mod(
 
 def generate_eager_sdpa(
     attn_type: str,
-    shape: tuple[int],
+    shape: tuple[int, ...],
     dtype: torch.dtype,
     block_mask: BlockMask,
     score_mod: Callable | None = None,
@@ -1265,12 +1279,14 @@ def _output_json_for_dashboard(
                 model: ModelInfo
                 metric: MetricInfo
 
+            operator_name = backend_to_operator_name.get(backend, backend)
+
             # Benchmark extra info
             benchmark_extra_info = {
                 "input_config": input_config,
                 "device": device,
                 "arch": device_arch,
-                "operator_name": backend,
+                "operator_name": operator_name,
                 "attn_type": config.attn_type,
                 "shape": str(config.shape),
                 "max_autotune": config.max_autotune,
@@ -1288,7 +1304,7 @@ def _output_json_for_dashboard(
                     type="attention-benchmark",
                     origins=["pytorch"],
                     extra_info={
-                        "operator_name": backend,
+                        "operator_name": operator_name,
                         "attn_type": config.attn_type,
                     },
                 ),
@@ -1315,7 +1331,7 @@ def _output_json_for_dashboard(
                         type="attention-benchmark",
                         origins=["pytorch"],
                         extra_info={
-                            "operator_name": backend,
+                            "operator_name": operator_name,
                         },
                     ),
                     metric=MetricInfo(
@@ -1341,7 +1357,7 @@ def _output_json_for_dashboard(
                         type="attention-benchmark",
                         origins=["pytorch"],
                         extra_info={
-                            "operator_name": backend,
+                            "operator_name": operator_name,
                         },
                     ),
                     metric=MetricInfo(
@@ -1371,7 +1387,7 @@ def _output_json_for_dashboard(
                         type="attention-benchmark",
                         origins=["pytorch"],
                         extra_info={
-                            "operator_name": backend,
+                            "operator_name": operator_name,
                         },
                     ),
                     metric=MetricInfo(
