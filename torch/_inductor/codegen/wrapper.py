@@ -2844,7 +2844,7 @@ class PythonWrapperCodegen(CodeGen):
         original_fxnode_name=None,
     ):
         device = device or V.graph.get_current_device_or_throw()
-        if not triton and device.type != "cuda":
+        if not triton and device.type not in ("cuda", "xpu"):
             if device.type == "cpu":
                 self.writeline(self.wrap_kernel_call(kernel_name, call_args))
             elif device.type == "mps":

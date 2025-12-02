@@ -66,6 +66,7 @@ RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-r
 
 # Install XPU Dependencies
 ARG XPU_VERSION
+ENV XPU_VERSION=${XPU_VERSION}
 COPY ./common/install_xpu.sh install_xpu.sh
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 
