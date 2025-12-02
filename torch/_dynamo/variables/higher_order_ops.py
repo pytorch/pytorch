@@ -1400,6 +1400,19 @@ def speculate_subgraph_with_auto_output_flattening(
                 tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
             )
 
+            # Special case - if users uses
+            # `traced_with_externally_visible_side_effects`, we still need to
+            # return the intermediates as outputs. However, this API gets
+            # triggered during the hop tracing,  and we don't know at this point
+            # of time, if the API will take into effect. To handle this, we have
+            # a flag traced_with_externally_visible_side_effects (default=False)
+            # that is set to True anytime
+            # `traced_with_externally_visible_side_effects` is set. We reset it
+            # with the old value after the hop is traced out.
+            old_value = (
+                tx.output.current_tracer.traced_with_externally_visible_side_effects
+            )
+
             output = trace_hop_function_with_auto_output_flattening(
                 f,
                 tx,
@@ -1483,11 +1496,20 @@ def speculate_subgraph_with_auto_output_flattening(
             # want this to be supported for other Hops as well, specifically
             # nested_compile_region and autograd.Function. Today, its safe
             # because we error out on seeing a side-effect.
+
+            allow_side_effects = (
+                allow_side_effects
+                or tx.output.current_tracer.traced_with_externally_visible_side_effects
+            )
             if allow_side_effects:
                 extra_outputs = _collect_intermediate_outputs(
                     tx, subtracer, graph_output_vts
                 )
                 graph_output_vts = graph_output_vts + tuple(extra_outputs)
+
+            tx.output.current_tracer.traced_with_externally_visible_side_effects = (
+                old_value
+            )
 
             validate_subgraph_output_types(graph_output_vts)
 
@@ -2911,7 +2933,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         subgraph_name="wrap_body",
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
-
         (
             body_r,
             body_graph,

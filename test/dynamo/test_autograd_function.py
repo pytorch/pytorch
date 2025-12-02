@@ -2,7 +2,6 @@
 # flake8: noqa: B950
 import copy
 import math
-import unittest
 from dataclasses import dataclass
 
 import torch
