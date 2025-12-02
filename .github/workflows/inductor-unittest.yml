@@ -7,9 +7,12 @@ on:
   workflow_call:
   schedule:
     - cron: 29 8 * * * # about 1:29am PDT, for mem leak check and rerun disabled tests.
+  pull_request:
+    paths:
+      - .github/workflows/inductor-unittest.yml
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-unittest
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-unittest
   cancel-in-progress: true
 
 permissions:
