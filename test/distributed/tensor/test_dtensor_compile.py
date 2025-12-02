@@ -534,7 +534,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
             # check output placements
             self.assertEqual(out.placements, out_placements)
-            return fn
 
         test_placements(
             (Replicate(), Replicate()),
