@@ -656,20 +656,19 @@ class TestViewOps(DTensorTestBase):
     @with_comms
     def test_dtensor_flatten_1d(self):
         mesh: DeviceMesh = init_device_mesh(self.device_type, (self.world_size,))
-        tensor_dim_values = [
-            2 * self.world_size - 1,
-            2 * self.world_size,
-            2 * self.world_size + 1,
-        ]
-
         for tensor_ndim in [2, 3, 4]:
-            for tensor_dims in list(
-                itertools.product(tensor_dim_values, repeat=tensor_ndim)
-            ):
-                # Shard
-                for flatten_start in range(tensor_ndim):
-                    for flatten_end in range(flatten_start + 2, tensor_ndim + 1):
-                        for shard_dim in range(flatten_start, flatten_end):
+            for flatten_start in range(tensor_ndim):
+                for flatten_end in range(flatten_start + 2, tensor_ndim + 1):
+                    # Shard
+                    for shard_dim in range(flatten_start, flatten_end):
+                        tensor_dim_values = [
+                            2 * mesh.size(0) - 1,
+                            2 * mesh.size(0),
+                            2 * mesh.size(0) + 1,
+                        ]
+                        for tensor_dims in list(
+                            itertools.product(tensor_dim_values, repeat=tensor_ndim)
+                        ):
                             placements = (Shard(shard_dim),)
                             ctx = contextlib.nullcontext()
                             # uneven shard on last dim (flatten_end - 1) is supported
@@ -686,9 +685,15 @@ class TestViewOps(DTensorTestBase):
                                     placements,
                                 )
 
-                # Replicate
-                for flatten_start in range(tensor_ndim):
-                    for flatten_end in range(flatten_start + 2, tensor_ndim + 1):
+                    # Replicate
+                    tensor_dim_values = [
+                        2 * mesh.size(0) - 1,
+                        2 * mesh.size(0),
+                        2 * mesh.size(0) + 1,
+                    ]
+                    for tensor_dims in list(
+                        itertools.product(tensor_dim_values, repeat=tensor_ndim)
+                    ):
                         placements = (Replicate(),)
                         self._test_dtensor_flatten_1d_replicate(
                             tensor_dims,
