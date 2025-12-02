@@ -857,6 +857,43 @@ class DistTensorOpsTest(DTensorTestBase):
                     self.assertEqual(x.full_tensor(), y)
 
 
+class DistArgMaxArgMinTest(DTensorTestBase):
+    _ops = [torch.argmax, torch.argmin]
+    sample = [
+        [0, 2, 1, 11, 5, 9, -2, -23],
+        [3, 5, 7, 9, 0, -1, 4, 2],
+        [8, 4, 6, -5, -10, 12, 7, 1],
+        [13, 6, 9, -5, 0, 4, 2, 8],
+        [4, 9, 2, 1, -6, -3, 5, 7],
+        [0, -4, -2, 8, 6, 3, 12, -7],
+        [20, 6, -3, 1, -8, 4, 2, 0],
+        [5, 9, 11, -1, -4, 2, 3, 8],
+    ]
+    placements_tuples = (
+        [Partial(), Shard(1)],
+        [Partial(), Shard(0)],
+        [Shard(0), Shard(1)],
+        [Replicate(), Shard(0)],
+        [Replicate(), Shard(1)],
+    )
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_argmax_argmin_with_placements(self):
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.tensor(self.sample, device=self.device_type)
+        for placements in self.placements_tuples:
+            dtensor_input = distribute_tensor(local_tensor, device_mesh, placements)
+            for op in self._ops:
+                d_result = op(dtensor_input, dim=1)
+                full_dresult = d_result.full_tensor()
+                local_result = op(local_tensor, dim=1)
+                self.assertEqual(full_dresult, local_result)
+
+    def build_device_mesh(self):
+        return init_device_mesh(self.device_type, (2, 2))
+
+
 DistTensorOpsTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorOpsTest,
 )
