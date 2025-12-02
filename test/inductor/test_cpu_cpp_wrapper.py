@@ -171,7 +171,8 @@ if RUN_CPU:
         BaseTest("test_add_complex4"),
         BaseTest("test_add_complex4", test_build_separate=True),
         BaseTest("test_as_strided"),  # buffer reuse
-        BaseTest("test_bernoulli1"),
+        BaseTest("test_bernoulli1_combo_kernels_False"),
+        BaseTest("test_bernoulli1_combo_kernels_True"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm1", test_build_separate=True),
