@@ -12,6 +12,7 @@ import subprocess
 import sys
 from collections import namedtuple
 from typing import cast as _cast
+import functools
 
 
 try:
@@ -266,7 +267,7 @@ def get_cudnn_version(run_lambda):
     result = "\n".join(files)
     return "Probably one of the following:\n{}".format(result)
 
-
+@functools.cache
 def get_nvidia_smi():
     # Note: nvidia-smi is currently available only on Windows and Linux
     smi = "nvidia-smi"
@@ -284,7 +285,7 @@ def get_nvidia_smi():
                 break
     return smi
 
-
+@functools.cache
 def _detect_linux_pkg_manager():
     if get_platform() != "linux":
         return "N/A"
@@ -542,7 +543,7 @@ def get_cpu_info(run_lambda):
         cpu_info = err
     return cpu_info
 
-
+@functools.cache
 def get_platform():
     if sys.platform.startswith("linux"):
         return "linux"
