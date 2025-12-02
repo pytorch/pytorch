@@ -1411,6 +1411,7 @@ class GraphLowering(torch.fx.Interpreter):
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)
+            or target in self.mutated_named_buffers
         ):
             return self.add_tensor_constant(value, target)
 
@@ -1419,10 +1420,7 @@ class GraphLowering(torch.fx.Interpreter):
                 return Constant(
                     value=value.item(), dtype=value.dtype, device=value.device
                 )
-            if (
-                self.can_inline_constant(value)
-                and target not in self.mutated_named_buffers
-            ):
+            if self.can_inline_constant(value):
                 log.debug("Inlining constant: %s ", str(target))
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
