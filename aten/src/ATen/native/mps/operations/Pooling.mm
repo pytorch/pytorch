@@ -388,36 +388,46 @@ static PoolSizes process_pool_sizes(const Tensor& input,
     output_size[leading_dims + dim] = output_pooling_size[dim];
   }
 
-  // Validate output sizes are not too small (matching CPU behavior)
-  for (const auto dim : c10::irange(pooling_dims)) {
-    if (output_pooling_size[dim] < 1) {
-      std::stringstream input_size_str, output_size_str;
-      // Build input size string for pooling dimensions
-      for (const auto d : c10::irange(pooling_dims)) {
-        if (d > 0)
-          input_size_str << 'x';
-        input_size_str << input.size(leading_dims + d);
-      }
-      // Build output size string for pooling dimensions
-      for (const auto d : c10::irange(pooling_dims)) {
-        if (d > 0)
-          output_size_str << 'x';
-        output_size_str << output_pooling_size[d];
-      }
-      // Always throw error - no need for extra bool flag
-      TORCH_CHECK(output_pooling_size[dim] >= 1,
-                  "Given input size: (",
-                  input.size(leading_dims - 1),
-                  'x',
-                  input_size_str.str(),
-                  "). ",
-                  "Calculated output size: (",
-                  input.size(leading_dims - 1),
-                  'x',
-                  output_size_str.str(),
-                  "). ",
-                  "Output size is too small");
-    }
+  // Validate output sizes using the same shape check functions as CPU/CUDA
+  if (pooling_dims == 2) {
+    const auto memory_format = input.suggest_memory_format();
+    pool2d_shape_check(input,
+                       kernel_size_expanded[0],
+                       kernel_size_expanded[1],
+                       stride_expanded[0],
+                       stride_expanded[1],
+                       padding_expanded[0],
+                       padding_expanded[1],
+                       dilation_expanded[0],
+                       dilation_expanded[1],
+                       input.size(leading_dims - 1),
+                       input.size(leading_dims),
+                       input.size(leading_dims + 1),
+                       output_pooling_size[0],
+                       output_pooling_size[1],
+                       memory_format);
+  } else if (pooling_dims == 3) {
+    pool3d_shape_check(input,
+                       input.size(leading_dims - 1),
+                       kernel_size_expanded[0],
+                       kernel_size_expanded[1],
+                       kernel_size_expanded[2],
+                       stride_expanded[0],
+                       stride_expanded[1],
+                       stride_expanded[2],
+                       padding_expanded[0],
+                       padding_expanded[1],
+                       padding_expanded[2],
+                       dilation_expanded[0],
+                       dilation_expanded[1],
+                       dilation_expanded[2],
+                       input.size(leading_dims),
+                       input.size(leading_dims + 1),
+                       input.size(leading_dims + 2),
+                       output_pooling_size[0],
+                       output_pooling_size[1],
+                       output_pooling_size[2],
+                       op_name.c_str());
   }
 
   return PoolSizes(dims,
