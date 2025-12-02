@@ -5,7 +5,8 @@ This package enables an interface for accessing MTIA backend in python
 
 import threading
 import warnings
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 from torch import device as _device, Tensor
@@ -302,7 +303,7 @@ class StreamContext:
         self.idx = _get_device_index(None, True)
         if not torch.jit.is_scripting():
             if self.idx is None:
-                self.idx = -1
+                self.idx = -1  # pyrefly: ignore [bad-assignment]
 
         self.src_prev_stream = (
             None if not torch.jit.is_scripting() else torch.mtia.default_stream(None)
@@ -395,6 +396,7 @@ def set_rng_state(
 
 
 from .memory import *  # noqa: F403
+from .mtia_graph import *  # noqa: F403
 
 
 __all__ = [
@@ -423,4 +425,7 @@ __all__ = [
     "set_rng_state",
     "get_rng_state",
     "is_bf16_supported",
+    "MTIAGraph",
+    "graph",
+    "graph_pool_handle",
 ]

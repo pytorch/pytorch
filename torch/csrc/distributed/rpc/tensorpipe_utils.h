@@ -49,8 +49,8 @@ extern TORCH_API std::array<
 class TORCH_API TensorpipeDeviceTypeConverterRegistrar {
  public:
   TensorpipeDeviceTypeConverterRegistrar(
-      DeviceType,
-      const TensorpipeDeviceTypeConverter*);
+      DeviceType /*type*/,
+      const TensorpipeDeviceTypeConverter* /*impl*/);
 };
 
 #define C10_REGISTER_TENSORPIPE_DEVICE_TYPE_CONVERTER(                     \

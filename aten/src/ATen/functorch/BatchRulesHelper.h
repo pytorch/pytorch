@@ -283,7 +283,7 @@ inline void boxed_existing_bdim_all_batch_rule(
 // Use when all tensors arguments accept one (normal) batch dim.
 // This batching rule expands the batch dim on all Tensors, reshapes it into
 // dim 0, calls the op, and then reshapes the batch dim out of dim 0.
-// This is not the most efficient thing; if there are alternatives, plese try
+// This is not the most efficient thing; if there are alternatives, please try
 // to use them. Use this only as a last resort.
 #define EXISTING_BDIM_ALL_BOXED(op) \
   m.impl(#op, torch::CppFunction::makeFromBoxedFunction<boxed_existing_bdim_all_batch_rule>());
@@ -410,7 +410,7 @@ struct ExistingBdimBatchRuleHelper<F, Func, c10::guts::typelist::typelist<A, T..
 
 
 template <typename F, F Method, typename... ExtraArgs>
-Tensor& unary_inplace_batch_rule(Tensor& self, std::optional<int64_t>, ExtraArgs... extra_args) {
+Tensor& unary_inplace_batch_rule(Tensor& self, std::optional<int64_t> /*unused*/, ExtraArgs... extra_args) {
   INVOKE(self, Method)(std::forward<ExtraArgs>(extra_args)...);
   return self;
 }

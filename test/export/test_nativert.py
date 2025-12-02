@@ -2,7 +2,6 @@
 
 
 import copy
-import pathlib
 import tempfile
 import unittest
 
@@ -12,6 +11,7 @@ import torch
 import torch._dynamo as torchdynamo
 from torch._C._nativert import PyModelRunner
 from torch._dynamo.test_case import TestCase
+from torch._environment import is_fbcode
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.nativert.backends._lower_utils import (
     lower_exported_program,
@@ -96,55 +96,55 @@ def run_with_nativert(ep):
     MODEL_NAME = "forward"
 
     # TODO Does named tempfile have collision?
-    with tempfile.NamedTemporaryFile(suffix=".pt2", delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
         torch.export.pt2_archive._package.package_pt2(
             f, exported_programs={MODEL_NAME: ep_infer}
         )
         filename = f.name
 
-    try:
-        ep_args, ep_kwargs = ep_infer.example_inputs
-        ep_args_copied, ep_kwargs_copied = (
-            copy.deepcopy(ep_args),
-            copy.deepcopy(ep_kwargs),
-        )
-        torch.manual_seed(0)
         try:
-            flat_expected = pytree.tree_leaves(
-                ep_infer.module()(*ep_args_copied, **ep_kwargs_copied)
+            ep_args, ep_kwargs = ep_infer.example_inputs
+            ep_args_copied, ep_kwargs_copied = (
+                copy.deepcopy(ep_args),
+                copy.deepcopy(ep_kwargs),
             )
-        except Exception as e:
-            raise unittest.case.SkipTest(str(e)) from e
+            torch.manual_seed(0)
+            try:
+                flat_expected = pytree.tree_leaves(
+                    ep_infer.module()(*ep_args_copied, **ep_kwargs_copied)
+                )
+            except Exception as e:
+                raise unittest.case.SkipTest(str(e)) from e
 
-        model_runner = PyModelRunner(filename, MODEL_NAME)
-        torch.manual_seed(0)
-        if _is_supported_types((ep_args, ep_kwargs)):
-            results = model_runner.run(*ep_args, **ep_kwargs)
-        else:
-            results = model_runner.run_with_flat_inputs_and_outputs(
-                *pytree.tree_leaves((ep_args, ep_kwargs))
-            )
-        flat_results = pytree.tree_leaves(results)
-        assert len(flat_results) == len(flat_expected)
-        for result, expected in zip(flat_results, flat_expected):
-            assert type(result) == type(expected)
-            if isinstance(result, torch.Tensor) and isinstance(expected, torch.Tensor):
-                assert result.shape == expected.shape
-                assert result.dtype == expected.dtype
-                assert result.device == expected.device
-                torch.testing.assert_close(result, expected, equal_nan=True)
+            model_runner = PyModelRunner(filename, MODEL_NAME)
+            torch.manual_seed(0)
+            if _is_supported_types((ep_args, ep_kwargs)):
+                results = model_runner.run(*ep_args, **ep_kwargs)
             else:
-                assert result == expected
-    except RuntimeError as e:
-        # User need to register pytree type on the cpp side, which
-        # cannot be tested in python unittest.
-        if "Unknown pytree node type" in str(e):
-            pass
-        else:
-            raise e
-    finally:
-        pathlib.Path(filename).unlink(missing_ok=True)
-    return ep
+                results = model_runner.run_with_flat_inputs_and_outputs(
+                    *pytree.tree_leaves((ep_args, ep_kwargs))
+                )
+            flat_results = pytree.tree_leaves(results)
+            assert len(flat_results) == len(flat_expected)
+            for result, expected in zip(flat_results, flat_expected):
+                assert type(result) is type(expected)
+                if isinstance(result, torch.Tensor) and isinstance(
+                    expected, torch.Tensor
+                ):
+                    assert result.shape == expected.shape
+                    assert result.dtype == expected.dtype
+                    assert result.device == expected.device
+                    torch.testing.assert_close(result, expected, equal_nan=True)
+                else:
+                    assert result == expected
+        except RuntimeError as e:
+            # User need to register pytree type on the cpp side, which
+            # cannot be tested in python unittest.
+            if "Unknown pytree node type" in str(e):
+                pass
+            else:
+                raise e
+        return ep
 
 
 def mocked_nativert_export_strict(*args, **kwargs):
@@ -197,6 +197,7 @@ def make_dynamic_cls(cls, strict=False):
 
 @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
+@unittest.skipIf(not is_fbcode(), "FBcode only for now")
 class TestNativeRT(TestCase):
     @staticmethod
     def get_module():
@@ -285,7 +286,7 @@ class TestNativeRT(TestCase):
         )
 
         # package everything needed for the NativeRT to execute the AOTI delegate
-        with tempfile.NamedTemporaryFile(suffix=".pt2", delete=False) as f:
+        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
             package_nativert_with_aoti_delegate(
                 f,
                 MODEL_NAME,
@@ -296,59 +297,56 @@ class TestNativeRT(TestCase):
             )
             filename = f.name
 
-        try:
-            ep_args, ep_kwargs = aoti_delegate_ep.example_inputs
-            ep_args_copied, ep_kwargs_copied = (
-                copy.deepcopy(ep_args),
-                copy.deepcopy(ep_kwargs),
-            )
-            torch.manual_seed(0)
             try:
-                flat_expected = pytree.tree_leaves(
-                    aoti_delegate_ep.module()(*ep_args_copied, **ep_kwargs_copied)
+                ep_args, ep_kwargs = aoti_delegate_ep.example_inputs
+                ep_args_copied, ep_kwargs_copied = (
+                    copy.deepcopy(ep_args),
+                    copy.deepcopy(ep_kwargs),
                 )
-            except Exception as e:
-                raise unittest.case.SkipTest(str(e)) from e
+                torch.manual_seed(0)
+                try:
+                    flat_expected = pytree.tree_leaves(
+                        aoti_delegate_ep.module()(*ep_args_copied, **ep_kwargs_copied)
+                    )
+                except Exception as e:
+                    raise unittest.case.SkipTest(str(e)) from e
 
-            model_runner = PyModelRunner(filename, f"{MODEL_NAME}-{BACKEND_ID}")
-            torch.manual_seed(0)
-            if _is_supported_types((ep_args, ep_kwargs)):
-                results = model_runner.run(*ep_args, **ep_kwargs)
-            else:
-                results = model_runner.run_with_flat_inputs_and_outputs(
-                    *pytree.tree_leaves((ep_args, ep_kwargs))
-                )
-            flat_results = pytree.tree_leaves(results)
-            assert len(flat_results) == len(flat_expected)
-            for result, expected in zip(flat_results, flat_expected):
-                assert type(result) == type(expected)
-                if isinstance(result, torch.Tensor) and isinstance(
-                    expected, torch.Tensor
-                ):
-                    assert result.shape == expected.shape
-                    assert result.dtype == expected.dtype
-                    assert result.device == expected.device
-                    torch.testing.assert_close(result, expected, equal_nan=True)
+                model_runner = PyModelRunner(filename, f"{MODEL_NAME}-{BACKEND_ID}")
+                torch.manual_seed(0)
+                if _is_supported_types((ep_args, ep_kwargs)):
+                    results = model_runner.run(*ep_args, **ep_kwargs)
                 else:
-                    assert result == expected
-        except RuntimeError as e:
-            # User need to register pytree type on the cpp side, which
-            # cannot be tested in python unittest.
-            if "Unknown pytree node type" in str(e):
-                pass
-            else:
-                raise e
-        finally:
-            pathlib.Path(filename).unlink(missing_ok=True)
+                    results = model_runner.run_with_flat_inputs_and_outputs(
+                        *pytree.tree_leaves((ep_args, ep_kwargs))
+                    )
+                flat_results = pytree.tree_leaves(results)
+                assert len(flat_results) == len(flat_expected)
+                for result, expected in zip(flat_results, flat_expected):
+                    assert type(result) is type(expected)
+                    if isinstance(result, torch.Tensor) and isinstance(
+                        expected, torch.Tensor
+                    ):
+                        assert result.shape == expected.shape
+                        assert result.dtype == expected.dtype
+                        assert result.device == expected.device
+                        torch.testing.assert_close(result, expected, equal_nan=True)
+                    else:
+                        assert result == expected
+            except RuntimeError as e:
+                # User need to register pytree type on the cpp side, which
+                # cannot be tested in python unittest.
+                if "Unknown pytree node type" in str(e):
+                    pass
+                else:
+                    raise e
 
 
-tests = [
-    test_export.TestExport,
-]
-for test in tests:
-    make_dynamic_cls(test, strict=True)
-    make_dynamic_cls(test, strict=False)
-del test
+if is_fbcode():
+    for test in [test_export.TestExport]:
+        make_dynamic_cls(test, strict=True)
+        make_dynamic_cls(test, strict=False)
+    del test
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

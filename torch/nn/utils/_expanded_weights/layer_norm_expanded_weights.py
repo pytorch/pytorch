@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -17,6 +16,7 @@ from .expanded_weights_utils import (
 @implements_per_sample_grads(F.layer_norm)
 class LayerNormPerSampleGrad(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx, kwarg_names, _, *expanded_args_and_kwargs):
         expanded_args, expanded_kwargs = standard_kwargs(
             kwarg_names, expanded_args_and_kwargs
@@ -42,6 +42,7 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
         return output
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         def weight_per_sample_grad(weight):
             return sum_over_all_but_batch_and_last_n(
@@ -52,7 +53,7 @@ class LayerNormPerSampleGrad(torch.autograd.Function):
         input, normalized_shape = ctx.args
         mean, rstd = ctx.mean, ctx.rstd
 
-        results: list[Optional[torch.Tensor]] = []
+        results: list[torch.Tensor | None] = []
         results.append(None)  # for kwarg names
         results.append(None)  # for op reference
         if input.requires_grad:

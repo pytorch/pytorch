@@ -4,14 +4,11 @@
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/python_strings.h>
 
-#include <ATen/Layout.h>
-
-#include <structmember.h>
 #include <cstring>
 #include <string>
 
 PyObject* THPLayout_New(at::Layout layout, const std::string& name) {
-  auto type = (PyTypeObject*)&THPLayoutType;
+  auto type = &THPLayoutType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   if (!self)
     throw python_error();
@@ -36,7 +33,7 @@ PyTypeObject THPLayoutType = {
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    (reprfunc)THPLayout_repr, /* tp_repr */
+    reinterpret_cast<reprfunc>(THPLayout_repr), /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
@@ -72,7 +69,8 @@ void THPLayout_init(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPLayoutType);
-  if (PyModule_AddObject(module, "layout", (PyObject*)&THPLayoutType) != 0) {
+  if (PyModule_AddObject(
+          module, "layout", reinterpret_cast<PyObject*>(&THPLayoutType)) != 0) {
     throw python_error();
   }
 }

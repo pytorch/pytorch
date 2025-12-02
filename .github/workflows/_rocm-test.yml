@@ -97,23 +97,10 @@ jobs:
         shell: bash
         run: |
           ngpu=$(rocminfo | grep -c -E 'Name:.*\sgfx')
-          if [[ $ngpu -lt 4 ]]; then
-            echo "Error: only $ngpu GPU(s) detected, at least 4 GPUs are needed for distributed jobs"
+          if [[ $ngpu -lt 2 ]]; then #We are temporarily reducing this down to 2 from 4 so that we can run tests on nodes with less gpus.
+            echo "Error: only $ngpu GPU(s) detected, at least 2 GPUs are needed for distributed jobs"
             exit 1
           fi
-
-      - name: configure aws credentials
-        id: aws_creds
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
-          aws-region: us-east-1
-          role-duration-seconds: 18000
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        continue-on-error: true
-        uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
 
       - name: Calculate docker image
         id: calculate-docker-image

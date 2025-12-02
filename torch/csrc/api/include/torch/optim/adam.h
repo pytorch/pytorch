@@ -38,7 +38,7 @@ struct TORCH_API AdamParamState
   TORCH_ARG(int64_t, step) = 0;
   TORCH_ARG(torch::Tensor, exp_avg);
   TORCH_ARG(torch::Tensor, exp_avg_sq);
-  TORCH_ARG(torch::Tensor, max_exp_avg_sq) = {};
+  TORCH_ARG(torch::Tensor, max_exp_avg_sq);
 
  public:
   void serialize(torch::serialize::InputArchive& archive) override;

@@ -97,7 +97,6 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  {%- if config["gpu_arch_type"] != "cuda-aarch64" %}
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -177,6 +176,9 @@ jobs:
     runs-on: linux.rocm.gpu.mi250
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -217,7 +219,6 @@ jobs:
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
     {%- endif %}
-  {%- endif %}
 
 {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config) }}

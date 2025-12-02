@@ -18,10 +18,10 @@ class KernelFunction;
 // implementation notes; notably, this does NOT actually go through the
 // boxing/unboxing codepath.
 TORCH_API void fallthrough_kernel(
-    OperatorKernel*,
-    const OperatorHandle&,
-    DispatchKeySet,
-    Stack*);
+    OperatorKernel* /*unused*/,
+    const OperatorHandle& /*unused*/,
+    DispatchKeySet /*unused*/,
+    Stack* /*unused*/);
 
 // Note [Ambiguity in AutogradOther kernel]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -62,10 +62,10 @@ TORCH_API void fallthrough_kernel(
 // than arbitrarily pick one or the other, we just register a kernel that raises
 // an error and let the user decide how to proceed.
 TORCH_API void ambiguous_autogradother_kernel(
-    OperatorKernel*,
-    const OperatorHandle&,
-    DispatchKeySet,
-    Stack*);
+    OperatorKernel* /*unused*/,
+    const OperatorHandle& /*op*/,
+    DispatchKeySet /*unused*/,
+    Stack* /*unused*/);
 
 // Note [named_not_supported_kernel]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -75,10 +75,10 @@ TORCH_API void ambiguous_autogradother_kernel(
 // give a good error message in cases when boxing is not supported).  When
 // boxing is universally supported this can be removed.
 [[noreturn]] TORCH_API void named_not_supported_kernel(
-    OperatorKernel*,
-    const OperatorHandle&,
-    DispatchKeySet,
-    Stack*);
+    OperatorKernel* /*unused*/,
+    const OperatorHandle& /*op*/,
+    DispatchKeySet /*unused*/,
+    Stack* /*unused*/);
 
 /**
  * BoxedKernel is similar to a std::function storing a boxed kernel.
@@ -185,16 +185,16 @@ class TORCH_API BoxedKernel final {
 
   template <BoxedKernelFunction* func>
   static void make_boxed_function(
-      OperatorKernel*,
+      OperatorKernel* /*unused*/,
       const OperatorHandle& opHandle,
-      DispatchKeySet,
+      DispatchKeySet /*unused*/,
       Stack* stack);
 
   template <BoxedKernelFunction_withDispatchKeys* func>
   static void make_boxed_function(
-      OperatorKernel*,
+      OperatorKernel* /*unused*/,
       const OperatorHandle& opHandle,
-      DispatchKeySet,
+      DispatchKeySet /*ks*/,
       Stack* stack);
 
   explicit BoxedKernel(

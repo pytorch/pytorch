@@ -13,6 +13,11 @@
 #define _PyCode_SetExtra PyUnstable_Code_SetExtra
 #endif
 
+namespace {
+// Short-term fix for: https://github.com/pytorch/pytorch/issues/166926
+bool use_lru = true;
+} // namespace
+
 Py_ssize_t extra_index = -1;
 
 CacheEntry* ExtraState::get_first_entry() {
@@ -190,7 +195,9 @@ void lookup(
     ++index;
   }
   if (found) {
-    extra_state->move_to_front(found);
+    if (use_lru) {
+      extra_state->move_to_front(found);
+    }
     *maybe_cached_code = found->code.ptr();
     *trace_annotation = found->trace_annotation.c_str();
     return;
@@ -202,8 +209,14 @@ CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guarded_code,
     PyObject* backend) {
-  extra_state->cache_entry_list.emplace_front(guarded_code, backend);
-  auto new_iter = extra_state->cache_entry_list.begin();
+  std::list<CacheEntry>::iterator new_iter;
+  if (use_lru) {
+    extra_state->cache_entry_list.emplace_front(guarded_code, backend);
+    new_iter = extra_state->cache_entry_list.begin();
+  } else {
+    extra_state->cache_entry_list.emplace_back(guarded_code, backend);
+    new_iter = std::prev(extra_state->cache_entry_list.end());
+  }
   new_iter->_owner = extra_state;
   new_iter->_owner_loc = new_iter;
   // Set guard_manager references to extra_state and CacheEntry
@@ -267,6 +280,14 @@ void _load_precompile_entry(
   auto entry =
       PrecompileEntry(std::move(guard_manager), std::move(dynamo_code));
   extra->precompile_entries.push_back(std::move(entry));
+}
+
+void _set_lru_cache(py::object boolean) {
+  if (py::cast<bool>(boolean)) {
+    use_lru = true;
+  } else {
+    use_lru = false;
+  }
 }
 
 py::list _debug_get_precompile_entries(const py::handle& code_obj) {

@@ -162,6 +162,34 @@ class DynamoProfilerTests(torch._dynamo.test_case.TestCase):
             any(e.name == "TorchDynamo Cache Lookup" for e in prof.events())
         )
 
+    def test_profiler_enabled_export(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                x = torch.sin(x)
+                if torch.autograd._profiler_enabled():
+                    return torch.cos(x)
+                else:
+                    return torch.sigmoid(x)
+
+        mod = Mod()
+
+        x = torch.randn(4)
+        opt_mod = torch._dynamo.export(mod, (x))
+
+        ref = mod(x)
+        res = opt_mod.graph_module(x)
+        self.assertEqual(ref, res)
+
+        with torch.autograd.profiler.profile():
+            ref = mod(x)
+            # Reexport because export skips guards
+            opt_mod = torch._dynamo.export(mod, (x))
+            res = opt_mod.graph_module(x)
+            self.assertEqual(ref, res)
+
     def test_profiler_dynamo_compiled_region(self):
         def fn(x, y):
             r = y.sum(dim=1)

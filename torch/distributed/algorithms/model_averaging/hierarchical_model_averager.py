@@ -4,7 +4,6 @@ import logging
 import warnings
 from collections import OrderedDict
 from collections.abc import Iterable
-from typing import Union
 
 import torch
 import torch.distributed as dist
@@ -114,7 +113,8 @@ class HierarchicalModelAverager(averagers.ModelAverager):
                 "no need to use model averaging because the communication cost "
                 "of all-reducing parameters will be no less than the cost of all-reducing gradients "
                 "by DistributedDataParallel in the backward pass. Therefore, only "
-                "DistributedDataParallel should be used for this case."
+                "DistributedDataParallel should be used for this case.",
+                stacklevel=2,
             )
         overall_group_size = dist.get_world_size(group=self.process_group)
         if list(period_group_size_dict.values())[-1] != overall_group_size:
@@ -159,9 +159,7 @@ class HierarchicalModelAverager(averagers.ModelAverager):
 
     def average_parameters(
         self,
-        params: Union[
-            Iterable[torch.nn.Parameter], Iterable[dict[str, torch.nn.Parameter]]
-        ],
+        params: Iterable[torch.nn.Parameter] | Iterable[dict[str, torch.nn.Parameter]],
     ):
         """
         Averages parameters or parameter groups of an optimizer.

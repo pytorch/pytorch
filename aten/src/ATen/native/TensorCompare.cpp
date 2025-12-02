@@ -73,7 +73,6 @@
 #include <ATen/ops/where_native.h>
 #include <ATen/ops/zeros_like.h>
 
-#include <iostream>
 #include <utility>
 #endif
 
@@ -515,7 +514,7 @@ Tensor _functional_assert_async_msg_cpu(
 }
 
 void _print(std::string_view s) {
-  std::cout << s << "\n";
+  std::cout << s << '\n';
 }
 
 // Sorting-based algorithm for isin(); used when the number of test elements is
@@ -847,7 +846,7 @@ TORCH_IMPL_FUNC(clamp_Tensor_out)
 (const Tensor& self,
  const OptionalTensorRef min,
  const OptionalTensorRef max,
- const Tensor&) {
+ const Tensor& /*unused*/) {
   if (min && max) {
     clamp_stub(device_type(), *this);
   } else if (min) {
