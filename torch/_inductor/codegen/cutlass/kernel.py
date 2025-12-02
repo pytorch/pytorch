@@ -26,7 +26,7 @@ from ...autotune_process import CUDABenchmarkRequest
 from ...ir import (
     Buffer,
     ChoiceCaller,
-    CUDATemplateBuffer,
+    CUTLASSTemplateBuffer,
     IRNode,
     Layout,
     PrimitiveInfoType,
@@ -73,9 +73,9 @@ class LayoutArg:
         return self.node == node and self.attr == attr and self.dim == dim
 
 
-class CUDAKernel(Kernel):
+class CUTLASSKernel(Kernel):
     """
-    Baseclass for CUDA / Cutlass based Kernels
+    Baseclass for Cutlass based Kernels
     """
 
     overrides = OpOverrides  # type: ignore[assignment]
@@ -192,9 +192,9 @@ class CUDAKernel(Kernel):
         return _normalize_idx(-1, len(strides))
 
 
-class CUDATemplateKernel(CUDAKernel):
+class CUTLASSTemplateKernel(CUTLASSKernel):
     """
-    Template kernels defined by CUDA / Cutlass in C++.
+    Template kernels defined by Cutlass in C++.
     """
 
     _EXTRA_CPP_ARGS = "size_t* workspace_size, uint8_t* workspace, cudaStream_t stream"
@@ -206,7 +206,7 @@ class CUDATemplateKernel(CUDAKernel):
         runtime_arg_values: list[Any],
     ) -> None:
         """
-        Initializes a new instance of the CUDATemplateKernel class.
+        Initializes a new instance of the CUTLASSTemplateKernel class.
 
         Args:
             kernel_name (str): The name of the kernel.
@@ -329,14 +329,14 @@ class CUDATemplateKernel(CUDAKernel):
     def call_kernel(
         self,
         name: str,
-        node: "CUDATemplateBuffer",  # type: ignore[name-defined]
+        node: "CUTLASSTemplateBuffer",  # type: ignore[name-defined]
     ) -> None:
         """
         Generates code to call the kernel through V.graph.wrapper_code.
         used from within torch._inductor.wrapper.PythonWrapperCodegen
 
         name: Name of kernel function.
-        node: The CUDATemplateBuffer node which contains information about the kernel, it's fused epilogue nodes
+        node: The CUTLASSTemplateBuffer node which contains information about the kernel, it's fused epilogue nodes
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code
@@ -563,16 +563,16 @@ class CUDATemplateKernel(CUDAKernel):
         self.store_buffer_names.add(name)
 
 
-class CUDATemplateCaller(ChoiceCaller):
+class CUTLASSTemplateCaller(ChoiceCaller):
     """
-    CUDATemplateCaller
+    CUTLASSTemplateCaller
 
-    This class represents a caller for CUDA template kernels. It is a subclass of ChoiceCaller.
+    This class represents a caller for CUTLASS template kernels. It is a subclass of ChoiceCaller.
     Attributes:
         name (str): The name of the caller.
         category (str): The category of the caller.
         bmreq (CUDABenchmarkRequest): The benchmark request for the caller.
-        template_buffer (CUDATemplateBuffer): The template buffer for the caller.
+        template_buffer (CUTLASSTemplateBuffer): The template buffer for the caller.
     """
 
     def __init__(
@@ -582,8 +582,8 @@ class CUDATemplateCaller(ChoiceCaller):
         input_nodes: list[Buffer],
         layout: Layout,
         make_kernel_render: Callable[
-            [CUDATemplateBuffer, Optional[list[BaseSchedulerNode]]],
-            tuple[CUDATemplateKernel, functools.partial[str]],
+            [CUTLASSTemplateBuffer, Optional[list[BaseSchedulerNode]]],
+            tuple[CUTLASSTemplateKernel, functools.partial[str]],
         ],
         bmreq: CUDABenchmarkRequest,
         supports_epilogue_fusion: bool,
@@ -613,10 +613,10 @@ class CUDATemplateCaller(ChoiceCaller):
         return self.bmreq.benchmark(*args, out=out)
 
     def __str__(self) -> str:
-        return f"CUDATemplateCaller(source_file={self.bmreq.source_file})"
+        return f"CUTLASSTemplateCaller(source_file={self.bmreq.source_file})"
 
     def call_name(self) -> str:
-        return f"cuda_template_kernels.{self.name}"
+        return f"cutlass_template_kernels.{self.name}"
 
     def kernel_hash_key(self) -> str:
         """
@@ -676,7 +676,7 @@ class CUDATemplateCaller(ChoiceCaller):
     def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
         self.bmreq.update_workspace_size()
         return TensorBox.create(
-            CUDATemplateBuffer(
+            CUTLASSTemplateBuffer(
                 layout=self.layout,
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
