@@ -349,6 +349,105 @@ class TestDropoutAlignRandomEager(InductorTestCase):
 
         assert t_comp > 0 and t_eager > 0
 
+    # ───────────────────────────────────────────────────────────
+    # Helper for primitive random parity (rand / randn / randint)
+    # ───────────────────────────────────────────────────────────
+    def _run_primitive_random_parity(self, kind, device, shape):
+        if kind == "rand":
+            def eager():
+                return torch.rand(shape, device=device)
+
+            compiled = torch.compile(eager)
+
+        elif kind == "randn":
+            def eager():
+                return torch.randn(shape, device=device)
+
+            compiled = torch.compile(eager)
+
+        elif kind == "randint":
+            def eager():
+                return torch.randint(0, 2**31 - 1, shape, device=device)
+
+            compiled = torch.compile(eager)
+
+        else:
+            raise AssertionError(f"unknown primitive random kind: {kind}")
+
+        _set_seed(BASE_SEED)
+        out_eager = eager()
+
+        _set_seed(BASE_SEED)
+        out_comp = compiled()
+
+        torch.testing.assert_close(
+            out_eager,
+            out_comp,
+            rtol=0.0,
+            atol=0.0,
+        )
+
+    # ───────────────────────────────────────────────────────────
+    # Primitive random fns: rand / randn / randint -> mark as XFAIL
+    # ───────────────────────────────────────────────────────────
+    @requires_gpu()
+    @pytest.mark.xfail(
+        reason="primitive torch.rand parity is tracked as future work",
+        strict=False,
+    )
+    def test_primitive_rand_parity(self):
+        device = torch.device(GPU_TYPE)
+        shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
+        self._run_primitive_random_parity("rand", device, shape)
+
+    @requires_gpu()
+    @pytest.mark.xfail(
+        reason="primitive torch.randn parity is tracked as future work",
+        strict=False,
+    )
+    def test_primitive_randn_parity(self):
+        device = torch.device(GPU_TYPE)
+        shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
+        self._run_primitive_random_parity("randn", device, shape)
+
+    @requires_gpu()
+    @pytest.mark.xfail(
+        reason="primitive torch.randint parity is tracked as future work",
+        strict=False,
+    )
+    def test_primitive_randint_parity(self):
+        device = torch.device(GPU_TYPE)
+        shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
+        self._run_primitive_random_parity("randint", device, shape)
+
+    # ───────────────────────────────────────────────────────────
+    # nn.Dropout as primitive RNG consumer (should PASS)
+    # ───────────────────────────────────────────────────────────
+    @requires_gpu()
+    def test_primitive_nn_dropout_parity(self):
+        device = torch.device(GPU_TYPE)
+        shape = (BATCH, SEQ_LEN, HIDDEN_DIM)
+
+        x = torch.ones(shape, device=device)
+
+        drop_eager = torch.nn.Dropout(DROPOUT_P).to(device).train()
+        drop_compiled = torch.nn.Dropout(DROPOUT_P).to(device).train()
+        drop_compiled.load_state_dict(drop_eager.state_dict())
+        drop_compiled = torch.compile(drop_compiled)
+
+        _set_seed(BASE_SEED)
+        out_eager = drop_eager(x)
+
+        _set_seed(BASE_SEED)
+        out_comp = drop_compiled(x)
+
+        torch.testing.assert_close(
+            out_eager,
+            out_comp,
+            rtol=0.0,
+            atol=0.0,
+        )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CUDA_AND_TRITON:
