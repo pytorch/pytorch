@@ -37,37 +37,59 @@ static void get_shapes(MPSShape* input_shape_readonly,
                        c10::MemoryFormat memory_format,
                        bool isBackward) {
   // Modify the shape
-  if (memory_format == at::MemoryFormat::Contiguous) {
-    for (int i = 0; i < num_input_dims; i++)
-      input_shape[i] = input_shape_readonly[i];
-  } else { // ChannelsLast
-    auto num_channels = input_shape_readonly[1];
-    input_shape[0] = input_shape_readonly[0];
-    for (int i = 1; i < num_input_dims - 1; i++)
-      input_shape[i] = input_shape_readonly[i + 1];
-    input_shape[num_input_dims - 1] = num_channels;
+  switch (memory_format) {
+    case at::MemoryFormat::Contiguous:
+      for (int i = 0; i < num_input_dims; i++)
+        input_shape[i] = input_shape_readonly[i];
+      break;
+    case at::MemoryFormat::ChannelsLast:
+    case at::MemoryFormat::ChannelsLast3d: {
+      auto num_channels = input_shape_readonly[1];
+      input_shape[0] = input_shape_readonly[0];
+      for (int i = 1; i < num_input_dims - 1; i++)
+        input_shape[i] = input_shape_readonly[i + 1];
+      input_shape[num_input_dims - 1] = num_channels;
+      break;
+    }
+    default:
+      TORCH_CHECK(false, "Unsupported memory format for MPS batch norm");
   }
 
-  // Mean shape should remain unchanged in backward
-  if (memory_format == at::MemoryFormat::Contiguous || isBackward) {
+  // Mean shape and reduction axes
+  if (isBackward) {
     new_mean_shape[0] = @1;
     new_mean_shape[1] = input_shape_readonly[1];
     for (int i = 2; i < num_input_dims; i++)
       new_mean_shape[i] = @1;
-  } else if (memory_format == at::MemoryFormat::ChannelsLast) {
-    for (int i = 0; i < num_input_dims - 1; i++)
-      new_mean_shape[i] = @1;
-    new_mean_shape[num_input_dims - 1] = input_shape[num_input_dims - 1];
-  }
 
-  // Set axes of reduction
-  if (memory_format == at::MemoryFormat::Contiguous || isBackward) {
     axes[0] = @0;
     for (int i = 2; i < num_input_dims; i++)
       axes[i - 1] = [NSNumber numberWithInt:i];
-  } else {
-    for (int i = 0; i < num_input_dims - 1; i++)
-      axes[i] = [NSNumber numberWithInt:i];
+    return;
+  }
+
+  switch (memory_format) {
+    case at::MemoryFormat::Contiguous:
+      new_mean_shape[0] = @1;
+      new_mean_shape[1] = input_shape_readonly[1];
+      for (int i = 2; i < num_input_dims; i++)
+        new_mean_shape[i] = @1;
+
+      axes[0] = @0;
+      for (int i = 2; i < num_input_dims; i++)
+        axes[i - 1] = [NSNumber numberWithInt:i];
+      break;
+    case at::MemoryFormat::ChannelsLast:
+    case at::MemoryFormat::ChannelsLast3d:
+      for (int i = 0; i < num_input_dims - 1; i++)
+        new_mean_shape[i] = @1;
+      new_mean_shape[num_input_dims - 1] = input_shape[num_input_dims - 1];
+
+      for (int i = 0; i < num_input_dims - 1; i++)
+        axes[i] = [NSNumber numberWithInt:i];
+      break;
+    default:
+      TORCH_CHECK(false, "Unsupported memory format for MPS batch norm");
   }
 }
 } // namespace mps
@@ -110,6 +132,17 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
   const bool has_bias = (bias_opt.has_value() && bias_opt->defined());
 
   auto memory_format = self.suggest_memory_format();
+  const bool input_is_view = self.is_view() || !self.is_contiguous(memory_format) || self.storage_offset();
+  if (input_is_view) {
+    memory_format = at::MemoryFormat::Contiguous;
+  }
+  const Tensor& input_for_graph = input_is_view ? self.contiguous(memory_format) : self;
+  memory_format = input_for_graph.suggest_memory_format();
+  auto graph_memory_format = memory_format;
+  if (memory_format == at::MemoryFormat::ChannelsLast || memory_format == at::MemoryFormat::ChannelsLast3d) {
+    graph_memory_format = at::MemoryFormat::Contiguous;
+  }
+  const bool placeholder_needs_gather = input_is_view ? false : mps::needsGather(input_for_graph);
 
   if (output.numel() == 0) {
     return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
@@ -117,21 +150,23 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
   }
 
   @autoreleasepool {
-    std::string mem_format_key;
-    switch (memory_format) {
+    std::string graph_mem_format_key;
+    switch (graph_memory_format) {
       case at::MemoryFormat::Contiguous:
-        mem_format_key = "Contiguous";
+        graph_mem_format_key = "Contiguous";
         break;
+      case at::MemoryFormat::ChannelsLast3d:
       case at::MemoryFormat::ChannelsLast:
-        mem_format_key = "ChannelsLast";
+        graph_mem_format_key = "ChannelsLast";
         break;
       default:
         assert(0 && "Check should have been done earlier\n");
     }
+    const std::string reshape_key = (graph_memory_format == memory_format) ? "NoReshape" : "Reshape";
 
     // Number of elements in one channel, needed for bessel correction term
-    const int64_t N = self.numel() / save_mean.numel();
-    MPSShape* input_shape_readonly = mps::getMPSShape(self);
+    const int64_t N = input_for_graph.numel() / save_mean.numel();
+    MPSShape* input_shape_readonly = mps::getMPSShape(input_for_graph);
     int num_input_dims = [input_shape_readonly count];
     // Input shape changes based on memory format
     NSMutableArray<NSNumber*>* input_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
@@ -140,12 +175,32 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
     // Reduction axes
     NSMutableArray<NSNumber*>* axes = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_input_dims - 1)];
 
-    get_shapes(input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, false);
+    get_shapes(input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, graph_memory_format, false);
+
+    NSArray<NSNumber*>* output_placeholder_shape = input_shape;
+    NSArray<NSNumber*>* reshape_to_flat_shape = nil;
+    if (graph_memory_format != memory_format) {
+      TORCH_CHECK(memory_format == at::MemoryFormat::ChannelsLast || memory_format == at::MemoryFormat::ChannelsLast3d);
+      NSMutableArray<NSNumber*>* channel_last_shape = [NSMutableArray arrayWithCapacity:num_input_dims];
+      [channel_last_shape addObject:input_shape[0]];
+      for (int i = 2; i < num_input_dims; ++i) {
+        [channel_last_shape addObject:input_shape[i]];
+      }
+      [channel_last_shape addObject:input_shape[1]];
+      output_placeholder_shape = [NSArray arrayWithArray:channel_last_shape];
+
+      int spatial_product = 1;
+      for (int i = 2; i < num_input_dims; ++i) {
+        spatial_product *= [input_shape[i] intValue];
+      }
+      NSNumber* spatial = [NSNumber numberWithInt:spatial_product];
+      reshape_to_flat_shape = @[ input_shape[0], input_shape[1], spatial ];
+    }
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    std::string key = "batch_norm_mps_out:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
-        std::to_string(momentum) + ":" + std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" +
+    std::string key = "batch_norm_mps_out:" + graph_mem_format_key + ":" + reshape_key + ":" + std::to_string(epsilon) +
+        ":" + std::to_string(momentum) + ":" + std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" +
         std::to_string(has_weight) + ":" + std::to_string(has_bias) + ":" + [ns_shape_key UTF8String] + ":" +
         getTensorsStringKey({self,
                              weight_opt.value_or(Tensor()),
@@ -154,9 +209,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                              running_var_opt.value_or(Tensor())});
     auto input_mps_dtype = getMPSDataType(self);
 
-    // Dim where channels are located
     int channelsDim;
-    if (memory_format == at::MemoryFormat::Contiguous)
+    if (graph_memory_format == at::MemoryFormat::Contiguous)
       channelsDim = 1;
     else
       channelsDim = num_input_dims - 1;
@@ -278,6 +332,12 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                                                                epsilon:(float)epsilon
                                                                   name:nil];
 
+      if (reshape_to_flat_shape) {
+        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:reshape_to_flat_shape name:nil];
+        outputTensor = [mpsGraph transposeTensor:outputTensor dimension:1 withDimension:2 name:nil];
+        outputTensor = [mpsGraph reshapeTensor:outputTensor withShape:output_placeholder_shape name:nil];
+      }
+
       // Reshape saved mean and var to fit output
       saveMeanTensor = [mpsGraph reshapeTensor:saveMeanTensor withShape:@[ new_mean_shape[channelsDim] ] name:nil];
       saveVarTensor = [mpsGraph reshapeTensor:saveVarTensor withShape:@[ new_mean_shape[channelsDim] ] name:nil];
@@ -304,9 +364,13 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
       newCachedGraph->runningVarInplaceUpdate_ = runningVarInplaceUpdate;
     });
 
-    const auto needs_gather = memory_format != MemoryFormat::ChannelsLast;
-    auto inputPlaceholder =
-        Placeholder(cachedGraph->inputTensor_, self, input_shape, needs_gather, MPSDataTypeInvalid, needs_gather);
+    const bool input_placeholder_use_strided_api = !placeholder_needs_gather;
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_,
+                                        input_for_graph,
+                                        input_shape,
+                                        placeholder_needs_gather,
+                                        MPSDataTypeInvalid,
+                                        input_placeholder_use_strided_api);
     auto weightPlaceholder = Placeholder();
     if (has_weight)
       weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);
@@ -329,8 +393,15 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
       runningVarInplaceUpdatePlaceholder = Placeholder(cachedGraph->runningVarInplaceUpdate_, running_var_opt.value());
     }
 
-    auto outputPlaceholder =
-        Placeholder(cachedGraph->outputTensor_, output, input_shape, false, MPSDataTypeInvalid, needs_gather);
+    bool outputNeedsCopy = input_is_view || (graph_memory_format == memory_format && mps::needsGather(output));
+    Tensor output_for_graph =
+        outputNeedsCopy ? at::empty(output.sizes(), output.options().memory_format(MemoryFormat::Contiguous)) : output;
+    auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
+                                         output_for_graph,
+                                         output_placeholder_shape,
+                                         false,
+                                         MPSDataTypeInvalid,
+                                         !outputNeedsCopy);
     auto saveMeanPlaceholder = Placeholder(cachedGraph->saveMeanTensor_, save_mean);
     auto saveVarPlaceholder = Placeholder(cachedGraph->saveVarTensor_, save_var);
 
@@ -359,6 +430,10 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
     }
 
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+
+    if (outputNeedsCopy) {
+      output.copy_(output_for_graph);
+    }
   }
 
   if (!train) {
@@ -496,6 +571,7 @@ static std::string get_mem_string(c10::MemoryFormat memory_format) {
     case at::MemoryFormat::Contiguous:
       mem_format_key = "Contiguous";
       break;
+    case at::MemoryFormat::ChannelsLast3d:
     case at::MemoryFormat::ChannelsLast:
       mem_format_key = "ChannelsLast";
       break;
@@ -544,7 +620,24 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
   Tensor grad_weight;
   Tensor grad_bias;
 
-  const auto memory_format = input.suggest_memory_format();
+  auto memory_format = input.suggest_memory_format();
+  const bool is_supported_format = memory_format == at::MemoryFormat::Contiguous ||
+      memory_format == at::MemoryFormat::ChannelsLast || memory_format == at::MemoryFormat::ChannelsLast3d;
+  const bool input_needs_realization =
+      input.is_view() || !input.is_contiguous(memory_format) || input.storage_offset() != 0 || !is_supported_format;
+  if (input_needs_realization) {
+    memory_format = at::MemoryFormat::Contiguous;
+  }
+  const Tensor input_for_graph = input_needs_realization ? input.contiguous(memory_format) : input;
+  memory_format = input_for_graph.suggest_memory_format();
+  auto graph_memory_format = memory_format;
+  if (memory_format == at::MemoryFormat::ChannelsLast || memory_format == at::MemoryFormat::ChannelsLast3d) {
+    graph_memory_format = at::MemoryFormat::Contiguous;
+  }
+
+  const bool grad_out_needs_realization =
+      grad_out.is_view() || !grad_out.is_contiguous(graph_memory_format) || grad_out.storage_offset() != 0;
+  const Tensor grad_out_for_graph = grad_out_needs_realization ? grad_out.contiguous(graph_memory_format) : grad_out;
 
   if (grad_input_mask[0]) {
     grad_input = at::empty(input.sizes(), input.scalar_type(), std::nullopt, kMPS, std::nullopt, memory_format);
@@ -605,19 +698,21 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
   }
 
   @autoreleasepool {
-    std::string mem_format_key;
-    switch (memory_format) {
+    std::string graph_mem_format_key;
+    switch (graph_memory_format) {
       case at::MemoryFormat::Contiguous:
-        mem_format_key = "Contiguous";
+        graph_mem_format_key = "Contiguous";
         break;
+      case at::MemoryFormat::ChannelsLast3d:
       case at::MemoryFormat::ChannelsLast:
-        mem_format_key = "ChannelsLast";
+        graph_mem_format_key = "ChannelsLast";
         break;
       default:
         assert(0 && "Check should have been done earlier\n");
     }
+    const std::string reshape_key = (graph_memory_format == memory_format) ? "NoReshape" : "Reshape";
 
-    MPSShape* input_shape_readonly = mps::getMPSShape(input);
+    MPSShape* input_shape_readonly = mps::getMPSShape(input_for_graph);
     int num_input_dims = [input_shape_readonly count];
     NSMutableArray<NSNumber*>* input_shape = [NSMutableArray<NSNumber*> arrayWithCapacity:num_input_dims];
     // Broadcast with input
@@ -625,19 +720,20 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
     // Reduction axes
     NSMutableArray<NSNumber*>* axes = [NSMutableArray<NSNumber*> arrayWithCapacity:(num_input_dims - 1)];
 
-    get_shapes(input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, memory_format, true);
+    get_shapes(input_shape_readonly, input_shape, new_mean_shape, axes, num_input_dims, graph_memory_format, true);
 
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
 
-    std::string key = "batch_norm_backward_mps:" + mem_format_key + ":" + std::to_string(epsilon) + ":" +
-        std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" + std::to_string(has_weight) + ":" +
-        [ns_shape_key UTF8String] + ":" + c10::Join(",", grad_input_mask) + ":" + getMPSTypeString(input);
+    std::string key = "batch_norm_backward_mps:" + graph_mem_format_key + ":" + reshape_key + ":" +
+        std::to_string(epsilon) + ":" + std::to_string(train) + ":" + std::to_string(has_running_mean) + ":" +
+        std::to_string(has_weight) + ":" + [ns_shape_key UTF8String] + ":" + c10::Join(",", grad_input_mask) + ":" +
+        getMPSTypeString(input);
     auto input_mps_dtype = getMPSDataType(input);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       // NCHW - Channels dim is 1
       int channelsDim = 1;
 
-      auto inputTensorOriginal = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
+      MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_mps_dtype, input_shape);
       // Shape is the ORIGINAL NCHW shape
       auto gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(grad_out), input_shape_readonly);
       MPSGraphTensor* weightTensor = nil;
@@ -662,23 +758,6 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
       MPSGraphTensor* gradInputTensor = nil;
       MPSGraphTensor* gradWeightTensor = nil;
       MPSGraphTensor* gradBiasTensor = nil;
-      MPSGraphTensor* inputTensor = nil;
-
-      if (memory_format == at::MemoryFormat::Contiguous)
-        inputTensor = inputTensorOriginal;
-      else {
-        // Reshape/transpose the input as needed
-        auto N = input_shape[0];
-        auto H = input_shape[1];
-        auto W = input_shape[2];
-        auto C = input_shape[3];
-
-        inputTensor = [mpsGraph reshapeTensor:inputTensorOriginal
-                                    withShape:@[ N, ([NSNumber numberWithInt:[H intValue] * [W intValue]]), C ]
-                                         name:nil];
-        inputTensor = [mpsGraph transposeTensor:inputTensor dimension:1 withDimension:2 name:nil];
-        inputTensor = [mpsGraph reshapeTensor:inputTensor withShape:@[ N, C, H, W ] name:nil];
-      }
 
       if (train) {
         // Use save_mean and save_var
@@ -798,38 +877,20 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
                                             name:nil];
       }
 
-      MPSGraphTensor* gradInputTensorFinal = nil;
-
-      if (memory_format == at::MemoryFormat::Contiguous)
-        gradInputTensorFinal = gradInputTensor;
-      else {
-        // Reshape/transpose the input as needed
-        auto N = input_shape[0];
-        auto H = input_shape[1];
-        auto W = input_shape[2];
-        auto C = input_shape[3];
-
-        gradInputTensorFinal = [mpsGraph reshapeTensor:gradInputTensor
-                                             withShape:@[ N, C, ([NSNumber numberWithInt:[H intValue] * [W intValue]]) ]
-                                                  name:nil];
-        gradInputTensorFinal = [mpsGraph transposeTensor:gradInputTensorFinal dimension:1 withDimension:2 name:nil];
-        gradInputTensorFinal = [mpsGraph reshapeTensor:gradInputTensorFinal withShape:@[ N, H, W, C ] name:nil];
-      }
-
       newCachedGraph->gradOutputTensor_ = gradOutputTensor;
-      newCachedGraph->inputTensor_ = inputTensorOriginal;
+      newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->weightTensor_ = weightTensor;
       newCachedGraph->runningMeanTensor_ = runningMeanTensor;
       newCachedGraph->runningVarTensor_ = runningVarTensor;
       newCachedGraph->saveMeanTensor_ = saveMeanTensor;
       newCachedGraph->saveVarTensor_ = saveVarTensor;
-      newCachedGraph->gradInputTensor_ = gradInputTensorFinal;
+      newCachedGraph->gradInputTensor_ = gradInputTensor;
       newCachedGraph->gradWeightTensor_ = gradWeightTensor;
       newCachedGraph->gradBiasTensor_ = gradBiasTensor;
     });
 
-    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input, input_shape);
-    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_out, input_shape_readonly);
+    auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_for_graph, input_shape);
+    auto gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_out_for_graph, input_shape_readonly);
     auto weightPlaceholder = Placeholder();
     if (has_weight)
       weightPlaceholder = Placeholder(cachedGraph->weightTensor_, weight_opt.value(), new_mean_shape);

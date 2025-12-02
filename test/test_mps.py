@@ -23,7 +23,7 @@ from torch.nn import Buffer, Parameter
 from torch.testing._internal import opinfo
 from torch.testing._internal.common_utils import \
     (gradcheck, gradgradcheck, parametrize, run_tests, TestCase, download_file, MACOS_VERSION, IS_CI,
-     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, xfailIf)
+     NoTest, skipIfSlowGradcheckEnv, suppress_warnings, serialTest, instantiate_parametrized_tests, subtest, xfailIf)
 from torch.testing._internal.common_mps import mps_ops_modifier, mps_ops_grad_modifier, mps_ops_error_inputs_modifier
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes, integral_types
@@ -1824,6 +1824,58 @@ class TestMPS(TestCaseMPS):
 
         self.assertEqual(bn_cpu.weight.grad, bn_mps.weight.grad, atol=1e-5, rtol=1e-5)
         self.assertEqual(bn_cpu.bias.grad, bn_mps.bias.grad, atol=1e-5, rtol=1e-5)
+
+    @parametrize(
+        "base_shape,permute,factory",
+        [
+            subtest(((2, 64, 32), (0, 2, 1), nn.BatchNorm1d), name="BatchNorm1d"),
+            subtest(((2, 64, 64, 128), (0, 3, 1, 2), nn.BatchNorm2d), name="BatchNorm2d"),
+            subtest(((2, 16, 16, 16, 64), (0, 4, 1, 2, 3), nn.BatchNorm3d), name="BatchNorm3d"),
+        ],
+    )
+    @parametrize("channels_last", [False, True])
+    @parametrize("momentum", [0.3])
+    def test_batch_norm_backward_noncontiguous_view(self, base_shape, permute, factory, channels_last, momentum):
+        if channels_last:
+            if len(base_shape) == 4:
+                mem_format = torch.channels_last
+            elif len(base_shape) == 5:
+                mem_format = torch.channels_last_3d
+            else:
+                self.skipTest("Channels-last memory format is only supported for 4D/5D tensors")
+        else:
+            mem_format = torch.contiguous_format
+
+        x_cpu = torch.randn(*base_shape)
+        x_cpu = x_cpu.to(memory_format=mem_format)
+        x_cpu.requires_grad_()
+
+        x_mps = x_cpu.to('mps')
+        x_mps = x_mps.to(memory_format=mem_format).detach().requires_grad_(True)
+
+        y_cpu = x_cpu.permute(*permute)
+        y_mps = x_mps.permute(*permute)
+
+        channels = y_cpu.shape[1]
+        bn_cpu = factory(channels, affine=True, momentum=momentum, track_running_stats=True).cpu().train()
+        bn_cpu.running_mean.copy_(torch.randn_like(bn_cpu.running_mean))
+        bn_cpu.running_var.copy_(torch.rand_like(bn_cpu.running_var) + 0.5)
+        bn_mps = factory(channels, affine=True, momentum=momentum, track_running_stats=True).to('mps').train()
+        bn_mps.load_state_dict(bn_cpu.state_dict())
+
+        out_cpu = bn_cpu(y_cpu)
+        out_mps = bn_mps(y_mps)
+
+        grad_cpu = torch.randn_like(out_cpu)
+        grad_mps = grad_cpu.to('mps')
+
+        out_cpu.backward(grad_cpu)
+        out_mps.backward(grad_mps)
+
+        self.assertEqual(out_mps.cpu(), out_cpu)
+        self.assertEqual(x_mps.grad.cpu(), x_cpu.grad)
+        self.assertEqual(bn_mps.running_mean.cpu(), bn_cpu.running_mean)
+        self.assertEqual(bn_mps.running_var.cpu(), bn_cpu.running_var)
 
     def test_layer_norm_backward(self):
         inputs = torch.rand(4, 4, device="mps", requires_grad=True)
