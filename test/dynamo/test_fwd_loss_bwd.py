@@ -53,25 +53,6 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    def test_autograd_grad_rejects_non_leaf(self):
-        mod = torch.nn.Linear(4, 4)
-        x = torch.randn(2, 4, requires_grad=True)
-
-        def fn(x):
-            res = mod(x)
-            loss = res.sum()
-            intermediate = res * 2
-            _ = torch.autograd.grad(loss, (intermediate,))
-            return loss.detach()
-
-        compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
-
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "torch.compile does not currently support torch.autograd.grad with non-leaf",
-        ):
-            compiled_fn(x)
-
     def test_autograd_grad_with_kwargs(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
@@ -176,8 +157,8 @@ class GraphModule(torch.nn.Module):
             return loss.detach()
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported,
-            "torch.compile does not currently support torch.autograd.grad with non-leaf",
+            RuntimeError,
+            "Compiled function receives an input with external grad_fn",
         ):
             fn(external_computation)
 
@@ -227,6 +208,45 @@ class GraphModule(torch.nn.Module):
         self.assertIsNotNone(mod_eager.bias.grad)
         self.assertIsNotNone(mod_compiled.bias.grad)
         self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
+
+    def test_autograd_grad_missing_detach_errors_like_eager(self):
+        # Test eager mode behavior
+        mod_eager = torch.nn.Linear(4, 4)
+        x_eager = torch.randn(2, 4)
+
+        def step_eager():
+            res = mod_eager(x_eager)
+            loss = res.sum()
+            params = tuple(mod_eager.parameters())
+            torch.autograd.grad(loss, params)
+            return loss  # Missing detach!
+
+        loss_eager = step_eager()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Trying to backward through the graph a second time",
+        ):
+            loss_eager.backward()
+
+        torch._dynamo.reset()
+        mod_compiled = torch.nn.Linear(4, 4)
+        x_compiled = torch.randn(2, 4)
+
+        @torch.compile(fullgraph=True, backend="aot_eager")
+        def step_compiled():
+            res = mod_compiled(x_compiled)
+            loss = res.sum()
+            params = tuple(mod_compiled.parameters())
+            torch.autograd.grad(loss, params)
+            return loss
+
+        # In compiled mode, the error surfaces during AOTAutograd compilation
+        # because it tries to trace the backward graph
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Trying to backward through the graph a second time",
+        ):
+            step_compiled()
 
 
 if __name__ == "__main__":

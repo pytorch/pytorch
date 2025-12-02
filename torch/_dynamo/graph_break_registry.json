@@ -3711,15 +3711,5 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
-  ],
-  "GB0367": [
-    {
-      "Gb_type": "torch.autograd.grad non-leaf input",
-      "Context": "torch.autograd.grad with non-leaf tensor in torch.compile",
-      "Explanation": "torch.compile does not currently support torch.autograd.grad with non-leaf tensors. All input tensors must be leaf tensors (typically model parameters).",
-      "Hints": [
-        "Use leaf tensors (nn.Parameter objects) as inputs to torch.autograd.grad"
-      ]
-    }
   ]
 }
