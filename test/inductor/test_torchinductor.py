@@ -10276,7 +10276,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @skipIfXpu(msg="Incorrect XPU reference")
-    @config.patch("combo_kernels", True)
     def test_argmax_argmin2(self):
         def fn(x):
             return (
@@ -14818,7 +14817,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @config.patch(combo_kernels=True)
     def test_combo_kernel_filter_cpu(self):
         def fn(a, b, c, d):
-            # Pointwise ops that should be fused
             a = a * 4
             b = b + 8
             return a, b, c.min(-1), d.max(-1)
