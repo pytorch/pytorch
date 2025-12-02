@@ -2353,15 +2353,13 @@ class ExternKernelCaller(ChoiceCaller):
         Called by benchmark_collective_choice, only run once, timing handled externally with barrier sync.
         """
         if out.numel() == 0:
-            return 0.0
+            return
 
         algo = self.to_callable()
         if self.has_out_variant:
             algo(*args, out=out)
         else:
             algo(*args)
-
-        return 0.0
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -3487,10 +3485,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
             total_time += start_evt.elapsed_time(end_evt)
 
-        work = dist.barrier(group=process_group, async_op=True)
-        if not work.wait(timeout):
-            raise TimeoutError(f"Barrier timeout after completing {nruns} runs")
-
         return total_time
 
     @classmethod
@@ -3531,7 +3525,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         try:
             # Do n warmups
-            cls._run_collective_benchmark(
+            total_time = cls._run_collective_benchmark(
                 choice, inputs, output, nwarmup, process_group, timeout
             )
 
@@ -3542,14 +3536,13 @@ class AlgorithmSelectorCache(PersistentCache):
 
             avg_time = total_time / nruns
 
-            # All-reduce to get max time across ranks
-            # If any rank times out here, all ranks will time out naturally
+            # All-reduce to get avg time across ranks
             time_tensor = torch.tensor(
                 [avg_time], dtype=torch.float32, device=f"cuda:{rank}"
             )
             work = dist.all_reduce(
                 time_tensor,
-                op=dist.ReduceOp.MAX,
+                op=dist.ReduceOp.AVG,
                 group=process_group,
                 async_op=True,
             )

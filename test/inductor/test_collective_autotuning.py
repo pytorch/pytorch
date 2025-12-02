@@ -177,7 +177,7 @@ class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
         model = torch.compile(VLLMAllReduceModel()).to(device)
 
         torch.manual_seed(42 + rank)
-        x = torch.randn(64, 128, device=device)
+        x = torch.randn(128, 256, device=device)
 
         y = model(x)
         self.assertEqual(y.shape, x.shape)

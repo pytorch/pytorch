@@ -157,7 +157,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             device=benchmarker.infer_device(*sym_inputs, *args),
         )
 
-    def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> float:
+    def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> None:
         """
         Only run once with cached compiled module.
         Called by benchmark_collective_choice which handles warmup
@@ -174,7 +174,6 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
 
         bm_func = mod.call
         bm_func([*sym_inputs, *args])
-        return 0.0
 
     def hash_key(self) -> str:
         return "-".join(
