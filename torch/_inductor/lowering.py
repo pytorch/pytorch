@@ -7380,18 +7380,6 @@ from torch._inductor.fx_passes.control_dependencies import requires_deps
 
 @register_lowering(requires_deps, type_promotion_kind=None)
 def requires_deps_op_lowering(additional_deps, out):
-    # Realize all additional dependencies
-    dep_names = []
-    for dep in additional_deps:
-        if not isinstance(dep, IRNode):
-            continue
-
-        dep.realize()
-        dep_names.append(dep.get_name())
-
-    for dep_name in dep_names:
-        V.graph.additional_buffer_deps[out.get_name()].add(dep_name)
-
     return out
 
 

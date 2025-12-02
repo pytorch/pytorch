@@ -10,6 +10,7 @@ with control_deps to make dependencies explicit.
 
 from typing import Any
 
+import torch
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
@@ -274,3 +275,15 @@ def _create_subgraph_for_node(graph: fx.Graph, node: fx.Node) -> fx.GraphModule:
         out.meta["val"] = result.meta["val"]
 
     return fx.GraphModule(owning_module, subgraph)
+
+
+def _requires_deps_to_control_deps_pass(gm: fx.GraphModule):
+    g = gm.graph
+    additional_deps_map = {}
+    for n in g.nodes:
+        if n.target == torch.ops.higher_order.requires_deps:
+            deps = n.args[0]
+            out = n.args[1]
+            additional_deps_map[n] = deps
+
+    preserve_node_ordering(g, additional_deps_map)
