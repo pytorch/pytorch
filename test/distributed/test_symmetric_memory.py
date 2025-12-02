@@ -173,6 +173,42 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
     @skip_if_lt_x_gpu(2)
+    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize("align_bytes", [4, 8, 16])
+    def test_all_gather_p2p_memcpy(self, dtype: torch.dtype, align_bytes: int) -> None:
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        input_numel = 32
+        shift = align_bytes // 4
+        # Create input with offset to test alignment handling if any (though copy engine doesn't care much)
+        input_full = torch.zeros(shift + input_numel, device=self.device, dtype=dtype)
+        input = input_full[shift:]
+        input.fill_(self.rank)
+
+        # Create output with offset
+        out_full = symm_mem.empty(
+            shift + input_numel * self.world_size, device=self.device, dtype=dtype
+        ).zero_()
+        out = out_full[shift:]
+        symm_mem.rendezvous(out, group=group_name)
+
+        torch.ops.symm_mem.all_gather_p2p_memcpy(input, group_name, out)
+
+        # Reference implementation using c10d
+        ref = torch.ops._c10d_functional.all_gather_into_tensor(
+            input, self.world_size, group_name
+        )
+        ref = torch.ops._c10d_functional.wait_tensor(ref)
+
+        self.assertTrue(
+            out.eq(ref).all(), f"Output mismatch. Expected:\n{ref}\nGot:\n{out}"
+        )
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
     @parametrize("symm_mem_input", [True, False])
     def test_low_contention_all_gather(self, symm_mem_input: bool) -> None:
         self._init_process()
