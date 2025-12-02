@@ -1393,6 +1393,29 @@ def _enforce_mem_layouts(
     return query, key, value
 
 
+def _autocast_inputs(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+) -> tuple[Tensor, Tensor, Tensor]:
+    device_type = query.device.type
+    if not torch.is_autocast_enabled(device_type):
+        return query, key, value
+
+    target_dtype = torch.get_autocast_dtype(device_type)
+
+    def convert(x: Tensor) -> Tensor:
+        if (
+            x.dtype.is_floating_point
+            and x.dtype != target_dtype
+            and x.dtype != torch.float64
+        ):
+            return x.to(target_dtype)
+        return x
+
+    return convert(query), convert(key), convert(value)
+
+
 def flex_attention(
     query: Tensor,
     key: Tensor,
@@ -1469,6 +1492,7 @@ def flex_attention(
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     """
+    query, key, value = _autocast_inputs(query, key, value)
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
     _validate_embed_dim(query, key, value)
