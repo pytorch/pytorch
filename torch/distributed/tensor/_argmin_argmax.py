@@ -73,8 +73,8 @@ def argmin_argmax_handler(
     device_mesh = input_dtensor.device_mesh
 
     if dim is None:
-        local_max = val_op(local_tensor)
         local_idx = op_call(local_tensor)
+        local_max = local_tensor.flatten()[local_idx]
     else:
         local_max, local_idx = val_op(local_tensor, dim=dim, keepdim=True)
 
