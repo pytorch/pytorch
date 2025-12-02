@@ -2106,7 +2106,7 @@ def forward(self, arg0_1, arg1_1):
         ):
             self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
 
-    def test_ac_rematerialize_with_no_annotations_raises_error(self):
+    def test_ac_rematerialize_with_no_annotations_warns_and_returns_unchanged(self):
         x = torch.randn(4, 4, requires_grad=True)
 
         def fwd_bwd(x):
@@ -2116,11 +2116,31 @@ def forward(self, arg0_1, arg1_1):
             loss = z.sum()
             return _grad(loss, x)[0]
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
-            "We are trying to rematerialize AC nodes in the backward region",
-        ):
-            self._compile_and_capture(fwd_bwd, True, (x,))
+        # Without backward annotations, the pass should warn and return unchanged
+        # We verify this by checking that remat_using_tags=True produces the same
+        # graph as remat_using_tags=False (i.e., no recomputation happens)
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
+
+            # Check warning was issued
+            self.assertTrue(
+                any("no backward region" in str(warning.message) for warning in w),
+                f"Expected warning about no backward region, got: {[str(warning.message) for warning in w]}",
+            )
+
+        # Get the graph without the pass for comparison
+        result_without, gm_without = self._compile_and_capture(fwd_bwd, False, (x,))
+
+        # Results should be correct
+        self.assertTrue(torch.allclose(result_with, result_without))
+
+        # Both graphs should have the same number of sigmoid ops (no recomputation)
+        sigmoid_with = self.count_op(gm_with, torch.ops.aten.sigmoid.default)
+        sigmoid_without = self.count_op(gm_without, torch.ops.aten.sigmoid.default)
+        self.assertEqual(sigmoid_with, sigmoid_without)
 
     def test_ac_rematerialize_with_selective_checkpoint_policy(self):
         x = torch.randn(4, 128, requires_grad=True)

@@ -2,6 +2,8 @@
 AC rematerialize pass: Duplicates checkpointed nodes for backward, then DCE removes unused forward versions.
 """
 
+import warnings
+
 import torch
 import torch.fx as fx
 from torch._functorch import config
@@ -70,10 +72,12 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
             bwd_start = idx
 
     if bwd_start is None:
-        raise RuntimeError(
-            "We are trying to rematerialize AC nodes in the backward region, but we could not find any backward nodes. "
-            'This is likely because you forgot to annotate your backward region with fx.traceback.annotate({"backward": 0}) '
+        warnings.warn(
+            "remat_using_tags_for_fwd_loss_bwd_graph: Graph has recomputable ops but no backward region. "
+            "This may indicate a forward-only graph (e.g., from nested compilation) or missing backward annotations. "
+            "Returning graph unchanged."
         )
+        return gm
 
     new_graph = fx.Graph()
     env: dict[fx.Node, fx.Node] = {}
