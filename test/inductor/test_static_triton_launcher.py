@@ -14,7 +14,12 @@ from torch._inductor.runtime.static_triton_launcher import (
     StaticallyLaunchedCudaKernel,
     StaticallyLaunchedXpuKernel,
 )
-from torch._inductor.runtime.triton_compat import CompiledKernel, tl, triton
+from torch._inductor.runtime.triton_compat import (
+    CompiledKernel,
+    JITFunction,
+    tl,
+    triton,
+)
 from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm, skipIfXpu
@@ -22,7 +27,8 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_XPU_AND_TRITON
 from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
-_orig_getitem = triton.runtime.JITFunction.__getitem__
+if HAS_XPU_AND_TRITON:
+    _orig_getitem = JITFunction.__getitem__
 
 
 def _patched_getitem(self, grid):
@@ -41,7 +47,7 @@ class TestStaticTritonLauncher(TestCase):
         super().setUp()
         self.tmp_files = []
         if HAS_XPU_AND_TRITON:
-            triton.runtime.JITFunction.__getitem__ = _patched_getitem
+            JITFunction.__getitem__ = _patched_getitem
 
     def tearDown(self):
         super().tearDown()
@@ -52,7 +58,7 @@ class TestStaticTritonLauncher(TestCase):
                 pass
 
         if HAS_XPU_AND_TRITON:
-            triton.runtime.JITFunction.__getitem__ = _orig_getitem
+            JITFunction.__getitem__ = _orig_getitem
 
     def write_cubin_to_tmp(self, kernel: CompiledKernel) -> str:
         """

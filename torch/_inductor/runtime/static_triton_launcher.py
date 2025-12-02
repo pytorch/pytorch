@@ -130,7 +130,7 @@ class StaticallyLaunchedTritonKernel:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
-                self.cubin_path = filepath
+                self.cubin_path = filepath  # pyre-ignore
         return self.cubin_path
 
     def load_kernel(self, device: int) -> None:

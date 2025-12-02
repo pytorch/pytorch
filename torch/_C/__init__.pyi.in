@@ -2823,6 +2823,7 @@ class _StaticCudaLauncher:
 
 # Defined in torch/csrc/inductor/static_launcher/xpu/static_xpu_launcher.cpp
 class _StaticXpuLauncher(_StaticCudaLauncher):
+    ...
 
 # Defined in torch/csrc/cuda/GreenContext.cpp
 class GreenContext:

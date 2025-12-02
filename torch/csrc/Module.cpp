@@ -125,7 +125,7 @@
 #endif
 #endif
 
-#ifdef USE_XPU
+#if defined(USE_XPU) && !defined(_WIN32)
 #include <torch/csrc/inductor/static_launcher/xpu/static_xpu_launcher.h>
 #endif
 
@@ -2157,7 +2157,7 @@ PyObject* initModule() {
 #if defined(USE_CUDA) && !defined(USE_ROCM)
   ASSERT_TRUE(StaticCudaLauncher_init(module));
 #endif
-#if defined(USE_XPU)
+#if defined(USE_XPU) && !defined(_WIN32)
   ASSERT_TRUE(StaticXpuLauncher_init(module));
 #endif
 #ifdef USE_MPS
