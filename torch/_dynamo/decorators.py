@@ -577,7 +577,7 @@ def mark_unbacked(
     """
     if isinstance(t, torch.distributed.tensor.DTensor):
         # apply on inner tensor sizes/strides
-        _apply_func_to_inner_tensors_of_same_dim(mark_unbacked, t, index)
+        mark_unbacked(t._local_tensor, index)
     elif is_traceable_wrapper_subclass(t):
         # You could have copied the mark_dynamic behavior but I'm not convinced
         # it's what you want

@@ -212,8 +212,8 @@ static PyObject* THPModule_initExtension(
         }
         auto frame_id = s_tb[idx];
         const auto& frame = s_tbs.all_frames.at(frame_id);
-        oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
-            << ":" << frame.lineno << '\n';
+        oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
+            << ':' << frame.lineno << '\n';
       }
       return oss.str();
     });
@@ -398,36 +398,27 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // weak_use_count() adds 1 if use_count is non-zero
   TORCH_CHECK(
-      a->cdata->weak_use_count() == 1,
+      a->cdata.weak_use_count() == 1,
       "Expected no weakrefs to t1's Tensor object but got  ",
-      a->cdata->weak_use_count() - 1);
+      a->cdata.weak_use_count() - 1);
   TORCH_CHECK(
-      b->cdata->weak_use_count() == 1,
+      b->cdata.weak_use_count() == 1,
       "Expected no weakrefs to t2's Tensor object but got  ",
-      b->cdata->weak_use_count() - 1);
+      b->cdata.weak_use_count() - 1);
+
+  // NB: Creating local copies of *both* Tensors here ensures that they each
+  // hold a strong reference to their PyObject. This avoids having to fix up
+  // reference counts when we swap the PyObject slots below.
+  at::Tensor tmp_a = a->cdata;
+  at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
-  c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+  a->cdata = tmp_b;
+  b->cdata = tmp_a;
 
-  // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
-  // associated with the TensorImpl. Swap this field as well.
-  std::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
-  std::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
-  TORCH_INTERNAL_ASSERT(
-      mb_obj_a.has_value() && mb_obj_b.has_value(),
-      "Both tensors should have PyObjects tagged by the current python interpreter");
-  TORCH_CHECK(mb_obj_a.value() == a_);
-  TORCH_CHECK(mb_obj_b.value() == b_);
-
-  a->cdata = b->cdata;
-  b->cdata = tmp;
-
-  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(a_);
-  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(b_);
+  // Fix up the PyObjects associated with each TensorImpl
+  a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);
+  b->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(b_);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -2781,8 +2772,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_dump_local_tls_set", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-    std::cout << "Included: " << toString(local_keyset.included_) << "\n";
-    std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
+    std::cout << "Included: " << toString(local_keyset.included_) << '\n';
+    std::cout << "Excluded: " << toString(local_keyset.excluded_) << '\n';
   });
 
   py_module.def(

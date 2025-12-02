@@ -19,6 +19,31 @@ fi
 ARCH=$(uname -m)
 echo "Building CPU wheel for architecture: $ARCH"
 
+# Detect and configure OpenBLAS and ARM Compute Libraryfor CPU aarch64
+if [[ "$ARCH" == "aarch64" ]]; then
+    # Use OpenBLAS for BLAS/LAPACK on CPU aarch64 builds
+    if [[ ! -f "/opt/OpenBLAS/lib/libopenblas.so.0" ]]; then
+        echo "ERROR: OpenBLAS not found at /opt/OpenBLAS/lib/"
+        echo "OpenBLAS (BLAS/LAPACK) is required for CPU aarch64 builds"
+        exit 1
+    fi
+    echo "Using OpenBLAS for CPU aarch64"
+    export BLAS=OpenBLAS
+    export OpenBLAS_HOME=/opt/OpenBLAS
+
+    # ACL is required for aarch64 builds
+    if [[ ! -d "/acl" ]]; then
+        echo "ERROR: ARM Compute Library not found at /acl"
+        echo "ACL is required for aarch64 builds. Check Docker image setup."
+        exit 1
+    fi
+
+    export USE_MKLDNN=1
+    export USE_MKLDNN_ACL=1
+    export ACL_ROOT_DIR=/acl
+    echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
+fi
+
 WHEELHOUSE_DIR="wheelhousecpu"
 LIBTORCH_HOUSE_DIR="libtorch_housecpu"
 if [[ -z "$PYTORCH_FINAL_PACKAGE_DIR" ]]; then
@@ -75,9 +100,11 @@ if [[ "$ARCH" == "aarch64" ]]; then
     # ARM system libraries
     DEPS_LIST+=(
         "/usr/lib64/libgfortran.so.5"
+        "/opt/OpenBLAS/lib/libopenblas.so.0"
     )
     DEPS_SONAME+=(
         "libgfortran.so.5"
+        "libopenblas.so.0"
     )
 fi
 
