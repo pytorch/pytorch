@@ -12,9 +12,20 @@ import unittest.mock
 import weakref
 from abc import abstractmethod
 from collections import defaultdict
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Any,
+    dataclass_transform,
+    Generic,
+    NamedTuple,
+    Optional,
+    overload,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 
 import torch
 from torch.utils import _pytree as pytree
@@ -1076,18 +1087,31 @@ def tracing(
         _TLS.tracing_context = old_context
 
 
-def dataclass_with_cached_hash(cls=None, **kwargs):
-    def wrap(cls):
-        new_cls = dataclasses.dataclass(cls, **kwargs)
-        old_hash = cls.__hash__
+@overload
+def dataclass_with_cached_hash(cls: type[T], **kwargs: Any) -> type[T]: ...
 
-        def __hash__(self):
+
+@overload
+def dataclass_with_cached_hash(
+    cls: None = None, **kwargs: Any
+) -> Callable[[type[T]], type[T]]: ...
+
+
+@dataclass_transform()
+def dataclass_with_cached_hash(
+    cls: type[T] | None = None, **kwargs: Any
+) -> type[T] | Callable[[type[T]], type[T]]:
+    def wrap(cls_inner: type[T]) -> type[T]:
+        new_cls = dataclasses.dataclass(cls_inner, **kwargs)
+        old_hash = cls_inner.__hash__
+
+        def __hash__(self) -> int:
             if not hasattr(self, "_hash"):
                 object.__setattr__(self, "_hash", old_hash(self))
             return self._hash
 
         new_cls.__hash__ = __hash__
-        return new_cls
+        return new_cls  # type: ignore[return-value]
 
     if cls is None:
         return wrap
@@ -1112,10 +1136,18 @@ class Source:
     def guard_source(self) -> GuardSource:
         raise NotImplementedError
 
-    # can be called by both `name` and `_get_value` in order
-    # to define guard name generation once.
-    @functools.cached_property
+    @property
     def _name_template(self) -> str:
+        """
+        A template for the name of the source. Used to prevent code duplication between
+        `name` and `get_value`.
+
+        For non-ChainedSources, `name` and `get_value` use the returned string directly.
+
+        For ChainedSources, `name` and `get_value` expect the return to be a format string
+        with `{0}` present - `name` and `get_value` will apply different values to this function's
+        returned format string.
+        """
         raise NotImplementedError
 
     @functools.cached_property
