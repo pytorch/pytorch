@@ -305,13 +305,6 @@ struct CachingHostAllocatorImpl {
     // Check in the recently freed blocks with pending events to see if we
     // can reuse them. Call get_free_block again after processing events
     if (pinned_use_background_threads()) {
-      process_events_for_specific_size(roundSize, pool);
-      block = get_free_block(roundSize, pool);
-      if (block) {
-        block->was_allocated_during_stream_capture_ = stream_is_capturing(get_current_stream());
-        return {block->ptr_, reinterpret_cast<void*>(block)};
-      }
-
       // Launch the background thread and process events in a loop.
       static bool background_thread_flag [[maybe_unused]] = [this] {
         active_ = true;
@@ -379,13 +372,25 @@ struct CachingHostAllocatorImpl {
       }
     }
 
-    if (!events) {
+    if (!events.has_value()) {
       auto& pool = pool_from_block(block);
       auto index = size_index(block->size_);
       std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
       pool.free_list_[index].list_.push_back(block);
+    } else if (allocated_during_capture) {
+      // pass: No events are ever recorded during stream capture.
+
+      // If the block was ever used, block->event_count_ will be above
+      // 0 and thus can never be recycled by
+      // process_events_for_specific_size. Thus, this block will never
+      // be returned again. "Leaking" memory like this is intentional
+      // to avoid subtle cuda graph problems described here:
+      // https://github.com/pytorch/pytorch/pull/161583#issuecomment-3229885771
+
+      // Otherwise, if the block was never used, block->event_count_
+      // will be 0 and thus process_events_for_specific_size can
+      // return this block.
     } else {
-      TORCH_INTERNAL_ASSERT(!allocated_during_capture || events->empty());
       // restore these events that record by used streams.
       auto& pool = pool_from_block(block);
       std::lock_guard<std::mutex> g(pool.events_mutex_);
@@ -418,13 +423,11 @@ struct CachingHostAllocatorImpl {
       std::lock_guard<std::mutex> gf(pool.free_list_[i].mutex_, std::adopt_lock);
       std::lock_guard<std::mutex> gb(pool.blocks_mutex_, std::adopt_lock);
 
-      std::vector<B*> blocks_to_remove(
-                                       pool.free_list_[i].list_.begin(), pool.free_list_[i].list_.end());
+      std::vector<B*> blocks_to_remove(pool.free_list_[i].list_.begin(),
+                                       pool.free_list_[i].list_.end());
       pool.free_list_[i].list_.clear();
 
       for (auto* block : blocks_to_remove) {
-        // this suggests that you can be part of the free_list_
-        // while still being in blocks_. Hmm...
         pool.blocks_.erase(block);
         pool.ptr_to_block_.erase(block->ptr_);
         auto index = size_index(block->size_);
@@ -788,7 +791,15 @@ struct CachingHostAllocatorImpl {
         if (entry.second(stream)) {
           auto it = graph_pools_.find(entry.first);
           TORCH_INTERNAL_ASSERT(it != graph_pools_.end());
-          return {entry.first, it->second->blocks};
+          auto id = entry.first;
+          if (C10_UNLIKELY(!stream_is_capturing(S(S::UNCHECKED, stream)))) {
+            TORCH_WARN_ONCE("CachingHostAllocator is allocating to private pool (",
+                            id.first, ",", id.second,
+                            ") but the current stream is not capturing. Private "
+                            "pools have been tested only during graph capture. "
+                            "See https://github.com/pytorch/pytorch/pull/167507#discussion_r2561698011");
+          }
+          return {id, it->second->blocks};
         }
       }
     }
