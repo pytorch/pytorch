@@ -5,6 +5,10 @@ on:
     branches:
       - main
       - release/*
+    ### TEMPORARY ###
+    tags:
+      - ciflow/trunk/*
+    ### TEMPORARY ###
   workflow_dispatch:
   schedule:
     - cron: 29 8 * * *  # about 1:29am PDT
