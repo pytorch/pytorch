@@ -18,7 +18,7 @@ from torch._subclasses.complex_tensor._ops.common import (
 from torch.autograd.gradcheck import gradcheck
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_utils import TestCase as PytorchTestCase
-from torch.utils._pytree import tree_flatten
+from torch.utils._pytree import tree_flatten, tree_map
 
 
 if TYPE_CHECKING:
@@ -210,21 +210,28 @@ class TestCase(PytorchTestCase):
         sample_inputs = op.sample_inputs(device, dtype, requires_grad=True)
 
         for sample_input in sample_inputs:
-            subclass_sample = sample_input.transform(_as_complex_tensor)
+            # We don't use `sample_input.transform` here as it
+            # uses a `no_grad` context which makes one lose the
+            # `requires_grad` flag.
+            args, kwargs = (sample_input.input, *sample_input.args), sample_input.kwargs
+            args, kwargs = tree_map(
+                _as_complex_tensor,
+                (args, kwargs),
+                is_leaf=lambda x: isinstance(x, torch.Tensor) and x.dtype.is_complex,
+            )
 
-            if isinstance(subclass_sample.input, torch.Tensor):
-                input_list = [subclass_sample.input, *subclass_sample.args]
+            if isinstance(args[0], torch.Tensor):
+                input_list = list(args)
 
                 def func(*t: torch.Tensor):
-                    return op(*t, **subclass_sample.kwargs)
+                    return op(*t, **kwargs)
             else:
                 # For ops like `stack` and `cat`, we need to specify
                 # the list of inputs a bit differently
-                assert len(subclass_sample.args) == 0, "Unexpected args."
-                input_list = list(subclass_sample.input)
+                input_list = list(args[0])
 
                 def func(*t: torch.Tensor):
-                    return op(list(t), **subclass_sample.kwargs)
+                    return op(list(t), *args[1:], **kwargs)
 
             # Do the actual gradcheck
             self.assertTrue(
