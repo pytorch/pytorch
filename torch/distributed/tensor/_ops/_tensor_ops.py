@@ -395,8 +395,6 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
 
     # normalize args
     slice_dim = normalize_dim(dim, input_ndim)  # type: ignore[arg-type]
-    start = normalize_dim(start, input_shape[dim])  # type: ignore[arg-type]
-    end = normalize_dim(end, input_shape[dim])  # type: ignore[arg-type]
 
     statically_redundant_slice = (
         statically_known_true(start == 0)
