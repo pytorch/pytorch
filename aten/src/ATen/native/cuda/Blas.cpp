@@ -182,7 +182,7 @@ static bool isInputCompliesAddmmCudaLt(
     // NOTE: row-major result is important when bias is 1D.
     // This is because Lt broadcasts 1D bias over the columns
     // while the aten::addmm API broadcasts it over the rows,
-    // and this is in conjuction with the data preparation
+    // and this is in conjunction with the data preparation
     // procedure that does not transpose arguments with
     // col-major result. For col-major result we need
     // to explicitly transpose the problem so that bias is

@@ -219,7 +219,7 @@ class MixOrderReduction:
     @classmethod
     def get_numel(cls, node: BaseSchedulerNode) -> int:
         g1 = cls.get_numel_rnumel(node)
-        return V.graph.sizevars.size_hint(g1[0] * g1[1])
+        return V.graph.sizevars.size_hint(g1[0] * g1[1], fallback=0)
 
     @classmethod
     def get_fusion_score(

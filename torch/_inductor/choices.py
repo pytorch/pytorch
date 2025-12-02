@@ -69,10 +69,11 @@ class FusionScore:
         if self.template_score != other.template_score:
             return self.template_score < other.template_score
 
-        if self.memory_score > other.memory_score * threshold:
-            return False
-        if other.memory_score > self.memory_score * threshold:
-            return True
+        if (
+            max(self.memory_score, other.memory_score)
+            > min(self.memory_score, other.memory_score) * threshold
+        ):
+            return self.memory_score < other.memory_score
 
         return (self.node_type_score, self.memory_score, self.proximity_score) < (
             other.node_type_score,

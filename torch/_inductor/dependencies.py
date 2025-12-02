@@ -266,7 +266,7 @@ class MemoryDep(Dep):
 
     def numel_hint(self) -> int:
         try:
-            return V.graph.sizevars.size_hint(self.get_numel())
+            return V.graph.sizevars.size_hint(self.get_numel(), fallback=0)
         except NotImplementedError:  # NoneLayout
             return 0
 
@@ -351,7 +351,7 @@ class StarDep(Dep):
 
     def numel_hint(self) -> int:
         try:
-            return V.graph.sizevars.size_hint(self.get_numel())
+            return V.graph.sizevars.size_hint(self.get_numel(), fallback=0)
         except NotImplementedError:
             return 0  # NoneLayout, MultiOutputLayout, etc
 
