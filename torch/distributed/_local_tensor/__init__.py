@@ -227,58 +227,67 @@ def _map_to_rank_local_val(val: Any, rank: int) -> Any:
     return val
 
 
-def _collect_cuda_rng_states() -> dict[int, torch.Tensor]:
+def _collect_accelerator_rng_states() -> dict[int, torch.Tensor]:
     """
-    Collects RNG state from all available CUDA devices.
+    Collects RNG state from all available acceleator devices.
 
     Returns:
-        List of RNG state tensors, one for each CUDA device.
-        Returns empty list if CUDA is not available.
+        List of RNG state tensors, one for each accelerator device.
+        Returns empty list if accelerator is not available.
     """
-    if not torch.cuda.is_available():
+    if not torch.accelerator.is_available():
         return {}
 
     if torch.cuda.is_available():
         device_idx = torch.cuda.current_device()
-
         with torch.cuda.device(device_idx):
             return {device_idx: torch.cuda.get_rng_state()}
+
+    if torch.xpu.is_available():
+        device_idx = torch.xpu.current_device()
+        with torch.xpu.device(device_idx):
+            return {device_idx: torch.xpu.get_rng_state()}
 
     return {}
 
 
-def _set_cuda_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
+def _set_accelerator_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
     """
-    Sets RNG state for all CUDA devices from a list of states.
+    Sets RNG state for all accelerator devices from a list of states.
 
     Args:
         rng_states: List of RNG state tensors to restore.
     """
-    if not torch.cuda.is_available():
+    if not torch.accelerator.is_available():
         return
 
-    for device_idx, device_rng_state in rng_states.items():
-        with torch.cuda.device(device_idx):
-            torch.cuda.set_rng_state(device_rng_state)
+    if torch.cuda.is_available():
+        for device_idx, device_rng_state in rng_states.items():
+            with torch.cuda.device(device_idx):
+                torch.cuda.set_rng_state(device_rng_state)
 
+    if torch.xpu.is_available():
+        for device_idx, device_rng_state in rng_states.items():
+            with torch.xpu.device(device_idx):
+                torch.xpu.set_rng_state(device_rng_state)
 
 def _get_rng_state() -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
     """
-    Gets CPU and CUDA rng states from all devices.
+    Gets CPU and accelerator (e.g., CUDA, XPU device) rng states from all devices.
     """
-    return (torch.get_rng_state(), _collect_cuda_rng_states())
+    return (torch.get_rng_state(), _collect_accelerator_rng_states())
 
 
 def _set_rng_state(
-    cpu_state: torch.Tensor, cuda_states: dict[int, torch.Tensor]
+    cpu_state: torch.Tensor, accelerator_states: dict[int, torch.Tensor]
 ) -> None:
     """
-    Sets CPU and CUDA rng states for all devices. If the list of cuda states
-    is shorter than the number of devices only the first len(cuda_states) devices
-    will get their rng state set.
+    Sets CPU and accelerator (e.g., CUDA, XPU device) rng states for all devices. If
+    the list of accelerator states is shorter than the number of devices only the
+    first len(accelerator_states) devices will get their rng state set.
     """
     torch.set_rng_state(cpu_state)
-    _set_cuda_rng_states(cuda_states)
+    _set_accelerator_rng_states(accelerator_states)
 
 
 def _combine_int_rank_results(rank_results: dict[int, int]) -> int | torch.SymInt:
