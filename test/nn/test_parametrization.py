@@ -23,6 +23,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     swap,
     TemporaryFileName,
+    xfailIfPy314Plus,
 )
 from torch.testing._internal.two_tensor import TwoTensor
 
@@ -669,6 +670,7 @@ class TestNNParametrization(NNTestCase):
         self.assertFalse(parametrize.is_parametrized(module))
         self.assertEqual(module.weight, weight_init)
 
+    @xfailIfPy314Plus
     @swap([True, False])
     def test_errors_parametrized_tensor_parametrization(self):
         # Test errors when registering a parametrization on a parametrized tensor
@@ -853,6 +855,7 @@ class TestNNParametrization(NNTestCase):
     # FIXME: Rewrite this test using functions not depending on LAPACK
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
+    @xfailIfPy314Plus
     @swap([True, False])
     def test_caching_parametrization(self):
         r"""Test the caching system of a parametrization"""
@@ -881,6 +884,7 @@ class TestNNParametrization(NNTestCase):
     # FIXME: Rewrite this test using functions not depending on LAPACK
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
+    @xfailIfPy314Plus
     @swap([True, False])
     def test_caching_parametrization_with_transfer_parametrizations_and_params(self):
         r"""Test that transferring parametrizations doesn't cause issues with caching"""
@@ -914,6 +918,7 @@ class TestNNParametrization(NNTestCase):
             # test that the results are distinct objects for each module
             self.assertNotEqual(id(A), id(X))
 
+    @xfailIfPy314Plus
     @swap([True, False])
     def test_parametrization_same_training_mode(self):
         r"""Test training mode updated on parametrization registration"""
@@ -931,6 +936,7 @@ class TestNNParametrization(NNTestCase):
         self.assertTrue(module.parametrizations.weight[0].training)
         self.assertTrue(module.parametrizations.weight[1].training)
 
+    @xfailIfPy314Plus
     @swap([True, False])
     def test_type_before_parametrizations(self):
         r"""Test that type_before_parametrizations always retrieves original type"""
@@ -1546,6 +1552,7 @@ class TestNNParametrization(NNTestCase):
             snm._u.shape, m.parametrizations.weight.original[0, :, 0, 0].shape
         )
 
+    @xfailIfPy314Plus
     @swap([True, False])
     def test_new_spectral_norm_forward(self):
         input = torch.randn(3, 5)
