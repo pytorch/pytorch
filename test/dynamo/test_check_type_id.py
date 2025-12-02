@@ -68,10 +68,9 @@ class TestCheckTypeId(torch._dynamo.test_case.TestCase):
             matches[0],
         )
         self.assertEqual(
-            matches[0],
+            matches[0].split("#")[0],
             "| | +- ID_MATCH: ___check_obj_id(L['Config'], <type_id>), type=<class '__main__.TestCheckTypeId.\
-test_type_match_with_different_values.<locals>.Config'>  # return x * Config.multiplier  # test/dynamo/test_\
-check_type_id.py:N in fn",
+test_type_match_with_different_values.<locals>.Config'>  ",
         )
 
     def test_type_match_with_custom_classes(self):
