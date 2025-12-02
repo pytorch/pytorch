@@ -328,7 +328,7 @@ def tuple_to_list(tuple_type: type[tuple]) -> type[list]:
     """
     Convert `tuple_type` into a list type with the same type arguments. Assumes that `tuple_type` is typing.Tuple type.
     """
-    type_args = getattr(tuple_type, "__args__", None)
+    type_args = typing.get_args(tuple_type)
     # Account for different python versions, e.g. python 3.8 would give ()
     # but python 3.12 would give None.
     if (

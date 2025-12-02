@@ -29,6 +29,7 @@ import logging
 import sys
 import traceback
 import types
+import typing
 from collections import namedtuple
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
@@ -799,7 +800,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         union_type = getattr(types, "UnionType", None)
         if union_type is not None and isinstance(value, union_type):
             collected = []
-            for entry in value.__args__:
+            for entry in typing.get_args(value):
                 flat = self._flatten_type_spec(entry)
                 if flat is None:
                     return None

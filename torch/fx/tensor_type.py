@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+import typing
+
 from torch.fx.experimental.unification import Var  # type: ignore[attr-defined]
 
 from ._compatibility import compatibility
@@ -19,11 +21,11 @@ class TensorType:
         self.__args__ = dim
 
     def __repr__(self):
-        return f"TensorType[{self.__args__}]"
+        return f"TensorType[{typing.get_args(self)}]"
 
     def __eq__(self, other):
         if isinstance(other, self.__class__):
-            return list(self.__args__) == list(other.__args__)
+            return list(typing.get_args(self)) == list(typing.get_args(other))
         else:
             return False
 
@@ -75,9 +77,9 @@ def is_consistent(t1, t2):
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        return len(t1.__args__) == len(t2.__args__) and all(
+        return len(typing.get_args(t1)) == len(typing.get_args(t2)) and all(
             is_consistent(elem1, elem2)
-            for elem1, elem2 in zip(t1.__args__, t2.__args__)
+            for elem1, elem2 in zip(typing.get_args(t1), typing.get_args(t2))
         )
     else:
         return False
@@ -102,9 +104,9 @@ def is_more_precise(t1, t2):
         return True
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        return len(t1.__args__) == len(t2.__args__) and all(
+        return len(typing.get_args(t1)) == len(typing.get_args(t2)) and all(
             is_more_precise(elem1, elem2)
-            for elem1, elem2 in zip(t1.__args__, t2.__args__)
+            for elem1, elem2 in zip(typing.get_args(t1), typing.get_args(t2))
         )
 
     else:
