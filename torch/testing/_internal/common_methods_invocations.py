@@ -9385,34 +9385,29 @@ def sample_inputs_diagflat(op_info, device, dtype, requires_grad, **kwargs):
     yield SampleInput(make_input((2,)), offset=-1)
 
 
+_UNPOOL_NAME_TO_DIM = {
+    'nn.functional.max_unpool1d': 1,
+    'nn.functional.max_unpool2d': 2,
+    'nn.functional.max_unpool3d': 3
+}
+
+
 def error_inputs_max_unpool(op_info, device, **kwargs):
     """Error inputs for max_unpool: shape mismatch between input and indices."""
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
-
-    unpool_name_to_dim = {
-        'nn.functional.max_unpool1d': 1,
-        'nn.functional.max_unpool2d': 2,
-        'nn.functional.max_unpool3d': 3
-    }
-
-    pool_dim = unpool_name_to_dim[op_info.name]
+    pool_dim = _UNPOOL_NAME_TO_DIM[op_info.name]
 
     # Create mismatched shapes for input and indices
+    kwargs_dict = {'kernel_size': 3, 'stride': 2, 'padding': 0}
     if pool_dim == 1:
-        # 1D: input (8, 8), indices (8, 7) - mismatch in last dimension
         input_shape = (8, 8)
         indices_shape = (8, 7)
-        kwargs_dict = {'kernel_size': 3, 'stride': 2, 'padding': 0}
     elif pool_dim == 2:
-        # 2D: input (1, 1, 4, 4), indices (1, 1, 4, 1) - mismatch in width
         input_shape = (1, 1, 4, 4)
         indices_shape = (1, 1, 4, 1)
-        kwargs_dict = {'kernel_size': 3, 'stride': 2, 'padding': 0}
     else:  # pool_dim == 3
-        # 3D: input (1, 1, 4, 4, 4), indices (1, 1, 4, 4, 1) - mismatch in width
         input_shape = (1, 1, 4, 4, 4)
         indices_shape = (1, 1, 4, 4, 1)
-        kwargs_dict = {'kernel_size': 3, 'stride': 2, 'padding': 0}
 
     yield ErrorInput(
         SampleInput(
@@ -9432,15 +9427,9 @@ def sample_inputs_max_unpool(op_info, device, dtype, requires_grad, **kwargs):
         'nn.functional.max_unpool3d': torch.nn.functional.max_pool3d
     }
 
-    unpool_name_to_dim = {
-        'nn.functional.max_unpool1d': 1,
-        'nn.functional.max_unpool2d': 2,
-        'nn.functional.max_unpool3d': 3
-    }
-
     unpool_to_pool_name_dict = {k: f'nn.functional.{v.__name__}' for k, v in unpool_name_to_pool_method_dict.items()}
 
-    pool_dim = unpool_name_to_dim[op_info.name]
+    pool_dim = _UNPOOL_NAME_TO_DIM[op_info.name]
     pool_method = unpool_name_to_pool_method_dict[op_info.name]
 
     pool_op_info = copy.copy(op_info)
