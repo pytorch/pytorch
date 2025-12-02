@@ -516,7 +516,7 @@ class FxirTestCase(InductorTestCase):
 
     def test_dynamic_launch_grid_calc(self):
         """
-        Test the dyanmic launch grid calculation.
+        Test the dynamic launch grid calculation.
         """
 
         func = torch.add
