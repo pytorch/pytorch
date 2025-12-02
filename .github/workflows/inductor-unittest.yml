@@ -100,8 +100,8 @@ jobs:
         ]}
     secrets: inherit
 
-  inductor-pallas-test:
-    name: inductor-pallas-test
+  inductor-pallas-cuda-test:
+    name: inductor-pallas-cuda-test
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-pallas-build
     with:
