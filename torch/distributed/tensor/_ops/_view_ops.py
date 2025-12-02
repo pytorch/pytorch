@@ -580,7 +580,7 @@ def propagate_shape_and_sharding(
     # 3 requires that info, to decide whether we can error out. Maybe we can refactor
     # to make this function purely "theoretical".
     def get_in_dim_to_shard(
-        cmd: DimSpec, shard_dim_map
+        cmd: DimSpec, input_dim_to_output_dims
     ) -> Optional[InputDim | list[InputDim]]:
         if isinstance(cmd, InputDim):
             return cmd
@@ -626,11 +626,13 @@ def propagate_shape_and_sharding(
                     )
                 return cmd.input_dims[0]
         elif isinstance(cmd, Split):
-            in_dim = get_in_dim_to_shard(cmd.input_dim, shard_dim_map)
+            in_dim = get_in_dim_to_shard(cmd.input_dim, input_dim_to_output_dims)
             out_size = cmd.group_shape[cmd.split_id]
             if in_dim is not None:
                 num_of_shard_placements = len(
-                    list(itertools.chain.from_iterable(shard_dim_map.values()))
+                    list(
+                        itertools.chain.from_iterable(input_dim_to_output_dims.values())
+                    )
                 )
                 shard_mesh_dim, input_src_placement = (
                     maybe_get_shard_mesh_dim_and_placement(
@@ -687,7 +689,7 @@ def propagate_shape_and_sharding(
             # we will only shard our first component of the split
             return in_dim if cmd.split_id == 0 else None
         elif isinstance(cmd, Repeat):
-            in_dim = get_in_dim_to_shard(cmd.input_dim, shard_dim_map)
+            in_dim = get_in_dim_to_shard(cmd.input_dim, input_dim_to_output_dims)
             if in_dim is not None:
                 shardable_dims[in_dim.input_dim] = [False] * mesh_ndim
             return None
@@ -695,20 +697,20 @@ def propagate_shape_and_sharding(
             return None
 
     # for each output dim, find the corresponding input dim in terms of sharding prop
-    shard_dim_map = {}
-    for dim, cmd in enumerate(rule):
-        in_dims = get_in_dim_to_shard(cmd, shard_dim_map)
+    input_dim_to_output_dims = {}
+    for output_dim, cmd in enumerate(rule):
+        in_dims = get_in_dim_to_shard(cmd, input_dim_to_output_dims)
         if isinstance(in_dims, list) and len(in_dims) > 0:
             for in_dim in in_dims:
                 if in_dim is not None:
-                    assert in_dim.input_dim not in shard_dim_map
-                    shard_dim_map[in_dim.input_dim] = [dim]
+                    assert in_dim.input_dim not in input_dim_to_output_dims
+                    input_dim_to_output_dims[in_dim.input_dim] = [output_dim]
         else:
             if in_dims is not None:
-                if in_dims.input_dim not in shard_dim_map:
-                    shard_dim_map[in_dims.input_dim] = [dim]
+                if in_dims.input_dim not in input_dim_to_output_dims:
+                    input_dim_to_output_dims[in_dims.input_dim] = [output_dim]
                 else:
-                    shard_dim_map[in_dims.input_dim].append(dim)
+                    input_dim_to_output_dims[in_dims.input_dim].append(output_dim)
 
     input_tgt_placements: list[Placement] = []
     for mesh_dim, p in enumerate(input_src_placements):
@@ -717,11 +719,13 @@ def propagate_shape_and_sharding(
         else:
             input_tgt_placements.append(p)
 
-    def _get_split_factor(input_src_spec, shard_dim):
+    def _get_split_factor(input_src_spec, input_start_idx, shard_dim):
         split_factor = 1
         for tensor_dim, global_tensor_size in enumerate(input_src_spec.shape):
+            if tensor_dim < input_start_idx:
+                continue
             if tensor_dim >= shard_dim:
-                return split_factor
+                break
             mesh_dim = input_src_spec.dim_map[tensor_dim]
             if mesh_dim >= 0:
                 local_tensor_size = math.ceil(
@@ -730,9 +734,10 @@ def propagate_shape_and_sharding(
             else:
                 local_tensor_size = global_tensor_size
             split_factor = split_factor * local_tensor_size
+        assert split_factor > 1
         return split_factor
 
-    def _rewrite_shard_dim(p: Shard, input_src_spec):
+    def _rewrite_shard_dim(p: Shard, input_src_spec, rule):
         """
         Rewrite the shard dim to the corresponding tensor dim in output.
         For ``_StridedShard``, we can safely keep the placement type and
@@ -749,27 +754,32 @@ def propagate_shape_and_sharding(
             inner ``dim`` attribute of ``Shard`` or ``_StridedShard``.
         """
         if isinstance(p, _StridedShard):
-            tgt_shard_dims = shard_dim_map[p.dim]
+            tgt_shard_dims = input_dim_to_output_dims[p.dim]
             tgt_shard_dim = tgt_shard_dims.pop(0)
             if tgt_shard_dim > 0:
                 # unfaltten from SS to S
                 return Shard(tgt_shard_dim)
             else:
                 # existing code path
-                return _StridedShard(shard_dim_map[p.dim], split_factor=p.split_factor)
+                return _StridedShard(
+                    input_dim_to_output_dims[p.dim], split_factor=p.split_factor
+                )
         else:
             # flatten from S to S/SS
-            tgt_shard_dim = shard_dim_map[p.dim]
+            tgt_shard_dim = input_dim_to_output_dims[p.dim]
             assert len(tgt_shard_dim) == 1
             tgt_shard_dim = tgt_shard_dim[0]
-            if p.dim == 0:
+            flatten_cmd = rule[tgt_shard_dim]
+            assert isinstance(flatten_cmd, Flatten)
+            input_start_idx = flatten_cmd.input_dims[0].input_dim
+            if p.dim == input_start_idx:
                 return Shard(tgt_shard_dim)
             else:
-                split_factor = _get_split_factor(input_src_spec, p.dim)
+                split_factor = _get_split_factor(input_src_spec, input_start_idx, p.dim)
                 return _StridedShard(tgt_shard_dim, split_factor=split_factor)
 
     output_placements = [
-        _rewrite_shard_dim(p, input_src_spec) if isinstance(p, Shard) else p
+        _rewrite_shard_dim(p, input_src_spec, rule) if isinstance(p, Shard) else p
         for p in input_tgt_placements
     ]
 
