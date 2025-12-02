@@ -397,7 +397,7 @@ graph():
             self.rank, self.world_size, self.backend(device_type), fake_pg=True
         ):
             # all_reduces remain in order!
-            # note: this isnt actually invariant of pass currently..
+            # note: this isn't actually invariant of pass currently..
             # but we should keep collectives stable without reordering opportunities
 
             _, code = run_and_get_aten_graph(fn, g1, g2, g3)
@@ -441,6 +441,62 @@ graph():
                 ).run(code[0])
 
                 correct = func(inputs)
+                self.assertTrue(same(out, correct))
+                self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
+
+    @torch._inductor.config.patch(get_patches())
+    def test_custom_estimator_for_non_compute_nodes(self):
+        """Test that non-compute nodes with custom runtime estimates can trigger collective prefetching."""
+
+        def custom_estimator_with_relu(fx_node, override_size=None):
+            """Custom estimator that provides runtime for relu."""
+            # Collective ops
+            if "c10" in str(fx_node.target):
+                return 1.0
+            # Non-compute ops that we want to overlap
+            elif fx_node.target == aten.relu.default:
+                return 1.0  # relu has same time as collective
+            else:
+                return None
+
+        def func(a, b):
+            c = torch.relu(a)
+            d = torch.mm(c, c)
+
+            # Collective that is independent and should be prefetched during relu
+            ar = _functional_collectives.all_reduce(b, "sum", "0")
+
+            # Use both results
+            return d * ar
+
+        patches = {
+            **get_patches(),
+            "aten_distributed_optimizations.custom_runtime_estimation": custom_estimator_with_relu,
+        }
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            inputs_a = (
+                torch.ones(4, 4, dtype=torch.float, device=device_type) + self.rank
+            )
+            inputs_b = torch.ones(4, 4, dtype=torch.float, device=device_type) * 2
+
+            with torch._inductor.config.patch(patches):
+                out, aten_graph_str = run_and_get_aten_graph(
+                    torch.compile(func), inputs_a, inputs_b
+                )
+
+                # Verify that all_reduce is prefetched to run concurrently with relu
+                # The collective should start before relu completes to enable perfect overlap
+                FileCheck().check("all_reduce").check("relu").check("wait_tensor").run(
+                    aten_graph_str
+                )
+
+                correct = func(inputs_a, inputs_b)
                 self.assertTrue(same(out, correct))
                 self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 0)
 
