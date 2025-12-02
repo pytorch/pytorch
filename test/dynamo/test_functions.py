@@ -4804,9 +4804,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         self.assertEqual(ref[0], res[0])
         self.assertEqual(list(ref[1]), list(res[1]))
         self.assertIsInstance(res[1], map)
-        # Check strict is set, (cls, (fn, iter, iter), strict)
-        self.assertEqual(len(ref[1].__reduce__()), len(res[1].__reduce__()))
-        self.assertTrue(res[1].__reduce__()[2])
 
         # If nopython, should raise UserError
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
@@ -4821,6 +4818,14 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
         with self.assertRaisesRegex(ValueError, "map()"):
             opt_fn(x, ys, zs[:1])
+
+        # Check strict is set by testing a map returned from dynamo
+        opt_map_fn = torch.compile(
+            lambda ys, zs: map(lambda a, b: a + b, ys, zs, strict=True), backend="eager"
+        )
+        strict_map_from_dynamo = opt_map_fn(ys[:1], zs)
+        with self.assertRaises(ValueError):
+            list(strict_map_from_dynamo)
 
     @unittest.skipIf(sys.version_info < (3, 14), "strict requires Python 3.14+")
     def test_map_strict_with_graph_break(self):

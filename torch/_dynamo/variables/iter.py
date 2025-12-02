@@ -525,7 +525,9 @@ class MapVariable(ZipVariable):
         self.reconstruct_items(codegen)
         codegen.append_output(create_build_tuple(len(self.iterables) + 1))
         if self.strict:
-            assert sys.version_info >= (3, 14), "map(strict=True) requires Python 3.14+"
+            assert sys.version_info >= (3, 14), (
+                "Unexpected bug: map(strict=True) requires Python 3.14+"
+            )
             codegen.extend_output(
                 [
                     codegen.create_load_const("strict"),
