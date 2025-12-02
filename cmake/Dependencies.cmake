@@ -582,7 +582,7 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
     if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL "14")
-      foreach(xnn_tgt IN ITEMS XNNPACK microkernels-prod)
+      foreach(xnn_tgt IN ITEMS XNNPACK microkernels-prod microkernels-all)
           target_compile_options(${xnn_tgt} PRIVATE -Wno-error=incompatible-pointer-types)
       endforeach()
     endif()
