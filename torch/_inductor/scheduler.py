@@ -1293,7 +1293,7 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
 
     ms = benchmarker.benchmark(
         bench_fn,
-        args,
+        args,  # pyrefly: ignore[bad-argument-type]
         kwargs,
         memory_warmup_iters=5,
         benchmark_iters=10,
