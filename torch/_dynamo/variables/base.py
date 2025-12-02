@@ -14,6 +14,7 @@ computations.
 """
 
 import collections
+import logging
 from collections.abc import Callable, ItemsView, KeysView, Sequence, ValuesView
 from enum import Enum
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
@@ -32,6 +33,11 @@ from ..utils import cmp_name_to_op_mapping, istype
 if TYPE_CHECKING:
     from ..codegen import PyCodegen
     from ..symbolic_convert import InstructionTranslator
+    from .constant import ConstantVariable
+    from .functions import UserFunctionVariable
+
+
+log = logging.getLogger(__name__)
 
 
 class SourceType(Enum):
@@ -150,9 +156,6 @@ class AttributeMutation(MutationType):
     This case of VariableTracker.mutation_type marker indicates that Dynamo
     allows mutation on the value's attributes.
     """
-
-    def __init__(self, typ: SourceType) -> None:
-        super().__init__(typ)
 
 
 class AttributeMutationExisting(AttributeMutation):
@@ -443,7 +446,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
-    def call_obj_hasattr(self, tx: Any, name: str) -> "VariableTracker":
+    def call_obj_hasattr(self, tx: Any, name: str) -> "ConstantVariable":
         unimplemented(
             gb_type="Unsupported hasattr call",
             context=f"call_obj_hasattr {self} {name}",
@@ -559,6 +562,81 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             hints=hints,
         )
 
+    def call_tree_map(
+        self,
+        tx: Any,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: Sequence["VariableTracker"],
+        tree_map_kwargs: dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        """Performance optimization to implement optree.tree_map faster than tracing it"""
+        is_leaf_var = tree_map_kwargs.get("is_leaf")
+        if is_leaf_var is not None and not (
+            is_leaf_var.is_python_constant()
+            and is_leaf_var.as_python_constant() is None
+        ):
+            pred_result = is_leaf_var.call_function(tx, [self], {})
+            try:
+                leaf_decision = pred_result.as_python_constant()
+            except NotImplementedError:
+                return self._tree_map_fallback(
+                    tx,
+                    tree_map_fn,
+                    map_fn,
+                    rest,
+                    tree_map_kwargs,
+                )
+            if leaf_decision:
+                return map_fn.call_function(tx, [self, *rest], {})
+
+        return self.call_tree_map_branch(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+        )
+
+    def call_tree_map_branch(
+        self,
+        tx: Any,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: Sequence["VariableTracker"],
+        tree_map_kwargs: dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        """Emulate optree.tree_map without is_leaf/none_is_leaf checks (handled above)"""
+        return self._tree_map_fallback(
+            tx,
+            tree_map_fn,
+            map_fn,
+            rest,
+            tree_map_kwargs,
+        )
+
+    def _tree_map_fallback(
+        self,
+        tx: Any,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn: "VariableTracker",
+        rest: Sequence["VariableTracker"],
+        tree_map_kwargs: dict[str, "VariableTracker"],
+    ) -> "VariableTracker":
+        tree_map_fn_copy = tree_map_fn.clone()
+        tree_map_fn_copy._maybe_call_tree_map_fastpath = lambda *args, **kwargs: None  # type: ignore[missing-attribute]
+        log.debug(
+            "tree_map fastpath fallback triggered for %s (rest=%s, kwargs=%s)",
+            self,
+            rest,
+            tree_map_kwargs,
+        )
+        return tree_map_fn_copy.call_function(
+            tx,
+            [map_fn, self, *rest],
+            tree_map_kwargs,
+        )
+
     def set_name_hint(self, name: str) -> None:
         pass
 
@@ -604,6 +682,62 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return builder.SourcelessBuilder.create(tx, value)
         else:
             return variables.LazyVariableTracker.create(value, source)
+
+    def is_python_hashable(self):
+        """
+        Unlike the variable tracker's own __hash__, this method checks whether
+        the underlying Python object referenced by this variable tracker is hashable.
+        """
+        try:
+            type_self = self.python_type()
+        except NotImplementedError:
+            type_self = type(self)
+
+        unimplemented(
+            gb_type="Dynamo cannot determine whether the underlying object is hashable",
+            context=f"is_python_hashable {self}",
+            explanation=f"Dynamo does not know whether the underlying python object for {self} is hashable",
+            hints=[
+                (
+                    f"Consider using a different type of object as the dictionary key instead of {type_self}."
+                ),
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+    def get_python_hash(self):
+        """
+        Unlike the variable tracker’s own __hash__, this method is used by
+        ConstDictVariableTracker to compute the hash of the underlying key object.
+        """
+        unimplemented(
+            gb_type="Dynamo cannot determine the hash of an object",
+            context=f"get_python_hash {self}",
+            explanation=f"Dynamo does not know the hash of the underlying python object for {self}",
+            hints=[
+                (
+                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
+                ),
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
+    def is_python_equal(self, other):
+        """
+        NB - Deliberately not overriding the __eq__ method because that can
+        disable the __hash__ for the vt itself.
+        """
+        unimplemented(
+            gb_type="Dynamo cannot determine the equality comparison of an object",
+            context=f"is_python_equal {self}",
+            explanation=f"Dynamo does not know the equality comparison of the underlying python object for {self}",
+            hints=[
+                (
+                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
+                ),
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def __init__(
         self,
