@@ -35,7 +35,9 @@ To first introduce a new compute platform (as **Engineering** Platform) to PyTor
 
 * Raise an RFC [issue](https://github.com/pytorch/pytorch/issues) at PyTorch Github repository. Describe proposed platform software, hardware, its availability and plans to develop respective support in PyTorch. Emphasize if a new PyTorch backend is being proposed and what are development plans.
 
-* Wait for the RFC review and acceptance by PyTorch Core [maintainers](https://docs.pytorch.org/docs/stable/community/persons_of_interest.html)
+* Request review of the RFC by [Accelerator Working Group](https://docs.pytorch.org/docs/stable/community/persons_of_interest.html). Upon reviewing the proposal and associated materials, the working group will provide recommendations and notify PyTorch [Technical Advisory Council](https://pytorch.org/tac/) of the proposal.
+
+* Join a TAC meeting, present a proposal and request approval for your RFC. Proceed with the next steps with RFC approved by TAC.
 
 * For the in-tree platforms, submit PR(s) to add support for the new platform
 
@@ -47,11 +49,15 @@ To change existing platform level (to **Unstable** or **Stable**) and reflect th
 
 * Raise a [New Feature for Release](https://github.com/pytorch/pytorch/issues) issue describing required change
 
-* Attach assessment results following the criteria outlined in this document
+* Attach assessment results following the criteria outlined in this document. Assessment must include evidence for each item.
+
+* Request review of the RFC by [Accelerator Working Group](https://docs.pytorch.org/docs/stable/community/persons_of_interest.html) from PyTorch Foundation. Upon reviewing the proposal and associated materials Working Group will provide recommendation and notify PyTorch [Technical Advisory Council](https://pytorch.org/tac/) of the proposal.
+
+* Join a TAC meeting, present a change request for the approval. Proceed with the next steps with change approved by TAC.
 
 * Post PR(s) to modify PyTorch documentation as needed and link them to the raised issue
 
-Note that with the evolution of PyTorch some platforms might need to be added and some removed from the PyTorch documentation. It is required to periodically assess quality levels of the compute platforms supported by PyTorch. When making decision to add or remove a platform from documentation use the following guideline:
+Note that with the evolution of PyTorch some platforms might need to be added and some removed from the PyTorch documentation. It is required to periodically assess quality levels of the compute platforms supported by PyTorch. Assessment results must be provided by the respective team supporting the compute platform per request from [Accelerator Working Group](https://docs.pytorch.org/docs/stable/community/persons_of_interest.html). Accelerator Working Group owns the decision to proceed changing platform level per the process described above. Decision to add or remove a platform from documentation follows the next guideline:
 
 * If adding platform:
   * Require platform to grade as Unstable platform for 2 consecutive PyTorch releases to be added to documentation as Unstable platform
