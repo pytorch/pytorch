@@ -666,11 +666,10 @@ class TestViewOps(DTensorTestBase):
             for tensor_dims in list(
                 itertools.product(tensor_dim_values, repeat=tensor_ndim)
             ):
-                for shard_dim in range(tensor_ndim):
-                    for flatten_start in range(tensor_ndim):
-                        for flatten_end in range(flatten_start + 2, tensor_ndim + 1):
-                            if shard_dim < flatten_start or shard_dim >= flatten_end:
-                                continue
+                # Shard
+                for flatten_start in range(tensor_ndim):
+                    for flatten_end in range(flatten_start + 2, tensor_ndim + 1):
+                        for shard_dim in range(flatten_start, flatten_end):
                             placements = (Shard(shard_dim),)
                             ctx = contextlib.nullcontext()
                             # uneven shard on last dim (flatten_end - 1) is supported
@@ -679,7 +678,7 @@ class TestViewOps(DTensorTestBase):
                             ) != 0 and shard_dim != (flatten_end - 1):
                                 ctx = self.assertRaises(RuntimeError)
                             with ctx:
-                                self._test_dtensor_flatten_1d(
+                                self._test_dtensor_flatten_1d_shard(
                                     tensor_dims,
                                     flatten_start,
                                     flatten_end,
@@ -687,7 +686,19 @@ class TestViewOps(DTensorTestBase):
                                     placements,
                                 )
 
-    def _test_dtensor_flatten_1d(
+                # Replicate
+                for flatten_start in range(tensor_ndim):
+                    for flatten_end in range(flatten_start + 2, tensor_ndim + 1):
+                        placements = (Replicate(),)
+                        self._test_dtensor_flatten_1d_replicate(
+                            tensor_dims,
+                            flatten_start,
+                            flatten_end,
+                            mesh,
+                            placements,
+                        )
+
+    def _test_dtensor_flatten_1d_shard(
         self, tensor_dims, flatten_start, flatten_end, mesh, placements
     ):
         shard_dim = placements[0].dim
@@ -723,23 +734,25 @@ class TestViewOps(DTensorTestBase):
         self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
-    def _test_dtensor_flatten_1d_extra_dim(self, mesh, batch_size, seq_len, dim1, dim2):
-        global_inps: Tensor = torch.arange(batch_size * seq_len * dim1 * dim2).view(
-            batch_size, seq_len, dim1, dim2
-        )
+    def _test_dtensor_flatten_1d_replicate(
+        self, tensor_dims, flatten_start, flatten_end, mesh, placements
+    ):
+        nelem = math.prod(tensor_dims)
+        global_inps: Tensor = torch.arange(nelem).view(tensor_dims)
         global_inps_replicate: DTensor = distribute_tensor(
             global_inps, mesh, (Replicate(),)
         )
-        inps = global_inps_replicate.redistribute(mesh, (Shard(1),))
+        inps = global_inps_replicate.redistribute(mesh, placements)
+        viewed_tensor_dims = self._get_viewed_tensor_dims(
+            tensor_dims, flatten_start, flatten_end
+        )
         comm_mode = CommDebugMode()
         with comm_mode:
-            inps_viewed = inps.view(batch_size * seq_len * dim1, dim2)
-        expected_placements = (_StridedShard(dim=0, split_factor=batch_size),)
+            inps_viewed = inps.view(viewed_tensor_dims)
+        expected_placements = (Replicate(),)
         expected_local_tensor = (
             distribute_tensor(
-                global_inps.view(batch_size * seq_len * dim1, dim2),
-                mesh,
-                (Replicate(),),
+                global_inps.view(viewed_tensor_dims), mesh, (Replicate(),)
             )
             .redistribute(mesh, expected_placements)
             ._local_tensor
