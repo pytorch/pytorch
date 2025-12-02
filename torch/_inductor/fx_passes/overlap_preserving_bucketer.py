@@ -136,6 +136,9 @@ class OverlapPreservingBucketer:
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
         bucket_mode: BucketMode = "custom_ops_multidtype",
+        *,
+        # temporary BC args. TODO: remove when bc window is done
+        node_ancestors: object = None,
     ):
         self.graph = graph
         self.collective_info = collective_info
