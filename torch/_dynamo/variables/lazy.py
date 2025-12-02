@@ -192,8 +192,14 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         # This is used by ConstDictVariable tracker to find if the key LazyVT
         # can be hashed.
         def _helper(value: Any) -> bool:
+            # Only return True for types that are KNOWN to be safely hashable
+            # without needing the full VT machinery. For tensors and modules,
+            # we need to go through the proper VT path to get consistent hashing
+            # (e.g., using FakeTensor for TensorVariable).
+            # Note: isinstance(value, Hashable) is too broad - it includes tensors
+            # and modules which need special handling.
             return (
-                isinstance(value, Hashable)
+                isinstance(value, (int, float, bool, str, type(None), frozenset))
                 or inspect.isbuiltin(value)
                 or issubclass(type(value), type)
                 or is_function_or_wrapper(value)
