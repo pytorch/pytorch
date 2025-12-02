@@ -2756,6 +2756,25 @@ class TestBinaryUfuncs(TestCase):
                     value = 255 if dtype == torch.uint8 else -1
                     self.assertTrue(torch.all(fn(x, zero) == value))
 
+    @onlyNativeDeviceTypes
+    @dtypes(*integral_types())
+    def test_fmod_remainder_overflow(self, device, dtype):
+        fn_list = (torch.fmod, torch.remainder)
+        for fn in fn_list:
+            if dtype in [torch.uint8, torch.uint16, torch.uint32, torch.uint64]:
+                continue
+
+            min_val = torch.iinfo(dtype).min
+            dividend = torch.full((2, 3), min_val, dtype=dtype, device=device)
+            divisor = torch.full((3,), -1, dtype=dtype, device=device)
+
+            result = fn(dividend, divisor)
+            expected = torch.zeros_like(dividend)
+            self.assertEqual(result, expected)
+
+            result_scalar = fn(dividend, -1)
+            self.assertEqual(result_scalar, expected)
+
     @dtypes(*all_types_and(torch.half))
     def test_fmod_remainder(self, device, dtype):
         # Use numpy as reference
@@ -3057,6 +3076,18 @@ class TestBinaryUfuncs(TestCase):
         with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
             with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
                 a // b
+
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_floor_divide_int_min(self, device, dtype):
+        int_min = torch.iinfo(dtype).min
+        a = torch.tensor([int_min], dtype=dtype, device=device)
+        b = torch.tensor([-1], dtype=dtype, device=device)
+
+        result = torch.floor_divide(a, b)
+        result_ = a // b
+
+        self.assertEqual(result, a)
+        self.assertEqual(result_, a)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_muldiv_scalar(self, device, dtype):
