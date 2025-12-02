@@ -9,6 +9,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
+from torch._decomp import get_decompositions
 from torch._library.utils import fill_defaults
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
@@ -42,6 +43,17 @@ except ImportError:
 
 aten = torch.ops.aten
 logger = logging.getLogger(__name__)
+
+decomps = get_decompositions(
+    [
+        aten.stack.default,
+    ]
+)
+
+
+def decomp_wrapper(op_overload, args, kwargs):
+    assert op_overload in decomps
+    return decomps[op_overload](*args, **kwargs)
 
 
 def as_strided_handler(
@@ -153,6 +165,7 @@ class OpDispatcher:
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
+            aten.stack.default: lambda *args: decomp_wrapper(*args),
         }
 
     # ********************************************************************************************

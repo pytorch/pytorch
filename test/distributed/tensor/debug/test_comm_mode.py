@@ -218,6 +218,21 @@ class TestCommMode(TestCase):
 
         self.checksAssert(comm_mode, c10d_ops.alltoall_base_, 1, 1)
 
+    def test_dtensor_stack_no_redistributes(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        def f(x, y):
+            return torch.mm(x, y)
+
+        comm_mode = CommDebugMode()
+        a = DTensor.from_local(torch.randn(8, 8, 8), mesh, [Shard(0)])
+
+        with comm_mode:
+            torch.stack([a, a], dim=0)
+            torch.stack([a, a], dim=1)
+
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+
 
 if __name__ == "__main__":
     run_tests()
