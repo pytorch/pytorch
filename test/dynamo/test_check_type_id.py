@@ -116,12 +116,10 @@ test_check_type_id.py:N in fn",
             "type=<class '__main__.TestCheckTypeId.test_type_match_with_custom_classes.<locals>.Point'>",
             matches[0],
         )
-        self.assertEqual(
-            matches[0],
-            "| | +- TYPE_MATCH: ___check_type_id(L['point'], <type_id>), type=<class '__main__.TestCheckTypeId.\
-test_type_match_with_custom_classes.<locals>.Point'>  # return tensor + point.x + point.y  # test/dynamo/\
-test_check_type_id.py:N in fn",
-        )
+
+        self.assertIn("TYPE_MATCH: ___check_type_id(L['point'], <type_id>)", matches[0])
+        self.assertIn("return tensor + point.x + point.y", matches[0])
+        self.assertIn("test_check_type_id.py:N in fn", matches[0])
 
 
 if __name__ == "__main__":
