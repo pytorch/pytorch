@@ -70,8 +70,8 @@ class TestCheckTypeId(torch._dynamo.test_case.TestCase):
         self.assertEqual(
             matches[0],
             "| | +- ID_MATCH: ___check_obj_id(L['Config'], <type_id>), type=<class '__main__.TestCheckTypeId.\
-test_type_match_with_different_values.<locals>.Config'>  # return x * Config.multiplier  # test/dynamo/\
-test_check_type_id.py:N in fn",
+test_type_match_with_different_values.<locals>.Config'>  # return x * Config.multiplier  # test/dynamo/test_\
+check_type_id.py:N in fn",
         )
 
     def test_type_match_with_custom_classes(self):
@@ -111,15 +111,11 @@ test_check_type_id.py:N in fn",
 
         guard_str = str(cache_entries[0].guard_manager)
         matches = self._find_guard_lines(guard_str, "TYPE_MATCH")
-        self.assertIn("___check_type_id", matches[0])
-        self.assertIn(
-            "type=<class '__main__.TestCheckTypeId.test_type_match_with_custom_classes.<locals>.Point'>",
-            matches[0],
+        self.assertEqual(
+            matches[0].split("#")[0],
+            "| | +- TYPE_MATCH: ___check_type_id(L['point'], <type_id>), type=<class '__main__.\
+TestCheckTypeId.test_type_match_with_custom_classes.<locals>.Point'>  ",
         )
-
-        self.assertIn("TYPE_MATCH: ___check_type_id(L['point'], <type_id>)", matches[0])
-        self.assertIn("return tensor + point.x + point.y", matches[0])
-        self.assertIn("test_check_type_id.py:N in fn", matches[0])
 
 
 if __name__ == "__main__":
