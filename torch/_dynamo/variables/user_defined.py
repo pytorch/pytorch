@@ -282,7 +282,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    msg=f"type object '{self.value.__name__}' has no attribute '{name}'",
+                    args=[
+                        f"type object '{self.value.__name__}' has no attribute '{name}'"
+                    ],
                 )
             else:
                 # Cannot reason about classes with a custom metaclass
@@ -1445,7 +1447,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+                    args=[
+                        f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                    ],
                 )
             return result
 
@@ -1721,7 +1725,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         raise_observed_exception(
             AttributeError,
             tx,
-            msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+            args=[f"'{type(self.value).__name__}' object has no attribute '{name}'"],
         )
 
     def call_obj_hasattr(

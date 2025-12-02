@@ -105,9 +105,11 @@ def initialize_lazy_module(tx: "InstructionTranslator", mod, args, kwargs):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                msg=str(e)
-                if str(e)
-                else "AttributeError during lazy module initialization",
+                args=[
+                    str(e)
+                    if str(e)
+                    else "AttributeError during lazy module initialization"
+                ],
             )
 
 
@@ -370,7 +372,7 @@ class NNModuleVariable(VariableTracker):
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    msg=f"'{type(base).__name__}' object has no attribute '{name}'",
+                    args=[f"'{type(base).__name__}' object has no attribute '{name}'"],
                 )
 
         if name == "forward":
@@ -1279,7 +1281,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+                args=[
+                    f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                ],
             )
         return out
 
