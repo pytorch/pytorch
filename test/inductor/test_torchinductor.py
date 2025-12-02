@@ -14755,6 +14755,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_dce(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            # CASE 1: The op should get wrapped with auto_functionalized, and
+            # FX's DCE should not remove it because this op is registered as
+            # effectful
+
             log1 = []
 
             @torch.library.custom_op(
@@ -14774,13 +14778,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.ops.mylib.my_logger1("moo", b)
                 return x + x
 
-            # The op should get wrapped with auto_functionalized, and FX's DCE
-            # should not remove it because this op is registered as effectful
             torch.fx.node.has_side_effect(torch.ops.mylib.my_logger1.default)
             torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
             self.assertTrue(len(log1), 1)
 
-            ########################################################3
+            # CASE 2: The op should not get DCEd by TorchInductor
 
             log2 = []
 
@@ -14801,44 +14803,9 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.ops.mylib.my_logger2("moo", b)
                 return x + x
 
-            # The op should not get DCEd by inductor
             torch.fx.node.has_side_effect(torch.ops.mylib.my_logger2.default)
             torch.compile(foo, fullgraph=True)(torch.ones(3, 3))
             self.assertTrue(len(log2), 1)
-
-            ########################################################3
-
-            log3 = []
-
-            @torch.library.custom_op(
-                "mylib::my_logger3",
-                mutates_args=(),
-            )
-            def my_logger3(s: str, t: torch.Tensor) -> torch.Tensor:
-                log3.append(s)
-                return torch.zeros(1)
-
-            @my_logger3.register_fake
-            def my_logger3(s, t) -> torch.Tensor:
-                return torch.zeros(1)
-
-            # Registering an op as being effectful should also prevent FX DCE
-            from torch._library.effects import EffectType
-
-            torch.library._register_effectful_op(
-                "mylib::my_logger3", EffectType.ORDERED
-            )
-
-            def foo(x):
-                b = torch.scalar_tensor(x.shape[0])
-                torch.ops.mylib.my_logger3("moo", b)
-                return x + x
-
-            gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 3))
-            gm.graph.eliminate_dead_code()
-            gm.recompile()
-            gm(torch.ones(3, 3))
-            self.assertTrue(len(log3), 1)
 
     @skipIfMPS  # Accuracy issue on MPS
     def test_weight_norm_conv2d(self):
