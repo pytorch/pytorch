@@ -9,7 +9,6 @@ import re
 import threading
 import traceback
 import unittest.mock
-import uuid
 import weakref
 from abc import abstractmethod
 from collections import defaultdict
@@ -1159,8 +1158,10 @@ class ChainedSource(Source):
         if self in cache:
             return cache[self]
         tmpvar = "tmp"
+        counter = 0
         while tmpvar in locals:
-            tmpvar = f"tmp{uuid.uuid4()}"
+            tmpvar = f"tmp{counter}"
+            counter += 1
         locals[tmpvar] = self.base.get_value(globals, locals, cache)
         value = eval(self._name_template.format(tmpvar), globals, locals)
         del locals[tmpvar]
