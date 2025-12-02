@@ -776,6 +776,30 @@ from user code:
             self.assertEqual(compiled_fn._artifacts.backend_name, "aotinductor")
             self.assertEqual(expected, actual)
 
+    def test_aot_compile_with_checkpoint(self):
+        from torch.utils.checkpoint import checkpoint
+
+        def fn(x, y):
+            def compute(x, y):
+                return x * 2 + y * 3
+
+            return checkpoint(compute, x, y, use_reentrant=False)
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*inputs)
+            self.assertEqual(expected, actual)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
