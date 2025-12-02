@@ -14,15 +14,11 @@ import copy
 import functools
 import itertools
 import pprint
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, TYPE_CHECKING, Union
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -87,6 +83,7 @@ from .subclass_utils import (
 from .utils import (
     call_and_expect_output_descs,
     call_func_at_runtime_with_args,
+    get_cuda_generator_meta_val,
     make_boxed_func,
     partial_flatten_asdict,
     simple_wraps,
@@ -492,20 +489,31 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
     def pre_compile(
         self,
         flat_fn: torch.fx.GraphModule,
-        flat_args,
-        aot_config,
+        flat_args: list[Any],
+        aot_config: AOTConfig,
         *,
-        fw_metadata,
+        fw_metadata: ViewAndMutationMeta,
     ) -> None:
+        # Add RNG states for forward mode only.
+        if not self.return_new_outs and fw_metadata.num_graphsafe_rng_states > 0:
+            index = fw_metadata.graphsafe_rng_state_index
+            assert index is not None
+            rng_states = [
+                get_cuda_generator_meta_val(index)
+                for _ in range(fw_metadata.num_graphsafe_rng_states)
+            ]
+            flat_args.extend(rng_states)
+
         if config.functionalize_rng_ops:
             # Update example inputs for the fw_compiler
             fake_mode = detect_fake_mode()
             assert fake_mode is not None
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple(fake_mode)
             flat_args.extend([seed, offset])
-            # We are not clearing flat_args here because
-            # 1) There is a check in the debug compiler at the end
-            # 2) It does not matter as these are fake tensors
+
+        # We are not clearing flat_args here because
+        # 1) There is a check in the debug compiler at the end
+        # 2) It does not matter as these are fake tensors
 
     def post_compile(
         self,
@@ -2569,6 +2577,22 @@ def pre_compile(
     return flat_fn, flat_args, flat_args_descs, fw_metadata
 
 
+def pre_compile_inductor_wrappers(
+    wrappers: Sequence[InductorWrapper],
+    fw_module: torch.fx.GraphModule,
+    flat_args: list[Tensor],
+    aot_config: AOTConfig,
+    *,
+    fw_metadata: ViewAndMutationMeta,
+) -> None:
+    """
+    Runs a sequence of InductorWrappers on the given GraphModule and arguments.  Mutates
+    flat_args in place.
+    """
+    for wrapper in wrappers:
+        wrapper.pre_compile(fw_module, flat_args, aot_config, fw_metadata=fw_metadata)
+
+
 def post_compile(
     wrappers: list[CompilerWrapper],
     compiled_fn: Callable,
@@ -2584,6 +2608,24 @@ def post_compile(
             compiled_fn, aot_config, runtime_metadata=runtime_metadata
         )
     return compiled_fn, runtime_metadata
+
+
+def post_compile_inductor_wrappers(
+    wrappers: Sequence[InductorWrapper],
+    compiled_fn: Callable,
+    aot_config: AOTConfig,
+    *,
+    runtime_metadata: ViewAndMutationMeta,
+) -> Callable:
+    """
+    Runs a sequence of InductorWrappers on the given function.  Should be called after
+    pre_compile_inductor_wrappers.
+    """
+    for wrapper in reversed(wrappers):
+        compiled_fn = wrapper.post_compile(
+            compiled_fn, aot_config, runtime_metadata=runtime_metadata
+        )
+    return compiled_fn
 
 
 def make_runtime_safe(

@@ -75,7 +75,9 @@ from .runtime_wrappers import (
     FunctionalizedRngRuntimeWrapper,
     make_runtime_safe,
     post_compile,
+    post_compile_inductor_wrappers,
     pre_compile,
+    pre_compile_inductor_wrappers,
     RuntimeWrapper,
     SerializableCompiledFunction,
 )
@@ -85,6 +87,7 @@ from .schemas import (
     AOTState,
     FlatFn,
     FxValue,
+    InductorWrapper,
     MutationType,
     SubclassMeta,
     ViewAndMutationMeta,
@@ -92,7 +95,6 @@ from .schemas import (
 from .subclass_utils import compute_inner_mutated_inp_indices_from_subclass_meta
 from .utils import (
     contain_metadata_mutation_ops,
-    get_cuda_generator_meta_val,
     make_boxed_func,
     simple_wraps,
     strict_zip,
@@ -2258,29 +2260,17 @@ def _aot_stage2b_compile_forward_or_inference(
         compiler = aot_config.fw_compiler
 
     with grad_ctx(), autocast_ctx(), track_graph_compiling(aot_config, tracking_mode):
-        # Setup wrappers
         fakified_out_wrapper = FakifiedOutWrapper()
-        fakified_out_wrapper.pre_compile(
-            fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
-        )
-
-        # Initialize RNG wrapper based on mode
-        functionalized_rng_wrapper = FunctionalizedRngRuntimeWrapper(
-            return_new_outs=is_inference
-        )
-
-        # Add RNG states for forward mode only
-        if not is_inference and fw_metadata.num_graphsafe_rng_states > 0:
-            index = fw_metadata.graphsafe_rng_state_index
-            assert index is not None
-            rng_states = [
-                get_cuda_generator_meta_val(index)
-                for _ in range(fw_metadata.num_graphsafe_rng_states)
-            ]
-            adjusted_flat_args.extend(rng_states)  # type: ignore[arg-type]
-
-        functionalized_rng_wrapper.pre_compile(
-            fw_module, adjusted_flat_args, aot_config, fw_metadata=fw_metadata
+        inductor_wrappers: list[InductorWrapper] = [
+            fakified_out_wrapper,
+            FunctionalizedRngRuntimeWrapper(return_new_outs=is_inference),
+        ]
+        pre_compile_inductor_wrappers(
+            inductor_wrappers,
+            fw_module,
+            adjusted_flat_args,
+            aot_config,
+            fw_metadata=fw_metadata,
         )
 
         # Set tracing context
@@ -2318,11 +2308,8 @@ def _aot_stage2b_compile_forward_or_inference(
             runtime_metadata=fw_metadata,
         )
 
-        compiled_fw_func = functionalized_rng_wrapper.post_compile(
-            compiled_fw_func, aot_config, runtime_metadata=fw_metadata
-        )
-
-        compiled_fw_func = fakified_out_wrapper.post_compile(
+        post_compile_inductor_wrappers(
+            inductor_wrappers,
             compiled_fw_func,
             aot_config,
             runtime_metadata=fw_metadata,
