@@ -160,6 +160,32 @@ class ComboKernelTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @requires_gpu_and_triton
+    def test_combo_kernels_filter_reduction(self):
+        def fn(a, b, c, d, e, f):
+            # Pointwise ops that should be fused
+            a = a + 1
+            b = b * 2
+            c = c - 3
+            return a, b, c, d.mean(-1), e.sum(-1), f.max(-1)
+
+        inps = [
+            torch.rand(8, 16, device=GPU_TYPE),
+            torch.rand(16, 32, device=GPU_TYPE),
+            torch.rand(32, 64, device=GPU_TYPE),
+            torch.rand(64, 128, device=GPU_TYPE),
+            torch.rand(128, 256, device=GPU_TYPE),
+            torch.rand(256, 512, device=GPU_TYPE),
+        ]
+
+        compiled_fn = torch.compile(fn)
+        result = compiled_fn(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(result, expected)
+        # 3 pointwise ops fused to 1 kernel + 3 reductions (1 kernel each)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+
 
 @instantiate_parametrized_tests
 class ComboKernelBenchmarkTests(TestCase):
