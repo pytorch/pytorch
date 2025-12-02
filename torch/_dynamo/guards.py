@@ -3327,7 +3327,7 @@ class GuardsStatePickler(pickle.Pickler):
         return types.MethodType(func, base)
 
     @staticmethod
-    def _unpickle_sdp_backend(name: str):
+    def _unpickle_sdp_backend(name: str) -> torch.nn.attention.SDPBackend:
         # Reconstruct from the Python-facing enum namespace
         return getattr(torch.nn.attention.SDPBackend, name)
 
