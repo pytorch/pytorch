@@ -3755,6 +3755,8 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.kernel_autotune_calls = root.kernel_autotune_calls
         # Only store kernel src to name mapping in the main graph
         self.src_to_kernel = root.src_to_kernel
+        # Same here, only define user-defined Triton kernels in the main graph
+        self.user_defined_kernel_cache = root.user_defined_kernel_cache
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
