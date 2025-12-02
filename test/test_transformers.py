@@ -4208,8 +4208,7 @@ class TestSDPAXpuOnly(NNTestCase):
     Mostly migrate from TestSDPACudaOnly in test/test_transformers.py
     """
 
-    PLATFORM_SUPPORTS_XPU_FLASH_ATTENTION = torch.xpu.is_available() and \
-                                            torch._C._is_flash_attention_available()
+    PLATFORM_SUPPORTS_XPU_FLASH_ATTENTION = torch.xpu.is_available() and torch._C._is_flash_attention_available()
 
     @parametrize("type", ["dense"])
     @parametrize("dropout", [0.0, 0.7])
@@ -4350,12 +4349,11 @@ class TestSDPAXpuOnly(NNTestCase):
 
         with sdpa_kernel(backends=[SDPBackend.OVERRIDEABLE]):
             actual = F.scaled_dot_product_attention(
-            query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
+                query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
 
         with sdpa_kernel(backends=[SDPBackend.MATH]):
             math_ref = F.scaled_dot_product_attention(
-            query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
-
+                query, key, value, attn_mask=attn_mask, dropout_p=0.0, is_causal=False)
         self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
     @parametrize("type", ["dense"])
@@ -4567,7 +4565,7 @@ class TestSDPAXpuOnly(NNTestCase):
         v = v.view(batch, seqlen, num_heads, head_dim).transpose(1, 2)
 
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-                F.scaled_dot_product_attention(q, k, v)
+            F.scaled_dot_product_attention(q, k, v)
 
         # (B, H, S, D)
         q = q.contiguous()
@@ -4593,9 +4591,9 @@ class TestSDPAXpuOnly(NNTestCase):
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
             F.scaled_dot_product_attention(q, k, v)
 
-        q_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim+1)
-        k_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim+1)
-        v_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim+1)
+        q_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim + 1)
+        k_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim + 1)
+        v_shape = SdpaShape(batch, seqlen, num_heads, max_supported_head_dim + 1)
         q, k, v = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
         q, k, v = q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2)
         with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
