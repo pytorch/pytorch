@@ -98,6 +98,8 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import (
+        InliningGeneratorInstructionTranslator,
+        InliningInstructionTranslator,
         InstructionTranslator,
         InstructionTranslatorBase,
     )
@@ -889,7 +891,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self,
         code: types.CodeType,
         f_globals: dict[str, Any],
-        inline_tracer: "InstructionTranslator",
+        inline_tracer: "InliningGeneratorInstructionTranslator",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
@@ -934,7 +936,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         temp = temporarely_allow_writes_to_output_graph(tx)
 
         with save, disallow, temp:
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             if not tracer.generator_exhausted:
                 self.remaining_items = self.force_unpack_var_sequence(tx)
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
@@ -953,12 +955,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def _get_inline_tracer(self, tx: "InstructionTranslator") -> Any:
-        assert self.inline_tracer is not None
-        return self.inline_tracer
-
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
-        tracer = self._get_inline_tracer(tx)
+        tracer = self.inline_tracer
 
         if self._is_generator_exhausted():
             raise_observed_exception(StopIteration, tx)
@@ -1015,7 +1013,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def _setup_exception(
         self, tx: "InstructionTranslator", exc: VariableTracker
     ) -> None:
-        tracer = self._get_inline_tracer(tx)
+        tracer = self.inline_tracer
         try:
             tracer._raise_exception_variable(exc)
         except ObservedException as e:
@@ -1053,7 +1051,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     for arg in args
                 ):
                     raise_observed_exception(TypeError, tx)
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             tracer.push_many(args)
             return self.next_variable(tx)
         elif name == "close":
@@ -1070,7 +1068,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Return None if close is called on a just-started generator
             # See test GeneratorCloseCpythonTests::test_close_not_started
 
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             if self._is_generator_just_started() or self._is_generator_exhausted():
                 tracer.generator_exhausted = True
                 return variables.ConstantVariable(None)
@@ -1130,7 +1128,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # or raises a different exception, then that exception propagates to the caller.
 
             # Setup the exception table and jump target in case of try...finally
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             try:
                 # In Python 3.9, the exception is represented as a triple (typ, val, tb)
                 # In such cases, we re-raise the exception object given to avoid
@@ -1263,7 +1261,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "InstructionTranslatorBase":
+    ) -> "InliningInstructionTranslator":
         from torch._dynamo.symbolic_convert import InliningInstructionTranslator
 
         return InliningInstructionTranslator.build_inline_tracer(
@@ -1325,7 +1323,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "InstructionTranslatorBase":
+    ) -> "InliningGeneratorInstructionTranslator":
         # NOTE: This only exists to not break support for context manager when
         # config.enable_faithful_generator_behavior = False and
         # config.enable_trace_contextlib = True. In case the former is false,
