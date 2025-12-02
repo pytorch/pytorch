@@ -4982,32 +4982,29 @@ class CommonTemplate:
 
     @skip_if_gpu_halide  # slow
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
-    @parametrize("combo_kernels", (False, True))
-    def test_adaptive_avg_pool2d1(self, combo_kernels):
-        with config.patch(combo_kernels=combo_kernels):
-
-            def fn(x):
-                return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
-                    x + 1, (2, 5)
-                )
-
-            self.common(
-                fn,
-                (torch.randn(2, 4, 16, 16),),
-                check_lowp=False,
+    def test_adaptive_avg_pool2d1(self):
+        def fn(x):
+            return aten._adaptive_avg_pool2d(x, (6, 6)), aten._adaptive_avg_pool2d(
+                x + 1, (2, 5)
             )
 
-            # lowering to avg_pool2d case
-            self.common(
-                fn,
-                (torch.randn(2, 4, 3, 3),),
-            )
+        self.common(
+            fn,
+            (torch.randn(2, 4, 16, 16),),
+            check_lowp=False,
+        )
 
-            # no-op case
-            self.common(
-                fn,
-                (torch.randn(2, 4, 6, 6),),
-            )
+        # lowering to avg_pool2d case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 3, 3),),
+        )
+
+        # no-op case
+        self.common(
+            fn,
+            (torch.randn(2, 4, 6, 6),),
+        )
 
     @xfail_if_mps  # Non-divisible input sizes are not implemented on MPS device
     def test_adaptive_avg_pool2d2(self):
@@ -8591,25 +8588,22 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [torch.randn(1, 1024), torch.randn(1, 1024, 2)])
 
-    @parametrize("combo_kernels", (False, True))
     @config.patch(fallback_random=True)
-    def test_bernoulli1(self, combo_kernels):
-        with config.patch(combo_kernels=combo_kernels):
+    def test_bernoulli1(self):
+        def fn(a):
+            b = a.clone()
+            # aten.bernoulli_() uses aten.bernoulli.p() behind the scene, so it will be decomposed.
+            return aten.bernoulli_(b).sum() / torch.prod(torch.tensor(a.size()))
 
-            def fn(a):
-                b = a.clone()
-                # aten.bernoulli_() uses aten.bernoulli.p() behind the scene, so it will be decomposed.
-                return aten.bernoulli_(b).sum() / torch.prod(torch.tensor(a.size()))
-
-            p = 0.3
-            self.common(
-                fn,
-                [
-                    torch.ones(200, 200) * p,
-                ],
-                atol=p * 0.06,
-                rtol=0.06,
-            )
+        p = 0.3
+        self.common(
+            fn,
+            [
+                torch.ones(200, 200) * p,
+            ],
+            atol=p * 0.06,
+            rtol=0.06,
+        )
 
     @skip_if_triton_cpu
     def test_bernoulli2(self):
