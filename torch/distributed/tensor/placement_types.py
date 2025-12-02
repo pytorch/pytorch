@@ -278,7 +278,7 @@ class Shard(torch._C._distributed.Shard):
         if is_padded:
             full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
             unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
-            local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size)
+            local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size).contiguous()
 
         return local_tensor
 
