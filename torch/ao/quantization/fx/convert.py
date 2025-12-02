@@ -6,7 +6,6 @@ import warnings
 from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
 from torch.ao.quantization.backend_config import (
     BackendConfig,
     get_native_backend_config,
@@ -65,6 +64,9 @@ from .utils import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+
+NUMERIC_DEBUG_HANDLE_KEY = "numeric_debug_handle"
+CUSTOM_KEY = "custom"
 
 __all__ = [
     "convert",
@@ -247,11 +249,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 CUSTOM_KEY in node.meta
                 and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
             ):
-                if CUSTOM_KEY not in dequantized_node.meta:
-                    dequantized_node.meta[CUSTOM_KEY] = {}
-                dequantized_node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
-                    CUSTOM_KEY
-                ][NUMERIC_DEBUG_HANDLE_KEY]
+                raise NotImplementedError(
+                    "pt2e numeric suite has been migrated to torchao (https://github.com/pytorch/ao)"
+                )
             graph.erase_node(node)
     elif is_dynamic:
         # uint8/int8/fp16 dynamic quantization
@@ -345,9 +345,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             node.replace_all_uses_with(dequantized_node)
             # propagate numeric debug handle from observer/fake_quant node to dequantize node
             if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
-                dequantized_node.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
-                    NUMERIC_DEBUG_HANDLE_KEY
-                ]
+                raise NotImplementedError(
+                    "pt2e numeric suite has been migrated to torchao (https://github.com/pytorch/ao)"
+                )
             graph.erase_node(node)
     elif dtype == torch.float16:
         # Insert to_fp16 -> to_fp32 node

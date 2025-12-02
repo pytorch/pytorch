@@ -5582,6 +5582,7 @@ class CPUReproTests(TestCase):
         )
 
     @config.patch(freezing=True)
+    @unittest.skip("TODO: Move this to torchao since we moved pt2e quant flow to torchao")
     def test_add_layernorm(self):
         class Model(torch.nn.Module):
             def __init__(self):

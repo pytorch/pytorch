@@ -20,7 +20,6 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
 from torch.testing._internal.common_quantized import (
     _calculate_dynamic_per_channel_qparams,
 )
@@ -1323,6 +1322,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @skipIfWindows(msg="Windows don't support quantize.")
+    @unittest.skip("TODO: Move this to torchao since we moved pt2e quant flow to torchao")
     def test_quantized_linear_with_pointwise(
         self, batch_size, in_features, out_features, bias, input_3d, dtype, epilogue
     ):
@@ -1343,6 +1343,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 return res
 
         counters.clear()
+        # NOTE: `_generate_qdq_quantized_model` is moved to torchao, so no longer works
+        # here
+        from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
         ref_quantized_mod = _generate_qdq_quantized_model(
             M(bias=bias).eval(),
             (input,),
@@ -1939,6 +1942,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @skipIfWindows(msg="Windows don't support quantize.")
+    @unittest.skip("TODO: Move this to torchao since we moved pt2e quant flow to torchao")
     def test_quantized_linear_with_pointwise_binary(
         self,
         batch_size,
@@ -1982,6 +1986,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
                 return res
 
         counters.clear()
+        # NOTE: `_generate_qdq_quantized_model` is moved to torchao, so no longer works
+        # here
+        from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
         ref_quantized_mod = _generate_qdq_quantized_model(
             M(bias=bias, input_3d=input_3d).eval(),
             (input, other, other2),
@@ -2020,6 +2027,7 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
     @parametrize("out_features", (64, 65))
     @parametrize("bias", (True, False))
     @skipIfWindows(msg="Windows don't support quantize.")
+    @unittest.skip("TODO: Move this to torchao since we moved pt2e quant flow to torchao")
     def test_quantized_linear_amx(self, batch_size, in_features, out_features, bias):
         class M(torch.nn.Module):
             def __init__(self, bias):
@@ -2031,6 +2039,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
 
         counters.clear()
         v = torch.randn(batch_size, in_features).to(dtype=torch.float32)
+        # NOTE: `_generate_qdq_quantized_model` is moved to torchao, so no longer works
+        # here
+        from torch.testing._internal.common_quantization import _generate_qdq_quantized_model
         ref_quantized_mod = _generate_qdq_quantized_model(
             M(bias=bias).eval(),
             (v,),
