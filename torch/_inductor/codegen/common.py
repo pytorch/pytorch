@@ -2657,12 +2657,12 @@ class CSEProxy(DefaultHandler):
         """
         from ..bounds import ValueRangeAnalysis
         from ..select_algorithm import TritonTemplateKernel
-        from .cutlass.cuda_kernel import CUDATemplateKernel
+        from .cutlass.kernel import CUTLASSTemplateKernel
 
         if isinstance(V.kernel, TritonTemplateKernel):
             return ValueRanges.unknown()
 
-        if isinstance(V.kernel, CUDATemplateKernel):
+        if isinstance(V.kernel, CUTLASSTemplateKernel):
             return ValueRanges.unknown()
 
         if isinstance(V.interpreter, NullHandler):
