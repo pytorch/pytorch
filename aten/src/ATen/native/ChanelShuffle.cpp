@@ -1,5 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/NamedTensorUtils.h>
+#if defined(C10_MOBILE) && defined(USE_XNNPACK)
+#include <ATen/native/xnnpack/Engine.h>
+#endif
 #include <c10/util/Exception.h>
 
 #include <ATen/native/cpu/ChannelShuffleKernel.h>
