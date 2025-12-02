@@ -40,10 +40,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download and Run PMD
+      - name: Download PMD
         run: |
-          wget -O pmd.zip https://github.com/pmd/pmd/releases/download/pmd_releases%2F7.19.0/pmd-dist-7.19.0-bin.zip
-          unzip pmd.zip
-          ./pmd-bin-7.19.0/bin/run.sh pmd -d ./src -R rulesets/java/quickstart.xml -f text
+          wget https://github.com/pmd/pmd/releases/download/pmd_releases/7.19.0/pmd-bin-7.19.0.zip
+          unzip pmd-bin-7.19.0.zip
+      
+      - name: Run PMD Quality Scan
+        run: |
+          ./pmd-bin-7.19.0/bin/pmd \
+            check \
+            --dir . \
+            --rulesets rulesets/java/quickstart.xml
+
 
 
