@@ -566,13 +566,17 @@ class GPUDeviceBenchmarkMixin:
             ),
             "cuda",
         )
+        benchmark_configs = {
+            "warmup": config.max_autotune_gemm_benchmark_warmup,
+            "rep": config.max_autotune_gemm_benchmark_reps,
+        }
         device_interface = get_interface_for_device(device_type)
         if len(device_idx_set) == 1:
             device_idx = next(iter(device_idx_set))
         else:
             device_idx = device_interface.current_device()
         with device_interface.device(device_idx):  # type: ignore[attr-defined]
-            res = benchmarker.benchmark_gpu(fn)
+            res = benchmarker.benchmark_gpu(fn, **benchmark_configs)
             device_interface.synchronize()  # shake out any CUDA errors
 
         return res
