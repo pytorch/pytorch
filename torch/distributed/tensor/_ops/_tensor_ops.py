@@ -33,6 +33,7 @@ from torch.distributed.tensor._ops.utils import (
     shift_shard_dims_after_remove,
 )
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -753,56 +754,6 @@ def _derive_follow_placements_from_tuple_strategy(
     return follow_placements
 
 
-@register_op_strategy(aten.stack.default, RuntimeSchemaInfo(1, needs_pytree=True))
-def stack_strategy(op_schema: OpSchema) -> StrategyType:
-    args_schema = op_schema.args_schema
-    input_tuple_strategy = args_schema[0]
-    if not isinstance(input_tuple_strategy, TupleStrategy):
-        raise AssertionError(f"Expected TupleStrategy, got {input_tuple_strategy}")
-    first_input_strategy = input_tuple_strategy.children[0]
-    if not isinstance(first_input_strategy, OpStrategy):
-        raise AssertionError(f"Expected OpStrategy, got {first_input_strategy}")
-    common_input_ndim = first_input_strategy.ndim
-    dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
-    # normalize the dim to be within the common input ndim
-    dim = normalize_dim(dim, common_input_ndim)
-
-    mesh = first_input_strategy.mesh
-
-    follow_placements = _derive_follow_placements_from_tuple_strategy(
-        op_schema.op, input_tuple_strategy
-    )
-
-    # create op strategy base on the follow placements
-    op_strategy = OpStrategy([])
-
-    input_specs = tuple(
-        DTensorSpec(mesh, tuple(follow_placements))
-        for _ in range(len(input_tuple_strategy.children))
-    )
-
-    # stack op would "insert" new dim, so all sharded dim >= the inserted dim need to
-    # be normalized with the new Shard placement
-    follow_placements = shift_shard_dims_after_insert(follow_placements, dim)
-
-    for strategy in input_tuple_strategy.children:
-        if not isinstance(strategy, OpStrategy):
-            raise AssertionError(f"Expected OpStrategy, got {type(strategy)}")
-        output_spec = DTensorSpec(mesh, tuple(follow_placements))
-        redistribute_cost = []
-        for input_spec in input_specs:
-            cost = generate_redistribute_costs(strategy, input_spec)
-            redistribute_cost.append(cost)
-        op_strategy.strategies.append(
-            OpSpec(
-                output_specs=output_spec,
-                input_specs=input_specs,
-                redistribute_cost=redistribute_cost,
-            )
-        )
-    return op_strategy
-
-
 @register_op_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
 def cat_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
@@ -820,9 +771,91 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
 
     mesh = first_input_strategy.mesh
 
+    # Check if we can use the _StridedShard optimization:
+    # This requires all input tensors to have the same size on the concatenation dimension
+    # and all be sharded on that dimension with the same placement.
+    can_use_strided_shard = True
+    first_strategy = input_tuple_strategy.children[0]
+    if not isinstance(first_strategy, OpStrategy):
+        can_use_strided_shard = False
+    else:
+        first_tensor_meta = first_strategy.strategies[0].output_spec.tensor_meta
+        if first_tensor_meta is not None and dim < len(first_tensor_meta.shape):
+            first_size_on_cat_dim = first_tensor_meta.shape[dim]
+            first_placements = first_strategy.strategies[0].output_spec.placements
+
+            # Check if first tensor is sharded on the cat dim
+            if not is_tensor_dim_sharded(first_strategy.strategies[0].output_spec, dim):
+                can_use_strided_shard = False
+
+            # Check all other tensors have the same size and sharding on cat dim
+            for idx in range(1, num_input_tensor):
+                that_strategy = input_tuple_strategy.children[idx]
+                if not isinstance(that_strategy, OpStrategy):
+                    can_use_strided_shard = False
+                    break
+                that_spec = that_strategy.strategies[0].output_spec
+                that_tensor_meta = that_spec.tensor_meta
+
+                if (
+                    that_tensor_meta is None
+                    or dim >= len(that_tensor_meta.shape)
+                    or that_tensor_meta.shape[dim] != first_size_on_cat_dim
+                ):
+                    can_use_strided_shard = False
+                    break
+
+                # Check if sharded on cat dim with same placement
+                if (
+                    not is_tensor_dim_sharded(that_spec, dim)
+                    or that_spec.placements != first_placements
+                ):
+                    can_use_strided_shard = False
+                    break
+        else:
+            can_use_strided_shard = False
+
     op_strategy = OpStrategy([])
     # use a set to deduplicate strategies with the same placement
     strategies_placement_pool = set()
+
+    # If we can use _StridedShard, add that strategy first (it has lower cost)
+    if can_use_strided_shard:
+        exemplar_spec = first_input_strategy.strategies[0].output_spec
+        exemplar_placement_strided = tuple(
+            _StridedShard(p.dim, split_factor=num_input_tensor)
+            if isinstance(p, Shard) and p.dim == dim
+            else p
+            for p in exemplar_spec.placements
+        )
+        strategies_placement_pool.add(exemplar_placement_strided)
+        redistribute_costs = []
+        input_specs = []
+        for idx in range(num_input_tensor):
+            that_tensor_strategy = input_tuple_strategy.children[idx]
+            if not isinstance(that_tensor_strategy, OpStrategy):
+                raise AssertionError(
+                    f"Expected OpStrategy, got {type(that_tensor_strategy)}"
+                )
+            # Input should keep Shard placement (no redistribution needed)
+            input_spec = DTensorSpec(
+                mesh,
+                exemplar_spec.placements,  # Keep original sharding
+                tensor_meta=that_tensor_strategy.strategies[0].output_spec.tensor_meta,
+            )
+            input_specs.append(input_spec)
+            redistribute_costs.append(
+                generate_redistribute_costs(that_tensor_strategy, input_spec)
+            )
+        op_strategy.strategies.append(
+            OpSpec(
+                output_specs=DTensorSpec(mesh, exemplar_placement_strided),
+                input_specs=tuple(input_specs),
+                redistribute_cost=redistribute_costs,
+            )
+        )
+
+    # Generate strategies for each unique placement among inputs
     for this_strategy in input_tuple_strategy.children:
         # check strategy of each tensor to be concatenated
         if not isinstance(this_strategy, OpStrategy):
