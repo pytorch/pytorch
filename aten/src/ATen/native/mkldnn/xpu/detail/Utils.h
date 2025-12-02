@@ -89,15 +89,17 @@ dnnl::memory::dims compatible_dilation(Vec&& dilation) {
 }
 
 inline std::vector<int64_t> padding_r(
-    IntArrayRef padding, IntArrayRef output_padding)
-{
+    IntArrayRef padding,
+    IntArrayRef output_padding) {
   // ConvTranspose padding adjustment
   //
   // PyTorch uses padding/output_padding:
-  //   osize = (isize - 1) * stride - 2 * padding + dilation * (kernel_size - 1) + output_padding + 1
+  //   osize = (isize - 1) * stride - 2 * padding + dilation * (kernel_size - 1)
+  //   + output_padding + 1
   //
   // MKLDNN uses padding_l/padding_r:
-  //   osize = (isize - 1) * stride - padding_l - padding_r + dilation * (kernel_size - 1) + 1
+  //   osize = (isize - 1) * stride - padding_l - padding_r + dilation *
+  //   (kernel_size - 1) + 1
   //
   // So: padding_l = padding, padding_r = padding - output_padding
   //
