@@ -100,12 +100,12 @@ jobs:
         ]}
     secrets: inherit
 
-  inductor-pallas-cuda-test:
-    name: inductor-pallas-cuda-test
+  inductor-pallas-test:
+    name: inductor-pallas-test
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-pallas-build
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm89
       docker-image: ${{ needs.inductor-pallas-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-pallas-build.outputs.test-matrix }}
     secrets: inherit
