@@ -1618,6 +1618,9 @@ class BuiltinVariable(VariableTracker):
                 # Default repr - build and trace it
                 fn_vt = VariableTracker.build(tx, repr_method)
                 return fn_vt.call_function(tx, [], {})
+            elif is_wrapper_or_member_descriptor(repr_method):
+                # C/C++ based repr method - not supported, return None to graph break
+                return None
             else:
                 # Custom repr - inline the method for tracing
                 bound_method = repr_method.__func__

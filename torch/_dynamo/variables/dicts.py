@@ -20,7 +20,6 @@ None values for efficiency and code reuse.
 
 import collections
 import functools
-import inspect
 import operator
 import types
 from collections.abc import Hashable as py_Hashable, Sequence
@@ -189,6 +188,11 @@ class ConstDictVariable(VariableTracker):
                 return variables.FrozenDataClassVariable.HashWrapper(
                     self.vt.python_type(), fields_values
                 )
+            elif isinstance(self.vt, variables.UserDefinedSetVariable):
+                # For user-defined set/frozenset subclasses, use the _set_vt to get
+                # the actual contents. The vt.value may be empty since side_effects
+                # creates an empty object via __new__ without calling __init__.
+                return self.vt._set_vt.as_python_constant()  # pyrefly: ignore
             elif isinstance(self.vt, variables.UserDefinedObjectVariable):
                 # The re module in Python 3.13+ has a dictionary (_cache2) with
                 # an object as key (`class _ZeroSentinel(int): ...`):
