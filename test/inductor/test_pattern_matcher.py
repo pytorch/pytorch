@@ -1216,6 +1216,7 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
+    @skipIfRocm
     def test_addmm_activation_fusion(self):
         """
         Test whether Activation(Addmm) implies _addmm_activation
