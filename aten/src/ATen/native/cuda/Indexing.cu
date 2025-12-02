@@ -1611,7 +1611,7 @@ void index_select_out_cuda_impl(
 
   // SmallIndexKernel is more performant when the number of indices is small, and pre-loading
   // the index reduces memory accesses. When the number of indices is large, we avoid that
-  // and increase parallellism by calling gather_out which is a generalization of index_select
+  // and increase parallelism by calling gather_out which is a generalization of index_select
   if (cuda::detail::canUse32BitIndexMath(out) &&
       cuda::detail::canUse32BitIndexMath(self) &&
       cuda::detail::canUse32BitIndexMath(index) &&
