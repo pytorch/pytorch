@@ -38,7 +38,7 @@ class ParseError(ValueError):
         self.token = token
 
 
-def is_empty(t: token.TokenInfo) -> None:
+def is_empty(t: TokenInfo) -> bool:
     return t.type in _EMPTY_TOKENS
 
 
