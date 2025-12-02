@@ -714,6 +714,10 @@ class ShardingPropagator:
 
         # prioritize negative/zero/no redistribute cost strategies
         if negative_cost_index != -1:
+            # If there's negative cost, we select the one with the minimal cost,
+            # even if this means we need to redistribute, e.g. via local chunking.
+            # E.g. this can happen for ops in self.op_to_shape_and_stride_idx
+            # when the inputs / outputs are sharded.
             selected_strategy_index = negative_cost_index
         elif no_redistribute_strategy_index != -1:
             selected_strategy_index = no_redistribute_strategy_index
