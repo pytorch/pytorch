@@ -42,7 +42,6 @@ class LazyCache:
         del self.name_hint
 
 
-# Flag to prevent implicit realization in isinstance checks (inherited by subclasses)
 class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     """
     A structure that defers the creation of the actual VariableTracker
@@ -57,6 +56,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     VariableTrackers right away.
     """
 
+    # Flag to prevent implicit realization in isinstance checks (inherited by subclasses)
     _no_implicit_realize = True
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
