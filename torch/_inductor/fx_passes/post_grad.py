@@ -692,16 +692,16 @@ def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
 @functools.cache
 def register_addmm_activation_fusions():
     def is_valid_addmm_activation_fusion(match: Match) -> bool:
+        # Exclude ROCm
+        if torch.version.hip:
+            return False
+
         if config.max_autotune_gemm:
             return False
 
         inp = match.kwargs["inp"].meta["val"]
 
         if not inp.is_cuda:
-            return False
-
-        # ROCm - no Lt with activation epilogue fusion when bias is 2D
-        if torch.version.hip and (inp.dim() == 2):
             return False
 
         output = match.output_node()
