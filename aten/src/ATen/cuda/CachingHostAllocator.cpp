@@ -174,14 +174,6 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool query_event(EventPool::Event& event) override {
-    // It is rare, but query_event() can be called during stream
-    // capture. This happens when stream capture is immediately
-    // preceded by allocating to this pool via
-    // _use_cuda_memory_pool_manager. Since capture_begin() is
-    // preceded by torch.cuda.synchronize() in torch/cuda/graphs.py,
-    // we can be certain that cudaEventQuery always returns
-    // cudaSuccess in this rare situation.
-    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     cudaError_t err = cudaEventQuery(*event);
     if (err == cudaErrorNotReady) {
       (void)cudaGetLastError(); // clear CUDA error
