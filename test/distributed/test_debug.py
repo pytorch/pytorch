@@ -50,6 +50,13 @@ class TestDebug(TestCase):
         self.assertEqual(resp.status_code, 404)
         self.assertIn("Handler not found: /blah", resp.text)
 
+        with self.subTest("tcpstore"):
+            store.set("test", "value")
+            store.set("test2", "a" * 1000)
+            out = fetch("/tcpstore")
+            self.assertIn("test: b'value'", out)
+            self.assertIn("test2: b'" + "a" * 95 + "...", out)
+
         stop_debug_server()
 
 
