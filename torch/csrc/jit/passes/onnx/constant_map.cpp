@@ -1,7 +1,5 @@
 #include <c10/util/irange.h>
-#include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/onnx/constant_map.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
 #include <iostream>
 #include <sstream>
 #include <string>
