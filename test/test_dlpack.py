@@ -1,5 +1,7 @@
 # Owner(s): ["module: tests"]
 
+import numpy as np
+
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
@@ -26,6 +28,19 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.utils.dlpack import DLDeviceType, from_dlpack, to_dlpack
+
+
+TORCH_DTYPE_TO_NP_DTYPE = {
+    torch.bool: np.bool_,
+    torch.uint8: np.uint8,
+    torch.uint16: np.uint16,
+    torch.uint32: np.uint32,
+    torch.uint64: np.uint64,
+    torch.int8: np.int8,
+    torch.int16: np.int16,
+    torch.int32: np.int32,
+    torch.int64: np.int64,
+}
 
 
 # Wraps a tensor, exposing only DLPack methods:
@@ -442,16 +457,19 @@ class TestTorchDlPack(TestCase):
         )
     )
     def test_numpy_dlpack_protocol_conversion(self, device, dtype):
-        import numpy as np
-
-        t = make_tensor((5,), dtype=dtype, device=device)
+        N = 5
+        t = make_tensor((N,), dtype=dtype, device=device)
 
         if hasattr(np, "from_dlpack"):
             # DLPack support only available from NumPy 1.22 onwards.
             # Here, we test having another framework (NumPy) calling our
             # Tensor.__dlpack__ implementation.
             arr = np.from_dlpack(t)
-            self.assertEqual(t, arr)
+            assert arr.shape == t.shape
+            expected_np_type = TORCH_DTYPE_TO_NP_DTYPE[dtype]
+            assert arr.dtype == expected_np_type
+            for i in range(N):
+                assert arr[i].item() == t[i].item()
 
         # We can't use the array created above as input to from_dlpack.
         # That's because DLPack imported NumPy arrays are read-only.
@@ -533,6 +551,102 @@ class TestTorchDlPack(TestCase):
             BufferError, ".* types are not supported by dlpack"
         ):
             from_dlpack(inp)
+
+    @skipMeta
+    @onlyNativeDeviceTypes
+    @dtypes(
+        *all_types_and_complex_and(
+            torch.half,
+            torch.bfloat16,
+            torch.bool,
+            torch.uint16,
+            torch.uint32,
+            torch.uint64,
+        )
+    )
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat, torch.chalf))
+    def test_dlpack_byte_offset_handling(self, device, dtype):
+        """Test that from_dlpack correctly converts byte_offset to storage_offset.
+
+        This test manually modifies a DLPack capsule to set byte_offset,
+        then verifies that from_dlpack correctly converts it to storage_offset.
+        This avoids modifying toDLPack, which might cause backward compatibility issues.
+        """
+        import ctypes
+
+        for offset_elements in [1, 2, 3, 5]:
+            base = make_tensor((10,), dtype=dtype, device=device)
+            element_size = base.element_size()
+
+            expected_byte_offset = offset_elements * element_size
+            expected_storage_offset = offset_elements
+
+            view = base[offset_elements:]
+
+            capsule = to_dlpack(base)
+
+            # Manually modify byte_offset in the capsule
+            class DLDevice(ctypes.Structure):
+                _fields_ = [
+                    ("device_type", ctypes.c_int32),
+                    ("device_id", ctypes.c_int32),
+                ]
+
+            class DLDataType(ctypes.Structure):
+                _fields_ = [
+                    ("code", ctypes.c_uint8),
+                    ("bits", ctypes.c_uint8),
+                    ("lanes", ctypes.c_uint16),
+                ]
+
+            class DLTensor(ctypes.Structure):
+                _fields_ = [
+                    ("data", ctypes.c_void_p),
+                    ("device", DLDevice),
+                    ("ndim", ctypes.c_int32),
+                    ("dtype", DLDataType),
+                    ("shape", ctypes.POINTER(ctypes.c_int64)),
+                    ("strides", ctypes.POINTER(ctypes.c_int64)),
+                    ("byte_offset", ctypes.c_uint64),
+                ]
+
+            class DLManagedTensor(ctypes.Structure):
+                _fields_ = [
+                    ("dl_tensor", DLTensor),
+                    ("manager_ctx", ctypes.c_void_p),
+                    ("deleter", ctypes.c_void_p),
+                ]
+
+            capsule_name = "dltensor"
+            pythonapi = ctypes.pythonapi
+            pythonapi.PyCapsule_GetPointer.argtypes = [
+                ctypes.py_object,
+                ctypes.c_char_p,
+            ]
+            pythonapi.PyCapsule_GetPointer.restype = ctypes.c_void_p
+
+            capsule_ptr = pythonapi.PyCapsule_GetPointer(
+                ctypes.py_object(capsule), capsule_name.encode("utf-8")
+            )
+
+            assert capsule_ptr is not None
+
+            dl_tensor_ptr = ctypes.cast(capsule_ptr, ctypes.POINTER(DLManagedTensor))
+
+            # Modify the DLPack tensor to set byte_offset
+            dl_tensor_ptr.contents.dl_tensor.byte_offset = expected_byte_offset
+
+            result = from_dlpack(capsule)
+
+            self.assertEqual(
+                result[:-offset_elements], view, "Data values should match"
+            )
+            self.assertEqual(
+                result.storage_offset(),
+                expected_storage_offset,
+                f"storage_offset should be {expected_storage_offset}, "
+                f"got {result.storage_offset()}",
+            )
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals(), allow_mps=True)
