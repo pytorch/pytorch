@@ -991,6 +991,81 @@ at::Tensor reduce_scatter_out(
   }
   return output;
 }
+
+at::Tensor all_gather_p2p_memcpy(
+    const at::Tensor& input,
+    const std::string& group_name,
+    at::Tensor out) {
+  auto symm_mem = c10d::symmetric_memory::rendezvous(out, group_name);
+  TORCH_CHECK(
+      symm_mem != nullptr,
+      "all_gather_p2p_memcpy: output must be allocated with empty_strided_p2p() "
+      "and rendezvous'd before calling this function.");
+
+  TORCH_CHECK(
+      input.is_contiguous(),
+      "all_gather_p2p_memcpy: input must be contiguous.");
+  TORCH_CHECK(
+      out.is_contiguous(), "all_gather_p2p_memcpy: output must be contiguous.");
+
+  TORCH_CHECK(
+      input.dim() == out.dim(),
+      "all_gather_p2p_memcpy: input/output dimension mismatch.");
+
+  int world_size = symm_mem->get_world_size();
+  TORCH_CHECK(
+      out.sizes()[0] == input.sizes()[0] * world_size,
+      "all_gather_p2p_memcpy: out.sizes()[0] must be equal to input.sizes[0] * world_size. (out.sizes():",
+      out.sizes(),
+      ", input.sizes(): ",
+      input.sizes(),
+      ", world_size: ",
+      world_size,
+      ")");
+
+  for (auto d = 1; d < input.dim(); ++d) {
+    TORCH_CHECK(
+        out.sizes()[d] == input.sizes()[d],
+        "all_gather_p2p_memcpy: all non-0th dimension of input and output must match.");
+  }
+
+  int rank = symm_mem->get_rank();
+
+  // Set device context for CUDA operations
+  c10::cuda::CUDAGuard guard(symm_mem->get_device());
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+
+  // Pre-barrier: Ensure all ranks are ready to receive data (use channel 0)
+  symm_mem->barrier(/*channel=*/0, /*timeout_ms=*/0);
+
+  // Calculate offsets and sizes for the batch copy
+  int64_t out_storage_offset = out.storage_offset();
+  int64_t input_numel = input.numel();
+  size_t bytes_per_rank =
+      static_cast<size_t>(input_numel * input.element_size());
+
+  // Get buffer pointers for all ranks
+  std::vector<void*> buffer_ptrs = symm_mem->get_buffer_ptrs();
+
+  // Use individual cudaMemcpyAsync calls for all P2P copies
+  for (int r = 0; r < world_size; ++r) {
+    void* dst_ptr = static_cast<char*>(buffer_ptrs[r]) +
+        (out_storage_offset + rank * input_numel) * input.element_size();
+
+    C10_CUDA_CHECK(cudaMemcpyAsync(
+        dst_ptr,
+        input.data_ptr(),
+        bytes_per_rank,
+        cudaMemcpyDeviceToDevice,
+        stream));
+  }
+
+  // Post-barrier: Ensure all copies are complete (use channel 1)
+  symm_mem->barrier(/*channel=*/1, /*timeout_ms=*/0);
+
+  return out;
+}
+
 } // namespace
 #elif defined(CUDART_VERSION) && CUDART_VERSION < 12030
 namespace {
@@ -1251,6 +1326,7 @@ TORCH_LIBRARY_IMPL(symm_mem, CUDA, m) {
       "multimem_one_shot_reduce_out", ::multimem_one_shot_reduce_out);
   m.impl("multimem_all_gather_out", ::multimem_all_gather_out);
 #endif
+  m.impl("all_gather_p2p_memcpy", ::all_gather_p2p_memcpy);
   m.impl("stream_write_value32_", ::stream_write_value32_);
   m.impl("memset32_", ::memset32_);
 }
