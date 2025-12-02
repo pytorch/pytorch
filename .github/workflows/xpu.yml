@@ -82,7 +82,7 @@ jobs:
       id-token: write
       contents: read
     with:
-      build-environment: linux-noble-xpu-n-py3.10
+      build-environment: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.test-matrix }}
     secrets: inherit

@@ -52,7 +52,7 @@ jobs:
     needs:
       - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-symm
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90-symm
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-symm.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-symm.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build-symm.outputs.test-matrix }}
     secrets: inherit

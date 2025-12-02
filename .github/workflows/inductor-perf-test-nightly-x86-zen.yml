@@ -106,7 +106,7 @@ jobs:
     needs: inductor-build
     if: github.event.schedule == '0 7 * * *'
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: ${{ needs.inductor-build.outputs.build-environment }}
       dashboard-tag: training-false-inference-true-default-true-dynamic-true-cppwrapper-true-aotinductor-true-freezing-true
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
@@ -122,7 +122,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-build
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: ${{ needs.inductor-build.outputs.build-environment }}
       dashboard-tag: training-${{ inputs.training || 'false' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'true' }}-aotinductor-${{ inputs.aotinductor || 'true' }}-freezing-${{ inputs.freezing || 'true' }}
       docker-image: ${{ needs.inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
