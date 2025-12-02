@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import os
+import shutil
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -27,7 +28,7 @@ class TestDebug(TestCase):
         os.environ["RANK"] = "0"
         os.environ["WORLD_SIZE"] = "1"
 
-        port = 25999
+        port = 25998
 
         def fetch(path: str) -> str:
             resp = session.get(f"http://localhost:{port}{path}")
@@ -67,6 +68,12 @@ class TestDebug(TestCase):
             out = fetch("/tcpstore")
             self.assertIn("test: b'value'", out)
             self.assertIn("test2: b'" + "a" * 95 + "...", out)
+
+        with self.subTest("pyspy"):
+            if shutil.which("py-spy"):
+                self.assertIn("test_all", fetch("/pyspy_dump"))
+                self.assertIn("_frontend", fetch("/pyspy_dump?subprocesses=1"))
+                self.assertIn("libc.so", fetch("/pyspy_dump?native=1"))
 
         stop_debug_server()
 
