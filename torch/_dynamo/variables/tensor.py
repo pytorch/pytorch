@@ -83,6 +83,8 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
+    from .functions import UserFunctionVariable
+
 
 log = logging.getLogger(__name__)
 
@@ -611,6 +613,16 @@ class TensorVariable(VariableTracker):
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
         ]
+
+    def call_tree_map(
+        self,
+        tx,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn,
+        rest,
+        tree_map_kwargs,
+    ) -> "VariableTracker":
+        return map_fn.call_function(tx, [self, *rest], {})
 
     def valid_size(self):
         return self._size is not None
