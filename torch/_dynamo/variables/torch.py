@@ -1423,6 +1423,54 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
             )
 
+        @register(torch.autograd.grad)
+        def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
+            """
+            Handler for torch.autograd.grad to ensure safety checks.
+
+            torch.compile does not currently support torch.autograd.grad with non-leaf
+            tensors. This handler validates that all input tensors are leaf tensors.
+            """
+            from ..exc import unimplemented
+            from . import ListVariable, TensorVariable, TupleVariable
+
+            # Extract 'inputs' argument - torch.autograd.grad(outputs, inputs, ...)
+            inputs_arg = None
+            if len(args) > 1:
+                inputs_arg = args[1]
+            elif "inputs" in kwargs:
+                inputs_arg = kwargs["inputs"]
+
+            # Check that inputs are leaf tensors
+            if inputs_arg is not None:
+
+                def check_leaf(var):
+                    """Recursively check all tensors are leaf tensors"""
+                    if isinstance(var, TensorVariable):
+                        if var.has_grad_fn:
+                            unimplemented(
+                                gb_type="torch.autograd.grad non-leaf input",
+                                context="torch.autograd.grad with non-leaf tensor in torch.compile",
+                                explanation=(
+                                    "torch.compile does not currently support torch.autograd.grad with non-leaf tensors. "
+                                    "All input tensors must be leaf tensors (typically model parameters)."
+                                ),
+                                hints=[
+                                    "Use leaf tensors (nn.Parameter objects) as inputs to torch.autograd.grad",
+                                ],
+                            )
+                    elif isinstance(var, (TupleVariable, ListVariable)):
+                        for item in var.items:
+                            check_leaf(item)
+                    else:
+                        raise AssertionError(
+                            f"Unexpected variable type in torch.autograd.grad inputs: {type(var)}"
+                        )
+
+                check_leaf(inputs_arg)
+
+            return None
+
         return handlers
 
     def call_function(

@@ -2069,6 +2069,48 @@ class OutputGraph(OutputGraphCommon):
             tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
 
+    def _validate_autograd_grad_inputs(self, gm: torch.fx.GraphModule) -> None:
+        """
+        Validate that if torch.autograd.grad is used in the graph, all graph inputs
+        (placeholders) are leaf tensors (don't have external grad_fn).
+
+        This checks that tensors passed as inputs to the compiled function are leaf tensors
+        when torch.autograd.grad is used anywhere in the graph or its subgraphs.
+        """
+        # Check if torch.autograd.grad is used anywhere in this graph or subgraphs
+        def has_autograd_grad_in_graph(graph_module):
+            """Recursively check if torch.autograd.grad is in graph or subgraphs."""
+            for node in graph_module.graph.nodes:
+                if node.op == "call_function" and node.target == torch.autograd.grad:  # pylint: disable=comparison-with-callable
+                    return True
+                # Check subgraphs (e.g., from torch.cond, torch.map, etc.)
+                if node.op == "get_attr":
+                    submod = graph_module.get_submodule(node.target)
+                    if isinstance(submod, torch.fx.GraphModule):
+                        if has_autograd_grad_in_graph(submod):
+                            return True
+            return False
+
+        if not has_autograd_grad_in_graph(gm):
+            return
+
+        # If torch.autograd.grad is used, check ALL graphargs for external grad_fn
+        from .variables.tensor import TensorVariable
+
+        for grapharg in self.graphargs:
+            if (
+                hasattr(grapharg, "source")
+                and grapharg.source in self.input_source_to_var
+            ):
+                var = self.input_source_to_var[grapharg.source]
+                if isinstance(var, TensorVariable) and var.has_grad_fn:
+                    raise RuntimeError(
+                        "Compiled function receives an input with external grad_fn "
+                        "(created by operations outside the compiled region). "
+                        "When torch.autograd.grad is used, all inputs must be leaf tensors "
+                        "because the autograd graph cannot extend beyond the compiled region."
+                    )
+
     def compile_and_call_fx_graph(
         self,
         tx: "InstructionTranslatorBase",
@@ -2141,6 +2183,9 @@ class OutputGraph(OutputGraphCommon):
             self.real_value_cache.clear()
 
             gm = _make_graph_module(root, self.graph)
+
+            # Check if torch.autograd.grad is used with graph inputs that have grad_fn
+            self._validate_autograd_grad_inputs(gm)
 
             # Saved tensors hooks are not used by the graph.
             # GraphModule by default only copies used in the graph submodules.
