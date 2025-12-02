@@ -16,11 +16,12 @@ from torch.distributed.nn import RemoteModule
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_distributed import (
     requires_gloo,
-    requires_nccl,
+    requires_nccl_or,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
 )
 from torch.testing._internal.dist_utils import dist_init, INIT_METHOD_TEMPLATE
+from torch.testing._internal.distributed.rpc.common_utils import _get_device_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -673,9 +674,9 @@ class DdpComparisonTest(CommonDdpComparisonTest):
                 )
 
 
-class CudaDdpComparisonTest(CommonDdpComparisonTest):
+class DeviceDdpComparisonTest(CommonDdpComparisonTest):
     @skip_if_lt_x_gpu(NUM_TRAINERS)
-    @requires_nccl()
+    @requires_nccl_or(["xccl"])
     @dist_init
     @skip_if_rocm_multiprocess
     def test_ddp_dist_autograd_local_vs_remote_gpu(self):
@@ -698,8 +699,10 @@ class CudaDdpComparisonTest(CommonDdpComparisonTest):
         # Start with the same parameters for remote and local
         layer1.weight = remote_layer1.module_rref.to_here().weight
 
-        layer2 = nn.Linear(7, 5).cuda(self.rank)
-        ddp_layer2 = DistributedDataParallel(layer2, device_ids=[self.rank])
+        layer2 = nn.Linear(7, 5).to(_get_device_name(self.rank))
+        ddp_layer2 = DistributedDataParallel(
+            layer2, device_ids=[_get_device_name(self.rank)]
+        )
 
         remote_layer3 = RemoteModule(
             remote_device="worker0/cpu", module_cls=nn.Linear, args=(5, 3, False)
@@ -708,13 +711,17 @@ class CudaDdpComparisonTest(CommonDdpComparisonTest):
         # Start with the same parameters for remote and local
         layer3.weight = remote_layer3.module_rref.to_here().weight
 
-        layer4 = nn.Linear(3, 1).cuda(self.rank)
-        ddp_layer4 = DistributedDataParallel(layer4, device_ids=[self.rank])
+        layer4 = nn.Linear(3, 1).to(_get_device_name(self.rank))
+        ddp_layer4 = DistributedDataParallel(
+            layer4, device_ids=[_get_device_name(self.rank)]
+        )
 
         # Run local case.
         inputs = torch.rand((10, 10))
         loss = ddp_layer4(
-            layer3(ddp_layer2(layer1(inputs).cuda(self.rank)).cpu()).cuda(self.rank)
+            layer3(ddp_layer2(layer1(inputs).to(_get_device_name(self.rank))).cpu()).to(
+                _get_device_name(self.rank)
+            )
         ).sum()
         loss.backward()
 
@@ -722,8 +729,10 @@ class CudaDdpComparisonTest(CommonDdpComparisonTest):
         with dist_autograd.context() as context_id:
             loss = ddp_layer4(
                 remote_layer3(
-                    ddp_layer2(remote_layer1(inputs).cuda(self.rank)).cpu()
-                ).cuda(self.rank)
+                    ddp_layer2(
+                        remote_layer1(inputs).to(_get_device_name(self.rank))
+                    ).cpu()
+                ).to(_get_device_name(self.rank))
             ).sum()
             dist_autograd.backward(context_id, [loss])
             grads_dict = dist_autograd.get_gradients(context_id)
