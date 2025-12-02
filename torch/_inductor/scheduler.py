@@ -2336,7 +2336,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             )
             for node in nodes:
                 device = node.get_device()
-                if device and device.type == "mps":
+                if device and (device.type == "mps" or device.type == "cpu"):
                     continue
                 device_groups[device].append(node)
 
@@ -6165,11 +6165,6 @@ class Scheduler:
         assert all(node.get_device() == device for node in subkernel_nodes), (
             "All nodes in a combo kernel group must be on the same device"
         )
-
-        # don't support benchmark fusion for CPU C++ backend right now.
-        # disabling cpu triton backend for now.
-        if device is None or device.type == "cpu":
-            return False
 
         if not config.benchmark_combo_kernel:
             return True
