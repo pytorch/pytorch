@@ -1,4 +1,5 @@
 import operator
+import typing
 
 import torch
 
@@ -22,7 +23,7 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
                 continue
             # container types
             if hasattr(sequence_node.type, "_name"):
-                parameterized_types = sequence_node.type.__args__
+                parameterized_types = typing.get_args(sequence_node.type)
                 if sequence_node.type._name == "Tuple":
                     if len(parameterized_types) == 2 and isinstance(
                         parameterized_types[1], type(...)
@@ -37,7 +38,7 @@ def annotate_getitem_nodes(graph: torch.fx.Graph) -> None:
                     node.type = parameterized_types[0]
             # Generic Alias Type
             elif hasattr(sequence_node.type, "__origin__"):
-                parameterized_types = sequence_node.type.__args__
+                parameterized_types = typing.get_args(sequence_node.type)
                 if sequence_node.type.__origin__ is tuple:
                     if len(parameterized_types) == 2 and isinstance(
                         parameterized_types[1], type(...)

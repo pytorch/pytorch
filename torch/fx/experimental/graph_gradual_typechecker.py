@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
+import typing
 from collections.abc import Callable
 from functools import reduce
 from typing import TypeVar
@@ -71,9 +72,9 @@ def expand_to_tensor_dim(t, n):
         dims = [Dyn] * n
         return TensorType(tuple(dims))
     elif isinstance(t, TensorType):
-        if len(t.__args__) != n:
+        if len(typing.get_args(t)) != n:
             raise TypeError(
-                f"Cannot extend tensor. Tensor {t} has rank {len(t.__args__)}. It should have rank {n}"
+                f"Cannot extend tensor. Tensor {t} has rank {len(typing.get_args(t))}. It should have rank {n}"
             )
         return t
     else:
@@ -92,11 +93,11 @@ def broadcast_types(t1, t2):
         return t1, t2
 
     if isinstance(t1, TensorType) and isinstance(t2, TensorType):
-        s1 = len(t1.__args__)
-        s2 = len(t2.__args__)
+        s1 = len(typing.get_args(t1))
+        s2 = len(typing.get_args(t2))
 
-        new_t1 = list(t1.__args__)
-        new_t2 = list(t2.__args__)
+        new_t1 = list(typing.get_args(t1))
+        new_t2 = list(typing.get_args(t2))
 
         # We make the types the same length which is the first requirement
         # for consistency
@@ -263,8 +264,10 @@ def transpose_inference_rule(n: Node):
             return n.type
 
         elif isinstance(t, TensorType):
-            if 0 <= dim1 < len(t.__args__) and 0 <= dim2 < len(t.__args__):
-                new_type = list(t.__args__)
+            if 0 <= dim1 < len(typing.get_args(t)) and 0 <= dim2 < len(
+                typing.get_args(t)
+            ):
+                new_type = list(typing.get_args(t))
                 new_type[dim1], new_type[dim2] = new_type[dim2], new_type[dim1]
                 final = TensorType(new_type)
                 n.type = get_greatest_upper_bound(n.type, final)
@@ -307,7 +310,7 @@ def reshape_inference_rule(n: Node):
     # we check for divisibility
     elif isinstance(t1, TensorType):
         assert isinstance(t1, TensorType)
-        a = [e if e != Dyn else 1 for e in t1.__args__]
+        a = [e if e != Dyn else 1 for e in typing.get_args(t1)]
         p1 = reduce(operator.mul, a)
         p2 = reduce(operator.mul, t2)
         if p1 % p2 == 0 or p2 % p1 == 0:
@@ -339,8 +342,8 @@ def bn2d_inference_rule(n: Node, module_instance):
     # and any existing annotation
     # we also check for consistency between both annotations
     if (
-        is_consistent(arg_type.__args__[1], module_instance.num_features)
-        and is_consistent(n.type.__args__[1], module_instance.num_features)
+        is_consistent(typing.get_args(arg_type)[1], module_instance.num_features)
+        and is_consistent(typing.get_args(n.type)[1], module_instance.num_features)
         and is_consistent(arg_type, n.type)
     ):
         # we choose the more precise type
@@ -409,7 +412,7 @@ def get_greatest_upper_bound(type1, type2):
             raise TypeError(f"Inconsistent types {type1}, {type2}")
         gub = [
             t1 if is_more_precise(t1, t2) else t2
-            for (t1, t2) in zip(type1.__args__, type2.__args__)
+            for (t1, t2) in zip(typing.get_args(type1), typing.get_args(type2))
         ]
         return TensorType(tuple(gub))
 
@@ -429,13 +432,13 @@ def conv2d_inference_rule(n: Node, module_instance):
     arg_type = n.args[0].type
     curr_node_type = expand_to_tensor_dim(n.type, 4)
 
-    if is_consistent(arg_type.__args__[1], module_instance.in_channels):
-        w_in = arg_type.__args__[3]
-        h_in = arg_type.__args__[2]
+    if is_consistent(typing.get_args(arg_type)[1], module_instance.in_channels):
+        w_in = typing.get_args(arg_type)[3]
+        h_in = typing.get_args(arg_type)[2]
         h_out = calculate_out_dimension(h_in, module_instance, 0)
         w_out = calculate_out_dimension(w_in, module_instance, 1)
         new_type = TensorType(
-            (arg_type.__args__[0], module_instance.out_channels, h_out, w_out)
+            (typing.get_args(arg_type)[0], module_instance.out_channels, h_out, w_out)
         )
         gub = get_greatest_upper_bound(new_type, curr_node_type)
         n.type = gub
@@ -454,7 +457,9 @@ def relu_inference_rule(n: Node, module_instance):
     assert isinstance(n.args[0], Node)
 
     if n.args[0].type == Dyn and isinstance(n.type, TensorType):
-        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+        n.args[0].type = expand_to_tensor_dim(
+            n.args[0].type, len(typing.get_args(n.type))
+        )
 
     if isinstance(n.args[0].type, TensorType):
         n.type = get_greatest_upper_bound(n.args[0].type, n.type)
@@ -466,7 +471,7 @@ def maxpool2d_check(typ, module_instance):
     Applies the maxpool2d shape information to the input
     this affects the last two dimensions
     """
-    new_type_list = list(typ.__args__)
+    new_type_list = list(typing.get_args(typ))
     if len(new_type_list) == 4 or len(new_type_list) == 3:
         w_in = new_type_list[-1]
         h_in = new_type_list[-2]
@@ -496,7 +501,9 @@ def maxpool2d_inference_rule(n: Node, module_instance):
     assert isinstance(n.args[0], Node)
 
     if n.args[0].type == Dyn and isinstance(n.type, TensorType):
-        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+        n.args[0].type = expand_to_tensor_dim(
+            n.args[0].type, len(typing.get_args(n.type))
+        )
     if isinstance(n.args[0].type, TensorType):
         output = maxpool2d_check(n.args[0].type, module_instance)
         n.type = get_greatest_upper_bound(output, n.type)
@@ -508,14 +515,14 @@ def linear_check(tensor_type, module_instance):
     Checks that an input tensor type satisfies the conditions for linear operation
     and returns the output type based on in and out features given by module_instance
     """
-    if len(tensor_type.__args__) >= 2:
-        if is_consistent(module_instance.in_features, tensor_type.__args__[-1]):
-            new_type_args = list(tensor_type.__args__)
+    if len(typing.get_args(tensor_type)) >= 2:
+        if is_consistent(module_instance.in_features, typing.get_args(tensor_type)[-1]):
+            new_type_args = list(typing.get_args(tensor_type))
             new_type_args[-1] = module_instance.out_features
             return TensorType(tuple(new_type_args))
         else:
             raise TypeError(
-                f"Inconsistent {module_instance.in_features} and {tensor_type.__args__[-1]} in {module_instance}"
+                f"Inconsistent {module_instance.in_features} and {typing.get_args(tensor_type)[-1]} in {module_instance}"
             )
     else:
         raise TypeError(f"Type {tensor_type} must have rank 2 or more.")
@@ -529,7 +536,9 @@ def linear_inference_rule(n: Node, module_instance):
     """
     assert isinstance(n.args[0], Node)
     if n.args[0].type == Dyn and isinstance(n.type, TensorType):
-        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+        n.args[0].type = expand_to_tensor_dim(
+            n.args[0].type, len(typing.get_args(n.type))
+        )
     if isinstance(n.args[0].type, TensorType):
         output_type = linear_check(n.args[0].type, module_instance)
         n.type = get_greatest_upper_bound(output_type, n.type)
@@ -547,9 +556,9 @@ def adaptiveavgpool2d_check(tensor_type, module_instance):
         if output_size[1] is None:
             output_size[1] = output_size[0]
 
-    new_type_list = list(tensor_type.__args__)
+    new_type_list = list(typing.get_args(tensor_type))
 
-    if len(tensor_type.__args__) == 4 or len(tensor_type.__args__) == 3:
+    if len(typing.get_args(tensor_type)) == 4 or len(typing.get_args(tensor_type)) == 3:
         new_type_list[-1] = output_size[1]
         new_type_list[-2] = output_size[0]
 
@@ -567,7 +576,9 @@ def adaptiveavgpool2d_inference_rule(n: Node, module_instance):
     """
     assert isinstance(n.args[0], Node)
     if n.args[0].type == Dyn and isinstance(n.type, TensorType):
-        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+        n.args[0].type = expand_to_tensor_dim(
+            n.args[0].type, len(typing.get_args(n.type))
+        )
     if isinstance(n.args[0].type, TensorType):
         output_type = adaptiveavgpool2d_check(n.args[0].type, module_instance)
         n.type = get_greatest_upper_bound(n.type, output_type)
@@ -575,13 +586,13 @@ def adaptiveavgpool2d_inference_rule(n: Node, module_instance):
 
 
 def flatten_check(tensor_type, start_dim, end_dim):
-    l = len(tensor_type.__args__)
+    l = len(typing.get_args(tensor_type))
 
     start_dim = l if start_dim == -1 else abs(start_dim)
     end_dim = l + end_dim + 1 if end_dim < 0 else end_dim + 1
 
     if 0 <= start_dim <= (l - 1) and 0 <= end_dim <= l and start_dim < end_dim:
-        my_args = list(tensor_type.__args__)
+        my_args = list(typing.get_args(tensor_type))
         lhs = my_args[0:start_dim]
         rhs = my_args[end_dim:]
         mid = my_args[start_dim:end_dim]
@@ -618,7 +629,9 @@ def flatten_inference_rule(n: Node):
         end_dim = n.args[2]
 
     if n.args[0].type == Dyn and isinstance(n.type, TensorType):
-        n.args[0].type = expand_to_tensor_dim(n.args[0].type, len(n.type.__args__))
+        n.args[0].type = expand_to_tensor_dim(
+            n.args[0].type, len(typing.get_args(n.type))
+        )
 
     if isinstance(n.args[0].type, TensorType):
         output_type = flatten_check(n.args[0].type, start_dim, end_dim)
@@ -716,7 +729,7 @@ def conv_refinement_rule(n: Node):
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
-        res = [Equality(arg_type.__args__[0], n.type.__args__[0])]
+        res = [Equality(typing.get_args(arg_type)[0], typing.get_args(n.type)[0])]
         return res
 
 
@@ -730,7 +743,7 @@ def linear_refinement_rule(n: Node):
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
-        res = [Equality(arg_type.__args__[0], n.type.__args__[0])]
+        res = [Equality(typing.get_args(arg_type)[0], typing.get_args(n.type)[0])]
     return res
 
 
@@ -744,8 +757,8 @@ def all_eq(n: Node):
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
-        args1 = arg_type.__args__
-        args2 = n.type.__args__
+        args1 = typing.get_args(arg_type)
+        args2 = typing.get_args(n.type)
         res = [Equality(args1[i], args2[i]) for i in range(len(args1))]
     return res
 
@@ -761,8 +774,8 @@ def first_two_eq(n: Node):
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
-        args1 = arg_type.__args__
-        args2 = n.type.__args__
+        args1 = typing.get_args(arg_type)
+        args2 = typing.get_args(n.type)
         res = [Equality(args1[0], args2[0]), Equality(args1[1], args2[1])]
     return res
 
@@ -795,9 +808,9 @@ def element_wise_eq(n: Node):
         ):
             args1, args2 = broadcast_types(arg_type1, arg_type2)
             # by this point, we know that args1 and args2 are the same size.
-            a1 = args1.__args__
-            a2 = args2.__args__
-            a3 = n.type.__args__
+            a1 = typing.get_args(args1)
+            a2 = typing.get_args(args2)
+            a3 = typing.get_args(n.type)
 
             # we would be here in the second iteration where we establish equality
             # between operand type dimensions and the resulting type dimensions
@@ -831,15 +844,19 @@ def flatten_refinement_rule(n: Node):
         end_dim = n.args[2]
 
     if isinstance(n.type, TensorType) and isinstance(n.args[0].type, TensorType):
-        l = len(n.type.__args__)
+        l = len(typing.get_args(n.type))
         arg_type = n.args[0].type
         start_dim = l if start_dim == -1 else start_dim
         end_dim = l + end_dim + 1 if end_dim < 0 else end_dim + 1
 
-        for t1, t2 in zip(n.type.__args__[0:start_dim], arg_type.__args__[0:start_dim]):
+        for t1, t2 in zip(
+            typing.get_args(n.type)[0:start_dim], typing.get_args(arg_type)[0:start_dim]
+        ):
             eq_const.append(Equality(t1, t2))
 
-        for t1, t2 in zip(n.type.__args__[end_dim:], arg_type.__args__[end_dim:]):
+        for t1, t2 in zip(
+            typing.get_args(n.type)[end_dim:], typing.get_args(arg_type)[end_dim:]
+        ):
             eq_const.append(Equality(t1, t2))
     return eq_const
 
@@ -853,11 +870,13 @@ def conv_rule(n: Node, module_instance):
     assert isinstance(n.args[0], Node)
     arg_type = n.args[0].type
     if isinstance(arg_type, TensorType) and isinstance(n.type, TensorType):
-        w_in = arg_type.__args__[3]
-        h_in = arg_type.__args__[2]
+        w_in = typing.get_args(arg_type)[3]
+        h_in = typing.get_args(arg_type)[2]
         h_out = calculate_out_dimension(h_in, module_instance, 0)
         w_out = calculate_out_dimension(w_in, module_instance, 1)
-        new_type = TensorType((n.type.__args__[0], n.type.__args__[1], h_out, w_out))
+        new_type = TensorType(
+            (typing.get_args(n.type)[0], typing.get_args(n.type)[1], h_out, w_out)
+        )
         n.type = new_type
         return new_type
 
@@ -902,7 +921,9 @@ class Refine:
             new_symbol = Var(next(self.symbol_iter))
             return new_symbol
         elif isinstance(typ, TensorType):
-            new_args = [self.replace_dyn_with_fresh_var(a) for a in typ.__args__]
+            new_args = [
+                self.replace_dyn_with_fresh_var(a) for a in typing.get_args(typ)
+            ]
             return TensorType(tuple(new_args))
         elif isinstance(typ, list):
             return [self.replace_dyn_with_fresh_var(t) for t in typ]
@@ -918,7 +939,7 @@ class Refine:
         if isinstance(typ, Var):
             return sympy.symbols(str(typ))
         elif isinstance(typ, TensorType):
-            new_args = [self.convert_to_sympy_symbols(a) for a in typ.__args__]
+            new_args = [self.convert_to_sympy_symbols(a) for a in typing.get_args(typ)]
             return TensorType(tuple(new_args))
         elif isinstance(typ, list):
             return [self.convert_to_sympy_symbols(t) for t in typ]
