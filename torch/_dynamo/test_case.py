@@ -130,8 +130,6 @@ class TestCaseWithNestedGraphBreaks(TestCase):
         # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.nested_graph_breaks = self.prev_nested_graph_breaks
 
-# Enable once cpython test suite is moved out from under test/dynamo
-# @skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class CPythonTestCase(TestCase):
     """
     Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
