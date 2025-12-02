@@ -49,6 +49,7 @@ import functools
 import operator
 import os
 import sys
+import threading
 from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
 from types import TracebackType
@@ -94,6 +95,83 @@ def _is_in_fake_tensor_mode() -> bool:
     return any(
         isinstance(mode, FakeTensorMode) for mode in _get_current_dispatch_mode_stack()
     )
+
+
+def _reduce_multidim_lists(
+    lists_to_reduce: list[Any], reduce_func: Callable[[list[Any]], Any]
+) -> Any:
+    """
+    Reduces a list of multi-dimensional lists, assuming they all have
+    the exact same shape.
+
+    Args:
+        lists_to_reduce (list): A list where each item is a multi-dimensional
+                                list (e.g., [md_list_1, md_list_2, ...]).
+                                All inner md_lists must have the same shape.
+        reduce_func (callable): A function that takes an iterable (list) of
+                                values and returns a single reduced value.
+                                For example: sum, max, min, or
+                                lambda x: sum(x) / len(x) for mean.
+
+    Returns:
+        A single multi-dimensional list of the same shape as the inputs,
+        where each value is the result of the reduce_func.
+
+    Raises:
+        ValueError: If the input list is empty or if shapes are inconsistent
+                    (which may also raise IndexError or TypeError).
+    """
+    if not lists_to_reduce:
+        raise ValueError("Input 'lists_to_reduce' cannot be empty.")
+
+    # Get the first list to inspect its structure (shape)
+    first_list = lists_to_reduce[0]
+
+    # Check if the first element of this list is *also* a list.
+    # This determines if we are at the base case or need to recurse.
+    if isinstance(first_list[0], list):
+        # --- RECURSIVE STEP ---
+        # The elements are lists, so we need to go one level deeper.
+
+        # We find the number of sub-lists from the first list.
+        # (e.g., for [[1,2], [3,4]], this is 2)
+        num_sublists = len(first_list)
+
+        result = []
+        # Iterate by the index of the sub-lists (e.g., i = 0, then i = 1)
+        for i in range(num_sublists):
+            # Build a new list to pass to the recursive call.
+            # This list will contain the i-th sublist from *each* of the
+            # input lists.
+            # e.g., if lists_to_reduce = [ L1, L2 ] and i = 0,
+            # this creates [ L1[0], L2[0] ]
+            sublists_to_reduce = [l[i] for l in lists_to_reduce]
+
+            # Recurse and append the result
+            result.append(_reduce_multidim_lists(sublists_to_reduce, reduce_func))
+        return result
+    else:
+        # --- BASE CASE ---
+        # The elements are values (int, float, etc.), not lists.
+        # We are at the innermost dimension.
+
+        # Find the number of values in the innermost list.
+        # (e.g., for [1, 2], this is 2)
+        num_values = len(first_list)
+
+        result = []
+        # Iterate by the index of the values (e.g., i = 0, then i = 1)
+        for i in range(num_values):
+            # Get the values at this specific position (i) from *all*
+            # input lists.
+            # e.g., if lists_to_reduce = [ [1,2], [10,20] ] and i = 0,
+            # this creates [ 1, 10 ]
+            values_at_pos = [l[i] for l in lists_to_reduce]
+
+            # Apply the user-provided reduction function to this list of values
+            # and append the single result.
+            result.append(reduce_func(values_at_pos))
+        return result
 
 
 def _is_inplace_op(op: OpOverload | Callable[..., Any]) -> bool:
@@ -284,7 +362,11 @@ def _for_each_rank_run_func(
 
         rank_flat_args = [_map_to_rank_local_val(a, r) for a in flat_args]
         rank_args, rank_kwargs = pytree.tree_unflatten(rank_flat_args, args_spec)
-        rank_ret = func(*rank_args, **rank_kwargs)
+        if func is torch.ops.aten.hash_tensor.default and rank_args[0].numel() == 0:
+            # Special case for empty tensors, hash_tensor returns an empty tensor
+            rank_ret = torch.empty(0, dtype=torch.uint64, device=rank_args[0].device)
+        else:
+            rank_ret = func(*rank_args, **rank_kwargs)
         flat_rank_rets[r] = rank_ret
 
         if use_per_rank_rng:
@@ -384,6 +466,12 @@ class LocalIntNode:
                 for r in self._local_ints
             }
         )
+
+    def sym_sum(self, other: Any) -> "LocalIntNode | ConstantIntNode":
+        t = LocalIntNode(dict.fromkeys(self._local_ints, 0))
+        for o in other:
+            t = t.add(o)
+        return t
 
     def neg(self) -> "LocalIntNode | ConstantIntNode":
         return LocalIntNode({r: -self._local_ints[r] for r in self._local_ints})
@@ -592,28 +680,33 @@ class _LocalOffsetBasedRNGTracker:
                 coord = (rank // num_chunks_after) % mesh_dim_size
                 mesh_coords.append(coord)
 
-            # compute local shape and global offset for this rank
-            local_shape, global_offset = _compute_local_shape_and_global_offset(
-                spec.shape, spec.mesh.shape, mesh_coords, spec.placements
+            # compute shard offset based on placements
+            from torch.distributed.tensor._random import (
+                _calc_first_shard_size,
+                _calc_shard_info,
+                _calc_shard_linear_idx,
             )
 
-            # compute shard offset based on placements
-            shard_offset = 1
-            for idx, placement in enumerate(spec.placements):
-                if isinstance(placement, Shard):
-                    shard_dim = placement.dim
-                    shard_offset *= global_offset[shard_dim] + 1
+            # Compute shard index and total number of shards on each tensor dim
+            shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
+                mesh_coords, spec
+            )
+
+            # compute shard linear index
+            shard_linear_idx = _calc_shard_linear_idx(
+                shard_idx_by_dim, total_num_shards_by_dim
+            )
 
             # get current offset for this rank
             current_offset = int(
                 state._per_rank_states[rank][8:].view(dtype=torch.int64).item()
             )
 
+            local_shape = _calc_first_shard_size(spec)
             # compute local size
             local_size = prod(local_shape)
 
             # compute new offset (must be multiple of 4)
-            shard_linear_idx = shard_offset - 1
             offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
             state._per_rank_offsets[rank] = current_offset + offset_incr
 
@@ -665,20 +758,20 @@ class _LocalOffsetBasedRNGTracker:
         if self.distribute_region_enabled:
             # sync to rank 0's state if no explicit generator
             if generator is None:
-                rank_0_state = lm._per_rank_rng_states[0]
-                rank_0_cpu, rank_0_cuda = rank_0_state
+                any_rank_state = lm._any_local_rng_state()
+                any_rank_cpu, any_rank_cuda = any_rank_state
 
                 if self._device.type == "cuda":
-                    assert self._device.index in rank_0_cuda
-                    rank_0_device_state = rank_0_cuda[self._device.index]
+                    assert self._device.index in any_rank_cuda
+                    any_rank_device_state = any_rank_cuda[self._device.index]
                 else:
-                    rank_0_device_state = rank_0_cpu
+                    any_rank_device_state = any_rank_cpu
 
                 from torch.distributed.tensor._random import _PhiloxState
 
-                rank_0_philox = _PhiloxState(rank_0_device_state)
-                state.seed = rank_0_philox.seed
-                state.offset = rank_0_philox.offset
+                any_rank_philox = _PhiloxState(any_rank_device_state)
+                state.seed = any_rank_philox.seed
+                state.offset = any_rank_philox.offset
 
             old_offset = state.offset
             self._set_pre_op_offset(state, spec)
@@ -939,9 +1032,7 @@ class LocalTensor(torch.Tensor):
         with LocalTensorMode(local_tensor._ranks):
             return func(*args, **kwargs)
 
-    def numpy(
-        self, *, force: bool = False
-    ) -> np.ndarray:  # pyrefly: ignore  # missing-attribute
+    def numpy(self, *, force: bool = False) -> Any:
         if HAS_NUMPY:
             return self.reconcile().numpy(force=force)
         else:
@@ -971,10 +1062,24 @@ class LocalTensor(torch.Tensor):
 
     def tolist(self) -> list[Any]:
         """
-        Reconcile and convert result to list.
+        Try to reconcile, if successful convert to list, otherwise if dtype is integer,
+        convert to list of local integers.
         """
+        equal_obj = self._equal_local_tensors()
+        if isinstance(equal_obj, torch.Tensor):
+            return equal_obj.tolist()
+        if isinstance(equal_obj, torch.Size):
+            if not self.dtype.is_floating_point and not self.dtype.is_complex:
+                ranks = sorted(self._ranks)
+                local_lists = [self._local_tensors[r].tolist() for r in ranks]
+                return _reduce_multidim_lists(
+                    local_lists,
+                    lambda values: torch.SymInt(
+                        LocalIntNode(dict(zip(ranks, values, strict=True)))
+                    ),
+                )
 
-        return self.reconcile().tolist()
+        raise RuntimeError("Cannot convert local tensor to list")
 
     def reconcile(self) -> torch.Tensor:
         """
@@ -988,15 +1093,22 @@ class LocalTensor(torch.Tensor):
         """
 
         # Force all local tensor shards across ranks to be the same
-        it = iter(self._local_tensors.values())
-        t1 = next(it)
-        for t2 in it:
-            assert torch.equal(t1, t2), (
-                "LocalTensor shards must be the same to reconcile"
-            )
-        cl = t1.clone().detach()
+        equal_obj = self._equal_local_tensors()
+        assert isinstance(equal_obj, torch.Tensor), (
+            "LocalTensor shards must be the same to reconcile"
+        )
+        cl = equal_obj.clone().detach()
         cl.requires_grad_(self.requires_grad)
         return cl
+
+    def _equal_local_tensors(self) -> torch.Tensor | torch.Size | None:
+        it = iter(self._local_tensors.values())
+        t1 = next(it)
+        if all(t2.equal(t1) for t2 in it):
+            return t1
+        if all(t2.shape == t1.shape for t2 in it):
+            return t1.shape
+        return None
 
     def _sync_meta(self) -> None:
         with no_dispatch():
@@ -1006,7 +1118,24 @@ class LocalTensor(torch.Tensor):
             self._size = shape
 
 
-_LOCAL_TENSOR_MODE: list["LocalTensorMode"] = []
+# If set to `True` the LocalTensorMode stack will be created for the whole process,
+# otherwise it will be created for each thread.
+_PROCESS_MODE: bool = True
+_PROCESS_LOCAL_TENSOR_MODE: list["LocalTensorMode"] = []
+# When running under local runner each thread must create its own local tensor mode
+# so that they do not interfere with each other.
+_THREAD_LOCAL_TENSOR_MODE: threading.local = threading.local()
+
+
+def get_local_tensor_mode_list() -> list["LocalTensorMode"]:
+    global _PROCESS_MODE
+    if _PROCESS_MODE:
+        global _PROCESS_LOCAL_TENSOR_MODE
+        return _PROCESS_LOCAL_TENSOR_MODE
+    global _THREAD_LOCAL_TENSOR_MODE
+    if not hasattr(_THREAD_LOCAL_TENSOR_MODE, "value"):
+        _THREAD_LOCAL_TENSOR_MODE.value = []
+    return _THREAD_LOCAL_TENSOR_MODE.value
 
 
 class LocalTensorMode(TorchDispatchMode):
@@ -1047,7 +1176,7 @@ class LocalTensorMode(TorchDispatchMode):
         self._disable = False
         self._patch_device_mesh()
         self._patch_random_functions()
-        _LOCAL_TENSOR_MODE.append(self)
+        get_local_tensor_mode_list().append(self)
 
         # _distribute_region will compute correct per-shard offsets
         # but we want all ranks to start with the same state
@@ -1070,7 +1199,7 @@ class LocalTensorMode(TorchDispatchMode):
         self._disable = True
         self._unpatch_device_mesh()
         self._unpatch_random_functions()
-        _LOCAL_TENSOR_MODE.pop()
+        get_local_tensor_mode_list().pop()
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def __torch_dispatch__(
@@ -1112,7 +1241,7 @@ class LocalTensorMode(TorchDispatchMode):
         for a in flat_args:
             if isinstance(a, LocalTensor):
                 assert a._ranks <= self.ranks, (
-                    f"Input LocalTensor {a} and LocalTensorMode must be configured for the same ranks"
+                    f"Input LocalTensor {a} must be configured for a subset of the LocalTensorMode ranks {self.ranks}"
                 )
 
         if func.overloadpacket == torch.ops.aten.dim:
@@ -1135,6 +1264,10 @@ class LocalTensorMode(TorchDispatchMode):
                 return _c10d._local_all_gather_(*args, **kwargs)
             elif func is torch.ops.c10d.allgather_into_tensor_coalesced_.default:
                 return _c10d._local_allgather_into_tensor_coalesced_(*args, **kwargs)
+            elif func is torch.ops.c10d._allgather_base_.default:
+                return _c10d._local_allgather_base_(*args, **kwargs)
+            elif func is torch.ops.c10d._reduce_scatter_base_.default:
+                return _c10d._local_reduce_scatter_base_(*args, **kwargs)
             elif func is torch.ops.c10d.gather_.default:
                 return _c10d._local_gather_(*args, **kwargs)
             elif func is torch.ops.c10d.alltoall_.default:
@@ -1160,6 +1293,10 @@ class LocalTensorMode(TorchDispatchMode):
                 return _c10d._local_functional_all_gather_into_tensor(*args, **kwargs)
             elif func is torch.ops._c10d_functional.reduce_scatter_tensor.default:
                 return _c10d._local_functional_reduce_scatter_tensor(*args, **kwargs)
+            elif func is torch.ops._c10d_functional.all_to_all_single.default:
+                return _c10d._local_functional_all_to_all_single(*args, **kwargs)
+            elif func is torch.ops._c10d_functional.wait_tensor.default:
+                return _c10d._local_functional_wait_tensor(*args, **kwargs)
             else:
                 with LocalTensorMode(self.ranks):
                     return func._op_dk(
@@ -1218,6 +1355,9 @@ class LocalTensorMode(TorchDispatchMode):
                         results[r] = m
             # pyrefly: ignore [bad-argument-type, bad-argument-count]
             return LocalTensor(results)
+
+    def _any_local_rng_state(self) -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
+        return self._per_rank_rng_states[next(iter(self.ranks))]
 
     def _patch_device_mesh(self) -> None:
         assert self._old_get_coordinate is None
@@ -1381,8 +1521,9 @@ def local_tensor_mode() -> Optional[LocalTensorMode]:
     Returns:
         Optional[LocalTensorMode]: The current LocalTensorMode if active, else None.
     """
-    if len(_LOCAL_TENSOR_MODE) > 0:
-        return _LOCAL_TENSOR_MODE[-1]
+    local_tensor_mode_list = get_local_tensor_mode_list()
+    if len(local_tensor_mode_list) > 0:
+        return local_tensor_mode_list[-1]
     return None
 
 
@@ -1547,12 +1688,16 @@ class LocalRunnerMode:
             threading.Thread(target=self._run, args=(i,), name="LocalRunnerMode")
             for i in range(concurrency)
         ]
+        self._process_mode = True
 
     def __enter__(self) -> "LocalRunnerMode":
         global _LOCAL_RUNNER_MODE
         assert _LOCAL_RUNNER_MODE is None, "LocalRunnerMode is already running"
         _LOCAL_RUNNER_MODE = self
 
+        global _PROCESS_MODE
+        self._process_mode = _PROCESS_MODE
+        _PROCESS_MODE = False
         for r in self._runners:
             r.start()
         return self
@@ -1567,6 +1712,9 @@ class LocalRunnerMode:
             r.join()
         global _LOCAL_RUNNER_MODE
         _LOCAL_RUNNER_MODE = None
+
+        global _PROCESS_MODE
+        _PROCESS_MODE = self._process_mode
 
     def _run(self, id: int) -> None:
         LocalRunnerMode.runner_context.id = id
@@ -1602,7 +1750,6 @@ class LocalRunnerMode:
 
     def _signal_send(self, src: int, dst: int, obj: object) -> None:
         assert obj is not None, "Cannot signal None"
-        self._assert_holds_run_lock()
         # Only a single thread a time executes so it is safe to mutate
         # read objects queue (executing thread is already holding the lock)
         self._recv_objects[dst][src].put(obj)
@@ -1611,7 +1758,6 @@ class LocalRunnerMode:
         self._run_cond.notify_all()
 
     def _wait_recv(self, src: int, dst: int, post: Callable[[object], None]) -> None:
-        self._assert_holds_run_lock()
         # Wait for the object to be available
         while True:
             obj = self._get_recv_object(src, dst)
