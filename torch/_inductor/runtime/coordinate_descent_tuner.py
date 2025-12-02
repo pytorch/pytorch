@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
 
+from ..utils import get_max_numwarps
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable
-from ..utils import get_max_numwarps
+
 
 if TYPE_CHECKING:
     from .triton_compat import triton
@@ -82,8 +83,8 @@ class CoordescTuner:
 
     def get_warpsmax(self):
         # Avoid querying device directly if device properties are populated in inductor_meta
-        warp_size = self.inductor_meta.get('warp_size')
-        max_threads_per_block = self.inductor_meta.get('max_threads_per_block')
+        warp_size = self.inductor_meta.get("warp_size")
+        max_threads_per_block = self.inductor_meta.get("max_threads_per_block")
         if warp_size and max_threads_per_block:
             return max_threads_per_block // warp_size
         else:
