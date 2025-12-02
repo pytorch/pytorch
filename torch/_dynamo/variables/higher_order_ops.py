@@ -1254,6 +1254,13 @@ def trace_hop_function(
     args,
     sub_kwargs,
 ):
+    # For autograd.Function and other legacy HOPs, we do NOT couple
+    # restore_side_effects with allow_side_effects_in_hop.
+    # This preserves the old behavior where:
+    # - restore_side_effects=False means ctx mutations persist
+    # - But non-ctx side effects still cause graph breaks (under_activation_checkpoint was False)
+    enable_side_effects_with_extra_outputs = False
+
     autograd_ctx = (
         dynamo_enable_grad(tx, enable_grad)
         if enable_grad is not None
@@ -1280,6 +1287,47 @@ def trace_hop_function(
     # track of that tensor, so that later subtracing or the root tracer
     # itself does not create a new proxy for the already observed tensor
     # variable.
+    if restore_side_effects:
+        prev_side_effects = tx.output.side_effects.clone()
+
+    with autograd_ctx, side_effects_ctx:
+        output = f.call_function(tx, args, sub_kwargs)
+
+    if restore_side_effects:
+        new_side_effects = tx.output.side_effects.clone()
+        prev_side_effects.track_runahead_tensor_and_symvar_side_effects(
+            new_side_effects
+        )
+        tx.output.side_effects = prev_side_effects
+    return output
+
+
+def trace_hop_function_with_auto_output_flattening(
+    f,
+    tx,
+    subtracer,
+    enable_grad,
+    restore_side_effects,
+    args,
+    sub_kwargs,
+):
+    # For the new unified control flow ops, we couple restore_side_effects
+    # with allow_side_effects_in_hop using the new semantics:
+    # - restore_side_effects=False means side effects become extra outputs
+    # - This allows mutations to be tracked and replayed
+    enable_side_effects_with_extra_outputs = not restore_side_effects
+
+    autograd_ctx = (
+        dynamo_enable_grad(tx, enable_grad)
+        if enable_grad is not None
+        else contextlib.nullcontext()
+    )
+    side_effects_ctx = (
+        dynamo_allow_side_effects_in_hop(tx)
+        if enable_side_effects_with_extra_outputs
+        else contextlib.nullcontext()
+    )
+
     if restore_side_effects:
         prev_side_effects = tx.output.side_effects.clone()
 
@@ -1459,7 +1507,7 @@ def speculate_subgraph_with_auto_output_flattening(
                 tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
             )
 
-            output = trace_hop_function(
+            output = trace_hop_function_with_auto_output_flattening(
                 f,
                 tx,
                 subtracer,
