@@ -1,6 +1,5 @@
 # mypy: ignore-errors
 import os
-from typing import Optional
 
 import torch
 
@@ -205,12 +204,23 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 "torch.sub",
                 "torch.mul",
                 "torch.div",
+                "torch.clamp",
+                "torch.cumsum",
                 # Tensor shape operations
                 "torch.Tensor.view",
                 "torch.reshape",
                 "torch.flatten",
                 "torch.squeeze",
                 "torch.unsqueeze",
+                "torch.split",
+                "torch.chunk",
+                "torch.expand",
+                "torch.cat",
+                "torch.stack",
+                # Indexing operations
+                "torch.gather",
+                "torch.index_select",
+                "torch.argsort",
                 # Matrix operations
                 "torch.mm",
                 "torch.addmm",
@@ -219,6 +229,8 @@ class DefaultFuzzTemplate(FuzzTemplate):
                 # Neural network operations
                 "torch.nn.functional.embedding",
                 "torch.nn.functional.linear",
+                "torch.nn.functional.scaled_dot_product_attention",
+                "torch.nn.functional.multi_head_attention_forward",
                 # Activation functions
                 "torch.nn.functional.relu",
                 "torch.nn.functional.leaky_relu",
@@ -254,7 +266,10 @@ class DefaultFuzzTemplate(FuzzTemplate):
         ]
 
     def flags_codegen(self):
-        return ["torch._dynamo.config.capture_scalar_outputs = True"]
+        return [
+            "torch.set_default_device('cuda')",
+            "torch._dynamo.config.capture_scalar_outputs = True",
+        ]
 
     def epilogue_codegen(self):
         return []
@@ -477,6 +492,7 @@ class UnbackedFuzzTemplate(FuzzTemplate):
 
     def flags_codegen(self):
         return [
+            "torch.set_default_device('cuda')",
             "torch._dynamo.config.capture_scalar_outputs = True",
             "torch._dynamo.config.capture_dynamic_output_shape_ops = True",
         ]
@@ -487,7 +503,7 @@ class UnbackedFuzzTemplate(FuzzTemplate):
 
 def convert_graph_to_python_code(
     operation_graph: OperationGraph,
-    seed: Optional[int] = None,
+    seed: int | None = None,
     template: str = "default",
 ) -> str:
     """

@@ -827,7 +827,7 @@ class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device=device_type.type)
-        for iter_idx in range(5):
+        for _ in range(5):
             ref_loss = ref_model(inp).sum()
             loss = model(inp).sum()
             self.assertEqual(ref_loss, loss)

@@ -1,7 +1,7 @@
 load("//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_library")
 load("//tools/build_defs:fb_xplat_cxx_test.bzl", "fb_xplat_cxx_test")
 load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
-load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "APPLETVOS", "CXX", "IOS", "MACOSX")
+load("//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "CXX", "IOS", "MACOSX")
 
 # Shared by internal and OSS BUCK
 def define_qnnpack(third_party, labels = []):
@@ -21,7 +21,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
@@ -82,7 +82,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
             "-ffast-math",
@@ -129,7 +129,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
             "-ffast-math",
@@ -184,7 +184,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
             "-ffast-math",
@@ -236,7 +236,7 @@ def define_qnnpack(third_party, labels = []):
             ],
         ),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
         ],
@@ -291,7 +291,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "qnnpack/*.h"),
             ("include", "*.h"),
         ]),
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O2",
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
@@ -300,6 +300,10 @@ def define_qnnpack(third_party, labels = []):
         fbobjc_preprocessor_flags = [
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
+        ],
+        fbobjc_compiler_flags = [
+            "-Wno-switch-enum",
+            "-Wno-switch-default",
         ],
         labels = [
             "supermodule:android/default/pytorch",
@@ -394,7 +398,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
             "-ffast-math",
@@ -461,7 +465,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "requantization/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
             "-Wno-unused-command-line-argument",
@@ -521,7 +525,7 @@ def define_qnnpack(third_party, labels = []):
             ("src", "qnnpack/*.h"),
         ]),
         header_namespace = "",
-        apple_sdks = (IOS, MACOSX, APPLETVOS),
+        apple_sdks = (IOS, MACOSX),
         compiler_flags = [
             "-O3",
             "-ffast-math",

@@ -18,8 +18,9 @@ of compilation.
 
 import logging
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from unittest import mock
 
 import torch

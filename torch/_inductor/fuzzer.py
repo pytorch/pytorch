@@ -6,20 +6,11 @@ import random
 import signal
 import string
 import traceback
-from collections.abc import KeysView, Sequence
+from collections.abc import Callable, KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
 from types import FrameType
-from typing import (
-    Any,
-    Callable,
-    get_args,
-    get_origin,
-    Literal,
-    Optional,
-    TypeVar,
-    Union,
-)
+from typing import Any, get_args, get_origin, Literal, Optional, TypeVar, Union
 
 import torch
 from functorch.compile import min_cut_rematerialization_partition
@@ -108,12 +99,12 @@ class TypeExemplars:
         """
         Return an example of a class.
         """
-        # pyrefly: ignore  # bad-argument-type, bad-argument-count
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return TypeExemplars.TYPE_EXEMPLARS.get(t.__name__, None)
 
     @staticmethod
     def contains(t: type[T]) -> bool:
-        # pyrefly: ignore  # bad-argument-type, bad-argument-count
+        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
 
 
@@ -517,6 +508,7 @@ MODULE_DEFAULTS: dict[str, ConfigType] = {
         "joint_custom_pre_pass": DEFAULT,  # Typing
         "pre_grad_custom_pass": DEFAULT,  # Typing
         "custom_partitioner_fn": DEFAULT,  # Typing
+        "inductor_choices_class": DEFAULT,  # Typing
     },
     "torch._dynamo.config": {
         "traceable_tensor_subclasses": DEFAULT,  # Typing
@@ -920,7 +912,7 @@ def visualize_results(
     assert len(results) > 0
 
     input_set: OrderedSet[str] = OrderedSet({})
-    for key in results.keys():
+    for key in results.keys():  # noqa: SIM118
         input_set.add(key[0])
         input_set.add(key[1])
     input_list = sorted(input_set)

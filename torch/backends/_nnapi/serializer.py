@@ -414,7 +414,7 @@ class _NnapiSerializer:
             )  # noqa: TRY002
         return Operand(
             shape=tuple(tensor.shape),
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             op_type=op_type,
             dim_order=dim_order,
             scale=scale,
@@ -1735,13 +1735,13 @@ class _NnapiSerializer:
         for dim in (2, 3):  # h, w indices
             if image_oper.shape[dim] == 0:
                 if size_ctype.kind() != "NoneType":
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     self.compute_operand_shape(out_id, dim, size_arg[dim - 2])
                 elif scale_ctype.kind() != "NoneType":
                     self.compute_operand_shape(
                         out_id,
                         dim,
-                        # pyrefly: ignore  # unsupported-operation
+                        # pyrefly: ignore [unsupported-operation]
                         f"int({scale_arg[dim - 2]} * {flex_name(image_id, dim)})",
                     )
                 else:

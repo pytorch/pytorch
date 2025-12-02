@@ -71,6 +71,7 @@
 #include <torch/csrc/autograd/python_special_functions.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/cpu/Module.h>
+#include <torch/csrc/distributed/python_placement.h>
 #include <torch/csrc/dynamo/init.h>
 #include <torch/csrc/export/pybind.h>
 #include <torch/csrc/functionalization/Module.h>
@@ -211,8 +212,8 @@ static PyObject* THPModule_initExtension(
         }
         auto frame_id = s_tb[idx];
         const auto& frame = s_tbs.all_frames.at(frame_id);
-        oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
-            << ":" << frame.lineno << '\n';
+        oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
+            << ':' << frame.lineno << '\n';
       }
       return oss.str();
     });
@@ -397,36 +398,27 @@ static PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
 
   // weak_use_count() adds 1 if use_count is non-zero
   TORCH_CHECK(
-      a->cdata->weak_use_count() == 1,
+      a->cdata.weak_use_count() == 1,
       "Expected no weakrefs to t1's Tensor object but got  ",
-      a->cdata->weak_use_count() - 1);
+      a->cdata.weak_use_count() - 1);
   TORCH_CHECK(
-      b->cdata->weak_use_count() == 1,
+      b->cdata.weak_use_count() == 1,
       "Expected no weakrefs to t2's Tensor object but got  ",
-      b->cdata->weak_use_count() - 1);
+      b->cdata.weak_use_count() - 1);
+
+  // NB: Creating local copies of *both* Tensors here ensures that they each
+  // hold a strong reference to their PyObject. This avoids having to fix up
+  // reference counts when we swap the PyObject slots below.
+  at::Tensor tmp_a = a->cdata;
+  at::Tensor tmp_b = b->cdata;
 
   // Swap the Tensor Impl
-  c10::MaybeOwned<at::Tensor> tmp = a->cdata;
+  a->cdata = tmp_b;
+  b->cdata = tmp_a;
 
-  // The TensorImpls contain PyObjectSlots that have a reference to the PyObject
-  // associated with the TensorImpl. Swap this field as well.
-  std::optional<PyObject*> mb_obj_a =
-      a->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
-  std::optional<PyObject*> mb_obj_b =
-      b->cdata->unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
-          /*ignore_hermetic_tls=*/false);
-  TORCH_INTERNAL_ASSERT(
-      mb_obj_a.has_value() && mb_obj_b.has_value(),
-      "Both tensors should have PyObjects tagged by the current python interpreter");
-  TORCH_CHECK(mb_obj_a.value() == a_);
-  TORCH_CHECK(mb_obj_b.value() == b_);
-
-  a->cdata = b->cdata;
-  b->cdata = tmp;
-
-  a->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(a_);
-  b->cdata->unsafeGetTensorImpl()->pyobj_slot()->init_pyobj(b_);
+  // Fix up the PyObjects associated with each TensorImpl
+  a->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(a_);
+  b->cdata.unsafeGetTensorImpl()->pyobj_slot()->store_pyobj(b_);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1604,6 +1596,32 @@ static PyObject* THPModule_are_vmap_fallback_warnings_enabled(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPModule_set_warn_on_accumulate_grad_stream_mismatch(
+    PyObject* _unused,
+    PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "enabled must be a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setWarnOnAccumulateGradStreamMismatch(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPModule_warn_on_accumulate_grad_stream_mismatch(
+    PyObject* _unused,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::globalContext().warnOnAccumulateGradStreamMismatch()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THCPModule_ensureCUDADeviceGuardSet(
     PyObject* self,
     PyObject* noargs) {
@@ -1821,6 +1839,14 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_are_vmap_fallback_warnings_enabled,
      METH_NOARGS,
      nullptr},
+    {"_set_warn_on_accumulate_grad_stream_mismatch",
+     THPModule_set_warn_on_accumulate_grad_stream_mismatch,
+     METH_O,
+     nullptr},
+    {"_warn_on_accumulate_grad_stream_mismatch",
+     THPModule_warn_on_accumulate_grad_stream_mismatch,
+     METH_NOARGS,
+     nullptr},
     {"_to_dlpack",
      castPyCFunctionWithKeywords(THPModule_toDLPack),
      METH_VARARGS | METH_KEYWORDS,
@@ -1923,6 +1949,7 @@ void THCPStream_init(PyObject* module);
 void THCPEvent_init(PyObject* module);
 void THCPGraph_init(PyObject* module);
 void THCPMemPool_init(PyObject* module);
+void THCPGreenContext_init(PyObject* module);
 PyMethodDef* THCPModule_methods();
 namespace torch::cuda {
 void initModule(PyObject* module);
@@ -2150,12 +2177,15 @@ PyObject* initModule() {
   THCPEvent_init(module);
   THCPGraph_init(module);
   THCPMemPool_init(module);
+  THCPGreenContext_init(module);
 #endif
 
 #ifdef USE_XPU
   THXPStream_init(module);
   THXPEvent_init(module);
 #endif
+
+  torch::distributed::initPlacementBindings(module);
 
   auto set_module_attr =
       [&](const char* name, PyObject* v, bool incref = true) {
@@ -2742,8 +2772,8 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def("_dump_local_tls_set", []() {
     auto local_keyset = c10::impl::tls_local_dispatch_key_set();
-    std::cout << "Included: " << toString(local_keyset.included_) << "\n";
-    std::cout << "Excluded: " << toString(local_keyset.excluded_) << "\n";
+    std::cout << "Included: " << toString(local_keyset.included_) << '\n';
+    std::cout << "Excluded: " << toString(local_keyset.excluded_) << '\n';
   });
 
   py_module.def(
@@ -2879,7 +2909,6 @@ static void pytorch_duplicate_guard() {
     abort();
   }
   initialized = 1;
-  ;
 }
 
 struct call_duplicate_guard {

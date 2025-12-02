@@ -64,7 +64,7 @@ def lift_subgraph_as_module(
 
         for name in target_name_parts[:-1]:
             if not hasattr(curr, name):
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 curr.add_module(name, HolderModule({}))
 
             curr = getattr(curr, name)

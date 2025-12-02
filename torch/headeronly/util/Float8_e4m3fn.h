@@ -463,7 +463,7 @@ C10_CLANG_DIAGNOSTIC_POP()
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 using c10::Float8_e4m3fn;
 using c10::operator<<;
 using c10::operator+;
@@ -474,7 +474,7 @@ using c10::operator+=;
 using c10::operator-=;
 using c10::operator*=;
 using c10::operator/=;
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 namespace std {
 

@@ -594,7 +594,7 @@ class CommDebugMode(TorchDispatchMode):
         self.advanced_module_tracker.__enter__()
         return self
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def __exit__(self, *args):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)

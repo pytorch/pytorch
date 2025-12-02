@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional
 
 import torch
 from torch._C import _len_torch_function_stack
@@ -8,7 +7,7 @@ from torch.overrides import _pop_mode, _push_mode, TorchFunctionMode
 from torch.utils._contextlib import context_decorator
 
 
-CURRENT_DEVICE: Optional[torch.device] = None
+CURRENT_DEVICE: torch.device | None = None
 
 
 @functools.lru_cache(1)
@@ -59,8 +58,8 @@ def _device_constructors():
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
 class DeviceContext(TorchFunctionMode):
-    def __init__(self, device):
-        # pyrefly: ignore  # read-only
+    def __init__(self, device) -> None:
+        # pyrefly: ignore [read-only]
         self.device = torch.device(device)
 
     def __enter__(self):
@@ -87,12 +86,18 @@ class DeviceContext(TorchFunctionMode):
         # or else someone else has popped it!
         for _ in range(_len_torch_function_stack() - 1):
             mode = _pop_mode()
-            assert not isinstance(mode, DeviceContext)
+            if isinstance(mode, DeviceContext):
+                raise AssertionError(
+                    "Found nested DeviceContext on the mode stack where none expected"
+                )
             cur_stack.append(mode)
 
         if _len_torch_function_stack() > 0:
             mode = _pop_mode()
-            assert isinstance(mode, DeviceContext)
+            if not isinstance(mode, DeviceContext):
+                raise AssertionError(
+                    "Expected a DeviceContext at the bottom of the mode stack"
+                )
 
         for mode in reversed(cur_stack):
             _push_mode(mode)

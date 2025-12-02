@@ -55,7 +55,7 @@ def report_download_progress(
     Pretty printer for file download progress.
     """
     if file_size != -1:
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         percent = min(1, (chunk_number * chunk_size) / file_size)
         bar = "#" * int(64 * percent)
         sys.stdout.write(f"\r0% |{bar:<64}| {int(percent * 100)}%")
@@ -195,8 +195,8 @@ if __name__ == "__main__":
         level=logging.INFO,
         stream=sys.stderr,
     )
-
-    config = json.load(open(args.config_json))
+    with open(args.config_json) as f:
+        config = json.load(f)
     config = config[args.linter]
 
     # Allow processor specific binaries for platform (namely Intel and M1 binaries for MacOS)

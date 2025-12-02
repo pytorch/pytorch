@@ -34,15 +34,6 @@
 
 namespace c10 {
 
-// std::is_pod is deprecated in C++20, std::is_standard_layout and
-// std::is_trivial are introduced in C++11, std::conjunction has been introduced
-// in C++17.
-template <typename T>
-using is_pod = std::conjunction<std::is_standard_layout<T>, std::is_trivial<T>>;
-
-template <typename T>
-constexpr bool is_pod_v = is_pod<T>::value;
-
 namespace guts {
 
 #if defined(__HIP__)
@@ -53,7 +44,7 @@ namespace guts {
 // member functions.
 namespace detail {
 template <class F, class Tuple, std::size_t... INDEX>
-C10_HOST_DEVICE constexpr decltype(auto) apply_impl(
+C10_HOST_DEVICE constexpr auto apply_impl(
     F&& f,
     Tuple&& t,
     std::index_sequence<INDEX...>) {
@@ -62,7 +53,7 @@ C10_HOST_DEVICE constexpr decltype(auto) apply_impl(
 } // namespace detail
 
 template <class F, class Tuple>
-C10_HOST_DEVICE constexpr decltype(auto) apply(F&& f, Tuple&& t) {
+C10_HOST_DEVICE constexpr auto apply(F&& f, Tuple&& t) {
   return detail::apply_impl(
       std::forward<F>(f),
       std::forward<Tuple>(t),

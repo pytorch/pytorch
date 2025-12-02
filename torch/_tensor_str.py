@@ -3,7 +3,7 @@ import contextlib
 import dataclasses
 import math
 import textwrap
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import inf
@@ -15,7 +15,7 @@ class __PrinterOptions:
     threshold: float = 1000
     edgeitems: int = 3
     linewidth: int = 80
-    sci_mode: Optional[bool] = None
+    sci_mode: bool | None = None
 
 
 PRINT_OPTS = __PrinterOptions()
@@ -657,10 +657,10 @@ def _str_intern(inp, *, tensor_contents=None):
         grad_fn_name = "Invalid"
 
     if grad_fn_name is None and grad_fn is not None:  # type: ignore[possibly-undefined]
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         grad_fn_name = type(grad_fn).__name__
         if grad_fn_name == "CppFunction":
-            # pyrefly: ignore  # unbound-name
+            # pyrefly: ignore [unbound-name]
             grad_fn_name = grad_fn.name().rsplit("::", 1)[-1]
 
     if grad_fn_name is not None:

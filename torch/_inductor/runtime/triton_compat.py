@@ -17,7 +17,7 @@ if triton is not None:
     from triton import Config
     from triton.compiler import CompiledKernel
     from triton.runtime.autotuner import OutOfResources
-    from triton.runtime.jit import KernelInterface
+    from triton.runtime.jit import JITFunction, KernelInterface
 
     try:
         from triton.runtime.autotuner import PTXASError
@@ -132,6 +132,9 @@ else:
 
         tensor = Any
         dtype = Any
+
+    class JITFunction:  # type: ignore[no-redef]
+        pass
 
     HAS_WARP_SPEC = False
     triton_key = _raise_error

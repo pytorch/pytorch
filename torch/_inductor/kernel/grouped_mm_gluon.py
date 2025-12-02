@@ -1,3 +1,4 @@
+import argparse
 import itertools
 import pandas as pd
 import pytest
@@ -11,7 +12,8 @@ from torch._inductor.utils import get_num_sms
 from triton.experimental import gluon
 from triton.experimental.gluon import language as gl
 
-from triton.experimental.gluon.nvidia.hopper import TensorDescriptor
+import triton.profiler as proton
+import triton.profiler.language as pl
 
 
 @cache
@@ -33,12 +35,36 @@ def get_grouped_mm_kernel():
     from jinja2 import Environment, FileSystemLoader
     from pathlib import Path
 
+    # fixme: remove this!
+    # get_tmem_reg_layout and tma.make_tensor_descriptor have to be
+    # there, i.e. Triton package is to be built from commit b6201360e
+    # or newer, otherwise the kernel won't work
+    from triton.experimental.gluon.language.nvidia.blackwell import (
+        get_tmem_reg_layout,
+    )
+    from triton.experimental.gluon.language.nvidia.blackwell.tma import (
+        make_tensor_descriptor,
+    )
+
+    # Check for features to be used in the kernel
+    USE_UPDATE_TENSOR_DESCRIPTOR = False
+    try:
+        from triton.experimental.gluon.language.nvidia.blackwell.tma import (
+            update_tensor_descriptor,
+        )
+
+        USE_UPDATE_TENSOR_DESCRIPTOR = True
+    except ImportError:
+        pass
+
     # Load the template from the same directory as this script
     template_dir = Path(__file__).parent
     env = Environment(loader=FileSystemLoader(template_dir))
     template = env.get_template("grouped_mm_kernel_gluon.jinja")
-    constants = {}
-    rendered = template.render(**constants)
+    context = {
+        "USE_UPDATE_TENSOR_DESCRIPTOR": USE_UPDATE_TENSOR_DESCRIPTOR,
+    }
+    rendered = template.render(**context)
 
     with tempfile.NamedTemporaryFile(suffix=".py", delete=False) as tmp_file:
         tmp_file.write(rendered.encode("utf-8"))
@@ -71,42 +97,69 @@ def grouped_mm(
     num_acc_buffers,
     num_warps,
 ):
-    a_layout = gl.NVMMASharedLayout.get_default_for([BLOCK_M, BLOCK_K], gl.bfloat16)
-    a_desc = TensorDescriptor.from_tensor(A, [BLOCK_M, BLOCK_K], a_layout)
+    device = C.device
+    dtype = torch.int8
 
+    def alloc_fn(size: int, alignment: int, stream: int):
+        return torch.empty(size, device=device, dtype=dtype)
+
+    triton.set_allocator(alloc_fn)
+
+    a_layout = gl.NVMMASharedLayout.get_default_for([BLOCK_M, BLOCK_K], gl.bfloat16)
     B_BLOCK_SHAPE = [1, BLOCK_N, BLOCK_K]
     b_layout = gl.NVMMASharedLayout.get_default_for(B_BLOCK_SHAPE, gl.bfloat16)
-    b_desc = TensorDescriptor.from_tensor(B, B_BLOCK_SHAPE, b_layout)
-
     c_layout = gl.NVMMASharedLayout.get_default_for([BLOCK_M, BLOCK_N], gl.bfloat16)
-    c_desc = TensorDescriptor.from_tensor(C, [BLOCK_M, BLOCK_N], c_layout)
 
-    # This is for non-TMA store.
+    M, N = C.shape[0], C.shape[1]
+    K = A.shape[1]
+    G = offs.shape[0]
+
+    a_stride_0, a_stride_1 = A.stride(0), A.stride(1)
+    b_stride_0, b_stride_1, b_stride_2 = B.stride(0), B.stride(1), B.stride(2)
+    c_stride_0, c_stride_1 = C.stride(0), C.stride(1)
+
     assert BLOCK_M % 1 == 0 and BLOCK_N % 32 == 0
     store_layout = gl.BlockedLayout(
         size_per_thread=[BLOCK_M // 1, BLOCK_N // 32],
         threads_per_warp=[1, 32],
         warps_per_cta=[num_warps, 1],
-        order=[1, 0],  # row-major for coalesced access
+        order=[1, 0],
     )
 
     num_sms = get_num_sms()
     NUM_BLOCKS = num_sms
+
     grouped_mm_kernel[[NUM_BLOCKS]](
-        a_desc,
-        b_desc,
-        c_desc,
+        A,
+        B,
         offs,
         C,
-        offs.shape[0],
-        store_layout,
-        NUM_BLOCKS,
+        a_layout=a_layout,
+        b_layout=b_layout,
+        c_layout=c_layout,
+        dtype=gl.bfloat16,
+        M=M,
+        N=N,
+        K=K,
+        a_stride_0=a_stride_0,
+        a_stride_1=a_stride_1,
+        b_stride_0=b_stride_0,
+        b_stride_1=b_stride_1,
+        b_stride_2=b_stride_2,
+        c_stride_0=c_stride_0,
+        c_stride_1=c_stride_1,
+        BLOCK_M=BLOCK_M,
+        BLOCK_N=BLOCK_N,
+        BLOCK_K=BLOCK_K,
+        G=G,
+        store_layout=store_layout,
+        NUM_BLOCKS=NUM_BLOCKS,
         num_load_buffers=num_load_buffers,
         num_acc_buffers=num_acc_buffers,
         num_warps=num_warps,
+        maxnreg=128,
     )
 
-    # fixme: remove this!
     torch.cuda.synchronize()
 
 
@@ -119,13 +172,19 @@ def grouped_mm(
 def test_grouped_mm(
     G, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, num_load_buffers, num_acc_buffers, num_warps
 ):
-    A = torch.randn(G * M, K, device="cuda", dtype=torch.bfloat16)
-    B = torch.randn((G, N, K), device="cuda", dtype=torch.bfloat16)
-    C = torch.empty(G * M, N, device="cuda", dtype=torch.bfloat16)
+    device = "cuda"
+    dtype = torch.bfloat16
+    align = 16 // dtype.itemsize
+    N_align = (N + align - 1) // align * align
+    K_align = (K + align - 1) // align * align
+
+    A = torch.randn(M, K_align, device=device, dtype=dtype)[:, :K]
+    B = torch.randn((G, N, K_align), device=device, dtype=dtype)[:, :, :K]
+    C = torch.empty(M, N_align, device=device, dtype=dtype)[:, :N]
 
     probs = torch.full((G,), 1.0 / G)
-    dist = torch.distributions.Multinomial(total_count=G, probs=probs)
-    offs = torch.cumsum(dist.sample(), dim=0).to(torch.int32).to("cuda")
+    dist = torch.distributions.Multinomial(total_count=M, probs=probs)
+    offs = torch.cumsum(dist.sample(), dim=0).to(torch.int32).to(device)
 
     C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
     grouped_mm(
@@ -141,7 +200,7 @@ def test_grouped_mm(
         num_warps,
     )
 
-    torch.testing.assert_close(C_ref, C)
+    torch.testing.assert_close(C, C_ref)
 
 
 def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
@@ -184,11 +243,11 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
 
     # fixme: remove this!
     BLOCK_M_vals = [64, 128]
-    BLOCK_N_vals = [128, 256]
-    BLOCK_K_vals = [64, 128, 256]
+    BLOCK_N_vals = [32, 64, 128]
+    BLOCK_K_vals = [32, 64, 128, 256]
 
-    num_load_buffers_vals = [1, 2, 3, 4]
-    num_acc_buffers_vals = [1, 2]
+    num_load_buffers_vals = [4, 5, 6, 7]
+    num_acc_buffers_vals = [3, 4, 5, 6]
     num_warps_vals = [4, 8]
 
     for (
@@ -275,8 +334,83 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
     return configs
 
 
+def config_helper(description: str):
+    # Configure command line arguments for profiling options
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument(
+        "--profile",
+        action="store_true",
+        default=False,
+        help="Enable profiling (default: False)",
+    )
+    parser.add_argument(
+        "--op-measure",
+        action="store_true",
+        default=False,
+        help="Enable operation measurement. Otherwise, we profile timeline trace. (default: False)",
+    )
+    parser.add_argument(
+        "--warp-sampling",
+        action="store_true",
+        default=False,
+        help="Enable warp sampling during profiling (default: False)",
+    )
+    parser.add_argument(
+        "--increase-accuracy",
+        action="store_true",
+        default=False,
+        help="Enable increased-accuracy during profiling (default: False).",
+    )
+    parser.add_argument(
+        "--warp-ids",
+        type=str,
+        default="0, 2",
+        help="Comma-separated list of warp IDs for warp sampling (default: '0, 2')",
+    )
+    parser.add_argument(
+        "--gmem-buffer",
+        action="store_true",
+        default=False,
+        help="Use global memory as the internal buffer during profiling (default: False).",
+    )
+
+    args = parser.parse_args()
+
+    # Configure profiling options based on accuracy requirements
+    # Default uses clock_64 for long-running kernels with higher overhead
+    opts = ""
+    # `clock_32` provides lower overhead per record, `time_shift`` post-processes to reduce noise
+    if args.increase_accuracy:
+        opts = "clock32,time_shift"
+
+    if args.gmem_buffer:
+        buf = "global"
+    else:
+        buf = "shared"
+
+    # Set up profiling mode based on warp sampling preferences
+    if args.warp_sampling:
+        # Selective warp sampling allows capturing more events within buffer constraints
+        # by only profiling specified warps (e.g. "0,1,2,3")
+        mode = proton.mode.Default(
+            optimizations=opts,
+            sampling_strategy="selective",
+            sampling_options=args.warp_ids,
+            buffer_type=buf,
+        )
+    else:
+        # Profile all warps - provides complete picture but uses more buffer space
+        mode = proton.mode.Default(optimizations=opts, buffer_type=buf)
+
+    return args.profile, args.op_measure, mode
+
+
 if __name__ == "__main__":
     torch.manual_seed(0)
+
+    device = "cuda"
+    dtype = torch.bfloat16
+    align = 16 // dtype.itemsize
 
     results = []
     for M, G, N, K in [
@@ -302,10 +436,13 @@ if __name__ == "__main__":
         # [131072, 48, 6144, 2048],
         # [131072, 64, 6144, 2048],
     ]:
-        A = torch.randn(M, K, device="cuda", dtype=torch.bfloat16)
-        B = torch.randn(G, N, K, device="cuda", dtype=torch.bfloat16)
-        C = torch.empty(M, N, device="cuda", dtype=torch.bfloat16)
-        offs = torch.arange(M // G, M + 1, M // G, device="cuda", dtype=torch.int32)
+        N_align = (N + align - 1) // align * align
+        K_align = (K + align - 1) // align * align
+
+        A = torch.randn(M, K_align, device=device, dtype=dtype)[:, :K]
+        B = torch.randn(G, N, K_align, device=device, dtype=dtype)[:, :, :K]
+        C = torch.empty(M, N_align, device=device, dtype=dtype)[:, :N]
+        offs = torch.arange(M // G, M + 1, M // G, device=device, dtype=torch.int32)
         if offs[-1] != M:
             offs[-1] = M
 
@@ -314,8 +451,8 @@ if __name__ == "__main__":
         print("-----------------------------------------------------------------")
 
         configs = find_configs_sm100(
-            dtype_AB=torch.bfloat16,
-            dtype_C=torch.bfloat16,
+            dtype_AB=dtype,
+            dtype_C=dtype,
             dtype_acc=torch.float32,
             M=M,
             N=N,
@@ -334,6 +471,7 @@ if __name__ == "__main__":
 
         # Benchmark compiled torch._grouped_mm
         torch._dynamo.reset()
+
         grouped_mm_triton = torch.compile(
             torch._grouped_mm,
             options={
@@ -367,11 +505,11 @@ if __name__ == "__main__":
         except:
             us_cute = None
             pass
-        
 
         # Autotune and benchmark Gluon grouped MM
         best_ms = float("inf")
         best_config = None
+        best_fn = None
         for config in configs:
             (
                 BLOCK_M,
@@ -402,8 +540,18 @@ if __name__ == "__main__":
                 if ms_curr < best_ms:
                     best_ms = ms_curr
                     best_config = config
-
+                    best_fn = fn
             except Exception as e:
+                import traceback
+
+                print("=" * 60)
+                print(
+                    f"Error with config: BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}, BLOCK_K={BLOCK_K}"
+                )
+                traceback.print_exc()
+                print("=" * 60)
+                continue
+
                 # Config failed (e.g., resource constraints), skip it
                 continue
 
@@ -434,18 +582,7 @@ if __name__ == "__main__":
             # Verify correctness with best config
             try:
                 C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
-                grouped_mm(
-                    A,
-                    B,
-                    C,
-                    offs,
-                    BLOCK_M,
-                    BLOCK_N,
-                    BLOCK_K,
-                    num_load_buffers,
-                    num_acc_buffers,
-                    num_warps,
-                )
+                best_fn()
                 torch.testing.assert_close(C, C_ref, rtol=1e-2, atol=1e-2)
                 print("  ✓ Correctness check passed")
             except AssertionError:
@@ -454,32 +591,47 @@ if __name__ == "__main__":
                 if "C_ref" in locals():
                     del C_ref
 
-            # fixme: remove this!
-            """
-            import triton.profiler as proton
-
-            sid = proton.start(name="grouped_mm", data="trace", context="shadow")
-            with proton.scope("CUTLASS grouped_mm"):
-                torch._grouped_mm(A, B.transpose(-2, -1), offs)
-            with proton.scope("Triton grouped_mm"):
-                grouped_mm_triton(A, B.transpose(-2, -1), offs)
-            with proton.scope("CuTe grouped_mm"):
-                grouped_mm_cute(A, B.transpose(-2, -1), offs)
-            with proton.scope("Gluon grouped_mm"):
-                grouped_mm(
-                    A,
-                    B,
-                    C,
-                    offs,
-                    BLOCK_M,
-                    BLOCK_N,
-                    BLOCK_K,
-                    num_load_buffers,
-                    num_acc_buffers,
-                    num_warps,
-                )
-            proton.finalize(sid)
-            """
+            description = "Gluon grouped MM with Proton Intra-Kernel Profiling"
+            profile, op_measure, mode = config_helper(description)
+            if profile:
+                pl.enable_semantic("gluon")
+                if op_measure:
+                    # Operation measurement mode generates scope-level metrics.
+                    # View results: proton-viewer -m normalized_cycles grouped_mm.hatchet
+                    # Note: cycles are averaged across all warps/CTAs -
+                    # adjust for warp specialization
+                    sid = proton.start(
+                        "grouped_mm",
+                        backend="instrumentation",
+                        mode=mode,
+                    )
+                else:
+                    # Timeline trace mode generates Chrome trace format
+                    # for visualization.
+                    # Output file: grouped_mm.chrome_trace
+                    sid = proton.start(
+                        "grouped_mm",
+                        data="trace",
+                        backend="instrumentation",
+                        mode=mode,
+                    )
+                # sid = proton.start(
+                #    name="grouped_mm", data="tree", context="shadow", backend="cupti"
+                # )
+                with proton.scope("Gluon grouped_mm"):
+                    grouped_mm(
+                        A,
+                        B,
+                        C,
+                        offs,
+                        BLOCK_M,
+                        BLOCK_N,
+                        BLOCK_K,
+                        num_load_buffers,
+                        num_acc_buffers,
+                        num_warps,
+                    )
+                proton.finalize(sid)
         else:
             print(f"{"Gluon grouped_mm":<36} No valid config found")
 
@@ -495,8 +647,8 @@ if __name__ == "__main__":
             "G": G,
             "N": N,
             "K": K,
-            "CUTLASS latency (us)":  us_cutlass,
-            }
+            "CUTLASS latency (us)": us_cutlass,
+        }
         if us_cute is not None:
             result["CuTe latency (us)"] = us_cutlass
         result["Triton latency (us)"] = us_triton
