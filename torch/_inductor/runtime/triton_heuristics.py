@@ -298,7 +298,7 @@ class CachingAutotuner(KernelInterface):
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
         # Add device properties to inductor_meta for use by coordinate descent tuner
         self.inductor_meta["warp_size"] = self.device_props.warp_size
-        self.inductor_meta["max_threads_per_block"] =  (
+        self.inductor_meta["max_threads_per_block"] = (
             self.device_props.max_threads_per_block
         )
         self.deterministic_mode = self.inductor_meta.get("deterministic", False)
