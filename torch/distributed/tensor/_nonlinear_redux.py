@@ -180,7 +180,6 @@ class ArgMinMaxHandler(NonLinearReductionsBase):
 
     def _compute_local_reduction(self, op_call: torch._ops.OpOverload):
         assert self._local_tensor is not None
-        assert self._dim is not None
         if self._dim is None:
             local_idx = op_call(self._local_tensor)
             local_redux = self._local_tensor.flatten()[local_idx]
@@ -216,9 +215,12 @@ class MinMaxDimHandler(NonLinearReductionsBase):
 
         if not self._shard_mesh_dims:
             return dtensor.DTensor._op_dispatcher.wrap(
-                    (local_redux.reshape(self._expected_shape), local_idx.reshape(self._expected_shape)),
-                    output_sharding.output_spec,
-                )
+                (
+                    local_redux.reshape(self._expected_shape),
+                    local_idx.reshape(self._expected_shape),
+                ),
+                output_sharding.output_spec,
+            )
 
         gather_dim, gathered_idxs = self._convert_to_global_idxs(local_idx)
         gathered_redux, gather_idxs = self._gather_tensors(
@@ -229,10 +231,13 @@ class MinMaxDimHandler(NonLinearReductionsBase):
         final_idx = torch.gather(gather_idxs, dim=gather_dim, index=rank_winner)
 
         return dtensor.DTensor._op_dispatcher.wrap(
-                (final_redux.reshape(self._expected_shape), final_idx.reshape(self._expected_shape)),
-                output_sharding.output_spec
-            )
-    
+            (
+                final_redux.reshape(self._expected_shape),
+                final_idx.reshape(self._expected_shape),
+            ),
+            output_sharding.output_spec,
+        )
+
     def _compute_local_reduction(self, op_call: torch._ops.OpOverload):
         assert self._local_tensor is not None
         assert self._dim is not None
