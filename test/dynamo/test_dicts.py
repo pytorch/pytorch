@@ -1202,6 +1202,29 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_f = torch.compile(f, backend="eager", fullgraph=True)
         self.assertEqual(f(), opt_f())
 
+    def test_dict_union_result_type(self):
+        def_dict = defaultdict(int, {1: 1, 2: 2})
+        ord_dict = OrderedDict({3: 3, 4: 4})
+        base_dict = {5: 5, 6: 6}
+
+        exp_def = def_dict | ord_dict
+        self.assertIsInstance(exp_def, defaultdict)
+
+        exp_def_2 = def_dict | base_dict
+        self.assertIsInstance(exp_def_2, defaultdict)
+
+        exp_def_3 = base_dict | def_dict
+        self.assertIsInstance(exp_def_3, defaultdict)
+
+        exp_ord = ord_dict | def_dict
+        self.assertIsInstance(exp_ord, OrderedDict)
+
+        exp_ord_2 = base_dict | ord_dict
+        self.assertIsInstance(exp_ord_2, OrderedDict)
+
+        exp_base = base_dict | base_dict
+        self.assertIsInstance(exp_base, dict)
+
 
 instantiate_parametrized_tests(DictTests)
 
