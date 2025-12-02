@@ -111,8 +111,8 @@ class File {
   void swap(File& other) noexcept;
 
   // movable
-  File(File&&) noexcept;
-  File& operator=(File&&) noexcept;
+  File(File&& /*other*/) noexcept;
+  File& operator=(File&& /*other*/) noexcept;
 
  private:
   // unique

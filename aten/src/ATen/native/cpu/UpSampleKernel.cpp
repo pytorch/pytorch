@@ -1017,7 +1017,7 @@ struct HelperInterpBase {
       while (aligned_interp_size % sizeof(int32_t) != 0) {
         aligned_interp_size += 1;
       }
-      // assert that we wont go out of bounds
+      // assert that we won't go out of bounds
       TORCH_INTERNAL_ASSERT(aligned_interp_size * sizeof(int16_t) < interp_size * sizeof(double));
     }
 
@@ -1038,7 +1038,7 @@ struct HelperInterpNearest : public HelperInterpBase {
   // We keep this structure for BC and consider as deprecated.
   // See HelperInterpNearestExact as replacement
 
-  static const int interp_size = 1;
+  static constexpr int interp_size = 1;
 
   static inline void init_indices_weights(
     at::ScalarType output_type,
@@ -1155,7 +1155,7 @@ struct HelperInterpNearestExact : public HelperInterpNearest {
 
 struct HelperInterpLinear : public HelperInterpBase {
 
-  static const int interp_size = 2;
+  static constexpr int interp_size = 2;
 
   // Compute indices and weights for each interpolated dimension
   // indices_weights = {
@@ -1275,7 +1275,7 @@ struct HelperInterpLinear : public HelperInterpBase {
 
 struct HelperInterpCubic : public HelperInterpBase {
 
-  static const int interp_size = 4;
+  static constexpr int interp_size = 4;
 
   // Compute indices and weights for each interpolated dimension
   // indices_weights = {

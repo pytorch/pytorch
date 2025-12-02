@@ -10,8 +10,8 @@ import sys
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union
-from typing_extensions import final, override, Self, TypeGuard
+from typing import Any, Optional, TYPE_CHECKING, TypeGuard, Union
+from typing_extensions import final, override, Self
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
@@ -30,7 +30,7 @@ from . import config
 from .compile_fx import _CompileFxKwargs, _InProcessFxCompile, FxCompile, log
 from .debug import DebugContext
 from .graph import GraphLowering
-from .output_code import complex_memory_overlap as complex_memory_overlap  # noqa: F401
+from .output_code import complex_memory_overlap  # noqa: F401
 from .virtualized import V
 
 
@@ -445,7 +445,7 @@ class _SerializedFxCompile(FxCompile):
             # we can't cache (or serialize)
             FxGraphCache._check_for_hop(gm)
         except BypassFxGraphCache as e:
-            log.debug("Skipping %s compile: %s", type(self), e)
+            log.debug("Skipping %s compile: %s", type(self), e)  # noqa: G200
             return None
 
         context = torch._guards.TracingContext.try_get()
@@ -468,6 +468,8 @@ class _SerializedFxCompile(FxCompile):
         fake_mode = _current_fake_mode()
         fake_tensor_mode = _FakeTensorModeSerializer(fake_mode)
 
+        from pickle import PicklingError
+
         try:
             input = _WireProtocolInput(
                 gm,
@@ -483,7 +485,7 @@ class _SerializedFxCompile(FxCompile):
                 fake_tensor_mode,
             ).serialize()
             return (input, constants)
-        except (AttributeError, BypassFxGraphCache):
+        except (AttributeError, BypassFxGraphCache, PicklingError):
             # For example: AttributeError: Can't pickle local object
             # 'make_opaque_unary_fn.<locals>.OpaqueUnaryFn'
 
@@ -620,7 +622,6 @@ class _OutOfProcessFxCompile(_SerializedFxCompile):
 
         if output.warning_replay:
             for w in output.warning_replay:
-                # pyrefly: ignore  # no-matching-overload
                 warnings.warn_explicit(
                     message=w.message,
                     category=w.category,

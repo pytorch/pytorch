@@ -1,10 +1,9 @@
+#include <ATen/functorch/TensorWrapper.h>
 #include <torch/csrc/utils/tensor_list.h>
 
 #include <c10/util/irange.h>
-#include <pybind11/pybind11.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_variable.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_scalars.h>
 
 using namespace at;
@@ -39,6 +38,12 @@ static PyObject* recursive_to_list(
   return list.release();
 }
 
+const Tensor& recursive_unwrap(const Tensor& tensor) {
+  if (auto* wrapper = at::functorch::maybeGetTensorWrapper(tensor))
+    return recursive_unwrap(wrapper->value());
+  return tensor;
+}
+
 PyObject* tensor_to_list(const Tensor& tensor) {
   {
     py::object pytensor =
@@ -48,7 +53,9 @@ PyObject* tensor_to_list(const Tensor& tensor) {
         ".tolist() is not supported for tensor subclasses, got ",
         Py_TYPE(pytensor.ptr())->tp_name);
   }
+  // check if it is a grad tracking tensor and unwrap.
   Tensor data = tensor.resolve_conj().resolve_neg();
+  data = recursive_unwrap(data);
   if (!data.device().is_cpu()) {
     pybind11::gil_scoped_release no_gil;
     data = data.toBackend(Backend::CPU);

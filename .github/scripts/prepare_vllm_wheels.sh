@@ -88,7 +88,7 @@ repackage_wheel() {
 ${PYTHON_EXECUTABLE} -mpip install wheel==0.45.1
 
 pushd externals/vllm/wheels
-for package in xformers flashinfer-python vllm; do
+for package in xformers vllm; do
   repackage_wheel $package
 done
 popd

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
+#include <c10/core/DeviceCapability.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 
 #include <include/openreg.h>
@@ -11,6 +12,7 @@
 
 namespace c10::openreg {
 
+// LITERALINCLUDE START: OPENREG DEVICE MGMT GUARD IMPL EXAMPLE
 struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   static constexpr DeviceType static_type = c10::DeviceType::PrivateUse1;
 
@@ -50,6 +52,14 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 
   /**
+   * Get the device capability for a given device.
+   * By default, OpenReg has 2 same devices with the same capability.
+   */
+  c10::DeviceCapability getDeviceCapability(c10::Device /*unused*/) const override {
+    return c10::DeviceCapability();
+  }
+
+  /**
    * Set the current device to c10::Device.
    */
   void setDevice(c10::Device d) const override {
@@ -58,6 +68,7 @@ struct OpenRegGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     set_device(d.index());
   }
+// LITERALINCLUDE END: OPENREG DEVICE MGMT GUARD IMPL EXAMPLE
 
   /**
    * Set the current device to c10::Device, without checking for errors

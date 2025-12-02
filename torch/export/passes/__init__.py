@@ -30,7 +30,7 @@ def move_to_device_pass(
         location: Union[torch.device, str, dict[str, str]],
     ) -> str:
         if isinstance(location, dict):
-            if str(curr_device) in location.keys():
+            if str(curr_device) in location:
                 return location[str(curr_device)]
             else:
                 return str(curr_device)
@@ -78,10 +78,10 @@ def move_to_device_pass(
 
                 if (
                     node.op == "call_function"
-                    and node.target == torch.ops.aten.to.device
+                    and node.target is torch.ops.aten.to.device
                 ):
                     args = list(node.args)
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     args[1] = _get_new_device(args[1], location)
                     node.args = tuple(args)
 

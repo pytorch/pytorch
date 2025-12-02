@@ -1520,7 +1520,7 @@ class TestMkldnn(TestCase):
                 h = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
                 c = torch.randn(num_layers * num_directions, batch_size, hidden_size, dtype=torch.float32)
                 if fp16:
-                    # TODO add traing support when oneDNN support lstm FP16 training
+                    # TODO add training support when oneDNN support lstm FP16 training
                     training = False
                 model = torch.nn.LSTM(input_size, hidden_size, num_layers, bidirectional=bidirectional,
                                       bias=bias, dropout=dropout, batch_first=batch_first).float()

@@ -225,7 +225,7 @@ def make_output_handler(info, runtime_metadata, trace_joint):
 # not sure why AOTDispatcher needs to manually set this
 def maybe_mark_dynamic_helper(t: torch.Tensor, dims: set[int]):
     if hasattr(t, "_dynamo_weak_dynamic_indices"):
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         t._dynamo_weak_dynamic_indices |= dims
     else:
         t._dynamo_weak_dynamic_indices = dims.copy()  # type: ignore[attr-defined]
@@ -1143,7 +1143,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
 
         def _unpack_synthetic_bases(primals: tuple[Any, ...]) -> list[Any]:
             f_args_inner = []
-            # pyrefly: ignore  # not-iterable
+            # pyrefly: ignore [not-iterable]
             for inner_idx_or_tuple in synthetic_base_info:
                 if isinstance(inner_idx_or_tuple, int):
                     f_args_inner.append(primals[inner_idx_or_tuple])
@@ -2041,7 +2041,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
         assert len(meta.attrs) == len(runtime_subclass_keys)
         leaves = []
-        for i, (attr, attr_meta) in enumerate(meta.attrs.items()):
+        for attr, attr_meta in meta.attrs.items():
             elem = getattr(x, attr)
             new_elem, elem_leaves = AOTDispatchAutograd.process_runtime_tangent(
                 elem, attr_meta
@@ -2114,7 +2114,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 return (ctx._autograd_function_id, *ctx.symints)
 
             @staticmethod
-            # pyrefly: ignore  # bad-override
+            # pyrefly: ignore [bad-override]
             def forward(ctx, *deduped_flat_tensor_args):
                 args = deduped_flat_tensor_args
                 if backward_state_indices:
@@ -2151,7 +2151,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 #   in the fw output order.
                 fw_outs = call_func_at_runtime_with_args(
                     CompiledFunction.compiled_fw,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     args,
                     disable_amp=disable_amp,
                 )
@@ -2347,7 +2347,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     _aot_id = aot_config.aot_id
 
                     @staticmethod
-                    # pyrefly: ignore  # bad-override
+                    # pyrefly: ignore [bad-override]
                     def forward(double_ctx, *unused_args):
                         return impl_fn(double_ctx)
 
@@ -2365,8 +2365,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def _backward_impl(ctx, all_args):
-                from torch._inductor.async_compile import async_compile_pool_manager
-
                 # compiled autograd reimplements this function at proxy_call_aot_backward
                 assert not backward_state_indices, (
                     "BackwardState requires CompiledAutograd"
@@ -2446,7 +2444,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     with (
                         tracing(saved_context),
                         compile_context(saved_compile_context),
-                        async_compile_pool_manager(),
                         context(),
                         track_graph_compiling(aot_config, "backward"),
                         metrics_context,

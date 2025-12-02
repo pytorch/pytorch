@@ -510,7 +510,7 @@ class CKGemmTemplate(CKTemplate):
                         torch.cuda.get_device_properties(X_meta.device).warp_size,
                     )
                 except Exception as e:
-                    log.debug(
+                    log.debug(  # noqa: G200
                         "Failed to prefetch_stages for %s with exception %s", op.name, e
                     )
                     # be conservative here and disable the op
@@ -590,9 +590,11 @@ class CKGemmTemplate(CKTemplate):
                     arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
                 else:  # tile shape
                     arg = f"/* {field_name} */ S<{tuple_elements}>"
+                # pyrefly: ignore [bad-argument-type]
                 template_params.append(arg)
             else:
                 if field_value is not None:
+                    # pyrefly: ignore [bad-argument-type]
                     template_params.append(f"/* {field_name} */ {field_value}")
         operation_name = op.name().replace("(", "").replace(",", "").replace(")", "")
         return self._template_from_string(template_definition).render(
@@ -937,6 +939,7 @@ class CKGemmTemplate(CKTemplate):
         for o in rops:
             kBatches = self._get_kBatch(o)
             for kBatch in kBatches:
+                # pyrefly: ignore [bad-argument-type]
                 ops.append(InductorROCmOp(op=o, kBatch=kBatch))
 
         filtered_instances = list(filter(lambda op: self.filter_op(op), ops))

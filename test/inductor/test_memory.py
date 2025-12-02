@@ -242,9 +242,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
     @mock.patch.object(config, "allow_buffer_reuse", False)
     @unittest.skipUnless(TRITON_AVAILABLE, "Triton is not available")
     @config.patch("test_configs.track_memory_lifecycle", "assert")
-    def test_mutation_size_propogation(self):
+    def test_mutation_size_propagation(self):
         """
-        This tests correct size propogation in the case of mutations.
+        This tests correct size propagation in the case of mutations.
         In this example, buf1 is a mutation of buf0; we should have:
         * buf0: has size_alloc 2048 and size_free 0;
         * buf1: has size_alloc 0 and size_free 2048.
@@ -319,11 +319,6 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 # succ nodes should be forwarded to pre mutation buffer
                 self.assertTrue(buffer_info[post][2] <= buffer_info[pre][2])
 
-    @unittest.skipIf(
-        not torch.cuda.is_available()
-        or torch.cuda.get_device_properties().total_memory < int(1e10),
-        "Need 10GB memory to be safe to run the test",
-    )
     def test_fusing_reductions_increase_peak_memory(self):
         @torch.compile
         def f(a, b, c):
@@ -332,9 +327,9 @@ class TestOperatorReorderForPeakMemory(TestCase):
         a = torch.randn(1024 * 32, 16, device=GPU_TYPE)
         b = torch.randn(1024 * 32, 16, device=GPU_TYPE)
         c = torch.randn(16, 1024 * 32, device=GPU_TYPE)
-        torch.cuda.reset_peak_memory_stats()
+        torch.get_device_module(GPU_TYPE).reset_peak_memory_stats()
         f(a, b, c)
-        peak_mem = torch.cuda.max_memory_allocated()
+        peak_mem = torch.get_device_module(GPU_TYPE).max_memory_allocated()
 
         expected_bound = a.size(0) * c.size(1) * a.dtype.itemsize * 2
         self.assertLess(peak_mem, expected_bound)
@@ -343,7 +338,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
     def test_fusion_acc_large_reads(self):
         def f(x, y, z):
             res = torch.zeros_like(x[0])
-            for i in range(4):
+            for _ in range(4):
                 temp = torch.matmul(x, y) + z
                 res = res + temp
             return res
@@ -449,7 +444,7 @@ class TestOperatorReorderForPeakMemory(TestCase):
                 "allow_buffer_reuse": False,
                 # make sure the mm is at the end so
                 # the earlier deallocation is not at the last step,
-                # which doesnt distinguish between returned tensors
+                # which doesn't distinguish between returned tensors
                 # and which tensors are deallocated immediately prior
                 "reorder_for_peak_memory": False,
             }

@@ -10,7 +10,6 @@ import sys
 import time
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Optional
 
 
 try:
@@ -48,24 +47,8 @@ def persist_print(msg):
 # List of regex patterns for ignore bucket
 IGNORE_PATTERNS: list[re.Pattern] = [
     re.compile(
-        r"Dynamo failed to run FX node with fake tensors: call_method fill_diagonal_"
-    ),  # https://github.com/pytorch/pytorch/issues/163420
-    re.compile(
-        r"TypeError: unsupported operand type\(s\) for divmod\(\): 'SymInt' and 'int'"
-    ),  # https://github.com/pytorch/pytorch/issues/163457
-    re.compile(
-        r"RuntimeError: self\.stride\(-1\) must be 1 to view ComplexDouble as"
-    ),  # https://github.com/pytorch/pytorch/issues/162561
-    re.compile(
-        r"BooleanAtom not allowed in this context"
-    ),  # https://github.com/pytorch/pytorch/issues/160726
-    re.compile(
-        r"TypeError\(\"unsupported operand type\(s\) for \*: 'SymBool' and 'FakeTensor'\"\)"
-    ),  # https://github.com/pytorch/pytorch/issues/164684
-    re.compile(r"KeyError: u\d+"),  # https://github.com/pytorch/pytorch/issues/164685
-    re.compile(
-        r"torch\._inductor\.exc\.InductorError: CppCompileError: C\+\+ compile error"
-    ),  # https://github.com/pytorch/pytorch/issues/164686
+        r"torch\._inductor\.exc\.InductorError: AssertionError: -1"
+    ),  # https://github.com/pytorch/pytorch/issues/167937
     # Add more patterns here as needed, e.g.:
     # re.compile(r"Some other error message"),
 ]
@@ -100,7 +83,7 @@ def is_ignored_output(output: str) -> int:
 def run_fuzzer_with_seed(
     seed: int,
     template: str = "default",
-    supported_ops: Optional[str] = None,
+    supported_ops: str | None = None,
 ) -> FuzzerResult:
     """
     Run fuzzer.py with a specific seed.
@@ -224,12 +207,12 @@ def handle_result_output(
 
 
 def run_multi_process_fuzzer(
-    num_processes: Optional[int] = None,
+    num_processes: int | None = None,
     seed_start: int = 0,
     seed_count: int = 100,
     verbose: bool = False,
     template: str = "default",
-    supported_ops: Optional[str] = None,
+    supported_ops: str | None = None,
 ) -> None:
     """
     Run the multi-process fuzzer.
@@ -290,6 +273,7 @@ def run_multi_process_fuzzer(
                 )
 
                 def write_func(msg):
+                    # pyrefly: ignore [missing-attribute]
                     pbar.write(msg)
             else:
                 persist_print("Progress: (install tqdm for better progress bar)")
@@ -516,3 +500,144 @@ def _print_operation_distribution(results: list[FuzzerResult]) -> None:
         persist_print(
             "\n📊 No operation statistics collected (no successful runs with stats)"
         )
+
+
+def run_until_failure(
+    num_processes: int | None = None,
+    verbose: bool = False,
+    template: str = "default",
+    supported_ops: str | None = None,
+) -> None:
+    """
+    Run the multi-process fuzzer with a random starting seed, iterating until a failure is found.
+
+    Args:
+        num_processes: Number of worker processes to use
+        verbose: Whether to print detailed output
+        template: The template to use for code generation
+        supported_ops: Comma-separated ops string with optional weights
+
+    Returns:
+        Exits with non-zero code when a failure is found
+    """
+    import random
+
+    # Pick a random seed to start from
+    initial_seed = random.randint(0, 2**31 - 1)
+
+    persist_print(
+        f"🎲 Starting continuous fuzzing with random initial seed: {initial_seed}"
+    )
+    persist_print(f"🚀 Using {num_processes} processes")
+    persist_print(
+        f"🔧 Command template: python fuzzer.py --seed {{seed}} --template {template}"
+    )
+    persist_print("🎯 Running until first failure is found...")
+    persist_print("=" * 60)
+
+    start_time = time.time()
+    current_seed = initial_seed
+    total_successful = 0
+    total_ignored = 0
+    batch_size = 100  # Process seeds in batches of 100
+
+    try:
+        while True:
+            # Process a batch of seeds
+            seeds = list(range(current_seed, current_seed + batch_size))
+
+            with mp.Pool(processes=num_processes) as pool:
+                future_results = []
+                for seed in seeds:
+                    future = pool.apply_async(
+                        run_fuzzer_with_seed, (seed, template, supported_ops)
+                    )
+                    future_results.append((seed, future))
+
+                # Set up progress bar for this batch
+                if HAS_TQDM:
+                    from tqdm import tqdm
+
+                    pbar = tqdm(
+                        total=len(seeds),
+                        desc=f"Batch starting at seed {current_seed}",
+                        file=sys.stdout,
+                        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}] ✅/🚫={postfix}",
+                        dynamic_ncols=True,
+                    )
+                    pbar.set_postfix_str(f"{total_successful}/{total_ignored}")
+
+                    def write_func(msg):
+                        # pyrefly: ignore [missing-attribute]
+                        pbar.write(msg)
+                else:
+                    pbar = None
+
+                # Collect results as they complete
+                for seed, future in future_results:
+                    result: FuzzerResult = future.get()
+
+                    if result.ignored_pattern_idx != -1:
+                        total_ignored += 1
+
+                    if result.success:
+                        total_successful += 1
+                    elif result.ignored_pattern_idx == -1:
+                        # Found a failure that is not ignored!
+                        if HAS_TQDM and pbar:
+                            pbar.close()
+
+                        elapsed = time.time() - start_time
+                        persist_print("\n" + "=" * 60)
+                        persist_print("🎯 FAILURE FOUND!")
+                        persist_print("=" * 60)
+                        persist_print(f"❌ Failing seed: {result.seed}")
+                        persist_print(
+                            f"⏱️  Duration for this seed: {result.duration:.2f}s"
+                        )
+                        persist_print(f"⏱️  Total time elapsed: {elapsed:.2f}s")
+                        persist_print(f"✅ Successful seeds tested: {total_successful}")
+                        persist_print(f"🚫 Ignored seeds: {total_ignored}")
+                        persist_print(
+                            f"📊 Total seeds tested: {total_successful + total_ignored + 1}"
+                        )
+                        persist_print("\n💥 Failure output:")
+                        persist_print("-" * 60)
+                        print_output_lines(result.output, persist_print)
+                        persist_print("-" * 60)
+                        persist_print(
+                            f"\n🔄 Reproduce with: python fuzzer.py --seed {result.seed} --template {template}"
+                        )
+
+                        # Exit with non-zero code
+                        sys.exit(1)
+
+                    # Update progress bar
+                    if HAS_TQDM and pbar:
+                        pbar.set_postfix_str(f"{total_successful}/{total_ignored}")
+                        pbar.update(1)
+                    elif verbose:
+                        status_emoji = "✅" if result.success else "🚫"
+                        persist_print(f"Seed {result.seed}: {status_emoji}")
+
+                # Close progress bar for this batch
+                if HAS_TQDM and pbar:
+                    pbar.close()
+
+            # Move to next batch
+            current_seed += batch_size
+
+    except KeyboardInterrupt:
+        persist_print("\n🛑 Interrupted by user (Ctrl+C)")
+        elapsed = time.time() - start_time
+        persist_print("=" * 60)
+        persist_print("📈 SUMMARY (interrupted)")
+        persist_print("=" * 60)
+        persist_print(f"⏱️  Total time: {elapsed:.2f}s")
+        persist_print(f"✅ Successful seeds: {total_successful}")
+        persist_print(f"🚫 Ignored seeds: {total_ignored}")
+        persist_print(f"📊 Total seeds tested: {total_successful + total_ignored}")
+        persist_print(
+            f"⚡ Throughput: {((total_successful + total_ignored) / (elapsed / 3600)):.2f} seeds/hr"
+        )
+        sys.exit(130)

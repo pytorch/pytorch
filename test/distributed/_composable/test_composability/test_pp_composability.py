@@ -29,8 +29,8 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
+    at_least_x_gpu,
     MultiProcessTestCase,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_XPU,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
@@ -49,7 +48,11 @@ if TYPE_CHECKING:
     from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
@@ -101,17 +104,15 @@ class ComposabilityTest(MultiProcessTestCase):
 
     @property
     def world_size(self):
-        return 4
+        return 8
 
     @property
     def device(self):
         return self.rank
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 4+ GPUs"
-    )
+    @requires_accelerator_dist_backend()
+    @skip_if_lt_x_gpu(8)
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     def test_pp_and_dcp(self):
         """
         Test that pipeline parallelism and distributed checkpointing can be used together and
@@ -169,8 +170,8 @@ class ComposabilityTest(MultiProcessTestCase):
             {f"{i}": MLPModule(dim) for i in range(total_layers)}
         )
         # Calculate start and end indices based on rank
-        start_index = self.rank * 2
-        end_index = start_index + 2
+        start_index = self.rank
+        end_index = start_index + 1
         pp_model = PPModelChunk(full_model, start_index, end_index)
 
         pp_model.to(self.device)
@@ -201,11 +202,9 @@ class ComposabilityTest(MultiProcessTestCase):
 
         _dcp_test(self)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -224,7 +223,6 @@ class ComposabilityTest(MultiProcessTestCase):
         ],
     )
     def test_3d_with_tp_dp_pp(self, ScheduleClass, MixedPrecisionParam):
-        _device_raii = torch.device(device_type, self.device)
         torch.accelerator.set_device_index(self.device)
         store = torch.distributed.FileStore(self.file_name, self.world_size)
         torch.distributed.init_process_group(
@@ -286,56 +284,44 @@ class ComposabilityTest(MultiProcessTestCase):
                 parallelize_module(layer, tp_mesh, parallelize_plan)
             return model
 
-        # Attach to a schedule
         if issubclass(ScheduleClass, PipelineScheduleSingle):
-            stage_idx = pp_group.rank()
-            partial_model = nn.Sequential(
-                *full_model[stage_idx * 2 : stage_idx * 2 + 2]
-            )
-            partial_model.to(self.device)
+            n_virtual = 1
+        else:
+            n_virtual = 2
 
+        num_stages = pp_group.size() * n_virtual
+        layers_per_stage = total_layers // num_stages
+        stages = []
+        for i in range(n_virtual):
+            stage_idx = pp_group.rank() + pp_group.size() * i
+            start_layer = stage_idx * layers_per_stage
+            end_layer = start_layer + layers_per_stage
+            # divide the model layers by the number of stages
+            partial_model = nn.Sequential(*full_model[start_layer:end_layer])
+            partial_model.to(self.device)
             tp_model = apply_tp(partial_model, tp_mesh)
             dp_model = apply_fsdp(tp_model)
-            pipeline_stage = PipelineStage(
+
+            stage = PipelineStage(
                 dp_model,
                 stage_idx,
-                pp_group.size(),
+                num_stages,
                 self.device,
                 group=pp_group,
             )
-            partial_models = [pipeline_stage.submod]
-            pipeline_schedule = ScheduleClass(
-                pipeline_stage,
-                n_microbatches=num_microbatches,
-                loss_fn=loss_fn,
-            )
-        else:
-            n_virtual = 2
-            num_stages = pp_group.size() * n_virtual
-            stages = []
-            for i in range(n_virtual):
-                stage_idx = pp_group.rank() + n_virtual * i
-                # divide the model layers by the number of stages
-                partial_model = nn.Sequential(*full_model[stage_idx : stage_idx + 1])
-                partial_model.to(self.device)
 
-                tp_model = apply_tp(partial_model, tp_mesh)
-                dp_model = apply_fsdp(tp_model)
-                stage = PipelineStage(
-                    dp_model,
-                    stage_idx,
-                    num_stages,
-                    self.device,
-                    group=pp_group,
-                )
+            stages.append(stage)
+            partial_models = [pipeline_stage.submod for pipeline_stage in stages]
 
-                stages.append(stage)
-                partial_models = [pipeline_stage.submod for pipeline_stage in stages]
-            pipeline_schedule = ScheduleClass(
-                stages,
-                n_microbatches=num_microbatches,
-                loss_fn=loss_fn,
-            )
+        if issubclass(ScheduleClass, PipelineScheduleSingle):
+            stages = stages[0]
+
+        pipeline_schedule = ScheduleClass(
+            stages,
+            n_microbatches=num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
 
         optimizer_kwargs = {
             "lr": 0.01,
@@ -349,7 +335,7 @@ class ComposabilityTest(MultiProcessTestCase):
             for model in partial_models
         ]
 
-        for train_step in range(5):
+        for _train_step in range(5):
             for optimizer in optimizers:
                 optimizer.zero_grad()
             inputs = torch.rand((num_microbatches, dim), device=self.device)
@@ -368,11 +354,9 @@ class ComposabilityTest(MultiProcessTestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
-    )
+    @requires_accelerator_dist_backend()
+    @skip_if_lt_x_gpu(8)
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -405,11 +389,11 @@ class ComposabilityTest(MultiProcessTestCase):
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
             device_type,
-            mesh_shape=(replicate_size, 1, pp_size),
-            mesh_dim_names=("replicate", "shard", "pp"),
+            mesh_shape=(replicate_size, pp_size),
+            mesh_dim_names=("replicate", "pp"),
         )
         torch.manual_seed(42)
-        dp_mesh = device_mesh["replicate", "shard"]
+        dp_mesh = device_mesh["replicate"]
         pp_mesh = device_mesh["pp"]
         pp_group = device_mesh["pp"].get_group()
 
@@ -429,15 +413,13 @@ class ComposabilityTest(MultiProcessTestCase):
                 param_dtype=MixedPrecisionParam,
                 reduce_dtype=torch.float32,
             )
-            replicate_config = {"mp_policy": mp_policy}
+            replicate_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
             for layer_id in range(len(partial_model)):
                 replicate(
                     partial_model[layer_id],
-                    device_mesh=dp_mesh,
                     **replicate_config,
-                    reshard_after_forward=False,
                 )
-            dp_model = replicate(partial_model, device_mesh=dp_mesh, **replicate_config)
+            dp_model = replicate(partial_model, **replicate_config)
             return dp_model
 
         # Apply same precision to reference model (without replicate)
@@ -447,108 +429,70 @@ class ComposabilityTest(MultiProcessTestCase):
                 partial_model = partial_model.to(dtype=MixedPrecisionParam)
             return partial_model
 
-        # Attach to a schedule
         if issubclass(ScheduleClass, PipelineScheduleSingle):
-            stage_idx = pp_group.rank()
-            partial_model = nn.Sequential(
-                *full_model[stage_idx * 2 : stage_idx * 2 + 2]
-            )
-            partial_model.to(self.device)
-
-            dp_model = apply_replicate(partial_model)
-            pipeline_stage = PipelineStage(
-                dp_model,
-                stage_idx,
-                pp_group.size(),
-                self.device,
-                group=pp_group,
-            )
-            partial_models = [pipeline_stage.submod]
-            pipeline_schedule = ScheduleClass(
-                pipeline_stage,
-                n_microbatches=num_microbatches,
-                loss_fn=loss_fn,
-                scale_grads=False,
-            )
-
-            ref_partial_model = nn.Sequential(
-                *ref_full_model[stage_idx * 2 : stage_idx * 2 + 2]
-            )
-            ref_partial_model.to(self.device)
-            ref_partial_model = apply_same_precision(
-                ref_partial_model
-            )  # Apply same precision
-
-            ref_pipeline_stage = PipelineStage(
-                ref_partial_model,
-                stage_idx,
-                pp_group.size(),
-                self.device,
-                group=pp_group,
-            )
-            ref_partial_models = [ref_pipeline_stage.submod]
-            ref_pipeline_schedule = ScheduleClass(
-                ref_pipeline_stage,
-                n_microbatches=num_microbatches,
-                loss_fn=loss_fn,
-                scale_grads=False,
-            )
+            n_virtual = 1
         else:
             n_virtual = 2
-            num_stages = pp_group.size() * n_virtual
-            stages = []
-            ref_stages = []
-            for i in range(n_virtual):
-                stage_idx = pp_group.rank() + n_virtual * i
-                # divide the model layers by the number of stages
-                partial_model = nn.Sequential(*full_model[stage_idx : stage_idx + 1])
-                partial_model.to(self.device)
 
-                dp_model = apply_replicate(partial_model)
-                stage = PipelineStage(
-                    dp_model,
-                    stage_idx,
-                    num_stages,
-                    self.device,
-                    group=pp_group,
-                )
+        num_stages = pp_group.size() * n_virtual
+        layers_per_stage = total_layers // num_stages
+        stages = []
+        ref_stages = []
+        for i in range(n_virtual):
+            stage_idx = pp_group.rank() + pp_group.size() * i
+            start_layer = stage_idx * layers_per_stage
+            end_layer = start_layer + layers_per_stage
+            # divide the model layers by the number of stages
+            partial_model = nn.Sequential(*full_model[start_layer:end_layer])
+            partial_model.to(self.device)
 
-                stages.append(stage)
-                partial_models = [pipeline_stage.submod for pipeline_stage in stages]
+            ref_partial_model = nn.Sequential(*ref_full_model[start_layer:end_layer])
+            ref_partial_model.to(self.device)
 
-                ref_partial_model = nn.Sequential(
-                    *ref_full_model[stage_idx : stage_idx + 1]
-                )
-                ref_partial_model.to(self.device)
-                ref_partial_model = apply_same_precision(
-                    ref_partial_model
-                )  # Apply same precision
+            dp_model = apply_replicate(partial_model)
+            ref_dp_model = apply_same_precision(ref_partial_model)
 
-                ref_stage = PipelineStage(
-                    ref_partial_model,
-                    stage_idx,
-                    num_stages,
-                    self.device,
-                    group=pp_group,
-                )
-
-                ref_stages.append(ref_stage)
-                ref_partial_models = [
-                    pipeline_stage.submod for pipeline_stage in ref_stages
-                ]
-            pipeline_schedule = ScheduleClass(
-                stages,
-                n_microbatches=num_microbatches,
-                loss_fn=loss_fn,
-                scale_grads=False,
+            stage = PipelineStage(
+                dp_model,
+                stage_idx,
+                num_stages,
+                self.device,
+                group=pp_group,
             )
 
-            ref_pipeline_schedule = ScheduleClass(
-                ref_stages,
-                n_microbatches=num_microbatches,
-                loss_fn=loss_fn,
-                scale_grads=False,
+            ref_stage = PipelineStage(
+                ref_dp_model,
+                stage_idx,
+                num_stages,
+                self.device,
+                group=pp_group,
             )
+
+            stages.append(stage)
+            ref_stages.append(ref_stage)
+
+            partial_models = [pipeline_stage.submod for pipeline_stage in stages]
+            ref_partial_models = [
+                pipeline_stage.submod for pipeline_stage in ref_stages
+            ]
+
+        if issubclass(ScheduleClass, PipelineScheduleSingle):
+            stages = stages[0]
+            ref_stages = ref_stages[0]
+
+        pipeline_schedule = ScheduleClass(
+            stages,
+            n_microbatches=num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
+
+        ref_pipeline_schedule = ScheduleClass(
+            ref_stages,
+            n_microbatches=num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
 
         optimizer_kwargs = {
             "lr": 0.01,
@@ -568,7 +512,7 @@ class ComposabilityTest(MultiProcessTestCase):
             for model in ref_partial_models
         ]
 
-        for train_step in range(5):
+        for _train_step in range(5):
             for optimizer in optimizers:
                 optimizer.zero_grad()
             for ref_optimizer in ref_optimizers:
@@ -603,11 +547,9 @@ class ComposabilityTest(MultiProcessTestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
-    @skip_if_lt_x_gpu(4)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
-    )
+    @requires_accelerator_dist_backend()
+    @skip_if_lt_x_gpu(8)
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -633,11 +575,11 @@ class ComposabilityTest(MultiProcessTestCase):
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
             device_type,
-            mesh_shape=(replicate_size, 1, pp_size),
-            mesh_dim_names=("replicate", "shard", "pp"),
+            mesh_shape=(replicate_size, pp_size),
+            mesh_dim_names=("replicate", "pp"),
         )
         torch.manual_seed(42)
-        dp_mesh = device_mesh["replicate", "shard"]
+        dp_mesh = device_mesh["replicate"]
         pp_mesh = device_mesh["pp"]
         pp_group = device_mesh["pp"].get_group()
         dp_group = device_mesh["replicate"].get_group()
@@ -699,10 +641,9 @@ class ComposabilityTest(MultiProcessTestCase):
             for layer_id in range(len(partial_model)):
                 replicate(
                     partial_model[layer_id],
-                    device_mesh=dp_mesh,
-                    reshard_after_forward=False,
+                    mesh=dp_mesh,
                 )
-            dp_model = replicate(partial_model, device_mesh=dp_mesh)
+            dp_model = replicate(partial_model, mesh=dp_mesh)
             return dp_model
 
         def pipelined_models_parameters(start_layer, model):
@@ -736,67 +677,44 @@ class ComposabilityTest(MultiProcessTestCase):
 
         pipeline_model_parameter_dict = {}
 
-        # Attach to a schedule
         if issubclass(ScheduleClass, PipelineScheduleSingle):
-            stage_idx = pp_group.rank()
-            # Calculate layers per stage correctly
-            layers_per_stage = total_layers // pp_group.size()  # 8 // 2 = 4
+            n_virtual = 1
+        else:
+            n_virtual = 2
+
+        num_stages = pp_group.size() * n_virtual
+        layers_per_stage = total_layers // num_stages
+        stages = []
+        for i in range(n_virtual):
+            stage_idx = pp_group.rank() + pp_group.size() * i
             start_layer = stage_idx * layers_per_stage
             end_layer = start_layer + layers_per_stage
-
+            # divide the model layers by the number of stages
             partial_model = nn.Sequential(*full_model[start_layer:end_layer])
             partial_model.to(self.device)
 
             dp_model = apply_replicate(partial_model)
             pipelined_models_parameters(start_layer, dp_model)
-
-            pipeline_stage = PipelineStage(
+            stage = PipelineStage(
                 dp_model,
                 stage_idx,
-                pp_group.size(),
+                num_stages,
                 self.device,
                 group=pp_group,
             )
-            partial_models = [pipeline_stage.submod]
-            pipeline_schedule = ScheduleClass(
-                pipeline_stage,
-                n_microbatches=num_microbatches,
-                loss_fn=loss_fn,
-                scale_grads=False,
-            )
 
-        else:
-            n_virtual = 2
-            num_stages = pp_group.size() * n_virtual
-            layers_per_stage = total_layers // num_stages
-            stages = []
-            for i in range(n_virtual):
-                stage_idx = pp_group.rank() + pp_group.size() * i
-                start_layer = stage_idx * layers_per_stage
-                end_layer = start_layer + layers_per_stage
-                # divide the model layers by the number of stages
-                partial_model = nn.Sequential(*full_model[start_layer:end_layer])
-                partial_model.to(self.device)
+            stages.append(stage)
+            partial_models = [pipeline_stage.submod for pipeline_stage in stages]
 
-                dp_model = apply_replicate(partial_model)
-                pipelined_models_parameters(start_layer, dp_model)
-                stage = PipelineStage(
-                    dp_model,
-                    stage_idx,
-                    num_stages,
-                    self.device,
-                    group=pp_group,
-                )
+        if issubclass(ScheduleClass, PipelineScheduleSingle):
+            stages = stages[0]
 
-                stages.append(stage)
-                partial_models = [pipeline_stage.submod for pipeline_stage in stages]
-
-            pipeline_schedule = ScheduleClass(
-                stages,
-                n_microbatches=num_microbatches,
-                loss_fn=loss_fn,
-                scale_grads=False,
-            )
+        pipeline_schedule = ScheduleClass(
+            stages,
+            n_microbatches=num_microbatches,
+            loss_fn=loss_fn,
+            scale_grads=False,
+        )
 
         optimizer_kwargs = {
             "lr": 0.01,
