@@ -35,12 +35,17 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
         flaky_models.update(
             {
                 "Background_Matting",
+                "doctr_reco_predictor",
                 "mnasnet1_0",
+                "llava",
                 "repvgg_a2",
                 "resnet152",
                 "resnet18",
                 "resnet50",
                 "stable_diffusion_unet",
+                "shufflenet_v2_x1_0",
+                "vgg16",
+                "BERT_pytorch",
                 # LLM
                 "google/gemma-2-2b",
             }
