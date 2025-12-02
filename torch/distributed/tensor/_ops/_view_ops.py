@@ -632,13 +632,20 @@ def propagate_shape_and_sharding(
 
                 # Special case for _StridedShard: if we're splitting a _StridedShard dimension
                 # and the first split size equals the split_factor, we can convert to Shard
-                # on the last split dimension
+                # on the last split dimension.
+                # IMPORTANT: This only applies when directly splitting a single InputDim,
+                # not when flattening multiple dimensions first.
                 shard_mesh_dim, shard_placement = (
                     maybe_get_shard_mesh_dim_and_placement(in_dim)
                 )
                 is_strided_shard = isinstance(shard_placement, _StridedShard)
+                is_direct_input_dim = isinstance(cmd.input_dim, InputDim)
 
-                if is_strided_shard and shard_mesh_dim is not None:
+                if (
+                    is_strided_shard
+                    and shard_mesh_dim is not None
+                    and is_direct_input_dim
+                ):
                     # For _StridedShard(dim=k, split_factor=n), when splitting into (d1, d2, ...),
                     # if d1 == n, we can convert to Shard on the rightmost split dimension
                     # (which will have split_id = len(group_shape) - 1)
@@ -658,7 +665,7 @@ def propagate_shape_and_sharding(
                                 "It cannot be performed without redistribution, which is disallowed by the current operator.",
                             )
                 else:
-                    # Regular Shard case
+                    # Regular Shard case (or _StridedShard with Flatten, which we treat as regular Shard)
                     # 1. is this dimension shardable on each individual mesh dim?
                     shardable_dims[in_dim.input_dim] = [
                         out_size % mesh_dim_size == 0 for mesh_dim_size in mesh_sizes

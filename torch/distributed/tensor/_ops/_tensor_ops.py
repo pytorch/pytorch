@@ -775,47 +775,45 @@ def cat_strategy(op_schema: OpSchema) -> StrategyType:
     # This requires all input tensors to have the same size on the concatenation dimension
     # and all be sharded on that dimension with the same placement.
     can_use_strided_shard = True
-    first_tensor_meta = (
-        input_tuple_strategy.children[0].strategies[0].output_spec.tensor_meta
-    )
-    if first_tensor_meta is not None and dim < len(first_tensor_meta.shape):
-        first_size_on_cat_dim = first_tensor_meta.shape[dim]
-        first_placements = (
-            input_tuple_strategy.children[0].strategies[0].output_spec.placements
-        )
-
-        # Check if first tensor is sharded on the cat dim
-        if not is_tensor_dim_sharded(
-            input_tuple_strategy.children[0].strategies[0].output_spec, dim
-        ):
-            can_use_strided_shard = False
-
-        # Check all other tensors have the same size and sharding on cat dim
-        for idx in range(1, num_input_tensor):
-            that_strategy = input_tuple_strategy.children[idx]
-            if not isinstance(that_strategy, OpStrategy):
-                can_use_strided_shard = False
-                break
-            that_spec = that_strategy.strategies[0].output_spec
-            that_tensor_meta = that_spec.tensor_meta
-
-            if (
-                that_tensor_meta is None
-                or dim >= len(that_tensor_meta.shape)
-                or that_tensor_meta.shape[dim] != first_size_on_cat_dim
-            ):
-                can_use_strided_shard = False
-                break
-
-            # Check if sharded on cat dim with same placement
-            if (
-                not is_tensor_dim_sharded(that_spec, dim)
-                or that_spec.placements != first_placements
-            ):
-                can_use_strided_shard = False
-                break
-    else:
+    first_strategy = input_tuple_strategy.children[0]
+    if not isinstance(first_strategy, OpStrategy):
         can_use_strided_shard = False
+    else:
+        first_tensor_meta = first_strategy.strategies[0].output_spec.tensor_meta
+        if first_tensor_meta is not None and dim < len(first_tensor_meta.shape):
+            first_size_on_cat_dim = first_tensor_meta.shape[dim]
+            first_placements = first_strategy.strategies[0].output_spec.placements
+
+            # Check if first tensor is sharded on the cat dim
+            if not is_tensor_dim_sharded(first_strategy.strategies[0].output_spec, dim):
+                can_use_strided_shard = False
+
+            # Check all other tensors have the same size and sharding on cat dim
+            for idx in range(1, num_input_tensor):
+                that_strategy = input_tuple_strategy.children[idx]
+                if not isinstance(that_strategy, OpStrategy):
+                    can_use_strided_shard = False
+                    break
+                that_spec = that_strategy.strategies[0].output_spec
+                that_tensor_meta = that_spec.tensor_meta
+
+                if (
+                    that_tensor_meta is None
+                    or dim >= len(that_tensor_meta.shape)
+                    or that_tensor_meta.shape[dim] != first_size_on_cat_dim
+                ):
+                    can_use_strided_shard = False
+                    break
+
+                # Check if sharded on cat dim with same placement
+                if (
+                    not is_tensor_dim_sharded(that_spec, dim)
+                    or that_spec.placements != first_placements
+                ):
+                    can_use_strided_shard = False
+                    break
+        else:
+            can_use_strided_shard = False
 
     op_strategy = OpStrategy([])
     # use a set to deduplicate strategies with the same placement
