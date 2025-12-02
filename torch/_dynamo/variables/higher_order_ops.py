@@ -279,10 +279,8 @@ def overwrite_tensor_vt_requires_grad(graph_output_vts, flat_variable):
     # this is required for faithfully representing the autograd.Function forward
     # outputs.
     for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
-        if isinstance(orig_vt, (variables.SymNodeVariable, variables.TensorVariable)):
-            assert isinstance(
-                subgraph_vt, (variables.SymNodeVariable, variables.TensorVariable)
-            )
+        if isinstance(orig_vt, variables.TensorVariable):
+            assert isinstance(subgraph_vt, variables.TensorVariable)
             orig_vt.requires_grad = subgraph_vt.requires_grad
             if orig_vt.requires_grad:
                 orig_vt.has_grad_fn = True
