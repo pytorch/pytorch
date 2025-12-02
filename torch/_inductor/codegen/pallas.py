@@ -988,7 +988,9 @@ class PallasKernel(SIMDKernel):
 
             # Generate iteration variables as jnp.arange arrays
             # These are used by index_expr operations like torch.arange
-            if self.range_tree_nodes:
+            # Skip on GPU with masked ops - iteration vars would create non-power-of-2 arrays
+            # which are not supported by Pallas Triton backend
+            if self.range_tree_nodes and not self.use_masked_ops:
                 code.writeline("# Define iteration variables as JAX arrays")
                 # Get the first output buffer's shape for reshaping
                 first_output_shape = None
@@ -1019,6 +1021,11 @@ class PallasKernel(SIMDKernel):
                         length_val = int(length) if hasattr(length, "__int__") else None
                     except (TypeError, ValueError):
                         length_val = None
+
+                    # Skip symbolic lengths - jnp.arange requires concrete values
+                    # This happens with dynamic shapes
+                    if length_val is None:
+                        continue
 
                     if (
                         first_output_shape
