@@ -28,7 +28,7 @@ class TestDebug(TestCase):
         os.environ["RANK"] = "0"
         os.environ["WORLD_SIZE"] = "1"
 
-        port = 25999
+        port = 25998
 
         def fetch(path: str) -> str:
             resp = session.get(f"http://localhost:{port}{path}")
@@ -71,7 +71,9 @@ class TestDebug(TestCase):
 
         with self.subTest("pyspy"):
             if shutil.which("py-spy"):
-                self.assertIn("test_all", fetch("/pyspy_dump_native"))
+                self.assertIn("test_all", fetch("/pyspy_dump"))
+                self.assertIn("_frontend", fetch("/pyspy_dump?subprocesses=1"))
+                self.assertIn("libc.so", fetch("/pyspy_dump?native=1"))
 
         stop_debug_server()
 

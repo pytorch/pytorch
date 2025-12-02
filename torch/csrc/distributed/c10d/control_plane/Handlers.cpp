@@ -91,12 +91,23 @@ RegisterHandler waitCounterHandler{
 }();
 #endif
 
+#ifndef _WIN32
 RegisterHandler pyspyHandler{
-    "pyspy_dump_native",
-    [](const Request&, Response& res) {
+    "pyspy_dump",
+    [](const Request& req, Response& res) {
       pid_t target = getpid();
-      std::string cmd =
-          "py-spy dump --pid " + std::to_string(target) + " --native 2>&1";
+      std::string cmd = "py-spy dump";
+      cmd += " --pid " + std::to_string(target);
+      if (req.getParam("native") != "") {
+        cmd += " --native";
+      }
+      if (req.getParam("subprocesses") != "") {
+        cmd += " --subprocesses";
+      }
+      if (req.getParam("nonblocking") != "") {
+        cmd += " --nonblocking";
+      }
+      cmd += " 2>&1";
       std::array<char, 4096> buf{};
       std::string output;
       FILE* pipe = popen(cmd.c_str(), "r");
@@ -116,6 +127,7 @@ RegisterHandler pyspyHandler{
         res.setStatus(200);
       }
     }};
+#endif
 
 } // namespace
 
