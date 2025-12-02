@@ -34,6 +34,23 @@ In some cases, the terms `torch.compile`, TorchDynamo, `torch.compiler`
 might be used interchangeably in this documentation.
 :::
 
+:::{warning}
+`torch.compile` is **not supported on Python 3.14+**.
+
+If you attempt to use `@torch.compile` on Python 3.14 or newer,
+you will encounter an error similar to:
+
+```
+RuntimeError: torch.compile is not supported on Python 3.14+
+```
+
+Please ensure that your Python version is lower than 3.14 (e.g., 
+Python 3.10–3.12 are commonly used and supported).
+
+If you have installed PyTorch on Python 3.14, you must switch to 
+an earlier Python version to use `torch.compile`.
+:::
+
 As mentioned above, to run your workflows faster, `torch.compile` through
 TorchDynamo requires a backend that converts the captured graphs into a fast
 machine code. Different backends can result in various optimization gains.
