@@ -7555,23 +7555,38 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
         self.assertEqual(len(w), 0)
 
-    def test_lstm_cell_invalid_gate_weight_size(self):
-        x = torch.randn(4, 8)
-        hx = torch.randn(4, 16)
-        cx = torch.randn(4, 16)
+    def test_rnn_cell_gate_weights_size(self):
+        def test_rnn_cell(cell_fn, gate_count):
+            input_size = 8
+            hidden_size = 16
+            x = torch.randn(4, input_size)
+            hx = torch.randn(4, hidden_size)
+            cx = torch.randn(4, hidden_size)
 
-        w_ih_invalid = torch.randn(60, 8)
-        w_ih = torch.randn(64, 8)
-        w_hh__invalid = torch.randn(50, 16)
-        w_hh = torch.randn(64, 16)
-        b_ih = torch.randn(64)
-        b_hh = torch.randn(64)
+            w_ih_invalid = torch.randn((gate_count*hidden_size)+1, 8)
+            w_ih = torch.randn(gate_count*hidden_size, 8)
+            w_hh_invalid = torch.randn((gate_count*hidden_size)+1, 16)
+            w_hh = torch.randn(gate_count*hidden_size, 16)
+            b_ih = torch.randn(gate_count*hidden_size)
+            b_hh = torch.randn(gate_count*hidden_size)
 
-        with self.assertRaisesRegex(RuntimeError, "weight_ih"):
-            torch.lstm_cell(x, (hx, cx), w_ih_invalid, w_hh, b_ih, b_hh)
+            if cell_fn is torch.lstm_cell:
+                state = (hx, cx)
+            else:
+                state = hx
 
-        with self.assertRaisesRegex(RuntimeError, "weight_hh"):
-            torch.lstm_cell(x, (hx, cx), w_ih, w_hh__invalid, b_ih, b_hh)
+            with self.assertRaisesRegex(RuntimeError, "weight_ih"):
+                cell_fn(x, state, w_ih_invalid, w_hh, b_ih, b_hh)
+
+            with self.assertRaisesRegex(RuntimeError, "weight_hh"):
+                cell_fn(x, state, w_ih, w_hh_invalid, b_ih, b_hh)
+        for cell_fn, gate_count in [
+            (torch.lstm_cell, 4),
+            (torch.gru_cell, 3),
+            (torch.rnn_relu_cell, 1),
+            (torch.rnn_tanh_cell, 1),
+        ]:
+            test_rnn_cell(cell_fn, gate_count)
 
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
