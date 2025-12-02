@@ -374,7 +374,7 @@ class TestCalculateShards(unittest.TestCase):
             expected_shards,
             calculate_shards(
                 2,
-                [TestRun(t) for t in test_times.keys()],
+                [TestRun(t) for t in test_times],
                 test_times,
                 gen_class_times(test_times),
             ),
@@ -404,7 +404,7 @@ class TestCalculateShards(unittest.TestCase):
             expected_shards,
             calculate_shards(
                 2,
-                [TestRun(t) for t in test_times.keys()],
+                [TestRun(t) for t in test_times],
                 test_times,
                 gen_class_times(test_times),
             ),
@@ -422,7 +422,7 @@ class TestCalculateShards(unittest.TestCase):
             expected_shards,
             calculate_shards(
                 2,
-                [TestRun(t) for t in test_times.keys()],
+                [TestRun(t) for t in test_times],
                 test_times,
                 gen_class_times(test_times),
             ),
