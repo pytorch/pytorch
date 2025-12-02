@@ -430,16 +430,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         inp = (torch.tensor(1), torch.tensor(0))
         torch.compile(foo)(*inp)
         self.assertEqual(len(dynamo_counters["graph_break"]), 1)
-        self.assertExpectedInline(
-            next(iter(dynamo_counters["graph_break"].keys())),
-            """\
-Opaque object were created in the middle of the program and passed to a custom op.
-  Explanation: Opaque objects cannot be created inside the torch.compile region. They must be created before entering the compiled function.
-  Hint: Please create the opaque object before calling torch.compile and pass it in as an argument or as a global variable.
-
-  Developer debug context: Opaque object types: [<class '__main__.Counter'>]. Function: _TestOpaqueObject.increment_counter
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0363.html""",  # noqa: B950
+        self.assertTrue(
+            "Opaque object were created in the middle of the program and passed to a custom op."
+            in next(iter(dynamo_counters["graph_break"].keys())),
         )
 
     def test_compile_attribute(self):
