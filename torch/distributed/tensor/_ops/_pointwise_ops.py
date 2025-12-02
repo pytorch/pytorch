@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Sequence
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
@@ -12,12 +12,12 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
     map_placements_after_broadcast,
     normalize_dim,
-    register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     Partial,
@@ -493,7 +493,7 @@ def common_pointwise_strategy(
     followed_strategy: OpStrategy,
     followed_strategy_index: int,
     linearity: int = -1,
-    scalar_tensor_idx: Optional[int] = None,
+    scalar_tensor_idx: int | None = None,
 ) -> OpStrategy:
     """
     Common strategy for pointwise operations.
@@ -713,11 +713,11 @@ def list_pointwise_strategy(
 
     def args_tuple_strategies(
         args_schema: tuple[object, ...],
-    ) -> list[Optional[TupleStrategy]]:
+    ) -> list[TupleStrategy | None]:
         first_arg = args_schema[0]
         assert isinstance(first_arg, TupleStrategy)
         strategy_len = len(first_arg.children)
-        tuple_strategies: list[Optional[TupleStrategy]] = []
+        tuple_strategies: list[TupleStrategy | None] = []
         for arg_idx, arg in enumerate(args_schema):
             if isinstance(arg, TupleStrategy):
                 # every tuple strategy should have the same length
@@ -743,7 +743,7 @@ def list_pointwise_strategy(
 
     for child_idx, child_strtgy in enumerate(follow_strategy.children):
         assert isinstance(child_strtgy, OpStrategy)
-        args_schema: list[Optional[OpStrategy]] = [
+        args_schema: list[OpStrategy | None] = [
             cast(OpStrategy, arg_strategy.children[child_idx]) if arg_strategy else None
             for arg_strategy in args_strategies
         ]
