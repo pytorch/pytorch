@@ -1,7 +1,7 @@
 import collections
 import functools
 import inspect
-from collections.abc import Callable, Hashable
+from collections.abc import Callable
 from typing import Any, Optional, Union
 from typing_extensions import Self
 
@@ -67,6 +67,8 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
 
     @staticmethod
     def create(value: Any, source: Any, **options: Any) -> "LazyVariableTracker":
+        if type(value) in LazyConstantVariable.supported_types:
+            return LazyConstantVariable.create(value, source, **options)
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
@@ -230,81 +232,18 @@ class LazyConstantVariable(LazyVariableTracker):
     This allows constants that are just passed through (e.g., returned without
     being used in control flow or math) to avoid unnecessary recompilation when
     their values change.
-
-    When realized, calls the realize_fn to create the appropriate VT with guards.
-    If no realize_fn is provided, creates a ConstantVariable with CONSTANT_MATCH guard.
     """
 
-    _nonvar_fields = {
-        "_realize_fn",
-        *LazyVariableTracker._nonvar_fields,
-    }
+    supported_types = (int, float, bool, str)
 
     @staticmethod
     def create(  # pyrefly: ignore[bad-override]
         value: Any,
         source: Any,
-        realize_fn: Optional[Callable[[], VariableTracker]] = None,
         **options: Any,
     ) -> "LazyConstantVariable":
-        return LazyConstantVariable(
-            LazyCache(value, source), realize_fn=realize_fn, source=source, **options
-        )
-
-    def __init__(
-        self,
-        _cache: LazyCache,
-        realize_fn: Optional[Callable[[], VariableTracker]] = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(_cache, **kwargs)
-        self._realize_fn = realize_fn
-
-    def realize(self) -> VariableTracker:
-        """Force construction of the real VariableTracker with guards."""
-        if self._cache.vt is None:
-            if self._realize_fn is not None:
-                # Use custom realize function (e.g., for wrap_symint/wrap_symfloat)
-                self._cache.vt = self._realize_fn()
-            else:
-                # Default: use VariableBuilder to create the appropriate VT with guards.
-                # Pass allow_lazy_constant=False to prevent returning another
-                # LazyConstantVariable (which would cause infinite recursion).
-                from ..symbolic_convert import InstructionTranslator
-                from . import builder
-
-                tx = InstructionTranslator.current_tx()
-                value = self._cache.value
-                source = self._cache.source
-                self._cache.vt = builder.VariableBuilder(
-                    tx, source, allow_lazy_constant=False
-                )(value)
-
-            # Clean up cache (mirroring LazyCache.realize() cleanup pattern)
-            if self._cache.name_hint is not None:
-                self._cache.vt.set_name_hint(self._cache.name_hint)
-
-            del self._cache.value
-            del self._cache.source
-            del self._cache.name_hint
-            self._realize_fn = None
-
-        return self._cache.vt  # pyrefly: ignore[bad-return]
-
-    def is_hashable(self) -> bool:
-        if not self.is_realized():
-            value = self._cache.value
-            return isinstance(value, Hashable)
-        return super().is_hashable()
-
-    def reconstruct(self, codegen: Any) -> None:
-        if self.is_realized():
-            assert self._cache.vt is not None
-            self._cache.vt.reconstruct(codegen)
-        else:
-            from .constant import ConstantVariable
-
-            ConstantVariable.create(self.peek_value()).reconstruct(codegen)
+        assert type(value) in LazyConstantVariable.supported_types
+        return LazyConstantVariable(LazyCache(value, source), source=source, **options)
 
 
 class LazySymNodeFormatString:

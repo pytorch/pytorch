@@ -411,24 +411,23 @@ class ConstDictVariable(VariableTracker):
         if tx.output.side_effects.is_modified(self):
             return
 
-        contains = args[0] in self
-        if args[0].source is None and args[0].is_python_constant():
+        # Realize the lookup key to install its guard
+        key = args[0].realize()
+        contains = key in self
+        if key.source is None and key.is_python_constant():
             install_guard(
                 self.make_guard(
                     functools.partial(
                         type(self).CONTAINS_GUARD,
-                        key=args[0].as_python_constant(),
+                        key=key.as_python_constant(),
                         invert=not contains,
                     )
                 )
             )
-        elif args[0].source:
-            # Realize the lookup key to install its guard
-            if isinstance(args[0], variables.LazyVariableTracker):
-                args[0].realize()
+        elif key.source:
             if contains:
                 # Key is in the dict - realize the dict's key to install guard
-                self.realize_key_vt(args[0])
+                self.realize_key_vt(key)
             else:
                 self.install_dict_keys_match_guard()
 

@@ -2056,12 +2056,12 @@ class VariableBuilder:
                     )
                     return ConstantVariable.create(value=value, source=self.source)
 
-                return self._wrap_symbolic_or_lazy_constant(value, self.wrap_symint)
+                return self._wrap_lazy_constant(value, self.wrap_symint)
 
             return self._wrap_lazy_constant(value)
         elif type(value) is float:
             if not config.specialize_float:
-                return self._wrap_symbolic_or_lazy_constant(value, self.wrap_symfloat)
+                return self._wrap_lazy_constant(value, self.wrap_symfloat)
 
             return self._wrap_lazy_constant(value)
         elif type(value) in (bool, str):
@@ -2074,32 +2074,17 @@ class VariableBuilder:
             return result
 
     def _wrap_lazy_constant(
-        self, value: Union[int, float, bool, str]
+        self,
+        value: Union[int, float, bool, str],
+        wrap_fn: Optional[Callable[[Union[int, float]], VariableTracker]] = None,
     ) -> VariableTracker:
         """Wrap a primitive constant, deferring guard installation if allowed."""
         if not self.allow_lazy_constant:
+            if wrap_fn is not None:
+                return wrap_fn(value)
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
         return LazyConstantVariable.create(value, source=self.source)
-
-    def _wrap_symbolic_or_lazy_constant(
-        self,
-        value: Union[int, float],
-        wrap_fn: Callable[[Union[int, float]], VariableTracker],
-    ) -> VariableTracker:
-        """Wrap a numeric constant as symbolic (unspecialized) or lazy constant."""
-        if not self.allow_lazy_constant:
-            return wrap_fn(value)
-
-        # Use LazyConstantVariable - will realize to wrap_fn when used
-        def _realize(
-            value: Union[int, float] = value, wrap_fn: Callable = wrap_fn
-        ) -> VariableTracker:
-            return wrap_fn(value)
-
-        return LazyConstantVariable.create(
-            value, source=self.source, realize_fn=_realize
-        )
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
         if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
