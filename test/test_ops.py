@@ -3054,7 +3054,8 @@ class TestTensorMetaProp(TestCase):
         if inplace_op is None:
             self.skipTest("No inplace variant for this op")
 
-        samples = list(op.sample_inputs(device, dtype, requires_grad=False))
+        # skip samples that are broadcasted or have 0 elements
+        samples = [ s for s in op.sample_inputs(device, dtype, requires_grad=False) if not s.broadcasts_input and s.input.numel() > 0 ]
 
         class CustomAutograd(torch.autograd.Function):
             @staticmethod
@@ -3070,9 +3071,6 @@ class TestTensorMetaProp(TestCase):
                 return torch.full_like(x, 123.0)
 
         for i, sample in enumerate(samples):
-            if sample.broadcasts_input or sample.input.numel() == 0:
-                continue
-
             try:
                 torch.compiler.reset()
                 # Setup: x starts with requires_grad=False, one arg has requires_grad=True
