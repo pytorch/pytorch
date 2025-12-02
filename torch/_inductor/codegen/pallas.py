@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy  # noqa: TC002
@@ -223,8 +224,6 @@ class PallasKernelOverrides(OpOverrides):
     @staticmethod
     def constant(val, dtype: torch.dtype) -> str:
         """Convert a constant value to JAX representation."""
-        import math
-
         jax_dtype = torch_dtype_to_jax(dtype)
         if dtype == torch.bool:
             return "True" if val else "False"
