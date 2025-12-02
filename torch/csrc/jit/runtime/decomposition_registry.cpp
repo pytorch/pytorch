@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/peephole.h>

@@ -968,6 +968,15 @@ class LRUCacheWarningTests(LoggingTestCase):
     @requires_cuda
     @make_logging_test(dynamo=logging.DEBUG)
     def test_lru_cache_warning_issued_during_tracing(self, records):
+        prev_default = torch._C._get_default_device()
+
+        def _restore_default_device():
+            if prev_default == "cpu":
+                torch.set_default_device(None)
+            else:
+                torch.set_default_device(prev_default)
+
+        self.addCleanup(_restore_default_device)
         torch.set_default_device("cuda")
 
         @torch.compile(backend="eager")
@@ -5026,7 +5035,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     for i in instance_lists[1:]:
                         assert i.image_size == image_size
                 ret = Instances(image_size)
-                for k in instance_lists[0]._fields.keys():
+                for k in instance_lists[0]._fields:
                     values = [i.get(k) for i in instance_lists]
                     v0 = values[0]
                     if isinstance(v0, torch.Tensor):
@@ -7085,15 +7094,14 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
-        torch._inductor.config.fallback_random = True
-
-        for backend in ["eager", "aot_eager"]:
-            torch.manual_seed(54321)
-            torch.cuda.manual_seed_all(54321)
-            actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                torch.randn((2, 12, 16, 32, 32))
-            ).sum()
-            self.assertEqual(actual, expected)
+        with torch._inductor.config.patch(fallback_random=True):
+            for backend in ["eager", "aot_eager"]:
+                torch.manual_seed(54321)
+                torch.cuda.manual_seed_all(54321)
+                actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                    torch.randn((2, 12, 16, 32, 32))
+                ).sum()
+                self.assertEqual(actual, expected)
 
     def test_incompatible_configs(self):
         with torch._dynamo.config.patch(
@@ -7234,11 +7242,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             elif compiled_graph and code is compiled_graph.__call__.__code__:
                 found_compiled_graph = True
 
-        sys.monitoring.use_tool_id(0, "test")
+        tool_id = 0
+        sys.monitoring.use_tool_id(tool_id, "test")
+        old_events = sys.monitoring.get_events(tool_id)
         old_callback = sys.monitoring.register_callback(
-            0, sys.monitoring.events.PY_START, callback
+            tool_id, sys.monitoring.events.PY_START, callback
         )
-        sys.monitoring.set_events(0, sys.monitoring.events.PY_START)
+        sys.monitoring.set_events(tool_id, sys.monitoring.events.PY_START)
         try:
 
             @torch.compile(backend=backend, fullgraph=True)
@@ -7251,9 +7261,11 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             # sys.monitoring should still run on the compiled graph
             self.assertTrue(found_compiled_graph)
         finally:
+            sys.monitoring.set_events(tool_id, old_events)
             sys.monitoring.register_callback(
-                0, sys.monitoring.events.PY_START, old_callback
+                tool_id, sys.monitoring.events.PY_START, old_callback
             )
+            sys.monitoring.free_tool_id(tool_id)
 
     def test_312_local_cell_overlap(self):
         keys = range(10)
@@ -8233,6 +8245,71 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
             flat, spec = pytree.tree_flatten(point)
             result = flat[0] + flat[1]
             return result
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_tree_is_leaf_not_traced(self):
+        # Test that torch.utils._pytree.tree_is_leaf is not traced into
+        # when is_leaf parameter is None (the common case)
+        from torch.utils._pytree import tree_is_leaf
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x, y):
+            # Test with various types
+            # Tensors are leaves
+            is_leaf_tensor = tree_is_leaf(x)
+            assert is_leaf_tensor is True
+
+            # Lists are not leaves (they're in SUPPORTED_NODES)
+            is_leaf_list = tree_is_leaf([x, y])
+            assert is_leaf_list is False
+
+            # Dicts are not leaves
+            is_leaf_dict = tree_is_leaf({"a": x, "b": y})
+            assert is_leaf_dict is False
+
+            return x + y
+
+        x = torch.randn(3, 4)
+        y = torch.randn(3, 4)
+        result = fn(x, y)
+        expected = x + y
+
+        self.assertTrue(torch.allclose(result, expected))
+        # Should compile successfully with fullgraph=True
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_pytree_tree_is_leaf_with_namedtuple(self):
+        # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
+        from collections import namedtuple
+
+        from torch.utils._pytree import tree_is_leaf
+
+        Point = namedtuple("Point", ["x", "y"])
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(a, b):
+            # Namedtuples are not leaves (they're in SUPPORTED_NODES)
+            point = Point(a, b)
+            is_leaf_namedtuple = tree_is_leaf(point)
+            assert is_leaf_namedtuple is False
+
+            # But individual tensors are leaves
+            is_leaf_tensor = tree_is_leaf(a)
+            assert is_leaf_tensor is True
+
+            return a + b
 
         x = torch.randn(3, 4)
         y = torch.randn(3, 4)

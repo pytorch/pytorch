@@ -320,7 +320,7 @@ void mallocAsync(
   TORCH_INTERNAL_ASSERT(
       0 <= device && device < device_count,
       "Invalid device index ",
-      device,
+      static_cast<int>(device),
       ": did you call init?");
 
   // If stream is a null (default) stream,
@@ -370,7 +370,7 @@ void mallocAsync(
         OutOfMemoryError,
         false,
         "Allocation on device ",
-        device,
+        static_cast<int>(device),
         " would exceed allowed memory. (out of memory)",
         "\nCurrently allocated     : ",
         format_size(pytorch_used_bytes[device]),
