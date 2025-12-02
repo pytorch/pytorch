@@ -34,6 +34,10 @@ from torch.distributed.tensor.experimental._attention import (
 from torch.distributed.tensor.experimental._context_parallel._cp_custom_ops import (
     flex_cp_allgather,
 )
+from torch.distributed.tensor.experimental._context_parallel._sharding_rules import (
+    register_cp_sharding_rules,
+    unregister_cp_sharding_rules,
+)
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch.nn.attention.flex_attention import (
@@ -812,6 +816,60 @@ class TestSharding(DTensorTestBase):
                 ),
             ),
         )
+
+    @skip_if_lt_x_gpu(2)
+    @with_comms
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION,
+        "Does not support flash nor efficient attention",
+    )
+    def test_attention_shard_without_cp(self) -> None:
+        """Test that sharding on sequence dimension without CP enabled is not supported."""
+        from torch.distributed.tensor import distribute_tensor, Replicate, Shard
+
+        B = 2
+        nheads = 4
+        seq_len = 256
+        dim = 32
+
+        device_mesh = init_device_mesh(
+            mesh_shape=(2,), mesh_dim_names=("cp",), device_type=self.device_type
+        )
+
+        for backend in backends:
+            with sdpa_kernel(backend):
+                dtype = torch.bfloat16
+                if backend == SDPBackend.EFFICIENT_ATTENTION:
+                    dtype = torch.float32
+                # Create q, k, v tensors with shape (B, nheads, seq_len, dim)
+                q = torch.randn(
+                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                )
+                k = torch.randn(
+                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                )
+                v = torch.randn(
+                    B, nheads, seq_len, dim, device=self.device_type, dtype=dtype
+                )
+                q_dt = distribute_tensor(q, device_mesh, [Shard(2)])
+                k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
+                v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
+
+                register_cp_sharding_rules()
+                out = F.scaled_dot_product_attention(q_dt, k_dt, v_dt)
+                unregister_cp_sharding_rules(clear_the_cache=True)
+                out = F.scaled_dot_product_attention(q_dt, k_dt, v_dt)
+                # Run SDPA with sequence-sharded tensors WITHOUT enabling CP
+                # Without CP enabled, DTensor should select a different strategy
+                # (not sequence-sharded) because Shard(2) strategy is only available with CP
+
+                # Verify the output is NOT sharded on sequence dimension (dim 2)
+                # This proves that CP sharding rules were not used
+                self.assertNotEqual(
+                    out.placements[0], Shard(2), f"Placement {out.placements}"
+                )
+                # The output should be replicated or sharded on batch head dimensions.
+                self.assertIn(out.placements[0], [Replicate(), Shard(0), Shard(1)])
 
 
 RingAttentionTestWithLocalTensor = create_local_tensor_test_class(
