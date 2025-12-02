@@ -310,6 +310,13 @@ class _IPv6HTTPServer(ThreadingHTTPServer):
 class HTTPRequestHandler(BaseHTTPRequestHandler):
     frontend: "FrontendServer"
 
+    def log_message(self, format, *args):
+        logger.info(
+            "%s %s",
+            self.client_address[0],
+            format % args,
+        )
+
     def do_GET(self):
         self.frontend._handle_request(self)
 
@@ -375,7 +382,7 @@ class FrontendServer:
         try:
             self._server.serve_forever()
         except Exception:
-            logger.exception("got exception in checkpoint server")
+            logger.exception("got exception in frontend server")
 
     def join(self) -> None:
         self._thread.join()
@@ -389,12 +396,13 @@ class FrontendServer:
         handler = self._routes[path]
         try:
             resp = handler(req)
-        except Exception as e:
+        # Catch SystemExit to not crash when FlightRecorder errors.
+        except (Exception, SystemExit) as e:
             logger.exception(
-                "Exception in checkpoint server when handling %s",
+                "Exception in frontend server when handling %s",
                 path,
             )
-            req.send_error(500, str(e))
+            req.send_error(500, f"Exception: {repr(e)}")
             return
 
         req.send_response(200)
@@ -426,7 +434,9 @@ class FrontendServer:
     def _render_fr_trace(self, addrs: list[str], resps: list[Response]) -> bytes:
         config = JobConfig()
         # pyrefly: ignore [bad-assignment]
-        args = config.parse_args(args=None)
+        args = config.parse_args(args=[])
+        args.allow_incomplete_ranks = True
+        args.verbose = True
 
         details = {}
         for rank, resp in enumerate(resps):
@@ -509,6 +519,8 @@ class FrontendServer:
 
 
 def main(port: int) -> None:
+    logger.setLevel(logging.INFO)
+
     server = FrontendServer(port=port)
     logger.info("Frontend server started on port %d", server._server.server_port)
     server.join()
