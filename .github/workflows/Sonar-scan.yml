@@ -47,10 +47,7 @@ jobs:
       
       - name: Run PMD Quality Scan
         run: |
-          ./pmd-bin-7.19.0/bin/pmd \
-            check \
-            --dir . \
-            --rulesets rulesets/java/quickstart.xml
+          ./pmd-dist-7.19.0/bin/pmd check --dir . --rulesets rulesets/java/quickstart.xml
 
 
 
