@@ -1947,7 +1947,7 @@ class TestMaxAutotune(TestCase):
         # Make sure all args of generate_and_load_args are passed to make_key_args (Except generate_with_caching)
         # update this function each time new arg added to generate_and_load and make sure arg is added to make_key
         self.assertEqual(generate_and_load_args - 1, make_key_args)
-        self.assertEqual(generate_and_load_args, 18)
+        self.assertEqual(generate_and_load_args, 19)
 
     @fresh_cache()
     @config.patch(
@@ -2036,6 +2036,7 @@ class TestMaxAutotune(TestCase):
                         'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[10,30],
                         'layout':"[[10,30],[30,1],torch.float32,device(type='cuda',index=0),0]",
                         'num_consumer_groups':0,'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
+                        'transpose_discontiguous_tensor_descriptors_override':None,
                         'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32',
                         'BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},'hint_override':None}"""
 
@@ -2075,8 +2076,10 @@ class TestMaxAutotune(TestCase):
                         "[[s27,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]"],
                     'num_stages':1,'num_warps':2,'prefix_args':0,'suffix_args':0,'call_sizes':[s77,s94],
                     'layout':"[[s77,s94],[s94,1],torch.float32,device(type='cuda',index=0),0]",'num_consumer_groups':0,
-                    'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,
-                    'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},'hint_override':None}"""
+                    'num_buffers_warp_spec':0,'epilogue_fn_hash':'identity','tma_store':False,
+                    'transpose_discontiguous_tensor_descriptors_override':None,
+                    'kwargs':{'EVEN_K':False,'USE_FAST_ACCUM':False,'ACC_TYPE':'tl.float32','BLOCK_M':16,'BLOCK_N':32,
+                    'BLOCK_K':16,'GROUP_M':8,'ALLOW_TF32':True},'hint_override':None}"""
                 expected = expected.replace("cuda", GPU_TYPE)
                 self.assertExpectedInline(
                     remove_white_space(cache_key),

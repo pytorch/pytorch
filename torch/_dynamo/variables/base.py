@@ -221,21 +221,38 @@ class AsPythonConstantNotImplementedError(NotImplementedError):
 class VariableTrackerMeta(type):
     all_subclasses: list[type] = []
 
-    def __instancecheck__(cls: type, instance: object) -> bool:
-        """Make isinstance work with LazyVariableTracker"""
-        # This is super expensive - just having it costs over 4% of tracing
-        # time!
-        if (type(instance) is variables.LazyVariableTracker) and (
-            cls not in (VariableTracker, variables.LazyVariableTracker)
-        ):
-            instance = instance.realize()
-        return type.__instancecheck__(cls, instance)
+    def __new__(
+        mcs: type, name: str, bases: tuple[type, ...], attrs: dict[str, Any]
+    ) -> type:
+        # Determine which metaclass to use based on the class attributes
+        # Classes with _no_implicit_realize = True should NOT implicitly realize
+        # (they need standard isinstance behavior to avoid infinite recursion)
+        # Check if any base class has _no_implicit_realize set, or if it's in attrs
+        no_implicit_realize = attrs.get("_no_implicit_realize", False) or any(
+            getattr(base, "_no_implicit_realize", False) for base in bases
+        )
+        if no_implicit_realize or name == "VariableTracker":
+            # Use base VariableTrackerMeta (no custom __instancecheck__)
+            return super().__new__(VariableTrackerMeta, name, bases, attrs)
+        else:
+            # Use ImplicitRealizingVariableTrackerMeta for all other subclasses
+            return super().__new__(
+                ImplicitRealizingVariableTrackerMeta, name, bases, attrs
+            )
 
     def __init__(
         cls: type, name: str, bases: tuple[type, ...], attrs: dict[str, Any]
     ) -> None:
         super().__init__(name, bases, attrs)  # type: ignore[misc]
         VariableTrackerMeta.all_subclasses.append(cls)
+
+
+class ImplicitRealizingVariableTrackerMeta(VariableTrackerMeta):
+    def __instancecheck__(self, instance: object) -> bool:
+        """Make isinstance work with LazyVariableTracker"""
+        if instancecheck(LazyVariableTracker, instance):
+            instance = instance.realize()  # pyrefly: ignore[missing-attribute]
+        return instancecheck(self, instance)
 
 
 class VariableTracker(metaclass=VariableTrackerMeta):
@@ -699,57 +716,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         else:
             return variables.LazyVariableTracker.create(value, source)
 
-    def is_python_hashable(self):
-        """
-        Unlike the variable tracker's own __hash__, this method checks whether
-        the underlying Python object referenced by this variable tracker is hashable.
-        """
-        unimplemented(
-            gb_type="Dynamo cannot determine whether the underlying object is hashable",
-            context=f"is_python_hashable {self}",
-            explanation=f"Dynamo does not know whether the underlying python object for {self} is hashable",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
-    def get_python_hash(self):
-        """
-        Unlike the variable tracker’s own __hash__, this method is used by
-        ConstDictVariableTracker to compute the hash of the underlying key object.
-        """
-        unimplemented(
-            gb_type="Dynamo cannot determine the hash of an object",
-            context=f"get_python_hash {self}",
-            explanation=f"Dynamo does not know the hash of the underlying python object for {self}",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
-    def is_python_equal(self, other):
-        """
-        NB - Deliberately not overriding the __eq__ method because that can
-        disable the __hash__ for the vt itself.
-        """
-        unimplemented(
-            gb_type="Dynamo cannot determine the equality comparison of an object",
-            context=f"is_python_equal {self}",
-            explanation=f"Dynamo does not know the equality comparison of the underlying python object for {self}",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
     def __init__(
         self,
         *,
@@ -794,4 +760,6 @@ def typestr(*objs: object) -> str:
         return " ".join(map(typestr, objs))
 
 
+instancecheck = type.__instancecheck__
 from . import builder
+from .lazy import LazyVariableTracker
