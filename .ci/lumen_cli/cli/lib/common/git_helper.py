@@ -45,6 +45,15 @@ def clone_external_repo(target: str, repo: str, dst: str = "", update_submodules
 
         # Checkout pinned commit
         commit = get_post_build_pinned_commit(target)
+        if commit.startswith("refs/pull/"):
+            import uuid
+            pr_head = commit[len("refs/pull/"):]
+            pr_num = int(pr_head[: pr_head.find("/")])
+            tmp_name = f"pr_{pr_num}_{uuid.uuid4().hex.replace('-', '_')}"
+            # Pull request commit, fetch PR branch
+            logger.info("Fetching pull request branch")
+            r.git.fetch("origin", f"pull/{pr_head}:{tmp_name}")
+            commit = tmp_name
         logger.info("Checking out pinned %s commit %s", target, commit)
         r.git.checkout(commit)
 
