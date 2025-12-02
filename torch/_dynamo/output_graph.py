@@ -2142,6 +2142,10 @@ class OutputGraph(OutputGraphCommon):
 
             gm = _make_graph_module(root, self.graph)
 
+            from .dce_extra_outputs import dce_hop_extra_outputs
+
+            dce_hop_extra_outputs(gm)
+
             # Saved tensors hooks are not used by the graph.
             # GraphModule by default only copies used in the graph submodules.
             # Copying them into the result graph manually.

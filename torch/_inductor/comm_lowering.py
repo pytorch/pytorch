@@ -311,6 +311,18 @@ def register_comm_lowerings():
             group_name,
         )
 
+    @register_comm_lowering(c10d.reduce_scatter_tensor_out)
+    def _reduce_scatter_tensor_out(inp, reduce_op, group_size, group_name, *, out):
+        ir._CollectiveKernel.create_inplace(
+            c10d.reduce_scatter_tensor_out.default,
+            inp,
+            reduce_op,
+            group_size,
+            group_name,
+            out=out,
+        )
+        return out
+
     @register_comm_lowering(c10d.reduce_scatter_tensor_coalesced)
     def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):
         return pytree.tree_map(
