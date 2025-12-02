@@ -59,7 +59,6 @@ def _get_effect(op: _op_identifier) -> Optional[_EffectType]:
 
 
 _register_effectful_op("aten::_print", _EffectType.ORDERED)
-_register_effectful_op("aten::_async_error", _EffectType.ORDERED)
 _register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
 _register_effectful_op(call_torchbind, _EffectType.ORDERED)
 _register_effectful_op(hop_print, _EffectType.ORDERED)

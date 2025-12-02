@@ -8,16 +8,7 @@ import sys
 import types
 from collections.abc import Callable, Iterator
 from functools import cached_property
-from typing import (
-    Any,
-    ClassVar,
-    Concatenate,
-    final,
-    Generic,
-    Optional,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, ClassVar, Concatenate, final, Generic, TYPE_CHECKING
 from typing_extensions import ParamSpec, TypeVar
 
 import torch
@@ -79,9 +70,7 @@ class OperatorBase:
         # for use with OpOverload; cache lookup is done entirely from C++
         # for speed.
         # TODO: The cache is NOT currently used by HigherOrderOperator, but it should!
-        self._dispatch_cache: dict[
-            DispatchKey, Union[DispatchKey, Callable[..., Any]]
-        ] = {}
+        self._dispatch_cache: dict[DispatchKey, DispatchKey | Callable[..., Any]] = {}
 
         # This table allows you to override the behavior of a particular
         # dispatch key to call a custom Python function, rather than the
@@ -99,7 +88,7 @@ class OperatorBase:
         # makes sense that you should be able to register them, the same
         # way you can register dispatch keys.
         self.python_key_table: dict[
-            type[Union[TorchDispatchMode, torch.Tensor]], Callable[..., Any]
+            type[TorchDispatchMode | torch.Tensor], Callable[..., Any]
         ] = {}
 
         # This table allows you to override the behavior of functorch
@@ -121,12 +110,7 @@ class OperatorBase:
 
     def py_impl(
         self,
-        k: Union[
-            type[TorchDispatchMode],
-            type[torch.Tensor],
-            TransformType,
-            DispatchKey,
-        ],
+        k: type[TorchDispatchMode] | type[torch.Tensor] | TransformType | DispatchKey,
     ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         def inner(fn: Callable[_P, _T]) -> Callable[_P, _T]:
             if inspect.isclass(k) and (
@@ -185,7 +169,7 @@ class OperatorBase:
             return fn(CppFunctionalizeAPI(), *args, **kwargs)
 
         def functionalize_dispatch_mode_fn(
-            mode: Optional[FunctionalTensorMode], *args: _P.args, **kwargs: _P.kwargs
+            mode: FunctionalTensorMode | None, *args: _P.args, **kwargs: _P.kwargs
         ) -> _T:
             return fn(PythonFunctionalizeAPI(mode), *args, **kwargs)
 
@@ -307,12 +291,7 @@ class HigherOrderOperator(OperatorBase, abc.ABC):
 
     def py_impl(
         self,
-        k: Union[
-            type[TorchDispatchMode],
-            type[torch.Tensor],
-            TransformType,
-            DispatchKey,
-        ],
+        k: type[TorchDispatchMode] | type[torch.Tensor] | TransformType | DispatchKey,
     ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
         if isinstance(k, DispatchKey) and not self.non_fallthrough_keys.has(k):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
@@ -894,7 +873,7 @@ class OpOverload(OperatorBase, Generic[_P, _T]):
         self._dispatch_cache.pop(key, None)
 
     # This implements the pre-computation logic for the Python dispatcher.
-    def _get_dispatch(self, key: DispatchKey) -> Union[DispatchKey, Callable[_P, _T]]:
+    def _get_dispatch(self, key: DispatchKey) -> DispatchKey | Callable[_P, _T]:
         # This is only called upon a cache miss
         assert key not in self._dispatch_cache, f"{self} {key}"
 
