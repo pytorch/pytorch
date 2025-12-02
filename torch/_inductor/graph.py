@@ -411,6 +411,9 @@ class GraphLowering(torch.fx.Interpreter):
         self.named_buffers: dict[str, torch.Tensor] = (
             const_module.named_buffers if const_module else {}
         )
+        self.mutated_named_buffers: OrderedSet[torch.Tensor] = gm.meta.get(
+            "mutated_named_buffers", OrderedSet()
+        )
         self.named_parameters: dict[str, torch.Tensor] = (
             const_module.named_parameters if const_module else {}
         )
@@ -1416,7 +1419,10 @@ class GraphLowering(torch.fx.Interpreter):
                 return Constant(
                     value=value.item(), dtype=value.dtype, device=value.device
                 )
-            if self.can_inline_constant(value):
+            if (
+                self.can_inline_constant(value)
+                and target not in self.mutated_named_buffers
+            ):
                 log.debug("Inlining constant: %s ", str(target))
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
