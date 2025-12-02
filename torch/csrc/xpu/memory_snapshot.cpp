@@ -17,37 +17,6 @@ using c10::xpu::XPUCachingAllocator::SegmentInfo;
 
 namespace {
 
-class CallbackManager {
- public:
-  // Constructor
-  CallbackManager() = default;
-  // Destructor
-  ~CallbackManager() = default;
-  // Methods to get and set the callback handles
-  at::CallbackHandle getAnnotationHandle() const {
-    return annotationHandle_;
-  }
-  void setAnnotationHandle(at::CallbackHandle handle) {
-    annotationHandle_ = handle;
-  }
-  at::CallbackHandle getCompileContextHandle() const {
-    return compileContextHandle_;
-  }
-  void setCompileContextHandle(at::CallbackHandle handle) {
-    compileContextHandle_ = handle;
-  }
-  std::unique_lock<std::mutex> lockCallbackMutex() const {
-    return std::unique_lock<std::mutex>(callbackMutex_);
-  }
-
- private:
-  mutable std::mutex callbackMutex_;
-  at::CallbackHandle annotationHandle_{0};
-  at::CallbackHandle compileContextHandle_{0};
-};
-
-CallbackManager callbackManager;
-
 std::string write_pickle(const IValue& v) {
   std::vector<char> result;
   {
@@ -61,9 +30,11 @@ std::string write_pickle(const IValue& v) {
   }
   return std::string(result.begin(), result.end());
 }
+
 Dict<IValue, IValue> new_dict() {
   return Dict<IValue, IValue>(c10::AnyType::get(), c10::AnyType::get());
 }
+
 c10::List<IValue> new_list() {
   return List<IValue>(c10::AnyType::get());
 }
@@ -129,77 +100,7 @@ CapturedTraceback* getFromContext(
       false,
       "attempting to gather stack context from the wrong StackContext type.");
 }
-
-#define ADD_CALLBACK(callbackType) at::add##callbackType##Callback
-at::CallbackHandle _initRecordAnnotations(bool useGlobalCallback) {
-  auto addCallback =
-      useGlobalCallback ? ADD_CALLBACK(Global) : ADD_CALLBACK(ThreadLocal);
-  return addCallback(
-      at::RecordFunctionCallback(
-          [](const at::RecordFunction& fn)
-              -> std::unique_ptr<at::ObserverContext> {
-            c10::xpu::XPUCachingAllocator::recordAnnotation(
-                {{"name", fn.name()}, {"stage", "START"}});
-            return nullptr;
-          },
-          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
-            c10::xpu::XPUCachingAllocator::recordAnnotation(
-                {{"name", fn.name()}, {"stage", "END"}});
-          })
-          .scopes({at::RecordScope::USER_SCOPE}));
-}
-
-at::CallbackHandle _initCompileContexts() {
-  return at::addGlobalCallback(
-      at::RecordFunctionCallback(
-          [](const at::RecordFunction& fn)
-              -> std::unique_ptr<at::ObserverContext> {
-            std::string functionName = fn.name();
-            const std::string functionNamePrefix = "Torch-Compiled Region";
-            if (functionName.compare(
-                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
-              c10::xpu::XPUCachingAllocator::pushCompileContext(functionName);
-            }
-            return nullptr;
-          },
-          [](const at::RecordFunction& fn, at::ObserverContext* ctx_ptr) {
-            std::string functionName = fn.name();
-            const std::string functionNamePrefix = "Torch-Compiled Region";
-            if (functionName.compare(
-                    0, functionNamePrefix.size(), functionNamePrefix) == 0) {
-              c10::xpu::XPUCachingAllocator::popCompileContext();
-            }
-          })
-          .scopes({at::RecordScope::FUNCTION}));
-}
-
-void setRecordFunctionCallbacks(
-    bool enabled,
-    bool compileContext,
-    bool globalRecordAnnotations) {
-  // Handle Callbacks under mutex
-  auto lock = callbackManager.lockCallbackMutex();
-  if (enabled) {
-    if (callbackManager.getAnnotationHandle() == 0) {
-      callbackManager.setAnnotationHandle(
-          _initRecordAnnotations(globalRecordAnnotations));
-    }
-    if (compileContext && callbackManager.getCompileContextHandle() == 0) {
-      callbackManager.setCompileContextHandle(_initCompileContexts());
-    }
-  } else {
-    if (callbackManager.getAnnotationHandle() != 0) {
-      at::removeCallback(callbackManager.getAnnotationHandle());
-      callbackManager.setAnnotationHandle(0);
-    }
-    if (callbackManager.getCompileContextHandle() != 0) {
-      at::removeCallback(callbackManager.getCompileContextHandle());
-      callbackManager.setCompileContextHandle(0);
-    }
-  }
-}
-
-} // namespace
+} // anonymous namespace
 
 void _record_memory_history(
     bool enabled,
@@ -224,8 +125,14 @@ void _record_memory_history(
     when = c10::xpu::XPUCachingAllocator::RecordContext::STATE;
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
-
-  setRecordFunctionCallbacks(enabled, compileContext, globalRecordAnnotations);
+  if (enabled && compileContext) {
+    TORCH_WARN(
+        "The compileContext option is not supported when recording XPU memory history.");
+  }
+  if (enabled && globalRecordAnnotations) {
+    TORCH_WARN(
+        "The globalRecordAnnotations option is not supported when recording XPU memory history.");
+  }
   c10::xpu::XPUCachingAllocator::recordHistory(
       enabled, recorder, trace_alloc_max_entries, when, clearHistory);
 }
@@ -279,8 +186,14 @@ void _record_memory_history(
     }
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
-  setRecordFunctionCallbacks(
-      enabled.has_value(), compileContext, globalRecordAnnotations);
+  if (enabled.has_value() && compileContext) {
+    TORCH_WARN(
+        "The compileContext option is not supported when recording XPU memory history.");
+  }
+  if (enabled.has_value() && globalRecordAnnotations) {
+    TORCH_WARN(
+        "The globalRecordAnnotations option is not supported when recording XPU memory history.");
+  }
   c10::xpu::XPUCachingAllocator::recordHistory(
       enabled.has_value(), recorder, max_entries, when, clearHistory);
 }
@@ -310,8 +223,6 @@ std::string _memory_snapshot_pickled() {
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
   IValue time_us_s = "time_us";
-  IValue compile_contexts_s = "compile_context";
-  IValue user_metadata_s = "user_metadata";
 
   auto empty_frames = new_list();
 
@@ -331,21 +242,21 @@ std::string _memory_snapshot_pickled() {
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     auto segmentDict = new_dict();
     segmentDict.insert(device_s, segmentInfo.device);
-    segmentDict.insert(address_s, static_cast<int64_t>(segmentInfo.address));
+    segmentDict.insert(address_s, static_cast<uint64_t>(segmentInfo.address));
     segmentDict.insert(
-        total_size_s, static_cast<int64_t>(segmentInfo.total_size));
+        total_size_s, static_cast<uint64_t>(segmentInfo.total_size));
     segmentDict.insert(
-        allocated_size_s, static_cast<int64_t>(segmentInfo.allocated_size));
+        allocated_size_s, static_cast<uint64_t>(segmentInfo.allocated_size));
     segmentDict.insert(
-        active_size_s, static_cast<int64_t>(segmentInfo.active_size));
+        active_size_s, static_cast<uint64_t>(segmentInfo.active_size));
     segmentDict.insert(
-        requested_size_s, static_cast<int64_t>(segmentInfo.requested_size));
-    segmentDict.insert(stream_s, int64_t(segmentInfo.stream));
+        requested_size_s, static_cast<uint64_t>(segmentInfo.requested_size));
+    segmentDict.insert(stream_s, reinterpret_cast<uint64_t>(segmentInfo.queue));
     segmentDict.insert(
         segment_type_s, (segmentInfo.is_large ? large_s : small_s));
     segmentDict.insert(
         segment_pool_id,
-        std::tuple<int64_t, int64_t>(segmentInfo.owner_private_pool_id));
+        std::tuple<uint64_t, uint64_t>(segmentInfo.owner_private_pool_id));
     segmentDict.insert(is_expandable_s, segmentInfo.is_expandable);
 
     add_frame_key(segmentDict, segmentInfo.context_when_allocated);
@@ -354,10 +265,10 @@ std::string _memory_snapshot_pickled() {
     auto blocks = new_list();
     for (const auto& blockInfo : segmentInfo.blocks) {
       auto blockDict = new_dict();
-      blockDict.insert(address_s, static_cast<int64_t>(address));
-      blockDict.insert(size_s, static_cast<int64_t>(blockInfo.size));
+      blockDict.insert(address_s, static_cast<uint64_t>(address));
+      blockDict.insert(size_s, static_cast<uint64_t>(blockInfo.size));
       blockDict.insert(
-          requested_size_s, static_cast<int64_t>(blockInfo.requested_size));
+          requested_size_s, static_cast<uint64_t>(blockInfo.requested_size));
       blockDict.insert(
           state_s,
           (blockInfo.allocated
@@ -425,11 +336,9 @@ std::string _memory_snapshot_pickled() {
       trace_entry.insert(action_s, action_to_str(te.action_));
       trace_entry.insert(
           TraceEntry::OOM == te.action_ ? device_free_s : addr_s,
-          static_cast<int64_t>(te.addr_));
-      trace_entry.insert(size_s, (int64_t)te.size_);
-      trace_entry.insert(stream_s, int64_t(te.stream_));
-      trace_entry.insert(compile_contexts_s, te.compile_context_);
-      trace_entry.insert(user_metadata_s, te.user_metadata_);
+          static_cast<uint64_t>(te.addr_));
+      trace_entry.insert(size_s, (uint64_t)te.size_);
+      trace_entry.insert(stream_s, reinterpret_cast<uint64_t>(te.queue_));
       if (te.context_) {
         auto sc = getFromContext(te.context_);
         frame_tracebacks.push_back(sc);
@@ -441,48 +350,20 @@ std::string _memory_snapshot_pickled() {
     traces.push_back(trace);
   }
 
-  auto external_annotations = new_list();
-  for (const auto& ae : snapshot.external_annotations) {
-    auto annotation_entry = new_dict();
-    for (const auto& md : ae.metadata_) {
-      annotation_entry.insert((IValue)md.first, md.second);
-    }
-    annotation_entry.insert(device_s, ae.device_);
-    annotation_entry.insert(time_us_s, ae.time_.t_);
-    external_annotations.push_back(annotation_entry);
-  }
-
   auto allocator_settings = new_dict();
   IValue last_allocator_settings_s = "PYTORCH_ALLOC_CONF";
-  IValue max_split_size_s = "max_split_size";
-  IValue garbage_collection_threshold_s = "garbage_collection_threshold";
   IValue expandable_segments_s = "expandable_segments";
-  IValue roundup_power2_divisions_s = "roundup_power2_divisions";
 
   allocator_settings.insert(
       last_allocator_settings_s,
       snapshot.config_metadata.last_allocator_settings);
   allocator_settings.insert(
-      max_split_size_s, int64_t(snapshot.config_metadata.max_split_size));
-  allocator_settings.insert(
-      garbage_collection_threshold_s,
-      snapshot.config_metadata.garbage_collection_threshold);
-  allocator_settings.insert(
       expandable_segments_s, snapshot.config_metadata.expandable_segments);
-  unsigned int roundup_key = 1;
-  auto roundup_settings = new_dict();
-  for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {
-    IValue roundup_key_s = std::to_string(roundup_key);
-    roundup_settings.insert(roundup_key_s, int64_t(v));
-    roundup_key *= 2;
-  }
-  allocator_settings.insert(roundup_power2_divisions_s, roundup_settings);
 
   auto result = new_dict();
   result.insert("segments", segments);
   result.insert("device_traces", traces);
   result.insert("allocator_settings", allocator_settings);
-  result.insert("external_annotations", external_annotations);
 
   auto frames = ivalue_symbolize(frame_tracebacks);
   for (auto i : c10::irange(frames.size())) {
