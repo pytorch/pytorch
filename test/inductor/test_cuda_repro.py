@@ -1558,13 +1558,11 @@ class CudaReproTests(TestCase):
             ]
             compiled_out = opt_fn(*compiled_args)
 
-            # Use relative tolerance only since divisions can produce very large values
-            # when denominators are small, making absolute tolerance unreliable
             torch.testing.assert_close(
                 eager_out,
                 compiled_out,
                 rtol=5e-2,
-                atol=float("inf"),
+                atol=1e-1,
             )
 
     @torch._inductor.config.patch(emulate_precision_casts=True)
