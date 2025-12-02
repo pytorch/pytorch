@@ -143,11 +143,11 @@ class _OverlappingCpuLoader(_TensorLoader):
         self,
         resolve_fun: Callable,
         stream: Optional[torch.Stream] = None,
-        inflight_threshhold: int = 1_000_000,
+        inflight_threshold: int = 1_000_000,
     ) -> None:
         self.resolve_fun = resolve_fun
         self.items: list[tuple[int, object]] = []
-        self.inflight_threshhold = inflight_threshhold
+        self.inflight_threshold = inflight_threshold
         self.in_flight_data = 0
         self.current_items: collections.deque = collections.deque()
         self.idx = 0
@@ -168,9 +168,9 @@ class _OverlappingCpuLoader(_TensorLoader):
 
     def _drain(self) -> list[tuple[torch.Tensor, object]]:
         drained = []
-        if self.in_flight_data >= self.inflight_threshhold:
+        if self.in_flight_data >= self.inflight_threshold:
             self.stream.synchronize()
-        while self.in_flight_data >= self.inflight_threshhold:
+        while self.in_flight_data >= self.inflight_threshold:
             val = self.current_items.popleft()
             self.in_flight_data -= val[0].numel() * val[0].element_size()
             drained.append(val)
@@ -178,7 +178,7 @@ class _OverlappingCpuLoader(_TensorLoader):
 
     def _refill(self) -> None:
         with self.device_module.stream(self.stream):
-            while not self._done and self.in_flight_data < self.inflight_threshhold:
+            while not self._done and self.in_flight_data < self.inflight_threshold:
                 _, obj = self.items[self.idx]
                 self.idx += 1
                 tensor = self.resolve_fun(obj).detach()
@@ -377,7 +377,7 @@ def _write_files_from_queue(
     result_queue: queue.Queue,
     planner: SavePlanner,
     transforms: _StorageWriterTransforms,
-    inflight_threshhold: int,
+    inflight_threshold: int,
     use_fsync: bool,
     thread_count: int,
     serialization_format: SerializationFormat,
@@ -399,11 +399,11 @@ def _write_files_from_queue(
                     torch.cuda.is_available()
                     or (custom_device_mod and custom_device_mod.is_available())
                 )
-                and inflight_threshhold > 0
+                and inflight_threshold > 0
             ):
                 loader = _OverlappingCpuLoader(
                     planner.resolve_data,
-                    inflight_threshhold=inflight_threshhold,
+                    inflight_threshold=inflight_threshold,
                 )
             else:
                 loader = _SerialCpuLoader(
@@ -742,7 +742,7 @@ class _FileSystemWriter(StorageWriter):
             result_queue=result_queue,
             planner=planner,
             transforms=self.transforms,
-            inflight_threshhold=self.per_thread_copy_ahead,
+            inflight_threshold=self.per_thread_copy_ahead,
             use_fsync=self.sync_files,
             thread_count=self.thread_count,
             serialization_format=self.serialization_format,
