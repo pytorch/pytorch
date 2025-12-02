@@ -9214,41 +9214,38 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 self.assertFalse(torch.allclose(a0, a1))
                 self.assertFalse(torch.allclose(a1, a2))
 
-    @parametrize("combo_kernels", (False, True))
-    def test_rand_like_deterministic(self, combo_kernels):
-        with config.patch(combo_kernels=combo_kernels):
+    def test_rand_like_deterministic(self):
+        @torch.compile(backend="inductor")
+        def fn(a):
+            return torch.rand_like(a), torch.rand_like(a)
 
-            @torch.compile(backend="inductor")
-            def fn(a):
-                return torch.rand_like(a), torch.rand_like(a)
+        x = torch.ones(1024, device=self.device, dtype=torch.float32)
 
-            x = torch.ones(1024, device=self.device, dtype=torch.float32)
+        torch.manual_seed(1234)
+        a0 = fn(x)[0].clone()
+        a1 = fn(x)[0].clone()
+        a2 = fn(x)[0].clone()
 
-            torch.manual_seed(1234)
-            a0 = fn(x)[0].clone()
-            a1 = fn(x)[0].clone()
-            a2 = fn(x)[0].clone()
+        torch.manual_seed(1234)
+        b0 = fn(x)[0].clone()
+        b1 = fn(x)[0].clone()
+        b2 = fn(x)[0].clone()
 
-            torch.manual_seed(1234)
-            b0 = fn(x)[0].clone()
-            b1 = fn(x)[0].clone()
-            b2 = fn(x)[0].clone()
+        # same seed, same values
+        self.assertTrue(torch.allclose(a0, b0))
+        self.assertTrue(torch.allclose(a1, b1))
+        self.assertTrue(torch.allclose(a2, b2))
 
-            # same seed, same values
-            self.assertTrue(torch.allclose(a0, b0))
-            self.assertTrue(torch.allclose(a1, b1))
-            self.assertTrue(torch.allclose(a2, b2))
+        # different calls, different values
+        self.assertFalse(torch.allclose(a0, a1))
+        self.assertFalse(torch.allclose(a1, a2))
 
-            # different calls, different values
-            self.assertFalse(torch.allclose(a0, a1))
-            self.assertFalse(torch.allclose(a1, a2))
-
-            c, d = fn(x)
-            self.assertFalse(torch.allclose(c, d))
-            self.assertTrue((c >= 0).all())
-            self.assertTrue((c < 1).all())
-            self.assertTrue((d >= 0).all())
-            self.assertTrue((d < 1).all())
+        c, d = fn(x)
+        self.assertFalse(torch.allclose(c, d))
+        self.assertTrue((c >= 0).all())
+        self.assertTrue((c < 1).all())
+        self.assertTrue((d >= 0).all())
+        self.assertTrue((d < 1).all())
 
     @config.patch(implicit_fallbacks=True)
     def test_needs_contiguous_strides(self):
@@ -14808,6 +14805,34 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.tensor(5.0, device=self.device),
             ),
         )
+
+    @config.patch(combo_kernels=True)
+    def test_combo_kernel_filter_cpu(self):
+        def fn(a, b, c, d):
+            # Pointwise ops that should be fused
+            a = a * 4
+            b = b + 8
+            return a, b, c.min(-1), d.max(-1)
+
+        inps = [
+            torch.rand(20, 20, device=self.device),
+            torch.rand(30, 30, device=self.device),
+            torch.rand(256, 256, device=self.device),
+            torch.rand(256, 256, device=self.device),
+        ]
+        torch._inductor.metrics.reset()
+        compiled_fn = torch.compile(fn)
+        result = compiled_fn(*inps)
+        expected = fn(*inps)
+
+        self.assertEqual(result, expected)
+        # on cuda combo kernel fuses (a, b) into one kernel and (c, d) into another (total 2)
+        # on cpu combo kernel is skipped (a), (b), (c), (d) each run as separate kernels (total 4)
+        if self.device.lower() == "cpu":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+
+        if self.device.lower() == "cuda":
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
     # end of class CommonTemplate - add new tests here
 
