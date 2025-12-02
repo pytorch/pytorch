@@ -128,6 +128,10 @@ This config is used to reorder logging functions so that they are called at the 
 traced function, thus avoiding a graph break.
 However, the logged contents may differ if, for example, a mutation occurs.
 
+Note: `reorderable_logging_functions` has restrictions, these functions must return `None`, and their arguments must be limited to tensors, constants, or format strings.
+
+You can also use `torch._dynamo.config.ignore_logging_functions` to completely skip selected logging functions during tracing.
+
 
 ```{code-cell}
 torch._dynamo.config.reorderable_logging_functions.add(print)

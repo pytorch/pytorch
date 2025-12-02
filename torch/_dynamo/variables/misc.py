@@ -1785,17 +1785,12 @@ class IgnoredFunctionVariable(VariableTracker):
     """
     Represents a call to an arbitrary function that should be ignored.
     """
-
-    _nonvar_fields = {"fn", *VariableTracker._nonvar_fields}
-
-    def __init__(self, fn, **kwargs):
+    def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
-        self.fn = fn
+        self.value = value
 
     def call_function(self, tx, args, kwargs):
-        # Correct import
-        from torch._dynamo.variables import ConstantVariable
-        return ConstantVariable.create(None)
+        return variables.ConstantVariable.create(None)
 
 
 class LoggingLoggerVariable(VariableTracker):
@@ -1817,7 +1812,7 @@ class LoggingLoggerVariable(VariableTracker):
 
         if tx.export:
             # For export cases, we can just make logging functions no-ops.
-            return
+            return variables.ConstantVariable.create(None)
 
         method = getattr(self.value, name, None)
         function = getattr(method, "__func__", None)

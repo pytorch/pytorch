@@ -878,7 +878,7 @@ class VariableBuilder:
             and value in torch._dynamo.config.ignore_logging_functions
         ):
             # Treat ignored functions as full no-ops
-            self.install_guards(GuardBuilder.BUILTIN_MATCH)
+            self.install_guards(GuardBuilder.ID_MATCH)
             return IgnoredFunctionVariable(value, source=self.source)
         elif isinstance(value, logging.Logger):
             self.install_guards(GuardBuilder.TYPE_MATCH)
