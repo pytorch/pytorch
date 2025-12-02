@@ -34,11 +34,13 @@ def <KERNEL_NAME>_kernel(x_ref, y_ref, z_ref) -> None:
   def _() -> None:
     z_ref[...] = jnp.zeros_like(z_ref)
 
-  z_ref[...] += jnp.dot(
+  acc = z_ref[...].astype({{acc_dtype}})
+  acc += jnp.dot(
       x_ref[...],
       y_ref[...],
       preferred_element_type={{acc_dtype}}
-  ).astype(z_ref.dtype)
+  )
+  z_ref[...] = acc.astype(z_ref.dtype)
 """
 
 PALLAS_CALL_TEMPLATE = """
