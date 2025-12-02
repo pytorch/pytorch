@@ -2880,6 +2880,7 @@ class GuardBuilder(GuardBuilderBase):
                 for term in terms:
                     term_src = AttrSource(guard.originating_source, term)
                     if term == "ndimension":
+                        term = "ndimension()"
                         term_src = CallFunctionNoArgsSource(term_src)
                     real_value = self.get(term_src)
                     if istype(real_value, (torch.device, torch.dtype)):
