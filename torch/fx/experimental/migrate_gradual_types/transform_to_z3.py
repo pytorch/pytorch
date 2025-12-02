@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+import typing
+
 from torch.fx.experimental.migrate_gradual_types.constraint import (
     BinConstraintD,
     BinConstraintT,
@@ -213,18 +215,18 @@ try:
         """
         if isinstance(tensor, TensorType):
             res = []
-            for t in tensor.__args__:
+            for t in typing.get_args(tensor):
                 transformed, counter = transform_dimension(t, counter, dimension_dict)
                 res.append(transformed)
 
             assert len(res) <= 4
-            if len(tensor.__args__) == 1:
+            if len(typing.get_args(tensor)) == 1:
                 return tensor_type.tensor1(res[0]), counter
-            elif len(tensor.__args__) == 2:
+            elif len(typing.get_args(tensor)) == 2:
                 return tensor_type.tensor2(res[0], res[1]), counter
-            elif len(tensor.__args__) == 3:
+            elif len(typing.get_args(tensor)) == 3:
                 return tensor_type.tensor3(res[0], res[1], res[2]), counter
-            elif len(tensor.__args__) == 4:
+            elif len(typing.get_args(tensor)) == 4:
                 return tensor_type.tensor4(res[0], res[1], res[2], res[3]), counter
 
         elif tensor == Dyn:

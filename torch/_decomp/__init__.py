@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import inspect
+import typing
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from functools import lru_cache, partial, wraps
@@ -119,7 +120,7 @@ def _convert_out_params(f):
                 default=None,
                 annotation=t,
             )
-            for o, t in zip(out_names, out_annotation.__args__)
+            for o, t in zip(out_names, typing.get_args(out_annotation))
         ]
         # Drop the out parameter and concatenate the new kwargs in the signature
         params = chain((v for k, v in sig.parameters.items() if k != "out"), out_params)

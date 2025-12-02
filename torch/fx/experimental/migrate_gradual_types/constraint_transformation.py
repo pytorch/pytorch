@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 import copy
 import itertools
+import typing
 from collections.abc import Callable
 
 from torch.fx.experimental.migrate_gradual_types.constraint import (
@@ -258,20 +259,22 @@ def generate_binconstraint_t(constraint, counter):
         if constraint.lhs == Dyn:
             return T(), counter
         elif isinstance(constraint.lhs, TensorType):
-            is_fully_static = all(d != Dyn for d in constraint.lhs.__args__)
+            is_fully_static = all(d != Dyn for d in typing.get_args(constraint.lhs))
             if is_fully_static:
                 return BinConstraintT(constraint.lhs, constraint.rhs, op_eq), counter
             else:
                 new_dims = []
 
-                for _ in range(len(constraint.lhs.__args__)):
+                for _ in range(len(typing.get_args(constraint.lhs))):
                     dim, counter = gen_dvar(counter)
                     new_dims.append(dim)
 
                 new_dim_constraints = (
                     [
                         BinConstraintD(old_dim, new_dim, op_precision)
-                        for new_dim, old_dim in zip(new_dims, constraint.lhs.__args__)
+                        for new_dim, old_dim in zip(
+                            new_dims, typing.get_args(constraint.lhs)
+                        )
                     ]
                     + [BinConstraintT(constraint.rhs, TensorType(new_dims), op_eq)]
                     + [BinConstraintD(1, new_dim, op_leq) for new_dim in new_dims]
@@ -281,10 +284,10 @@ def generate_binconstraint_t(constraint, counter):
     # matching
     elif constraint.op == op_matching:
         assert isinstance(constraint.rhs, TensorType)
-        d1 = constraint.rhs.__args__[0]
-        d2 = constraint.rhs.__args__[1]
-        d3 = constraint.rhs.__args__[2]
-        d4 = constraint.rhs.__args__[3]
+        d1 = typing.get_args(constraint.rhs)[0]
+        d2 = typing.get_args(constraint.rhs)[1]
+        d3 = typing.get_args(constraint.rhs)[2]
+        d4 = typing.get_args(constraint.rhs)[3]
 
         conj = [
             BinConstraintT(constraint.lhs, Dyn, op_eq),
@@ -581,7 +584,7 @@ def generate_reshape(constraint, counter):
     d3 = d[2]
     d4 = d[3]
 
-    target = constraint.target.__args__
+    target = typing.get_args(constraint.target)
 
     is_fully_static = all(d != Dyn for d in target)
 
@@ -1222,12 +1225,16 @@ def gen_greatest_upper_bound(constraint: TGreatestUpperBound, counter: int):
         ] + gen_nat_constraints(dims1 + dims2 + dims3)
 
         assert (
-            len(c3tensor.__args__) == len(c1tensor.__args__) == len(c2tensor.__args__)
+            len(typing.get_args(c3tensor))
+            == len(typing.get_args(c1tensor))
+            == len(typing.get_args(c2tensor))
         )
-        for i in range(len(c3tensor.__args__)):
+        for i in range(len(typing.get_args(c3tensor))):
             c.append(
                 DGreatestUpperBound(
-                    c3tensor.__args__[i], c1tensor.__args__[i], c2tensor.__args__[i]
+                    typing.get_args(c3tensor)[i],
+                    typing.get_args(c1tensor)[i],
+                    typing.get_args(c2tensor)[i],
                 )
             )
 

@@ -1,4 +1,6 @@
 # mypy: allow-untyped-defs
+import typing
+
 from torch.fx.experimental.graph_gradual_typechecker import Refine
 from torch.fx.experimental.unification import unify, Var  # type: ignore[attr-defined]
 from torch.fx.tensor_type import TensorType
@@ -68,7 +70,7 @@ def substitute_solution_one_type(mapping, t):
 
     elif isinstance(t, TensorType):
         new_type = []
-        for typ in t.__args__:
+        for typ in typing.get_args(t):
             if typ in mapping:
                 new_type.append(mapping[typ])
             else:

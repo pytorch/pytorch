@@ -6,6 +6,7 @@ import collections
 import functools
 import numbers
 import sys
+import typing
 
 # Please check [Note: TypeMeta and TypeAlias]
 # In case of metaclass conflict due to ABCMeta or _ProtocolMeta
@@ -111,7 +112,7 @@ def _decompose_type(t, to_list=True):
             # For T_co, __constraints__ is ()
             ts = list(t.__constraints__)
     elif hasattr(t, "__origin__") and t.__origin__ == Union:
-        ts = t.__args__
+        ts = typing.get_args(t)
     else:
         if not to_list:
             return None
@@ -456,7 +457,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs) -> None:
                         sub_cls.__name__, _type_repr(hints["return"])
                     )
                 )
-            data_type = return_hint.__args__[0]
+            data_type = typing.get_args(return_hint)[0]
             if not issubtype(data_type, sub_cls.type.param):
                 raise TypeError(
                     f"Expected return type of '__iter__' as a subtype of {sub_cls.type},"

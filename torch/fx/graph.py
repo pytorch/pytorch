@@ -509,8 +509,8 @@ class CodeGen:
 
                 origin_typename = add_global(_type_repr(origin_type), origin_type)
 
-                if hasattr(o, "__args__") and o.__args__:
-                    args = [type_repr(arg) for arg in o.__args__]
+                if targs := typing.get_args(o):
+                    args = [type_repr(arg) for arg in targs]
                     return f"{origin_typename}[{','.join(args)}]"
                 else:
                     return origin_typename
