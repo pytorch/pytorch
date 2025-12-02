@@ -39,7 +39,7 @@ function(c10d_add_test test_src)
   endif()
 endfunction()
 
-if (USE_ROCM)
+if(USE_ROCM)
   c10d_add_test(hip/BackoffTest.cpp LINK_LIBRARIES torch_cpu gtest_main INSTALL_TEST OFF)
   c10d_add_test(hip/FileStoreTest.cpp LINK_LIBRARIES torch_cpu gtest_main INSTALL_TEST ${INSTALL_TEST})
   c10d_add_test(hip/TCPStoreTest.cpp LINK_LIBRARIES torch_cpu gtest_main INSTALL_TEST ${INSTALL_TEST})
