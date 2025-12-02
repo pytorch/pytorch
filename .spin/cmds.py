@@ -286,8 +286,9 @@ def lazy_setup_lint(ctx, parent_callback, **kwargs):
 
 @click.command()
 @click.option("-a", "--apply-patches", is_flag=True)
+@click.argument("lintrunner_args", metavar="", nargs=-1)
 @click.pass_context
-def lint(ctx, apply_patches, **kwargs):
+def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     """Lint all files."""
     ctx.invoke(lazy_setup_lint)
     all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
@@ -295,43 +296,54 @@ def lint(ctx, apply_patches, **kwargs):
     cmd = LINTRUNNER_BASE_CMD
     if apply_patches:
         cmd += ["--apply-patches"]
-    all_files_cmd = cmd + [
-        "--take",
-        ",".join(all_files_linters),
-        "--all-files",
-    ]
+    all_files_cmd = (
+        cmd
+        + [
+            "--take",
+            ",".join(all_files_linters),
+            "--all-files",
+        ]
+        + list(lintrunner_args)
+    )
     spin.util.run(all_files_cmd)
-    changed_files_cmd = cmd + [
-        "--take",
-        ",".join(changed_files_linters),
-    ]
+    changed_files_cmd = (
+        cmd
+        + [
+            "--take",
+            ",".join(changed_files_linters),
+        ]
+        + list(lintrunner_args)
+    )
     spin.util.run(changed_files_cmd)
 
 
 @click.command()
+@click.argument("lintrunner_args", metavar="", nargs=-1)
 @click.pass_context
-def fixlint(ctx, **kwargs):
+def fixlint(ctx, *, lintrunner_args, **kwargs):
     """Autofix all files."""
-    ctx.invoke(lint, apply_patches=True)
+    ctx.invoke(lint, lintrunner_args=lintrunner_args, apply_patches=True)
 
 
 @click.command()
 @click.option("-a", "--apply-patches", is_flag=True)
+@click.argument("lintrunner_args", metavar="", nargs=-1)
 @click.pass_context
-def quicklint(ctx, apply_patches, **kwargs):
+def quicklint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     """Lint changed files."""
     ctx.invoke(lazy_setup_lint)
-    cmd = LINTRUNNER_BASE_CMD
+    cmd = LINTRUNNER_BASE_CMD + list(lintrunner_args)
     if apply_patches:
         cmd += ["--apply-patches"]
     spin.util.run(cmd)
 
 
 @click.command()
+@click.argument("lintrunner_args", metavar="", nargs=-1)
 @click.pass_context
-def quickfix(ctx, **kwargs):
+def quickfix(ctx, *, lintrunner_args, **kwargs):
     """Autofix changed files."""
-    ctx.invoke(quicklint, apply_patches=True)
+    ctx.invoke(quicklint, lintrunner_args=lintrunner_args, apply_patches=True)
 
 
 @click.command()
