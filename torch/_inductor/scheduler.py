@@ -2317,6 +2317,18 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 template_nodes,
             )
         filtered_nodes = [x for x in filtered_nodes if x not in template_nodes]
+
+        # Filter out reduction nodes - combo kernels currently support pointwise ops
+        # fixme @karthickps enable combokernels for reduction
+        reduction_nodes = [x for x in filtered_nodes if x.is_reduction()]
+        if reduction_nodes:
+            log.debug(
+                "ComboKernels: %d reduction nodes are filtered (only pointwise supported): %s",
+                len(reduction_nodes),
+                reduction_nodes,
+            )
+        filtered_nodes = [x for x in filtered_nodes if not x.is_reduction()]
+
         return filtered_nodes
 
     @staticmethod
