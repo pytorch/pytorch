@@ -151,7 +151,7 @@ def _get_first_offset(offsets: torch.Tensor) -> int:
 def _compute_local_shape_and_global_offset(
     global_shape: ShapeType,
     mesh_shape: ShapeType,
-    my_coordinate: Optional[list[int]],
+    my_coordinate: list[int] | None,
     placements: Sequence[Placement],
     skip_offset: bool = False,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
