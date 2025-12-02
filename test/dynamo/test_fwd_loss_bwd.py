@@ -29,7 +29,9 @@ class TestForwardLossBackward(TestCase):
 
         gm = cnt.graphs[0]
         actual = normalize_gm(gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_weight_ = L_mod_parameters_weight_
@@ -48,7 +50,8 @@ class GraphModule(torch.nn.Module):
         sum_2: "f32[]" = getitem.sum();  getitem = None
         sum_3: "f32[]" = getitem_1.sum();  getitem_1 = None
         return (detach, sum_2, sum_3)
-""")
+""",  # noqa: B950
+        )
 
     def test_autograd_grad_rejects_non_leaf(self):
         mod = torch.nn.Linear(4, 4)
@@ -58,14 +61,14 @@ class GraphModule(torch.nn.Module):
             res = mod(x)
             loss = res.sum()
             intermediate = res * 2
-            grads = torch.autograd.grad(loss, (intermediate,))
+            _ = torch.autograd.grad(loss, (intermediate,))
             return loss.detach()
 
         compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "torch.compile does not currently support torch.autograd.grad with non-leaf"
+            "torch.compile does not currently support torch.autograd.grad with non-leaf",
         ):
             compiled_fn(x)
 
@@ -77,7 +80,7 @@ class GraphModule(torch.nn.Module):
             res = mod(x)
             loss = res.sum()
             params = tuple(mod.parameters())
-            grads = torch.autograd.grad(
+            _ = torch.autograd.grad(
                 outputs=loss,
                 inputs=params,
                 retain_graph=False,
@@ -96,7 +99,9 @@ class GraphModule(torch.nn.Module):
 
         gm = cnt.graphs[0]
         actual = normalize_gm(gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_weight_ = L_mod_parameters_weight_
@@ -111,7 +116,8 @@ class GraphModule(torch.nn.Module):
 
         detach: "f32[]" = loss.detach();  loss = None
         return (detach,)
-""")
+""",  # noqa: B950
+        )
 
     def test_autograd_grad_single_tensor(self):
         mod = torch.nn.Linear(4, 4)
@@ -135,7 +141,9 @@ class GraphModule(torch.nn.Module):
 
         gm = cnt.graphs[0]
         actual = normalize_gm(gm.print_readable(print_output=False))
-        self.assertExpectedInline(actual, """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
         l_mod_parameters_weight_ = L_mod_parameters_weight_
@@ -152,7 +160,8 @@ class GraphModule(torch.nn.Module):
         detach: "f32[]" = loss.detach();  loss = None
         sum_2: "f32[]" = getitem.sum();  getitem = None
         return (detach, sum_2)
-""")
+""",  # noqa: B950
+        )
 
     def test_autograd_grad_rejects_graph_input_with_grad_fn(self):
         mod = torch.nn.Linear(4, 4)
@@ -163,14 +172,61 @@ class GraphModule(torch.nn.Module):
         def fn(external_input):
             res = mod(external_input)
             loss = res.sum()
-            grads = torch.autograd.grad(loss, external_input)
+            _ = torch.autograd.grad(loss, external_input)
             return loss.detach()
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "torch.compile does not currently support torch.autograd.grad with non-leaf"
+            "torch.compile does not currently support torch.autograd.grad with non-leaf",
         ):
             fn(external_computation)
+
+    def test_autograd_grad_manual_update_matches_eager(self):
+        # Create two separate models to ensure independent tests
+        mod_eager = torch.nn.Linear(4, 4)
+        mod_compiled = torch.nn.Linear(4, 4)
+
+        # Copy weights to ensure they start with same values
+        with torch.no_grad():
+            mod_compiled.weight.copy_(mod_eager.weight)
+            mod_compiled.bias.copy_(mod_eager.bias)
+
+        x = torch.randn(2, 4)
+
+        def step_fn(mod):
+            res = mod(x)
+            loss = res.sum()
+            params = tuple(mod.parameters())
+            param_grads = torch.autograd.grad(
+                loss, params, materialize_grads=False, allow_unused=True
+            )
+            for p, g_p in zip(params, param_grads):
+                if p.grad is None:
+                    p.grad = g_p
+                elif g_p is not None:
+                    p.grad.add_(g_p)
+            return loss.detach()
+
+        # Run eager version
+        eager_loss = step_fn(mod_eager)
+
+        # Run compiled version
+        compiled_step_fn = torch.compile(
+            lambda: step_fn(mod_compiled), backend="aot_eager", fullgraph=True
+        )
+        compiled_loss = compiled_step_fn()
+
+        # Verify losses match
+        self.assertEqual(eager_loss, compiled_loss)
+
+        # Verify gradients match
+        self.assertIsNotNone(mod_eager.weight.grad)
+        self.assertIsNotNone(mod_compiled.weight.grad)
+        self.assertEqual(mod_eager.weight.grad, mod_compiled.weight.grad)
+
+        self.assertIsNotNone(mod_eager.bias.grad)
+        self.assertIsNotNone(mod_compiled.bias.grad)
+        self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
 
 
 if __name__ == "__main__":

@@ -2077,6 +2077,7 @@ class OutputGraph(OutputGraphCommon):
         This checks that tensors passed as inputs to the compiled function are leaf tensors
         when torch.autograd.grad is used anywhere in the graph or its subgraphs.
         """
+
         # Check if torch.autograd.grad is used anywhere in this graph or subgraphs
         def has_autograd_grad_in_graph(graph_module):
             """Recursively check if torch.autograd.grad is in graph or subgraphs."""
