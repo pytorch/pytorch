@@ -11,8 +11,13 @@ import torch._dynamo.test_case
 from torch._C._dynamo import guards
 from torch._dynamo.convert_frame import GlobalStateGuard
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
-from torch.testing._internal.common_utils import set_default_dtype
+from torch.testing._internal.common_utils import set_default_dtype, TEST_CUDA, TEST_XPU
 
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+TEST_GPU = TEST_XPU or TEST_CUDA
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
@@ -205,7 +210,7 @@ num_guards_executed=0)
         self.assertTrue(guard(foo))
 
         try:
-            torch.set_default_device("cuda")
+            torch.set_default_device(device_type)
             self.assertFalse(guard(foo))
         finally:
             torch.set_default_device(None)
@@ -391,10 +396,10 @@ num_guards_executed=0)
         del x
         self.assertFalse(guard(weakref_x()))
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skipIf(not TEST_GPU, "requires gpu")
     def test_call_function_no_args_guard(self):
         root = RootGuardManager()
-        x = torch.cuda.current_device()
+        x = torch.accelerator.current_device_index()
         guard = guards.EQUALS_MATCH(root, x, [0])
         self.assertTrue(guard(0))
         self.assertFalse(guard(1))
