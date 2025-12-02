@@ -7,6 +7,7 @@ from ..common import (
     register_device_op_overrides,
     TritonScratchWorkspace,
 )
+from .xpu_env import get_xpu_arch, get_xpu_version
 
 
 class XPUDeviceOpOverrides(DeviceOpOverrides):
@@ -62,6 +63,12 @@ class XPUDeviceOpOverrides(DeviceOpOverrides):
         self, idx: int, workspace: TritonScratchWorkspace, prefix: Optional[str] = None
     ) -> Optional[tuple[list[str], str]]:
         return [f"void *global_scratch_{idx} = 0;"], f"global_scratch_{idx}"
+
+    def get_device_arch(self) -> str:
+        return get_xpu_arch()
+
+    def get_toolkit_version(self) -> str:
+        return get_xpu_version()
 
 
 register_device_op_overrides("xpu", XPUDeviceOpOverrides())
