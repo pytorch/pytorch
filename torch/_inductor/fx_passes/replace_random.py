@@ -23,6 +23,7 @@ aten = torch.ops.aten
 from torch.library import custom_op
 from torch._inductor.lowering import make_fallback
 from torch._utils import _get_device_index
+import torch._dynamo as dynamo
 
 def _shape_to_offset(size, device: torch.device) -> int:
     nelem = 1
