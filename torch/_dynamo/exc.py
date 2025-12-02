@@ -198,33 +198,26 @@ class RecompileError(TorchDynamoException):
 
 
 class ArgsMismatchError(Unsupported):
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg)
+    pass
 
 
 class AttributeMutationError(Unsupported):
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg)
+    pass
 
 
 class InfiniteGeneratorError(Unsupported):
     # Raised when the number of yielded values is greater than MAX_ITERATOR_LIMIT
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg)
+    pass
 
 
 class SideEffectsError(Unsupported):
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg)
+    pass
 
 
 class CondOpArgsMismatchError(ArgsMismatchError):
     """
     Internal error from cond() due to arguments mismatch.
     """
-
-    def __init__(self, msg: str) -> None:
-        super().__init__(msg)
 
 
 class UserErrorType(Enum):
