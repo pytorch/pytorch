@@ -1,4 +1,4 @@
-name: inductor-rocm
+name: inductor-rocm-mi200
 
 on:
   schedule:

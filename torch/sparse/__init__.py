@@ -19,7 +19,7 @@ from .semi_structured import (
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
 
-    DimOrDims = Optional[Union[int, tuple[int, ...], list[int]]]
+    DimOrDims = Optional[int | tuple[int, ...] | list[int]]
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
@@ -198,7 +198,7 @@ Examples::
 )
 
 
-def sum(input: Tensor, dim: DimOrDims = None, dtype: Optional[DType] = None) -> Tensor:
+def sum(input: Tensor, dim: DimOrDims = None, dtype: DType | None = None) -> Tensor:
     r"""Return the sum of each row of the given sparse tensor.
 
     Returns the sum of each row of the sparse tensor :attr:`input` in the given
@@ -521,7 +521,7 @@ class check_sparse_tensor_invariants:
     # context manager support
     def __init__(self, enable=True):
         self.state = enable
-        self.saved_state: Optional[bool] = None
+        self.saved_state: bool | None = None
 
     def __enter__(self):
         if self.saved_state is not None:

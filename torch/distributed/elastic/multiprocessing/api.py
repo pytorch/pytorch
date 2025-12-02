@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from enum import IntFlag
 from multiprocessing import synchronize
 from types import FrameType
-from typing import Any, Optional, Union
+from typing import Any, Optional, TextIO, Union
 
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure, record
@@ -491,8 +491,8 @@ class PContext(abc.ABC):
         self.stderrs = logs_dest.stderrs
         self.error_files = logs_dest.error_files
         self.nprocs = nprocs
-        self.filtered_stdout = logs_dest.filtered_stdout
-        self.filtered_stderr = logs_dest.filtered_stderr
+        self.filtered_stdout: Optional[TextIO] = None
+        self.filtered_stderr: Optional[TextIO] = None
 
         self._tail_logs = [
             TailLog(name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes),
@@ -500,6 +500,9 @@ class PContext(abc.ABC):
         ]
 
         if duplicate_stdout_filters:
+            self.filtered_stdout = open(
+                logs_dest.filtered_stdout, mode="w", errors="replace", buffering=1
+            )
             self._tail_logs.append(
                 TailLog(
                     name,
@@ -513,6 +516,9 @@ class PContext(abc.ABC):
             )
 
         if duplicate_stderr_filters:
+            self.filtered_stderr = open(
+                logs_dest.filtered_stderr, mode="w", errors="replace", buffering=1
+            )
             self._tail_logs.append(
                 TailLog(
                     name,
@@ -657,6 +663,10 @@ class PContext(abc.ABC):
         self._close(death_sig=death_sig, timeout=timeout)
         for tail_log in self._tail_logs:
             tail_log.stop()
+        if self.filtered_stdout:
+            self.filtered_stdout.close()
+        if self.filtered_stderr:
+            self.filtered_stderr.close()
 
 
 def get_std_cm(std_rd: str, redirect_fn):
