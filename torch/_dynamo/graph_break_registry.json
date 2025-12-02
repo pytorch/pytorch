@@ -3667,5 +3667,16 @@
         "Use custom operators instead of direct attribute/method access."
       ]
     }
+  ],
+  "GB0363": [
+    {
+      "Gb_type": "returning @contextmanager object from compile",
+      "Context": "str(value)",
+      "Explanation": "Returning a @contextmanager object from a torch.compile function is not yet implemented",
+      "Hints": [
+        "Consider refactoring to avoid returning @contextmanager objects from compiled functions.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }
