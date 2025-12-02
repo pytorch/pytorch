@@ -18,10 +18,10 @@ from torch.testing._internal.common_device_type import (
     dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
-    onlyCUDA,
     onlyOn,
     OpDTypes,
     ops,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and,
@@ -54,6 +54,7 @@ _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+TEST_MULTIACCELERATOR = torch.accelerator.device_count() >= 2
 
 
 class RegularFuncWrapper:
@@ -1638,9 +1639,11 @@ class TestForeach(TestCase):
             for t, ref_t in zip(out, out_ref):
                 self.assertTrue(torch.equal(t, ref_t))
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @serialTest()
-    # OOM issue on xpu, see https://github.com/intel/torch-xpu-ops/issues/2444
+    @skipXPUIf(
+        True, "OOM issue on xpu, see https://github.com/intel/torch-xpu-ops/issues/2444"
+    )
     @largeTensorTest("40GB", device=device_type)
     def test_foreach_copy_with_multi_dtypes_large_input(self):
         # see https://github.com/pytorch/pytorch/issues/156261
