@@ -54,7 +54,8 @@ def partitioned_scatter_optimization_pass(graph: fx.Graph) -> fx.Graph:
 
     if num_matches > 0:
         log.info(
-            f"partitioned_scatter_optimization: applied to {num_matches} operation(s)"
+            "partitioned_scatter_optimization: applied to %d operation(s)",
+            num_matches,
         )
         graph.lint()
 
@@ -120,7 +121,7 @@ def validate_match(match: Match) -> bool:
         return False
 
     if scatter_dim >= len(input_meta["shape"]):
-        log.debug(f"Skipping: scatter dim {scatter_dim} out of bounds")
+        log.debug("Skipping: scatter dim %d out of bounds", scatter_dim)
         return False
 
     # Calculate optimal partitions and check memory
@@ -136,7 +137,7 @@ def validate_match(match: Match) -> bool:
     # Check minimum index size threshold
     min_index_size = getattr(config, "partitioned_scatter_min_index_size", 4096)
     if index_size < min_index_size:
-        log.debug(f"Skipping: index size {index_size} below threshold {min_index_size}")
+        log.debug("Skipping: index size %d below threshold %d", index_size, min_index_size)
         return False
 
     # Only use if index_size is small enough and estimated contention is relevant
@@ -159,9 +160,13 @@ def validate_match(match: Match) -> bool:
     match._scatter_dim = scatter_dim  # type: ignore[attr-defined]
 
     log.debug(
-        f"Applying optimization: {num_partitions} partitions, "
-        f"dim={scatter_dim}, contention={contention_ratio:.2f}, "
-        f"output_size={output_size}, index_size={index_size}"
+        "Applying optimization: %d partitions, dim=%d, contention=%.2f, "
+        "output_size=%d, index_size=%d",
+        num_partitions,
+        scatter_dim,
+        contention_ratio,
+        output_size,
+        index_size,
     )
 
     return True
@@ -291,9 +296,12 @@ def _fit_to_memory_budget(
                     logging.DEBUG
                 ):
                     log.debug(
-                        f"Reduced partitions from {num_partitions} to "
-                        f"{current_partitions} to fit memory budget "
-                        f"({overhead / 1e9:.2f}GB / {budget / 1e9:.2f}GB)"
+                        "Reduced partitions from %d to %d to fit memory budget "
+                        "(%.2fGB / %.2fGB)",
+                        num_partitions,
+                        current_partitions,
+                        overhead / 1e9,
+                        budget / 1e9,
                     )
                 return current_partitions
 
@@ -304,8 +312,10 @@ def _fit_to_memory_budget(
         if log.isEnabledFor(logging.DEBUG):
             overhead = output_size * element_bytes * (MIN_PARTITIONS - 1)
             log.debug(
-                f"Insufficient memory even for {MIN_PARTITIONS} partitions: "
-                f"{overhead / 1e9:.2f}GB > {budget / 1e9:.2f}GB"
+                "Insufficient memory even for %d partitions: %.2fGB > %.2fGB",
+                MIN_PARTITIONS,
+                overhead / 1e9,
+                budget / 1e9,
             )
         return 0
 
