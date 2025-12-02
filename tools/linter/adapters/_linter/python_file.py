@@ -115,7 +115,7 @@ class PythonFile:
             tk = self.tokens[i]
             if tk.type == token.STRING:
                 return tk.string
-            if is_empty(tk.type):
+            if is_empty(tk):
                 return ""
         return ""
 
