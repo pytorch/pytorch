@@ -5,6 +5,8 @@ from collections.abc import Callable
 from typing import Any, final, Optional, Union
 from typing_extensions import Self
 
+import torch
+
 from ..utils import is_function_or_wrapper
 from .base import VariableTracker
 from .tensor import SymNodeVariable
@@ -67,6 +69,8 @@ class LazyVariableTracker(VariableTracker):
         assert isinstance(_cache, LazyCache)
         super().__init__(**kwargs)
         self._cache = _cache
+        if isinstance(_cache.value, torch.Tensor):
+            self.realize()
 
     def realize(self) -> VariableTracker:
         """Force construction of the real VariableTracker"""

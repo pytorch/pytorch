@@ -578,9 +578,10 @@ def forward(self, args_0):
         self.assertExpectedInline(
             ep._in_shuffle_graph.code.strip("\r\n "),
             """\
-def forward(self, arg0_1, arg1_1):
-    _tensor_constant0 = self._tensor_constant0
-    return (arg1_1, _tensor_constant0)""",
+def forward(self, unused_placeholder, L_flat_orig_inputs_1_ : torch.Tensor):
+    l_flat_orig_inputs_1_ = L_flat_orig_inputs_1_
+    l__input_extractor_____closure___1_cell_contents = self.L__input_extractor_____closure___1_cell_contents
+    return (l_flat_orig_inputs_1_, l__input_extractor_____closure___1_cell_contents)""",
         )
         self.assertExpectedInline(
             ep.code.strip("\r\n "),
