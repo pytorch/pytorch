@@ -203,12 +203,3 @@ class OmittedLines:
 
     def contains_lines(self, begin: int, end: int) -> bool:
         return bool(self.omitted.intersection(range(begin, end + 1)))
-
-
-if __name__ == "__main__":
-    import sys
-
-    for file in sys.argv[1:]:
-        print(file)
-        pbf = PythonFile("", Path(file)).blocks_by_line_number
-        print(*pbf)
