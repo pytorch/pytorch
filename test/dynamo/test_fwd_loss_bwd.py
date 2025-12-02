@@ -6,6 +6,35 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 
 class TestForwardLossBackward(TestCase):
+    def _run_backward_test(self, fn, mod, x):
+        """
+        Shared utility for running backward tests.
+
+        Runs the function in both eager and compiled mode, verifies results match,
+        and returns the normalized graph for assertExpectedInline verification.
+        """
+        backend = AotEagerAndRecordGraphs()
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+        # Save eager grads
+        for p in mod.parameters():
+            p.grad = None
+        eager_result = fn(x)
+        eager_grads = {name: p.grad.clone() for name, p in mod.named_parameters()}
+
+        # Run compiled
+        for p in mod.parameters():
+            p.grad = None
+        compiled_result = compiled_fn(x)
+
+        self.assertEqual(eager_result, compiled_result)
+        for name, p in mod.named_parameters():
+            self.assertEqual(eager_grads[name], p.grad, f"Grad mismatch for {name}")
+        self.assertEqual(len(backend.graphs), 1)
+
+        gm = backend.graphs[0]
+        return normalize_gm(gm.print_readable(print_output=False))
+
     def test_autograd_grad_basic(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
@@ -311,6 +340,210 @@ class <lambda>(torch.nn.Module):
             "Trying to backward through the graph a second time",
         ):
             step_compiled()
+
+    def test_tensor_backward_basic(self):
+        """Test that tensor.backward(inputs=params) works in compiled code."""
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = list(mod.parameters())
+            loss.backward(inputs=params)
+            return loss.detach()
+
+        actual = self._run_backward_test(fn, mod, x)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
+        l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_x_ = L_x_
+
+        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
+
+        loss: "f32[]" = res.sum();  res = None
+
+        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_])
+        getitem: "f32[4, 4]" = grad[0]
+        getitem_1: "f32[4]" = grad[1];  grad = None
+        new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+        copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
+        new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
+        copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
+
+        detach: "f32[]" = loss.detach();  loss = None
+        return (detach, new_grad_strided, new_grad_strided_1)
+""",  # noqa: B950
+        )
+
+    def test_tensor_backward_without_inputs(self):
+        """Test that tensor.backward() without inputs works by auto-detecting params."""
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            loss.backward()  # No inputs - auto-detect!
+            return loss.detach()
+
+        actual = self._run_backward_test(fn, mod, x)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
+        l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_x_ = L_x_
+
+        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
+
+        loss: "f32[]" = res.sum();  res = None
+
+        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_])
+        getitem: "f32[4, 4]" = grad[0]
+        getitem_1: "f32[4]" = grad[1];  grad = None
+        new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+        copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
+        new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
+        copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
+
+        detach: "f32[]" = loss.detach();  loss = None
+        return (detach, new_grad_strided, new_grad_strided_1)
+""",  # noqa: B950
+        )
+
+    def test_tensor_backward_matches_eager(self):
+        """Test that tensor.backward produces same results as eager mode."""
+        mod_eager = torch.nn.Linear(4, 4)
+        mod_compiled = torch.nn.Linear(4, 4)
+
+        with torch.no_grad():
+            mod_compiled.weight.copy_(mod_eager.weight)
+            mod_compiled.bias.copy_(mod_eager.bias)
+
+        x = torch.randn(2, 4)
+
+        def step_fn(mod):
+            res = mod(x)
+            loss = res.sum()
+            params = list(mod.parameters())
+            loss.backward(inputs=params)
+            return loss.detach()
+
+        # Run eager
+        for p in mod_eager.parameters():
+            p.grad = None
+        eager_loss = step_fn(mod_eager)
+
+        # Run compiled
+        for p in mod_compiled.parameters():
+            p.grad = None
+        compiled_step_fn = torch.compile(
+            lambda: step_fn(mod_compiled), backend="aot_eager", fullgraph=True
+        )
+        compiled_loss = compiled_step_fn()
+
+        self.assertEqual(eager_loss, compiled_loss)
+        self.assertEqual(mod_eager.weight.grad, mod_compiled.weight.grad)
+        self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
+
+    def test_tensor_backward_with_gradient(self):
+        """Test tensor.backward with a gradient argument."""
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)  # [2, 4]
+            params = list(mod.parameters())
+            # Non-scalar output, need gradient
+            gradient = torch.ones_like(res)
+            res.backward(gradient=gradient, inputs=params)
+            return res.detach().sum()
+
+        actual = self._run_backward_test(fn, mod, x)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
+        l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_x_ = L_x_
+
+        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
+
+        gradient: "f32[2, 4]" = torch.ones_like(res)
+
+        grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient);  gradient = None
+        getitem: "f32[4, 4]" = grad[0]
+        getitem_1: "f32[4]" = grad[1];  grad = None
+        new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+        copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
+        new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
+        copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
+
+        detach: "f32[2, 4]" = res.detach();  res = None
+        sum_1: "f32[]" = detach.sum();  detach = None
+        return (sum_1, new_grad_strided, new_grad_strided_1)
+""",  # noqa: B950
+        )
+
+    def test_tensor_backward_accumulates_grads(self):
+        """Test that tensor.backward accumulates gradients correctly."""
+        mod = torch.nn.Linear(4, 4)
+        x = torch.randn(2, 4)
+
+        def fn(x):
+            res = mod(x)
+            loss = res.sum()
+            params = list(mod.parameters())
+            # Call backward twice to test accumulation
+            loss.backward(inputs=params, retain_graph=True)
+            loss.backward(inputs=params)
+            return loss.detach()
+
+        actual = self._run_backward_test(fn, mod, x)
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_mod_parameters_weight_: "f32[4, 4]", L_mod_parameters_bias_: "f32[4]", L_x_: "f32[2, 4]"):
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
+        l_mod_parameters_bias_ = L_mod_parameters_bias_
+        l_x_ = L_x_
+
+        res: "f32[2, 4]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = None
+
+        loss: "f32[]" = res.sum();  res = None
+
+        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], retain_graph = True)
+        getitem: "f32[4, 4]" = grad[0]
+        getitem_1: "f32[4]" = grad[1];  grad = None
+        new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_)
+        copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
+        new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_)
+        copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
+
+        grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_])
+        getitem_2: "f32[4, 4]" = grad_1[0]
+        getitem_3: "f32[4]" = grad_1[1];  grad_1 = None
+        new_grad_strided_2: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
+        copy__2: "f32[4, 4]" = new_grad_strided_2.copy_(getitem_2);  getitem_2 = copy__2 = None
+        add: "f32[4, 4]" = new_grad_strided + new_grad_strided_2;  new_grad_strided = new_grad_strided_2 = None
+        new_grad_strided_3: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
+        copy__3: "f32[4]" = new_grad_strided_3.copy_(getitem_3);  getitem_3 = copy__3 = None
+        add_1: "f32[4]" = new_grad_strided_1 + new_grad_strided_3;  new_grad_strided_1 = new_grad_strided_3 = None
+
+        detach: "f32[]" = loss.detach();  loss = None
+        return (detach, add, add_1)
+""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":
