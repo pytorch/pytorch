@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
+    TemporaryFileName,
     TEST_HPU,
     TEST_XPU,
     TestCase,
@@ -669,14 +670,12 @@ class TestExecutionTrace(TestCase):
         assert event_count == expected_loop_events
 
     def test_execution_trace_no_capture(self):
-        with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
-            et = ExecutionTraceObserver().register_callback(fp.name)
+        with TemporaryFileName("w+t", suffix=".et.json") as file_name:
+            et = ExecutionTraceObserver().register_callback(file_name)
 
-            assert fp.name == et.get_output_file_path()
+            assert file_name == et.get_output_file_path()
             et.unregister_callback()
-            nodes = self.get_execution_trace_root(fp.name)
-            fp.close()
-            os.unlink(fp.name)
+            nodes = self.get_execution_trace_root(file_name)
             found_root_node = False
             for n in nodes:
                 assert "name" in n
