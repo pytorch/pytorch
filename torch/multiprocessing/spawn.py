@@ -190,7 +190,7 @@ class ProcessContext:
             with open(self.__error_files[error_index], "rb") as fh:
                 original_trace = pickle.load(fh)
                 msg += original_trace
-            with contextlib.suppress(BaseException):
+            with contextlib.suppress(FileNotFoundError, IOError):
                 os.remove(self.__error_files[error_index])
             raise ProcessRaisedException(msg, error_index, failed_process.pid)
         exitcode = self.processes[error_index].exitcode
