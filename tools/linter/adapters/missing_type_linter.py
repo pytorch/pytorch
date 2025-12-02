@@ -37,9 +37,6 @@ PARAM_RE = re.compile('Type of parameter "(.*)" is unknown')
 PUBLIC_NAMES = "__init__", "__main__"
 SUFFIXES = ".py", ".pyi"
 
-# TODO: This file causes the block generator to hang!
-BAD_FILE = Path("torch/nn/functional.pyi")
-
 
 _log = partial(print, file=sys.stderr)
 
@@ -164,9 +161,6 @@ class MissingTypeLinter(FileLinter):
     def missing_annotations(self) -> dict[str, list[MissingAnnotation]]:
         def missing(i: int, pf: PythonFile) -> Iterator[MissingAnnotation]:
             assert pf.path is not None
-            if pf.path == BAD_FILE:
-                return
-
             functions = self.type_results[str(pf.path.absolute())]["functions"]
             functions = [f for f in functions if is_public(f["name"])]
 

@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
 
 class PythonFile:
+    contents: str
+    lines: list[str]
     path: Path | None
     linter_name: str
 
@@ -29,25 +31,12 @@ class PythonFile:
         contents: str | None = None,
     ) -> None:
         self.linter_name = linter_name
-        self.path = path.relative_to(ROOT) if path and path.is_absolute() else path
-        self._contents = contents
+        self.path = path and (path.relative_to(ROOT) if path.is_absolute() else path)
+        if contents is None and path is not None:
+            contents = path.read_text()
 
-    @cached_property
-    def contents(self) -> str:
-        if self._contents is not None:
-            return self._contents
-        elif self.path is not None:
-            return self.path.read_text()
-        else:
-            return ""
-
-    @cached_property
-    def filename(self) -> str:
-        return str(self.path)
-
-    @cached_property
-    def lines(self) -> list[str]:
-        return self.contents.splitlines(keepends=True)
+        self.contents = contents or ""
+        self.lines = self.contents.splitlines(keepends=True)
 
     @classmethod
     def make(cls, linter_name: str, pc: Path | str | None = None) -> Self:
@@ -208,12 +197,3 @@ class OmittedLines:
 
     def contains_lines(self, begin: int, end: int) -> bool:
         return bool(self.omitted.intersection(range(begin, end + 1)))
-
-
-if __name__ == "__main__":
-    import sys
-
-    for file in sys.argv[1:]:
-        print(file)
-        pbf = PythonFile("", Path(file)).blocks_by_line_number
-        print(*pbf)

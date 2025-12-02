@@ -2597,7 +2597,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    # High piority - grads are wrong
+    # High priority - grads are wrong
     @unittest.expectedFailure
     def test_grad_accuracy_check(self):
         class Foo:
