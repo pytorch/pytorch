@@ -273,9 +273,10 @@ class PyCodegen:
             # to keep the old behavior, as when `value_from_source` was
             # introduced. TODO sort out the invariants among side effect,
             # codegen and export.
+            # breakpoint()
             if (
                 isinstance(value.mutation_type, ValueMutationExisting)
-                or self.value_from_source
+                # or self.value_from_source
             ):
                 return self(value.source)
 

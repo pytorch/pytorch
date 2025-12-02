@@ -3371,6 +3371,9 @@ def _module_dir(m: types.ModuleType) -> Optional[str]:
 # LEGACY_MOD_INLINELIST because it is less likely to break existing tests.
 LEGACY_MOD_INLINELIST = {
     "torch._dynamo.external_utils",
+    "torch._dynamo.functional_export",
+    # "torch._dynamo.utils",
+    # "torch._dynamo.source",
     "torch._export.db.examples",
     "torch._export.wrappers",
     "torch._functorch.apis",

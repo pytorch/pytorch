@@ -2478,6 +2478,7 @@ class OutputGraph(OutputGraphCommon):
         # allows for the guard to be done using C++ guards.)  If we get
         # ShapeEnv guards to go into C++ guards, this will stop being a thing
         # though!
+        return
 
         assert self.should_exit
 

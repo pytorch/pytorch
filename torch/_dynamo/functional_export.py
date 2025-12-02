@@ -12,7 +12,6 @@ import sympy
 import torch
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
@@ -21,7 +20,6 @@ from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
-from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
@@ -471,6 +469,38 @@ class PyTreeifyOutput:
     root: Optional[torch.nn.Module] = None
 
 
+def insert_unused_placeholder(gm, name):
+    """
+    Inserts a placeholder as the first node in the FX graph, which is not used anywhere.
+    For some reason, the nn.Module is a part of the orig inputs.
+
+    Args:
+        gm: The GraphModule to modify.
+        name: Name of the new placeholder input.
+
+    Returns:
+        The same GraphModule, modified in-place.
+    """
+    graph = gm.graph
+
+    # Get current first node (if any) so we can insert before it
+    try:
+        first_node = next(iter(graph.nodes))
+    except StopIteration:
+        first_node = None  # empty graph
+
+    if first_node is not None:
+        with graph.inserting_before(first_node):
+            graph.placeholder(name)
+    else:
+        # If the graph is empty, just create the placeholder as the only node
+        graph.placeholder(name)
+
+    # Rebuild the code for the GraphModule after graph mutation
+    gm.recompile()
+    return gm
+
+
 def pytreeify(
     out: CaptureOutput, mod: Any, args: tuple[Any, ...], kwargs: dict[str, Any]
 ) -> PyTreeifyOutput:
@@ -499,76 +529,58 @@ def pytreeify(
         root = mod.__self__
 
     flat_real_args, in_spec = pytree.tree_flatten((args, kwargs))
-    torch._dynamo.eval_frame.check_user_input_output(
-        flat_real_args[1 if root else 0 :], UserErrorType.INVALID_INPUT
-    )
     f_globals = out.graph_capture_output.f_globals
-
-    class Yield(Exception):
-        pass
-
-    class InShuffle(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.mod = mod
-            self.num_inputs = len(flat_real_args)
-            self.gm_inputs = None
-
-        def forward(self, *flat_proxy_args):
-            args, kwargs = pytree.tree_unflatten(
-                [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
-            )
-
-            def backend_dummy(*example_inputs):
-                self.gm_inputs = example_inputs
-                raise Yield
-
-            try:
-                out.forward_callable(
-                    compiled_fn=backend_dummy, extra_globals=f_globals
-                )(*args, **kwargs)
-            except Yield:
-                assert self.gm_inputs is not None
-                return self.gm_inputs
-            raise RuntimeError
 
     fake_mode = torch._dynamo.utils.detect_fake_mode(flat_real_args)
     if fake_mode and fake_mode.shape_env is None:
         fake_mode.shape_env = ShapeEnv()
-    in_shuffle_graph = make_fx(
-        InShuffle(), tracing_mode="symbolic", proxy_module_inputs=True
-    )(*flat_real_args)
+
+    dynamo_graph_inputs = None
+
+    class Yield(Exception):
+        pass
+
+    def return_graph_inputs(*example_inputs):
+        nonlocal dynamo_graph_inputs
+        dynamo_graph_inputs = example_inputs
+        raise Yield
+
+    input_extractor = out.forward_callable(
+        compiled_fn=return_graph_inputs, extra_globals=f_globals
+    )
+
+    def fn_to_trace(*flat_orig_inputs):
+        try:
+            l_args, l_kwargs = pytree.tree_unflatten(flat_orig_inputs, in_spec)
+            input_extractor(*l_args, **l_kwargs)
+        except Yield:
+            return dynamo_graph_inputs
+
+    fn_to_trace(*flat_real_args)
+    # earlier we were using make_fx, which is equivalent to install_free_tensors=True
+    with (
+        torch._dynamo.config.patch(install_free_tensors=True),
+        get_metrics_context(),
+        dynamo_timed("input_extractor"),
+    ):
+        input_extractor_out = fullgraph_capture(
+            fn_to_trace,
+            flat_real_args,
+        )
+    in_shuffle_graph = input_extractor_out.backend_input.graph_module
+    insert_unused_placeholder(in_shuffle_graph, "unused_placeholder")
+
+    # Force a unused placeholder in_shuffle_graph because for some reason,
+    # forward_callable expects nn.Mod as input
     _normalize_shuffle_graph(in_shuffle_graph)
+
+    _, out_spec = pytree.tree_flatten(
+        out.forward_callable(extra_globals=f_globals)(*args, **kwargs)
+    )
 
     output_node = next(iter(reversed(backend_input.graph_module.graph.nodes)))
 
-    class OutShuffle(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.num_inputs = len(flat_real_args)
-
-            self.num_outputs = len(output_node.args[0])
-            self.out_spec: Optional[TreeSpec] = None
-
-        def forward(self, *flat_proxy_args):
-            args, kwargs = pytree.tree_unflatten(
-                [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
-            )
-
-            def backend_dummy(*example_inputs):
-                return [
-                    flat_proxy_args[self.num_inputs + i]
-                    for i in range(self.num_outputs)
-                ]
-
-            results = out.forward_callable(
-                compiled_fn=backend_dummy, extra_globals=f_globals
-            )(*args, **kwargs)
-            ret, self.out_spec = pytree.tree_flatten(results)
-            return ret
-
-    out_shuffle = OutShuffle()
-    flat_out_shuffle_args = [
+    flat_graph_inputs_and_graph_outputs = [
         *flat_real_args,
         *pytree.tree_map_only(
             torch.fx.Node,
@@ -578,22 +590,44 @@ def pytreeify(
             output_node.args[0],
         ),
     ]
-    fake_mode = torch._dynamo.utils.detect_fake_mode(flat_out_shuffle_args)
-    if fake_mode and fake_mode.shape_env is None:
-        fake_mode.shape_env = ShapeEnv()
-    with enable_python_dispatcher():
-        out_shuffle_graph = make_fx(
-            out_shuffle, tracing_mode="real", proxy_module_inputs=True
-        )(*flat_out_shuffle_args)
+    num_inputs = len(flat_real_args)
+
+    def return_graph_outputs(*example_inputs):
+        return flat_graph_inputs_and_graph_outputs[num_inputs:]
+
+    output_extractor = out.forward_callable(
+        compiled_fn=return_graph_outputs, extra_globals=f_globals
+    )
+
+    def fn_to_trace(*flat_graph_inputs_and_graph_outputs):
+        l_args, l_kwargs = pytree.tree_unflatten(
+            flat_graph_inputs_and_graph_outputs[:num_inputs], in_spec
+        )
+        return output_extractor(*l_args, **l_kwargs)
+
+    fn_to_trace(*flat_graph_inputs_and_graph_outputs)
+
+    # earlier we were using make_fx, which is equivalent to install_free_tensors=True
+    with (
+        torch._dynamo.config.patch(install_free_tensors=True),
+        get_metrics_context(),
+        dynamo_timed("output_extractor"),
+    ):
+        output_extractor_out = fullgraph_capture(
+            fn_to_trace,
+            tuple(flat_graph_inputs_and_graph_outputs),
+        )
+    out_shuffle_graph = output_extractor_out.backend_input.graph_module
+    insert_unused_placeholder(out_shuffle_graph, "unused_placeholder")
     _normalize_shuffle_graph(out_shuffle_graph)
 
-    assert out_shuffle.out_spec is not None
+    assert out_spec is not None
     return PyTreeifyOutput(
         backend_input.graph_module,
         in_spec,
         in_shuffle_graph,
         len(flat_real_args),
-        out_shuffle.out_spec,
+        out_spec,
         out_shuffle_graph,
         root=root,  # type: ignore[arg-type]
     )
@@ -612,7 +646,9 @@ def dynamo_graph_capture_for_export(
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
         with (
-            torch._dynamo.config.patch(side_effect_replay_policy="warn"),
+            torch._dynamo.config.patch(
+                side_effect_replay_policy="warn", record_runtime_overhead=False
+            ),
             get_metrics_context(),
             dynamo_timed("fullgraph_capture"),
         ):
