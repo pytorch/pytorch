@@ -46,8 +46,15 @@ jobs:
           unzip pmd-bin-7.19.0.zip
       
       - name: Run PMD Quality Scan
-       
         run: |
           ./pmd-dist-7.19.0/bin/pmd check --dir . --rulesets rulesets/java/quickstart.xml
+     
+     
+     
+     
+     
+     
+       
+       
 
 
