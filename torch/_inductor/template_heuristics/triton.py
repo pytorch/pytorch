@@ -1777,6 +1777,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
             "tma_store": config.triton.enable_template_tma_store,
+            "transpose_discontiguous_tensor_descriptors_override": True,
         }
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
