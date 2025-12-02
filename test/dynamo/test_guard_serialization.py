@@ -14,6 +14,7 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
+import torch.fx.graph as fx_graph
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.bytecode_transformation import transform_code_object
@@ -303,6 +304,26 @@ pytree.register_constant(CustomConstantType)
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        self._fx_magic_methods_snapshot = fx_graph.magic_methods.copy()
+        self._saved_default_device_context = getattr(
+            torch._GLOBAL_DEVICE_CONTEXT, "device_context", None
+        )
+
+    def tearDown(self):
+        fx_graph.magic_methods.clear()
+        fx_graph.magic_methods.update(self._fx_magic_methods_snapshot)
+
+        current_ctx = getattr(torch._GLOBAL_DEVICE_CONTEXT, "device_context", None)
+        if current_ctx is not self._saved_default_device_context:
+            if self._saved_default_device_context is None:
+                torch.set_default_device(None)
+            else:
+                torch.set_default_device(self._saved_default_device_context.device)
+
+        super().tearDown()
+
     def _tracefunc(self, frame, event, arg):
         if event != "call":
             return
@@ -1724,6 +1745,48 @@ class TestGuardSerialization(TestGuardSerializationBase):
         # Check global guards are gone.
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), foo(x))
+
+    def test_sdp_backend_serialization(self):
+        def fn(x, backend):
+            # Use the backend enum in a guard-producing way
+            if backend == torch.nn.attention.SDPBackend.MATH:
+                return x + 1
+            elif backend == torch.nn.attention.SDPBackend.FLASH_ATTENTION:
+                return x + 2
+            elif backend == torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION:
+                return x + 3
+            else:
+                return x + 4
+
+        x = torch.randn(3, 2)
+        backend = torch.nn.attention.SDPBackend.MATH
+
+        ref, loaded = self._test_serialization("EQUALS_MATCH", fn, x, backend)
+
+        # Test with the same backend
+        self._test_check_fn(
+            ref, loaded, {"x": x, "backend": torch.nn.attention.SDPBackend.MATH}, True
+        )
+
+        # Test with different backends
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "backend": torch.nn.attention.SDPBackend.FLASH_ATTENTION},
+            False,
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "backend": torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION},
+            False,
+        )
+        self._test_check_fn(
+            ref,
+            loaded,
+            {"x": x, "backend": torch.nn.attention.SDPBackend.CUDNN_ATTENTION},
+            False,
+        )
 
 
 class SimpleModule(torch.nn.Module):

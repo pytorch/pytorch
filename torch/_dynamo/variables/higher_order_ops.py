@@ -196,13 +196,13 @@ def dynamo_enable_grad(tx: "InstructionTranslator", enable=True):
 
 
 @contextlib.contextmanager
-def dynamo_under_activation_checkpoint(tx: "InstructionTranslator"):
-    orig_val = tx.output.current_tracer.under_activation_checkpoint
+def dynamo_allow_side_effects_in_hop(tx: "InstructionTranslator"):
+    orig_val = tx.output.current_tracer.allow_side_effects_in_hop
     try:
-        tx.output.current_tracer.under_activation_checkpoint = True
+        tx.output.current_tracer.allow_side_effects_in_hop = True
         yield
     finally:
-        tx.output.current_tracer.under_activation_checkpoint = orig_val
+        tx.output.current_tracer.allow_side_effects_in_hop = orig_val
 
 
 def find_mismatched_vars(var, types, allow_none=False):
@@ -418,6 +418,31 @@ def _assert_tensors_nonaliasing(inputs, outputs):
     assert input_tensor_ids.isdisjoint(output_tensor_ids), (
         "inputs to function body cannot alias outputs"
     )
+
+
+def _collect_intermediate_outputs(tx, subtracer, graph_output_vts):
+    """
+    Collect intermediate outputs for side effects support.
+
+    Returns all tracked tensor/symint variables that are not already in graph_output_vts.
+    """
+    extra_outputs = []
+    existing_out_proxies = {vt.as_proxy() for vt in graph_output_vts}
+
+    for out in subtracer.tracked_tensor_or_symint_vt:
+        proxy = out.as_proxy()
+
+        # Skip if already in output
+        if proxy in existing_out_proxies:
+            continue
+
+        # TODO floats are not supported in HOP input/output
+        if isinstance(out, SymNodeVariable) and out.python_type() is float:
+            continue
+
+        extra_outputs.append(out)
+
+    return extra_outputs
 
 
 def _check_all_tensorvariable(args):
@@ -1127,19 +1152,25 @@ def trace_hop_function(
     tx,
     subtracer,
     enable_grad,
-    under_activation_checkpoint,
     restore_side_effects,
     args,
     sub_kwargs,
 ):
+    # For autograd.Function and other legacy HOPs, we do NOT couple
+    # restore_side_effects with allow_side_effects_in_hop.
+    # This preserves the old behavior where:
+    # - restore_side_effects=False means ctx mutations persist
+    # - But non-ctx side effects still cause graph breaks (under_activation_checkpoint was False)
+    enable_side_effects_with_extra_outputs = False
+
     autograd_ctx = (
         dynamo_enable_grad(tx, enable_grad)
         if enable_grad is not None
         else contextlib.nullcontext()
     )
-    checkpoint_ctx = (
-        dynamo_under_activation_checkpoint(tx)
-        if under_activation_checkpoint
+    side_effects_ctx = (
+        dynamo_allow_side_effects_in_hop(tx)
+        if enable_side_effects_with_extra_outputs
         else contextlib.nullcontext()
     )
 
@@ -1161,7 +1192,7 @@ def trace_hop_function(
     if restore_side_effects:
         prev_side_effects = tx.output.side_effects.clone()
 
-    with autograd_ctx, checkpoint_ctx:
+    with autograd_ctx, side_effects_ctx:
         output = f.call_function(tx, args, sub_kwargs)
 
     if restore_side_effects:
@@ -1170,6 +1201,32 @@ def trace_hop_function(
             new_side_effects
         )
         tx.output.side_effects = prev_side_effects
+    return output
+
+
+def trace_hop_function_with_auto_output_flattening(
+    f,
+    tx,
+    subtracer,
+    enable_grad,
+    allow_side_effects,
+    args,
+    sub_kwargs,
+):
+    autograd_ctx = (
+        dynamo_enable_grad(tx, enable_grad)
+        if enable_grad is not None
+        else contextlib.nullcontext()
+    )
+    side_effects_ctx = (
+        dynamo_allow_side_effects_in_hop(tx)
+        if allow_side_effects
+        else contextlib.nullcontext()
+    )
+
+    with autograd_ctx, side_effects_ctx:
+        output = f.call_function(tx, args, sub_kwargs)
+
     return output
 
 
@@ -1228,9 +1285,9 @@ def speculate_subgraph_with_auto_output_flattening(
     set_subgraph_inputs: Literal[
         "automatic", "automatic_with_forced_inputs", "flatten_manual", "manual"
     ] = "automatic",
-    # Make default False
-    restore_side_effects: bool = True,
-    under_activation_checkpoint: bool = False,
+    # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
+    # access intermediates from the subgraph, this is useful for mutation
+    allow_side_effects: bool = False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
@@ -1340,18 +1397,17 @@ def speculate_subgraph_with_auto_output_flattening(
             (f, sub_args, sub_kwargs),
         )
 
-        with tx.output.subtracer(source_target, tracer) as subtracer:
+        with tx.output.subtracer(source_target, tracer, description) as subtracer:
             args = get_hop_args(
                 tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
             )
 
-            output = trace_hop_function(
+            output = trace_hop_function_with_auto_output_flattening(
                 f,
                 tx,
                 subtracer,
                 enable_grad,
-                under_activation_checkpoint,
-                restore_side_effects,
+                allow_side_effects,
                 args,
                 sub_kwargs,
             )
@@ -1429,11 +1485,10 @@ def speculate_subgraph_with_auto_output_flattening(
             # want this to be supported for other Hops as well, specifically
             # nested_compile_region and autograd.Function. Today, its safe
             # because we error out on seeing a side-effect.
-            if under_activation_checkpoint:
-                extra_outputs = []
-                for out in subtracer.tracked_tensor_or_symint_vt:
-                    if out not in set(graph_output_vts):
-                        extra_outputs.append(out)
+            if allow_side_effects:
+                extra_outputs = _collect_intermediate_outputs(
+                    tx, subtracer, graph_output_vts
+                )
                 graph_output_vts = graph_output_vts + tuple(extra_outputs)
 
             validate_subgraph_output_types(graph_output_vts)
@@ -1530,7 +1585,6 @@ def speculate_subgraph(
     # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
     # const outputs from the subgraph output.
     remove_consts_from_outputs=True,
-    under_activation_checkpoint=False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation=True,
     supports_aliasing=True,
@@ -1566,7 +1620,7 @@ def speculate_subgraph(
             (f, sub_args, sub_kwargs),
         )
 
-        with tx.output.subtracer(source_target, tracer) as subtracer:
+        with tx.output.subtracer(source_target, tracer, description) as subtracer:
             args = get_hop_args(
                 tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
             )
@@ -1576,7 +1630,6 @@ def speculate_subgraph(
                 tx,
                 subtracer,
                 enable_grad,
-                under_activation_checkpoint,
                 restore_side_effects,
                 args,
                 sub_kwargs,
@@ -1766,6 +1819,15 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.as_python_constant())
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
 
 
 class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
@@ -2830,9 +2892,7 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     supports_input_mutation = True
     supports_aliasing = True
-    # TODO - Go through all subclasses of WrapHigherOrderVariable to see if
-    # restore_side_effects can be ignored. For now, this is conservative.
-    restore_side_effects = True
+    allow_side_effects = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -2849,7 +2909,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         fn_args_vt,
         kwargs,
         description,
-        under_activation_checkpoint=False,
         *,
         subgraph_name="wrap_body",
     ):
@@ -2867,8 +2926,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
-            restore_side_effects=self.restore_side_effects,
-            under_activation_checkpoint=under_activation_checkpoint,
+            allow_side_effects=self.allow_side_effects,
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
         )
@@ -3327,10 +3385,8 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # If side effects are allowed under checkpoint, we should not restore
-        # the side effects after speculate subgraph.
-        self.restore_side_effects = (
-            not torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
+        self.allow_side_effects = (
+            torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
         )
 
     def _call_function(
@@ -3374,7 +3430,6 @@ class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
             args[1:],
             gmod_kwargs,
             "torch.utils.checkpoint.checkpoint",
-            under_activation_checkpoint=True,
         )
         if context_fn is not None:
             checkpointed_gmod.meta["_checkpoint_context_fn"] = context_fn
@@ -3932,7 +3987,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 "autograd.Function",
                 enable_grad=None,
                 set_subgraph_inputs="automatic",
-                restore_side_effects=False,
+                allow_side_effects=False,
                 tracer=fwd_tracer,
             )
         )
@@ -4019,7 +4074,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         "autograd.Function",
                         enable_grad=False,
                         set_subgraph_inputs="automatic_with_forced_inputs",
-                        restore_side_effects=False,
+                        allow_side_effects=False,
                         tracer=bwd_tracer,
                     )
                 )
@@ -4071,7 +4126,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                                 "autograd.Function",
                                 enable_grad=False,
                                 set_subgraph_inputs="automatic_with_forced_inputs",
-                                restore_side_effects=False,
+                                allow_side_effects=False,
                                 tracer=bwd_tracer,
                             )
                         )
@@ -4535,7 +4590,8 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     supports_input_mutation = True
     supports_aliasing = False
-    restore_side_effects = False
+    # TODO - make this true to support mutation
+    allow_side_effects = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name

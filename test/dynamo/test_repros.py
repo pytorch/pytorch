@@ -7242,11 +7242,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             elif compiled_graph and code is compiled_graph.__call__.__code__:
                 found_compiled_graph = True
 
-        sys.monitoring.use_tool_id(0, "test")
+        tool_id = 0
+        sys.monitoring.use_tool_id(tool_id, "test")
+        old_events = sys.monitoring.get_events(tool_id)
         old_callback = sys.monitoring.register_callback(
-            0, sys.monitoring.events.PY_START, callback
+            tool_id, sys.monitoring.events.PY_START, callback
         )
-        sys.monitoring.set_events(0, sys.monitoring.events.PY_START)
+        sys.monitoring.set_events(tool_id, sys.monitoring.events.PY_START)
         try:
 
             @torch.compile(backend=backend, fullgraph=True)
@@ -7259,9 +7261,11 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             # sys.monitoring should still run on the compiled graph
             self.assertTrue(found_compiled_graph)
         finally:
+            sys.monitoring.set_events(tool_id, old_events)
             sys.monitoring.register_callback(
-                0, sys.monitoring.events.PY_START, old_callback
+                tool_id, sys.monitoring.events.PY_START, old_callback
             )
+            sys.monitoring.free_tool_id(tool_id)
 
     def test_312_local_cell_overlap(self):
         keys = range(10)
