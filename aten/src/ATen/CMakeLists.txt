@@ -803,7 +803,6 @@ if(USE_MPS)
                 cmake_path(GET SHADER STEM TGT_STEM)
                 string(CONCAT TGT_NAX ${TGT_STEM} "_40.air")
                 list(APPEND AIR_NAX ${TGT_NAX})
-                # Note: Added -Wno-c++20-extensions based on your snippet
                 metal_to_air(${SHADER} ${TGT_NAX} "-std=metal4.0;-Wno-c++20-extensions")
             endforeach()
 
