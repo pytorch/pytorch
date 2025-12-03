@@ -2243,9 +2243,17 @@ the output has the same batch dimensions.
 
 Letting `*` be zero or more batch dimensions,
 
-- If :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(*, n)` (a batch of vectors) or shape
-  `(*, n, k)` (a batch of matrices or "multiple right-hand sides"), this function returns `X` of shape
-  `(*, n)` or `(*, n, k)` respectively.
+- If :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(*, n)` (a batch of vectors), 
+  the batch dimensions `*` of :attr:`A` and :attr:`B` must **exactly match**. Broadcasting is not allowed.
+  
+- If :attr:`A` has shape `(*, n, n)` and :attr:`B` has shape `(*, n, k)` (a batch of matrices or 
+  "multiple right-hand sides"), the batch dimensions `*` of :attr:`A` and :attr:`B` only need to be 
+  **broadcastable** with each other. This function returns `X` of shape `(**, n, k)` where `**` 
+  is the result of broadcasting the batch dimensions of :attr:`A` and :attr:`B`.
+
+- **Ambiguous cases**: If :attr:`B` could be interpreted as either a batch of vectors or a batch of matrices
+  (e.g., when :attr:`B` has shape `(n, n)`), PyTorch treats :attr:`B` as a **batch of vectors**.
+  
 - Otherwise, if :attr:`A` has shape `(*, n, n)` and  :attr:`B` has shape `(n,)`  or `(n, k)`, :attr:`B`
   is broadcasted to have shape `(*, n)` or `(*, n, k)` respectively.
   This function then returns the solution of the resulting batch of systems of linear equations.
