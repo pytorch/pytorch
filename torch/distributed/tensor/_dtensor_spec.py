@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Any, cast, NamedTuple, Optional
+from typing import Any, cast, NamedTuple
 
 import torch
 import torch.distributed.tensor.placement_utils as putils
@@ -90,7 +90,7 @@ class DTensorSpec:
     placements: tuple[Placement, ...]
 
     # tensor meta will only be set during sharding propagation
-    tensor_meta: Optional[TensorMeta] = None
+    tensor_meta: TensorMeta | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.placements, tuple):
@@ -338,7 +338,7 @@ class DTensorSpec:
         mesh: DeviceMesh,
         dim_map: list[int],
         sums: list[int],
-        tensor_meta: Optional[TensorMeta] = None,
+        tensor_meta: TensorMeta | None = None,
     ) -> "DTensorSpec":
         """
         Construct a DTensorSpec from dim_map list and pending sum.
@@ -390,7 +390,7 @@ class DTensorSpec:
         return any(placement.is_shard() for placement in self.placements)
 
     def shallow_copy_with_tensor_meta(
-        self, tensor_meta: Optional[TensorMeta]
+        self, tensor_meta: TensorMeta | None
     ) -> "DTensorSpec":
         """
         Shallow copy the DTensorSpec with a new tensor_meta.

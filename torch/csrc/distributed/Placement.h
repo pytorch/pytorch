@@ -38,7 +38,7 @@ class Placement {
 class Shard : public Placement {
  public:
   std::int64_t dim;
-  explicit Shard(std::int64_t dim_) : dim(dim_) {}
+  explicit Shard(std::int64_t dim) : dim(dim) {}
 
   bool is_shard(std::optional<std::int64_t> dim_) const override {
     if (typeid(*this) != typeid(Shard)) {
@@ -60,8 +60,8 @@ class StridedShard : public Placement {
  public:
   std::int64_t dim;
   std::int64_t split_factor;
-  explicit StridedShard(std::int64_t dim_, std::int64_t split_factor_)
-      : dim(dim_), split_factor(split_factor_) {}
+  explicit StridedShard(std::int64_t dim, std::int64_t split_factor_)
+      : dim(dim), split_factor(split_factor_) {}
 
   bool operator==(const StridedShard& rhs) const {
     return dim == rhs.dim && split_factor == rhs.split_factor;

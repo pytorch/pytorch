@@ -8,7 +8,7 @@ import weakref
 from collections import defaultdict
 from collections.abc import Sequence
 from functools import cache
-from typing import cast, NamedTuple, Optional
+from typing import cast, NamedTuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -18,7 +18,6 @@ from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
-    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -29,72 +28,6 @@ from torch.utils._debug_mode import get_active_debug_mode
 
 
 logger = logging.getLogger(__name__)
-
-# Global configuration flag to control the redistribution planning strategy.
-# When True, forces the graph-based algorithm using Dijkstra's shortest path.
-# When False, prefers the greedy algorithm for faster planning. Uses the graph-based algorithm
-# only when necessary to support strided-shard redistribution
-_FORCE_MIN_COST_REDISTRIBUTION_PLAN: Optional[bool] = None
-
-
-@contextlib.contextmanager
-def use_min_cost_redistribution_plan(enabled: bool = True):
-    """
-    Context manager to control the redistribution planning strategy for DTensor operations.
-
-    This context manager allows you to choose between two algorithms for computing the
-    sequence of collective operations needed to redistribute a DTensor from one placement
-    to another:
-
-    - **Graph-based**: Uses Dijkstra's algorithm to find the minimum-cost path
-      through all possible placement transformations. This approach considers the global
-      cost of all collective operations and finds the optimal sequence. Best for complex
-      redistribution patterns where reducing communication cost and memory overhead is critical.
-
-    - **Greedy**: Uses a heuristic approach that makes locally optimal choices
-      at each step. This is faster to compute but may not produce the globally optimal
-      transformation sequence. Best for simple redistribution patterns or when planning
-      speed is more important than optimal communication.
-
-    **Default Behavior (without this context manager):**
-
-    When this context manager is NOT used, the algorithm selection follows this priority:
-
-    1. **Non-default shard orders**
-       → Always use graph-based algorithm (required for correctness)
-
-    2. **Explicit `use_graph_based_transform` parameter** to `_gen_transform_infos_non_cached`
-       → Use the specified algorithm (True = graph-based, False = greedy)
-
-    3. **No explicit parameter** (default case)
-       → Use greedy algorithm for faster planning
-
-    **Behavior with this context manager:**
-
-    This context manager overrides the default selection by setting the global flag
-    `_FORCE_MIN_COST_REDISTRIBUTION_PLAN`, which takes precedence over the explicit
-    `use_graph_based_transform` parameter (but not over non-default shard order requirements).
-
-    **Cache Considerations:**
-
-    The redistribution planner caches transform info for performance via the `@cache`
-    decorator on `_gen_transform_infos`. If you need to change the algorithm selection
-    for the same input specs, clear the cache using `_gen_transform_infos.cache_clear()`
-    to ensure the new setting takes effect and doesn't reuse cached results from a
-    previous run.
-
-    Args:
-        enabled (bool): If True, forces the use of the graph-based algorithm.
-                       If False, forces the use of the greedy algorithm.
-                       Default: True
-    """
-    global _FORCE_MIN_COST_REDISTRIBUTION_PLAN
-    old_value = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
-    _FORCE_MIN_COST_REDISTRIBUTION_PLAN = enabled
-    try:
-        yield
-    finally:
-        _FORCE_MIN_COST_REDISTRIBUTION_PLAN = old_value
 
 
 class _TransformInfo(NamedTuple):
@@ -152,7 +85,7 @@ class DTensorRedistributePlanner:
     class DistState:
         placements: tuple[Placement, ...]
         tensor_dim_to_mesh_dim: ShardOrder
-        _hash: Optional[int] = dataclasses.field(
+        _hash: int | None = dataclasses.field(
             default=None, init=False, repr=False, compare=False
         )
 
@@ -559,8 +492,12 @@ class DTensorRedistributePlanner:
         dst_placements, dst_shard_order = putils._normalize_placements_into_shard_order(
             dst_spec.placements, dst_spec.mesh
         )
-        assert src_shard_order is not None
-        assert dst_shard_order is not None
+        if src_shard_order is None or dst_shard_order is None:
+            raise NotImplementedError(
+                "Redistribution of _StridedShard placement is only supported for "
+                "_StridedShard that can be converted to ordered Shard placements. "
+                "Full _StridedShard redistribution support is not yet implemented."
+            )
         src_state = self.DistState(src_placements, src_shard_order)
         dst_state = self.DistState(dst_placements, dst_shard_order)
         transform_infos: list[_TransformInfo] = []
@@ -715,8 +652,9 @@ class DTensorRedistributePlanner:
 def _gen_transform_infos_non_cached(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
+    transform_infos: list[_TransformInfo] = []
     device_mesh = src_spec.device_mesh
     src_shard_order = putils.maybe_convert_StridedShard_to_shard_order(
         src_spec.placements, device_mesh
@@ -738,10 +676,10 @@ def _gen_transform_infos_non_cached(
     )
     if has_non_default_order is True:
         use_graph_based_transform = True
-    elif _FORCE_MIN_COST_REDISTRIBUTION_PLAN is not None:
-        use_graph_based_transform = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
-    elif use_graph_based_transform is None:
-        use_graph_based_transform = False
+    # elif _FORCE_MIN_COST_REDISTRIBUTION_PLAN is not None:
+    #     use_graph_based_transform = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
+    # elif use_graph_based_transform is None:
+    #     use_graph_based_transform = False
 
     if use_graph_based_transform is None:
         if (
@@ -770,7 +708,7 @@ def _gen_transform_infos_non_cached(
 def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> list[_TransformInfo]:
     return _gen_transform_infos_non_cached(
         src_spec, dst_spec, use_graph_based_transform
@@ -784,7 +722,7 @@ def redistribute_local_tensor(
     *,
     async_op: bool = False,
     is_backward: bool = False,
-    use_graph_based_transform: Optional[bool] = None,
+    use_graph_based_transform: bool | None = None,
 ) -> torch.Tensor:
     """
     This redistribute the local tensor (torch.Tensor) from the current DTensorSpec to
@@ -937,8 +875,8 @@ class Redistribute(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
         async_op: bool = False,
-        forward_dtype: Optional[torch.dtype] = None,
-        backward_dtype: Optional[torch.dtype] = None,
+        forward_dtype: torch.dtype | None = None,
+        backward_dtype: torch.dtype | None = None,
     ):
         ctx.async_op = async_op
         ctx.backward_dtype = backward_dtype

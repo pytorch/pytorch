@@ -890,6 +890,42 @@ class TestStridedSharding(DTensorTestBase):
             self.assertEqual(dtensor.full_tensor(), tensor)
 
 
+class Test_StridedShard_Propagation(LocalDTensorTestBase):
+    @property
+    def world_size(self) -> int:
+        return 16
+
+    @with_comms
+    def test_einsum_propagation(self):
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = init_device_mesh("cpu", (4, 4))
+            input_tensor = torch.arange(16 * 16).float().view(16, 16)
+            A = distribute_tensor(input_tensor, mesh, [Shard(1), Shard(1)])
+            B1 = distribute_tensor(input_tensor, mesh, [Shard(0), Shard(0)])
+            B2 = distribute_tensor(
+                input_tensor, mesh, [_StridedShard(0, split_factor=4), Shard(0)]
+            )
+            res1 = A @ B1
+            res2 = A @ B2
+            self.assertEqual(res1.full_tensor(), res2.full_tensor())
+            self.assertEqual(res1.full_tensor(), res2.full_tensor())
+
+    @with_comms
+    def test_pointwise_propagation(self):
+        with LocalTensorMode(ranks=self.world_size):
+            mesh = init_device_mesh("cpu", (2, 2, 2, 2))
+            input_tensor = torch.arange(32).float().view(2, 16)
+            A = distribute_tensor(
+                input_tensor,
+                mesh,
+                [Shard(1), _StridedShard(1, split_factor=2), Shard(1), Shard(0)],
+            )
+            res1 = torch.sum(A, dim=0)
+            self.assertEqual(res1.full_tensor(), torch.sum(input_tensor, dim=0))
+            res2 = torch.sum(A, dim=1)
+            self.assertEqual(res2.full_tensor(), torch.sum(input_tensor, dim=1))
+
+
 class Test_StridedShard_with_shard_order(LocalDTensorTestBase):
     @property
     def world_size(self) -> int:
