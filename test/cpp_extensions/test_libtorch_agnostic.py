@@ -871,19 +871,52 @@ if not IS_WINDOWS:
 
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
-        def test_std_cuda_check_error(self, device):
-            """Test that STD_CUDA_CHECK throws std::runtime_error with CUDA error message."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+        @parametrize("show_cpp_stacktraces", [False, True])
+        def test_std_cuda_check_error(self, device, show_cpp_stacktraces):
+            """Test that STD_CUDA_CHECK throws std::runtime_error with CUDA error message.
 
-            # This should raise a RuntimeError with the full CUDA error message
-            # including "invalid device ordinal" and help text
-            # Use [\s\S]* to match across newlines
-            with self.assertRaisesRegex(
-                RuntimeError,
-                r"CUDA error: invalid device ordinal[\s\S]*"
-                r"GPU device may be out of range, do you have enough GPUs\?",
-            ):
-                libtorch_agnostic.ops.test_std_cuda_check_error()
+            When TORCH_SHOW_CPP_STACKTRACES=1, the error should include a C++ stack trace.
+            Since this env var is cached on first use, we use subprocess to test both cases.
+            """
+            import os
+            import subprocess
+            import sys
+
+            test_script = """
+import torch
+import libtorch_agnostic_2_10 as libtorch_agnostic
+
+try:
+    libtorch_agnostic.ops.test_std_cuda_check_error()
+except RuntimeError as e:
+    print(str(e))
+"""
+            env = os.environ.copy()
+            env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+
+            result = subprocess.run(
+                [sys.executable, "-c", test_script],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            error_message = result.stdout + result.stderr
+
+            self.assertIn("CUDA error: invalid device ordinal", error_message)
+            self.assertIn(
+                "GPU device may be out of range, do you have enough GPUs?",
+                error_message,
+            )
+
+            if show_cpp_stacktraces:
+                self.assertIn("C++ CapturedTraceback:", error_message)
+                self.assertRegex(
+                    error_message,
+                    r"Exception raised from test_std_cuda_check_error at .*test_std_cuda_check\.cu:\d+",
+                )
+            else:
+                self.assertNotIn("C++ CapturedTraceback:", error_message)
 
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
@@ -895,14 +928,48 @@ if not IS_WINDOWS:
 
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
-        def test_std_cuda_kernel_launch_check_error(self, device):
-            """Test that STD_CUDA_KERNEL_LAUNCH_CHECK throws std::runtime_error for invalid kernel launches."""
-            import libtorch_agnostic_2_10 as libtorch_agnostic
+        @parametrize("show_cpp_stacktraces", [False, True])
+        def test_std_cuda_kernel_launch_check_error(self, device, show_cpp_stacktraces):
+            """Test that STD_CUDA_KERNEL_LAUNCH_CHECK throws std::runtime_error for invalid kernel launches.
 
-            with self.assertRaisesRegex(
-                RuntimeError, r"CUDA error: invalid configuration argument"
-            ):
-                libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_error()
+            When TORCH_SHOW_CPP_STACKTRACES=1, the error should include a C++ stack trace.
+            Since this env var is cached on first use, we use subprocess to test both cases.
+            """
+            import os
+            import subprocess
+            import sys
+
+            test_script = """
+import torch
+import libtorch_agnostic_2_10 as libtorch_agnostic
+
+try:
+    libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_error()
+except RuntimeError as e:
+    print(str(e))
+"""
+            env = os.environ.copy()
+            env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+
+            result = subprocess.run(
+                [sys.executable, "-c", test_script],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            error_message = result.stdout + result.stderr
+
+            self.assertIn("CUDA error: invalid configuration argument", error_message)
+
+            if show_cpp_stacktraces:
+                self.assertIn("C++ CapturedTraceback:", error_message)
+                self.assertRegex(
+                    error_message,
+                    r"Exception raised from test_std_cuda_kernel_launch_check_error at .*test_std_cuda_check\.cu:\d+",
+                )
+            else:
+                self.assertNotIn("C++ CapturedTraceback:", error_message)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

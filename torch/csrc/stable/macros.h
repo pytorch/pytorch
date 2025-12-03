@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include <string>
 
+// Users of this macro are expected to include cuda_runtime.h
 #define STD_CUDA_CHECK(EXPR)                      \
   do {                                            \
     const cudaError_t __err = EXPR;               \
@@ -21,4 +22,5 @@
     }                                             \
   } while (0)
 
+// Users of this macro are expected to include cuda_runtime.h
 #define STD_CUDA_KERNEL_LAUNCH_CHECK() STD_CUDA_CHECK(cudaGetLastError())
