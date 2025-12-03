@@ -718,12 +718,12 @@ def download_url_to_file(
     """
     file_size = None
     req = Request(url, headers={"User-Agent": "torch.hub"})
-    u = urlopen(req)
-    meta = u.info()
-    if hasattr(meta, "getheaders"):
-        content_length = meta.getheaders("Content-Length")
-    else:
-        content_length = meta.get_all("Content-Length")
+    with urlopen(req) as u:
+        meta = u.info()
+        if hasattr(meta, "getheaders"):
+            content_length = meta.getheaders("Content-Length")
+        else:
+            content_length = meta.get_all("Content-Length")
     if content_length is not None and len(content_length) > 0:
         file_size = int(content_length[0])
 
