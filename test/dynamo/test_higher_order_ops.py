@@ -4631,6 +4631,53 @@ class GraphModule(torch.nn.Module):
         )
         self.assertEqual(actual, expected)
 
+    def test_functional_call_with_cond(self):
+        """Test that functional_call works with torch.cond"""
+        mod = nn.Linear(10, 10)
+        params = dict(mod.named_parameters())
+        buffers = dict(mod.named_buffers())
+        x = torch.randn(10)
+
+        def step_fn(x):
+            return torch.func.functional_call(mod, (params, buffers), (x,))
+
+        def run_logic(pred, x):
+            return torch.cond(
+                pred,
+                step_fn,  # True branch: calls functional_call
+                lambda x: x,  # False branch: identity
+                [x],  # Operands
+            )
+
+        # Should not raise UncapturedHigherOrderOpError
+        self._compile_check(run_logic, (torch.tensor(True), x), fullgraph=True)
+
+        # Test false branch
+        result_false = torch.compile(run_logic, fullgraph=True)(torch.tensor(False), x)
+        self.assertTrue(torch.allclose(result_false, x))
+
+    def test_functional_call_with_scan(self):
+        """Test that functional_call works with torch.scan"""
+        from torch._higher_order_ops.scan import scan
+
+        mod = nn.Linear(10, 10)
+        params = dict(mod.named_parameters())
+        buffers = dict(mod.named_buffers())
+
+        def combine_fn(carry, x):
+            # Use functional_call in combine function
+            y = torch.func.functional_call(mod, (params, buffers), (x,))
+            return carry + y, y
+
+        init = torch.zeros(10)
+        xs = torch.randn(5, 10)  # 5 steps
+
+        def run_scan(xs):
+            return scan(combine_fn, init, xs, dim=0)
+
+        # Should not raise UncapturedHigherOrderOpError
+        self._compile_check(run_scan, (xs,), fullgraph=True)
+
     def test_grad(self):
         counters.clear()
 
