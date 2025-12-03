@@ -443,6 +443,7 @@ class TestDTensorDebugMode(TestCase):
                 self.xyz = torch.nn.Linear(4, 4)
 
             def forward(self, x):
+                DebugMode.annotate("Bar.forward")
                 return self.xyz(self.abc(x))
 
         mod = Bar()
@@ -454,6 +455,7 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
     [nn.Mod] Bar
+    [annotate] Bar.forward
       [nn.Mod] Bar.abc
         [nn.Mod] Bar.abc.l1
           aten::t(t: f32[4, 4])
@@ -471,7 +473,9 @@ class TestDTensorDebugMode(TestCase):
             out.backward()
 
         sum_op = [
-            op for op in debug_mode.operators if str(op.op) == "aten.sum.dim_IntList"
+            op
+            for op in debug_mode.operators
+            if isinstance(op, _OpCall) and str(op.op) == "aten.sum.dim_IntList"
         ][-1]
         self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
         self.assertTrue(

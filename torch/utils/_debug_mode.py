@@ -543,6 +543,25 @@ class _TritonKernelCall(_DebugCall):
         yield from [self.kernel_name, (), self.kwargs_str, self.call_depth]
 
 
+class _AnnotateCall(_DebugCall):
+    """Custom annotation call"""
+
+    def __init__(self, tag: Any, call_depth: int, stack: bool = False) -> None:
+        super().__init__(call_depth, stack=stack)
+        self.tag = tag
+
+    def render(self, attributes: list[str]) -> str:
+        return f"[annotate] {self.tag}"
+
+    def __iter__(self):
+        yield from [
+            f"[nn.Mod] {self.tag}",
+            (),
+            {},
+            self.call_depth,
+        ]
+
+
 def _run_hook(hook, *args):
     out = hook(*args)
     assert out is None or isinstance(out, dict)
@@ -1006,6 +1025,16 @@ class DebugMode(TorchDispatchMode):
     @property
     def logs(self):
         return list(self.operators)
+
+    @staticmethod
+    def annotate(tag: Any) -> None:
+        """
+        If an active DebugMode exists, adds an "[annotate] <tag>" entry to the logs. Useful for contextualizing logs.
+        """
+        if (debug_mode := get_active_debug_mode()) is None:
+            return
+        call = _AnnotateCall(tag, debug_mode.call_depth, debug_mode.record_stack_trace)
+        debug_mode.operators.append(call)
 
     @staticmethod
     def check_hash_mismatches(
