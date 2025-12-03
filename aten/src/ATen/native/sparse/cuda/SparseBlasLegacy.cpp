@@ -54,13 +54,13 @@ void s_addmm_out_csr_sparse_dense_cuda_worker(int64_t nnz, int64_t m, int64_t n,
           k,
           nnz,
           cast_alpha,
-          values.data_ptr<scalar_t>(),
-          crow_indices.data_ptr<int32_t>(),
-          col_indices.data_ptr<int32_t>(),
-          dense_.data_ptr<scalar_t>(),
+          values.mutable_data_ptr<scalar_t>(),
+          crow_indices.mutable_data_ptr<int32_t>(),
+          col_indices.mutable_data_ptr<int32_t>(),
+          dense_.mutable_data_ptr<scalar_t>(),
           (transpose_dense == 'n' ? dense_.stride(1) : dense_.stride(0)),
           cast_beta,
-          r__.data_ptr<scalar_t>(),
+          r__.mutable_data_ptr<scalar_t>(),
           r__.stride(1));
 
         if (!at::sparse::is_same_tensor(r__, r_)) {

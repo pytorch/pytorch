@@ -37,7 +37,7 @@ std::vector<int64_t> NestedTensor_get_max_size_from_size_tensor(
   if (sizes.dim() == 0) {
     return {};
   }
-  const auto sizes_ptr = sizes.data_ptr<int64_t>();
+  const auto sizes_ptr = sizes.const_data_ptr<int64_t>();
   const auto sizes_size_0 = sizes.sizes()[0];
   const auto sizes_size_1 = sizes.sizes()[1];
   TORCH_INTERNAL_ASSERT(sizes_size_1 > 0);
@@ -88,7 +88,7 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
   const auto& sizes = self_impl->get_nested_sizes();
   const auto& strides = self_impl->get_nested_strides();
   const auto offsets = self_impl->get_storage_offsets();
-  int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
+  int64_t *offsets_ptr = offsets.mutable_data_ptr<int64_t>();
   // Account for the implicit batch dim
   --dim;
   int64_t tensor_dim = sizes.size(1);
@@ -97,8 +97,8 @@ std::vector<Tensor> chunk_nested_tensor(const Tensor& self, int64_t chunks, int6
       auto new_strides = strides.clone();
       // This copies offsets so we are safe to move
       auto new_offsets = offsets.clone();
-      int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
-      int64_t *new_offsets_ptr = new_offsets.data_ptr<int64_t>();
+      int64_t *size_ptr = new_sizes.mutable_data_ptr<int64_t>();
+      int64_t *new_offsets_ptr = new_offsets.mutable_data_ptr<int64_t>();
       // Get start val for each split
       int64_t start_val = split_idx * split_size;
       for (int64_t i : c10::irange(n_tensors)) {
@@ -143,7 +143,7 @@ std::vector<Tensor> split_with_sizes_nested(
   const auto& sizes = self_impl->get_nested_sizes();
   const auto& strides = self_impl->get_nested_strides();
   const auto offsets = self_impl->get_storage_offsets();
-  int64_t *offsets_ptr = offsets.data_ptr<int64_t>();
+  int64_t *offsets_ptr = offsets.mutable_data_ptr<int64_t>();
   // Account for the implicit batch dim
   --dim;
   int64_t tensor_dim = sizes.size(1);
@@ -153,8 +153,8 @@ std::vector<Tensor> split_with_sizes_nested(
     auto new_sizes = sizes.clone();
     auto new_strides = strides.clone();
     auto new_offsets = offsets.clone();
-    int64_t *size_ptr = new_sizes.data_ptr<int64_t>();
-    int64_t *new_offsets_ptr = new_offsets.data_ptr<int64_t>();
+    int64_t *size_ptr = new_sizes.mutable_data_ptr<int64_t>();
+    int64_t *new_offsets_ptr = new_offsets.mutable_data_ptr<int64_t>();
     // Get start val for each split
     for (int64_t i : c10::irange(n_tensors)) {
       const int64_t index = i * tensor_dim + dim;
