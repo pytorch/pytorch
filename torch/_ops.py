@@ -1043,28 +1043,6 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             if _may_use_fallthrough_instead_of_fallback(key)
         ]
 
-    @contextlib.contextmanager
-    def _register_as_effectful_op_temporarily(self):
-        from torch._higher_order_ops.effects import (
-            _EffectType,
-            _get_effect,
-            _register_effectful_op,
-        )
-
-        try:
-            # We don't want to register the effect if there already exists a
-            # registration, especially if the registration is None (explicitly
-            # no effect)
-            register_tmp_effect = _get_effect(self) is None
-            handle = None
-            if register_tmp_effect:
-                handle = _register_effectful_op(self, _EffectType.ORDERED)
-            yield
-        finally:
-            if register_tmp_effect:
-                assert handle is not None
-                handle.destroy()
-
     # Use positional-only argument to avoid naming collision with aten ops arguments
     # that are named "self". This way, all the aten ops can be called by kwargs.
     def __call__(self, /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
@@ -1072,17 +1050,7 @@ class TorchBindOpOverload(OpOverload[_P, _T]):
             # When any inputs are FakeScriptObject, we need to
             # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher
             # because C++ dispatcher will check the schema and cannot recognize FakeScriptObject.
-            #
-            # Note:
-            # 1. We only register the torchbind op temporarily as effectful op because we only want
-            #    the effect token functionalization logic to be applied during tracing. Otherwise, the behavior
-            #    of the eagerly executing the op might change after tracing.
-            # 2. We don't want to register the op as effectful for all torchbind ops in ctor because this might
-            #    cause unexpected behavior for some autograd.profiler ops e.g. profiler._record_function_exit._RecordFunction.
-            with self._register_as_effectful_op_temporarily():
-                return self._dispatch_in_python(
-                    self._fallthrough_keys(), *args, **kwargs
-                )
+            return self._dispatch_in_python(self._fallthrough_keys(), *args, **kwargs)
         return self._op(*args, **kwargs)
 
     def _dispatch_in_python(
