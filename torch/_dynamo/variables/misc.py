@@ -691,7 +691,7 @@ class AutogradFunctionVariable(VariableTracker):
 
         def visit(vt):
             nonlocal requires_grad
-            if isinstance(vt, variables.TensorVariable):
+            if vt.is_tensor():
                 if vt.requires_grad is not False:
                     requires_grad = True
             if isinstance(vt, variables.NNModuleVariable):
@@ -925,10 +925,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     def create(tx: "InstructionTranslator", args=None, kwargs=None):
         needs_input_grad = None
         if args and not kwargs:
-            needs_input_grad = tuple(
-                isinstance(x, variables.TensorVariable) and x.requires_grad
-                for x in args
-            )
+            needs_input_grad = tuple(x.is_tensor() and x.requires_grad for x in args)
         out = tx.output.side_effects.track_object_new(
             None,
             torch.autograd.function.FunctionCtx,
