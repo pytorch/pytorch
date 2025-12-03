@@ -1,15 +1,9 @@
 # Owner(s): ["module: inductor"]
 
-import sys
+import unittest
 
 import torch
 import torch.distributed as dist
-
-
-if not dist.is_available() or not dist.is_nccl_available():
-    print("c10d NCCL not available, skipping tests", file=sys.stderr)
-    sys.exit(0)
-
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,
@@ -17,6 +11,10 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import run_tests
 
 
+@unittest.skipIf(
+    not dist.is_available() or not dist.is_nccl_available(),
+    "c10d NCCL not available, skipping tests",
+)
 class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
     """Test collective autotuning with 2 ranks"""
 
@@ -99,6 +97,10 @@ class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
         dist.destroy_process_group()
 
 
+@unittest.skipIf(
+    not dist.is_available() or not dist.is_nccl_available(),
+    "c10d NCCL not available, skipping tests",
+)
 class TestCollectiveAutotuning4Ranks(MultiProcessTestCase):
     """Test collective autotuning with 4 ranks"""
 
