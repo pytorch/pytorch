@@ -208,32 +208,6 @@ jobs:
       test-matrix: ${{ needs.inductor-smoke-build.outputs.test-matrix }}
     secrets: inherit
 
-  inductor-smoke-build-cuda13:
-    name: inductor-smoke-build-cuda13
-    uses: ./.github/workflows/_linux-build.yml
-    needs:
-      - get-default-label-prefix
-    with:
-      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
-      cuda-arch-list: '8.0'
-      test-matrix: |
-        { include: [
-          { config: "inductor_torchbench_smoketest_perf", shard: 1, num_shards: 1, runner: "linux.aws.a100" },
-        ]}
-      build-additional-packages: "vision audio torchao"
-    secrets: inherit
-
-  inductor-smoke-test-cuda13:
-    name: inductor-smoke-test-cuda13
-    uses: ./.github/workflows/_linux-test.yml
-    needs: inductor-smoke-build-cuda13
-    with:
-      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm80
-      docker-image: ${{ needs.inductor-smoke-build-cuda13.outputs.docker-image }}
-      test-matrix: ${{ needs.inductor-smoke-build-cuda13.outputs.test-matrix }}
-    secrets: inherit
 
   periodic-dynamo-benchmarks-cpu-build:
     name: periodic-dynamo-benchmarks-cpu-build
