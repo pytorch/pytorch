@@ -30,13 +30,13 @@ class XpuScopeProfilerTest(TestCase):
         self.assertTrue("args" in event)
         self.assertTrue(isinstance(event["args"], dict))
 
-        for arg in event["args"].keys():
+        for arg in event["args"]:
             counter[arg] += 1
 
     def check_metrics(self, counter):
         rev_counter = defaultdict(int)
 
-        for metric_name_in_json in counter.keys():
+        for metric_name_in_json in counter:
             metric_name_in_json_valid = sum(
                 metric_name_in_json == metric_name
                 or metric_name_in_json.startswith(metric_name + " [")
@@ -92,7 +92,7 @@ class XpuScopeProfilerTest(TestCase):
                 print(f"{count_c_metrics = }")
 
             metric_name_in_json_valid = sum(
-                name.startswith("metrics: ") for name in count_names.keys()
+                name.startswith("metrics: ") for name in count_names
             )
             self.assertTrue(metric_name_in_json_valid > 0)
 
@@ -121,6 +121,8 @@ class XpuScopeProfilerTest(TestCase):
             r1 = torch.matmul(a, b)
             r2 = torch.add(r1, 1.0)
             result = torch.abs(r2)
+
+        self.assertTrue(result.numel() > 0)
 
         json_file = os.environ.get("JSON_FILE")
 
