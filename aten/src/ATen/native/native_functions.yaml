@@ -1563,8 +1563,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA: clamp_out
-    MPS: clamp_out_mps
+    CPU, CUDA, MTIA, MPS: clamp_out
   tags: pointwise
 
 - func: clamp.Tensor_out(Tensor self, Tensor? min=None, Tensor? max=None, *, Tensor(a!) out) -> Tensor(a!)
@@ -1602,8 +1601,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA: clamp_max_out
-    MPS: clamp_max_out_mps
+    CPU, CUDA, MTIA, MPS: clamp_max_out
   tags: pointwise
 
 - func: clamp_max.Tensor_out(Tensor self, Tensor max, *, Tensor(a!) out) -> Tensor(a!)
@@ -1611,8 +1609,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_max_Tensor_out
-    MPS: clamp_max_Tensor_out_mps
+    CPU, CUDA, MPS: clamp_max_Tensor_out
   tags: pointwise
 
 - func: clamp_min(Tensor self, Scalar min) -> Tensor
@@ -1642,8 +1639,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA, MTIA: clamp_min_out
-    MPS: clamp_min_out_mps
+    CPU, CUDA, MTIA, MPS: clamp_min_out
   tags: pointwise
 
 - func: clamp_min.Tensor_out(Tensor self, Tensor min, *, Tensor(a!) out) -> Tensor(a!)
@@ -1651,8 +1647,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_min_Tensor_out
-    MPS: clamp_min_Tensor_out_mps
+    CPU, CUDA, MPS: clamp_min_Tensor_out
   tags: pointwise
 
 # clip is an alias for clamp
