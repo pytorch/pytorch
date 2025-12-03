@@ -313,6 +313,16 @@ at::Tensor _grouped_mm_mat1_backward(
     c10::Layout mat1_layout,
     std::optional<Tensor> offs,
     const Scalar& alpha);
+std::tuple<Tensor, Tensor, Tensor> _addmm_gelu_backward(
+    const Tensor& grad_activation,
+    const Tensor& grad_pre_activation,
+    bool materialize_pre_activation,
+    const Tensor& pre_activation,
+    const std::optional<Tensor>& mat1,
+    const std::optional<Tensor>& mat2,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const std::array<bool, 3>& grad_input_mask);
 at::Tensor _grouped_mm_mat2_backward(
     const at::Tensor& grad,
     const at::Tensor& mat1,

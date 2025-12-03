@@ -32,6 +32,7 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_addmm_activation_native.h>
+#include <ATen/ops/_addmm_gelu_native.h>
 #include <ATen/ops/_compute_linear_combination_native.h>
 #include <ATen/ops/_convert_weight_to_int4pack_for_cpu_native.h>
 #include <ATen/ops/_dyn_quant_matmul_4bit_native.h>
@@ -196,6 +197,13 @@ TORCH_META_FUNC(addmm)(const Tensor& self, const Tensor& mat1, const Tensor& mat
 
 TORCH_META_FUNC(_addmm_activation)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu) {
   ADDMM_META();
+}
+
+TORCH_META_FUNC(_addmm_gelu)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool materialize_pre_activation) {
+  ADDMM_META();
+  if (materialize_pre_activation) {
+    set_output_raw_strided(1, {mat1.sizes()[0], mat2.sizes()[1]}, {}, mat1.options(), names);
+  }
 }
 
 TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
