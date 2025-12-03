@@ -1423,6 +1423,45 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
             )
 
+        @register(torch.autograd.grad)
+        def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
+            from .. import graph_break_hints
+            from .tensor import TensorVariable
+
+            tx.output.uses_autograd_grad = True
+
+            # Check if any graph input has external grad_fn
+            # If a tensor is a graph input (placeholder) AND has grad_fn,
+            # then its grad_fn was created outside the compiled region
+            for source, var in tx.output.input_source_to_var.items():
+                if source in tx.output.autograd_grad_checked_sources:
+                    continue
+                tx.output.autograd_grad_checked_sources.add(source)
+
+                if isinstance(var, TensorVariable) and var.has_grad_fn:
+                    # NOTE: This is an overly conservative check. It is actually safe to
+                    # trace autograd.grad if the non-leaf input with grad_fn is NOT
+                    # reachable from the autograd graph of the tensors being differentiated.
+                    # A less conservative check would analyze the autograd graph connectivity.
+                    unimplemented(
+                        gb_type="autograd.grad with external grad_fn input",
+                        context="",
+                        explanation=(
+                            "torch.autograd.grad() cannot be used when the compiled function "
+                            "receives tensors with grad_fn created outside the compiled region. "
+                            "The autograd graph cannot extend beyond the compiled region boundary. "
+                            "Note: This is a conservative check. It may be safe if the input with "
+                            "grad_fn is not reachable from the autograd graph of the differentiated tensors."
+                        ),
+                        hints=[
+                            "Ensure all tensor inputs to the compiled function are leaf tensors.",
+                            "Or move the autograd.grad() call outside the compiled region.",
+                            *graph_break_hints.SUPPORTABLE,
+                        ],
+                    )
+
+            return None
+
         return handlers
 
     def call_function(
