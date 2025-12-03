@@ -44,6 +44,9 @@ from torch.testing._internal.distributed._shard.sharded_tensor import (
 
 
 device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
+    device_type
+)
 
 
 if TEST_WITH_DEV_DBG_ASAN:
@@ -79,7 +82,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
     def world_size(self) -> int:
         return 2
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_tensor_metadata_with_missing_rank_spec(self) -> None:
@@ -96,7 +99,7 @@ class TestDistributedCheckpointing(ShardedTensorTestBase):
 
         self.assertEqual(1, len(st_md.chunks))
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_default_metadata(self) -> None:
@@ -244,7 +247,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
             ],
         )
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_dummy_writer_works(self) -> None:
@@ -256,7 +259,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
         save_state_dict(state_dict, FaultyStorageWriter({}))
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(2)
     @requires_accelerator_dist_backend()
     def test_dummy_reader_works(self) -> None:
@@ -319,7 +322,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
 
         self._test_dist_failure(_load, kwargs)
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend()
     def test_save_error_handling(self) -> None:
@@ -353,7 +356,7 @@ class TestDistributedFailure(ShardedTensorTestBase):
         self._test_save(state_dict, fail_write_data=[0])
         self._test_save(state_dict, fail_write_data_async=[0])
 
-    @with_comms(init_rpc=False)
+    @with_comms(init_rpc=False, backend=backend)
     @skip_if_lt_x_gpu(4)
     @requires_accelerator_dist_backend()
     def test_load_error_handling(self) -> None:
