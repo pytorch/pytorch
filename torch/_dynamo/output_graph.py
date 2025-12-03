@@ -2079,9 +2079,7 @@ class OutputGraph(OutputGraphCommon):
             tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
 
-    def _validate_autograd_grad_outputs(
-        self, rv: list["VariableTracker"]
-    ) -> None:
+    def _validate_autograd_grad_outputs(self, rv: list["VariableTracker"]) -> None:
         """
         Validate that if torch.autograd.grad is used in the graph and outputs
         require grad, we trigger a graph break.
