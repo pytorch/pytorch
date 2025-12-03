@@ -495,6 +495,17 @@ class DTensorExportTest(TestCase):
             2,
         )
 
+        # check that original_dtensor meta exist on node.meta
+        nodes_with_dtensor_meta = []
+        num_addmm_nodes = 0
+        for node in joint_gm.graph.nodes:
+            if "original_dtensor" in node.meta:
+                nodes_with_dtensor_meta.append(node.name)
+                if node.target == torch.ops.aten.addmm.default:
+                    num_addmm_nodes += 1
+        self.assertEqual(num_addmm_nodes, 4)
+        self.assertEqual(len(nodes_with_dtensor_meta), 20)
+
     def test_union_typed_annotation(self):
         def fn(leaf: torch.Tensor | DTensor):
             def nest_fn(leaf: torch.Tensor | DTensor):
