@@ -1692,9 +1692,11 @@ class TritonOverrides(OpOverrides):
         else:
             dtype = None
         if (
-            torch.version.hip
+            config.use_fast_math
+            and torch.version.hip
             and get_triton_version() > (3, 5)
             and dtype != torch.float64
+            and dtype is not None
         ):
             # Requires upstream Triton 3.6+ for latest fast_tanhf support
             # https://github.com/triton-lang/triton/pull/8551
