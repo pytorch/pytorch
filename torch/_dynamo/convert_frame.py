@@ -26,6 +26,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import cProfile
+import dataclasses
 import dis
 import functools
 import gc
@@ -932,6 +933,7 @@ class GraphRuntimeEnv:
     used_globals: dict[str, Any]
     closure: Optional[tuple[Any, ...]]
     argdefs: Optional[tuple[Any, ...]]
+    external_refs: set[str] = dataclasses.field(default_factory=set)
 
     def forward_callable(
         self,
@@ -950,12 +952,28 @@ class GraphRuntimeEnv:
             **(extra_globals or {}),
             backend_id: compiled_fn,
         }
+
+        # check that all external references are available
+        self._check_external_refs(f_globals)
+
         return types.FunctionType(
             self.bytecode,
             f_globals,
             closure=self.closure,
             argdefs=self.argdefs,
         )
+
+    def _check_external_refs(self, f_globals: dict[str, Any]) -> None:
+        missing_refs = []
+        for ref in self.external_refs:
+            if ref not in f_globals:
+                missing_refs.append(ref)
+
+        if missing_refs:
+            raise RuntimeError(
+                f"Missing required external references: {missing_refs}. "
+                "Please load AOT compiled function with `f_globals=<enclosing global scope>`"
+            )
 
 
 @dataclass
@@ -1003,13 +1021,36 @@ class GraphCaptureOutput:
             if global_name in self.f_globals:
                 used_globals[global_name] = self.f_globals[global_name]
 
+        # Scan bytecode for all external references
+        external_refs = self._get_external_refs(self.bytecode)
+
         return GraphRuntimeEnv(
             bytecode=self.bytecode,
             import_sources=self.import_sources,
             used_globals=used_globals,
             closure=self.closure,
             argdefs=self.argdefs,
+            external_refs=external_refs,
         )
+
+    @staticmethod
+    def _get_external_refs(bytecode: types.CodeType) -> set[str]:
+        import dis
+
+        external_refs: set[str] = set()
+
+        # Get all instructions from the bytecode
+        for instruction in dis.get_instructions(bytecode):
+            # LOAD_GLOBAL loads a global variable or a builtin
+            if instruction.opname == "LOAD_GLOBAL":
+                if instruction.argval:
+                    external_refs.add(instruction.argval)
+            # LOAD_NAME loads a name (used in module-level code, less common in functions)
+            elif instruction.opname == "LOAD_NAME":
+                if instruction.argval:
+                    external_refs.add(instruction.argval)
+
+        return external_refs
 
 
 @dataclass

@@ -23,6 +23,12 @@
 #endif
 
 namespace at::native {
+#ifndef PYTORCH_JIT_COMPILE_SHADERS
+static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+#else
+#include <ATen/native/mps/TensorCompare_metallib.h>
+#endif
+
 namespace mps {
 
 struct CachedGraph : public MPSCachedGraph {
@@ -374,10 +380,6 @@ static void is_posneginf_helper(TensorIteratorBase& iter, bool is_neg) {
 } // namespace mps
 
 // APIs exposed to at::native scope
-TORCH_IMPL_FUNC(clamp_Tensor_out_mps)
-(const Tensor& input_t, const OptionalTensorRef min, const OptionalTensorRef max, const Tensor& output_t) {
-  mps::clamp_tensor_out_mps(input_t, min, max, output_t, __func__);
-}
 
 TORCH_IMPL_FUNC(clamp_out_mps)
 (const Tensor& input_t, const OptionalScalarRef min, const OptionalScalarRef max, const Tensor& output_t) {
@@ -604,8 +606,13 @@ static void isposinf_kernel_mps(TensorIteratorBase& iter) {
   mps::is_posneginf_helper(iter, false);
 }
 
+static void clamp_kernel_mps(TensorIteratorBase& iter) {
+  lib.exec_ternary_kernel(iter, "clamp");
+}
+
 REGISTER_DISPATCH(where_kernel, &where_kernel_mps)
 REGISTER_DISPATCH(isneginf_stub, &isneginf_kernel_mps)
 REGISTER_DISPATCH(isposinf_stub, &isposinf_kernel_mps)
+REGISTER_DISPATCH(clamp_stub, &clamp_kernel_mps)
 
 } // namespace at::native
