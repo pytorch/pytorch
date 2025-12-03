@@ -1,5 +1,4 @@
 #include <c10/util/Backtrace.h>
-#include <c10/util/FileSystem.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Lazy.h>
 #include <c10/util/Logging.h>
@@ -479,7 +478,8 @@ MessageLogger::MessageLogger(
           << std::setfill('0') << ' ' << std::setw(2) << timeinfo->tm_hour
           << ':' << std::setw(2) << timeinfo->tm_min << ':' << std::setw(2)
           << timeinfo->tm_sec << '.' << std::setw(9) << ns << ' '
-          << c10::filesystem::path(file).filename() << ':' << line << "] ";
+          << c10::detail::StripBasename(std::string(file)) << ':' << line
+          << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.

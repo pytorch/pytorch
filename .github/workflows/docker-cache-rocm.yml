@@ -7,9 +7,18 @@ on:
     types:
       - completed
   workflow_dispatch:
+    inputs:
+      branch:
+        type: string
+        description: Branch corresponding to the docker images being cached
+        required: true
+      run_id:
+        type: string
+        description: Workflow run id to pull artifacts from
+        required: true
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name }}
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
   cancel-in-progress: true
 
 permissions:
@@ -28,9 +37,9 @@ jobs:
       pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
     steps:
       - name: Download artifacts
-        uses: actions/download-artifact@v4.1.7
+        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e #4.1.7
         with:
-          run-id: ${{ github.event.workflow_run.id }}
+          run-id: ${{ github.event.workflow_run.id || github.event.inputs.run_id }}
           path: ./docker-builds-artifacts
           merge-multiple: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -51,8 +60,8 @@ jobs:
         runner: [linux.rocm.gfx942.docker-cache]
         docker-image: [
           "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}",
-          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
+          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
+          #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
         ]
     runs-on: "${{ matrix.runner }}"
     steps:
@@ -91,7 +100,7 @@ jobs:
           docker_image_tag=${{ matrix.docker-image }}
           docker_image_tag="${docker_image_tag#*:}" # Remove everything before and including first ":"
           docker_image_tag="${docker_image_tag%-*}" # Remove everything after and including last "-"
-          ref_name=${{ github.event.workflow_run.head_branch }}
+          ref_name=${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
           if [[ $ref_name =~ "release/" ]]; then
             ref_suffix="release"
           elif [[ $ref_name == "main" ]]; then
