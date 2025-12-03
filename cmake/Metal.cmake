@@ -20,9 +20,9 @@ execute_process(
 
 # Check for NAX(Neural Accelerator) support based on Metal version and macOS SDK version
 if(MPS_METAL_VERSION GREATER_EQUAL 400 AND MACOS_SDK_VERSION GREATER_EQUAL 26.2)
-    set(MPS_ENABLE_NAX TRUE)
+    set(MPS_ENABLE_NAX TRUE CACHE BOOL "Enable NAX support for MPS")
 else()
-    set(MPS_ENABLE_NAX FALSE)
+    set(MPS_ENABLE_NAX FALSE CACHE BOOL "Enable NAX support for MPS")
 endif()
 
 set(METAL_CFLAGS -Wall -Wextra -fno-fast-math)
