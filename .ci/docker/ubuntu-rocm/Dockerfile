@@ -66,11 +66,18 @@ RUN rm install_rocm_magma.sh
 ADD ./common/install_miopen.sh install_miopen.sh
 RUN if [ "${ROCM_VERSION}" != "nightly" ]; then bash ./install_miopen.sh ${ROCM_VERSION}; fi && rm install_miopen.sh
 
-# Set default ENV for traditional builds - will be overridden by entrypoint.sh for TheRock
-ENV ROCM_PATH /opt/rocm
-ENV PATH /opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
-# Note: MAGMA_HOME only for traditional ROCm - theRock installations don't include MAGMA
-ENV MAGMA_HOME /opt/rocm/magma
+# Set ROCm environment variables
+# For theRock (nightly), install_rocm.sh writes /etc/rocm_env.sh which is sourced by entrypoint
+# For traditional ROCm, we set the standard paths
+# Note: We append to /etc/bash.bashrc so the env is available in all bash sessions
+RUN if [ "${ROCM_VERSION}" = "nightly" ] && [ -f /etc/rocm_env.sh ]; then \
+      cat /etc/rocm_env.sh >> /etc/bash.bashrc; \
+    else \
+      echo 'export ROCM_PATH=/opt/rocm' >> /etc/bash.bashrc && \
+      echo 'export ROCM_HOME=/opt/rocm' >> /etc/bash.bashrc && \
+      echo 'export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:${PATH}' >> /etc/bash.bashrc && \
+      echo 'export MAGMA_HOME=/opt/rocm/magma' >> /etc/bash.bashrc; \
+    fi
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
 

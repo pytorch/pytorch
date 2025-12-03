@@ -71,6 +71,20 @@ install_ubuntu() {
       export PATH="${ROCM_BIN}:${PATH}"
       export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:${CMAKE_PREFIX_PATH:-}"
 
+      # Write environment to /etc/environment for all processes (used by docker exec)
+      # Note: /etc/environment uses KEY=value format without 'export'
+      echo "ROCM_PATH=${ROCM_HOME}" >> /etc/environment
+      echo "ROCM_HOME=${ROCM_HOME}" >> /etc/environment
+      
+      # Also write to /etc/profile.d/ for shell sessions
+      cat > /etc/profile.d/rocm.sh << ROCM_ENV
+export ROCM_PATH="${ROCM_HOME}"
+export ROCM_HOME="${ROCM_HOME}"
+export PATH="${ROCM_BIN}:\${PATH}"
+export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+ROCM_ENV
+      chmod +x /etc/profile.d/rocm.sh
+
       echo "install_rocm.sh: TheRock nightly ROCm install complete"
       exit 0
     fi
