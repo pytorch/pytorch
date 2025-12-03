@@ -54,7 +54,6 @@ _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
-TEST_MULTIACCELERATOR = torch.accelerator.device_count() >= 2
 
 
 class RegularFuncWrapper:
