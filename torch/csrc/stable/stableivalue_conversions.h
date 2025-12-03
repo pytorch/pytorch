@@ -485,7 +485,7 @@ struct ToImpl<ScalarType> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    int32_t shim_scalartype = to<int32_t>(val);
+    int32_t shim_scalartype = torch::stable::detail::to<int32_t>(val);
     if (shim_scalartype == aoti_torch_dtype_uint8()) {
       return ScalarType::Byte;
     } else if (shim_scalartype == aoti_torch_dtype_int8()) {
@@ -544,7 +544,7 @@ struct ToImpl<DeviceType> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    int32_t shim_devicetype = to<int32_t>(val);
+    int32_t shim_devicetype = torch::stable::detail::to<int32_t>(val);
     if (shim_devicetype == aoti_torch_device_type_cpu()) {
       return DeviceType::CPU;
     } else if (shim_devicetype == aoti_torch_device_type_cuda()) {
@@ -588,7 +588,7 @@ struct ToImpl<std::optional<T>> {
       StableIValue val,
       uint64_t extension_build_version,
       bool is_internal) {
-    auto sivp = to<StableIValue*>(val);
+    auto sivp = torch::stable::detail::to<StableIValue*>(val);
 
     // sivp is either nullptr or a pointer to a StableIValue
     if (sivp == nullptr) {
@@ -613,7 +613,8 @@ struct ToImpl<torch::stable::Tensor> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    return torch::stable::Tensor(to<AtenTensorHandle>(val));
+    return torch::stable::Tensor(
+        torch::stable::detail::to<AtenTensorHandle>(val));
   }
 };
 
@@ -629,7 +630,7 @@ struct ToImpl<Layout> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    int32_t shim_layout = to<int32_t>(val);
+    int32_t shim_layout = torch::stable::detail::to<int32_t>(val);
     if (shim_layout == aoti_torch_layout_strided()) {
       return Layout::Strided;
     } else if (shim_layout == aoti_torch_layout_sparse_coo()) {
@@ -663,7 +664,7 @@ struct ToImpl<MemoryFormat> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    int32_t shim_memory_format = to<int32_t>(val);
+    int32_t shim_memory_format = torch::stable::detail::to<int32_t>(val);
     if (shim_memory_format == aoti_torch_memory_format_contiguous_format()) {
       return MemoryFormat::Contiguous;
     } else if (
@@ -695,7 +696,7 @@ struct ToImpl<std::vector<T>> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    auto list_handle = to<StableListHandle>(val);
+    auto list_handle = torch::stable::detail::to<StableListHandle>(val);
     size_t size;
     try {
       TORCH_ERROR_CODE_CHECK(torch_list_size(list_handle, &size));
@@ -704,7 +705,7 @@ struct ToImpl<std::vector<T>> {
       for (size_t i = 0; i < size; i++) {
         StableIValue element;
         TORCH_ERROR_CODE_CHECK(torch_list_get_item(list_handle, i, &element));
-        result.push_back(to<T>(element));
+        result.push_back(torch::stable::detail::to<T>(element));
       }
       TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       return result;
@@ -729,7 +730,8 @@ struct ToImpl<torch::stable::Device> {
     // Unpack: lower 32 bits = device index, upper 32 bits = device type (shim)
     int32_t device_index = static_cast<int32_t>(val & 0xFFFFFFFF);
     StableIValue device_type_shim = (val >> 32) & 0xFFFFFFFF;
-    DeviceType device_type = to<DeviceType>(device_type_shim);
+    DeviceType device_type =
+        torch::stable::detail::to<DeviceType>(device_type_shim);
     return torch::stable::Device(device_type, device_index);
   }
 };
@@ -742,7 +744,7 @@ struct ToImpl<std::string> {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
-    StringHandle handle = to<StringHandle>(val);
+    StringHandle handle = torch::stable::detail::to<StringHandle>(val);
     size_t length;
     TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
     const char* data;
