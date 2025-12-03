@@ -2451,10 +2451,11 @@ def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone
                 extra_ldflags.append('-lamdhip64')
     if with_sycl:
         if IS_WINDOWS:
-            extra_ldflags.append('c10_xpu.lib')
-            extra_ldflags.append('torch_xpu.lib')
             extra_ldflags.append(f'/LIBPATH:{_join_sycl_home("lib")}')
             extra_ldflags.append('sycl.lib')
+        else:
+            extra_ldflags.append(f'-L{_join_sycl_home("lib")}')
+            extra_ldflags.append('-lsycl')
     return extra_ldflags
 
 
