@@ -14,11 +14,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-<<<<<<< HEAD
 from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, TypeVar, Union
-=======
-from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, TypeVar
->>>>>>> 2135c94d546 (Add linter error handling)
 
 import torch
 from torch.utils import _pytree as pytree
@@ -497,11 +493,7 @@ class GuardsCheckpointState:
     def __init__(self, dynamo_guards: OrderedSet[Guard]) -> None:
         self.dynamo_guards = dynamo_guards
 
-<<<<<<< HEAD
-    def diff(self, other: GuardsCheckpointState) -> Optional[set[Guard]]:
-=======
     def diff(self, other: GuardsCheckpointState) -> Optional[OrderedSet[Guard]]:
->>>>>>> 2135c94d546 (Add linter error handling)
         """
         Produces a delta against another GuardsCheckpointState.
 
@@ -614,11 +606,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-<<<<<<< HEAD
-    def __init__(self, inner: Optional[set[Guard]] = None) -> None:
-=======
     def __init__(self, inner: Optional[OrderedSet[Guard]] = None) -> None:
->>>>>>> 2135c94d546 (Add linter error handling)
         if inner is None:
             self.inner: OrderedSet[Guard] = OrderedSet()
         else:
