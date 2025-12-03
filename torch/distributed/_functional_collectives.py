@@ -172,6 +172,43 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     return _maybe_wrap_tensor(tensor)
 
 
+def _maybe_view_chunk_cat(
+    res: torch.Tensor, group_size: int, gather_dim: int
+) -> torch.Tensor:
+    """
+    Helper function to rearrange all_gather output from [group_size, ...] to desired gather_dim.
+
+    Optimization: When the product of dimensions [0..gather_dim) equals group_size,
+    we can use a pure view instead of split + cat.
+    This works because the data is already contiguous in the right layout.
+    Example: shape [4, d1, d2] with group_size=4, gather_dim=1 -> [1, 4*d1, d2]
+    Example: shape [2, 2, d2] with group_size=4, gather_dim=2 -> [1, 2, 2*d2]
+
+    Args:
+        res: Tensor with gathered data in dim 0, shape [group_size, ...]
+        group_size: Number of ranks in the group
+        gather_dim: Dimension to gather along in the output
+
+    Returns:
+        Tensor with data rearranged to gather along gather_dim
+    """
+    import math
+
+    numel_prefix = math.prod(res.shape[:gather_dim])
+    if numel_prefix == group_size:
+        shape = list(res.shape)
+        # All dimensions [0:gather_dim) become 1, dimension gather_dim gets multiplied
+        final_shape = (
+            [1] * gather_dim
+            + [numel_prefix * shape[gather_dim]]
+            + shape[gather_dim + 1 :]
+        )
+        return res.view(final_shape)
+    else:
+        # General case: fall back to split + cat
+        return torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+
+
 def all_gather_tensor(
     self: torch.Tensor,
     gather_dim: int,
@@ -209,26 +246,7 @@ def all_gather_tensor(
         if isinstance(res, AsyncCollectiveTensor):
             res = res.wait()  # type: ignore[attr-defined]
 
-        # Optimization: When the product of dimensions [0..gather_dim) equals group_size,
-        # we can use a pure view instead of split + cat.
-        # This works because the data is already contiguous in the right layout.
-        # Example: shape [4, d1, d2] with group_size=4, gather_dim=1 -> [1, 4*d1, d2]
-        # Example: shape [2, 2, d2] with group_size=4, gather_dim=2 -> [1, 2, 2*d2]
-        import math
-
-        numel_prefix = math.prod(res.shape[:gather_dim])
-        if numel_prefix == group_size:
-            shape = list(res.shape)
-            # All dimensions [0:gather_dim) become 1, dimension gather_dim gets multiplied
-            final_shape = (
-                [1] * gather_dim
-                + [numel_prefix * shape[gather_dim]]
-                + shape[gather_dim + 1 :]
-            )
-            res = res.view(final_shape)
-        else:
-            # General case: fall back to split + cat
-            res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+        res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
 
