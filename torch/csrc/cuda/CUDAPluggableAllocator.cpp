@@ -267,6 +267,23 @@ void CUDAPluggableAllocator::endAllocateToPool(
   }
 }
 
+void CUDAPluggableAllocator::beginAllocateToGraphPool(
+    c10::DeviceIndex device,
+    c10::cuda::MempoolId_t mempool_id,
+    std::function<bool(cudaStream_t)> filter) {
+  if (begin_allocate_to_pool_fn_) {
+    begin_allocate_to_pool_fn_(device, mempool_id, std::move(filter));
+  }
+}
+
+void CUDAPluggableAllocator::endAllocateToGraphPool(
+    c10::DeviceIndex device,
+    c10::cuda::MempoolId_t mempool_id) {
+  if (end_allocate_to_pool_fn_) {
+    end_allocate_to_pool_fn_(device, mempool_id);
+  }
+}
+
 void CUDAPluggableAllocator::releasePool(
     c10::DeviceIndex device,
     c10::cuda::MempoolId_t mempool_id) {

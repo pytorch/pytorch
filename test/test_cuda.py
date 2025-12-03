@@ -5710,6 +5710,38 @@ class TestMemPool(TestCase):
             s = p.snapshot()
             self.assertEqual(len(s), 1, "Expected to have a single segment")
 
+    def test_nested_mempool(self):
+        torch.cuda.empty_cache()
+        pool1 = torch.cuda.MemPool()
+        pool2 = torch.cuda.MemPool()
+        pool3 = torch.cuda.MemPool()
+
+        nelem = 1024 * 1024 * 20
+
+        data = []
+        data_ptrs = []
+        def allocate_data():
+            x = torch.empty(nelem, device="cuda")
+            data.append(x)
+            data_ptrs.append(x.data_ptr())
+
+        with torch.cuda.use_mem_pool(pool1):
+            allocate_data()
+            with torch.cuda.use_mem_pool(pool2):
+                allocate_data()
+                with torch.cuda.use_mem_pool(pool3):
+                    allocate_data()
+                allocate_data()
+            allocate_data()
+
+        pool1_segments = torch.cuda.memory.memory_snapshot(pool1.id)
+        pool2_segments = torch.cuda.memory.memory_snapshot(pool2.id)
+        pool3_segments = torch.cuda.memory.memory_snapshot(pool3.id)
+
+        self.assertEqual(len(pool1_segments), 2)
+        self.assertEqual(len(pool2_segments), 2)
+        self.assertEqual(len(pool3_segments), 1)
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )

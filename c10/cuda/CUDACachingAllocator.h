@@ -243,6 +243,13 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void endAllocateToPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id) = 0;
+  virtual void beginAllocateToGraphPool(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      std::function<bool(cudaStream_t)> filter) = 0;
+  virtual void endAllocateToGraphPool(
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id) = 0;
   virtual void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) = 0;
   virtual int getPoolUseCount(
       c10::DeviceIndex /*device*/,
@@ -458,6 +465,19 @@ inline void beginAllocateToPool(
 
 inline void endAllocateToPool(c10::DeviceIndex device, MempoolId_t mempool_id) {
   get()->endAllocateToPool(device, mempool_id);
+}
+
+inline void beginAllocateToGraphPool(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id,
+    std::function<bool(cudaStream_t)> filter) {
+  get()->beginAllocateToGraphPool(device, mempool_id, std::move(filter));
+}
+
+inline void endAllocateToGraphPool(
+    c10::DeviceIndex device,
+    MempoolId_t mempool_id) {
+  get()->endAllocateToGraphPool(device, mempool_id);
 }
 
 inline void recordHistory(
