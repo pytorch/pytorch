@@ -41,6 +41,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     serialTest,
     skipIfTorchDynamo,
+    TEST_MULTIACCELERATOR,
     TEST_WITH_ROCM,
     TestCase,
 )
@@ -52,7 +53,6 @@ _BOOL_SUB_ERR_MSG = "Subtraction, the `-` operator"
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
-TEST_MULTIACCELERATOR = torch.accelerator.device_count() >= 2
 
 
 class RegularFuncWrapper:
@@ -1097,8 +1097,8 @@ class TestForeach(TestCase):
                     zero_size=False,
                     **kwargs,
                 )
-            elif "xpu" in device:
-                self.skipTest("XPU does not support cudaGraph")
+            elif "cuda" not in device:
+                self.skipTest("only CUDA support CUDAGraph")
             else:
                 # When using CUDA graphs and the tensor metadata doesn't fit in
                 # the static kernel argument space, multi_tensor_apply creates
