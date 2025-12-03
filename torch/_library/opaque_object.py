@@ -69,6 +69,9 @@ def is_opaque_type(cls: Any) -> bool:
     """
     Checks if the given type is an opaque type.
     """
+    if isinstance(cls, str):
+        return torch._C._is_opaque_type_registered(cls)
+
     if cls not in _OPAQUE_TYPES:
         return False
 
