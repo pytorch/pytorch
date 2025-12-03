@@ -51,6 +51,7 @@ from ..pattern_matcher import (
 from ..utils import (
     decode_device,
     get_all_devices,
+    get_current_backend,
     get_gpu_type,
     is_gpu,
     is_pointwise_use,
@@ -365,10 +366,11 @@ def prepare_softmax_extra_check(match):
     """
     We only have triton online softmax kernels currently.
     """
+    device_type = match.kwargs["x"].meta["val"].device.type
     return (
         config.online_softmax
-        and match.kwargs["x"].meta["val"].device.type == "cuda"
-        and config.cuda_backend == "triton"
+        and device_type in ("cuda", "xpu")
+        and "triton" == get_current_backend(device_type)
     )
 
 
