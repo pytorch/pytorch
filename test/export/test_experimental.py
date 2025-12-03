@@ -399,6 +399,35 @@ def forward(self, x):
         with torch._dynamo.config.patch(replay_side_effects=False):
             _ = dynamo_graph_capture_for_export(Foo())(torch.randn(4, 4))
             self.assertEqual(len(global_env), 0)
+    
+    def test_export_method(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.l(x)
+
+            def method(self, x):
+                return self.l(x)
+
+        inputs = (torch.randn(4, 4),)
+        foo = Foo().method
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        gm = _dynamo_graph_capture_for_export(foo)(torch.randn(4, 4))
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    arg_0, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
+    l_flat_args_0_ = arg_0
+    l__self_____self___l_weight = self.L__self_____self___l_weight
+    l__self_____self___l_bias = self.L__self_____self___l_bias
+    res = torch._C._nn.linear(l_flat_args_0_, l__self_____self___l_weight, l__self_____self___l_bias);  l_flat_args_0_ = l__self_____self___l_weight = l__self_____self___l_bias = None
+    return pytree.tree_unflatten((res,), self._out_spec)"""
+        )
+
 
     def test_export_add_in_out_info(self):
         class Foo(torch.nn.Module):
