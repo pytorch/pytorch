@@ -902,6 +902,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 self.prefix.writeline(
                     f"""constants_info_[{idx}].original_fqn = "{original_fqn}";"""
                 )
+
+                # Add device info
+                device_type, device_idx = self.codegen_device(tensor.device).split(",")
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].device_type = {device_type};"
+                )
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].device_idx = {device_idx};"
+                )
             self.prefix.writeline("update_constants_map(std::move(constants_map));")
             self.prefix.writeline("update_constants_array(std::move(constants_array));")
 
