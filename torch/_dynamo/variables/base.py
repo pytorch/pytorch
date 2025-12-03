@@ -251,7 +251,7 @@ class ImplicitRealizingVariableTrackerMeta(VariableTrackerMeta):
     def __instancecheck__(self, instance: object) -> bool:
         """Make isinstance work with LazyVariableTracker"""
         if instancecheck(LazyVariableTracker, instance):
-            instance = instance.realize()  # pyrefly: ignore[missing-attribute]
+            return instance.lazy_isinstance(self)  # pyrefly: ignore[missing-attribute]
         return instancecheck(self, instance)
 
 
