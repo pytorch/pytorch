@@ -19,7 +19,7 @@ from ..runtime.triton_heuristics import (
     SequentialComboKernelGrid,
 )
 from ..scheduler import BaseSchedulerNode
-from ..utils import Placeholder, triton_version_uses_attrs_dict
+from ..utils import is_rocm, Placeholder, triton_version_uses_attrs_dict
 from ..virtualized import V
 from .common import (
     ArgName,
@@ -742,10 +742,12 @@ class ComboKernel(Kernel):
                     continue
                 # pyrefly: ignore [missing-argument]
                 if not tree.is_reduction or sub_kernel.inside_reduction:
+                    meta_hint = sub_kernel.hint_override if is_rocm() else None
                     extra_args.append(
                         str(
                             V.graph.sizevars.size_hint(
-                                tree.numel, fallback=config.unbacked_symint_fallback
+                                tree.numel, fallback=config.unbacked_symint_fallback,
+                                hint_override=meta_hint,
                             )
                         )
                     )
