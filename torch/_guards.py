@@ -301,7 +301,7 @@ class Guard:
 
     @property
     def source(self) -> GuardSource:
-        return self.originating_source.guard_source()
+        return self.originating_source.guard_source
 
     @staticmethod
     def weakref_to_str(obj_weakref: object) -> str:
@@ -1089,6 +1089,7 @@ class Source:
     def reconstruct(self, codegen: PyCodegen) -> None:
         raise NotImplementedError
 
+    @functools.cached_property
     def guard_source(self) -> GuardSource:
         raise NotImplementedError
 
@@ -1123,16 +1124,16 @@ class Source:
         return value
 
     def make_guard(self, fn: Callable[..., Any]) -> Guard:
-        if self.guard_source() is GuardSource.CONSTANT:
+        if self.guard_source is GuardSource.CONSTANT:
             raise NotImplementedError
         return Guard(self, fn)
 
     def is_specialized_nn_module(self) -> bool:
-        return self.guard_source().is_specialized_nn_module()
+        return self.guard_source.is_specialized_nn_module()
 
     def subguards_allowed(self) -> bool:
         """True if you can guard on attributes of this"""
-        return self.guard_source() != GuardSource.SYNTHETIC_LOCAL
+        return self.guard_source != GuardSource.SYNTHETIC_LOCAL
 
 
 # Subclasses can be found in torch/_dynamo/source.py
@@ -1146,6 +1147,10 @@ class ChainedSource(Source):
 
     def is_ephemeral(self) -> bool:
         return self.base.is_ephemeral()
+
+    @functools.cached_property
+    def guard_source(self) -> GuardSource:
+        return self.base.guard_source
 
     def get_base(self) -> Source:
         current: Source = self
