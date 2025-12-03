@@ -257,10 +257,13 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
     Arguments:
         gm: The graph module to topologically sort. It is modified in-place.
-        stable_topo_sort: when True, PRIORITIZED_OPS would be ignored.
 
     Returns:
         The graph module in-place sorted
+
+    Warning:
+        This topological sort is NOT stable, it will NOT preserve the original node order.
+        If you need a stable topological sort, use stable_topological_sort instead.
     """
 
     # These operators are used for making runtime assertions before any
@@ -347,9 +350,9 @@ def stable_topological_sort(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     new_graph = torch.fx.Graph()
 
     # Build node to original index mapping
-    node_to_id: dict[torch.fx.Node, int] = {}
-    for idx, node in enumerate(gm.graph.nodes):
-        node_to_id[node] = idx
+    node_to_id: dict[torch.fx.Node, int] = {
+        node: idx for idx, node in enumerate(gm.graph.nodes)
+    }
 
     # Track how many unfulfilled dependencies each node has
     for node in gm.graph.nodes:
@@ -378,10 +381,9 @@ def stable_topological_sort(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 heapq.heappush(ready_queue, (node_to_id[user], user))
 
     # Check if all nodes were processed
-    if len(new_graph.nodes) < len(gm.graph.nodes):
-        raise RuntimeError(
-            f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}"
-        )
+    assert len(new_graph.nodes) == len(gm.graph.nodes), (
+        f"Input graph has cycles, unable to add {[node for node in indeg if indeg[node] != 0]}"
+    )
 
     new_graph._codegen = gm.graph._codegen
     gm.graph = new_graph
