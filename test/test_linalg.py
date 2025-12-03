@@ -17,6 +17,10 @@ from functools import reduce, partial
 from typing import Union, Optional
 from torch._prims_common import DimsType
 from packaging import version
+from torch.testing._internal.common_device_type import (
+    tol,
+    toleranceOverride
+)
 
 from torch.testing._internal.common_utils import \
     (TestCase, run_tests, TEST_SCIPY, IS_MACOS, IS_WINDOWS, slowTest,
@@ -3824,11 +3828,11 @@ class TestLinalg(TestCase):
             # Test broadcasting of tol
             if a.ndim > 2:
                 tolerances.append(make_tensor(a.shape[-3], dtype=torch.float32, device=device, low=0))
-            for tol in tolerances:
-                actual = torch.linalg.matrix_rank(a, atol=tol)
-                actual_tol = torch.linalg.matrix_rank(a, tol=tol)
+            for tol_ in tolerances:
+                actual = torch.linalg.matrix_rank(a, atol=tol_)
+                actual_tol = torch.linalg.matrix_rank(a, tol=tol_)
                 self.assertEqual(actual, actual_tol)
-                numpy_tol = tol if isinstance(tol, float) else tol.cpu().numpy()
+                numpy_tol = tol_ if isinstance(tol_, float) else tol_.cpu().numpy()
                 expected = np.linalg.matrix_rank(a.cpu().numpy(), tol=numpy_tol)
                 self.assertEqual(actual, expected)
 
@@ -10210,13 +10214,29 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @dtypes(torch.float, torch.half, torch.bfloat16)
     @largeTensorTest('16GB')
+    @toleranceOverride({
+        torch.float32: tol(atol=1e-05, rtol=1e-05),
+        torch.float16: tol(atol=0.6, rtol=1e-03),
+        torch.bfloat16: tol(atol=5.0, rtol=1e-03)
+    })
     def test_matmul_mv(self, device, dtype):
         # Regression test for https://github.com/pytorch/pytorch/issues/150637
         # Such matrix will take more than 4Gb in memory
+
+        # It is expected that we have very large errors when we are summing
+        # 50,000 random numbers in low precision dtypes using 2 different
+        # reduction paths so atol,rtol values above reflect this.
         n = 50_000
         A = torch.ones(n, n, dtype=dtype, device=device)
-        B = torch.rand(n, dtype=dtype, device=device)
+        B = torch.randn(n, dtype=dtype, device=device)
         C = torch.matmul(A, B)
+
+        # Sanity Checks
+        self.assertEqual(C.shape, (n,))
+        self.assertEqual(C.dtype, dtype)
+        self.assertFalse(torch.isnan(C).any())
+        self.assertFalse(torch.isinf(C).any())
+
         self.assertEqual(C, B.sum().expand(B.shape))
 
     @onlyCUDA

@@ -1626,18 +1626,17 @@ std::tuple<Tensor, Tensor, Tensor> _addmm_gelu_backward(
 
   // _addmm_gelu returns 2 outputs (GELU(x), x),
   // so we sum gradients before doing addmm pullback
-  const auto [addmm_grad1, addmm_grad2] = [&]() -> std::tuple<Tensor, Tensor> {
-    // At this moment at least one of the grads is defined
-    if (grad_activation.defined()) {
-      return std::make_tuple(
-        at::gelu_backward(grad_activation, pre_activation, /*approximate=*/"tanh"),
-        grad_pre_activation
-      );
+  const auto addmm_grad = [&]() -> Tensor {
+    // At this moment, at least of the grads is defined
+    if (!grad_activation.defined()) {
+      return grad_pre_activation;
+    } else if (!grad_pre_activation.defined()) {
+      return at::gelu_backward(grad_activation, pre_activation, /*approximate=*/"tanh");
     } else {
-      return std::make_tuple(grad_pre_activation, grad_activation);
+      return at::gelu_backward(grad_activation, pre_activation, /*approximate=*/"tanh")
+        + grad_pre_activation;
     }
   }();
-  const auto addmm_grad = addmm_grad2.defined() ? addmm_grad1 + addmm_grad2 : addmm_grad1;
 
   // Addmm pullback
   const auto self_grad = self_requires_grad && (beta.toComplexDouble() != 0.0)
