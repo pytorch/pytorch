@@ -132,8 +132,8 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
   dim3 dim_grid;
 
   const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
-  const int max_threads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
-  dim_grid.x=num_mp*(max_threads/dim_block.x);
+  // Given a thread block size of 512, we launch with 4 blocks per SM/CU
+  dim_grid.x=num_mp*4;
   auto total_dims = in_tensor.dim();
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
