@@ -245,7 +245,7 @@ class Guard:
     # globals (and locals, if you create a LOCAL guard) to extract the Python
     # object that we want to perform guard tests on.  This evaluation
     # typically happens in GuardBuilder.eval.  In these cases, name is
-    # typically produced by originating_source.name() (not to be confused with
+    # typically produced by originating_source.name (not to be confused with
     # GuardSource - the property source).
     #
     # Occasionally, name is not a valid Python expression; sometimes
@@ -297,7 +297,7 @@ class Guard:
 
     @property
     def name(self) -> str:
-        return self.originating_source.name()
+        return self.originating_source.name
 
     @property
     def source(self) -> GuardSource:
@@ -1092,6 +1092,7 @@ class Source:
     def guard_source(self) -> GuardSource:
         raise NotImplementedError
 
+    @functools.cached_property
     def name(self) -> str:
         raise NotImplementedError
 
