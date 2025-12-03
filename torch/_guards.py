@@ -22,7 +22,12 @@ from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, 
 if sys.version_info >= (3, 11):
     from typing import dataclass_transform
 else:
-    dataclass_transform = lambda: (lambda fn: fn)
+
+    def dataclass_transform():
+        def decorator(fn):
+            return fn
+
+        return decorator
 
 import torch
 from torch.utils import _pytree as pytree
@@ -36,7 +41,7 @@ log = logging.getLogger(__name__)
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Generator, Iterator
+    from collections.abc import Generator, Iterator
     from types import CodeType
 
     import sympy
