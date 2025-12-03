@@ -60,6 +60,20 @@ struct fmin_functor {
   }
 };
 
+struct maximum_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return max(a, b);
+  }
+};
+
+struct minimum_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return min(a, b);
+  }
+};
+
 struct copysign_functor {
   template <typename T>
   inline enable_if_t<is_floating_point_v<T>, T> operator()(
@@ -396,6 +410,10 @@ REGISTER_FLOAT_BINARY_OP(copysign);
 REGISTER_INT2FLOAT_BINARY_OP(copysign);
 REGISTER_FLOAT_BINARY_OP(fmax);
 REGISTER_FLOAT_BINARY_OP(fmin);
+REGISTER_FLOAT_BINARY_OP(maximum);
+REGISTER_INTEGER_BINARY_OP(maximum);
+REGISTER_FLOAT_BINARY_OP(minimum);
+REGISTER_INTEGER_BINARY_OP(minimum);
 REGISTER_FLOAT_BINARY_OP(nextafter);
 REGISTER_FLOAT_BINARY_OP(zeta);
 REGISTER_INT2FLOAT_BINARY_OP(zeta);
