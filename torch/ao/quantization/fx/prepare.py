@@ -34,7 +34,6 @@ from torch.ao.quantization.utils import (
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
 from torch.fx.node import Argument
-
 from ._equalize import is_equalization_observer, node_supports_equalization
 from .custom_config import PrepareCustomConfig, StandaloneModuleConfigEntry
 from .match_utils import _find_matches, _MatchResultWithQConfig
