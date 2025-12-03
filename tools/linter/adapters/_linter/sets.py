@@ -5,7 +5,7 @@ import token
 from functools import cached_property
 from typing import TYPE_CHECKING
 
-from . import is_empty
+from . import EMPTY_TOKENS
 from .bracket_pairs import bracket_pairs
 
 
@@ -67,7 +67,7 @@ class LineWithSets:
             if brace_end := self.bracket_pairs.get(i):
                 # Skip to the end of a subexpression
                 i = brace_end
-            elif not is_empty(t):
+            elif t.type not in EMPTY_TOKENS:
                 empty = False
             i += 1
         return not empty
