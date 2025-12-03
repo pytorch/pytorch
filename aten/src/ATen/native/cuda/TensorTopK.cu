@@ -504,7 +504,7 @@ __global__ void computeBlockDigitCounts(
   }
 }
 
-#if !defined(USE_ROCM)
+#ifndef USE_ROCM
 // CUDA path: compute global histogram and cumsum for each row
 __global__ void computeDigitCumSum(
   short* counts,
@@ -715,7 +715,7 @@ __global__ void computeBlockwiseWithinKCounts(
   if (tidx < RADIX_DIGITS) {
     uint32_t sum = 0;
     // Accumulate counts across all blocks in the slice for this digit
-#if defined(USE_ROCM)
+
     // AMD optimization: Improve memory access pattern to reduce latency
     // Access pattern: counts[base + blk * RADIX_DIGITS + tidx]
     // For large blocks_per_slice, this loop dominates kernel time
@@ -736,12 +736,6 @@ __global__ void computeBlockwiseWithinKCounts(
       sum += count_ptr[0];
       count_ptr += RADIX_DIGITS;
     }
-#else
-    // Original code for CUDA
-    for (uint32_t blk = 0; blk < blocks_per_slice; ++blk) {
-      sum += counts[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + tidx];
-    }
-#endif
     digit_totals[tidx] = sum;
   }
   __syncthreads();
@@ -811,12 +805,8 @@ __global__ void computeBlockwiseWithinKCounts(
     warp_counts[warp] = count;
   }
   __syncthreads();
-#ifdef USE_ROCM
+  
   CUDA_KERNEL_ASSERT(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE);
-#else
-  static_assert(RADIX_DIGITS < C10_WARP_SIZE * C10_WARP_SIZE,
-    "Assuming only 1 warp is needed for final reduction");
-#endif
   if (warp != 0) {
     return;
   }

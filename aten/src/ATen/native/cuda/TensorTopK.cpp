@@ -30,7 +30,7 @@ void topk_out_with_sort(
   indices.copy_(sorted_indices.narrow(dim, 0, k));
 }
 
-bool should_use_sort(const Tensor& self, int64_t k, int64_t dim) {
+bool should_use_sort(const Tensor& self, int64_t dim) {
 #if defined(USE_ROCM)
   if (self.dtype() == kBool) return false; // Bool sort not supported in ROCm: https://github.com/pytorch/pytorch/issues/139972
 
@@ -39,47 +39,32 @@ bool should_use_sort(const Tensor& self, int64_t k, int64_t dim) {
     return false;
   }
 
-  int64_t n = self.size(dim);
+  /* Strategy: Balance between full sort and TopK selection based on size, k, and dtype
+  
+  Analysis:
+  - TopK (mbtopk): O(n * radix_passes) - radix passes vary by dtype
+    - float32: 4 passes (32 bits / 8 bits per pass)
+    - bfloat16/float16: 2 passes (16 bits / 8 bits per pass)
+    - Has multi-block overhead and atomics
+    - Better for very large n with small k, especially for float32
+  
+  - Full sort: O(n * log2(n))
+    - Better memory patterns and cache locality
+    - Efficient rocThrust implementation for moderate sizes
+    - Crossover depends on n, k, and dtype
+  
+  Empirical thresholds (based on benchmarks):
+    For n < 500k:  Use sort (rocThrust is well-optimized for moderate sizes)
+    For n >= 500k: Dtype-aware strategy
+      - float32: Use TopK (fewer radix passes than sort comparisons)
+      - bfloat16/float16: Use sort (fewer radix passes make TopK overhead less beneficial)
 
-  // Strategy: Balance between full sort and TopK selection based on size, k, and dtype
-  //
-  // Analysis:
-  // - TopK (mbtopk): O(n * radix_passes) - radix passes vary by dtype
-  //   - float32: 4 passes (32 bits / 8 bits per pass)
-  //   - bfloat16/float16: 2 passes (16 bits / 8 bits per pass)
-  //   - Has multi-block overhead and atomics
-  //   - Better for very large n with small k, especially for float32
-  //
-  // - Full sort: O(n * log2(n))
-  //   - Better memory patterns and cache locality
-  //   - Efficient rocThrust implementation for moderate sizes
-  //   - Crossover depends on n, k, and dtype
-  //
-  // Empirical thresholds (based on benchmarks):
-  //   For n < 500k:  Use sort (rocThrust is well-optimized for moderate sizes)
-  //   For n >= 500k: Dtype-aware strategy
-  //     - float32: Use TopK (fewer radix passes than sort comparisons)
-  //     - bfloat16/float16: Use sort (fewer radix passes make TopK overhead less beneficial)
+  For moderate sizes (10k-500k), rocThrust sort is highly optimized
+  and faster than TopK multi-block overhead */
 
-  // For moderate sizes (10k-500k), rocThrust sort is highly optimized
-  // and faster than TopK multi-block overhead
-  if (n < 500000) {
-    return true;  // Use sort for n < 500k
+  if(self.size(dim) > 500000 && self.dtype() == at::kFloat) {
+    return false;
   }
-
-  // For very large arrays (n >= 500k), use dtype-aware strategy
-  // float32 benefits from TopK due to higher cost of full sort
-  // bfloat16/float16 benefit from sort due to lower radix pass overhead
-  auto dtype = self.dtype();
-  bool is_float32 = (dtype == at::kFloat);
-
-  if (is_float32) {
-    // For float32 with large n (>= 500k), TopK is consistently faster
-    // across all k values due to O(n * 4 radix passes) vs O(n * log2(n))
-    // Benchmarks show 2-5x speedup for n=1M
-    return false;  // Use TopK for float32
-  }
-
   // For bfloat16/float16 with large n, sort remains competitive
   // Use sort to avoid regression (benchmarks show sort is 15-25% faster)
   return true;  // Use sort for bfloat16/float16
@@ -99,7 +84,7 @@ TORCH_IMPL_FUNC(topk_out_cuda)
 
   dim = at::maybe_wrap_dim(dim, self);
 
-  if (should_use_sort(self, k, dim)) {
+  if (should_use_sort(self, dim)) {
     topk_out_with_sort(self, k, dim, largest, values, indices);
     return;
   }
