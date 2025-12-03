@@ -147,8 +147,9 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
     def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a qat module from a float module or qparams_dict
 
-        Args: `mod' a float module, either produced by torch.ao.quantization
-        utilities or directly from user
+        Args:
+            mod: A float module, either produced by torch.ao.quantization
+                utilities or directly from the user.
         """
         assert type(mod) is nni.LinearBn1d, (
             "qat."
