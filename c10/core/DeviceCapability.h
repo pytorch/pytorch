@@ -47,20 +47,22 @@ struct C10_API DeviceCapability {
   union {
     struct {
       AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_TYPE)
-    };
+    } supported_scalar_types;
     uint64_t capability_bits; // Allow direct bit manipulation
-  };
+  } capability_data;
 
   // Default constructor with all capabilities enabled.
-  DeviceCapability()
-      : capability_bits((1ULL << NUMBER_OF_DEVICE_CAPABILITIES) - 1) {}
+  DeviceCapability() {
+    capability_data.capability_bits =
+        ((1ULL << NUMBER_OF_DEVICE_CAPABILITIES) - 1);
+  }
 
   // Iterate supported ScalarTypes without allocating a vector
   template <typename F>
   void forEachSupportedScalarType(F&& visitor) const {
-#define VISIT_SCALAR_TYPE(_1, n) \
-  if (has_##n) {                 \
-    visitor(ScalarType::n);      \
+#define VISIT_SCALAR_TYPE(_1, n)                        \
+  if (capability_data.supported_scalar_types.has_##n) { \
+    visitor(ScalarType::n);                             \
   }
 
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(VISIT_SCALAR_TYPE)
