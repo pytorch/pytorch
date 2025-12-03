@@ -232,13 +232,15 @@ class CausalBias(torch.Tensor):
                 query, key, value, None, dropout_p, is_causal, enable_gqa
             )
             if can_use_flash_attention(sdpa_params):
-                needs_padding = query.size(-1) % 8 != 0
+                alignment = 64 if query.device.type == "xpu" else 8
                 og_head_size = query.size(-1)
                 og_scale = _calculate_scale(og_head_size, scale)
+                needs_padding = og_head_size % alignment != 0
                 if needs_padding:
-                    query = torch.nn.functional.pad(query, (0, 8 - query.size(-1) % 8))
-                    key = torch.nn.functional.pad(key, (0, 8 - key.size(-1) % 8))
-                    value = torch.nn.functional.pad(value, (0, 8 - value.size(-1) % 8))
+                    pad_len = alignment - (og_head_size % alignment)
+                    query = torch.nn.functional.pad(query, (0, pad_len))
+                    key = torch.nn.functional.pad(key, (0, pad_len))
+                    value = torch.nn.functional.pad(value, (0, pad_len))
                 out = torch.ops.aten._scaled_dot_product_flash_attention(
                     query,
                     key,
