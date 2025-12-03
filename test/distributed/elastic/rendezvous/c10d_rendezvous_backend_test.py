@@ -157,7 +157,7 @@ class CreateBackendTest(TestCase):
 
     def test_create_backend_returns_backend_if_is_host_is_false(self) -> None:
         if device_type == "xpu":
-            store = TCPStore(  # type: ignore[call-arg]
+            store = TCPStore(  # type: ignore[call-arg] # noqa: F841
                 self._expected_endpoint_host,
                 self._expected_endpoint_port,
                 is_master=True,
