@@ -50,5 +50,17 @@ jobs:
         run: |
           ./pmd-bin-7.19.0/bin/pmd check --dir . --rulesets rulesets/java/quickstart.xml
 
+  grype:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install grype
+      run : |
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh
+      
+    - name: Run Grype
+      run: |
+          ./bin/grype dir:. --fail-on high
+
 
 
