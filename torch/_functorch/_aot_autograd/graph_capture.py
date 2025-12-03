@@ -37,6 +37,7 @@ from .streams import (
     assign_backward_streams,
     assign_epilogue_copy_streams,
     insert_backward_syncs,
+    populate_fw_metadata_with_stream_indices,
     sync_deallocations,
 )
 from .utils import (
@@ -289,6 +290,8 @@ def aot_dispatch_base_graph(
     if not aot_config.disable_functionalization:
         copy_count = assert_functional_graph(fw_module.graph)
         assign_epilogue_copy_streams(fw_module)
+        # Populate fw_metadata with stream indices from the compiled graph
+        populate_fw_metadata_with_stream_indices(fw_module, fw_metadata)
         fw_module.graph.eliminate_dead_code()
         fw_module.recompile()
         copy_count2 = assert_functional_graph(fw_module.graph)
@@ -489,8 +492,12 @@ def aot_dispatch_autograd_graph(
     insert_backward_syncs(fx_g)
 
     # Sync deallocations for tensors where the stream w/ their last usage
-    # is distinct from their allocation strea
+    # is distinct from their allocation stream
     sync_deallocations(fx_g)
+
+    # Populate fw_metadata with stream indices from the compiled graph
+    # NB: This needs to be done after the above stream assignments
+    populate_fw_metadata_with_stream_indices(fx_g, fw_metadata)
 
     fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:
