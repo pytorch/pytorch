@@ -3731,7 +3731,6 @@ torch.fx.experimental.unification.multipledispatch.utils.groupby(func=)
 torch.fx.experimental.unification.multipledispatch.utils.groupby(seq=)
 torch.fx.experimental.unification.multipledispatch.utils.raises
 torch.fx.experimental.unification.multipledispatch.utils.raises(err=)
-torch.fx.experimental.unification.multipledispatch.utils.raises(lamda=)  # codespell:ignore
 torch.fx.experimental.unification.multipledispatch.utils.reverse_dict
 torch.fx.experimental.unification.multipledispatch.utils.reverse_dict(d=)
 torch.fx.experimental.unification.multipledispatch.utils.typename
@@ -3807,7 +3806,6 @@ torch.fx.experimental.unification.utils.hashable
 torch.fx.experimental.unification.utils.hashable(x=)
 torch.fx.experimental.unification.utils.raises
 torch.fx.experimental.unification.utils.raises(err=)
-torch.fx.experimental.unification.utils.raises(lamda=)  # codespell:ignore
 torch.fx.experimental.unification.utils.reverse_dict
 torch.fx.experimental.unification.utils.reverse_dict(d=)
 torch.fx.experimental.unification.utils.transitive_get
