@@ -233,7 +233,7 @@ manual_torch_name_rule_map: dict[
     "torch._C.autocast_decrement_nesting": SkipFunctionVariable,
     "torch._C.autocast_increment_nesting": SkipFunctionVariable,
     "torch.autograd.grad": TorchInGraphFunctionVariable,
-    "torch.autograd.backward": SkipFunctionVariable,
+    "torch.autograd.backward": TorchInGraphFunctionVariable,
     "torch._C.clear_autocast_cache": SkipFunctionVariable,
     "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
     "torch.jit.isinstance": SkipFunctionVariable,
@@ -3970,6 +3970,12 @@ def _lookup_inner(
     if obj is not None:
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
+        # Check config at runtime for torch.autograd.grad and torch.autograd.backward
+        if not config.trace_autograd_ops and obj in (
+            torch.autograd.grad,
+            torch.autograd.backward,
+        ):
+            return SkipFunctionVariable
         rule = get_torch_obj_rule_map().get(obj, None)
         if rule is not None:
             if reasons is not None:
