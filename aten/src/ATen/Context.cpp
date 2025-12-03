@@ -58,6 +58,8 @@ Float32Op str2op(const std::string& name) {
     return Float32Op::RNN;
   else if (name == "matmul")
     return Float32Op::MATMUL;
+  else if (name == "math_sdp")
+    return Float32Op::MATH_SDP;
   TORCH_CHECK(false, "Unknown op: ", name);
 }
 

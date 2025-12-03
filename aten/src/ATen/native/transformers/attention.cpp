@@ -868,6 +868,11 @@ std::tuple<Tensor, Tensor> _scaled_dot_product_attention_math(
       ? value.to(at::kFloat)
       : value;
   auto attn_mask = attn_mask_;
+  const auto math_sdp_precision = at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATH_SDP);
+  // Temporarily override matmul precision with value from cuda.math_sdp
+  // IEEE should be used when use fp32+math backend as golden reference.
+  at::Fp32PrecisonGuard<at::Float32Backend::CUDA, at::Float32Op::MATMUL> fp32guard(math_sdp_precision);
+
   // Naive, composite implementation defined here.
 
   // Scale q, k before matmul for stability see https://tinyurl.com/sudb9s96 for
