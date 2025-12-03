@@ -90,20 +90,20 @@ __global__ void roll_cuda_kernel(
     int64_t size,
     int64_t stride,
     int64_t total_dims) {
-  int64_t linear_index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
-  if (linear_index >= N) {
-    return;
+  for (int64_t linear_index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
+       linear_index<N; linear_index+=blockDim.x*gridDim.x)
+  {
+    // roll dim idx is the index of linear_index along the rolling dimension.
+    int64_t roll_dim_idx = linear_index % (stride * size) / stride;
+    // index into the source data to find appropriate value.
+    int64_t source_idx = 0;
+    if( roll_dim_idx >= (size - start) ) {
+      source_idx = linear_index - ((size - start) * stride);
+    } else {
+      source_idx = linear_index + (start * stride);
+    }
+    out_tensor[linear_index] = in_tensor[source_idx];
   }
-  // roll dim idx is the index of linear_index along the rolling dimension.
-  int64_t roll_dim_idx = linear_index % (stride * size) / stride;
-  // index into the source data to find appropriate value.
-  int64_t source_idx = 0;
-  if( roll_dim_idx >= (size - start) ) {
-    source_idx = linear_index - ((size - start) * stride);
-  } else {
-    source_idx = linear_index + (start * stride);
-  }
-  out_tensor[linear_index] = in_tensor[source_idx];
 }
 
 // Roll a tensor along a dimension
@@ -130,8 +130,10 @@ Tensor roll_cuda(const Tensor& self, IntArrayRef shifts, IntArrayRef dims) {
 
   dim3 dim_block = cuda::getApplyBlock();
   dim3 dim_grid;
-  TORCH_CHECK(cuda::getApplyGrid(N, dim_grid, in_tensor.get_device()), "unable to get dim grid");
 
+  const int num_mp = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  const int max_threads = at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock;
+  dim_grid.x=num_mp*(max_threads/dim_block.x);
   auto total_dims = in_tensor.dim();
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
