@@ -1572,8 +1572,7 @@
   structured: True
   structured_inherits: TensorIteratorBase
   dispatch:
-    CPU, CUDA: clamp_Tensor_out
-    MPS: clamp_Tensor_out_mps
+    CPU, CUDA, MPS: clamp_Tensor_out
   tags: pointwise
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
