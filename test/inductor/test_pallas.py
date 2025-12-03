@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_PALLAS
 from torch.utils._pallas import has_cuda_pallas, has_jax_tpu_backend
 from torch.utils._triton import has_triton
+from torch_tpu import api
 
 
 if IS_WINDOWS and IS_CI:
@@ -775,7 +776,7 @@ class PallasTestsCPU(PallasTestsMixin, TestCase):
 @unittest.skipUnless(has_jax_tpu_backend(), "requires JAX TPU backend")
 @config.patch({"_debug_cpu_to_tpu_pallas": True})
 class PallasTestsTPU(PallasTestsMixin, TestCase):
-    DEVICE = "cpu"
+    DEVICE = api.tpu_device()
 
     @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
     def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):

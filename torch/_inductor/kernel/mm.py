@@ -425,7 +425,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
-    if inductor_config._debug_cpu_to_tpu_pallas:
+    if mat1.get_device().type == "tpu":
         from ..codegen.pallas_kernels.block_mm_template import (
             pallas_tpu_block_mm_template,
         )
