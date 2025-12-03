@@ -1784,7 +1784,9 @@ if HAS_CUDA_AND_TRITON:
             inp_list = [inp]
             # Create placeholder info for the input
             foo_placeholders = (PlaceholderInfo("arg0", None, [], None),)
-            foo_cg = self.cudagraphify_impl(foo, inp_list, (), placeholders=foo_placeholders)
+            foo_cg = self.cudagraphify_impl(
+                foo, inp_list, (), placeholders=foo_placeholders
+            )
             x1, x2 = foo_cg(inp_list)
 
             def foo2(args):
@@ -1794,7 +1796,9 @@ if HAS_CUDA_AND_TRITON:
 
             inp_list = [x1]
             foo2_placeholders = (PlaceholderInfo("arg0", None, [], None),)
-            foo2_cg = self.cudagraphify_impl(foo2, inp_list, (), placeholders=foo2_placeholders)
+            foo2_cg = self.cudagraphify_impl(
+                foo2, inp_list, (), placeholders=foo2_placeholders
+            )
             foo2_cg(inp_list)
 
             del x1, x2
@@ -1809,7 +1813,10 @@ if HAS_CUDA_AND_TRITON:
                     foo2_cg([torch.zeros_like(x1)])
 
             self.assertTrue(
-                any("re-recording due to" in record.getMessage() for record in log.records)
+                any(
+                    "re-recording due to" in record.getMessage()
+                    for record in log.records
+                )
             )
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
