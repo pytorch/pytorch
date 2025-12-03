@@ -2813,44 +2813,6 @@ class AOTInductorTestsTemplate:
         )
         torch._export.aot_compile(Model(), example_inputs)
 
-    @skipCUDAIf(True, "Test for x86 backend")
-    @unittest.skipIf(IS_FBCODE, "Need newer ideep")
-    @unittest.skip(
-        "TODO: Move this to torchao since we moved pt2e quant flow to torchao"
-    )
-    def test_buffer_mutation_and_force_mmap_weights(self):
-        import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-        from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-
-        class Model(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear1 = torch.nn.Linear(16, 15)
-                self.linear2 = torch.nn.Linear(15, 14)
-
-            def forward(self, x):
-                x = self.linear1(x)
-                out = self.linear2(x)
-                return out
-
-        example_inputs = (torch.randn(32, 16),)
-        model = Model().eval()
-        with (
-            config.patch({"freezing": True, "aot_inductor.force_mmap_weights": True}),
-            torch.no_grad(),
-        ):
-            exported_model = export(model, example_inputs, strict=True).module()
-            quantizer = xiq.X86InductorQuantizer()
-            quantizer.set_global(
-                xiq.get_default_x86_inductor_quantization_config(reduce_range=True)
-            )
-            prepared_model = prepare_pt2e(exported_model, quantizer)
-            prepared_model(*example_inputs)
-            converted_model = convert_pt2e(prepared_model)
-            torch.ao.quantization.move_exported_model_to_eval(converted_model)
-
-            self.check_model(converted_model, example_inputs)
-
     @skipIfMPS
     def test_fallback_mem_leak_fix(self):
         if self.device != GPU_TYPE:
