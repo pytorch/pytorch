@@ -269,9 +269,9 @@ case "$tag" in
     PYTHON_VERSION=3.10
     CUDA_VERSION=12.8.1
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc13)
+  pytorch-linux-noble-aarch64-py3.10-gcc14)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=13
+    GCC_VERSION=14
     ACL=yes
     VISION=yes
     OPENBLAS=yes
@@ -279,7 +279,7 @@ case "$tag" in
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-clang21)
+  pytorch-linux-noble-aarch64-py3.10-clang21)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=21
     ACL=yes
@@ -289,9 +289,9 @@ case "$tag" in
     # from pytorch/llvm:9.0.1 is x86 specific
     SKIP_LLVM_SRC_BUILD_INSTALL=yes
     ;;
-  pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks)
+  pytorch-linux-noble-aarch64-py3.10-gcc14-inductor-benchmarks)
     ANACONDA_PYTHON_VERSION=3.10
-    GCC_VERSION=13
+    GCC_VERSION=14
     ACL=yes
     VISION=yes
     OPENBLAS=yes
