@@ -82,6 +82,7 @@
      mem_get_info
      memory_allocated
      memory_reserved
+     memory_snapshot
      memory_stats
      memory_stats_as_nested_dict
      reset_accumulated_memory_stats
