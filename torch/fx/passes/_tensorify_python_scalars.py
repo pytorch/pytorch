@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Union
+from typing import Any, TYPE_CHECKING, Union
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -13,16 +13,14 @@ from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._dynamo.utils import get_metrics_context
 from torch._prims_common import get_computation_dtype
-from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import justknobs_check
 from torch.fx._utils import lazy_format_graph_code
-from torch.fx.experimental.symbolic_shapes import (  # noqa: TCH001
+from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     has_free_symbols,
     ShapeEnv,
 )
-from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
@@ -30,6 +28,11 @@ from torch.fx.proxy import MetaProxy
 from torch.utils._sympy.interp import _run_sympy_handler, sympy_interp
 from torch.utils._sympy.reference import TensorReferenceAnalysis
 from torch.utils._sympy.symbol import symbol_is_type, SymT
+
+
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
+    from torch.fx.graph_module import GraphModule
 
 
 __all__: list[str] = []
