@@ -22,7 +22,7 @@ from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, 
 if sys.version_info >= (3, 11):
     from typing import dataclass_transform
 else:
-    dataclass_transform = contextlib.nullcontext()
+    dataclass_transform = contextlib.nullcontext
 
 import torch
 from torch.utils import _pytree as pytree
