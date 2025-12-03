@@ -265,3 +265,54 @@ def my_string_op(t, accessor, passthru) -> tuple[list[str], int]:
     Returns: tuple - (list of [accessor, value, passthru] as strings, value)
     """
     return torch.ops.libtorch_agnostic_2_10.my_string_op.default(t, accessor, passthru)
+
+
+def my_get_current_cuda_stream(device_index: int) -> int:
+    """
+    Return the current cudaStream_t pointer value.
+
+    Args:
+        device_index: int - device index
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_get_current_cuda_stream.default(
+        device_index
+    )
+
+
+def my_set_current_cuda_stream(stream: int, device_index: int):
+    """
+    Set the current stream to cudaStream_t pointer value.
+
+    Args:
+        stream: int - cudaStream_t pointer value
+        device_index: int - device index
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_set_current_cuda_stream.default(
+        stream, device_index
+    )
+
+
+def my_get_cuda_stream_from_pool(high_priority: bool, device_index: int) -> int:
+    """
+    Return the cudaStream_t pointer value from pool.
+
+    Args:
+        high_priority: bool - if true, return a stream with high priority
+        device_index: int - device index
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_get_cuda_stream_from_pool.default(
+        high_priority, device_index
+    )
+
+
+def my_cuda_stream_synchronize(stream: int, device_index: int):
+    """
+    Synchronize cuda stream.
+
+    Args:
+        stream: int - cudaStream_t pointer value
+        device_index: int - device index
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_cuda_stream_synchronize(
+        stream, device_index
+    )
