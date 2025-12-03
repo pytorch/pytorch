@@ -169,7 +169,9 @@ def fetch_model(model_path, device, sparse_dlrm=False):
         unzip_path = model_path
 
     model = get_dlrm_model(sparse_dlrm=sparse_dlrm)
-    model.load_state_dict(torch.load(unzip_path, map_location=device))
+    model.load_state_dict(
+        torch.load(unzip_path, map_location=device, weights_only=True)
+    )
     model = model.to(device)
     model.eval()
 
