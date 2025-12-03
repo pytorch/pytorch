@@ -1945,7 +1945,8 @@ class GuardBuilder(GuardBuilderBase):
             guard._unserializable = True
 
         obj_id = self.id_ref(t, f"type({guard.name})")
-        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})"
+        type_repr = repr(t)
+        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})  # {type_repr}"
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_type_match_guard(
@@ -3325,6 +3326,11 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
         return types.MethodType(func, base)
 
+    @staticmethod
+    def _unpickle_sdp_backend(name: str):
+        # Reconstruct from the Python-facing enum namespace
+        return getattr(torch.nn.attention.SDPBackend, name)
+
     @classmethod
     def _unpickle_cell(cls, val: Any) -> Any:
         def _() -> Any:
@@ -3464,6 +3470,9 @@ class GuardsStatePickler(pickle.Pickler):
         ):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("distributed_c10d.Work",)
+
+        if isinstance(obj, torch.nn.attention.SDPBackend):
+            return type(self)._unpickle_sdp_backend, (obj.name,)
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise torch._dynamo.exc.PackageError(
@@ -3862,7 +3871,7 @@ class CheckFunctionManager:
             },
             global_scope=global_scope_state,
             _guards=torch._guards.GuardsSet(
-                {
+                OrderedSet(
                     dataclasses.replace(
                         guard,
                         obj_weakref=None,
@@ -3870,7 +3879,7 @@ class CheckFunctionManager:
                         create_fn=normalize_create_fn(guard.create_fn),
                     )
                     for guard in sorted_guards
-                }
+                )
             ),
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,

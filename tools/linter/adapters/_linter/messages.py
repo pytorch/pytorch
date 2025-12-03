@@ -69,11 +69,11 @@ class LintResult:
 
     def apply(self, lines: list[str]) -> None:
         if not (
-            self.is_recursive
-            or self.char is None
+            self.char is None
             or self.length is None
             or self.line is None
             or self.replacement is None
+            or self.is_recursive
         ):
             line = lines[self.line - 1]
             before = line[: self.char]

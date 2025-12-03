@@ -36,10 +36,8 @@ PARAM_RE = re.compile('Type of parameter "(.*)" is unknown')
 
 PUBLIC_NAMES = "__init__", "__main__"
 SUFFIXES = ".py", ".pyi"
-
-# TODO: This file causes the block generator to hang!
-BAD_FILE = Path("torch/nn/functional.pyi")
-
+# Words that appear in the grandfather file that CODESPELL flags
+CODESPELL_CLASHES = ["lamda"]
 
 _log = partial(print, file=sys.stderr)
 
@@ -51,6 +49,8 @@ class MissingAnnotation:
     location: dict[str, Any]
     param_name: str | None = None
 
+    is_fixer = False
+
     @cached_property
     def block_name(self) -> str:
         # Triggers a read and tokenize of the whole file the first time called
@@ -58,7 +58,9 @@ class MissingAnnotation:
 
     @cached_property
     def column(self) -> int:
-        return self.location["start"]["column"]
+        column = self.location["start"]["column"]
+        assert isinstance(column, int)
+        return column
 
     @cached_property
     def grandfather(self) -> str:
@@ -71,16 +73,18 @@ class MissingAnnotation:
 
     @cached_property
     def is_public(self) -> bool:
-        return is_public(*self.python_parts)
+        return is_public(self.grandfather)
 
     @cached_property
     def length(self) -> int | None:
         end = self.location["end"]
-        return 1 + end["column"] - self.column if self.line == end["line"] else None
+        return 1 + end["column"] - self.column if self.line == end["line"] else 0
 
     @cached_property
     def line(self) -> int:
-        return self.location["start"]["line"]
+        line = self.location["start"]["line"]
+        assert isinstance(line, int)
+        return line
 
     @cached_property
     def lint_result(self) -> LintResult:
@@ -111,7 +115,6 @@ class MissingTypeLinter(FileLinter):
 
         help = "The paths to check"
         add("--path", "-p", nargs="*", help=help)
-        # add("path", nargs="*", help=help)
 
         help = f"Set the grandfather list (default={GRANDFATHER})"
         add("--grandfather", "-g", default=GRANDFATHER, type=Path, help=help)
@@ -128,7 +131,7 @@ class MissingTypeLinter(FileLinter):
     def lint_all(self) -> bool:
         if self.write_grandfather:
             with self.args.grandfather.open("w") as fp:
-                fp.writelines(g + "\n" for g in self.grandfather)
+                fp.writelines(self.grandfather_lines())
             return True
         else:
             for k in self.missing_annotations_added:
@@ -141,7 +144,7 @@ class MissingTypeLinter(FileLinter):
     @cached_property
     def missing_annotations_added(self) -> dict[str, list[MissingAnnotation]]:
         with self.args.grandfather.open() as fp:
-            grandfather = {i.strip() for i in fp}
+            grandfather = {s for line in fp if (s := line.partition("#")[0].strip())}
 
         def grandfathered(lm: list[MissingAnnotation]) -> list[MissingAnnotation]:
             return [m for m in lm if m.grandfather not in grandfather]
@@ -152,40 +155,34 @@ class MissingTypeLinter(FileLinter):
     @cached_property
     def grandfather(self) -> list[str]:
         annotations = self.missing_annotations.values()
-        return sorted(m.grandfather for v in annotations for m in v)
+        # TODO: investigate dupes
+        return sorted({m.grandfather for v in annotations for m in v})
 
     @cached_property
     def missing_annotations(self) -> dict[str, list[MissingAnnotation]]:
         def missing(i: int, pf: PythonFile) -> Iterator[MissingAnnotation]:
-            if pf.path == BAD_FILE:
-                return
-
+            assert pf.path is not None
             functions = self.type_results[str(pf.path.absolute())]["functions"]
             functions = [f for f in functions if is_public(f["name"])]
 
             if self.args.verbose:
-                m = f"{i + 1:0{digits}d}:{len(functions):03d}:{pf.filename}"
-                _log(m)
+                msg = f"{i + 1:03d}:{len(functions):03d}:{pf.filename}"
+                _log(msg)
 
-            for func in functions:
-                make = partial(MissingAnnotation, python_file=pf, name=func["name"])
-                if not func["return_annotation"]:
-                    yield make(location=func["location"])
+            for f in functions:
+                if not f["return_annotation"]:
+                    yield MissingAnnotation(pf, f["name"], f["location"])
 
-                for p in func["parameters"]:
-                    if (
-                        not p["annotation"]
-                        and is_public(n := p["name"])
-                        and n != "self"
-                    ):
-                        yield make(location=p["location"], param_name=n)
+                for p in f["parameters"]:
+                    name = p["name"]
+                    if not p["annotation"] and is_public(name) and name != "self":
+                        yield MissingAnnotation(pf, f["name"], p["location"], name)
 
-        def public(ma: Iterator[MissingAnnotation]) -> list[MissingAnnotation]:
-            return [m for m in ma if m.is_public]
+        def public(it: Iterator[MissingAnnotation]) -> list[MissingAnnotation]:
+            return [i for i in it if i.is_public]
 
-        python_files = [self.make_file(Path(f)) for f in self.type_results]
-        python_files = [pf for pf in python_files if is_public(*pf.python_parts)]
-        digits = len(str(len(python_files) + 1))
+        it = (self.make_file(Path(f)) for f in self.type_results)
+        python_files = [pf for pf in it if is_public(*pf.python_parts)]
         if self.args.verbose:
             _log(len(python_files), "files")
 
@@ -204,13 +201,21 @@ class MissingTypeLinter(FileLinter):
         items = sorted(json.loads(text).items())
         return {k: v for k, v in items if k.endswith(SUFFIXES)}
 
+    def grandfather_lines(self) -> Iterator[str]:
+        for g in self.grandfather:
+            yield g
+            if any(i in g for i in CODESPELL_CLASHES):
+                yield "  # codespell:ignore"
+            yield "\n"
+
     @cached_property
     def write_grandfather(self) -> bool:
         return self.args.write_grandfather or not self.args.grandfather.exists()
 
 
 def is_public(*p: str) -> bool:
-    return not any(i.startswith("_") and i not in PUBLIC_NAMES for i in p)
+    it = (j for i in p for j in i.split("."))
+    return not any(i.startswith("_") and i not in PUBLIC_NAMES for i in it)
 
 
 if __name__ == "__main__":
