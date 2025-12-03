@@ -26,6 +26,7 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -764,6 +765,7 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(grad1_norm.device_mesh, mesh_y)
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -1034,6 +1036,31 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertTrue(out_without_redistribute.placements[0].is_partial())
         self.assertTrue(out_with_redistribute.placements[0].is_replicate())
         self.assertEqual(out_without_redistribute, out_with_redistribute)
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_std(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))
+        rank = self.rank
+        comm_mode = CommDebugMode()
+
+        global_tensor = map_local_for_rank(
+            rank,
+            lambda rank: torch.tensor(
+                [[-20.0, -18.0, -12.0, 0.0], [-20.0, -18.0, -8.0, 4.0]]
+            ),
+        )
+
+        dt = distribute_tensor(global_tensor, mesh, [Shard(0), Shard(1)])
+
+        with comm_mode:
+            res = dt.std(dim=1)
+        expected_answer = torch.tensor([9.0, 11.0])
+
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        self.assertEqual(comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1)
+        self.assertEqual(res.placements, [Shard(0), Replicate()])
+        self.assertEqual(res.full_tensor(), expected_answer)
 
 
 DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(

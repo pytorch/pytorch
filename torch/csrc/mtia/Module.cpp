@@ -19,7 +19,10 @@ struct _MTIAGraph {
 
   _MTIAGraph(bool keep_graph = false)
       : handle_(at::detail::getMTIAHooks().mtiagraphCreate(keep_graph)) {}
-  ~_MTIAGraph() = default;
+
+  ~_MTIAGraph() {
+    at::detail::getMTIAHooks().mtiagraphDestroy(handle_);
+  }
 
   void capture_begin(at::MempoolId_t pool) {
     at::detail::getMTIAHooks().mtiagraphCaptureBegin(handle_, pool);
@@ -166,6 +169,10 @@ void initModule(PyObject* module) {
 
   m.def("_mtia_resetPeakMemoryStats", [](c10::DeviceIndex device_index) {
     at::detail::getMTIAHooks().resetPeakMemoryStats(device_index);
+  });
+
+  m.def("_mtia_graphPoolHandle", []() {
+    return at::detail::getMTIAHooks().graphPoolHandle();
   });
 
   py::class_<_MTIAGraph>(m, "_MTIAGraph")

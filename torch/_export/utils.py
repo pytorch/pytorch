@@ -24,6 +24,8 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 if TYPE_CHECKING:
+    import sympy
+
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._ops import OperatorBase
     from torch.export import ExportedProgram
@@ -433,8 +435,6 @@ def _check_symint(
 def _check_input_constraints_for_graph(
     input_placeholders: list[torch.fx.Node], flat_args_with_path, range_constraints
 ) -> None:
-    import sympy  # noqa: TC002
-
     if len(flat_args_with_path) != len(input_placeholders):
         raise RuntimeError(
             "Unexpected number of inputs "
@@ -974,6 +974,41 @@ def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
         subgraph.recompile()
 
 
+def _assign_new_node_names(
+    gm: torch.fx.GraphModule,
+    name_map: dict[str, str],
+    custom_meta: dict[str, Any],
+) -> None:
+    """
+    Assign new names to all nodes, in the graph module, from name map.
+    """
+    for node in gm.graph.nodes:
+        if node.op == "placeholder":
+            assert node.name in name_map
+            node.name = node.target = name_map[node.name]
+            if node.name in custom_meta:
+                if node.meta.get("custom") is None:
+                    node.meta["custom"] = {}
+                else:
+                    # Assert if any existing key has different value
+                    for k, v in node.meta["custom"].items():
+                        if (
+                            k in custom_meta[node.name]
+                            and v != custom_meta[node.name][k]
+                        ):
+                            raise AssertionError(
+                                f"Mismatch in custom metadata for key {k}. Value in "
+                                f"node.meta is {v} and value in custom_meta is {custom_meta[node.name][k]}."
+                            )
+                node.meta["custom"].update(custom_meta[node.name])
+            # if the constant obj is an input, we also need to update meta["val"]
+            # because this is created before the placeholder naming pass
+            if isinstance(node.meta["val"], CustomObjArgument):
+                node.meta["val"].name = node.name
+        elif node.name in name_map:
+            node.name = name_map[node.name]
+
+
 def placeholder_naming_pass(
     gm: torch.fx.GraphModule,
     export_graph_signature: "ExportGraphSignature",
@@ -1091,21 +1126,7 @@ def placeholder_naming_pass(
         )
 
     # assign new node names
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            assert node.name in name_map
-            node.name = node.target = name_map[node.name]
-            if node.name in custom_meta:
-                if node.meta.get("custom") is None:
-                    node.meta["custom"] = custom_meta[node.name]
-                else:
-                    assert node.meta["custom"] == custom_meta[node.name]
-            # if the constant obj is an input, we also need to update meta["val"]
-            # because this is created before the placeholder naming pass
-            if isinstance(node.meta["val"], CustomObjArgument):
-                node.meta["val"].name = node.name
-        elif node.name in name_map:
-            node.name = name_map[node.name]
+    _assign_new_node_names(gm, name_map, custom_meta)
 
     # propagate names to higher order op subgraphs
     _name_hoo_subgraph_placeholders(gm)

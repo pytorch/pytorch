@@ -76,7 +76,7 @@ if is_available():
         def interaction(self, *args, **kwargs):
             _stdin = sys.stdin
             try:
-                sys.stdin = open("/dev/stdin")
+                sys.stdin = open("/dev/stdin")  # noqa: SIM115
                 pdb.Pdb.interaction(self, *args, **kwargs)
             finally:
                 sys.stdin = _stdin
@@ -135,7 +135,7 @@ if is_available():
     # this.
     # pyrefly: ignore [deprecated]
     from .distributed_c10d import *  # noqa: F403
-    from .distributed_c10d import (  # pyrefly: ignore  # deprecated
+    from .distributed_c10d import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
         _all_gather_base,
         _coalescing_manager,
         _CoalescingManager,

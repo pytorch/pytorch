@@ -26,11 +26,11 @@ import dataclasses
 import logging
 import os
 from functools import partial
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 from torch._dynamo.utils import counters, get_runtime_metrics_context
+from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
@@ -52,6 +52,7 @@ from torch._inductor.utils import (
 )
 from torch.autograd.profiler import record_function
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -59,7 +60,7 @@ from .runtime.autotune_cache import AutotuneCacheBundler
 
 if TYPE_CHECKING:
     from collections import Counter
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
@@ -438,6 +439,7 @@ class CompiledFxGraph(OutputCode):
 
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[TritonBundle] = None
+    _wrap_compiled_regions: bool = False
 
     def __init__(
         self,
@@ -582,6 +584,10 @@ class CompiledFxGraph(OutputCode):
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
 
+        # Store whether to wrap compiled regions in inductor_compiled_code HOP
+        # This is set at compile time to avoid runtime overhead
+        self._wrap_compiled_regions = config.wrap_inductor_compiled_regions
+
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
             # For torch._inductor.config.graph_partition = True,
@@ -713,6 +719,19 @@ class CompiledFxGraph(OutputCode):
             self.mutated_input_idxs,
         )
 
+        # Apply inductor_compiled_code HOP wrapper if configured
+        # This is done in post_compile to ensure it works with cached artifacts
+        if self._wrap_compiled_regions and self.current_callable is not None:
+            original_callable = self.current_callable
+
+            def wrapped_callable(inputs):
+                if is_in_torch_dispatch_mode():
+                    return inductor_compiled_code(original_callable, inputs)
+                else:
+                    return original_callable(inputs)
+
+            self.current_callable = wrapped_callable
+
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         self._triton_bundle = triton_bundle
 
@@ -774,9 +793,86 @@ class CompiledAOTI(OutputCode):
     """
 
     filename: Union[str, list[Union[str, Weights]], torch.fx.GraphModule]
+    device_type: str
+    current_callable: Optional[Callable[..., Any]] = None
+    _cached_files: dict[str, bytes] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        if not config.aot_inductor.link_libtorch:
+            return
+
+        if (
+            torch._inductor.cpp_builder._IS_MACOS
+            or torch._inductor.cpp_builder._IS_WINDOWS
+        ):
+            return
+
+        if config.aot_inductor.cross_target_platform == "windows":
+            return
+
+        if config.aot_inductor.package_cpp_only:
+            return
+
+        if not config.enable_autograd_for_aot:
+            return
+
+        if isinstance(self.filename, list):
+            current_callable = next(
+                fn for fn in self.filename if isinstance(fn, str) and fn.endswith(".so")
+            )
+        else:
+            current_callable = self.filename
+
+        if isinstance(current_callable, torch.fx.GraphModule):
+            self.current_callable = current_callable
+            return
+
+        if self.device_type.startswith("cuda"):
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
+                    current_callable,
+                    1,
+                    self.device_type,
+                    "",
+                    True,
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
+        elif self.device_type == "cpu":
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(  # type: ignore[call-arg]
+                    current_callable, 1
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
+        else:
+            raise RuntimeError(f"unsupported device type {self.device_type}")
+        self.current_callable = current_callable
+        self._boxed_call = True
+        for file in self._cached_files:
+            if not os.path.exists(file):
+                with open(file, "wb") as f:
+                    f.write(self._cached_files[file])
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        raise NotImplementedError("NYI")
+        if self.current_callable is None:
+            raise RuntimeError("AOTInductor compiled so is not loaded")
+        return self.current_callable(inputs)
+
+    def prepare_for_serialization(self) -> None:
+        self.current_callable = None
+        self._cached_files = {}
+        filenames: list[str] = []
+        if isinstance(self.filename, list):
+            filenames = self.filename  # type: ignore[assignment]
+        elif isinstance(self.filename, str):
+            filenames = [self.filename]
+        for name in filenames:
+            with open(name, "rb") as f:
+                self._cached_files[name] = f.read()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["current_callable"] = None
+        return state
 
     def post_compile(
         self,
@@ -784,10 +880,8 @@ class CompiledAOTI(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
-        pass
-
-    def prepare_for_serialization(self) -> None:
-        pass
+        if self.current_callable is None:
+            self.__post_init__()
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass

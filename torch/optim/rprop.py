@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the Resilient backpropagation."""
 
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -31,15 +31,15 @@ class Rprop(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-2,
+        lr: float | Tensor = 1e-2,
         etas: tuple[float, float] = (0.5, 1.2),
         step_sizes: tuple[float, float] = (1e-6, 50),
         *,
         capturable: bool = False,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -235,7 +235,7 @@ def _single_tensor_rprop(
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     for i, param in enumerate(params):
         grad = grads[i]
         grad = grad if not maximize else -grad
@@ -306,7 +306,7 @@ def _multi_tensor_rprop(
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
@@ -418,7 +418,7 @@ def rprop(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     capturable: bool = False,
     maximize: bool = False,
     differentiable: bool = False,
@@ -428,7 +428,7 @@ def rprop(
     step_size_max: float,
     etaminus: float,
     etaplus: float,
-):
+) -> None:
     r"""Functional API that performs rprop algorithm computation.
 
     See :class:`~torch.optim.Rprop` for details.
