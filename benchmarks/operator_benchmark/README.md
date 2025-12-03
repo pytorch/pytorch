@@ -186,7 +186,7 @@ The [operator_microbenchmark.yml](../../.github/workflows/operator_microbenchmar
 
 **Schedule:** Daily at 06:00 UTC
 
-**Performance Dashboard:** [PyTorch Operator Microbenchmark Dashboard](https://hud.pytorch.org/benchmark/v3/dashboard/pytorch_operator_microbenchmark?renderGroupId=main&time.start=2025-11-26T00%3A00%3A00.000Z&time.end=2025-12-03T23%3A59%3A59.999Z&filters.device=cuda&filters.arch=NVIDIA+B200&filters.deviceName=cuda%7C%7CNVIDIA+B200&filters.operatorName=addmm&lcommit.commit=7bc2a66ded06a0b2549aa51d807edc5dc3e73d1b&lcommit.workflow_id=19755695510&lcommit.date=2025-11-28T10%3A00%3A00Z&lcommit.branch=main&rcommit.commit=afdff7f0325080dedac44d080cb5a3b0e65e6c5e&rcommit.workflow_id=19850132772&rcommit.date=2025-12-02T11%3A00%3A00Z&rcommit.branch=main&lbranch=main&rbranch=main)
+**Performance Dashboard:** [PyTorch Operator Microbenchmark Dashboard](https://hud.pytorch.org/benchmark/v3/dashboard/pytorch_operator_microbenchmark) @lint-ignore
 
 **Triggers:**
 - Scheduled runs (daily)
