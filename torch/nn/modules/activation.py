@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import warnings
+from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -260,8 +261,8 @@ class Hardtanh(Module):
         min_val: float = -1.0,
         max_val: float = 1.0,
         inplace: bool = False,
-        min_value: float | None = None,
-        max_value: float | None = None,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
     ) -> None:
         super().__init__()
         if min_value is not None:
@@ -1052,7 +1053,7 @@ class Softshrink(Module):
         return str(self.lambd)
 
 
-def _check_arg_device(x: torch.Tensor | None) -> bool:
+def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
     if x is not None:
         return x.device.type in [
             "cpu",
@@ -1062,7 +1063,7 @@ def _check_arg_device(x: torch.Tensor | None) -> bool:
     return True
 
 
-def _arg_requires_grad(x: torch.Tensor | None) -> bool:
+def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
     if x is not None:
         return x.requires_grad
     return False
@@ -1155,8 +1156,8 @@ class MultiheadAttention(Module):
     """
 
     __constants__ = ["batch_first"]
-    bias_k: torch.Tensor | None
-    bias_v: torch.Tensor | None
+    bias_k: Optional[torch.Tensor]
+    bias_v: Optional[torch.Tensor]
 
     def __init__(
         self,
@@ -1257,12 +1258,12 @@ class MultiheadAttention(Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        key_padding_mask: Tensor | None = None,
+        key_padding_mask: Optional[Tensor] = None,
         need_weights: bool = True,
-        attn_mask: Tensor | None = None,
+        attn_mask: Optional[Tensor] = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> tuple[Tensor, Tensor | None]:
+    ) -> tuple[Tensor, Optional[Tensor]]:
         r"""Compute attention outputs using query, key, and value embeddings.
 
             Supports optional parameters for padding, masks and attention weights.
@@ -1516,10 +1517,10 @@ class MultiheadAttention(Module):
 
     def merge_masks(
         self,
-        attn_mask: Tensor | None,
-        key_padding_mask: Tensor | None,
+        attn_mask: Optional[Tensor],
+        key_padding_mask: Optional[Tensor],
         query: Tensor,
-    ) -> tuple[Tensor | None, int | None]:
+    ) -> tuple[Optional[Tensor], Optional[int]]:
         r"""Determine mask type and combine masks if necessary.
 
         If only one mask is provided, that mask
@@ -1534,8 +1535,8 @@ class MultiheadAttention(Module):
             merged_mask: merged mask
             mask_type: merged mask type (0, 1, or 2)
         """
-        mask_type: int | None = None
-        merged_mask: Tensor | None = None
+        mask_type: Optional[int] = None
+        merged_mask: Optional[Tensor] = None
 
         if key_padding_mask is not None:
             mask_type = 1
@@ -1731,9 +1732,9 @@ class Softmin(Module):
     """
 
     __constants__ = ["dim"]
-    dim: int | None
+    dim: Optional[int]
 
-    def __init__(self, dim: int | None = None) -> None:
+    def __init__(self, dim: Optional[int] = None) -> None:
         super().__init__()
         self.dim = dim
 
@@ -1796,9 +1797,9 @@ class Softmax(Module):
     """
 
     __constants__ = ["dim"]
-    dim: int | None
+    dim: Optional[int]
 
-    def __init__(self, dim: int | None = None) -> None:
+    def __init__(self, dim: Optional[int] = None) -> None:
         super().__init__()
         self.dim = dim
 
@@ -1881,9 +1882,9 @@ class LogSoftmax(Module):
     """
 
     __constants__ = ["dim"]
-    dim: int | None
+    dim: Optional[int]
 
-    def __init__(self, dim: int | None = None) -> None:
+    def __init__(self, dim: Optional[int] = None) -> None:
         super().__init__()
         self.dim = dim
 
