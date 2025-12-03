@@ -12149,6 +12149,16 @@ class TestNNDeviceType(NNTestCase):
             # test softmax with large input value which causes exp() to overflow
             _test_bfloat16_ops(self, torch.nn.Softmax(dim=dim), device, inp_dims=(16, 33, 15, 16), prec=0.05, scale_factor=1000.0)
 
+    def test_softmax_bfloat16_half_to_float(self):
+        # half_to_float is only supported on MTIA
+        # Test meta tensors - both dtypes work for meta regardless of target device
+        for dtype in [torch.half, torch.bfloat16]:
+            x_meta = torch.randn(8, 16, device='meta', dtype=dtype)
+            result_meta = torch._softmax(x_meta, dim=1, half_to_float=True)
+            # Meta tensor result should also be float32
+            self.assertEqual(result_meta.dtype, torch.float32)
+            self.assertEqual(result_meta.shape, (8, 16))
+
     def test_nll_loss_1d_input_1d_target_invalid_size(self, device):
         x = torch.randn(10, device=device)
         t = torch.randint(0, 10, (3,), dtype=torch.int64, device=device)
