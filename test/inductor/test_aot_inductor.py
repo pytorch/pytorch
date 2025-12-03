@@ -2815,7 +2815,9 @@ class AOTInductorTestsTemplate:
 
     @skipCUDAIf(True, "Test for x86 backend")
     @unittest.skipIf(IS_FBCODE, "Need newer ideep")
-    @unittest.skip("TODO: Move this to torchao since we moved pt2e quant flow to torchao")
+    @unittest.skip(
+        "TODO: Move this to torchao since we moved pt2e quant flow to torchao"
+    )
     def test_buffer_mutation_and_force_mmap_weights(self):
         import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
         from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
