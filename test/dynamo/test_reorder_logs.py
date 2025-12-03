@@ -68,7 +68,7 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
         else:
             self.assertIn("moo", printed_output)
             self.assertGreater(len(counters["graph_break"]), 0)
-    
+
 
     def test_ignore_arbitrary_function_noop(self):
         counters.clear()
@@ -76,7 +76,7 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
 
         def dbg_fn(x):
             calls.append("ran")
-        
+
         def f(x):
             dbg_fn(x)  # must be no-op inside Dynamo
             return x + 1
@@ -92,10 +92,10 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
 
         # output must match eager
         self.assertTrue(same(opt_out, x + 1))
-        
+
         # no graph breaks allowed
         self.assertEqual(len(counters["graph_break"]), 0)
-    
+
 
     def test_ignore_function_returns_none(self):
         counters.clear()
@@ -135,6 +135,7 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
 
         def ignored(x):
             log.append("ignored")
+
         def reordered(x):
             log.append("reordered")
 

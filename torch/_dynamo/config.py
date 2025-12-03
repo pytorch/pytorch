@@ -590,7 +590,9 @@ reorderable_logging_functions: set[Callable[[Any], None]] = set()
 # These functions will NOT run, will NOT be reordered, and will NOT
 # cause graph breaks. They act as full no-ops.
 # Ignored functions can take any arguments, but MUST return None.
-# Functions should either be module-level functions, `logging.Logger.<method>` (ignores all method for all logging.Logger instances) or `logger_obj.<method>` (ignores method only for logger_obj logging.Logger instance).
+# Functions should either be module-level functions,
+# `logging.Logger.<method>` (ignores all method for all logging.Logger instances)
+# or `logger_obj.<method>` (ignores method only for logger_obj logging.Logger instance).
 # Other functions may or may not be ignored due to implementation details. If you want to ignore a function
 # that `ignore_logging_functions` is failing to ignore, please submit an issue.
 ignore_logging_functions: set[Callable[..., Any]] = set()

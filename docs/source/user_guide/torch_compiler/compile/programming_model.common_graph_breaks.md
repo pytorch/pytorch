@@ -131,9 +131,9 @@ However, the logged contents may differ if, for example, a mutation occurs.
 Note: `reorderable_logging_functions` has restrictions, these functions must return `None`, and their arguments must be limited to tensors, constants, or format strings.
 
 You can also use `torch._dynamo.config.ignore_logging_functions` to completely skip selected logging functions during tracing.
- 
-Ignored functions can take any arguments, but MUST return `None`. 
-Functions should either be module-level functions, `logging.Logger.<method>` (ignores that method for all `logging.Logger` instances) or `logger_obj.<method>` (ignores that method only for the specific `logger_obj` instance). 
+
+Ignored functions can take any arguments, but MUST return `None`.
+Functions should either be module-level functions, `logging.Logger.<method>` (ignores that method for all `logging.Logger` instances) or `logger_obj.<method>` (ignores that method only for the specific `logger_obj` instance).
 Other functions may or may not be ignored due to implementation details. If you want to ignore a function that `ignore_logging_functions` is failing to ignore, please submit an issue.
 
 
