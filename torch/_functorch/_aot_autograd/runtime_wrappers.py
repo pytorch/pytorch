@@ -97,6 +97,9 @@ from .utils import (
 
 zip = strict_zip
 
+# Used for testing
+side_stream_epilogue_copies = 0
+
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
 # that needs to run after the compiled function.
@@ -437,7 +440,29 @@ def _create_runtime_wrapper(
                         # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
                         original_inpt.detach().copy_(updated_inpt)
                     else:
-                        original_inpt.copy_(updated_inpt)
+                        # Check if we have stream index information for this mutated input
+                        stream_ind = None
+                        if (
+                            runtime_metadata.mutated_inp_stream_indices is not None
+                            and i < len(runtime_metadata.mutated_inp_stream_indices)
+                        ):
+                            stream_ind = runtime_metadata.mutated_inp_stream_indices[i]
+
+                        if stream_ind is not None:
+                            global side_stream_epilogue_copies
+                            side_stream_epilogue_copies += 1
+                            from torch._dynamo.graph_bytecode_inputs import (
+                                get_external_object_by_index,
+                            )
+
+                            stream = get_external_object_by_index(stream_ind)
+                            assert isinstance(stream, torch.Stream), (
+                                "Expected stream in epilogue copy"
+                            )
+                            with stream:
+                                original_inpt.copy_(updated_inpt)
+                        else:
+                            original_inpt.copy_(updated_inpt)
         else:
             fw_outs = all_outs
 
