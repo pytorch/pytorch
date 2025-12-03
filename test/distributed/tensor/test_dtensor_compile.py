@@ -176,18 +176,14 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
 
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
-        super(
-            type(self), self
-        ).setUp()  # use explicit params for compiled autograd test wrapping
+        super().setUp()
         fake_store = FakeStore()
         dist.init_process_group(
             "fake", store=fake_store, rank=0, world_size=self.world_size
         )
 
     def tearDown(self):
-        super(
-            type(self), self
-        ).tearDown()  # use explicit params for compiled autograd test wrapping
+        super().tearDown()
         dist.destroy_process_group()
 
     @property
