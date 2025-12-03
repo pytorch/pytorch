@@ -614,8 +614,8 @@ at::Tensor preprocess_mask(
 // This causes the kernel to maybe alias query, key, value
 // So instead we pad the head_dimensions to be a multiple of 8 in the composite
 // region
-template <bool slice>
-at::Tensor pad_last_dim(const at::Tensor& attn_bias, int alignment_size) {
+template <int alignment_size, bool slice>
+at::Tensor pad_last_dim(const at::Tensor& attn_bias) {
   auto last_dim_size = attn_bias.sym_size(-1);
   if (last_dim_size % alignment_size == 0) {
     return attn_bias;
@@ -743,13 +743,11 @@ Tensor scaled_dot_product_attention(
       return std::get<0>(out_lse_softmax);
     }
     case SDPBackend::flash_attention: {
-      if(query_device_type == DeviceType::CUDA ||
-         query_device_type == DeviceType::XPU) {
+      if(query_device_type == DeviceType::CUDA){
         c10::SymInt og_size = query_.sym_size(-1);
-        int alignment_size = (query_device_type == DeviceType::XPU) ? 64 : 8;
-        Tensor query_padded = pad_last_dim<false>(query_, alignment_size);
-        Tensor key_padded = pad_last_dim<false>(key, alignment_size);
-        Tensor value_padded = pad_last_dim<false>(value, alignment_size);
+        Tensor query_padded = pad_last_dim<8, false>(query_);
+        Tensor key_padded = pad_last_dim<8, false>(key);
+        Tensor value_padded = pad_last_dim<8, false>(value);
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
