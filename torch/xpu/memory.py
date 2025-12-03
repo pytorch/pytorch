@@ -568,7 +568,30 @@ __all__ = [
     "use_mem_pool",
 ]
 
-class MemPool(torch._C._XPUMemPool):
+if not hasattr(torch._C, "_xpu_XPUAllocator"):
+    # Define dummy base classes
+    torch._C.__dict__["_xpu_XPUAllocator"] = _dummy_type("_xpu_XPUAllocator")
+
+
+if not hasattr(torch._C, "_XPUMemPool"):
+    # Define dummy base classes
+    torch._C.__dict__["_XPUMemPool"] = _dummy_type("_XPUMemPool")
+    torch._C.__dict__["_xpu_beginAllocateCurrentThreadToPool"] = _dummy_type(
+        "_xpu_beginAllocateCurrentThreadToPool"
+    )
+    torch._C.__dict__["_xpu_endAllocateToPool"] = _dummy_type("_xpu_endAllocateToPool")
+    torch._C.__dict__["_xpu_releasePool"] = _dummy_type("_xpu_releasePool")
+
+from torch._C import (  # noqa: F401;
+    _xpu_beginAllocateCurrentThreadToPool,
+    _xpu_endAllocateToPool,
+    _xpu_releasePool,
+    _xpu_XPUAllocator,
+    _XPUMemPool,
+)
+
+
+class MemPool(_XPUMemPool):
     r"""MemPool represents a pool of memory in a caching allocator. Currently,
     it's just the ID of the pool object maintained in the XPUCachingAllocator.
 
@@ -586,7 +609,7 @@ class MemPool(torch._C._XPUMemPool):
 
     def __init__(
         self,
-        allocator: Optional[torch._C._xpu_XPUAllocator] = None,
+        allocator: Optional[_xpu_XPUAllocator] = None,
         use_on_oom: bool = False,
     ):
         super().__init__(allocator, True, use_on_oom)
@@ -597,7 +620,7 @@ class MemPool(torch._C._XPUMemPool):
         return super().id
 
     @property
-    def allocator(self) -> Optional[torch._C._xpu_XPUAllocator]:
+    def allocator(self) -> Optional[_xpu_XPUAllocator]:
         r"""Returns the allocator this MemPool routes allocations to."""
         return super().allocator
 
@@ -635,9 +658,9 @@ def use_mem_pool(pool: MemPool, device: "Device" = None):
     device_index = (
         torch.xpu.current_device() if device is None else _get_device_index(device)
     )
-    torch._C._xpu_beginAllocateCurrentThreadToPool(device_index, pool.id)
+    _xpu_beginAllocateCurrentThreadToPool(device_index, pool.id)
     try:
         yield
     finally:
-        torch._C._xpu_endAllocateToPool(device_index, pool.id)
-        torch._C._xpu_releasePool(device_index, pool.id)
+        _xpu_endAllocateToPool(device_index, pool.id)
+        _xpu_releasePool(device_index, pool.id)
