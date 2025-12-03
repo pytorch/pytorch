@@ -7511,7 +7511,18 @@ def with_effects(token, op, *args, **kwargs):
             new_op  # pyrefly: ignore[unsupported-operation]
         )
 
-    schema = _get_schema(op, args, kwargs)
+    try:
+        args, kwargs = pytree.tree_map_only(
+            ir.TorchBindObject, lambda a: a.get_value(), (args, kwargs)
+        )
+        schema = _get_schema(op, args, kwargs)
+    except RuntimeError as e:
+        error_msg = str(e)
+        log.warning(
+            "Failed to get schema for %s: %s. Assuming list output", op, error_msg
+        )
+        return (token, *result)
+
     if len(schema.returns) == 0:
         return (token, result)
     elif len(schema.returns) == 1:
