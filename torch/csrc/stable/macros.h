@@ -1,5 +1,6 @@
 #include <torch/csrc/stable/c/shim.h>
-#include <stdexcept> // NOLINT
+
+#include <stdexcept>
 #include <string>
 
 #define STD_CUDA_CHECK(EXPR)                      \

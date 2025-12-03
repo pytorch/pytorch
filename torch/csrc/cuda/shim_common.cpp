@@ -7,6 +7,27 @@
 #include <torch/csrc/utils/cpp_stacktraces.h>
 #include <cstring>
 
+namespace {
+// Helper to call the appropriate check implementation for CUDA vs ROCm.
+// This is done in a separate function to avoid preprocessor directives inside
+// macro (AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE) arguments, which
+// is undefined behavior and fails on MSVC.
+inline void call_c10_accelerator_check_implementation(
+    int32_t err,
+    const char* filename,
+    const char* function_name,
+    uint32_t line_number,
+    bool include_device_assertions) {
+#ifdef USE_ROCM
+  c10::hip::c10_hip_check_implementation(
+      err, filename, function_name, line_number, include_device_assertions);
+#else
+  c10::cuda::c10_cuda_check_implementation(
+      err, filename, function_name, line_number, include_device_assertions);
+#endif
+}
+} // namespace
+
 AOTITorchError torch_get_current_cuda_blas_handle(void** ret_handle) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     *(cublasHandle_t*)(ret_handle) = at::cuda::getCurrentCUDABlasHandle();
@@ -24,13 +45,8 @@ AOTITorchError torch_c10_cuda_check_msg(
     *error_msg = nullptr;
 
     try {
-#ifdef USE_ROCM
-      c10::hip::c10_hip_check_implementation(
+      call_c10_accelerator_check_implementation(
           err, filename, function_name, line_number, include_device_assertions);
-#else
-      c10::cuda::c10_cuda_check_implementation(
-          err, filename, function_name, line_number, include_device_assertions);
-#endif
     } catch (const c10::AcceleratorError& e) {
       // Match the behavior of Python exception translation:
       // use what() if C++ stacktraces are enabled, otherwise
