@@ -167,7 +167,7 @@ def maybe_to_fake_obj(
         OpaqueTypeStr,
     )
 
-    if x is None or is_opaque_type(type(x)) or str(x._type()) == OpaqueTypeStr:
+    if x is None or is_opaque_type(type(x)):
         # In order to make OpaqueObjects truly opaque, the fake kernel should
         # not depend on the contents of the OpaqueObject at all.
         fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), OpaqueTypeStr, None)
