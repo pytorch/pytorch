@@ -399,7 +399,7 @@ def forward(self, x):
         with torch._dynamo.config.patch(replay_side_effects=False):
             _ = dynamo_graph_capture_for_export(Foo())(torch.randn(4, 4))
             self.assertEqual(len(global_env), 0)
-    
+
     def test_export_method(self):
         class Foo(torch.nn.Module):
             def __init__(self):
