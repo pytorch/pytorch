@@ -7,7 +7,8 @@ from tokenize import generate_tokens, TokenInfo
 from typing import TYPE_CHECKING
 from typing_extensions import Self
 
-from . import is_empty, NO_TOKEN, ParseError, ROOT
+from . import EMPTY_TOKENS, NO_TOKEN, ParseError, ROOT
+from .blocks import blocks
 from .sets import LineWithSets
 
 
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
 
 
 class PythonFile:
+    contents: str
+    lines: list[str]
     path: Path | None
     linter_name: str
 
@@ -28,25 +31,12 @@ class PythonFile:
         contents: str | None = None,
     ) -> None:
         self.linter_name = linter_name
-        self.path = path.relative_to(ROOT) if path and path.is_absolute() else path
-        self._contents = contents
+        self.path = path and (path.relative_to(ROOT) if path.is_absolute() else path)
+        if contents is None and path is not None:
+            contents = path.read_text()
 
-    @cached_property
-    def contents(self) -> str:
-        if self._contents is not None:
-            return self._contents
-        elif self.path is not None:
-            return self.path.read_text()
-        else:
-            return ""
-
-    @cached_property
-    def filename(self) -> str:
-        return str(self.path)
-
-    @cached_property
-    def lines(self) -> list[str]:
-        return self.contents.splitlines(keepends=True)
+        self.contents = contents or ""
+        self.lines = self.contents.splitlines(keepends=True)
 
     @classmethod
     def make(cls, linter_name: str, pc: Path | str | None = None) -> Self:
@@ -64,7 +54,7 @@ class PythonFile:
 
     @cached_property
     def tokens(self) -> list[TokenInfo]:
-        # Raises IndentationError on incorrectly indented code
+        # Might raise IndentationError if the code is mal-indented
         return list(generate_tokens(iter(self.lines).__next__))
 
     @cached_property
@@ -115,7 +105,7 @@ class PythonFile:
             tk = self.tokens[i]
             if tk.type == token.STRING:
                 return tk.string
-            if is_empty(tk):
+            if tk.type not in EMPTY_TOKENS:
                 return ""
         return ""
 
@@ -131,6 +121,10 @@ class PythonFile:
                 dedents[stack.pop()] = i
 
         return dedents
+
+    @cached_property
+    def errors(self) -> dict[str, str]:
+        return {}
 
     @cached_property
     def braced_sets(self) -> list[Sequence[TokenInfo]]:
@@ -159,25 +153,9 @@ class PythonFile:
 
     @cached_property
     def blocks(self) -> list[Block]:
-        from .blocks import blocks
-
-        return blocks(self)
-
-    @cached_property
-    def blocks_by_line_number(self) -> dict[int, Block]:
-        # Lines that don't appear are in the top-level scope
-        # Later blocks correctly overwrite earlier, parent blocks.
-        return {i: b for b in self.blocks for i in b.line_range}
-
-    def block_name(self, line: int) -> str:
-        block = self.blocks_by_line_number.get(line)
-        return block.full_name if block else ""
-
-    @cached_property
-    def python_parts(self) -> tuple[str, ...]:
-        assert self.path
-        parts = self.path.with_suffix("").parts
-        return parts[:-1] if parts[-1] == "__init__" else parts
+        res = blocks(self.tokens)
+        self.errors.update(res.errors)
+        return res.blocks
 
 
 class OmittedLines:
