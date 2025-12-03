@@ -7952,7 +7952,7 @@ torch.cuda.synchronize()
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
-    @xfailIfWindows # precision
+    @xfailIfWindows  # precision
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
@@ -8053,7 +8053,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @xfailIfWindows # precision
+    @xfailIfWindows  # precision
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_padded_dense_conversion_preserves_metadata_cache(
