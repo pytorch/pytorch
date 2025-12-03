@@ -1,3 +1,4 @@
+#include <ATen/MemoryOverlap.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 
@@ -52,6 +53,15 @@ static inline std::tuple<bool, Tensor> checkTrilTriuBatchContiguous(const Tensor
     expected_stride *= tensor.size(i);
   }
   return std::make_tuple(true, tensor);
+}
+
+static inline void checkTrilTriuMemoryOverlap(const Tensor& result, const Tensor& self) {
+  if (result.is_same(self)) {
+    at::assert_no_internal_overlap(result);
+  } else {
+    at::assert_no_internal_overlap(result);
+    at::assert_no_overlap(result, self);
+  }
 }
 
 }  // namespace at::native
