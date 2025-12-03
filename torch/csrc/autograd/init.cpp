@@ -1424,7 +1424,8 @@ static PyObject* pop_torch_dispatch_stack(
     auto mode = c10::impl::TorchDispatchModeTLS::pop_stack();
     r = mode->release();
   }
-  // No Py_INCREF needed - release() transfers ownership from SafePyObject to Python
+  // No Py_INCREF needed - release() transfers ownership from SafePyObject to
+  // Python
   return r;
   END_HANDLE_TH_ERRORS
 }

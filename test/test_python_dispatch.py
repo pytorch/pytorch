@@ -5,6 +5,7 @@ import pickle
 import sys
 import tempfile
 import unittest
+import weakref
 from copy import deepcopy
 
 import torch
