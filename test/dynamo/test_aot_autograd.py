@@ -30,9 +30,9 @@ def maybe_dupe_op(x):
     y = x + 1
     z = x + 2
     if x.numel() < 5:
-        return y, y
+        return y.clone(), y.clone()
     else:
-        return y, z
+        return y.clone(), z.clone()
 
 
 def is_dynamic_shape_test(test_name):
