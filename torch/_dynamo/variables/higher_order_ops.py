@@ -3580,7 +3580,11 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ):
         from .._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-        def create_scalar():
+        def create_scalar(query):
+            # If the query is a DTensor, then make the query to be the local
+            # tensor first. The indices should always be plain tensors.
+            if query.call_obj_hasattr(tx, "_local_tensor").value:
+                query = query.var_getattr(tx, "_local_tensor")
             return query.call_method(
                 tx,
                 "new_empty",
@@ -3591,7 +3595,7 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         with discard_graph_changes(tx):
-            bhmn = [create_scalar() for _ in range(4)]
+            bhmn = [create_scalar(query) for _ in range(4)]
             if fn_name == "score_mod":
                 scores_require_grad: bool = query.requires_grad
                 score = query.call_method(

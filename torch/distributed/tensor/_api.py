@@ -1392,9 +1392,7 @@ def shard_mask_mod(
     device_mesh: DeviceMesh,
     placements: Sequence[Placement],
 ) -> _mask_mod_signature:
-    from torch.distributed.tensor._utils import (
-        _compute_local_shape_and_global_offset,
-    )
+    from torch.distributed.tensor._utils import _compute_local_shape_and_global_offset
 
     B = 1 if B is None else B
     H = 1 if H is None else H

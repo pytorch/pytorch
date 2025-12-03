@@ -22,7 +22,7 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
-from torch.distributed.tensor.placement_types import Replicate, Shard
+from torch.distributed.tensor.placement_types import _Partial, Replicate, Shard
 from torch.fx.graph_module import GraphModule
 from torch.utils import _cxx_pytree as pytree
 
@@ -71,6 +71,7 @@ def flex_attention_strategy(op_schema: OpSchema) -> OpStrategy:
 
     # When sharding on the num_heads dimension, the mask has to be sharded along
     # the num_heads dimension as well if masks' num_heads size is larger than 1.
+    # TODO: is this legal? Can the mask shard on the head dimension?
     num_heads_dim_sharding: PlacementList = [
         Shard(1),  # output,
         Shard(1),  # logsumexp,
@@ -194,6 +195,7 @@ def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
 
     # When sharding on the num_heads dimension, the mask has to be sharded along
     # the num_heads dimension as well if masks' num_heads size is larger than 1.
+    # TODO: is this legal? Can the mask shard on the head dimension?
     num_heads_dim_sharding: PlacementList = [
         Shard(1),  # grad_query,
         Shard(1),  # grad_key,
@@ -231,8 +233,8 @@ def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
     # grad_V follow K and V sharding (Replicate()).
     seq_dim_sharding: PlacementList = [
         Shard(2),  # grad_query,
-        Replicate(),  # grad_key,
-        Replicate(),  # grad_value,
+        _Partial(),  # grad_key,
+        _Partial(),  # grad_value,
         Shard(2),  # query,
         Replicate(),  # key,
         Replicate(),  # value,
@@ -240,8 +242,8 @@ def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
         Shard(2),  # logsumexp,
         Shard(2),  # grad_out,
         Shard(2),  # grad_logsumexp,
-        Shard(2),  # q_num_blocks,
-        Shard(2),  # q_indices,
+        Replicate(),  # q_num_blocks,
+        Shard(3),  # q_indices,
     ]
 
     single_mesh_dim_strategies = [
@@ -263,10 +265,10 @@ def flex_attention_backward_strategy(op_schema: OpSchema) -> OpStrategy:
         costs = op_spec.redistribute_cost
         assert costs is not None
         # costs is a list of lists, one per input tensor
-        # For backward: indices 0-3 are outputs (grad_query, grad_key, grad_value,
-        # grad_score_mod_captured), indices 4-10 are tensor inputs, and indices
-        # 11-12 are the mask tensors (kv_num_blocks, kv_indices).
-        for mask_idx in range(11, len(costs)):
+        # For backward: indices 0-2 are outputs (grad_query, grad_key, grad_value),
+        # indices 3-9 are tensor inputs, and indices
+        # 10-11 are the mask tensors (q_num_blocks, q_indices)
+        for mask_idx in range(10 - 3, len(costs)):
             mask_costs = costs[mask_idx]
             # If any cost for this mask is > 0, mark all costs for this input as inf
             if any(cost > 0 for cost in mask_costs):
@@ -446,7 +448,6 @@ def _flex_backward_propagate(
     compute_mesh = query.device_mesh
 
     block_mask_spec = tuple(b._spec for b in block_mask)
-    assert False, block_mask_spec
     op_schema = OpSchema(
         flex_attention_backward_hop,  # type: ignore[arg-type]
         args_schema=(
@@ -541,8 +542,16 @@ def dtensor_flex_attention(
     # Import DTensor at runtime to avoid circular dependency
     from torch.distributed.tensor._api import DTensor
 
-    if score_mod_other_buffers or mask_mod_other_buffers:
-        raise ValueError("DTensor + Flex Attention does not support other buffers")
+    if score_mod_other_buffers:
+        raise ValueError(
+            "FlexAttention + DTensor doesn't support score_mod_other_buffers yet."
+        )
+
+    # Convert DTensor buffers in mask_mod_other_buffers to local tensors
+    mask_mod_other_buffers_local = pytree.tree_map(
+        lambda x: x._local_tensor if isinstance(x, DTensor) else x,
+        mask_mod_other_buffers,
+    )
 
     op_info = _flex_propagate(query, key, value, block_mask[2:4])
     query, key, value, *_ = op_info.local_args
@@ -560,7 +569,7 @@ def dtensor_flex_attention(
         scale=scale,
         kernel_options=kernel_options,
         score_mod_other_buffers=score_mod_other_buffers,
-        mask_mod_other_buffers=mask_mod_other_buffers,
+        mask_mod_other_buffers=mask_mod_other_buffers_local,
     )
     assert op_info.output_sharding is not None
     return tuple(
@@ -593,8 +602,16 @@ def dtensor_flex_attention_backward(
     # Import DTensor at runtime to avoid circular dependency
     from torch.distributed.tensor._api import DTensor
 
-    if score_mod_other_buffers or mask_mod_other_buffers:
-        raise ValueError("DTensor + Flex Attention does not support other buffers")
+    if score_mod_other_buffers:
+        raise ValueError(
+            "FlexAttention + DTensor doesn't support score_mod_other_buffers yet."
+        )
+
+    # Convert DTensor buffers in mask_mod_other_buffers to local tensors
+    mask_mod_other_buffers_local = pytree.tree_map(
+        lambda x: x._local_tensor if isinstance(x, DTensor) else x,
+        mask_mod_other_buffers,
+    )
 
     if not isinstance(grad_logsumexp, DTensor):
         # TODO: Why is this not a DTensor? Is it because that logsumexp is not used
@@ -611,7 +628,7 @@ def dtensor_flex_attention_backward(
         )
 
     op_info = _flex_backward_propagate(
-        query, key, value, out, logsumexp, grad_out, grad_logsumexp, block_mask[5:7]
+        query, key, value, out, logsumexp, grad_out, grad_logsumexp, block_mask[6:8]
     )
     query, key, value, out, logsumexp, grad_out, grad_logsumpexp, *_ = (
         op_info.local_args
@@ -635,13 +652,13 @@ def dtensor_flex_attention_backward(
         scale=scale,
         kernel_options=kernel_options,
         score_mod_other_buffers=score_mod_other_buffers,
-        mask_mod_other_buffers=mask_mod_other_buffers,
+        mask_mod_other_buffers=mask_mod_other_buffers_local,
     )
     assert op_info.output_sharding is not None
     result = []
     assert len(outputs) == 4 and len(op_info.output_sharding.output_spec) == 3
-    for out, spec in zip(outputs, op_info.output_sharding.output_spec):  # type: ignore[arg-type]
-        result.append(DTensor(out, spec, requires_grad=out.requires_grad))
+    for out, spec in zip(outputs, op_info.output_sharding.output_spec, strict=False):  # type: ignore[arg-type]
+        result.append(DTensor(out, spec, requires_grad=False))
     result.append(tuple())
 
     return tuple(result)

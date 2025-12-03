@@ -4,6 +4,7 @@
 import torch
 from torch.distributed.tensor import (
     create_distributed_block_mask,
+    DeviceMesh,
     distribute_tensor,
     DTensor,
     Replicate,
@@ -27,152 +28,82 @@ def _causal_mask(
     return q_idx >= kv_idx
 
 
+def _create_block_causal_batch(
+    global_bs: int,
+    global_query_tokens: int,
+    device_type: str,
+    device_mesh: DeviceMesh | None = None,
+    data_parallelism: bool = False,
+):
+    """Helper to create a batch for block_causal_mask tests.
+
+    Creates a fake batch which packs several documents together, where each
+    has DOC_LEN tokens and the last token is the EOS token (DOC_LEN - 1).
+
+    Args:
+        global_bs: Global batch size
+        global_query_tokens: Global query sequence length
+        device_type: Device type (e.g., 'cuda', 'cpu')
+        device_mesh: Optional DeviceMesh. If provided, seq_idx will be converted
+                     to a replicated DTensor to support distributed execution.
+
+    Returns:
+        tuple: (batch, DOC_LEN, block_causal_mask)
+            - batch: Tensor of shape (global_bs, global_query_tokens)
+            - DOC_LEN: Document length
+            - block_causal_mask: Mask function that works with both local and distributed contexts
+    """
+    DOC_LEN = 30
+    total_elements = global_bs * global_query_tokens
+    batch = torch.arange(total_elements, device=device_type) % DOC_LEN
+    batch = batch.reshape(global_bs, global_query_tokens)
+
+    # Pre-compute seq_idx for the entire batch
+    mask = batch == (DOC_LEN - 1)
+    mask[:, -1] = True
+    acc_mask = torch.cumsum(torch.where(mask, 1, 0), dim=1)
+    seq_idx = torch.zeros_like(acc_mask, dtype=torch.int32)
+    seq_idx[:, 1:] = acc_mask[:, :-1]
+
+    # Convert to DTensor if device_mesh is provided for distributed execution
+
+    def block_causal_mask(
+        b: torch.Tensor,
+        h: torch.Tensor,
+        q_idx: torch.Tensor,
+        kv_idx: torch.Tensor,
+    ):
+        seq_idx_to_use = seq_idx
+        return (seq_idx_to_use[b, q_idx] == seq_idx_to_use[b, kv_idx]) & (
+            q_idx >= kv_idx
+        )
+
+    return batch, DOC_LEN, block_causal_mask
+
+
 class DistFlexAttentionTest(DTensorTestBase):
     # Global dimension constants for all tests
     GLOBAL_BS = 16  # Batch size (divisible by world_size=4)
     GLOBAL_NHEADS = 8  # Number of attention heads (divisible by world_size=4)
-    GLOBAL_QUERY_TOKENS = 512  # Query sequence length (divisible by world_size=4)
+    GLOBAL_QUERY_TOKENS = 1024  # Query sequence length (divisible by world_size=4)
     GLOBAL_CONTEXT_TOKENS = 1024  # KV sequence length (divisible by world_size=4)
     DIM = 32  # Head dimension
 
-    @with_comms
-    def test_flex_attention_shard0(self):
-        """Test FlexAttention with batch dimension sharding (Shard(0))."""
+    def _test_flex_attention_with_placement(
+        self, placement, mask_fn=None, dtype=torch.bfloat16
+    ):
+        """Helper function to test FlexAttention with different placements.
+
+        Args:
+            placement: List of Placement objects (e.g., [Shard(0)], [Replicate()], [Shard(2)])
+            mask_fn: Mask function to use (defaults to _causal_mask if None)
+            dtype: Data type for tensors (default: torch.bfloat16)
+        """
         device_mesh = self.build_device_mesh()
-        dtype = torch.bfloat16
 
-        # Create input tensors with gradients enabled
-        q = torch.rand(
-            (self.GLOBAL_BS, self.GLOBAL_NHEADS, self.GLOBAL_QUERY_TOKENS, self.DIM),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        k = torch.rand(
-            (self.GLOBAL_BS, self.GLOBAL_NHEADS, self.GLOBAL_CONTEXT_TOKENS, self.DIM),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        v = torch.rand(
-            (self.GLOBAL_BS, self.GLOBAL_NHEADS, self.GLOBAL_CONTEXT_TOKENS, self.DIM),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-
-        # Create block mask for distributed execution
-        local_mask = create_distributed_block_mask(
-            _causal_mask,
-            self.GLOBAL_BS,
-            self.GLOBAL_NHEADS,
-            self.GLOBAL_QUERY_TOKENS,
-            self.GLOBAL_CONTEXT_TOKENS,
-            device_mesh,
-            [Shard(0)],
-        )
-
-        # Distribute tensors with Shard(0)
-        placement = [Shard(0)]
-        q_dt = distribute_tensor(q, device_mesh, placement)
-        k_dt = distribute_tensor(k, device_mesh, placement)
-        v_dt = distribute_tensor(v, device_mesh, placement)
-
-        # Compile flex_attention for better performance
-
-        # TODO: we cannot turn on torch.compile yet.
-        # Error message:
-        #   Expected metadata: (DTensorSpec(...)), expected type: <class 'torch.distributed.tensor.DTensor'>
-        #   Runtime metadata: None, runtime type: <class 'torch.Tensor'>
-        #   shape: torch.Size([16, 8, 512])
-        #   To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
-
-        # This is very likely to be the case where grad_logsumexp is a plain tensor.
-        flex_attention_compiled = torch.compile(flex_attention)
-        flex_attention_compiled = flex_attention
-
-        # Run distributed FlexAttention
-        out_dt, aux_dt = flex_attention_compiled(
-            q_dt,
-            k_dt,
-            v_dt,
-            block_mask=local_mask,
-            return_aux=AuxRequest(lse=True, max_scores=True),
-        )
-        local_out = out_dt
-        local_logsumexp = aux_dt.lse
-        local_max_scores = aux_dt.max_scores
-
-        # Verify outputs are DTensors with correct placements
-        self.assertIsInstance(local_out, DTensor)
-        self.assertIsInstance(local_logsumexp, DTensor)
-        self.assertIsInstance(local_max_scores, DTensor)
-        self.assertTrue(local_out.placements[0].is_shard(dim=0))
-        self.assertTrue(local_logsumexp.placements[0].is_shard(dim=0))
-        self.assertTrue(local_max_scores.placements[0].is_shard(dim=0))
-
-        # Create regular (non-DTensor) block mask for reference computation
-        # Use the cached compiled version from create_distributed_block_mask
-        full_mask = create_distributed_block_mask.create_block_mask(
-            _causal_mask,
-            self.GLOBAL_BS,
-            self.GLOBAL_NHEADS,
-            self.GLOBAL_QUERY_TOKENS,
-            self.GLOBAL_CONTEXT_TOKENS,
-        )
-
-        # Get full tensors and run reference computation with regular tensors
-        full_q = q_dt.full_tensor().detach()
-        full_k = k_dt.full_tensor().detach()
-        full_v = v_dt.full_tensor().detach()
-        full_q.requires_grad = True
-        full_k.requires_grad = True
-        full_v.requires_grad = True
-        full_out, full_aux = flex_attention_compiled(
-            full_q,
-            full_k,
-            full_v,
-            block_mask=full_mask,
-            return_aux=AuxRequest(lse=True, max_scores=True),
-        )
-        full_logsumexp = full_aux.lse
-        full_max_scores = full_aux.max_scores
-
-        # Verify correctness by comparing DTensor results with regular tensor results
-        self.assertTrue(
-            torch.allclose(local_out.full_tensor(), full_out, atol=1e-3, rtol=1e-3)
-        )
-        self.assertTrue(
-            torch.allclose(
-                local_logsumexp.full_tensor(), full_logsumexp, atol=1e-3, rtol=1e-3
-            )
-        )
-        self.assertTrue(
-            torch.allclose(
-                local_max_scores.full_tensor(), full_max_scores, atol=1e-3, rtol=1e-3
-            )
-        )
-
-        # Test backward pass
-        local_out.sum().backward()
-        full_out.sum().backward()
-
-        # Compare gradients
-        torch.testing.assert_close(
-            q_dt.grad.full_tensor(), full_q.grad, atol=2e-06, rtol=1e-05
-        )
-        torch.testing.assert_close(
-            k_dt.grad.full_tensor(), full_k.grad, atol=2e-06, rtol=1e-05
-        )
-        torch.testing.assert_close(
-            v_dt.grad.full_tensor(), full_v.grad, atol=2e-06, rtol=1e-05
-        )
-
-    @with_comms
-    def test_flex_attention_replicate(self):
-        """Test FlexAttention with replicated placement."""
-        device_mesh = self.build_device_mesh()
-        dtype = torch.bfloat16
+        # Use default causal mask if none provided
+        if mask_fn is None:
+            mask_fn = _causal_mask
 
         # Create input tensors with gradients enabled
         q = torch.rand(
@@ -195,154 +126,29 @@ class DistFlexAttentionTest(DTensorTestBase):
         )
 
         # Create distributed block mask
-        mask = create_distributed_block_mask(
-            _causal_mask,
+        local_mask = create_distributed_block_mask(
+            mask_fn,
             self.GLOBAL_BS,
             self.GLOBAL_NHEADS,
             self.GLOBAL_QUERY_TOKENS,
             self.GLOBAL_CONTEXT_TOKENS,
             device_mesh,
-            [Replicate()],
+            placement,
         )
 
-        # Distribute tensors with Replicate
-        placement = [Replicate()]
+        # Distribute tensors with the specified placement
         q_dt = distribute_tensor(q, device_mesh, placement)
         k_dt = distribute_tensor(k, device_mesh, placement)
         v_dt = distribute_tensor(v, device_mesh, placement)
 
         # Compile flex_attention for better performance
-        flex_attention_compiled = torch.compile(flex_attention)
-        flex_attention_compiled = flex_attention
-
-        # Run FlexAttention with DTensors
-        out_dt, aux_dt = flex_attention_compiled(
-            q_dt,
-            k_dt,
-            v_dt,
-            block_mask=mask,
-            return_aux=AuxRequest(lse=True, max_scores=True),
-        )
-        local_out = out_dt
-        local_logsumexp = aux_dt.lse
-        local_max_scores = aux_dt.max_scores
-
-        # Verify outputs are DTensors with replicate placements
-        self.assertIsInstance(local_out, DTensor)
-        self.assertIsInstance(local_logsumexp, DTensor)
-        self.assertIsInstance(local_max_scores, DTensor)
-        self.assertTrue(local_out.placements[0].is_replicate())
-        self.assertTrue(local_logsumexp.placements[0].is_replicate())
-        self.assertTrue(local_max_scores.placements[0].is_replicate())
-
-        # Verify shapes
-        self.assertEqual(
-            local_out.shape,
-            (self.GLOBAL_BS, self.GLOBAL_NHEADS, self.GLOBAL_QUERY_TOKENS, self.DIM),
-        )
-
-        # Create regular (non-DTensor) block mask for reference computation
-        # Use the cached compiled version from create_distributed_block_mask
-        full_mask = create_distributed_block_mask.create_block_mask(
-            _causal_mask,
-            self.GLOBAL_BS,
-            self.GLOBAL_NHEADS,
-            self.GLOBAL_QUERY_TOKENS,
-            self.GLOBAL_CONTEXT_TOKENS,
-        )
-
-        # Get full tensors and run reference computation
-        full_q = q_dt.full_tensor().detach()
-        full_k = k_dt.full_tensor().detach()
-        full_v = v_dt.full_tensor().detach()
-        full_q.requires_grad = True
-        full_k.requires_grad = True
-        full_v.requires_grad = True
-        full_out, full_aux = flex_attention_compiled(
-            full_q,
-            full_k,
-            full_v,
-            block_mask=full_mask,
-            return_aux=AuxRequest(lse=True, max_scores=True),
-        )
-        full_logsumexp = full_aux.lse
-        full_max_scores = full_aux.max_scores
-
-        # Verify correctness by comparing DTensor results with regular tensor results
-        self.assertTrue(
-            torch.allclose(local_out.full_tensor(), full_out, atol=1e-3, rtol=1e-3)
-        )
-        self.assertTrue(
-            torch.allclose(
-                local_logsumexp.full_tensor(), full_logsumexp, atol=1e-3, rtol=1e-3
-            )
-        )
-        self.assertTrue(
-            torch.allclose(
-                local_max_scores.full_tensor(), full_max_scores, atol=1e-3, rtol=1e-3
-            )
-        )
-
-        # Test backward pass
-        local_out.sum().to_local().backward()
-        full_out.sum().backward()
-
-        # Compare gradients
-        torch.testing.assert_close(
-            q_dt.grad.full_tensor(), full_q.grad, atol=2e-06, rtol=1e-05
-        )
-        torch.testing.assert_close(
-            k_dt.grad.full_tensor(), full_k.grad, atol=2e-06, rtol=1e-05
-        )
-        torch.testing.assert_close(
-            v_dt.grad.full_tensor(), full_v.grad, atol=2e-06, rtol=1e-05
-        )
-
-    @with_comms
-    def test_flex_attention_shard2(self):
-        """Test FlexAttention with sequence dimension sharding (Shard(2))."""
-        device_mesh = self.build_device_mesh()
-        dtype = torch.bfloat16
-
-        # Create input tensors with gradients enabled
-        q = torch.rand(
-            (self.GLOBAL_BS, self.GLOBAL_NHEADS, self.GLOBAL_QUERY_TOKENS, self.DIM),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        k = torch.rand(
-            (self.GLOBAL_BS, self.GLOBAL_NHEADS, self.GLOBAL_CONTEXT_TOKENS, self.DIM),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-        v = torch.rand(
-            (self.GLOBAL_BS, self.GLOBAL_NHEADS, self.GLOBAL_CONTEXT_TOKENS, self.DIM),
-            device=self.device_type,
-            dtype=dtype,
-            requires_grad=True,
-        )
-
-        # Create block mask for distributed execution with Shard(2)
-        local_mask = create_distributed_block_mask(
-            _causal_mask,
-            self.GLOBAL_BS,
-            self.GLOBAL_NHEADS,
-            self.GLOBAL_QUERY_TOKENS,
-            self.GLOBAL_CONTEXT_TOKENS,
-            device_mesh,
-            [Shard(2)],
-        )
-
-        # For context parallel: Q, K, V are all sharded on sequence dim.
-        # DTensor will perform the allgather for KV.
-        q_dt = distribute_tensor(q, device_mesh, [Shard(2)])
-        k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
-        v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
-
-        # Compile flex_attention for better performance
         # TODO: we cannot turn on torch.compile yet.
+        # Error message:
+        #   Expected metadata: (DTensorSpec(...)), expected type: <class 'torch.distributed.tensor.DTensor'>
+        #   Runtime metadata: None, runtime type: <class 'torch.Tensor'>
+        #   shape: torch.Size([16, 8, 1024])
+        #   To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
+        # This is very likely to be the case where grad_logsumexp is a plain tensor.
         flex_attention_compiled = flex_attention
 
         # Run distributed FlexAttention
@@ -357,18 +163,26 @@ class DistFlexAttentionTest(DTensorTestBase):
         local_logsumexp = aux_dt.lse
         local_max_scores = aux_dt.max_scores
 
-        # Verify outputs are DTensors with correct placements
+        # Verify outputs are DTensors
         self.assertIsInstance(local_out, DTensor)
         self.assertIsInstance(local_logsumexp, DTensor)
         self.assertIsInstance(local_max_scores, DTensor)
-        self.assertTrue(local_out.placements[0].is_shard(dim=2))
-        self.assertTrue(local_logsumexp.placements[0].is_shard(dim=2))
-        self.assertTrue(local_max_scores.placements[0].is_shard(dim=2))
+
+        # Verify placements based on the input placement
+        if isinstance(placement[0], Shard):
+            shard_dim = placement[0].dim
+            self.assertTrue(local_out.placements[0].is_shard(dim=shard_dim))
+            self.assertTrue(local_logsumexp.placements[0].is_shard(dim=shard_dim))
+            self.assertTrue(local_max_scores.placements[0].is_shard(dim=shard_dim))
+        elif isinstance(placement[0], Replicate):
+            self.assertTrue(local_out.placements[0].is_replicate())
+            self.assertTrue(local_logsumexp.placements[0].is_replicate())
+            self.assertTrue(local_max_scores.placements[0].is_replicate())
 
         # Create regular (non-DTensor) block mask for reference computation
         # Use the cached compiled version from create_distributed_block_mask
         full_mask = create_distributed_block_mask.create_block_mask(
-            _causal_mask,
+            mask_fn,
             self.GLOBAL_BS,
             self.GLOBAL_NHEADS,
             self.GLOBAL_QUERY_TOKENS,
@@ -393,37 +207,74 @@ class DistFlexAttentionTest(DTensorTestBase):
         full_max_scores = full_aux.max_scores
 
         # Verify correctness by comparing DTensor results with regular tensor results
-        self.assertTrue(
-            torch.allclose(local_out.full_tensor(), full_out, atol=1e-3, rtol=1e-3)
-        )
-        self.assertTrue(
-            torch.allclose(
-                local_logsumexp.full_tensor(), full_logsumexp, atol=1e-3, rtol=1e-3
-            )
-        )
-        self.assertTrue(
-            torch.allclose(
-                local_max_scores.full_tensor(), full_max_scores, atol=1e-3, rtol=1e-3
-            )
-        )
+        torch.testing.assert_close(local_out.full_tensor(), full_out)
+        torch.testing.assert_close(local_logsumexp.full_tensor(), full_logsumexp)
+        torch.testing.assert_close(local_max_scores.full_tensor(), full_max_scores)
 
         # Test backward pass
-        local_out.sum().to_local().backward()
+        local_out.sum().backward()
         full_out.sum().backward()
 
         # Compare gradients
-        assert False, (q_dt.grad._spec, k_dt.grad._spec)
+        torch.testing.assert_close(q_dt.grad.full_tensor(), full_q.grad)
+        torch.testing.assert_close(k_dt.grad.full_tensor(), full_k.grad)
+        torch.testing.assert_close(v_dt.grad.full_tensor(), full_v.grad)
+
+    @with_comms
+    def test_flex_attention_shard0(self):
+        """Test FlexAttention with batch dimension sharding (Shard(0))."""
+        self._test_flex_attention_with_placement(
+            [Shard(0)],
+            dtype=torch.bfloat16,
+        )
+
+    @with_comms
+    def test_flex_attention_replicate(self):
+        """Test FlexAttention with replicated placement."""
+        self._test_flex_attention_with_placement([Replicate()], dtype=torch.bfloat16)
+
+    @with_comms
+    def test_flex_attention_shard2(self):
+        """Test FlexAttention with sequence dimension sharding (Shard(2))."""
+        self._test_flex_attention_with_placement([Shard(2)], dtype=torch.float32)
+
+    def _create_block_causal_batch(self, data_parallelism: bool = False):
+        """Helper to create a batch for block_causal_mask tests.
+
+        Returns the batch tensor on the device, and a mask function that works
+        with both local and distributed contexts.
         """
-        torch.testing.assert_close(
-            q_dt.grad.full_tensor(), full_q.grad, atol=2e-02, rtol=1e-02
+        return _create_block_causal_batch(
+            self.GLOBAL_BS,
+            self.GLOBAL_QUERY_TOKENS,
+            self.device_type,
+            device_mesh=self.build_device_mesh(),
+            data_parallelism=data_parallelism,
         )
-        torch.testing.assert_close(
-            k_dt.grad.full_tensor(), full_k.grad, atol=2e-02, rtol=1e-02
+
+    @with_comms
+    def test_flex_attention_block_causal_shard0(self):
+        """Test FlexAttention with block_causal_mask and Shard(0) placement."""
+        batch, DOC_LEN, mask_fn = self._create_block_causal_batch(data_parallelism=True)
+        self._test_flex_attention_with_placement(
+            [Shard(0)], mask_fn=mask_fn, dtype=torch.bfloat16
         )
-        torch.testing.assert_close(
-            v_dt.grad.full_tensor(), full_v.grad, atol=2e-02, rtol=1e-02
+
+    @with_comms
+    def test_flex_attention_block_causal_replicate(self):
+        """Test FlexAttention with block_causal_mask and Replicate placement."""
+        batch, DOC_LEN, mask_fn = self._create_block_causal_batch()
+        self._test_flex_attention_with_placement(
+            [Replicate()], mask_fn=mask_fn, dtype=torch.bfloat16
         )
-        """
+
+    @with_comms
+    def test_flex_attention_block_causal_shard2(self):
+        """Test FlexAttention with block_causal_mask and Shard(2) placement."""
+        batch, DOC_LEN, mask_fn = self._create_block_causal_batch()
+        self._test_flex_attention_with_placement(
+            [Shard(2)], mask_fn=mask_fn, dtype=torch.float32
+        )
 
 
 class DistBlockMaskTest(DTensorTestBase):
@@ -441,12 +292,74 @@ class DistBlockMaskTest(DTensorTestBase):
     GLOBAL_QUERY_TOKENS = 512  # Query sequence length (divisible by world_size=4)
     GLOBAL_CONTEXT_TOKENS = 1024  # KV sequence length (divisible by world_size=4)
 
+    def _test_create_distributed_block_mask(
+        self,
+        placement,
+        mask_fn=None,
+        expected_kv_placement=None,
+        expected_q_num_blocks_placement=None,
+        expected_q_indices_placement=None,
+        verify_values=True,
+    ):
+        """Helper function to test create_distributed_block_mask with different placements.
+
+        Args:
+            placement: List of Placement objects (e.g., [Shard(0)], [Replicate()], [Shard(2)])
+            mask_fn: Mask function to use (defaults to _causal_mask if None)
+            expected_kv_placement: Expected placement for kv fields. If None, uses placement[0]
+            expected_q_num_blocks_placement: Expected placement for q_num_blocks. If None, uses expected_kv_placement
+            expected_q_indices_placement: Expected placement for q_indices. If None, uses expected_kv_placement
+            verify_values: Whether to verify tensor values by comparing with full_block_mask (default: True)
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Use default causal mask if none provided
+        if mask_fn is None:
+            mask_fn = _causal_mask
+
+        # Create distributed block mask
+        block_mask = create_distributed_block_mask(
+            mask_fn,
+            self.GLOBAL_BS,
+            self.GLOBAL_NHEADS,
+            self.GLOBAL_QUERY_TOKENS,
+            self.GLOBAL_CONTEXT_TOKENS,
+            device_mesh,
+            placement,
+        )
+
+        # Create reference full block mask if needed for value verification
+        full_block_mask = None
+        if verify_values:
+            full_block_mask = create_distributed_block_mask.create_block_mask(
+                mask_fn,
+                B=self.GLOBAL_BS,
+                H=self.GLOBAL_NHEADS,
+                Q_LEN=self.GLOBAL_QUERY_TOKENS,
+                KV_LEN=self.GLOBAL_CONTEXT_TOKENS,
+                device=device_mesh.device_type,
+            )
+
+        # Default expected placements
+        if expected_kv_placement is None:
+            expected_kv_placement = placement[0]
+
+        # Verify placements (and optionally values)
+        self._verify_block_mask_placements(
+            block_mask,
+            expected_kv_placement,
+            expected_q_num_blocks_placement=expected_q_num_blocks_placement,
+            expected_q_indices_placement=expected_q_indices_placement,
+            full_block_mask=full_block_mask,
+        )
+
     def _verify_block_mask_placements(
         self,
         block_mask,
         expected_kv_placement,
         expected_q_num_blocks_placement=None,
         expected_q_indices_placement=None,
+        full_block_mask=None,
     ):
         """Verify all block mask components have expected placements.
 
@@ -458,6 +371,8 @@ class DistBlockMaskTest(DTensorTestBase):
                                             If None, uses expected_kv_placement
             expected_q_indices_placement: Expected placement for q_indices, full_q_indices.
                                          If None, uses expected_kv_placement
+            full_block_mask: Optional reference BlockMask (non-distributed) to compare
+                           tensor values against using full_tensor()
         """
         if expected_q_num_blocks_placement is None:
             expected_q_num_blocks_placement = expected_kv_placement
@@ -470,11 +385,26 @@ class DistBlockMaskTest(DTensorTestBase):
             self.assertEqual(
                 block_mask.kv_num_blocks.placements[0], expected_kv_placement
             )
+            if (
+                full_block_mask is not None
+                and full_block_mask.kv_num_blocks is not None
+            ):
+                gathered_tensor = block_mask.kv_num_blocks.full_tensor()
+                self.assertTrue(
+                    torch.equal(gathered_tensor, full_block_mask.kv_num_blocks),
+                    "kv_num_blocks values don't match after gathering",
+                )
 
         # Verify kv_indices
         if block_mask.kv_indices is not None:
             self.assertIsInstance(block_mask.kv_indices, DTensor)
             self.assertEqual(block_mask.kv_indices.placements[0], expected_kv_placement)
+            if full_block_mask is not None and full_block_mask.kv_indices is not None:
+                gathered_tensor = block_mask.kv_indices.full_tensor()
+                self.assertTrue(
+                    torch.equal(gathered_tensor, full_block_mask.kv_indices),
+                    "kv_indices values don't match after gathering",
+                )
 
         # Verify full_kv_num_blocks
         if block_mask.full_kv_num_blocks is not None:
@@ -482,6 +412,15 @@ class DistBlockMaskTest(DTensorTestBase):
             self.assertEqual(
                 block_mask.full_kv_num_blocks.placements[0], expected_kv_placement
             )
+            if (
+                full_block_mask is not None
+                and full_block_mask.full_kv_num_blocks is not None
+            ):
+                gathered_tensor = block_mask.full_kv_num_blocks.full_tensor()
+                self.assertTrue(
+                    torch.equal(gathered_tensor, full_block_mask.full_kv_num_blocks),
+                    "full_kv_num_blocks values don't match after gathering",
+                )
 
         # Verify full_kv_indices
         if block_mask.full_kv_indices is not None:
@@ -489,6 +428,15 @@ class DistBlockMaskTest(DTensorTestBase):
             self.assertEqual(
                 block_mask.full_kv_indices.placements[0], expected_kv_placement
             )
+            if (
+                full_block_mask is not None
+                and full_block_mask.full_kv_indices is not None
+            ):
+                gathered_tensor = block_mask.full_kv_indices.full_tensor()
+                self.assertTrue(
+                    torch.equal(gathered_tensor, full_block_mask.full_kv_indices),
+                    "full_kv_indices values don't match after gathering",
+                )
 
         # Verify q_num_blocks
         if block_mask.q_num_blocks is not None:
@@ -496,6 +444,12 @@ class DistBlockMaskTest(DTensorTestBase):
             self.assertEqual(
                 block_mask.q_num_blocks.placements[0], expected_q_num_blocks_placement
             )
+            if full_block_mask is not None and full_block_mask.q_num_blocks is not None:
+                gathered_tensor = block_mask.q_num_blocks.full_tensor()
+                self.assertTrue(
+                    torch.equal(gathered_tensor, full_block_mask.q_num_blocks),
+                    "q_num_blocks values don't match after gathering",
+                )
 
         # Verify q_indices
         if block_mask.q_indices is not None:
@@ -503,6 +457,12 @@ class DistBlockMaskTest(DTensorTestBase):
             self.assertEqual(
                 block_mask.q_indices.placements[0], expected_q_indices_placement
             )
+            if full_block_mask is not None and full_block_mask.q_indices is not None:
+                gathered_tensor = block_mask.q_indices.full_tensor()
+                self.assertTrue(
+                    torch.equal(gathered_tensor, full_block_mask.q_indices),
+                    "q_indices values don't match after gathering",
+                )
 
         # Verify full_q_num_blocks
         if block_mask.full_q_num_blocks is not None:
@@ -511,6 +471,15 @@ class DistBlockMaskTest(DTensorTestBase):
                 block_mask.full_q_num_blocks.placements[0],
                 expected_q_num_blocks_placement,
             )
+            if (
+                full_block_mask is not None
+                and full_block_mask.full_q_num_blocks is not None
+            ):
+                gathered_tensor = block_mask.full_q_num_blocks.full_tensor()
+                self.assertTrue(
+                    torch.equal(gathered_tensor, full_block_mask.full_q_num_blocks),
+                    "full_q_num_blocks values don't match after gathering",
+                )
 
         # Verify full_q_indices
         if block_mask.full_q_indices is not None:
@@ -518,72 +487,77 @@ class DistBlockMaskTest(DTensorTestBase):
             self.assertEqual(
                 block_mask.full_q_indices.placements[0], expected_q_indices_placement
             )
+            if (
+                full_block_mask is not None
+                and full_block_mask.full_q_indices is not None
+            ):
+                gathered_tensor = block_mask.full_q_indices.full_tensor()
+                self.assertTrue(
+                    torch.equal(gathered_tensor, full_block_mask.full_q_indices),
+                    "full_q_indices values don't match after gathering",
+                )
 
     @with_comms
     def test_create_distributed_block_mask_shard0(self):
         """Test create_distributed_block_mask with Shard(0) placement."""
-        device_mesh = self.build_device_mesh()
-
-        # Create distributed block mask with Shard(0)
-        block_mask = create_distributed_block_mask(
-            _causal_mask,
-            self.GLOBAL_BS,
-            self.GLOBAL_NHEADS,
-            self.GLOBAL_QUERY_TOKENS,
-            self.GLOBAL_CONTEXT_TOKENS,
-            device_mesh,
-            [Shard(0)],
-        )
-
-        # Verify all mask components are DTensors with Shard(0) placement
-        # All 8 fields should be Shard(0) when sharding on batch dimension
-        self._verify_block_mask_placements(block_mask, Shard(0))
+        self._test_create_distributed_block_mask([Shard(0)])
 
     @with_comms
     def test_create_distributed_block_mask_replicate(self):
         """Test create_distributed_block_mask with Replicate placement."""
-        device_mesh = self.build_device_mesh()
-
-        # Create distributed block mask with Replicate
-        block_mask = create_distributed_block_mask(
-            _causal_mask,
-            self.GLOBAL_BS,
-            self.GLOBAL_NHEADS,
-            self.GLOBAL_QUERY_TOKENS,
-            self.GLOBAL_CONTEXT_TOKENS,
-            device_mesh,
-            [Replicate()],
-        )
-
-        # Verify all mask components are DTensors with Replicate placement
-        # All 8 fields should be Replicate()
-        self._verify_block_mask_placements(block_mask, Replicate())
+        self._test_create_distributed_block_mask([Replicate()])
 
     @with_comms
     def test_create_distributed_block_mask_shard2(self):
         """Test create_distributed_block_mask with Shard(2) placement (context parallel)."""
-        device_mesh = self.build_device_mesh()
-
-        # Create distributed block mask with Shard(2)
-        block_mask = create_distributed_block_mask(
-            _causal_mask,
-            self.GLOBAL_BS,
-            self.GLOBAL_NHEADS,
-            self.GLOBAL_QUERY_TOKENS,
-            self.GLOBAL_CONTEXT_TOKENS,
-            device_mesh,
+        # Shard(2) uses a sharded mask_mod with local dimensions, so tensor values
+        # will differ from a reference block mask created with unsharded mask_mod
+        self._test_create_distributed_block_mask(
             [Shard(2)],
-        )
-
-        # Verify placements:
-        # - kv fields (kv_num_blocks, kv_indices, full_kv_*): Shard(2)
-        # - q_num_blocks, full_q_num_blocks: Replicate() (no Q_LEN dimension)
-        # - q_indices, full_q_indices: Shard(3) (Q_LEN swapped to last dimension)
-        self._verify_block_mask_placements(
-            block_mask,
             expected_kv_placement=Shard(2),
             expected_q_num_blocks_placement=Replicate(),
             expected_q_indices_placement=Shard(3),
+            verify_values=False,
+        )
+
+    def _create_block_causal_batch(self):
+        """Helper to create a batch for block_causal_mask tests.
+
+        Returns the batch tensor on the device, and a mask function that works
+        with both local and distributed contexts.
+        """
+        return _create_block_causal_batch(
+            self.GLOBAL_BS,
+            self.GLOBAL_QUERY_TOKENS,
+            self.device_type,
+            device_mesh=None,  # DistBlockMaskTest doesn't need DTensor version
+        )
+
+    @with_comms
+    def test_create_distributed_block_mask_block_causal_shard0(self):
+        """Test create_distributed_block_mask with block_causal_mask and Shard(0) placement."""
+        batch, DOC_LEN, mask_fn = self._create_block_causal_batch()
+        self._test_create_distributed_block_mask([Shard(0)], mask_fn=mask_fn)
+
+    @with_comms
+    def test_create_distributed_block_mask_block_causal_replicate(self):
+        """Test create_distributed_block_mask with block_causal_mask and Replicate placement."""
+        batch, DOC_LEN, mask_fn = self._create_block_causal_batch()
+        self._test_create_distributed_block_mask([Replicate()], mask_fn=mask_fn)
+
+    @with_comms
+    def test_create_distributed_block_mask_block_causal_shard2(self):
+        """Test create_distributed_block_mask with block_causal_mask and Shard(2) placement."""
+        batch, DOC_LEN, mask_fn = self._create_block_causal_batch()
+        # Shard(2) uses a sharded mask_mod with local dimensions, so tensor values
+        # will differ from a reference block mask created with unsharded mask_mod
+        self._test_create_distributed_block_mask(
+            [Shard(2)],
+            mask_fn=mask_fn,
+            expected_kv_placement=Shard(2),
+            expected_q_num_blocks_placement=Replicate(),
+            expected_q_indices_placement=Shard(3),
+            verify_values=False,
         )
 
     @with_comms
