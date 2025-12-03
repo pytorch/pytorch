@@ -7,18 +7,18 @@ import unittest.mock as mock
 from unittest.mock import patch
 
 import torch
-import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch._dynamo.exc import IncorrectUsage, Unsupported
 from torch._dynamo.utils import counters
 from torch.testing._internal.common_utils import skipIfWindows
+from torch.testing._internal.dynamo_pytree_test_utils import PytreeRegisteringTestCase
 
 
 def my_custom_function(x):
     return x + 1
 
 
-class DecoratorTests(torch._dynamo.test_case.TestCase):
+class DecoratorTests(PytreeRegisteringTestCase):
     def test_disallow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
@@ -329,10 +329,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.x = x
                 self.y = y
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             Point,
             lambda p: ((p.x, p.y), ()),
             lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
         )
 
         @torch._dynamo.nonstrict_trace
@@ -360,10 +361,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.x = x
                 self.y = y
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             Point,
             lambda p: ((p.x, p.y), ()),
             lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
         )
 
         @torch._dynamo.nonstrict_trace
@@ -396,10 +398,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.x = x
                 self.y = y
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             Point,
             lambda p: ((p.x, p.y), ()),
             lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
         )
 
         @torch._dynamo.nonstrict_trace
@@ -438,16 +441,18 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.p = p
                 self.t = t
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             PointTensor,
             lambda pt: ((pt.p, pt.t), ()),
             lambda pt, _: PointTensor(pt[0], pt[1]),
+            serialized_type_name=f"{PointTensor.__module__}.{PointTensor.__qualname__}",
         )
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             Point,
             lambda p: ((p.x, p.y), ()),
             lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
         )
 
         def trace_point(p):
@@ -491,7 +496,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch.utils._pytree.register_constant(State)
+        self.register_constant(State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -592,10 +597,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 torch._dynamo.graph_break()
                 return t + self.n
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             Num,
             lambda num: ((num.n,), ()),
             lambda n, _: Num(n[0]),
+            serialized_type_name=f"{Num.__module__}.{Num.__qualname__}",
         )
 
         def fn(x, n):
@@ -709,10 +715,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.p = p
                 self.t = t
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             PointTensor,
             lambda pt: ((pt.p, pt.t), ()),
             lambda pt, _: PointTensor(pt[0], pt[1]),
+            serialized_type_name=f"{PointTensor.__module__}.{PointTensor.__qualname__}",
         )
 
         def trace_point(p):
@@ -784,7 +791,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         # Assume `State` is implemented in C, and the author didn't bother to
         # provide a pytree decomposition for it, and its instances are safe to
         # treat as a constant by `torch.compile`.
-        torch.utils._pytree.register_constant(State)
+        self.register_constant(State)
 
         @torch._dynamo.nonstrict_trace
         def trace_me(x, s):
@@ -823,10 +830,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
                 self.p = p
                 self.t = t
 
-        torch.utils._pytree.register_pytree_node(
+        self.register_pytree_node(
             PointTensor,
             lambda pt: ((pt.t,), pt.p),
             lambda ts, p: PointTensor(p, ts[0]),
+            serialized_type_name=f"{PointTensor.__module__}.{PointTensor.__qualname__}",
         )
 
         @torch._dynamo.nonstrict_trace
@@ -1313,12 +1321,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         B = torch.tensor(B_list, dtype=torch.int32)
         torch._dynamo.decorators.mark_static(B, 0)
 
-        torch._dynamo.config.capture_scalar_outputs = True
-        torch._dynamo.config.capture_dynamic_output_shape_ops = True
-
-        self.assertEqual(
-            fn(B), torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B)
-        )
+        with torch._dynamo.config.patch(
+            capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+        ):
+            self.assertEqual(
+                fn(B),
+                torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B),
+            )
 
     def test_assume_constant_result_on_computation_with_graph_input(self):
         @torch._dynamo.assume_constant_result
@@ -2108,6 +2117,89 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
 
         with self.assertRaises(Unsupported):
             outer_f2(inp)
+
+    def test_disable_recursive_flags(self):
+        class SimpleLinear(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer0 = torch.nn.Linear(4, 4)
+
+            def forward(self, inp):
+                return self.layer0(torch.sigmoid(inp))
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.layer0 = SimpleLinear()
+                self.layer1 = torch.nn.Linear(4, 4)
+
+            def forward(self, inp):
+                z = self.layer0(torch.sin(inp))
+                return self.layer1(z)
+
+        for recursive_flag in [True, False]:
+            model = SimpleModel()
+            other_model = SimpleModel()
+
+            model.forward = torch._dynamo.disable(
+                model.forward,
+                recursive=recursive_flag,
+            )
+            self.assertEqual(
+                torch._dynamo.is_dynamo_disable_recursive(model.forward),
+                recursive_flag,
+            )
+
+            other_model = torch._dynamo.disable(other_model, recursive=recursive_flag)
+            self.assertEqual(
+                torch._dynamo.is_dynamo_disable_recursive(
+                    other_model.forward
+                    if isinstance(other_model, torch.nn.Module)
+                    else other_model
+                ),
+                recursive_flag,
+            )
+
+            # check the model is compilable
+            torch.compile(model)
+            torch.compile(other_model)
+
+    def test_dynamo_disable_annotations(self):
+        class SimpleModel(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("buffer", torch.rand(2, 2))
+
+            @torch._dynamo.disable()
+            def f1(self, x) -> torch.Tensor:
+                return x + self.buffer + 1
+
+            @torch._dynamo.disable()
+            def f2(self, x) -> torch.Tensor:
+                return x + self.buffer + 2
+
+            def forward(self, x) -> torch.Tensor:
+                return self.f1(x) + self.f2(x)
+
+        model = SimpleModel()
+        inp = torch.rand(2, 2)
+        with torch.fx.traceback.preserve_node_meta():
+            exported_model = torch.export.export(model, (inp,))
+        graph = exported_model.graph_module.graph
+        found_f1 = False
+        found_f2 = False
+        for node in graph.nodes:
+            if "custom" in node.meta:
+                if "_torchdynamo_disable_method" in node.meta["custom"]:
+                    if node.meta["custom"]["_torchdynamo_disable_method"] == "f1":
+                        found_f1 = True
+                    elif node.meta["custom"]["_torchdynamo_disable_method"] == "f2":
+                        found_f2 = True
+        self.assertTrue(found_f1)
+        self.assertTrue(found_f2)
+        model.forward = torch._dynamo.disable(model.forward, recursive=False)
+        with self.assertRaises(RuntimeError):
+            exported_model = torch.export.export(model, (inp,))
 
 
 if __name__ == "__main__":

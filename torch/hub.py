@@ -736,7 +736,7 @@ def download_url_to_file(
     for _ in range(tempfile.TMP_MAX):
         tmp_dst = dst + "." + uuid.uuid4().hex + ".partial"
         try:
-            f = open(tmp_dst, "w+b")
+            f = open(tmp_dst, "w+b")  # noqa: SIM115
         except FileExistsError:
             continue
         break
@@ -781,7 +781,8 @@ def download_url_to_file(
 # We should remove this support since zipfile is now default zipfile format for torch.save().
 def _is_legacy_zip_format(filename: str) -> bool:
     if zipfile.is_zipfile(filename):
-        infolist = zipfile.ZipFile(filename).infolist()
+        with zipfile.ZipFile(filename) as zf:
+            infolist = zf.infolist()
         return len(infolist) == 1 and not infolist[0].is_dir()
     return False
 

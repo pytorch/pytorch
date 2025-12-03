@@ -10,14 +10,14 @@
 import logging
 import os
 import time
+from collections.abc import Callable
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
-from typing import Callable, Optional, TextIO, TYPE_CHECKING, Union
+from typing import TextIO, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     from concurrent.futures._base import Future
-    from io import TextIOWrapper
 
 __all__ = ["tail_logfile", "TailLog"]
 
@@ -30,7 +30,7 @@ def tail_logfile(
     dst: TextIO,
     finished: Event,
     interval_sec: float,
-    log_line_filter: Optional[Callable[[str], bool]] = None,
+    log_line_filter: Callable[[str], bool] | None = None,
 ):
     while not os.path.exists(file):
         if finished.is_set():
@@ -97,8 +97,8 @@ class TailLog:
         self,
         name: str,
         log_files: dict[int, str],
-        dst: Union[TextIO, str],
-        log_line_prefixes: Optional[dict[int, str]] = None,
+        dst: TextIO,
+        log_line_prefixes: dict[int, str] | None = None,
         interval_sec: float = 0.1,
         log_line_filter: Callable[[str], bool] = (lambda _: True),
     ):
@@ -112,24 +112,12 @@ class TailLog:
             )
 
         self._name = name
-        self._dst_file: Optional[TextIOWrapper] = None
-        self._dst: Optional[Union[TextIO, TextIOWrapper]] = None
-        if isinstance(dst, str):
-            try:
-                self._dst_file = open(dst, mode="w", errors="replace")
-                self._dst = self._dst_file
-            except Exception:
-                logger.exception("error opening dst file %s.", dst)
-                self._dst = None
-                self._dst_file = None
-
-        else:
-            self._dst = dst
+        self._dst = dst
         self._log_files = log_files
         self._log_line_prefixes = log_line_prefixes
         self._log_line_filter = log_line_filter
         self._finished_events: dict[int, Event] = {
-            local_rank: Event() for local_rank in log_files.keys()
+            local_rank: Event() for local_rank in log_files
         }
         self._futs: list[Future] = []
         self._interval_sec = interval_sec
@@ -173,9 +161,6 @@ class TailLog:
 
         if self._threadpool:
             self._threadpool.shutdown(wait=True)
-
-        if self._dst_file:
-            self._dst_file.close()
 
         self._stopped = True
 

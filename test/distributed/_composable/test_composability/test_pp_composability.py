@@ -29,8 +29,8 @@ from torch.distributed.tensor.parallel import (
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
+    at_least_x_gpu,
     MultiProcessTestCase,
     requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skip_but_pass_in_sandcastle_if,
-    TEST_XPU,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
@@ -49,7 +48,11 @@ if TYPE_CHECKING:
     from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 backend = torch.distributed.get_default_backend_for_device(device_type)
 
 
@@ -107,11 +110,9 @@ class ComposabilityTest(MultiProcessTestCase):
     def device(self):
         return self.rank
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 4+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     def test_pp_and_dcp(self):
         """
         Test that pipeline parallelism and distributed checkpointing can be used together and
@@ -201,11 +202,9 @@ class ComposabilityTest(MultiProcessTestCase):
 
         _dcp_test(self)
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -355,11 +354,9 @@ class ComposabilityTest(MultiProcessTestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -392,11 +389,11 @@ class ComposabilityTest(MultiProcessTestCase):
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
             device_type,
-            mesh_shape=(replicate_size, 1, pp_size),
-            mesh_dim_names=("replicate", "shard", "pp"),
+            mesh_shape=(replicate_size, pp_size),
+            mesh_dim_names=("replicate", "pp"),
         )
         torch.manual_seed(42)
-        dp_mesh = device_mesh["replicate", "shard"]
+        dp_mesh = device_mesh["replicate"]
         pp_mesh = device_mesh["pp"]
         pp_group = device_mesh["pp"].get_group()
 
@@ -416,15 +413,13 @@ class ComposabilityTest(MultiProcessTestCase):
                 param_dtype=MixedPrecisionParam,
                 reduce_dtype=torch.float32,
             )
-            replicate_config = {"mp_policy": mp_policy}
+            replicate_config = {"mesh": dp_mesh, "mp_policy": mp_policy}
             for layer_id in range(len(partial_model)):
                 replicate(
                     partial_model[layer_id],
-                    device_mesh=dp_mesh,
                     **replicate_config,
-                    reshard_after_forward=False,
                 )
-            dp_model = replicate(partial_model, device_mesh=dp_mesh, **replicate_config)
+            dp_model = replicate(partial_model, **replicate_config)
             return dp_model
 
         # Apply same precision to reference model (without replicate)
@@ -552,11 +547,9 @@ class ComposabilityTest(MultiProcessTestCase):
 
         torch.distributed.destroy_process_group()
 
-    @requires_accelerator_dist_backend(["nccl", "xccl"])
+    @requires_accelerator_dist_backend()
     @skip_if_lt_x_gpu(8)
-    @skip_but_pass_in_sandcastle_if(
-        not TEST_MULTIGPU and not TEST_XPU, "Test requires 8+ GPUs"
-    )
+    @skip_but_pass_in_sandcastle_if(not at_least_x_gpu(8), "Test requires 8+ GPUs")
     @parametrize(
         "ScheduleClass",
         [
@@ -582,11 +575,11 @@ class ComposabilityTest(MultiProcessTestCase):
         replicate_size = self.world_size // (pp_size)
         device_mesh = init_device_mesh(
             device_type,
-            mesh_shape=(replicate_size, 1, pp_size),
-            mesh_dim_names=("replicate", "shard", "pp"),
+            mesh_shape=(replicate_size, pp_size),
+            mesh_dim_names=("replicate", "pp"),
         )
         torch.manual_seed(42)
-        dp_mesh = device_mesh["replicate", "shard"]
+        dp_mesh = device_mesh["replicate"]
         pp_mesh = device_mesh["pp"]
         pp_group = device_mesh["pp"].get_group()
         dp_group = device_mesh["replicate"].get_group()
@@ -648,10 +641,9 @@ class ComposabilityTest(MultiProcessTestCase):
             for layer_id in range(len(partial_model)):
                 replicate(
                     partial_model[layer_id],
-                    device_mesh=dp_mesh,
-                    reshard_after_forward=False,
+                    mesh=dp_mesh,
                 )
-            dp_model = replicate(partial_model, device_mesh=dp_mesh)
+            dp_model = replicate(partial_model, mesh=dp_mesh)
             return dp_model
 
         def pipelined_models_parameters(start_layer, model):
