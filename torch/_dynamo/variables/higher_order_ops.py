@@ -307,8 +307,10 @@ def _call_function_with_auto_output_flattening(
     # while still allowing `body_r` to contain arbitrary Python objects.
     if body_r is not None:
         for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
-            if orig_vt.is_tensor() or orig_vt.is_symnode_like():
-                assert subgraph_vt.is_tensor() or subgraph_vt.is_symnode_like()
+            if orig_vt.is_tensor() or isinstance(orig_vt, SymNodeVariable):
+                assert subgraph_vt.is_tensor() or isinstance(
+                    subgraph_vt, SymNodeVariable
+                )
                 orig_vt.proxy = subgraph_vt.proxy
     return body_r
 
@@ -337,8 +339,10 @@ def _call_function_and_unflatten_output(
     # outer graph uses an original vt, it uses the subgraph output.
     if body_r is not None:
         for orig_vt, subgraph_vt in zip(body_r.items, flat_variable.items):
-            if orig_vt.is_tensor() or orig_vt.is_symnode_like():
-                assert subgraph_vt.is_tensor() or subgraph_vt.is_symnode_like()
+            if orig_vt.is_tensor() or isinstance(orig_vt, SymNodeVariable):
+                assert subgraph_vt.is_tensor() or isinstance(
+                    subgraph_vt, SymNodeVariable
+                )
                 orig_vt.proxy = subgraph_vt.proxy
 
     if ret_spec.num_intermediate_nodes_as_outputs:
@@ -1338,7 +1342,7 @@ def speculate_subgraph_with_auto_output_flattening(
             graph_output_vts = []
 
             def visit(vt):
-                if vt.is_tensor() or vt.is_symnode_like():
+                if vt.is_tensor() or isinstance(vt, SymNodeVariable):
                     graph_output_vts.append(vt)
 
             VariableTracker.visit(visit, output)
@@ -3985,7 +3989,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # at torch._functorch.autograd_function.AutogradFunctionApply.
         args_tensor_mask = [False] * len(args)
         for i, arg in enumerate(args):
-            if arg.is_tensor() or arg.is_symnode_like():
+            if arg.is_tensor() or isinstance(arg, SymNodeVariable):
                 filtered_args.append(arg)
                 args_tensor_mask[i] = True
 

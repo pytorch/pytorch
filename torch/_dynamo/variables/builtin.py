@@ -1332,8 +1332,10 @@ class BuiltinVariable(VariableTracker):
 
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
+            # NB: Use exact type check here - NumpyNdarrayVariable is a TensorVariable
+            # subclass but should NOT trigger the tensor path
             if check_numpy_ndarray_args(args, kwargs) and not any(
-                arg.is_tensor() for arg in args
+                type(arg) is TensorVariable for arg in args
             ):
                 proxy = tx.output.create_proxy(
                     "call_function",
@@ -1562,7 +1564,7 @@ class BuiltinVariable(VariableTracker):
     ) -> VariableTracker | None:
         # Handle cases like int(torch.seed())
         # Also handle sym_float to sym_int cases
-        if arg.is_tensor() or arg.is_symnode_like():
+        if arg.is_tensor() or isinstance(arg, SymNodeVariable):
             if arg.is_tensor():
                 item = arg.call_method(tx, "item", [], {})
             else:
