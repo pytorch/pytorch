@@ -2049,12 +2049,48 @@ static py::object try_find_mesh_from_args(
   for (auto argument_it = args_kwargs.args_begin();
        argument_it != args_kwargs.args_end();
        ++argument_it) {
-    const auto [tensor_flavor, py_tensor] =
-        check_for_dtensor_or_tensor(*argument_it);
+    const auto& arg = *argument_it;
+
+    const auto [tensor_flavor, py_tensor] = check_for_dtensor_or_tensor(arg);
     if (tensor_flavor == TensorFlavor::EXACTLY_DTENSOR ||
         tensor_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
       return py::reinterpret_borrow<py::object>(
           py_tensor.attr(dtensor_interned_strings.device_mesh));
+    }
+
+    if (arg.isList()) {
+      const auto& list = arg.toList();
+      for (const auto i : c10::irange(list.size())) {
+        const auto [list_tensor_flavor, list_py_tensor] =
+            check_for_dtensor_or_tensor(list.get(i));
+        if (list_tensor_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+            list_tensor_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+          return py::reinterpret_borrow<py::object>(
+              list_py_tensor.attr(dtensor_interned_strings.device_mesh));
+        }
+      }
+    } else if (arg.isTensorList()) {
+      const auto& tensor_list = arg.toTensorList();
+      for (const auto i : c10::irange(tensor_list.size())) {
+        const auto [list_tensor_flavor, list_py_tensor] =
+            check_for_dtensor_or_tensor(tensor_list[i]);
+        if (list_tensor_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+            list_tensor_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+          return py::reinterpret_borrow<py::object>(
+              list_py_tensor.attr(dtensor_interned_strings.device_mesh));
+        }
+      }
+    } else if (arg.isTuple()) {
+      const auto& tuple = arg.toTuple();
+      for (const auto& elem : tuple->elements()) {
+        const auto [tuple_tensor_flavor, tuple_py_tensor] =
+            check_for_dtensor_or_tensor(elem);
+        if (tuple_tensor_flavor == TensorFlavor::EXACTLY_DTENSOR ||
+            tuple_tensor_flavor == TensorFlavor::DTENSOR_SUBCLASS) {
+          return py::reinterpret_borrow<py::object>(
+              tuple_py_tensor.attr(dtensor_interned_strings.device_mesh));
+        }
+      }
     }
   }
   TORCH_CHECK_VALUE(
