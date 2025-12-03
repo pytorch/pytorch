@@ -843,3 +843,10 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. automodule:: torch.quantization
 .. automodule:: torch.nn.intrinsic.modules
 ```
+
+```{eval-rst}
+.. toctree::
+    :hidden:
+
+    quantization-support.aliases.md
+```
