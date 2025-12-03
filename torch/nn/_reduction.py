@@ -1,5 +1,4 @@
 import warnings
-from typing import Optional
 
 
 # NB: Keep this file in sync with enums in aten/src/ATen/core/Reduction.h
@@ -31,8 +30,8 @@ def get_enum(reduction: str) -> int:
 
 # We use these functions in torch/legacy as well, in which case we'll silence the warning
 def legacy_get_string(
-    size_average: Optional[bool],
-    reduce: Optional[bool],
+    size_average: bool | None,
+    reduce: bool | None,
     emit_warning: bool = True,
 ) -> str:
     warning = "size_average and reduce args will be deprecated, please use reduction='{}' instead."
@@ -54,8 +53,8 @@ def legacy_get_string(
 
 
 def legacy_get_enum(
-    size_average: Optional[bool],
-    reduce: Optional[bool],
+    size_average: bool | None,
+    reduce: bool | None,
     emit_warning: bool = True,
 ) -> int:
     return get_enum(legacy_get_string(size_average, reduce, emit_warning))
