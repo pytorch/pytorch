@@ -29,7 +29,6 @@ from torch.distributed.tensor._op_schema import (
 from torch.distributed.tensor._ops.utils import (
     _args_schema_with_tensor_meta,
     _expand_single_dim_strategy_to_mesh,
-    _find_lowest_cost_sharding,
 )
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
@@ -443,9 +442,7 @@ class ShardingPropagator:
                 )
                 strategy = _expanded_strategy_fn(args_schema, kwargs_schema)
             else:
-                strategy = _find_lowest_cost_sharding(
-                    mesh, op_schema, single_dim_strategy
-                )
+                raise NotImplementedError("NYI")
             # TODO: prefer to rename vars to match typing, this is an OpSpec. But matching naming from elif block
             # for sanity for now
             assert isinstance(strategy, OpStrategy), "TupleStrategy for single-dim NYI"
