@@ -1623,6 +1623,127 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+    def test_document_block_mask_batch_invariance(self, device):
+        """Test that document block masks are batch-invariant."""
+        # from torch.nn.attention.flex_attention import create_document_block_mask
+        from torch._inductor._numeric_utils import assert_batch_invariance
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        def unpack_tensor(seqlens, offsets, max_seqlen, tensor):
+            assert tensor.ndim == 4
+            assert tensor.shape[0] == 1
+            assert tensor.shape[1] == 1
+            result = torch.zeros(
+                seqlens.shape[0], 1, max_seqlen, tensor.shape[-1], device=device
+            )
+            for i in range(tensor.shape[0]):
+                src = tensor[0, :, offsets[i] : (offsets[i] + seqlens[i]), :]
+                dst = result[i, :, : seqlens[i], :]
+                print(
+                    f"{src.shape=} {dst.shape=} {offsets[i]=} {tensor.shape=} {offsets=} {seqlens=}"
+                )
+                dst.copy_(src)
+            return result
+
+        random.seed(0)
+
+        min_seqlen = 32
+        max_seqlen = 1024
+        num_documents = 8
+
+        seqlens = [random.randint(min_seqlen, max_seqlen) for _ in range(num_documents)]
+        seqlens_tensor = torch.tensor(seqlens, device=device)
+        offset_tensor = torch.cumsum(seqlens_tensor, dim=0).roll(1)
+        offset_tensor[0].zero_()
+
+        # Create inputs for both cases
+        total_len_full = sum(seqlens)
+
+        # Full sequence input
+        query_full = torch.randn(
+            1, 1, total_len_full, 64, device=device, dtype=torch.float16
+        )
+        key_full = torch.randn(
+            1, 1, total_len_full, 64, device=device, dtype=torch.float16
+        )
+        value_full = torch.randn(
+            1, 1, total_len_full, 64, device=device, dtype=torch.float16
+        )
+
+        def create_document_block_mask(
+            mask_mod_inner,
+            total_q,
+            total_kv,
+            seqlens_q,
+            seqlens_kv,
+            offsets_q,
+            offsets_kv,
+        ):
+            print(
+                f"{seqlens_q.device=} {seqlens_kv.device=} {offsets_q.device=} {offsets_kv.device=}"
+            )
+            upper_q = offsets_q + seqlens_q
+            upper_kv = offsets_kv + seqlens_kv
+            doc_q = torch.arange(total_q, device=device)
+            doc_kv = torch.arange(total_kv, device=device)
+            doc_q = torch.searchsorted(upper_q, doc_q) % seqlens_q.shape[0]
+            doc_kv = torch.searchsorted(upper_kv, doc_kv) % seqlens_kv.shape[0]
+
+            assert (
+                seqlens_q.shape
+                == seqlens_kv.shape
+                == offsets_q.shape
+                == offsets_kv.shape
+            )
+
+            def mask_mod(b, h, q, k):
+                id_q = doc_q[q]
+                id_kv = doc_kv[k]
+                in_range_q = (q >= offsets_q[id_q]) & (
+                    q < (offsets_q[id_q] + seqlens_q[id_q])
+                )
+                in_range_kv = (k >= offsets_kv[id_kv]) & (
+                    k < (offsets_kv[id_kv] + seqlens_kv[id_kv])
+                )
+                return (
+                    in_range_q
+                    & in_range_kv
+                    & (id_q == id_kv)
+                    & mask_mod_inner(b, h, q - offsets_q[id_q], k - offsets_kv[id_kv])
+                )
+
+            return mask_mod
+
+        def fn(seqlens, offsets, q, k, v):
+            block_mask_full = create_document_block_mask(
+                causal_mask, q.shape[2], k.shape[2], seqlens, seqlens, offsets, offsets
+            )
+            block_mask_full = torch.compile(create_block_mask)(
+                block_mask_full,
+                q.shape[0],
+                q.shape[1],
+                q.shape[2],
+                k.shape[2],
+                device=device,
+            )
+            output = torch.compile(flex_attention)(
+                q,
+                k,
+                v,
+                block_mask=block_mask_full,
+            )
+            return unpack_tensor(seqlens, offsets, max_seqlen, output)
+
+        assert_batch_invariance(
+            fn,
+            (0, 0, None, None, None),
+            0,
+            (seqlens_tensor, offset_tensor, query_full, key_full, value_full),
+        )
+
+    @supported_platform
     def test_index_multiple(self, device):
         bias = torch.randn(B, S, device=device)
 
