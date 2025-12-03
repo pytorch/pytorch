@@ -47,11 +47,7 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     tf32_on_and_off,
 )
-from torch.testing._internal.common_device_type import (
-    _has_sufficient_memory,
-    e4m3_type,
-    skipCUDAIf,
-)
+from torch.testing._internal.common_device_type import _has_sufficient_memory, e4m3_type
 from torch.testing._internal.common_quantization import (
     _group_quantize_tensor,
     skip_if_no_torchvision,

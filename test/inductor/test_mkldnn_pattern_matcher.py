@@ -5,7 +5,6 @@ import itertools
 import unittest
 
 import torch
-from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.test_case import run_tests, TestCase
@@ -20,23 +19,15 @@ from torch.testing._internal.common_mkldnn import reduced_f32_on_and_off
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
-    skipIfNoONEDNNBF16,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     IS_LINUX,
-    IS_X86,
-    MI300_ARCH,
-    MI350_ARCH,
-    parametrize,
-    skipIfNoXPU,
     skipIfRocm,
-    skipIfRocmArch,
     skipIfXpu,
     TEST_ACL,
     TEST_MKL,
-    xfailIfACL,
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
