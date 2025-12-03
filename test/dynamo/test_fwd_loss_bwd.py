@@ -1,10 +1,12 @@
 # Owner(s): ["module: dynamo"]
 
 import torch
+import torch._dynamo
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_utils import run_tests, skipIfCrossRef, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfCrossRef, skipIfTorchDynamo, TestCase
 
 
+@skipIfTorchDynamo()
 class TestForwardLossBackward(TestCase):
     def _run_backward_test(self, fn, mod, x):
         """
@@ -264,7 +266,7 @@ class <lambda>(torch.nn.Module):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Compiled function receives an input with external grad_fn",
+            "autograd.grad with external grad_fn input",
         ):
             fn(external_computation)
 
@@ -333,8 +335,9 @@ class <lambda>(torch.nn.Module):
         mod_compiled = torch.nn.Linear(4, 4)
         x_compiled = torch.randn(2, 4)
 
+        # With fullgraph=True, we get an Unsupported error at compile time
         @torch.compile(fullgraph=True, backend="aot_eager")
-        def step_compiled():
+        def step_compiled_fullgraph():
             res = mod_compiled(x_compiled)
             loss = res.sum()
             params = tuple(mod_compiled.parameters())
@@ -342,10 +345,60 @@ class <lambda>(torch.nn.Module):
             return loss
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.BackendCompilerFailed,
+            torch._dynamo.exc.Unsupported,
+            "autograd.grad with output that requires grad",
+        ):
+            step_compiled_fullgraph()
+
+        torch._dynamo.reset()
+        mod_compiled2 = torch.nn.Linear(4, 4)
+        x_compiled2 = torch.randn(2, 4)
+
+        # With fullgraph=False, graph breaks and runs in eager mode
+        # So we get the same error as eager when calling backward()
+        @torch.compile(fullgraph=False, backend="aot_eager")
+        def step_compiled_no_fullgraph():
+            res = mod_compiled2(x_compiled2)
+            loss = res.sum()
+            params = tuple(mod_compiled2.parameters())
+            torch.autograd.grad(loss, params)
+            return loss
+
+        loss_compiled = step_compiled_no_fullgraph()
+        with self.assertRaisesRegex(
+            RuntimeError,
             "Trying to backward through the graph a second time",
         ):
-            step_compiled()
+            loss_compiled.backward()
+
+    @skipIfCrossRef
+    def test_trace_autograd_ops_config(self):
+        """Test that trace_autograd_ops config controls whether autograd.grad is traced."""
+        def fn(x):
+            y = x.sin()
+            (gx,) = torch.autograd.grad(y, x)
+            return gx.cos()  # Add op after autograd.grad to detect graph break
+
+        x = torch.tensor(1.0, requires_grad=True)
+        eager_result = fn(x)
+
+        # With trace_autograd_ops=True (default), should trace in single graph
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounter()
+        compiled_fn = torch.compile(backend=cnt)(fn)
+        compiled_result = compiled_fn(torch.tensor(1.0, requires_grad=True))
+        self.assertEqual(eager_result, compiled_result)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # With trace_autograd_ops=False, should graph break
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(trace_autograd_ops=False):
+            cnt = torch._dynamo.testing.CompileCounter()
+            compiled_fn = torch.compile(backend=cnt)(fn)
+            compiled_result = compiled_fn(torch.tensor(1.0, requires_grad=True))
+            self.assertEqual(eager_result, compiled_result)
+            # Should have graph break due to autograd.grad being skipped
+            self.assertEqual(cnt.frame_count, 2)
 
     @skipIfCrossRef
     def test_tensor_backward_basic(self):

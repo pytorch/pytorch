@@ -682,6 +682,10 @@ class OutputGraph(OutputGraphCommon):
         # to validate that graph inputs are leaf tensors (no external grad_fn).
         self.uses_autograd_grad = False
 
+        # Tracks which input sources have been checked for external grad_fn
+        # when autograd.grad is used. This avoids re-checking the same sources.
+        self.autograd_grad_checked_sources: set[Source] = set()
+
         # Tracks a list of called ops that were not tagged with "pt2_compliant_tag".
         # This information is useful for logging.
         self.non_compliant_ops: set[torch._ops.OpOverload] = set({})
@@ -2075,40 +2079,36 @@ class OutputGraph(OutputGraphCommon):
             tx.speculation_log.clear()
             raise exc.CompileCollectiveRestartAnalysis
 
-    def _validate_autograd_grad_inputs(self, gm: torch.fx.GraphModule) -> None:
+    def _validate_autograd_grad_outputs(
+        self, rv: list["VariableTracker"]
+    ) -> None:
         """
-        Validate that if torch.autograd.grad is used in the graph, all graph inputs
-        (placeholders) are leaf tensors (don't have external grad_fn).
+        Validate that if torch.autograd.grad is used in the graph and outputs
+        require grad, we trigger a graph break.
 
-        This checks that tensors passed as inputs to the compiled function are leaf tensors
-        when torch.autograd.grad is used anywhere in the graph or its subgraphs.
+        This is because aot_autograd will try to trace backward through the outputs,
+        which will fail with a confusing error about "backward through graph a second time".
         """
-        # uses_autograd_grad is set during tracing when we encounter torch.autograd.grad
         if not self.uses_autograd_grad:
             return
 
-        # If torch.autograd.grad is used, check ALL graphargs for external grad_fn
         from . import graph_break_hints
         from .variables.tensor import TensorVariable
 
-        for grapharg in self.graphargs:
-            if (
-                hasattr(grapharg, "source")
-                and grapharg.source in self.input_source_to_var
-            ):
-                var = self.input_source_to_var[grapharg.source]
-                if isinstance(var, TensorVariable) and var.has_grad_fn:
-                    unimplemented(
-                        gb_type="autograd.grad with external grad_fn input",
-                        context="",
-                        explanation=(
-                            "Compiled function receives an input with external grad_fn "
-                            "(created by operations outside the compiled region). "
-                            "When torch.autograd.grad is used, all inputs must be leaf tensors "
-                            "because the autograd graph cannot extend beyond the compiled region."
-                        ),
-                        hints=[*graph_break_hints.USER_ERROR],
-                    )
+        for var in rv:
+            if isinstance(var, TensorVariable) and var.requires_grad:
+                unimplemented(
+                    gb_type="autograd.grad with output that requires grad",
+                    context="",
+                    explanation=(
+                        "torch.compile with aot_autograd does not currently support double backward. "
+                        "The compiled function uses torch.autograd.grad() and returns tensors that "
+                        "require grad, which would require tracing backward through the autograd.grad() call. "
+                        "Note: This is a conservative check. It may be safe if the returned tensor's "
+                        "grad_fn is not connected to the autograd.grad() computation."
+                    ),
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
 
     def compile_and_call_fx_graph(
         self,
@@ -2136,6 +2136,10 @@ class OutputGraph(OutputGraphCommon):
 
             assert isinstance(rv, list)
             assert isinstance(root, FakeRootModule)
+
+            # Check if autograd.grad is used with outputs that require grad
+            # This would cause double backward issues in aot_autograd
+            self._validate_autograd_grad_outputs(rv)
 
             output_node = self.create_node(
                 "output",
@@ -2186,9 +2190,6 @@ class OutputGraph(OutputGraphCommon):
             from .dce_extra_outputs import dce_hop_extra_outputs
 
             dce_hop_extra_outputs(gm)
-
-            # Check if torch.autograd.grad is used with graph inputs that have grad_fn
-            self._validate_autograd_grad_inputs(gm)
 
             # Saved tensors hooks are not used by the graph.
             # GraphModule by default only copies used in the graph submodules.
@@ -2768,6 +2769,7 @@ class OutputGraph(OutputGraphCommon):
         self.register_finalizer_fns.clear()
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
+        self.autograd_grad_checked_sources.clear()
         self.input_source_to_var.clear()
         self.unspec_variable_map.clear()
         self.backward_state.clear()
