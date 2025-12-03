@@ -2,10 +2,11 @@
 
 import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfCrossRef, TestCase
 
 
 class TestForwardLossBackward(TestCase):
+    @skipIfCrossRef
     def test_autograd_grad_basic(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
@@ -82,6 +83,7 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_autograd_grad_with_kwargs(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
@@ -147,6 +149,7 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_autograd_grad_single_tensor(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
