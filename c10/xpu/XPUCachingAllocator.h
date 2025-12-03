@@ -7,6 +7,12 @@
 
 namespace c10::xpu::XPUCachingAllocator {
 
+class XPUAllocator : public DeviceAllocator {
+ public:
+  virtual void* raw_alloc(size_t nbytes) = 0;
+  virtual void raw_delete(void* ptr) = 0;
+};
+
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
 
 enum struct RecordContext {
@@ -97,8 +103,6 @@ C10_XPU_API void recordHistory(
     size_t alloc_trace_max_entries,
     RecordContext when,
     bool clearHistory);
-
-class XPUAllocator;
 
 C10_XPU_API void createOrIncrefPool(
     c10::DeviceIndex device,
