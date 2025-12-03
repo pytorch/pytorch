@@ -269,7 +269,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             triton_events = [
                 event
                 for event in trace_json["traceEvents"]
-                if "kernel_backend" in event.get("args", {}).keys()
+                if "kernel_backend" in event.get("args", {})
             ]
 
         print(triton_events)
