@@ -96,7 +96,7 @@ jobs:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
         { include: [
-          { config: "inductor-pallas", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.12xlarge.nvidia.gpu" },
+          { config: "inductor-pallas", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g6.12xlarge.nvidia.gpu" },
         ]}
     secrets: inherit
 
@@ -105,7 +105,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-pallas-build
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: linux-jammy-cuda12.8-py3.12-gcc11
       docker-image: ${{ needs.inductor-pallas-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-pallas-build.outputs.test-matrix }}
     secrets: inherit
