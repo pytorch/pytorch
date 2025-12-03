@@ -1,7 +1,15 @@
 # Owner(s): ["module: inductor"]
 
+import sys
+
 import torch
 import torch.distributed as dist
+
+
+if not dist.is_available() or not dist.is_nccl_available():
+    print("c10d NCCL not available, skipping tests", file=sys.stderr)
+    sys.exit(0)
+
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     skip_if_lt_x_gpu,

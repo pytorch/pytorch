@@ -3586,7 +3586,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         try:
             # Do n warmups
-            total_time = cls._run_collective_benchmark(
+            cls._run_collective_benchmark(
                 choice, inputs, output, nwarmup, process_group, timeout
             )
 
