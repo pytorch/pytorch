@@ -1601,6 +1601,57 @@ std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
           : Tensor{});
 }
 
+std::tuple<Tensor, Tensor, Tensor> _addmm_gelu_backward(
+    const Tensor& grad_activation,
+    const Tensor& grad_pre_activation,
+    bool materialize_pre_activation,
+    const Tensor& pre_activation,
+    const std::optional<Tensor>& mat1,
+    const std::optional<Tensor>& mat2,
+    const Scalar& alpha,
+    const Scalar& beta,
+    const std::array<bool, 3>& grad_input_mask) {
+  if (!grad_activation.defined() && !grad_pre_activation.defined()) {
+    return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
+  }
+
+  TORCH_CHECK(
+    materialize_pre_activation,
+    "_addmm_gelu: can compute grad only when `materialize_pre_activation` is True"
+  );
+
+  const auto self_requires_grad = grad_input_mask[0];
+  const auto mat1_requires_grad = grad_input_mask[1];
+  const auto mat2_requires_grad = grad_input_mask[2];
+
+  // _addmm_gelu returns 2 outputs (GELU(x), x),
+  // so we sum gradients before doing addmm pullback
+  const auto addmm_grad = [&]() -> Tensor {
+    // At this moment, at least of the grads is defined
+    if (!grad_activation.defined()) {
+      return grad_pre_activation;
+    } else if (!grad_pre_activation.defined()) {
+      return at::gelu_backward(grad_activation, pre_activation, /*approximate=*/"tanh");
+    } else {
+      return at::gelu_backward(grad_activation, pre_activation, /*approximate=*/"tanh")
+        + grad_pre_activation;
+    }
+  }();
+
+  // Addmm pullback
+  const auto self_grad = self_requires_grad && (beta.toComplexDouble() != 0.0)
+    ? maybe_multiply(addmm_grad, beta.conj())
+    : Tensor{};
+  const auto mat1_grad = mat1_requires_grad
+    ? mm_mat1_backward(addmm_grad, *mat2, mat1->sym_sizes(), mat1->sym_strides(), mat1->layout(), alpha)
+    : Tensor{};
+  const auto mat2_grad = mat2_requires_grad
+    ? mm_mat2_backward(addmm_grad, *mat1, mat2->sym_sizes(), mat2->sym_strides(), mat2->layout(), alpha)
+    : Tensor{};
+
+  return std::make_tuple(std::move(self_grad), std::move(mat1_grad), std::move(mat2_grad));
+}
+
 Tensor sparse_mask_backward(
     const Tensor& grad,
     const Tensor& mask,
