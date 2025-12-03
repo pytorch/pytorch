@@ -5104,11 +5104,29 @@ def wrap_test_class(orig_cls):
 
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
-        orig_cls.__bases__,
+        (orig_cls,),
         dct,
     )
     cls.__file__ = __file__
     return cls
+
+
+class WrapTestClassTests(TestCase):
+    def test_wrap_preserves_inheritance_and_super(self):
+        class DummyTest(unittest.TestCase):
+            def runTest(self):
+                pass
+
+            def tearDown(self):
+                self.super_called = True
+                super().tearDown()
+
+        wrapped = wrap_test_class(DummyTest)
+        self.assertTrue(issubclass(wrapped, DummyTest))
+        test = wrapped("runTest")
+        test.setUp()
+        test.tearDown()
+        self.assertTrue(getattr(test, "super_called", False))
 
 
 known_graph_breaks_tests = {
