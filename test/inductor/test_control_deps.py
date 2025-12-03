@@ -19,20 +19,20 @@ class TestControlDeps(InductorTestCase):
     def test_control_deps_prevents_fusion(self):
         def fn(a, b):
             c = a + 1
-            d = (b @ b) * 4.5
+            d = b @ b
             e = c * 2
             return d, e
 
         def add_control_deps(graph):
-            from torch.utils._ordered_set import OrderedSet
-
             nodes = [n for n in graph.nodes if n.op == "call_function"]
-            assert len(nodes) == 4
+            assert len(nodes) == 3
             c_node = nodes[0]
             d_node = nodes[1]
-            e_node = nodes[3]
+            e_node = nodes[2]
 
             assert d_node.target == torch.ops.aten.mm.default
+
+            from torch.utils._ordered_set import OrderedSet
 
             deps_map = {d_node: OrderedSet([c_node]), e_node: OrderedSet([d_node])}
             torch._inductor.fx_passes.control_dependencies.preserve_node_ordering(
