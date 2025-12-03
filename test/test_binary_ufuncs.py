@@ -1149,6 +1149,15 @@ class TestBinaryUfuncs(TestCase):
         res = nom / denom
         self.assertEqual(res, expected)
 
+    @dtypes(torch.float, torch.bfloat16)
+    def test_division_by_scalar(self, device, dtype):
+        num = torch.rand(1024, device=device, dtype=dtype)
+        denom = torch.logspace(-4, 4, steps=20)
+        denom = [d.item() for d in denom]
+        res = [num / d for d in denom]
+        ref = [num * (1 / d) for d in denom]
+        self.assertEqual(res, ref, atol=0, rtol=0)
+
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
     @onlyCUDA
