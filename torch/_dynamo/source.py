@@ -24,7 +24,13 @@ from collections.abc import Callable
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 from torch import device as device_type
-from torch._guards import ChainedSource, Guard, GuardSource, Source
+from torch._guards import (
+    ChainedSource,
+    dataclass_with_cached_hash,
+    Guard,
+    GuardSource,
+    Source,
+)
 
 from . import utils
 from .bytecode_transformation import (
@@ -137,7 +143,7 @@ def _esc_str(s: Any, apply_repr: bool = False) -> str:
     return s.replace("{", "{{").replace("}", "}}")
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class LocalSource(Source):
     local_name: str
 
@@ -168,7 +174,7 @@ class LocalSource(Source):
         return f"L[{_esc_str(self.local_name, apply_repr=True)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TempLocalSource(Source):
     # like LocalSource, but cannot be guarded on
     local_name: str
@@ -187,7 +193,7 @@ class TempLocalSource(Source):
         )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class SyntheticLocalSource(Source):
     local_name: str
 
@@ -203,7 +209,7 @@ class SyntheticLocalSource(Source):
         return f"SYNTHETIC_LOCAL[{_esc_str(self.local_name, apply_repr=True)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class RandomValueSource(Source):
     random_call_index: int
 
@@ -221,7 +227,7 @@ class RandomValueSource(Source):
         return f"random_value_{_esc_str(self.random_call_index)}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GlobalSource(Source):
     global_name: str
 
@@ -237,7 +243,7 @@ class GlobalSource(Source):
         return f"G[{_esc_str(self.global_name, apply_repr=True)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GlobalWeakRefSource(Source):
     global_name: str
 
@@ -258,7 +264,7 @@ class GlobalWeakRefSource(Source):
         return f"G[{_esc_str(self.global_name, apply_repr=True)}]()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class WeakRefCallSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: codegen(self.base))
@@ -269,12 +275,12 @@ class WeakRefCallSource(ChainedSource):
         return "{0}()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class CallFunctionNoArgsSource(WeakRefCallSource):
     pass
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class AttrSource(ChainedSource):
     member: str
 
@@ -298,7 +304,7 @@ class AttrSource(ChainedSource):
         return f"{{0}}.{_esc_str(self.member)}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GenericAttrSource(ChainedSource):
     member: str
 
@@ -323,7 +329,7 @@ class GenericAttrSource(ChainedSource):
 
 
 # Represents obj.__dict__ where obj is a type object
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TypeDictSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
@@ -339,7 +345,7 @@ class TypeDictSource(ChainedSource):
 
 
 # Represents obj.__mro__ where object is type object
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TypeMROSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
@@ -350,7 +356,7 @@ class TypeMROSource(ChainedSource):
         return "{0}.__mro__"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class LocalCellSource(Source):
     """
     Conceptually, this class is `LocalSource` for cell objects implicitly
@@ -370,7 +376,7 @@ class LocalCellSource(Source):
 
 
 # Represents obj.__code__ where object is type object
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class CodeSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
@@ -382,7 +388,7 @@ class CodeSource(ChainedSource):
 
 
 # Represents obj.__closure__ where object is type object
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ClosureSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
@@ -397,7 +403,7 @@ class ClosureSource(ChainedSource):
 # But, we could access grad field on tensor directly in C++ without going
 # through the Python bytecodes. Therefore, we use a separate source for grad
 # field.
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GradSource(ChainedSource):
     member: str = "grad"
 
@@ -410,7 +416,7 @@ class GradSource(ChainedSource):
         return f"{{0}}.{_esc_str(self.member)}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ParamBufferSource(AttrSource):
     @functools.cached_property
     def guard_source(self) -> GuardSource:
@@ -418,7 +424,7 @@ class ParamBufferSource(AttrSource):
 
 
 # Special AttrSource to differentiate module._buffers or module._parameters
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class UnspecializedParamBufferSource(AttrSource):
     pass
 
@@ -432,7 +438,7 @@ class UnspecializedParamBufferSource(AttrSource):
 # symbolicized / fake-ified to avoid invalid specialization during view replay. This source
 # is useful for symbols utilized in the middle of the view chain that are not expected to be
 # present within the final view shape metadata.
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class EphemeralSource(Source):
     desc: Optional[str] = None
 
@@ -452,7 +458,7 @@ class EphemeralSource(Source):
         return True
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class SkipGuardSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         self.base.reconstruct(codegen)
@@ -478,7 +484,7 @@ class TensorProperty(enum.Enum):
             raise AssertionError(f"unhandled {_esc_str(self)}")
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TensorPropertySource(ChainedSource):
     prop: TensorProperty
     idx: Optional[int] = None  # None for STORAGE_OFFSET
@@ -517,7 +523,7 @@ class TensorPropertySource(ChainedSource):
             raise AssertionError(f"unhandled {_esc_str(self.prop)}")
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class IndexedSource(ChainedSource):
     idx: int
 
@@ -532,7 +538,7 @@ class IndexedSource(ChainedSource):
         return f"({_esc_str(self.idx)}, {{0}})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class NegateSource(ChainedSource):
     def __post_init__(self) -> None:
         assert self.base is not None
@@ -546,7 +552,7 @@ class NegateSource(ChainedSource):
         return "{0}.__neg__()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ConvertIntSource(ChainedSource):
     def __post_init__(self) -> None:
         assert self.base is not None
@@ -559,7 +565,7 @@ class ConvertIntSource(ChainedSource):
         return "cast_symbool_to_symint_guardless({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class DynamicScalarSource(ChainedSource):
     is_int: bool
 
@@ -580,7 +586,7 @@ class DynamicScalarSource(ChainedSource):
         return "int({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class FlattenScriptObjectSource(ChainedSource):
     def __post_init__(self) -> None:
         assert self.base is not None
@@ -593,7 +599,7 @@ class FlattenScriptObjectSource(ChainedSource):
         return "{0}.__obj_flatten__()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ScriptObjectQualifiedNameSource(ChainedSource):
     def __post_init__(self) -> None:
         assert self.base is not None
@@ -615,7 +621,7 @@ class AttrProxySource(ChainedSource):
         return "{0}.get_base()"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class DefaultsSource(ChainedSource):
     idx_key: Union[int, str]
     is_kw: bool = False
@@ -652,7 +658,7 @@ class DefaultsSource(ChainedSource):
         return self._name
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GetItemSource(ChainedSource):
     index: Any
     index_is_slice: bool = False
@@ -689,7 +695,7 @@ class GetItemSource(ChainedSource):
             return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ConstDictKeySource(ChainedSource):
     index: Any
 
@@ -710,7 +716,7 @@ class ConstDictKeySource(ChainedSource):
         return True
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class NonSerializableSetGetItemSource(ChainedSource):
     index: int
 
@@ -737,7 +743,7 @@ class NonSerializableSetGetItemSource(ChainedSource):
 
 
 # Used to access an item from the dictionary
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class DictGetItemSource(ChainedSource):
     # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
@@ -772,7 +778,7 @@ class DictGetItemSource(ChainedSource):
 
 # Same as DictGetItemSource but used for dict.__getitem__ calls to ensure that
 # torch.compile does not run the overridden __getitem__ method
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class DictSubclassGetItemSource(ChainedSource):
     # Key to access in the dictionary. It can be one of the following types
     # 1) ConstDictKeySource
@@ -813,7 +819,7 @@ class DictSubclassGetItemSource(ChainedSource):
             return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ListGetItemSource(GetItemSource):
     """
     Same as GetItemSource with reconstruct and name overridden to be list specific.
@@ -855,7 +861,7 @@ class ListGetItemSource(GetItemSource):
             return f"list.__getitem__({{0}}, {_esc_str(self.index, apply_repr=True)})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TupleIteratorGetItemSource(GetItemSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -872,7 +878,7 @@ class TupleIteratorGetItemSource(GetItemSource):
         )
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class NamedTupleFieldsSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
@@ -883,7 +889,7 @@ class NamedTupleFieldsSource(ChainedSource):
         return "___namedtuple_fields({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class DataclassFieldsSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -897,7 +903,7 @@ class DataclassFieldsSource(ChainedSource):
         return "___dataclass_fields({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TypeSource(ChainedSource):
     def __post_init__(self) -> None:
         assert self.base is not None
@@ -912,7 +918,7 @@ class TypeSource(ChainedSource):
         return "type({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class OptimizerSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
@@ -922,7 +928,7 @@ class OptimizerSource(ChainedSource):
         return "{0}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class NNModuleSource(ChainedSource):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen(self.base)
@@ -936,28 +942,28 @@ class NNModuleSource(ChainedSource):
         return "{0}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class UnspecializedNNModuleSource(NNModuleSource):
     @functools.cached_property
     def guard_source(self) -> GuardSource:
         return _GUARD_SOURCE_UNSPECIALIZED_NN_MODULE[self.base.guard_source]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class UnspecializedBuiltinNNModuleSource(UnspecializedNNModuleSource):
     @functools.cached_property
     def guard_source(self) -> GuardSource:
         return _GUARD_SOURCE_UNSPECIALIZED_BUILTIN_NN_MODULE[self.base.guard_source]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class FSDPNNModuleSource(NNModuleSource):
     @functools.cached_property
     def guard_source(self) -> GuardSource:
         return _GUARD_SOURCE_FSDP_MODULE[self.base.guard_source]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class GlobalStateSource(Source):
     @property
     def _name_template(self) -> str:
@@ -968,7 +974,7 @@ class GlobalStateSource(Source):
         return GuardSource.GLOBAL
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TorchSource(Source):
     """Points to the actual `torch` module - used instead of GlobalSource
     in case the user has overridden `torch` in their local namespace"""
@@ -997,7 +1003,7 @@ class TorchSource(Source):
         return GuardSource.GLOBAL
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class CollectionsSource(Source):
     """Points to the actual `collections` module - used instead of GlobalSource
     in case the user has overridden `collections` in their local namespace"""
@@ -1026,7 +1032,7 @@ class CollectionsSource(Source):
         return GuardSource.GLOBAL
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class TorchFunctionModeStackSource(Source):
     ind: int
 
@@ -1053,7 +1059,7 @@ class TorchFunctionModeStackSource(Source):
         return GuardSource.GLOBAL
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ConstantSource(Source):
     source_name: str
 
@@ -1072,7 +1078,7 @@ class ConstantSource(Source):
         raise NotImplementedError
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class NumpyTensorSource(ChainedSource):
     @property
     def _name_template(self) -> str:
@@ -1084,7 +1090,7 @@ class NumpyTensorSource(ChainedSource):
         codegen.extend_output(create_call_function(1, False))
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class SubclassAttrListSource(ChainedSource):
     @property
     def _name_template(self) -> str:
@@ -1093,14 +1099,14 @@ class SubclassAttrListSource(ChainedSource):
 
 # NB: We don't expect you to actually ever generate guards against this
 # source, it is ephemeral
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class FloatTensorSource(ChainedSource):
     @property
     def _name_template(self) -> str:
         return "___as_tensor({0})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class CallMethodItemSource(ChainedSource):
     @property
     def _name_template(self) -> str:
@@ -1110,7 +1116,7 @@ class CallMethodItemSource(ChainedSource):
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ShapeEnvSource(Source):
     @property
     def _name_template(self) -> str:
@@ -1121,7 +1127,7 @@ class ShapeEnvSource(Source):
         return GuardSource.SHAPE_ENV
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class CurrentStreamSource(Source):
     device: device_type
 
@@ -1147,7 +1153,7 @@ class CurrentStreamSource(Source):
         return GuardSource.GLOBAL
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class BackwardStateSource(Source):
     @property
     def _name_template(self) -> str:

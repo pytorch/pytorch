@@ -6,6 +6,7 @@ import enum
 import functools
 import logging
 import re
+import sys
 import threading
 import traceback
 import unittest.mock
@@ -14,7 +15,28 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import (
+    Any,
+    Generic,
+    NamedTuple,
+    Optional,
+    overload,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
+
+
+if sys.version_info >= (3, 11):
+    from typing import dataclass_transform
+else:
+
+    def dataclass_transform():
+        def decorator(fn):
+            return fn
+
+        return decorator
+
 
 import torch
 from torch.utils import _pytree as pytree
@@ -1076,9 +1098,41 @@ def tracing(
         _TLS.tracing_context = old_context
 
 
+@overload
+def dataclass_with_cached_hash(cls: type[T], **kwargs: Any) -> type[T]: ...
+
+
+@overload
+def dataclass_with_cached_hash(
+    cls: None = None, **kwargs: Any
+) -> Callable[[type[T]], type[T]]: ...
+
+
+@dataclass_transform()
+def dataclass_with_cached_hash(
+    cls: type[T] | None = None, **kwargs: Any
+) -> type[T] | Callable[[type[T]], type[T]]:
+    def wrap(cls_inner: type[T]) -> type[T]:
+        new_cls = dataclasses.dataclass(cls_inner, **kwargs)
+        old_hash = cls_inner.__hash__
+
+        def __hash__(self) -> int:
+            if not hasattr(self, "_hash"):
+                object.__setattr__(self, "_hash", old_hash(self))
+            return self._hash
+
+        new_cls.__hash__ = __hash__
+        return new_cls  # type: ignore[return-value]
+
+    if cls is None:
+        return wrap
+
+    return wrap(cls)
+
+
 # Subclasses can be found in torch/_dynamo/source.py
 # TODO(voz): Consider a toplevel torch/_source.py
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class Source:
     def is_dict_key(self) -> bool:
         return False
@@ -1137,7 +1191,7 @@ class Source:
 
 
 # Subclasses can be found in torch/_dynamo/source.py
-@dataclasses.dataclass(frozen=True)
+@dataclass_with_cached_hash(frozen=True)
 class ChainedSource(Source):
     base: Source
 
