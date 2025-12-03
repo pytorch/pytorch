@@ -65,7 +65,7 @@ class Counter:
         self.counter += 1
 
 
-class Moodule(torch.nn.Module):
+class AddModule(torch.nn.Module):
     def forward(self, x, y):
         return x * y
 
@@ -73,7 +73,7 @@ class Moodule(torch.nn.Module):
 register_opaque_type(OpaqueQueue)
 register_opaque_type(RNGState)
 register_opaque_type(Counter)
-register_opaque_type(Moodule)
+register_opaque_type(AddModule)
 
 
 class TestOpaqueObject(TestCase):
@@ -461,7 +461,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     def test_export_joint(self):
         torch.library.define(
             "_TestOpaqueObject::module_mul",
-            f"({get_opaque_type_name(Moodule)} a, Tensor b, SymInt c) -> Tensor",
+            f"({get_opaque_type_name(AddModule)} a, Tensor b, SymInt c) -> Tensor",
             tags=torch.Tag.pt2_compliant_tag,
             lib=self.lib,
         )
@@ -469,12 +469,12 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         @torch.library.impl(
             "_TestOpaqueObject::module_mul", "CompositeExplicitAutograd", lib=self.lib
         )
-        def module_mul_impl(m: Moodule, a: torch.Tensor, b: int) -> torch.Tensor:
-            assert isinstance(m, Moodule)
+        def module_mul_impl(m: AddModule, a: torch.Tensor, b: int) -> torch.Tensor:
+            assert isinstance(m, AddModule)
             return m(a, b)
 
         @torch.library.register_fake("_TestOpaqueObject::module_mul", lib=self.lib)
-        def module_mul_fake(m: Moodule, a: torch.Tensor, b: int) -> torch.Tensor:
+        def module_mul_fake(m: AddModule, a: torch.Tensor, b: int) -> torch.Tensor:
             return torch.empty_like(a)
 
         def module_mul_setup_context(ctx, inputs, output):
@@ -494,7 +494,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.moo = Moodule()
+                self.moo = AddModule()
 
             def forward(self, x, y):
                 b = y.item()
