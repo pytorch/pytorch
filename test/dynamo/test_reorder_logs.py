@@ -69,7 +69,6 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
             self.assertIn("moo", printed_output)
             self.assertGreater(len(counters["graph_break"]), 0)
 
-
     def test_ignore_arbitrary_function_noop(self):
         counters.clear()
         calls = []
@@ -95,7 +94,6 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
 
         # no graph breaks allowed
         self.assertEqual(len(counters["graph_break"]), 0)
-
 
     def test_ignore_function_returns_none(self):
         counters.clear()
@@ -126,8 +124,6 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
 
         # no graph breaks
         self.assertEqual(len(counters["graph_break"]), 0)
-
-
 
     def test_ignore_function_does_not_conflict_with_reorderable(self):
         counters.clear()
