@@ -2857,69 +2857,30 @@ Tensor& linalg_eigvalsh_out(const Tensor& A, std::string_view uplo, Tensor& L) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linalg_eig ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-// This function returns complex-valued eigenvectors that is obtained from LAPACK GEEV's real-valued output
-// This function is also used for the MAGMA path because intermediate MAGMA's results live on CPU
-template <typename scalar_t>
-static void linalg_eig_make_complex_eigenvectors_impl(Tensor& result, const Tensor& complex_values, const Tensor& real_vectors) {
-  // From GEEV documentation:
-  // Complex conjugate pairs of eigenvalues appear consecutively with the eigenvalue having the positive imaginary part first
-  // If the j-th eigenvalue is real, then v(j) = VR(:,j), the j-th column of VR.
-  // If the j-th and (j+1)-st eigenvalues form a complex conjugate pair, then v(j) = VR(:,j) + i*VR(:,j+1) and v(j+1) = VR(:,j) - i*VR(:,j+1).
+DEFINE_DISPATCH(linalg_eig_make_complex_eigenvectors_stub);
 
-  auto batch_size = batchCount(real_vectors);
-  auto n = real_vectors.size(-1);
-  auto matrix_stride = matrixStride(real_vectors);
+// Converts LAPACK's real-valued eigenvector encoding to complex eigenvectors.
+// This function dispatches to device-specific implementations (CPU or CUDA) based
+// on the device type of the input tensors.
+void linalg_eig_make_complex_eigenvectors(const Tensor& complex_vectors, const Tensor& complex_values, const Tensor& real_vectors) {
+  // Device consistency checks
+  TORCH_CHECK(
+      complex_vectors.device() == complex_values.device() &&
+      complex_vectors.device() == real_vectors.device(),
+      "linalg_eig_make_complex_eigenvectors: all tensors must be on the same device");
 
-  auto result_data = result.data_ptr<c10::complex<scalar_t>>();
-  auto real_vectors_data = real_vectors.const_data_ptr<scalar_t>();
-  auto values_data = complex_values.const_data_ptr<c10::complex<scalar_t>>();
-
-  for (auto b = decltype(batch_size){0}; b < batch_size; b++) {
-    const scalar_t* vecs = &real_vectors_data[b * matrix_stride];
-    c10::complex<scalar_t>* res = &result_data[b * matrix_stride];
-    const c10::complex<scalar_t>* vals = &values_data[b * n];
-    for (auto j = decltype(n){0}; j < n; j++) {
-      if (vals[j].imag() == 0.0) {  // eigenvalue is real, then v(j) = VR(:,j)
-        for (auto i = decltype(n){0}; i < n; i++) {
-          res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i], 0);
-        }
-      } else {
-        for (auto i = decltype(n){0}; i < n; i++) {
-          res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i],  vecs[(j+1) * n + i]);      // v(j)   = VR(:,j) + i*VR(:,j+1)
-          res[(j+1) * n + i] = c10::complex<scalar_t>(vecs[j * n + i], -vecs[(j+1) * n + i]);  // v(j+1) = VR(:,j) - i*VR(:,j+1)
-        }
-        j++;
-      }
-    }
-  }
-}
-
-static Tensor& linalg_eig_make_complex_eigenvectors(Tensor& complex_vectors, const Tensor& complex_values, const Tensor& real_vectors) {
-  // These asserts make explicit the requirements on tensors for 'linalg_eig_make_complex_eigenvectors_impl'
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.device() == at::kCPU);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.device() == at::kCPU);
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.is_complex());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.is_complex());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.is_floating_point());
-
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.mT().is_contiguous());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.is_contiguous());
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.mT().is_contiguous());
-
-  AT_DISPATCH_FLOATING_TYPES(real_vectors.scalar_type(), "linalg_eig_make_complex_vector", [&]{
-    linalg_eig_make_complex_eigenvectors_impl<scalar_t>(complex_vectors, complex_values, real_vectors);
-  });
-  return complex_vectors;
+  // Dispatch to device-specific implementation
+  linalg_eig_make_complex_eigenvectors_stub(
+      complex_vectors.device().type(),
+      complex_vectors,
+      complex_values,
+      real_vectors);
 }
 
 DEFINE_DISPATCH(linalg_eig_stub);
 
 static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Tensor& values, Tensor& vectors, Tensor& infos, bool compute_eigenvectors) {
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
-  // therefore we create all intermediate tensors on CPU
-  auto options = input.options().device(at::kCPU);
+  auto options = input.options();
 
   // These internal asserts make explicit the assumptions in the implementation
   // Error check with the actual error messages are done on the higher level of the hierarchy of calls
@@ -2928,16 +2889,13 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
 
   // for real-valued 'input', eigenvalues can be real-valued or complex-valued
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY((toComplexType(input.scalar_type()) == values.scalar_type()) || (input.scalar_type() == values.scalar_type()));
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(values.device() == at::kCPU);
 
   // for real-valued 'input', eigenvectors can be real-valued or complex-valued
   if (compute_eigenvectors) {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY((toComplexType(input.scalar_type()) == vectors.scalar_type()) || (input.scalar_type() == vectors.scalar_type()));
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(vectors.device() == at::kCPU);
   }
 
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.scalar_type() == at::kInt);
-  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.device() == at::kCPU);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.numel() == std::max<int64_t>(1, batchCount(input)));
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(infos.is_contiguous());
 
@@ -2986,15 +2944,7 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
     }
   }
 
-  // MAGMA uses a hybrid CPU-GPU algorithm that performs well only for large matrices
-  // See: https://github.com/pytorch/pytorch/pull/52491#issuecomment-795685687
-  // Here we call CPU path for matrices smaller than 2048x2048
-  // that should be in general significantly faster than calling MAGMA
-  if (input.size(-1) <= 2048) {
-    linalg_eig_stub(at::kCPU, real_imag_values, maybe_complex_vectors, infos, input.to(kCPU), compute_eigenvectors);
-  } else {
-    linalg_eig_stub(input.device().type(), real_imag_values, maybe_complex_vectors, infos, input, compute_eigenvectors);
-  }
+  linalg_eig_stub(input.device().type(), real_imag_values, maybe_complex_vectors, infos, input, compute_eigenvectors);
 
   // if input is not complex we need to do some post-processing
   if (!input.is_complex()) {
@@ -3019,7 +2969,9 @@ static std::tuple<Tensor&, Tensor&> linalg_eig_out_info(const Tensor& input, Ten
     }
     if (compute_eigenvectors) {
       if (vectors.is_complex()) {
-          vectors = linalg_eig_make_complex_eigenvectors(vectors, values, maybe_complex_vectors);
+        // Decode LAPACK's real eigenvector format into complex eigenvectors
+        // This now dispatches to device-specific implementations (CPU/CUDA)
+        linalg_eig_make_complex_eigenvectors(vectors, values, maybe_complex_vectors);
       } else {
         TORCH_CHECK(false, "torch.linalg.eig: imaginary part of eigenvectors is non-zero, can't safely cast eigenvectors to non-complex dtype.")
       }
@@ -3039,8 +2991,7 @@ std::tuple<Tensor&, Tensor&> linalg_eig_out(const Tensor& input, Tensor& values,
   checkSameDevice("torch.linalg.eig", values, input, "eigenvalues");
   checkSameDevice("torch.linalg.eig", vectors, input, "eigenvectors");
 
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
-  auto options = input.options().device(at::kCPU);
+  auto options = input.options();
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, options.dtype(kInt));
 
   // if result is not empty and not in batched column major format we have to allocate a temporary tensor
@@ -3129,8 +3080,7 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   checkLinalgCompatibleDtype("torch.linalg.eigvals", values.scalar_type(), toComplexType(input.scalar_type()), "eigenvalues");
   checkSameDevice("torch.linalg.eigvals", values, input, "eigenvalues");
 
-  // MAGMA doesn't have GPU interface for GEEV routine, it requires inputs to be on CPU
-  auto options = input.options().device(at::kCPU);
+  auto options = input.options();
   auto infos = at::zeros({std::max<int64_t>(1, batchCount(input))}, options.dtype(kInt));
 
   bool values_expected_type = (values.scalar_type() == toComplexType(input.scalar_type()));
@@ -3159,6 +3109,7 @@ Tensor& linalg_eigvals_out(const Tensor& input, Tensor& values) {
   }
 
   Tensor vectors;
+  vectors = at::empty({0}, input.options());
   if (values_tmp_needed) {
     Tensor values_tmp = at::empty({0}, options.dtype(values_type));
     std::tie(values_tmp, std::ignore) = linalg_eig_out_info(input, values_tmp, vectors, infos, /*compute_eigenvectors=*/false);

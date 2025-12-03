@@ -45,6 +45,20 @@ void _foreach_tensor(
   }
 }
 
+[[maybe_unused]]
+size_t expected_fresh_use_count(const at::Tensor& self) {
+  if (!self.defined()) {
+    // An UndefinedTensorImpl always has a use count of 0
+    return 0;
+  }
+  if (self.unsafeGetTensorImpl()->pyobj_slot()->load_pyobj() != nullptr) {
+    // A TensorImpl with a Python object has a use count of 2
+    return 2;
+  }
+  // A fresh TensorImpl (with no PyObject) has a use count of 1
+  return 1;
+}
+
 AutogradFallbackMode kAutogradFallbackMode = AutogradFallbackMode::Warn;
 
 } // namespace
@@ -394,8 +408,7 @@ static void autogradNotImplementedFallbackImpl(
             op_name == "aten::_test_optional_floatlist")
           return;
         if (!is_inplace_output[idx_ret])
-          TORCH_INTERNAL_ASSERT(
-              t.use_count() <= 1, op_name); // Okay to return undefined tensor
+          TORCH_INTERNAL_ASSERT(t.use_count() == expected_fresh_use_count(t));
         // note(crcrpar): `_foreach_norm` returns a list of scalar Tensors and
         // each Tensor shares a storage of a hidden, intermediate 1D Tensor
         // created inside the CUDA implementation. This is because the

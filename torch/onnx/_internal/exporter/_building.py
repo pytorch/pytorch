@@ -537,7 +537,7 @@ class OpRecorder(evaluator.Evaluator):
 
     def __init__(
         self, opset: onnxscript.values.Opset, constant_farm: dict[Any, ir.Value]
-    ):
+    ) -> None:
         self.nodes: list[ir.Node] = []
         self.opset = opset
         self.functions: dict[
