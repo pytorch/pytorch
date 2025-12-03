@@ -37,7 +37,7 @@ PARAM_RE = re.compile('Type of parameter "(.*)" is unknown')
 PUBLIC_NAMES = "__init__", "__main__"
 SUFFIXES = ".py", ".pyi"
 # Words that appear in the grandfather file that CODESPELL flags
-CODESPELL_CLASHES = ["lamda"]
+CODESPELL_CLASHES = ["lamda"]  # codespell:ignore
 
 _log = partial(print, file=sys.stderr)
 
