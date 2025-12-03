@@ -422,7 +422,7 @@ static void initXpuMethodBindings(PyObject* module) {
   m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
     c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
   });
-  m.def("_xpu_memorySnapshot", [](c10::MempoolId_t mempool_id) {
+  m.def("_xpu_memorySnapshot", [](std::optional<c10::MempoolId_t> mempool_id) {
     using c10::xpu::XPUCachingAllocator::BlockInfo;
     using c10::xpu::XPUCachingAllocator::SegmentInfo;
 
@@ -448,8 +448,6 @@ static void initXpuMethodBindings(PyObject* module) {
     py::str is_expandable_s = "is_expandable";
     py::str frames_s = "frames";
     py::str time_us_s = "time_us";
-    py::str compile_context_s = "compile_context";
-    py::str user_metadata_s = "user_metadata";
 
     py::list empty_frames;
     std::vector<CapturedTraceback*> to_gather_frames;
@@ -474,9 +472,9 @@ static void initXpuMethodBindings(PyObject* module) {
       segmentDict[allocated_size_s] = segmentInfo.allocated_size;
       segmentDict[active_size_s] = segmentInfo.active_size;
       segmentDict[requested_size_s] = segmentInfo.requested_size;
-      // we want the python objects to pickle easily so use an int to
-      // represent the stream rather than a torch.cuda.stream object
-      segmentDict[stream_s] = int64_t(segmentInfo.queue);
+      // To ensure Python objects can be easily pickled, we represent the stream
+      // as an integer rather than as a Stream object.
+      segmentDict[stream_s] = reinterpret_cast<uint64_t>(segmentInfo.queue);
       segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
       segmentDict[segment_pool_id] = segmentInfo.owner_private_pool_id;
       segmentDict[is_expandable_s] = segmentInfo.is_expandable;
@@ -502,8 +500,8 @@ static void initXpuMethodBindings(PyObject* module) {
       return segmentDict;
     };
 
-    auto snapshot = c10::xpu::XPUCachingAllocator::snapshot();
-    std::cout << "snapshot done!" << std::endl;
+    auto snapshot = c10::xpu::XPUCachingAllocator::snapshot(
+        mempool_id.value_or(std::make_pair(0, 0)));
 
     py::list segments;
 
@@ -556,7 +554,6 @@ static void initXpuMethodBindings(PyObject* module) {
       for (const auto& te : traceInfo) {
         py::dict trace_entry;
         if (te.context_) {
-          // without further compression frames can get really large on dump
           auto sc = getFromContext(te.context_);
           to_gather_frames.emplace_back(sc);
           to_gather_dest.emplace_back(trace_entry);
@@ -571,10 +568,9 @@ static void initXpuMethodBindings(PyObject* module) {
       }
       traces.append(trace);
     }
-    std::cout << "traces done!" << std::endl;
 
     py::dict allocator_settings;
-    py::str last_allocator_settings_s = "PYTORCH_CUDA_ALLOC_CONF";
+    py::str last_allocator_settings_s = "PYTORCH_ALLOC_CONF";
     py::str expandable_segments_s = "expandable_segments";
 
     allocator_settings[last_allocator_settings_s] =
@@ -588,13 +584,11 @@ static void initXpuMethodBindings(PyObject* module) {
     result["allocator_settings"] = allocator_settings;
 
     auto frames = py_symbolize(to_gather_frames);
-    for (auto i : c10::irange(frames.size())) {
+    for (const auto i : c10::irange(frames.size())) {
       to_gather_dest.at(i)[frames_s] = frames.at(i);
     }
 
-    std::cout << "symbolize done!" << std::endl;
-
-    return result.release().ptr();
+    return result;
   });
 }
 
