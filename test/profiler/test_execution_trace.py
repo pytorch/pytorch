@@ -33,6 +33,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
+    TemporaryFileName,
     TEST_HPU,
     TEST_XPU,
     TestCase,
@@ -669,18 +670,18 @@ class TestExecutionTrace(TestCase):
         assert event_count == expected_loop_events
 
     def test_execution_trace_no_capture(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-        et = ExecutionTraceObserver().register_callback(fp.name)
+        with TemporaryFileName("w+t", suffix=".et.json") as file_name:
+            et = ExecutionTraceObserver().register_callback(file_name)
 
-        assert fp.name == et.get_output_file_path()
-        et.unregister_callback()
-        nodes = self.get_execution_trace_root(fp.name)
-        for n in nodes:
-            assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
-        assert found_root_node
+            assert file_name == et.get_output_file_path()
+            et.unregister_callback()
+            nodes = self.get_execution_trace_root(file_name)
+            found_root_node = False
+            for n in nodes:
+                assert "name" in n
+                if "[pytorch|profiler|execution_trace|process]" in n["name"]:
+                    found_root_node = True
+            assert found_root_node
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
