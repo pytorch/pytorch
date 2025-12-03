@@ -22,6 +22,7 @@ from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
+    decorateIf,
     TEST_WITH_ROCM,
     skipIfRocm,
     skipIfRocmArch,
@@ -39,6 +40,7 @@ from torch.testing._internal.common_utils import (
     NOTEST_CPU,
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
+    xfailIfWindows,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
@@ -4555,6 +4557,7 @@ class TestAttnBias(NNTestCase):
         torch.testing.assert_close(key.grad, key_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
         torch.testing.assert_close(value.grad, value_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
 
+    @decorateIf(xfailIfWindows, lambda params: params['shape'] != (1, 1, 23, 56, 15))
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
         "shape",

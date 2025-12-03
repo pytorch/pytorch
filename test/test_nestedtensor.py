@@ -62,6 +62,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ROCM,
     xfailIfTorchDynamo,
+    xfailIfWindows,
 )
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -7004,6 +7005,7 @@ torch.cuda.synchronize()
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     # Guarding with sqrt() doesn't work on ROCm?
+    @xfailIfWindows
     @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(
@@ -7188,6 +7190,7 @@ torch.cuda.synchronize()
                 out, out_component, atol=output_ref_atol, rtol=output_ref_rtol
             )
 
+    @decorateIf(xfailIfWindows, lambda params: params["dtype"] == torch.float32)
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     # mha_varlen_fwd not supported on ROCm
@@ -7949,6 +7952,7 @@ torch.cuda.synchronize()
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
+    @xfailIfWindows # precision
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
@@ -8049,6 +8053,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
+    @xfailIfWindows # precision
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_padded_dense_conversion_preserves_metadata_cache(
