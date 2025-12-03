@@ -65,18 +65,15 @@ def <KERNEL_NAME>_main({{main_fn_args}}, stream=None):
     # Enable JAX x64 mode for float64/int64 support
     jax.config.update('jax_enable_x64', True)
 
-    # Move torch tensors to CPU, convert to numpy, then put on TPU device
-    x_tpu_jax = jax.device_put({{x}}.cpu().numpy(), device=jax.devices('tpu')[0])
-    y_tpu_jax = jax.device_put({{y}}.cpu().numpy(), device=jax.devices('tpu')[0])
+    # Convert torch tensors to JAX arrays via dlpack
+    x_tpu_jax = jax.dlpack.from_dlpack({{x}}.__dlpack__())
+    y_tpu_jax = jax.dlpack.from_dlpack({{y}}.__dlpack__())
 
     # Call the jitted Pallas kernel
     z_tpu_jax = <KERNEL_NAME>_pallas_call(x_tpu_jax, y_tpu_jax)
 
-    # Get the result from TPU to CPU as a numpy array
-    z_cpu_numpy = jax.device_get(z_tpu_jax)
-
-    # Convert numpy array to torch tensor and copy to the output
-    {{z}}.copy_(torch.from_numpy(z_cpu_numpy))
+    # Convert the result from JAX to torch via dlpack and copy to the output
+    {{z}}.copy_(torch.from_dlpack(z_tpu_jax))
 """
 
 # --- IR Node for Pallas Kernels ---
