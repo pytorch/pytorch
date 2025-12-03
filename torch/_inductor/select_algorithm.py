@@ -2964,6 +2964,29 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
+        if log.isEnabledFor(logging.DEBUG):
+            # Log shape information for debugging timeout issues
+            sizevars = V.graph.sizevars
+            shapes = [
+                "x".join(
+                    map(
+                        str,
+                        sizevars.size_hints(
+                            node.get_size(),
+                            fallback=config.unbacked_symint_fallback,
+                            hint_override=hint_override,
+                        ),
+                    )
+                )
+                for node in input_nodes
+            ]
+            log.debug(
+                "[BENCHMARK DEBUG] Starting autotuning for '%s' with shapes: %s, device: %s",
+                name,
+                shapes,
+                layout.device.type if layout else "unknown",
+            )
+
         precompile_start_ts = time.time()
         with dynamo_timed(
             f"{name}_template_precompiling",
@@ -3241,30 +3264,16 @@ class AlgorithmSelectorCache(PersistentCache):
             log.debug("Waiting on futures")
             counters["inductor"]["select_algorithm_precompile"] += 1
             exceptions: list[tuple[ChoiceCaller, BaseException]] = []
-            for future in as_completed(
-                futures,
-                timeout=precompilation_timeout_seconds,
-            ):
-                if e := future.exception():
-                    counters["inductor"][
-                        "select_algorithm_num_precompilation_exceptions"
-                    ] += 1
-                    exceptions.append((futures[future], e))
-                    from torch._inductor.codegen.cuda.cuda_kernel import (
-                        CUDATemplateCaller,
-                    )
-
-                    if isinstance(e, CUDACompileError) and isinstance(
-                        futures[future], CUDATemplateCaller
-                    ):
-                        log.debug(
-                            "Exception %s for benchmark choice %s",
-                            e,
-                            futures[future],
-                            exc_info=e,
-                        )
-                        futures[future].mark_failed()
-                    else:
+            try:
+                for future in as_completed(
+                    futures,
+                    timeout=precompilation_timeout_seconds,
+                ):
+                    if e := future.exception():
+                        counters["inductor"][
+                            "select_algorithm_num_precompilation_exceptions"
+                        ] += 1
+                        exceptions.append((futures[future], e))
                         log.exception(  # noqa: G202
                             "Exception %s for benchmark choice %s",
                             e,
@@ -3272,13 +3281,39 @@ class AlgorithmSelectorCache(PersistentCache):
                             exc_info=e,
                         )
                         futures[future].mark_failed()
-                else:
-                    counters["inductor"]["select_algorithm_num_precompiles"] += 1
-                    log.info(
-                        "Precompiling benchmark choice %s took %.02fs",
-                        futures.get(future),
-                        elapsed_times.get(future),
+                    else:
+                        counters["inductor"]["select_algorithm_num_precompiles"] += 1
+                        log.info(
+                            "Precompiling benchmark choice %s took %.02fs",
+                            futures.get(future),
+                            elapsed_times.get(future),
+                        )
+            except TimeoutError:
+                # Don't force the entire process to crash due to a timeout
+                # in compilation. Just mark those futures as failed.
+                completed_futures = OrderedSet([f for f in futures if f.done()])
+                remaining_futures = OrderedSet(futures.keys()) - completed_futures
+
+                log.warning(
+                    "Precompilation timeout after %ds: %d of %d futures did not complete",
+                    precompilation_timeout_seconds,
+                    len(remaining_futures),
+                    len(futures),
+                )
+
+                # Mark remaining futures as failed and log them
+                for future in remaining_futures:
+                    choice = futures[future]
+                    log.warning(
+                        "Marking choice as failed due to timeout: %s",
+                        choice,
                     )
+                    choice.mark_failed()
+                    # Add timeout exception to the exceptions list
+                    timeout_exc = TimeoutError(
+                        f"Precompilation timed out after {precompilation_timeout_seconds}s"
+                    )
+                    exceptions.append((choice, timeout_exc))
             if exceptions:
                 _log_autotune_exceptions(exceptions)
 
