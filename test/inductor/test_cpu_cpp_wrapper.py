@@ -301,19 +301,19 @@ if RUN_CPU:
         #     test_mkldnn_pattern_matcher.TestQuantizedPatternMatcher(),
         #     condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
         # ),
-        BaseTest(
-            "test_qconv2d_maxpool2d_linear_dynamic",
-            "cpu",
-            test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
-            condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
-            func_inputs=[
-                [
-                    "aoti_torch_cpu__qconv_pointwise_tensor",
-                    "torch.ops.quantized.max_pool2d",
-                    "aoti_torch_cpu__qlinear_pointwise_tensor",
-                ]
-            ],
-        ),
+        # BaseTest(
+        #     "test_qconv2d_maxpool2d_linear_dynamic",
+        #     "cpu",
+        #     test_mkldnn_pattern_matcher.TestDynamicPatternMatcher(),
+        #     condition=torch.backends.mkldnn.is_available() and not IS_WINDOWS,
+        #     func_inputs=[
+        #         [
+        #             "aoti_torch_cpu__qconv_pointwise_tensor",
+        #             "torch.ops.quantized.max_pool2d",
+        #             "aoti_torch_cpu__qlinear_pointwise_tensor",
+        #         ]
+        #     ],
+        # ),
         # *[
         #     BaseTest(
         #         func,

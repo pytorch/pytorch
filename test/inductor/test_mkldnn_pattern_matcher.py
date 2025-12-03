@@ -4662,6 +4662,7 @@ class TestDynamicPatternMatcherGeneric(TestPatternMatcherBase):
             self._test_common(mod, (v,), matcher_check_fn, rtol=1e-2, atol=1e-2)
 
 
+@unittest.skip("TODO: Move this to torchao since we moved pt2e quant flow to torchao")
 class TestDynamicPatternMatcher(TestPatternMatcherBase):
     test_linear_unary_dynamic_shapes = TestPatternMatcher.test_linear_unary
     test_linear_input_non_contiguous_3D_wo_bias_dynamic_shapes = (
