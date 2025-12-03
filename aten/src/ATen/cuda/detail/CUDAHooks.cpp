@@ -36,7 +36,6 @@
 #include <ATen/cuda/detail/LazyNVRTC.h>
 #endif
 
-#include <cuda.h>
 
 #include <sstream>
 #include <cstddef>

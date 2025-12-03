@@ -2,17 +2,13 @@
   Provides the implementations of CUDA BLAS function templates.
  */
 
-#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
-#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
 
