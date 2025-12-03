@@ -1646,7 +1646,10 @@ class BuiltinVariable(VariableTracker):
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
                 return fn_vt.call_function(tx, [arg], {})
-        return None
+        try:
+            return arg.call_method(tx, "__repr__", [], {})
+        except (NotImplementedError, AttributeError):
+            return None
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
