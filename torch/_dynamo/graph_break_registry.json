@@ -3711,5 +3711,27 @@
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
+  ],
+  "GB0367": [
+    {
+      "Gb_type": "autograd.grad with external grad_fn input",
+      "Context": "",
+      "Explanation": "Compiled function receives an input with external grad_fn (created by operations outside the compiled region). When torch.autograd.grad is used, all inputs must be leaf tensors because the autograd graph cannot extend beyond the compiled region.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB0368": [
+    {
+      "Gb_type": "autograd.grad without fullgraph=True",
+      "Context": "",
+      "Explanation": "torch.autograd.grad() is only supported with fullgraph=True. Graph breaks can cause tensors with grad_fn to cross graph boundaries, which cannot be traced correctly.",
+      "Hints": [
+        "Use torch.compile(..., fullgraph=True) to enable autograd.grad support.",
+        "Or move the torch.autograd.grad() call outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
   ]
 }

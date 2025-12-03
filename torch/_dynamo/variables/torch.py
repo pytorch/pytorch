@@ -1423,6 +1423,32 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ),
             )
 
+        @register(torch.autograd.grad)
+        def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
+            # Only allow autograd.grad in fullgraph=True mode.
+            # In non-fullgraph mode, graph breaks can cause tensors with grad_fn
+            # to become graph inputs, which breaks fake tensor tracing.
+            if not tx.output.root_tx.one_graph:
+                unimplemented(
+                    gb_type="autograd.grad without fullgraph=True",
+                    context="",
+                    explanation=(
+                        "torch.autograd.grad() is only supported with fullgraph=True. "
+                        "Graph breaks can cause tensors with grad_fn to cross graph boundaries, "
+                        "which cannot be traced correctly."
+                    ),
+                    hints=[
+                        "Use torch.compile(..., fullgraph=True) to enable autograd.grad support.",
+                        "Or move the torch.autograd.grad() call outside the compiled region.",
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
+                )
+
+            # Mark that we use autograd.grad, used later in _validate_autograd_grad_inputs
+            tx.output.uses_autograd_grad = True
+            # Return None to fall through to default handling
+            return None
+
         return handlers
 
     def call_function(
