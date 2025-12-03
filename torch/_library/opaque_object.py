@@ -1,33 +1,43 @@
 from typing import Any, NewType
 
 import torch
-import torch.utils._pytree as pytree
 
 from .fake_class_registry import register_fake_class
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Note [Opaque Objects]
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #
-# Opaque objects are objects that we allow to be passed into custom operators.
+# Opaque objects are the way we allow custom operators to accept a user-defined
+# "black box" object as an input.
 #
-# There are two kinds of opaque types: VALUE types and REFERENCE types.
+# There are two kinds of opaque types: VALUE type and REFERENCE type.
 # The distinction determines how torch.compile handles the object.
 #
 # REFERENCE TYPES (default):
-# - Represents mutable stateful objects and are treated as black boxes.
-# - In torch.compile, the object is treated as an input/output to the graph.
-# - Register with: register_opaque_type(MyClass)
+# Reference-typed opaque objects represent mutable stateful objects and are
+# treated as black boxes. In torch.compile, since torch.compile cannot optimize
+# the anything (including tensors) within the object, the object must be an
+# input to the graph.
+#
+# You can register a custom class as being a reference-based opaque object class
+# through `register_opaque_type(MyClass)`.
 #
 # VALUE TYPES:
-# - Represents constant values that are embedded in the graph
-# - When torch.compiling, the object is treated as a constant and the graph
-#   specializes on the constant. Guards are based on equality (obj.__eq__),
-#   meaning torch.compile will recompile if the hash of the object changes.
-# - The type's __eq__, __hash__, and __repr__ must be implemented.
-# - Register with: register_opaque_type(MyClass) + pytree.register_constant(MyClass)
+# Value-typed opaque objects represent constant values.
+# In torch.compile, the graph specializes on the object like how other constants
+# are. Guards are based on equality (obj.__eq__), meaning torch.compile will
+# recompile if implemented __eq__ returns false. Therefore there are a couple of
+# methods on a class that must be implemented before registering it as a
+# value-typed opaque object class:
+#   - __eq__ must be implemented as torch.compile guard on this to decide
+#   whether or not to recompile.
+#   - __hash__ must be implemented for Fake Tensor caching
+#   - __repr__ must be implemented as it will be used in the FX graph's
+#     codegen to reconstruct the object
 #
+# You can register a custom class as being a reference-based opaque object class
+# through `register_opaque_type(MyClass, value_type=True)`.
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -48,7 +58,8 @@ OpaqueTypeStr = "__torch__.torch.classes.aten.OpaqueObject"
 
 OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 
-_OPAQUE_TYPES: dict[Any, str] = {}
+# Mapping of type -> (registered string name, whether or not it is a value type)
+_OPAQUE_TYPES: dict[Any, tuple[str, bool]] = {}
 
 
 def get_opaque_type_name(cls: Any) -> str:
@@ -69,10 +80,10 @@ def get_opaque_type_name(cls: Any) -> str:
             f"Class {cls} is not registered as an opaque type. "
             f"Call register_opaque_type({cls.__name__}) first."
         )
-    return _OPAQUE_TYPES[cls]
+    return _OPAQUE_TYPES[cls][0]
 
 
-def register_opaque_type(cls: Any) -> None:
+def register_opaque_type(cls: Any, *, value_type=False) -> None:
     """
     Registers the given type as an opaque type which allows this to be consumed
     by a custom operator.
@@ -82,17 +93,28 @@ def register_opaque_type(cls: Any) -> None:
 
     Args:
         cls (type): The class to register as an opaque type.
+        value_type (bool): Whether or not the opaque type is a value-type or a
+            reference-type. See Note [Opaque Objects] for more details.
     """
-    if cls in (int, str, bool, float, torch.Tensor):
-        raise RuntimeError(
+    import torch.utils._pytree as pytree
+
+    # Prevent registration of built-in types (int, str, list, dict, etc.) and torch.Tensor
+    if cls.__module__ == "builtins" or cls is torch.Tensor:
+        raise ValueError(
             f"Unable to register built-in type {cls} as an opaque type. "
-            "Please wrap it in a custom class instead."
+            "Please wrap it in a custom class and register the custom class as opaque."
+        )
+
+    if cls in pytree.SUPPORTED_NODES:
+        raise ValueError(
+            f"{cls} cannot be registered as an opaque object as it has been "
+            "registered as a pytree. Opaque objects must be pytree leaves."
         )
 
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
-    _OPAQUE_TYPES[cls] = name
+    _OPAQUE_TYPES[cls] = (name, value_type)
 
     torch._C._register_opaque_type(name)
 
@@ -107,7 +129,7 @@ def is_opaque_type(cls: Any) -> bool:
     if cls not in _OPAQUE_TYPES:
         return False
 
-    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls])
+    return torch._C._is_opaque_type_registered(_OPAQUE_TYPES[cls][0])
 
 
 def is_opaque_value_type(cls: Any) -> bool:
@@ -119,9 +141,24 @@ def is_opaque_value_type(cls: Any) -> bool:
         return False
 
     if isinstance(cls, str):
-        for cls_type, cls_str in _OPAQUE_TYPES.items():
+        for cls_str, is_value in _OPAQUE_TYPES.values():
             if cls_str == cls:
-                cls = cls_type
-                return pytree.is_constant_class(cls_type)
+                return is_value
 
-    return pytree.is_constant_class(cls)  # pyrefly: ignore[bad-argument-type]
+    return _OPAQUE_TYPES[cls][1]
+
+
+def is_opaque_reference_type(cls: Any) -> bool:
+    """
+    Checks if the given type is an opaque **reference** type.
+    See Note [Opaque Objects] for more information.
+    """
+    if not is_opaque_type(cls):
+        return False
+
+    if isinstance(cls, str):
+        for cls_str, is_value in _OPAQUE_TYPES.values():
+            if cls_str == cls:
+                return not is_value
+
+    return not _OPAQUE_TYPES[cls][1]

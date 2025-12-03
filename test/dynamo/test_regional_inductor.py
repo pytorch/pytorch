@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import functools
+import warnings
 from typing import TYPE_CHECKING
 
 import torch
@@ -101,6 +102,36 @@ class RegionalInductorTests(torch._inductor.test_case.TestCase):
         # Check that inductor compilation is called twice
         _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
         self.assertEqual(len(codes), 2)
+
+    def test_boxed_calling_convention(self):
+        def fn(x, y):
+            sin = torch.sin(x)
+
+            with fx_traceback.annotate({"compile_with_inductor": 0}):
+                mul = sin * y
+                add = mul + 1
+
+            return torch.sin(add)
+
+        opt_fn = torch.compile(
+            fn, backend=aot_eager_regional_inductor(serialize=False), fullgraph=True
+        )
+        x = torch.randn(10, requires_grad=True)
+        y = torch.randn(10, requires_grad=True)
+
+        # Check that inductor compilation is called twice
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            _, codes = run_fw_bw_and_get_code(lambda: opt_fn(x, y))
+
+        msgs = [str(warn.message) for warn in w]
+        self.assertTrue(
+            not any(
+                "Your compiler for AOTAutograd is returning a function that doesn't take boxed arguments"
+                in m
+                for m in msgs
+            )
+        )
 
     @parametrize("serialize", [False, True])
     def test_repeated_blocks(self, serialize):

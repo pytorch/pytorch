@@ -83,7 +83,6 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
 )
-from torch.utils._pytree import is_constant_class
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
 
@@ -1462,7 +1461,7 @@ class VariableBuilder:
 
             if is_opaque_type(type(value)):
                 # Check if this is a value-type opaque object (registered as both opaque type and constant)
-                if is_constant_class(type(value)):
+                if is_opaque_value_type(type(value)):
                     # Value-type: guard on equality (will use __eq__)
                     self.install_guards(GuardBuilder.CONSTANT_MATCH)
                     return TorchScriptObjectVariable.create(

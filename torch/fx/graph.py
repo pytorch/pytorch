@@ -571,7 +571,8 @@ class CodeGen:
                     raise TypeError(
                         f"Value-type opaque object of type {arg_type} is "
                         "expected to have to have a non-default `__repr__` "
-                        "implementation."
+                        "implementation as we will use this to reconstruct "
+                        "the object in the FX codegen."
                     )
                 arg_repr = repr(arg)
                 return arg_repr

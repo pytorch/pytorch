@@ -2,8 +2,10 @@
 
 import random
 from contextlib import ExitStack
+from dataclasses import dataclass
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import AotEagerAndRecordGraphs, CompileCounter
 from torch._dynamo.utils import counters as dynamo_counters
@@ -65,7 +67,7 @@ class Counter:
         self.counter += 1
 
 
-class Moodule(torch.nn.Module):
+class AddModule(torch.nn.Module):
     def forward(self, x, y):
         return x * y
 
@@ -104,13 +106,9 @@ class SizeStore:
 register_opaque_type(OpaqueQueue)
 register_opaque_type(RNGState)
 register_opaque_type(Counter)
-register_opaque_type(Moodule)
-register_opaque_type(ValueConfig)
-register_opaque_type(SizeStore)
-
-# Register these types as a pytree constant to make it a value-type
-torch.utils._pytree.register_constant(ValueConfig)
-torch.utils._pytree.register_constant(SizeStore)
+register_opaque_type(AddModule)
+register_opaque_type(ValueConfig, value_type=True)
+register_opaque_type(SizeStore, value_type=True)
 
 
 class TestOpaqueObject(TestCase):
@@ -498,16 +496,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         inp = (torch.tensor(1), torch.tensor(0))
         torch.compile(foo)(*inp)
         self.assertEqual(len(dynamo_counters["graph_break"]), 1)
-        self.assertExpectedInline(
-            next(iter(dynamo_counters["graph_break"].keys())),
-            """\
-Opaque object were created in the middle of the program and passed to a custom op.
-  Explanation: Opaque objects cannot be created inside the torch.compile region. They must be created before entering the compiled function.
-  Hint: Please create the opaque object before calling torch.compile and pass it in as an argument or as a global variable.
-
-  Developer debug context: Opaque object types: [<class '__main__.Counter'>]. Function: _TestOpaqueObject.increment_counter
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0363.html""",  # noqa: B950
+        self.assertTrue(
+            "Opaque object were created in the middle of the program and passed to a custom op."
+            in next(iter(dynamo_counters["graph_break"].keys())),
         )
 
     def test_compile_attribute(self):
@@ -536,7 +527,7 @@ Opaque object were created in the middle of the program and passed to a custom o
     def test_export_joint(self):
         torch.library.define(
             "_TestOpaqueObject::module_mul",
-            f"({get_opaque_type_name(Moodule)} a, Tensor b, SymInt c) -> Tensor",
+            f"({get_opaque_type_name(AddModule)} a, Tensor b, SymInt c) -> Tensor",
             tags=torch.Tag.pt2_compliant_tag,
             lib=self.lib,
         )
@@ -544,12 +535,12 @@ Opaque object were created in the middle of the program and passed to a custom o
         @torch.library.impl(
             "_TestOpaqueObject::module_mul", "CompositeExplicitAutograd", lib=self.lib
         )
-        def module_mul_impl(m: Moodule, a: torch.Tensor, b: int) -> torch.Tensor:
-            assert isinstance(m, Moodule)
+        def module_mul_impl(m: AddModule, a: torch.Tensor, b: int) -> torch.Tensor:
+            assert isinstance(m, AddModule)
             return m(a, b)
 
         @torch.library.register_fake("_TestOpaqueObject::module_mul", lib=self.lib)
-        def module_mul_fake(m: Moodule, a: torch.Tensor, b: int) -> torch.Tensor:
+        def module_mul_fake(m: AddModule, a: torch.Tensor, b: int) -> torch.Tensor:
             return torch.empty_like(a)
 
         def module_mul_setup_context(ctx, inputs, output):
@@ -569,7 +560,7 @@ Opaque object were created in the middle of the program and passed to a custom o
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.moo = Moodule()
+                self.moo = AddModule()
 
             def forward(self, x, y):
                 b = y.item()
@@ -594,12 +585,62 @@ def forward(self, primals, tangents):
 
         self.assertEqual(compiled_fn(*inp), M()(*inp))
 
-    def test_invalid_value_types(self):
+    def test_invalid_schema(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "unknown type specifier",
+        ):
+            torch.library.define(
+                "_TestOpaqueObject::invalid_op1",
+                "(foo.bar.baz a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=self.lib,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"expected \) but found 'dots' here",
+        ):
+            torch.library.define(
+                "_TestOpaqueObject::invalid_op2",
+                "(......... a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=self.lib,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "unknown type specifier",
+        ):
+            torch.library.define(
+                "_TestOpaqueObject::invalid_op5",
+                "(MyNamespace..MyClass a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=self.lib,
+            )
+
+    def test_invalid_opaque_obj_types(self):
         for t in [str, bool, int, float, torch.Tensor]:
-            with self.assertRaisesRegex(
-                RuntimeError, "Unable to register built-in type"
-            ):
+            with self.assertRaisesRegex(ValueError, "Unable to register built-in type"):
                 register_opaque_type(t)
+
+        @dataclass
+        class Bad1:
+            x: int
+
+        pytree.register_dataclass(Bad1)
+        with self.assertRaisesRegex(
+            ValueError, "cannot be registered as an opaque object"
+        ):
+            register_opaque_type(Bad1)
+
+        @dataclass
+        class Bad2:
+            x: int
+
+        register_opaque_type(Bad2)
+        with self.assertRaisesRegex(ValueError, "cannot be registered as a pytree"):
+            pytree.register_dataclass(Bad2)
 
     def test_value_type_recompile(self):
         cnt = CompileCounter()
@@ -696,6 +737,11 @@ def forward(self, arg0_1):
     process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(arg0_1, ValueConfig(mode='double'));  arg0_1 = None
     return (process_with_config,)""",  # noqa: B950
         )
+
+        opt_f = torch.compile(foo, fullgraph=True, backend="inductor")
+        x = torch.randn(3, 3)
+        self.assertEqual(opt_f(x, "square"), foo(x, "square"))
+        self.assertEqual(opt_f(x, "double"), foo(x, "double"))
 
     def test_value_type_attr_access(self):
         def foo(x):

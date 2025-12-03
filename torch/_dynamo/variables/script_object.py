@@ -61,6 +61,13 @@ def _raise_hard_error_if_graph_break(
 
 
 class OpaqueObjectValueTypeVariable(UserDefinedVariable):
+    """
+    A variable that represents an opaque object value type (not instance).
+    Since UserDefinedClassVariable has some special handling for side effects,
+    we have a separate class here which will directly return the object when
+    __init__ is called.
+    """
+
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
