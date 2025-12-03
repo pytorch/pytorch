@@ -675,21 +675,17 @@ else:
             slice_dim_group_name = []
             for name in submesh_dim_names:
                 if name in not_none(self._mesh_dim_names):
-                    slice_dim_group_name.append(
-                        self._dim_group_names[  # type: ignore[has-type]
-                            not_none(self._mesh_dim_names).index(name)
-                        ]
-                    )
+                    idx = not_none(self._mesh_dim_names).index(name)
+                    if idx < len(self._dim_group_names):
+                        slice_dim_group_name.append(self._dim_group_names[idx])
                 else:
                     # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
                     # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
                     # we don't want to optimize the code furthermore.
                     flatten_mesh = self._flatten_mapping[name]
-                    slice_dim_group_name.append(
-                        flatten_mesh._dim_group_names[  # type: ignore[has-type]
-                            not_none(flatten_mesh._mesh_dim_names).index(name)
-                        ]
-                    )
+                    idx = not_none(flatten_mesh._mesh_dim_names).index(name)
+                    if idx < len(flatten_mesh._dim_group_names):
+                        slice_dim_group_name.append(flatten_mesh._dim_group_names[idx])
             res_submesh = DeviceMesh(
                 self._device_type,
                 _layout=layout,

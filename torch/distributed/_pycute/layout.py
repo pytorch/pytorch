@@ -167,12 +167,13 @@ def coalesce(layout: Layout, profile: LayoutProfile = None) -> Layout:
             )
         )
 
+    flattened_stride = flatten(layout.stride)
     result_shape = [1]
-    result_stride = [0]
+    result_stride = [flattened_stride[-1]]
     # Since we now follow lexicographic order, we need to process from right to left.
     # And to make implementation more efficient, we append to the end of list and reverse it in the end.
     for shape, stride in zip(
-        reversed(flatten(layout.shape)), reversed(flatten(layout.stride))
+        reversed(flatten(layout.shape)), reversed(flattened_stride)
     ):
         # skip their shape-1s
         if shape == 1:
