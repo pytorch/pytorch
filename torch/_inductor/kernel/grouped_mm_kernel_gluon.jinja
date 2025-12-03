@@ -490,6 +490,8 @@ def grouped_mm_kernel(
     NUM_ACC_BUFFERS: gl.constexpr,
     NUM_LOAD_WARPS: gl.constexpr,
     NUM_COMPUTE_WARPS: gl.constexpr,
+    NUM_LOAD_THREAD_REGISTERS: gl.constexpr,
+    NUM_COMPUTE_THREAD_REGISTERS: gl.constexpr,
     num_warps: gl.constexpr,
 ):
     NUM_STORE_WARPS: gl.constexpr = num_warps
@@ -586,5 +588,5 @@ def grouped_mm_kernel(
             (compute_partition, (pargs,)),
         ],
         [NUM_LOAD_WARPS, NUM_COMPUTE_WARPS],
-        [24, 24],
+        [NUM_LOAD_THREAD_REGISTERS, NUM_COMPUTE_THREAD_REGISTERS],
     )

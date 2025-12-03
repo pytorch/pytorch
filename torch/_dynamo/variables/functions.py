@@ -45,7 +45,6 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     format_skip_frame_message,
-    get_dynamo_observed_exception,
     handle_observed_exception,
     InfiniteGeneratorError,
     ObservedException,
@@ -98,6 +97,8 @@ except ModuleNotFoundError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import (
+        InliningGeneratorInstructionTranslator,
+        InliningInstructionTranslator,
         InstructionTranslator,
         InstructionTranslatorBase,
     )
@@ -654,8 +655,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 return super().call_function(tx, args, kwargs)
 
         if (
-            tx.output.current_tracer.under_activation_checkpoint
-            and not tx.output.current_tracer.allow_side_effects_under_checkpoint
+            getattr(tx.output.current_tracer, "description", None)
+            == "torch.utils.checkpoint.checkpoint"
+            and not tx.output.current_tracer.allow_side_effects_in_hop
         ):
             try:
                 from torch.distributed.fsdp._fully_shard._fsdp_state import FSDPState
@@ -665,7 +667,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                 FSDPState._pre_forward,
                 FSDPState._post_forward,
             ]:
-                with torch._dynamo.side_effects.allow_side_effects_under_checkpoint(tx):
+                with torch._dynamo.side_effects.allow_side_effects_in_hop(tx):
                     return super().call_function(tx, args, kwargs)
 
         tree_map_result = self._maybe_call_tree_map_fastpath(tx, args, kwargs)
@@ -898,13 +900,14 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self,
         code: types.CodeType,
         f_globals: dict[str, Any],
-        inline_tracer: Optional["InstructionTranslator"],
+        inline_tracer: "InliningGeneratorInstructionTranslator",
         **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.code = code
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
+        inline_tracer.output.side_effects.track_generator(self)
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -943,7 +946,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
         temp = temporarely_allow_writes_to_output_graph(tx)
 
         with save, disallow, temp:
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             if not tracer.generator_exhausted:
                 self.remaining_items = self.force_unpack_var_sequence(tx)
             variables.ListIteratorVariable(self.remaining_items).reconstruct(codegen)
@@ -962,17 +965,8 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def _get_inline_tracer(self, tx: "InstructionTranslator") -> Any:
-        from torch._dynamo.symbolic_convert import InliningInstructionTranslator
-
-        if self.inline_tracer is None:
-            self.inline_tracer = InliningInstructionTranslator.build_inline_tracer(  # type: ignore[assignment]
-                tx, self, [], {}
-            )
-        return self.inline_tracer
-
     def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
-        tracer = self._get_inline_tracer(tx)
+        tracer = self.inline_tracer
 
         if self._is_generator_exhausted():
             raise_observed_exception(StopIteration, tx)
@@ -982,9 +976,12 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
             return tracer.inline_call_()
-        except ObservedException as e:
+        except ObservedUserStopIteration:
+            tracer.output.side_effects.untrack_generator(self)
+            raise
+        except ObservedException:
             tracer.generator_exhausted = True
-            raise e
+            raise
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
@@ -1026,10 +1023,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def should_allow_nested_graph_breaks(self):
         return False
 
-    def _setup_exception(
+    def _setup_and_raise_exception(
         self, tx: "InstructionTranslator", exc: VariableTracker
     ) -> None:
-        tracer = self._get_inline_tracer(tx)
+        # Raise an exception at the point where the generator is paused
+        tracer = self.inline_tracer
         try:
             tracer._raise_exception_variable(exc)
         except ObservedException as e:
@@ -1067,7 +1065,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                     for arg in args
                 ):
                     raise_observed_exception(TypeError, tx)
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             tracer.push_many(args)
             return self.next_variable(tx)
         elif name == "close":
@@ -1084,7 +1082,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Return None if close is called on a just-started generator
             # See test GeneratorCloseCpythonTests::test_close_not_started
 
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             if self._is_generator_just_started() or self._is_generator_exhausted():
                 tracer.generator_exhausted = True
                 return variables.ConstantVariable(None)
@@ -1092,7 +1090,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Raise GeneratorExit to see if user code catches it. Any other exception
             # is propagated to the parent frame.
             try:
-                self._setup_exception(
+                self._setup_and_raise_exception(
                     tx, variables.ExceptionVariable(GeneratorExit, ())
                 )
                 # There's an extra block on Python 3.12+ to handle StopIteration
@@ -1141,93 +1139,24 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # returns the next value yielded by the generator.
             # * If the generator exits without yielding, raise StopIteration
             # * If the generator function does not catch the passed-in exception,
-            # or raises a different exception, then that exception propagates to the caller.
+            # or raises a different exception, then that new exception propagates to the caller.
 
             # Setup the exception table and jump target in case of try...finally
-            tracer = self._get_inline_tracer(tx)
+            tracer = self.inline_tracer
             try:
                 # In Python 3.9, the exception is represented as a triple (typ, val, tb)
                 # In such cases, we re-raise the exception object given to avoid
                 # creating a new object, so that IS_OP works.
                 # See: https://github.com/pytorch/pytorch/pull/146496
-                self._setup_exception(tx, args[1] if len(args) == 3 else args[0])
+                self._setup_and_raise_exception(
+                    tx, args[1] if len(args) == 3 else args[0]
+                )
             except ObservedException:  # noqa: TRY203
                 # propagate the exception back to the parent caller
                 raise
 
-            retval = self.next_variable(tx)
-
-            # The exception raised before is still active. We need to check the exception
-            # table one more time to find the next target. But why? Let's walk
-            # through an example and its generated bytecode: https://godbolt.org/z/ebdTbMv8M
-            #
-            #     z = 0
-            #     def whoo():
-            #         global z
-            #         z = 0
-            #         try:
-            #             yield 1
-            #         except ValueError:
-            #             yield 2
-            #         finally:
-            #             z += 1
-            #         z += 10
-            #
-            #     gen = whoo()
-            #     next(gen)
-            #     gen.throw(ValueError)
-            #     print('z', z)  -> z = 1
-            #
-            #              ...
-            #         >>   58 PUSH_EXC_INFO
-            #
-            #   8          60 LOAD_GLOBAL              2 (ValueError)
-            #              70 CHECK_EXC_MATCH
-            #              72 POP_JUMP_IF_FALSE        7 (to 88)
-            #              74 POP_TOP
-            #
-            #   9          76 LOAD_CONST               3 (2)
-            #              78 YIELD_VALUE              3      <------ ValueError is still active here
-            #              80 RESUME                   1
-            #              82 POP_TOP
-            #              84 POP_EXCEPT
-            #              86 jump_backward           34 (to 20)
-            #              ...
-            #
-            #     ExceptionTable:
-            #     4 to 8 -> 124 [0] lasti
-            #     12 to 18 -> 58 [0]
-            #     20 to 56 -> 124 [0] lasti
-            #     58 to 82 -> 90 [1] lasti     <------ move to 90
-            #     84 to 86 -> 96 [0]
-            #     88 to 88 -> 90 [1] lasti
-            #     90 to 94 -> 96 [0]
-            #     96 to 116 -> 118 [1] lasti
-            #     118 to 122 -> 124 [0] lasti
-            #
-            # In this scenario, a generator can yield after `throw()` is called. Even
-            # after the exception is raised a few lines above, it remains active
-            # within the `78 YIELD_VALUE` instruction. When the generator resumes
-            # after the second yield on instruction `80 RESUME`, we cannot simply
-            # return the control flow to the next instruction. Instead, one must
-            # check the exception table (or equivalent) to find the next target
-            # In this case, it says the instruction pointer must be moved to 90.
-            #
-            # Without this step, if we let the trace proceed to the next
-            # instruction, it would follow the control flow where the exception
-            # raised by `throw()` was handled and swallowed, potentially leading
-            # to incorrect behavior.
-            exc_type = type("__InternalThrowException", (Exception,), {})
-
-            try:
-                self._setup_exception(tx, variables.ExceptionVariable(exc_type, ()))
-                self.next_variable(tx)
-            except get_dynamo_observed_exception(exc_type):
-                # We should get back the exception raised before.
-                pass
-            else:
-                raise_observed_exception(RuntimeError, tracer)
-            return retval
+            # If reaches here, it means user code captured the exception
+            return self.next_variable(tx)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -1277,7 +1206,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "InstructionTranslatorBase":
+    ) -> "InliningInstructionTranslator":
         from torch._dynamo.symbolic_convert import InliningInstructionTranslator
 
         return InliningInstructionTranslator.build_inline_tracer(
@@ -1339,7 +1268,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
-    ) -> "InstructionTranslatorBase":
+    ) -> "InliningGeneratorInstructionTranslator":
         # NOTE: This only exists to not break support for context manager when
         # config.enable_faithful_generator_behavior = False and
         # config.enable_trace_contextlib = True. In case the former is false,
