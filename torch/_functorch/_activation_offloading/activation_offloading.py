@@ -28,23 +28,29 @@ GPU_RELOAD_PREFIX = "gpu_reload_"
 
 def offload_activation_fw(graph: fx.Graph) -> None:
     """
-    Forward pass modification for CPU offloading, by inserting offloaindg nodes.
+    Insert CPU offload operations in the forward pass graph.
+
+    Offload operations are placed after the last effective use of each tensor marked
+    for offloading. This ensures the tensor is no longer needed on the GPU before
+    transferring it to CPU memory.
+
+    NOTE: An alternative approach would offload tensors immediately after generation
+    to maximize compute-communication overlap. However, this requires additional
+    synchronization to ensure tensor deletion (which occurs on the default stream)
+    waits for the asynchronous offload operation to complete. This would necessitate
+    more complex tracking to separate operation scheduling from memory cleanup.
 
     Args:
         graph: The forward graph to modify
     """
 
-    effective_users_cache: dict[fx.Node, OrderedSet[fx.Node]] = {}
     op_types: OpTypes = get_default_op_list()
 
     def find_all_effective_users(node: fx.Node) -> OrderedSet[fx.Node]:
         """
         Find all effective users of a node, where view ops extend the lifetime of the
-        original node. If a user is a view op, recursively find  users of the view.
+        original node. If a user is a view op, recursively find users of the view.
         """
-        if node in effective_users_cache:
-            return effective_users_cache[node]
-
         effective_users: OrderedSet[fx.Node] = OrderedSet()
         for user in node.users.keys():
             if user.op == "output":
@@ -52,8 +58,6 @@ def offload_activation_fw(graph: fx.Graph) -> None:
             effective_users.add(user)
             if op_types.is_view(user):
                 effective_users.update(find_all_effective_users(user))
-
-        effective_users_cache[node] = effective_users
 
         return effective_users
 
@@ -96,9 +100,12 @@ def offload_activation_fw(graph: fx.Graph) -> None:
     )
 
 
-def offload_activation_bw(graph: fx.Graph) -> None:
+def reload_activation_bw(graph: fx.Graph) -> None:
     """
-    Backward pass modification for GPU reloading, by inserting reloaindg nodes.
+    Insert GPU reload operations in the backward pass graph.
+
+    Reload operations are placed before the first use of each offloaded tensor,
+    transferring it from CPU back to GPU memory before it's needed for computation.
 
     Args:
         graph: The backward graph to modify
@@ -152,7 +159,35 @@ def can_offload(
         node: The node to check
         fwd_outputs: Forward module outputs, including model outputs and activations
         model_outputs: Model outputs
+
+    NOTE: Additional context for the logic behind these offloading checks:
+
+    * fwd_outputs: Only saved intermediate tensors should be offloaded.
+
+    * model_outputs / static_lifetime_input_nodes: Tensors that may be accessed outside
+      the compiled region (e.g., model outputs, static inputs) cannot be offloaded as
+      they must remain accessible beyond the scope of the compiled graph.
+
+    * views / getitems: Offloading such nodes can lead to segmentation faults.
+
+    * contiguous: Offloading non-contiguous tensors causes CPU-side stride changes
+      during both forward and backward passes when using the Inductor backend. While
+      these stride changes cancel each other out, they introduce significant compute
+      overhead. This is due to the contiguity check in ir.py (see link below).
+      TODO: This restriction could potentially be bypassed in the future.
+      Reference: https://github.com/pytorch/pytorch/blob/44ac69388a4a5eb463dbd2a13f00d1e3b924566c/torch/_inductor/ir.py#L3214
+
+    Additional criteria to consider for offloading optimization:
+
+    * Tensor size: Small tensors may not fully utilize available bandwidth, reducing the
+      efficiency gains from offloading.
+
+    * Position in forward/backward graph: Activations generated near the end of the forward
+      pass are typically consumed near the beginning of the backward pass. Offloading such
+      tensors may be counterproductive since they are quickly reloaded, not having sufficient
+      time to overlap the transfer with computation.
     """
+
     log.debug(f"Checking node {node.name} for offloading...")  # noqa: G004
 
     op_types: OpTypes = get_default_op_list()
@@ -166,8 +201,11 @@ def can_offload(
     if node in static_lifetime_input_nodes:
         log.debug("\tSkipped! Cannot offload static input nodes.")
         return False
-    if op_types.is_view(node) or node.target == operator.getitem:
-        log.debug("\tSkipped! Cannot offload views of getitems.")
+    if op_types.is_view(node):
+        log.debug("\tSkipped! Cannot offload views.")
+        return False
+    if node.target == operator.getitem:
+        log.debug("\tSkipped! Cannot offload getitems.")
         return False
     if hasattr(node, "meta") and "val" in node.meta:
         if (
@@ -183,7 +221,6 @@ def can_offload(
 
 def choose_offload_sets(
     fwd_module: fx.GraphModule,
-    bwd_module: fx.GraphModule,
     num_fwd_outputs: int,
     static_lifetime_input_nodes: OrderedSet[fx.Node],
 ) -> bool:
@@ -209,10 +246,9 @@ def choose_offload_sets(
 
     should_perform_offloading = False
     for node in fwd_module.graph.nodes:
-        if node.meta.get("should_offload", False) is False:
-            continue
-
-        if can_offload(node, fwd_outputs, model_outputs, static_lifetime_input_nodes):
+        if node.meta.get("should_offload", False) and can_offload(
+            node, fwd_outputs, model_outputs, static_lifetime_input_nodes
+        ):
             node.meta["saved_for_offloading"] = True
             node.meta["original_device"] = node.meta["val"].device
             should_perform_offloading = True
@@ -255,7 +291,7 @@ def offload_chosen_sets(
         bwd_module.graph.erase_node(bwd_node)
 
     # Add reload nodes in backward graph
-    offload_activation_bw(bwd_module.graph)
+    reload_activation_bw(bwd_module.graph)
 
 
 def add_forward_offload_stream_ops(graph: fx.Graph) -> None:
@@ -444,7 +480,6 @@ def enable_activation_offloading(
     # Step 1: Decide which nodes to offload and mark them
     should_perform_offloading: bool = choose_offload_sets(
         fwd_module,
-        bwd_module,
         num_fwd_outputs,
         static_lifetime_input_nodes,
     )
