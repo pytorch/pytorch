@@ -3,7 +3,6 @@
 # Test to ensure sparsity information propagates properly into traced graph.
 #
 
-import sys
 import unittest
 
 import torch

@@ -52,7 +52,6 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     instantiate_parametrized_tests,
     IS_FBCODE,
-    IS_WINDOWS,
     markDynamoStrictTest,
     NestedTensorTestCase,
     parametrize,

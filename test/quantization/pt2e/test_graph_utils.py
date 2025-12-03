@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import unittest
 
 import torch
 import torch._dynamo as torchdynamo
@@ -9,11 +8,7 @@ from torch.ao.quantization.pt2e.graph_utils import (
     get_equivalent_types,
     update_equivalent_types_dict,
 )
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    raise_on_run_directly,
-    TestCase,
-)
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 class TestGraphUtils(TestCase):
