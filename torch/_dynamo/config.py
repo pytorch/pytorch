@@ -597,7 +597,9 @@ ignore_logging_functions: set[Callable[..., Any]] = set()
 
 # Backwards compat: `ignore_logger_methods` now aliases `ignore_logging_functions`.
 # Existing code that used `ignore_logger_methods` will continue to work.
-ignore_logger_methods = ignore_logging_functions
+ignore_logger_methods: set[Callable[..., Any]] = Config(
+    alias="torch._dynamo.config.ignore_logging_functions"
+)
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing

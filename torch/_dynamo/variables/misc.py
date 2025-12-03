@@ -1785,6 +1785,7 @@ class IgnoredFunctionVariable(VariableTracker):
     """
     Represents a call to an arbitrary function that should be ignored.
     """
+
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -1809,7 +1810,6 @@ class LoggingLoggerVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-
         if tx.export:
             # For export cases, we can just make logging functions no-ops.
             return variables.ConstantVariable.create(None)
