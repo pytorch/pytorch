@@ -7,10 +7,13 @@ from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
-from torch.types import _size, Number
+from torch.types import _size, Number as _Number
 
 
 __all__ = ["Normal"]
+
+# Dynamo can't trace isinstance for unions yet
+Number = _Number.__args__
 
 
 class Normal(ExponentialFamily):
