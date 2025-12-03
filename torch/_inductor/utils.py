@@ -1370,15 +1370,27 @@ clear_inductor_caches = clear_caches
 fresh_inductor_cache = fresh_cache
 
 
-def argsort(seq: Sequence[Any]) -> list[int]:
-    # preserve original order for equal strides
+def argsort(seq: Sequence[Any], *, reverse: bool = False) -> list[int]:
     getter = seq.__getitem__
     a_r = range(len(seq))
-    return list(reversed(sorted(a_r, key=getter, reverse=True)))  # noqa: C413
+    # preserve original order for equal strides
+    # e.g. if strides are [32, 8, 8, 1]
+    # argsort -> [3, 2, 1, 0], rather than
+    # [3, 1, 2, 0]
+    # i.e. for equal strides in ascending order (reverse=False) an
+    # inner dimension should come before an outer dimension, and vice versa
+    # for descending
+    sort_idx = list(sorted(a_r, key=getter, reverse=True))  # noqa: C413
+    if not reverse:
+        return list(reversed(sort_idx))
+    return sort_idx
 
 
 def argsort_sym(
-    shape_env: ShapeEnv, seq: Sequence[Union[int, torch.SymInt, sympy.Expr]]
+    shape_env: ShapeEnv,
+    seq: Sequence[Union[int, torch.SymInt, sympy.Expr]],
+    *,
+    reverse: bool = False,
 ) -> list[int]:
     def cmp(a: tuple[int, sympy.Expr], b: tuple[int, sympy.Expr]) -> int:
         a_idx, a_val = a
@@ -1408,7 +1420,7 @@ def argsort_sym(
         (idx, s.node.expr if isinstance(s, torch.SymInt) else s)
         for idx, s in enumerate(seq)
     ]
-    exprs = sorted(exprs, key=functools.cmp_to_key(cmp))
+    exprs = sorted(exprs, key=functools.cmp_to_key(cmp), reverse=reverse)
     result = [idx for idx, _ in exprs]
     return result
 
@@ -2696,6 +2708,17 @@ def get_gpu_shared_memory() -> int:
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
+def get_max_numwarps() -> int:
+    if torch.cuda.is_available():
+        warp_size = torch.cuda.get_device_properties().warp_size
+        max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
+    else:
+        # Defaults
+        warp_size = 32
+        max_threads_per_block = 1024
+    return max_threads_per_block // warp_size
+
+
 def is_welford_reduction(reduction_type: str) -> bool:
     return reduction_type.startswith("welford")
 
@@ -3028,6 +3051,11 @@ def get_cloned_parameter_buffer_name(name: str) -> str:
 
 def is_gpu(device: Optional[str]) -> bool:
     return device in GPU_TYPES
+
+
+def is_rocm() -> bool:
+    """Check if we're running on ROCm/HIP platform."""
+    return torch.version.hip is not None
 
 
 def device_need_guard(device: str) -> bool:
