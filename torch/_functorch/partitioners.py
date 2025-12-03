@@ -1110,6 +1110,10 @@ def default_partition(
     for node in joint_module.graph.nodes:
         if node.name not in forward_node_names:
             continue
+        if node.op == "get_attr" and node.name in (
+            k for k, v in joint_module.named_modules()
+        ):
+            continue
         if node.target is torch.ops.aten._assert_scalar.default:
             continue
         if is_sym_node(node):
@@ -1167,13 +1171,7 @@ def default_partition(
 
     # Run DCE while overriding the definition of is_impure_node
     def is_not_collective(node):
-        if not distributed_enabled:
-            return True
-        if node.target is torch.ops._c10d_functional.wait_tensor.default:
-            return False
-        if node.target is torch.ops._c10d_functional.all_gather_into_tensor.default:
-            return False
-        return True
+        return getattr(node.target, "namespace", None) != "_c10d_functional"
 
     fw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
     bw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
