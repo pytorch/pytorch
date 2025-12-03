@@ -4,10 +4,14 @@
 #include <ATen/native/BinaryOps.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/bitwise_and_native.h>
 #include <ATen/ops/bitwise_or_native.h>
 #include <ATen/ops/bitwise_xor_native.h>
 #include <ATen/ops/logical_not_native.h>
+#endif
 #include <fmt/format.h>
 
 namespace at::native {

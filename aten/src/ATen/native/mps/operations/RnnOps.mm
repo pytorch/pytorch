@@ -5,8 +5,14 @@
 #include <ATen/native/RNN.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/mps/OperationUtils.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
 #include <ATen/ops/_lstm_mps_native.h>
 #include <ATen/ops/lstm_mps_backward_native.h>
+#endif
 #import <MetalPerformanceShadersGraph/MPSGraphRNNOps.h>
 
 namespace at::native {

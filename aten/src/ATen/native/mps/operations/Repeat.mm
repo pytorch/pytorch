@@ -5,9 +5,6 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Repeat.h>
 #include <ATen/native/mps/OperationUtils.h>
-#include <ATen/ops/permute_native.h>
-#include <ATen/ops/repeat_interleave_native.h>
-#include <ATen/ops/repeat_native.h>
 #include <fmt/format.h>
 
 namespace at::native {
@@ -89,6 +86,15 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
 static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
 #else
 #include <ATen/native/mps/Repeat_metallib.h>
+
+#ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
+#include <ATen/NativeFunctions.h>
+#else
+#include <ATen/ops/permute_native.h>
+#include <ATen/ops/repeat_interleave_native.h>
+#include <ATen/ops/repeat_native.h>
+#endif
 #endif
 
 Tensor repeat_interleave_mps(const Tensor& repeat, std::optional<int64_t> output_size) {
