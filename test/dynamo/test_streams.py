@@ -965,6 +965,13 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+        self.assertExpectedInline(
+            str(
+                torch._functorch._aot_autograd.runtime_wrappers.side_stream_epilogue_copies
+            ),
+            """1""",
+        )
+
     @requires_cuda
     def test_inductor_lowering(self):
         with patch("torch._inductor.config.implicit_fallbacks", False):
