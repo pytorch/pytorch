@@ -9,16 +9,7 @@ import warnings
 from bisect import bisect_right
 from collections import Counter
 from functools import partial, wraps
-from typing import (
-    Any,
-    cast,
-    Literal,
-    Optional,
-    SupportsFloat,
-    TYPE_CHECKING,
-    TypedDict,
-    Union,
-)
+from typing import Any, cast, Literal, SupportsFloat, TYPE_CHECKING, TypedDict
 from typing_extensions import override, Self
 from weakref import ref
 
@@ -89,7 +80,9 @@ def _param_groups_val_list(optimizer: Optimizer, key: str) -> list[Any]:
     ]
 
 
-def _update_param_group_val(param_group: dict[str, Any], key: str, val: float | Tensor):
+def _update_param_group_val(
+    param_group: dict[str, Any], key: str, val: float | Tensor
+) -> None:
     """Set param_group[key] to val without aliasing or assignment when they're
     both tensors. Raises a KeyError if param_group[key] does not exist.
     """
@@ -196,7 +189,7 @@ class LRScheduler:
             key: value for key, value in self.__dict__.items() if key != "optimizer"
         }
 
-    def load_state_dict(self, state_dict: dict[str, Any]):
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
         """Load the scheduler's state.
 
         Args:
@@ -242,7 +235,7 @@ class LRScheduler:
         """
         raise NotImplementedError
 
-    def step(self, epoch: Optional[int] = None) -> None:
+    def step(self, epoch: int | None = None) -> None:
         """Step the scheduler.
 
         Args:
@@ -288,7 +281,7 @@ class LRScheduler:
             warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
         self._update_lr(epoch)
 
-    def _update_lr(self, epoch: Optional[int] = None):
+    def _update_lr(self, epoch: int | None = None) -> None:
         with _enable_get_lr_call(self):
             if epoch is None:
                 self.last_epoch += 1
@@ -296,9 +289,7 @@ class LRScheduler:
             else:
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
-                    values = cast(
-                        list[Union[float, Tensor]], self._get_closed_form_lr()
-                    )
+                    values = cast(list[float | Tensor], self._get_closed_form_lr())
                 else:
                     values = self.get_lr()
 
@@ -339,7 +330,7 @@ class _enable_get_lr_call:
 
 
 class _initial_mode:
-    def __init__(self, o: LRScheduler):
+    def __init__(self, o: LRScheduler) -> None:
         self.o = o
 
     def __enter__(self):
@@ -387,7 +378,7 @@ class LambdaLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        lr_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
+        lr_lambda: Callable[[int], float] | list[Callable[[int], float]],
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
         self.optimizer = optimizer
@@ -503,7 +494,7 @@ class MultiplicativeLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        lr_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
+        lr_lambda: Callable[[int], float] | list[Callable[[int], float]],
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
         self.optimizer = optimizer
@@ -1180,7 +1171,7 @@ class SequentialLR(LRScheduler):
 
         self._last_lr = schedulers[0].get_last_lr()
 
-    def recursive_undo(self, sched=None):
+    def recursive_undo(self, sched=None) -> None:
         """
         Recursively undo any step performed by the initialisation of
         schedulers.
@@ -1517,7 +1508,7 @@ class ChainedScheduler(LRScheduler):
     """
 
     def __init__(
-        self, schedulers: Sequence[LRScheduler], optimizer: Optional[Optimizer] = None
+        self, schedulers: Sequence[LRScheduler], optimizer: Optimizer | None = None
     ) -> None:  # noqa: D107
         if len(schedulers) < 1:
             raise ValueError(
@@ -1657,9 +1648,9 @@ class ReduceLROnPlateau(LRScheduler):
         threshold: float = 1e-4,
         threshold_mode: Literal["rel", "abs"] = "rel",
         cooldown: int = 0,
-        min_lr: Union[list[float], float] = 0,
+        min_lr: list[float] | float = 0,
         eps: float = 1e-8,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if factor >= 1.0:
             raise ValueError("Factor should be < 1.0.")
         self.factor = factor
@@ -1691,7 +1682,7 @@ class ReduceLROnPlateau(LRScheduler):
         )
         self._reset()
 
-    def _reset(self):
+    def _reset(self) -> None:
         """Reset num_bad_epochs counter and cooldown counter."""
         self.best = self.mode_worse
         self.cooldown_counter = 0
@@ -1724,7 +1715,7 @@ class ReduceLROnPlateau(LRScheduler):
 
         self._last_lr = _param_groups_val_list(self.optimizer, "lr")
 
-    def _reduce_lr(self, epoch):
+    def _reduce_lr(self, epoch) -> None:
         if len(self.optimizer.param_groups) != len(self.min_lrs):
             if self.default_min_lr is None:
                 raise RuntimeError(
@@ -1765,7 +1756,7 @@ class ReduceLROnPlateau(LRScheduler):
         else:  # mode == 'max' and epsilon_mode == 'abs':
             return a > best + self.threshold
 
-    def _init_is_better(self, mode, threshold, threshold_mode):
+    def _init_is_better(self, mode, threshold, threshold_mode) -> None:
         if mode not in {"min", "max"}:
             raise ValueError("mode " + mode + " is unknown!")
         if threshold_mode not in {"rel", "abs"}:
@@ -1892,19 +1883,19 @@ class CyclicLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        base_lr: Union[float, list[float]],
-        max_lr: Union[float, list[float]],
+        base_lr: float | list[float],
+        max_lr: float | list[float],
         step_size_up: int = 2000,
-        step_size_down: Optional[int] = None,
+        step_size_down: int | None = None,
         mode: Literal["triangular", "triangular2", "exp_range"] = "triangular",
         gamma: float = 1.0,
-        scale_fn: Optional[Callable[[float], float]] = None,
+        scale_fn: Callable[[float], float] | None = None,
         scale_mode: Literal["cycle", "iterations"] = "cycle",
         cycle_momentum: bool = True,
         base_momentum: float = 0.8,
         max_momentum: float = 0.9,
         last_epoch: int = -1,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         # Attach optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")
@@ -1970,7 +1961,7 @@ class CyclicLR(LRScheduler):
         super().__init__(optimizer, last_epoch)
         self.base_lrs = base_lrs
 
-    def _init_scale_fn(self):
+    def _init_scale_fn(self) -> None:
         if self._scale_fn_custom is not None:
             return
         if self.mode == "triangular":
@@ -2155,7 +2146,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         T_mult: int = 1,
         eta_min: float = 0.0,
         last_epoch: int = -1,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if T_0 <= 0 or not isinstance(T_0, int):
             raise ValueError(f"Expected positive integer T_0, but got {T_0}")
         if T_mult < 1 or not isinstance(T_mult, int):
@@ -2394,20 +2385,20 @@ class OneCycleLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        max_lr: Union[float, list[float]],
-        total_steps: Optional[int] = None,
-        epochs: Optional[int] = None,
-        steps_per_epoch: Optional[int] = None,
+        max_lr: float | list[float],
+        total_steps: int | None = None,
+        epochs: int | None = None,
+        steps_per_epoch: int | None = None,
         pct_start: float = 0.3,
         anneal_strategy: Literal["cos", "linear"] = "cos",
         cycle_momentum: bool = True,
-        base_momentum: Union[float, list[float]] = 0.85,
-        max_momentum: Union[float, list[float]] = 0.95,
+        base_momentum: float | list[float] = 0.85,
+        max_momentum: float | list[float] = 0.95,
         div_factor: float = 25.0,
         final_div_factor: float = 1e4,
         three_phase: bool = False,
         last_epoch: int = -1,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         # Validate optimizer
         if not isinstance(optimizer, Optimizer):
             raise TypeError(f"{type(optimizer).__name__} is not an Optimizer")

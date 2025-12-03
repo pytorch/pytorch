@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -114,11 +113,13 @@ def _strong_wolfe(
         # compute new trial value
         t = _cubic_interpolate(
             # pyrefly: ignore [index-error]
+            # pyrefly: ignore [unbound-name]
             bracket[0],
             # pyrefly: ignore [unbound-name]
             bracket_f[0],
             bracket_gtd[0],  # type: ignore[possibly-undefined]
             # pyrefly: ignore [index-error]
+            # pyrefly: ignore [unbound-name]
             bracket[1],
             # pyrefly: ignore [unbound-name]
             bracket_f[1],
@@ -164,6 +165,7 @@ def _strong_wolfe(
         if f_new > (f + c1 * t * gtd) or f_new >= bracket_f[low_pos]:
             # Armijo condition not satisfied or not lower than lowest point
             # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [unbound-name]
             bracket[high_pos] = t
             # pyrefly: ignore [unbound-name]
             bracket_f[high_pos] = f_new
@@ -177,9 +179,11 @@ def _strong_wolfe(
                 # Wolfe conditions satisfied
                 done = True
             # pyrefly: ignore [index-error]
+            # pyrefly: ignore [unbound-name]
             elif gtd_new * (bracket[high_pos] - bracket[low_pos]) >= 0:
                 # old high becomes new low
                 # pyrefly: ignore [unsupported-operation]
+                # pyrefly: ignore [unbound-name]
                 bracket[high_pos] = bracket[low_pos]
                 # pyrefly: ignore [unbound-name]
                 bracket_f[high_pos] = bracket_f[low_pos]
@@ -189,6 +193,7 @@ def _strong_wolfe(
 
             # new point becomes new low
             # pyrefly: ignore [unsupported-operation]
+            # pyrefly: ignore [unbound-name]
             bracket[low_pos] = t
             # pyrefly: ignore [unbound-name]
             bracket_f[low_pos] = f_new
@@ -241,14 +246,14 @@ class LBFGS(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1,
+        lr: float | Tensor = 1,
         max_iter: int = 20,
-        max_eval: Optional[int] = None,
+        max_eval: int | None = None,
         tolerance_grad: float = 1e-7,
         tolerance_change: float = 1e-9,
         history_size: int = 100,
-        line_search_fn: Optional[str] = None,
-    ):
+        line_search_fn: str | None = None,
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -298,7 +303,7 @@ class LBFGS(Optimizer):
             views.append(view)
         return torch.cat(views, 0)
 
-    def _add_grad(self, step_size, update):
+    def _add_grad(self, step_size, update) -> None:
         offset = 0
         for p in self._params:
             if torch.is_complex(p):
@@ -313,7 +318,7 @@ class LBFGS(Optimizer):
     def _clone_param(self):
         return [p.clone(memory_format=torch.contiguous_format) for p in self._params]
 
-    def _set_param(self, params_data):
+    def _set_param(self, params_data) -> None:
         for p, pdata in zip(self._params, params_data, strict=True):
             p.copy_(pdata)
 

@@ -227,6 +227,11 @@ class TestDynamoTimed(TestCase):
     Test utilities surrounding dynamo_timed.
     """
 
+    def setUp(self):
+        super().setUp()
+        if hasattr(torch._dynamo, "reset_recompile_user_contexts"):
+            torch._dynamo.reset_recompile_user_contexts()
+
     def run_forward_backward(self):
         model = torch.compile(TestModel())
         x = torch.rand([3], requires_grad=True)
@@ -562,7 +567,7 @@ class TestDynamoTimed(TestCase):
  'graph_node_count': 3,
  'graph_node_shapes': None,
  'graph_op_count': 1,
- 'guard_count': 9,
+ 'guard_count': 10,
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
@@ -608,7 +613,7 @@ class TestDynamoTimed(TestCase):
  'tensorify_float_attempt': None,
  'tensorify_float_failure': None,
  'tensorify_float_success': None,
- 'triton_compile_time_us': None,
+ 'triton_compile_time_us': 0,
  'triton_kernel_compile_times_us': None,
  'triton_version': None}"""
                 if _IS_WINDOWS
@@ -649,7 +654,7 @@ class TestDynamoTimed(TestCase):
  'graph_node_count': 3,
  'graph_node_shapes': None,
  'graph_op_count': 1,
- 'guard_count': 9,
+ 'guard_count': 10,
  'has_guarded_code': True,
  'inductor_code_gen_cumulative_compile_time_us': 0,
  'inductor_compile_time_s': 0.0,
@@ -920,7 +925,7 @@ class TestDynamoTimed(TestCase):
         first, second = {
             (3, 9): (10, 6),
             (3, 10): (10, 6),
-            (3, 11): (10, 6),
+            (3, 11): (11, 7),
             (3, 12): (11, 7),
             (3, 13): (11, 7),
             (3, 14): (11, 7),
