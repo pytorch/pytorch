@@ -36,7 +36,7 @@ class DistFlexAttentionTest(DTensorTestBase):
     DIM = 32  # Head dimension
 
     @with_comms
-    def test_flex_attention_forward_shard0(self):
+    def test_flex_attention_shard0(self):
         """Test FlexAttention with batch dimension sharding (Shard(0))."""
         device_mesh = self.build_device_mesh()
         dtype = torch.bfloat16
@@ -79,7 +79,16 @@ class DistFlexAttentionTest(DTensorTestBase):
         v_dt = distribute_tensor(v, device_mesh, placement)
 
         # Compile flex_attention for better performance
-        # flex_attention_compiled = torch.compile(flex_attention)
+
+        # TODO: we cannot turn on torch.compile yet.
+        # Error message:
+        #   Expected metadata: (DTensorSpec(...)), expected type: <class 'torch.distributed.tensor.DTensor'>
+        #   Runtime metadata: None, runtime type: <class 'torch.Tensor'>
+        #   shape: torch.Size([16, 8, 512])
+        #   To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
+
+        # This is very likely to be the case where grad_logsumexp is a plain tensor.
+        flex_attention_compiled = torch.compile(flex_attention)
         flex_attention_compiled = flex_attention
 
         # Run distributed FlexAttention
@@ -160,7 +169,7 @@ class DistFlexAttentionTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_flex_attention_forward_replicate(self):
+    def test_flex_attention_replicate(self):
         """Test FlexAttention with replicated placement."""
         device_mesh = self.build_device_mesh()
         dtype = torch.bfloat16
@@ -288,6 +297,133 @@ class DistFlexAttentionTest(DTensorTestBase):
         torch.testing.assert_close(
             v_dt.grad.full_tensor(), full_v.grad, atol=2e-06, rtol=1e-05
         )
+
+    @with_comms
+    def test_flex_attention_shard2(self):
+        """Test FlexAttention with sequence dimension sharding (Shard(2))."""
+        device_mesh = self.build_device_mesh()
+        dtype = torch.bfloat16
+
+        # Create input tensors with gradients enabled
+        q = torch.rand(
+            (self.GLOBAL_BS, self.GLOBAL_NHEADS, self.GLOBAL_QUERY_TOKENS, self.DIM),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        k = torch.rand(
+            (self.GLOBAL_BS, self.GLOBAL_NHEADS, self.GLOBAL_CONTEXT_TOKENS, self.DIM),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        v = torch.rand(
+            (self.GLOBAL_BS, self.GLOBAL_NHEADS, self.GLOBAL_CONTEXT_TOKENS, self.DIM),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+
+        # Create block mask for distributed execution with Shard(2)
+        local_mask = create_distributed_block_mask(
+            _causal_mask,
+            self.GLOBAL_BS,
+            self.GLOBAL_NHEADS,
+            self.GLOBAL_QUERY_TOKENS,
+            self.GLOBAL_CONTEXT_TOKENS,
+            device_mesh,
+            [Shard(2)],
+        )
+
+        # For context parallel: Q, K, V are all sharded on sequence dim.
+        # DTensor will perform the allgather for KV.
+        q_dt = distribute_tensor(q, device_mesh, [Shard(2)])
+        k_dt = distribute_tensor(k, device_mesh, [Shard(2)])
+        v_dt = distribute_tensor(v, device_mesh, [Shard(2)])
+
+        # Compile flex_attention for better performance
+        # TODO: we cannot turn on torch.compile yet.
+        flex_attention_compiled = flex_attention
+
+        # Run distributed FlexAttention
+        out_dt, aux_dt = flex_attention_compiled(
+            q_dt,
+            k_dt,
+            v_dt,
+            block_mask=local_mask,
+            return_aux=AuxRequest(lse=True, max_scores=True),
+        )
+        local_out = out_dt
+        local_logsumexp = aux_dt.lse
+        local_max_scores = aux_dt.max_scores
+
+        # Verify outputs are DTensors with correct placements
+        self.assertIsInstance(local_out, DTensor)
+        self.assertIsInstance(local_logsumexp, DTensor)
+        self.assertIsInstance(local_max_scores, DTensor)
+        self.assertTrue(local_out.placements[0].is_shard(dim=2))
+        self.assertTrue(local_logsumexp.placements[0].is_shard(dim=2))
+        self.assertTrue(local_max_scores.placements[0].is_shard(dim=2))
+
+        # Create regular (non-DTensor) block mask for reference computation
+        # Use the cached compiled version from create_distributed_block_mask
+        full_mask = create_distributed_block_mask.create_block_mask(
+            _causal_mask,
+            self.GLOBAL_BS,
+            self.GLOBAL_NHEADS,
+            self.GLOBAL_QUERY_TOKENS,
+            self.GLOBAL_CONTEXT_TOKENS,
+        )
+
+        # Get full tensors and run reference computation with regular tensors
+        full_q = q_dt.full_tensor().detach()
+        full_k = k_dt.full_tensor().detach()
+        full_v = v_dt.full_tensor().detach()
+        full_q.requires_grad = True
+        full_k.requires_grad = True
+        full_v.requires_grad = True
+        full_out, full_aux = flex_attention_compiled(
+            full_q,
+            full_k,
+            full_v,
+            block_mask=full_mask,
+            return_aux=AuxRequest(lse=True, max_scores=True),
+        )
+        full_logsumexp = full_aux.lse
+        full_max_scores = full_aux.max_scores
+
+        # Verify correctness by comparing DTensor results with regular tensor results
+        self.assertTrue(
+            torch.allclose(local_out.full_tensor(), full_out, atol=1e-3, rtol=1e-3)
+        )
+        self.assertTrue(
+            torch.allclose(
+                local_logsumexp.full_tensor(), full_logsumexp, atol=1e-3, rtol=1e-3
+            )
+        )
+        self.assertTrue(
+            torch.allclose(
+                local_max_scores.full_tensor(), full_max_scores, atol=1e-3, rtol=1e-3
+            )
+        )
+
+        # Test backward pass
+        local_out.sum().to_local().backward()
+        full_out.sum().backward()
+
+        # Compare gradients
+        assert False, (q_dt.grad._spec, k_dt.grad._spec)
+        """
+        torch.testing.assert_close(
+            q_dt.grad.full_tensor(), full_q.grad, atol=2e-02, rtol=1e-02
+        )
+        torch.testing.assert_close(
+            k_dt.grad.full_tensor(), full_k.grad, atol=2e-02, rtol=1e-02
+        )
+        torch.testing.assert_close(
+            v_dt.grad.full_tensor(), full_v.grad, atol=2e-02, rtol=1e-02
+        )
+        """
 
 
 class DistBlockMaskTest(DTensorTestBase):

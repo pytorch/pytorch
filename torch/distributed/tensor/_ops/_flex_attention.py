@@ -392,11 +392,13 @@ def _flex_propagate(
         kwargs_schema={},
     )
 
+    local_args = [query._local_tensor, key._local_tensor, value._local_tensor]
+    local_args.extend(b._local_tensor for b in block_mask)
     op_info = OpInfo(
         compute_mesh,
         op_schema,
         flat_args_schema=(query._spec, key._spec, value._spec, *block_mask_spec),  # type: ignore[arg-type]
-        local_args=(query, key, value, *block_mask),
+        local_args=tuple(local_args),
         local_kwargs={},
         args_tree_spec=None,
     )
@@ -444,6 +446,7 @@ def _flex_backward_propagate(
     compute_mesh = query.device_mesh
 
     block_mask_spec = tuple(b._spec for b in block_mask)
+    assert False, block_mask_spec
     op_schema = OpSchema(
         flex_attention_backward_hop,  # type: ignore[arg-type]
         args_schema=(
@@ -459,6 +462,16 @@ def _flex_backward_propagate(
         kwargs_schema={},
     )
 
+    local_args = [
+        query._local_tensor,
+        key._local_tensor,
+        value._local_tensor,
+        out._local_tensor,
+        logsumexp._local_tensor,
+        grad_out._local_tensor,
+        grad_logsumexp._local_tensor,
+    ]
+    local_args.extend(b._local_tensor for b in block_mask)
     op_info = OpInfo(
         compute_mesh,
         op_schema,
@@ -472,16 +485,7 @@ def _flex_backward_propagate(
             grad_logsumexp._spec,
             *block_mask_spec,
         ),  # type: ignore[arg-type]
-        local_args=(
-            query,
-            key,
-            value,
-            out,
-            logsumexp,
-            grad_out,
-            grad_logsumexp,
-            *block_mask,
-        ),
+        local_args=tuple(local_args),
         local_kwargs={},
         args_tree_spec=None,
     )
@@ -541,19 +545,16 @@ def dtensor_flex_attention(
         raise ValueError("DTensor + Flex Attention does not support other buffers")
 
     op_info = _flex_propagate(query, key, value, block_mask[2:4])
-    query, key, vlaue, *_ = op_info.local_args
+    query, key, value, *_ = op_info.local_args
 
-    q_local = query.to_local()
-    k_local = key.to_local()
-    v_local = value.to_local()
     block_mask_local = pytree.tree_map(
-        lambda x: x.to_local() if isinstance(x, DTensor) else x,
+        lambda x: x._local_tensor if isinstance(x, DTensor) else x,
         block_mask,
     )
     outputs = flex_attention_hop(
-        q_local,
-        k_local,
-        v_local,
+        query=query,
+        key=key,
+        value=value,
         score_mod=score_mod,
         block_mask=block_mask_local,
         scale=scale,
@@ -616,25 +617,18 @@ def dtensor_flex_attention_backward(
         op_info.local_args
     )
 
-    q_local = query.to_local()
-    k_local = key.to_local()
-    v_local = value.to_local()
-    out_local = out.to_local()
-    logsumexp_local = logsumexp.to_local()
-    grad_out_local = grad_out.to_local()
-    grad_logsumexp_local = grad_logsumexp.to_local()
     block_mask_local = pytree.tree_map(
-        lambda x: x.to_local() if isinstance(x, DTensor) else x,
+        lambda x: x._local_tensor if isinstance(x, DTensor) else x,
         block_mask,
     )
     outputs = flex_attention_backward_hop(
-        query=q_local,
-        key=k_local,
-        value=v_local,
-        out=out_local,
-        logsumexp=logsumexp_local,
-        grad_out=grad_out_local,
-        grad_logsumexp=grad_logsumexp_local,
+        query=query,
+        key=key,
+        value=value,
+        out=out,
+        logsumexp=logsumexp,
+        grad_out=grad_out,
+        grad_logsumexp=grad_logsumpexp,
         fw_graph=fw_graph,
         joint_graph=joint_graph,
         block_mask=block_mask_local,

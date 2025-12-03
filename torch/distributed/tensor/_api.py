@@ -1383,6 +1383,47 @@ def zeros(  # type: ignore[no-untyped-def]
     )
 
 
+def shard_mask_mod(
+    mask_mod: _mask_mod_signature,
+    B: int | None,
+    H: int | None,
+    Q_LEN: int,
+    KV_LEN: int,
+    device_mesh: DeviceMesh,
+    placements: Sequence[Placement],
+) -> _mask_mod_signature:
+    from torch.distributed.tensor._utils import (
+        _compute_local_shape_and_global_offset,
+    )
+
+    B = 1 if B is None else B
+    H = 1 if H is None else H
+
+    _, global_offset = _compute_local_shape_and_global_offset(
+        (B, H, Q_LEN, KV_LEN),
+        device_mesh.shape,
+        device_mesh.get_coordinate(),
+        placements,
+    )
+
+    def create_mask_mod(b_offset_int, h_offset_int, q_offset_int, kv_offset_int):
+        def offset_mask_mod(b, h, q, kv):
+            b_offset = torch.full_like(b, b_offset_int)
+            h_offset = torch.full_like(h, h_offset_int)
+            q_offset = torch.full_like(q, q_offset_int)
+            kv_offset = torch.full_like(kv, kv_offset_int)
+            return mask_mod(
+                b + b_offset,
+                h + h_offset,
+                q + q_offset,
+                kv + kv_offset,
+            )
+
+        return offset_mask_mod
+
+    return create_mask_mod(*global_offset)
+
+
 def create_distributed_block_mask(
     mask_mod: _mask_mod_signature,
     B: int | None,
@@ -1404,6 +1445,8 @@ def create_distributed_block_mask(
         mask_mod (_mask_mod_signature): The mask modification function that defines
             the attention pattern (e.g., causal mask). The mask_mod operates on
             **global indices** across the entire unsharded tensor dimensions.
+            As a result, if your mask_mod relies on a local tensor (e.g., input from
+            the dataloader), you will need to convert the indices accordingly.
         B (int | None): **Global** batch size (across all ranks). Can be None for broadcasting.
         H (int | None): **Global** number of attention heads (across all ranks). Can be None for broadcasting.
         Q_LEN (int): **Global** query sequence length (across all ranks).
@@ -1432,12 +1475,18 @@ def create_distributed_block_mask(
           block masks. Sharding on the KV sequence dimension (dim=3) is not
           supported because FlexAttention requires full KV context for attention
           computation.
-        - The sharding is assumed to be orthogonal to the mask_mod at this time.
-          TODO: If mask_mod requires a rewrite due to sharding (e.g., adjusting indices
-          for local shard offsets), this is not supported yet.
     """
-    shard_dim_sizes = defaultdict(lambda: 1)
+    # Use cached compiled version of create_block_mask for performance
+    create_block_mask_fn = getattr(
+        create_distributed_block_mask, "create_block_mask", None
+    )
 
+    if create_block_mask_fn is None:
+        create_block_mask_fn = torch.compile(create_block_mask)
+        create_block_mask_fn = create_block_mask
+        create_distributed_block_mask.create_block_mask = create_block_mask_fn  # type: ignore[attr-defined]
+
+    shard_dim_sizes = defaultdict(lambda: 1)
     for p, dim_size in zip(placements, device_mesh.shape, strict=True):
         if isinstance(p, Shard):
             if p.dim == 1:
@@ -1466,18 +1515,22 @@ def create_distributed_block_mask(
 
         block_mask_sizes[dim] = specificed_size // shard_size
 
-    # Use cached compiled version of create_block_mask for performance
-    create_block_mask_fn = getattr(
-        create_distributed_block_mask, "create_block_mask", None
+    mask_mod = shard_mask_mod(
+        mask_mod,
+        B=B,
+        H=H,
+        Q_LEN=Q_LEN,
+        KV_LEN=KV_LEN,
+        device_mesh=device_mesh,
+        placements=placements,
     )
-
-    if create_block_mask_fn is None:
-        create_block_mask_fn = torch.compile(create_block_mask)
-        create_distributed_block_mask.create_block_mask = create_block_mask_fn  # type: ignore[attr-defined]
-
+    dist_b, dist_h, dist_q_len, dist_kv_len = block_mask_sizes
     block_mask = create_block_mask_fn(  # type: ignore[arg-type]
         mask_mod,
-        *block_mask_sizes,
+        B=dist_b,
+        H=dist_h,
+        Q_LEN=dist_q_len,
+        KV_LEN=dist_kv_len,
         device=device_mesh.device_type,
         BLOCK_SIZE=BLOCK_SIZE,
     )
@@ -1503,6 +1556,7 @@ def create_distributed_block_mask(
             continue
 
         # p.dim > 2 shouldn't happen as we check above
+        assert isinstance(p, Shard)
         assert p.dim <= 2, f"Sharding on dim {p.dim} is not supported"
 
         # There is no second or Q_LEN dimension in q_num_blocks_placements.
@@ -1566,4 +1620,16 @@ def create_distributed_block_mask(
             q_indices_placements,
         )
 
-    return block_mask
+    return BlockMask(
+        seq_lengths=(Q_LEN, KV_LEN),
+        kv_num_blocks=block_mask.kv_num_blocks,
+        kv_indices=block_mask.kv_indices,
+        full_kv_num_blocks=block_mask.full_kv_num_blocks,
+        full_kv_indices=block_mask.full_kv_indices,
+        q_num_blocks=block_mask.q_num_blocks,
+        q_indices=block_mask.q_indices,
+        full_q_num_blocks=block_mask.full_q_num_blocks,
+        full_q_indices=block_mask.full_q_indices,
+        BLOCK_SIZE=block_mask.BLOCK_SIZE,
+        mask_mod=block_mask.mask_mod,
+    )
