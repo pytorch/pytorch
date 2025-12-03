@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -247,13 +246,13 @@ class LBFGS(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1,
+        lr: float | Tensor = 1,
         max_iter: int = 20,
-        max_eval: Optional[int] = None,
+        max_eval: int | None = None,
         tolerance_grad: float = 1e-7,
         tolerance_change: float = 1e-9,
         history_size: int = 100,
-        line_search_fn: Optional[str] = None,
+        line_search_fn: str | None = None,
     ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
