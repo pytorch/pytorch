@@ -1190,16 +1190,10 @@ def trace_hop_function_with_auto_output_flattening(
     tx,
     subtracer,
     enable_grad,
-    restore_side_effects,
+    allow_side_effects,
     args,
     sub_kwargs,
 ):
-    # For the new unified control flow ops, we couple restore_side_effects
-    # with allow_side_effects_in_hop using the new semantics:
-    # - restore_side_effects=False means side effects become extra outputs
-    # - This allows mutations to be tracked and replayed
-    enable_side_effects_with_extra_outputs = not restore_side_effects
-
     autograd_ctx = (
         dynamo_enable_grad(tx, enable_grad)
         if enable_grad is not None
@@ -1207,22 +1201,13 @@ def trace_hop_function_with_auto_output_flattening(
     )
     side_effects_ctx = (
         dynamo_allow_side_effects_in_hop(tx)
-        if enable_side_effects_with_extra_outputs
+        if allow_side_effects
         else contextlib.nullcontext()
     )
-
-    if restore_side_effects:
-        prev_side_effects = tx.output.side_effects.clone()
 
     with autograd_ctx, side_effects_ctx:
         output = f.call_function(tx, args, sub_kwargs)
 
-    if restore_side_effects:
-        new_side_effects = tx.output.side_effects.clone()
-        prev_side_effects.track_runahead_tensor_and_symvar_side_effects(
-            new_side_effects
-        )
-        tx.output.side_effects = prev_side_effects
     return output
 
 
@@ -1271,7 +1256,9 @@ def speculate_subgraph_with_auto_output_flattening(
     set_subgraph_inputs: Literal[
         "automatic", "semi_automatic", "flatten_manual", "manual"
     ] = "automatic",
-    restore_side_effects: bool = True,
+    # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
+    # access intermediates from the subgraph, this is useful for mutation
+    allow_side_effects: bool = False,
     # TODO - supports input_mutation and aliasing should be False by default for strictness
     supports_input_mutation: bool = True,
     supports_aliasing: bool = True,
@@ -1386,12 +1373,25 @@ def speculate_subgraph_with_auto_output_flattening(
                 tx, f, subtracer, sub_args, sub_kwargs, set_subgraph_inputs, description
             )
 
+            # Special case - if users uses
+            # `traced_with_externally_visible_side_effects`, we still need to
+            # return the intermediates as outputs. However, this API gets
+            # triggered during the hop tracing,  and we don't know at this point
+            # of time, if the API will take into effect. To handle this, we have
+            # a flag traced_with_externally_visible_side_effects (default=False)
+            # that is set to True anytime
+            # `traced_with_externally_visible_side_effects` is set. We reset it
+            # with the old value after the hop is traced out.
+            old_value = (
+                tx.output.current_tracer.traced_with_externally_visible_side_effects
+            )
+
             output = trace_hop_function_with_auto_output_flattening(
                 f,
                 tx,
                 subtracer,
                 enable_grad,
-                restore_side_effects,
+                allow_side_effects,
                 args,
                 sub_kwargs,
             )
@@ -1469,12 +1469,20 @@ def speculate_subgraph_with_auto_output_flattening(
             # want this to be supported for other Hops as well, specifically
             # nested_compile_region and autograd.Function. Today, its safe
             # because we error out on seeing a side-effect.
-            enable_side_effects_with_extra_outputs = not restore_side_effects
-            if enable_side_effects_with_extra_outputs:
+
+            allow_side_effects = (
+                allow_side_effects
+                or tx.output.current_tracer.traced_with_externally_visible_side_effects
+            )
+            if allow_side_effects:
                 extra_outputs = _collect_intermediate_outputs(
                     tx, subtracer, graph_output_vts
                 )
                 graph_output_vts = graph_output_vts + tuple(extra_outputs)
+
+            tx.output.current_tracer.traced_with_externally_visible_side_effects = (
+                old_value
+            )
 
             validate_subgraph_output_types(graph_output_vts)
 
@@ -2877,9 +2885,7 @@ class ReparametrizeModuleCallVariable(FunctorchHigherOrderVariable):
 class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
     supports_input_mutation = True
     supports_aliasing = True
-    # TODO - Go through all subclasses of WrapHigherOrderVariable to see if
-    # restore_side_effects can be ignored. For now, this is conservative.
-    restore_side_effects = True
+    allow_side_effects = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name="wrap_body"
@@ -2900,7 +2906,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         subgraph_name="wrap_body",
     ):
         # See NOTE [HigherOrderOperator tracing design] for more details
-
         (
             body_r,
             body_graph,
@@ -2913,7 +2918,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             kwargs,
             description,
             source_target=self.value,
-            restore_side_effects=self.restore_side_effects,
+            allow_side_effects=self.allow_side_effects,
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
         )
@@ -3372,10 +3377,8 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 class CheckpointHigherOrderVariable(WrapHigherOrderVariable):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        # When skip_fwd_side_effects_in_bwd is True, we allow side effects by NOT restoring them.
-        # This enables collecting intermediate outputs for side effects.
-        self.restore_side_effects = (
-            not torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
+        self.allow_side_effects = (
+            torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
         )
 
     def _call_function(
@@ -4240,10 +4243,8 @@ class BaseHOPVariable(WrapHigherOrderVariable):
 class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
     supports_input_mutation = True
     supports_aliasing = False
-    # TODO (tmanlaibaatar) This is in preparation for supporting side effects in invoke_subgraph.
-    # invoke_subgraph does not support side effects, so we restore them (default behavior).
-    # This means enable_side_effects_with_extra_outputs will be False.
-    restore_side_effects = True
+    # TODO - make this true to support mutation
+    allow_side_effects = False
 
     def install_subgraph_in_output_graph(
         self, tx, fn_vt, fn_args_vt, kwargs, body_gmod, attr_name
