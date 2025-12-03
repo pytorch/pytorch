@@ -37,7 +37,13 @@ def inline_subgraph_to_ir_nodes(
     """
     from torch._inductor.lowering import process_subgraph_nodes
 
-    return process_subgraph_nodes(gm, inputs)
+    # Temporarily switch V.graph.module to subgraph during processing; restore to prevent IR nodes added to wrong graph
+    original_module = V.graph.module
+    try:
+        V.graph.module = gm
+        return process_subgraph_nodes(gm, inputs)
+    finally:
+        V.graph.module = original_module
 
 
 class SubgraphChoiceCaller(ir.ChoiceCaller):
@@ -70,6 +76,16 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         gm_original_output_strides(self.gm)
 
         self.sym_inputs = get_symbolic_inputs(self.input_nodes)
+        # Cached decomposition info for range-based dispatch (set via cache_decomposition)
+        self.decomposition: Callable[..., Any] | None = None
+        self.decomposition_kwargs: dict[str, Any] = {}
+
+    def cache_decomposition(
+        self, decomposition: Callable[..., Any], kwargs: dict[str, Any]
+    ) -> None:
+        """Cache decomposition function and kwargs for range-based dispatch lookup."""
+        self.decomposition = decomposition
+        self.decomposition_kwargs = kwargs
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
@@ -90,7 +106,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             extern_node_serializer=V.graph.extern_node_serializer,
             is_inference=V.graph.is_inference,
             is_backward=V.graph.is_backward,
-            name=f"benchmark_{self.name}",
+            name=f"benchmark_{self.name.replace('::', '_')}",
         )
 
         for sym_inp in self.sym_inputs:
@@ -296,6 +312,8 @@ class SubgraphTemplate(KernelTemplate):
                 make_fx_graph=make_fx_graph,
                 description=f"CustomOp {decomp.__name__}",
             )
+            # Cache decomposition info for range-based dispatch
+            choice.cache_decomposition(decomp, decomp_kwargs)
             choices.append(choice)
 
         return choices
