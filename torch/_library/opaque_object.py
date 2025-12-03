@@ -1,4 +1,4 @@
-from typing import Any, NewType, Optional
+from typing import Any, NewType
 
 import torch
 
@@ -155,23 +155,41 @@ def set_payload(opaque_object: torch._C.ScriptObject, payload: Any) -> None:
 _OPAQUE_TYPES: dict[Any, str] = {}
 
 
-def register_opaque_type(cls: Any, name: Optional[str] = None) -> None:
+def get_opaque_type_name(cls: Any) -> str:
+    """
+    Gets the registered opaque type name for a given class.
+
+    Args:
+        cls (type): The class to get the type name for.
+
+    Returns:
+        str: The registered type name for the class.
+
+    Raises:
+        ValueError: If the class is not registered as an opaque type.
+    """
+    if cls not in _OPAQUE_TYPES:
+        raise ValueError(
+            f"Class {cls} is not registered as an opaque type. "
+            f"Call register_opaque_type({cls.__name__}) first."
+        )
+    return _OPAQUE_TYPES[cls]
+
+
+def register_opaque_type(cls: Any) -> None:
     """
     Registers the given type as an opaque type which allows this to be consumed
     by a custom operator.
 
+    The type name will be automatically generated from the class's fully
+    qualified name (ex. my_module.MyClass).
+
     Args:
         cls (type): The class to register as an opaque type.
-        name (str): A unique qualified name of the type.
     """
-    if name is None:
-        name = cls.__name__
+    # Generate a fully qualified name by combining module and qualname
+    name = f"{cls.__module__}.{cls.__qualname__}"
 
-    if "." in name:
-        # The schema_type_parser will break up types with periods
-        raise ValueError(
-            f"Unable to accept name, {name}, for this opaque type as it contains a '.'"
-        )
     _OPAQUE_TYPES[cls] = name
 
     torch._C._register_opaque_type(name)
