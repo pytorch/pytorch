@@ -187,7 +187,7 @@ jobs:
 
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         id: install-nvidia-driver
-        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@seemethere/auto_detect_nvidia_gpu_for_real_this_time
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
 
       - name: configure aws credentials
