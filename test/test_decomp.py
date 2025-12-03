@@ -401,6 +401,8 @@ CROSS_REF_EXCLUDE_SET = {
     # CompositeAutogradImplicit
     # See https://github.com/pytorch/pytorch/issues/81669
     (None, None, "nn.functional.relu6"),
+    (None, None, "nn.functional.linear_cross_entropy"),
+    (None, None, "aten.linear_cross_entropy"),
     # This decomp runs before autograd.
     (None, None, "nn.functional.rrelu"),
     (None, None, "meshgrid"),
