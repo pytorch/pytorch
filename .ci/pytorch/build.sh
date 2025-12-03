@@ -7,8 +7,8 @@ set -ex -o pipefail
 # need to set it yourself.
 
 # Source ROCm environment for theRock nightly builds (needed for docker exec)
-if [[ -f /etc/profile.d/rocm.sh ]]; then
-  source /etc/profile.d/rocm.sh
+if [[ -f /etc/rocm_env.sh ]]; then
+  source /etc/rocm_env.sh
 fi
 
 # shellcheck source=./common.sh
