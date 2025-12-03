@@ -301,13 +301,23 @@ IF(USE_FBGEMM_GENAI)
 
       # Add additional HIPCC compiler flags for performance
       set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
-        -mllvm
-        -amdgpu-coerce-illegal-types=1
-        -mllvm
-        -enable-post-misched=0
+	-mllvm
+	-enable-post-misched=0
         -mllvm
         -greedy-reverse-local-assignment=1
         -fhip-new-launch-api)
+
+      # check compiler support for "-amdgpu-coerce-illegal-types" clang extension
+      # clang++ versions from ROCM_SDK 7.2 and newer does not support this flag
+      include(CheckCXXCompilerFlag)
+      set(AMDGPU_COERCE_ILLEGAL_TYPES_FLAG "-mllvm -amdgpu-coerce-illegal-types")
+      check_cxx_compiler_flag("${AMDGPU_COERCE_ILLEGAL_TYPES_FLAG}" AMDGPU_COERCE_ILLEGAL_TYPES_SUPPORTED)
+      if(AMDGPU_COERCE_ILLEGAL_TYPES_SUPPORTED)
+          message(STATUS "${CMAKE_CXX_COMPILER_ID} compiler in use supports ${AMDGPU_COERCE_ILLEGAL_TYPES_FLAG}. Enabling option.")
+	      string(APPEND FBGEMM_GENAI_EXTRA_HIPCC_FLAGS "-mllvm -amdgpu-coerce-illegal-types=1")
+      else()
+          message(STATUS "${CMAKE_CXX_COMPILER_ID} compiler in use does not support ${AMDGPU_COERCE_ILLEGAL_TYPES_FLAG}. Option not enabled.")
+      endif()
 
       hip_add_library(
         fbgemm_genai STATIC
