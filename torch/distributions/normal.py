@@ -7,10 +7,13 @@ from torch import Tensor
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import _standard_normal, broadcast_all
-from torch.types import _Number, _size
+from torch.types import _size, Number as _Number
 
 
 __all__ = ["Normal"]
+
+# Dynamo can't trace isinstance for unions yet
+Number = _Number.__args__
 
 
 class Normal(ExponentialFamily):
@@ -60,7 +63,7 @@ class Normal(ExponentialFamily):
         validate_args: Optional[bool] = None,
     ) -> None:
         self.loc, self.scale = broadcast_all(loc, scale)
-        if isinstance(loc, _Number) and isinstance(scale, _Number):
+        if isinstance(loc, Number) and isinstance(scale, Number):
             batch_shape = torch.Size()
         else:
             batch_shape = self.loc.size()
@@ -92,9 +95,7 @@ class Normal(ExponentialFamily):
         # pyrefly: ignore [unsupported-operation]
         var = self.scale**2
         log_scale = (
-            math.log(self.scale)
-            if isinstance(self.scale, _Number)
-            else self.scale.log()
+            math.log(self.scale) if isinstance(self.scale, Number) else self.scale.log()
         )
         return (
             -((value - self.loc) ** 2) / (2 * var)

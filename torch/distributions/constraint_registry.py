@@ -67,7 +67,7 @@ object.
 """
 
 from torch.distributions import constraints, transforms
-from torch.types import _Number
+from torch.types import Number
 
 
 __all__ = [
@@ -220,10 +220,10 @@ def _transform_to_less_than(constraint):
 def _transform_to_interval(constraint):
     # Handle the special case of the unit interval.
     lower_is_0 = (
-        isinstance(constraint.lower_bound, _Number) and constraint.lower_bound == 0
+        isinstance(constraint.lower_bound, Number) and constraint.lower_bound == 0
     )
     upper_is_1 = (
-        isinstance(constraint.upper_bound, _Number) and constraint.upper_bound == 1
+        isinstance(constraint.upper_bound, Number) and constraint.upper_bound == 1
     )
     if lower_is_0 and upper_is_1:
         return transforms.SigmoidTransform()
