@@ -1,3 +1,5 @@
+from typing import Optional
+
 import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.common_types import (
@@ -55,7 +57,7 @@ class _MaxPoolNd(Module):
     def __init__(
         self,
         kernel_size: _size_any_t,
-        stride: _size_any_t | None = None,
+        stride: Optional[_size_any_t] = None,
         padding: _size_any_t = 0,
         dilation: _size_any_t = 1,
         return_indices: bool = False,
@@ -387,7 +389,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
     def __init__(
         self,
         kernel_size: _size_1_t,
-        stride: _size_1_t | None = None,
+        stride: Optional[_size_1_t] = None,
         padding: _size_1_t = 0,
     ) -> None:
         super().__init__()
@@ -396,7 +398,7 @@ class MaxUnpool1d(_MaxUnpoolNd):
         self.padding = _single(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: list[int] | None = None
+        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
         """Runs the forward pass."""
         return F.max_unpool1d(
@@ -483,7 +485,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
     def __init__(
         self,
         kernel_size: _size_2_t,
-        stride: _size_2_t | None = None,
+        stride: Optional[_size_2_t] = None,
         padding: _size_2_t = 0,
     ) -> None:
         super().__init__()
@@ -492,7 +494,7 @@ class MaxUnpool2d(_MaxUnpoolNd):
         self.padding = _pair(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: list[int] | None = None
+        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
         """Runs the forward pass."""
         return F.max_unpool2d(
@@ -562,7 +564,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
     def __init__(
         self,
         kernel_size: _size_3_t,
-        stride: _size_3_t | None = None,
+        stride: Optional[_size_3_t] = None,
         padding: _size_3_t = 0,
     ) -> None:
         super().__init__()
@@ -571,7 +573,7 @@ class MaxUnpool3d(_MaxUnpoolNd):
         self.padding = _triple(padding)
 
     def forward(
-        self, input: Tensor, indices: Tensor, output_size: list[int] | None = None
+        self, input: Tensor, indices: Tensor, output_size: Optional[list[int]] = None
     ) -> Tensor:
         """Runs the forward pass."""
         return F.max_unpool3d(
@@ -760,11 +762,11 @@ class AvgPool2d(_AvgPoolNd):
     def __init__(
         self,
         kernel_size: _size_2_t,
-        stride: _size_2_t | None = None,
+        stride: Optional[_size_2_t] = None,
         padding: _size_2_t = 0,
         ceil_mode: bool = False,
         count_include_pad: bool = True,
-        divisor_override: int | None = None,
+        divisor_override: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.kernel_size = kernel_size
@@ -877,11 +879,11 @@ class AvgPool3d(_AvgPoolNd):
     def __init__(
         self,
         kernel_size: _size_3_t,
-        stride: _size_3_t | None = None,
+        stride: Optional[_size_3_t] = None,
         padding: _size_3_t = 0,
         ceil_mode: bool = False,
         count_include_pad: bool = True,
-        divisor_override: int | None = None,
+        divisor_override: Optional[int] = None,
     ) -> None:
         super().__init__()
         self.kernel_size = kernel_size
@@ -962,8 +964,8 @@ class FractionalMaxPool2d(Module):
     def __init__(
         self,
         kernel_size: _size_2_t,
-        output_size: _size_2_t | None = None,
-        output_ratio: _ratio_2_t | None = None,
+        output_size: Optional[_size_2_t] = None,
+        output_ratio: Optional[_ratio_2_t] = None,
         return_indices: bool = False,
         _random_samples=None,
     ) -> None:
@@ -1048,8 +1050,8 @@ class FractionalMaxPool3d(Module):
     def __init__(
         self,
         kernel_size: _size_3_t,
-        output_size: _size_3_t | None = None,
-        output_ratio: _ratio_3_t | None = None,
+        output_size: Optional[_size_3_t] = None,
+        output_ratio: Optional[_ratio_3_t] = None,
         return_indices: bool = False,
         _random_samples=None,
     ) -> None:
@@ -1104,7 +1106,7 @@ class _LPPoolNd(Module):
         self,
         norm_type: float,
         kernel_size: _size_any_t,
-        stride: _size_any_t | None = None,
+        stride: Optional[_size_any_t] = None,
         ceil_mode: bool = False,
     ) -> None:
         super().__init__()
