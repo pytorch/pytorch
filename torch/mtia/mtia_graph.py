@@ -9,6 +9,13 @@ import torch
 _POOL_HANDLE = tuple[int, int]
 
 
+def graph_pool_handle() -> _POOL_HANDLE:
+    """
+    Return an opaque token representing the id of a graph memory pool.
+    """
+    return torch._C._mtia_graphPoolHandle()
+
+
 class MTIAGraph(torch._C._MTIAGraph):
     """
     Wrapper around a MTIA graph.
@@ -93,4 +100,5 @@ class graph:
 __all__ = [
     "MTIAGraph",
     "graph",
+    "graph_pool_handle",
 ]
