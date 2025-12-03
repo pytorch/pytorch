@@ -85,9 +85,6 @@ class ShardedTensorTestBase(MultiProcessTestCase):
 
 # wrapper to initialize comms (processgroup + rpc)
 def with_comms(func=None, init_rpc=True, backend="nccl"):
-    backend = torch.distributed.distributed_c10d.Backend.default_device_backend_map.get(
-        torch.accelerator.current_accelerator().type
-    )
     if func is None:
         return partial(
             with_comms,
@@ -97,7 +94,7 @@ def with_comms(func=None, init_rpc=True, backend="nccl"):
 
     @wraps(func)
     def wrapper(self, *args, **kwargs):
-        if torch.accelerator.device_count() < self.world_size:
+        if backend == "nccl" and torch.cuda.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
         self.init_comms(init_rpc=init_rpc, backend=backend)
         func(self, *args, **kwargs)
