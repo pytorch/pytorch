@@ -3,8 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_functionalization_with_native_python_assertion)
 """
 
-import copy
-
 # Owner(s): ["oncall: export"]
 import math
 import operator
@@ -48,7 +46,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
-from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
