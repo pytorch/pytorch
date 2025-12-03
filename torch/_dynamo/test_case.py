@@ -25,7 +25,6 @@ from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
-    skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
@@ -129,6 +128,7 @@ class TestCaseWithNestedGraphBreaks(TestCase):
         super().tearDown()
         # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.nested_graph_breaks = self.prev_nested_graph_breaks
+
 
 class CPythonTestCase(TestCase):
     """
