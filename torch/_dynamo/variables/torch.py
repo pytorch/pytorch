@@ -1180,7 +1180,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_torch_tensor(self, tx: "InstructionTranslator", *args, **kwargs):
             def check_any_unspec(x):
                 # NB: This includes UnspecializedPythonVariable
-                if x.is_tensor() or x.is_symnode_like():
+                if x.is_tensor() or isinstance(x, SymNodeVariable):
                     return True
                 elif isinstance(x, (ListVariable, TupleVariable)):
                     return any(check_any_unspec(y) for y in x.items)
