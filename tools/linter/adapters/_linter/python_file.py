@@ -7,8 +7,7 @@ from tokenize import generate_tokens, TokenInfo
 from typing import TYPE_CHECKING
 from typing_extensions import Self
 
-from . import EMPTY_TOKENS, NO_TOKEN, ParseError, ROOT
-from .blocks import blocks
+from . import is_empty, NO_TOKEN, ParseError, ROOT
 from .sets import LineWithSets
 
 
@@ -19,8 +18,6 @@ if TYPE_CHECKING:
 
 
 class PythonFile:
-    contents: str
-    lines: list[str]
     path: Path | None
     linter_name: str
 
@@ -31,7 +28,7 @@ class PythonFile:
         contents: str | None = None,
     ) -> None:
         self.linter_name = linter_name
-        self.path = path.relative_to(ROOT) if path.is_absolute() else path
+        self.path = path.relative_to(ROOT) if path and path.is_absolute() else path
         self._contents = contents
 
     @cached_property
@@ -67,7 +64,7 @@ class PythonFile:
 
     @cached_property
     def tokens(self) -> list[TokenInfo]:
-        # Might raise IndentationError if the code is mal-indented
+        # Raises IndentationError on incorrectly indented code
         return list(generate_tokens(iter(self.lines).__next__))
 
     @cached_property
@@ -118,7 +115,7 @@ class PythonFile:
             tk = self.tokens[i]
             if tk.type == token.STRING:
                 return tk.string
-            if tk.type not in EMPTY_TOKENS:
+            if is_empty(tk):
                 return ""
         return ""
 
@@ -134,10 +131,6 @@ class PythonFile:
                 dedents[stack.pop()] = i
 
         return dedents
-
-    @cached_property
-    def errors(self) -> dict[str, str]:
-        return {}
 
     @cached_property
     def braced_sets(self) -> list[Sequence[TokenInfo]]:
@@ -166,9 +159,9 @@ class PythonFile:
 
     @cached_property
     def blocks(self) -> list[Block]:
-        res = blocks(self.tokens)
-        self.errors.update(res.errors)
-        return res.blocks
+        from .blocks import blocks
+
+        return blocks(self)
 
     @cached_property
     def blocks_by_line_number(self) -> dict[int, Block]:

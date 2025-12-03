@@ -5035,7 +5035,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     for i in instance_lists[1:]:
                         assert i.image_size == image_size
                 ret = Instances(image_size)
-                for k in instance_lists[0]._fields.keys():
+                for k in instance_lists[0]._fields:
                     values = [i.get(k) for i in instance_lists]
                     v0 = values[0]
                     if isinstance(v0, torch.Tensor):
@@ -7094,15 +7094,14 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         expected = f(torch.randn((2, 12, 16, 32, 32))).sum()
 
         # https://github.com/pytorch/pytorch/issues/147171
-        torch._inductor.config.fallback_random = True
-
-        for backend in ["eager", "aot_eager"]:
-            torch.manual_seed(54321)
-            torch.cuda.manual_seed_all(54321)
-            actual = torch.compile(backend=backend, fullgraph=True)(f)(
-                torch.randn((2, 12, 16, 32, 32))
-            ).sum()
-            self.assertEqual(actual, expected)
+        with torch._inductor.config.patch(fallback_random=True):
+            for backend in ["eager", "aot_eager"]:
+                torch.manual_seed(54321)
+                torch.cuda.manual_seed_all(54321)
+                actual = torch.compile(backend=backend, fullgraph=True)(f)(
+                    torch.randn((2, 12, 16, 32, 32))
+                ).sum()
+                self.assertEqual(actual, expected)
 
     def test_incompatible_configs(self):
         with torch._dynamo.config.patch(
@@ -7243,11 +7242,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             elif compiled_graph and code is compiled_graph.__call__.__code__:
                 found_compiled_graph = True
 
-        sys.monitoring.use_tool_id(0, "test")
+        tool_id = 0
+        sys.monitoring.use_tool_id(tool_id, "test")
+        old_events = sys.monitoring.get_events(tool_id)
         old_callback = sys.monitoring.register_callback(
-            0, sys.monitoring.events.PY_START, callback
+            tool_id, sys.monitoring.events.PY_START, callback
         )
-        sys.monitoring.set_events(0, sys.monitoring.events.PY_START)
+        sys.monitoring.set_events(tool_id, sys.monitoring.events.PY_START)
         try:
 
             @torch.compile(backend=backend, fullgraph=True)
@@ -7260,9 +7261,11 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             # sys.monitoring should still run on the compiled graph
             self.assertTrue(found_compiled_graph)
         finally:
+            sys.monitoring.set_events(tool_id, old_events)
             sys.monitoring.register_callback(
-                0, sys.monitoring.events.PY_START, old_callback
+                tool_id, sys.monitoring.events.PY_START, old_callback
             )
+            sys.monitoring.free_tool_id(tool_id)
 
     def test_312_local_cell_overlap(self):
         keys = range(10)

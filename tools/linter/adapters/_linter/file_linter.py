@@ -21,9 +21,6 @@ if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
 
 
-MAX_ERROR_CHARS = 2_048
-
-
 class ErrorLines:
     """How many lines to display before and after an error"""
 
