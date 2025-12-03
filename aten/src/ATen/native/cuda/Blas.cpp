@@ -144,6 +144,30 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   return false;
 }
 
+struct cublasLtEpilogueParams {
+  using self_type = cublasLtEpilogueParams;
+
+  std::optional<Tensor> opt_bias = std::nullopt;
+  Activation activation = Activation::None;
+  std::optional<Tensor> opt_pre_activation = std::nullopt;
+
+  self_type& set_bias(const Tensor& bias) {
+    this->opt_bias = std::make_optional(bias);
+    return *this;
+  }
+
+  self_type& set_activation(Activation new_activation) {
+    this->activation = new_activation;
+    return *this;
+  }
+
+  self_type& set_pre_activation(Tensor& buffer) {
+    this->opt_pre_activation = std::make_optional(buffer);
+    return *this;
+  }
+};
+
+
 /*
  * Check whether for the given input we want to enable the Lt interface
  */
@@ -154,7 +178,7 @@ static bool isInputCompliesAddmmCudaLt(
     const Tensor& mat2,
     const Scalar& beta,
     const Scalar& alpha,
-    Activation activation
+    cublasLtEpilogueParams& epilogue_params
 ) {
   #ifdef USE_ROCM
   // Implies 2D bias which we currently not send through Lt.
@@ -174,10 +198,40 @@ static bool isInputCompliesAddmmCudaLt(
   }
   #endif
 
+  if (epilogue_params.opt_pre_activation.has_value()) {
+    const auto pre_activation = epilogue_params.opt_pre_activation.value();
+    TORCH_CHECK(
+      pre_activation.is_non_overlapping_and_dense(),
+      "The buffer for storing pre-activation values is expected to be contiguous ",
+      "or F-contiguous/row-major (i.e. pre_activation.transpose(-2, -1) should be contiguous)"
+    );
+    TORCH_CHECK(
+      pre_activation.sizes() == result.sizes(),
+      "The buffer for storing pre-activation values should have the same shape as the result ",
+      "(expected ", result.sizes(), " but got ", pre_activation.sizes(), ")"
+    );
+  }
+
   const auto mat1_sizes = mat1.sizes();
   const auto mat2_sizes = mat2.sizes();
   #if defined(CUDA_VERSION) || defined(USE_ROCM)
   const auto scalar_type = mat1.scalar_type();
+
+  // We apply bias in the epilogue only when it is 1D,
+  // or when it can be squeezed to 1D.
+  // nullptr implies ignore bias epilogue
+  // and use standard gemm-like API.
+  const bool can_use_epilogue_bias(
+    // Conditions for bias to be fusable -- implies direct Lt path without copies.
+    self.is_contiguous() &&
+    // NOTE: fine to have 1-len dims to the left from the right-most one
+    (self.dim() == 1 || self.squeeze().dim() == 1) &&
+    self.sizes().back() == mat2_sizes[1]
+  );
+  if (can_use_epilogue_bias) {
+    epilogue_params.set_bias(self);
+  }
+
   return (beta.toComplexDouble() == 1.0
     // NOTE: row-major result is important when bias is 1D.
     // This is because Lt broadcasts 1D bias over the columns
@@ -194,16 +248,9 @@ static bool isInputCompliesAddmmCudaLt(
     // will be ignored.
     && result.dim() == 2 && result.is_contiguous()
     && (
-      ( // Conditions for bias to be fusable -- implies direct Lt path without copies.
-        self.is_contiguous() &&
-        // NOTE: fine to have 1-len dims to the left from the right-most one
-        (self.dim() == 1 || self.squeeze().dim() == 1) &&
-        self.sizes().back() == mat2_sizes[1]
-      )
-      || ( // 2D bias restrictions. self.is_contiguous() is implicit when result.is_same(self),
-        // and we need to copy self into result otherwise, so the self's layout becomes irrelevant.
-        // See also TODO from above.
-        activation != Activation::None && // Lt is faster when activation is fused
+      can_use_epilogue_bias
+      || (
+        epilogue_params.activation != Activation::None && // Lt is faster when activation is fused
         (self.dim() == 2 && at::is_expandable_to(self.sizes(), {mat1_sizes[0], mat2_sizes[1]}))
       )
     )
@@ -293,28 +340,42 @@ void launchTunableGemmAndBias(cublasCommonArgs &args, const Scalar& alpha, const
 }
 
 template <typename scalar_t, typename res_scalar_t = scalar_t>
-bool launchGemmAndBiasCublasLt(
+bool launchGemmAndEpilogueCublasLt(
     // args contains result which is modified
     cublasCommonArgs& args,
-    const std::optional<Tensor>& self,
     const Scalar& alpha,
-    Activation activation = Activation::None
+    const cublasLtEpilogueParams& epilogue_params
 ) {
-  // We apply bias in the epilogue only when it is 1D,
-  // or when it can be squeezed to 1D.
-  // self_ptr == nullptr implies ignore bias epilogue
-  // and use standard gemm-like API.
-  const auto* self_ptr = self.has_value() ? self.value().const_data_ptr<scalar_t>() : static_cast<const scalar_t*>(nullptr);
-
+  const auto* self_ptr = (epilogue_params.opt_bias.has_value()
+    ? epilogue_params.opt_bias.value().const_data_ptr<scalar_t>()
+    : static_cast<const scalar_t*>(nullptr)
+  );
 
   const auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
     // TODO: maybe also return some success state?
     launchTunableGemmAndBias<scalar_t>(
-      args, alpha, self_ptr, activation_to_gemm_and_blas_arg(activation)
+      // TODO(@nikitaved) MUST - enable pre_activation ptr or error!
+      args, alpha, self_ptr, activation_to_gemm_and_blas_arg(epilogue_params.activation)
     );
     return true;
   }
+
+  const auto opt_pre_activation = epilogue_params.opt_pre_activation;
+  auto* pre_activation_ptr = (opt_pre_activation.has_value()
+      ? opt_pre_activation.value().data_ptr<res_scalar_t>()
+      : nullptr
+  );
+  int64_t pre_activation_ld = (opt_pre_activation.has_value()
+      // NOTE: column-major result is not yet supported in Lt,
+      // so the assumption is that Lt computes a transposed problem,
+      // which turns result into row-major
+      ? (opt_pre_activation.value().is_contiguous()
+        ? opt_pre_activation.value().stride(-2)
+        : opt_pre_activation.value().stride(-1)
+      )
+      : 0 // will be ignored with pre_activation_ptr == nullptr
+  );
 
   return at::cuda::blas::gemm_and_bias<scalar_t, res_scalar_t>(
     args.transa == 't',
@@ -327,10 +388,12 @@ bool launchGemmAndBiasCublasLt(
     args.lda,
     args.matb->const_data_ptr<scalar_t>(),
     args.ldb,
-    self_ptr,
+    /*bias_ptr=*/self_ptr,
     args.result->data_ptr<res_scalar_t>(),
     args.result_ld,
-    activation_to_gemm_and_blas_arg(activation)
+    /*activation=*/activation_to_gemm_and_blas_arg(epilogue_params.activation),
+    pre_activation_ptr,
+    pre_activation_ld
   );
 }
 
@@ -359,7 +422,7 @@ bool launchGemmCublas(
   return true; // success!
 }
 
-Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None, bool disable_addmm_cuda_lt_override=false) {
+Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, cublasLtEpilogueParams epilogue_params=cublasLtEpilogueParams(), bool disable_addmm_cuda_lt_override=false) {
   // Shape checks {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
@@ -391,7 +454,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || isGloballyDisabledAddmmCudaLt(self.device());
   #endif
   // Condition on the input
-  disable_addmm_cuda_lt = disable_addmm_cuda_lt || !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha, activation);
+  disable_addmm_cuda_lt = disable_addmm_cuda_lt || !isInputCompliesAddmmCudaLt(result, self, mat1, mat2, beta, alpha, epilogue_params);
 
   at::ScalarType scalar_type = mat1.scalar_type();
   bool is_float_output_with_half_input = (scalar_type == at::ScalarType::Half || scalar_type == at::ScalarType::BFloat16) && result.scalar_type() == at::ScalarType::Float;
@@ -400,7 +463,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   disable_addmm_cuda_lt = disable_addmm_cuda_lt || is_float_output_with_half_input;
   #endif
 
-  bool use_bias_ptr_lt = (self.dim() == 1) && !disable_addmm_cuda_lt;
+  bool use_bias_ptr_lt = epilogue_params.opt_bias.has_value() && !disable_addmm_cuda_lt;
   // for float output with half input cublasLT with bias produces wrong results
   use_bias_ptr_lt &= !is_float_output_with_half_input;
 
@@ -459,7 +522,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-          lt_success = launchGemmAndBiasCublasLt<scalar_t, float>(args, use_bias_ptr_lt ? std::make_optional(self) : std::nullopt, alpha, activation);
+          lt_success = launchGemmAndEpilogueCublasLt<scalar_t, float>(args, alpha, epilogue_params);
         }
       );
       #endif
@@ -471,14 +534,14 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
-          lt_success = launchGemmAndBiasCublasLt<scalar_t>(args, use_bias_ptr_lt ? std::make_optional(self) : std::nullopt, alpha, activation);
+          lt_success = launchGemmAndEpilogueCublasLt<scalar_t>(args, alpha, epilogue_params);
         }
       );
     } // end is_float_output_with_half_input
 
     if (!lt_success) {
     // lt path failed; recurse but disable lt path
-      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, activation, true);
+      return addmm_out_cuda_impl(result, self, mat1, mat2, beta, alpha, epilogue_params, true);
     }
     // end Lt path
   } else {
@@ -503,8 +566,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
       );
     }
 
+    if (epilogue_params.opt_pre_activation.has_value()) {
+      epilogue_params.opt_pre_activation.value().copy_(*args.result);
+    }
+
     // Apply epilogue
-    switch (activation) {
+    switch (epilogue_params.activation) {
       case Activation::RELU:
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
         at::relu_(const_cast<Tensor&>(*args.result));
@@ -522,7 +589,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
 // performing a post-GELU because we weren't able to use the GELU
 // epilogue above.
 #if !defined(CUDA_VERSION) && !defined(USE_ROCM)
-  if (!disable_addmm_cuda_lt && activation == Activation::GELU) {
+  if (!disable_addmm_cuda_lt && epilogue_params.activation == Activation::GELU) {
     at::gelu_(const_cast<Tensor&>(*args.result), "tanh");
   }
 #endif
@@ -662,7 +729,15 @@ TORCH_IMPL_FUNC(addmm_out_cuda)(const Tensor& self, const Tensor& mat1, const Te
 
 TORCH_IMPL_FUNC(addmm_activation_out_cuda)(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, bool use_gelu, const Tensor& result) {
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  addmm_out_cuda_impl(const_cast<Tensor&>(result), self, mat1, mat2, beta, alpha, use_gelu ? Activation::GELU : Activation::RELU);
+  addmm_out_cuda_impl(
+    const_cast<Tensor&>(result),
+    self,
+    mat1,
+    mat2,
+    beta,
+    alpha,
+    cublasLtEpilogueParams().set_activation(use_gelu ? Activation::GELU : Activation::RELU)
+  );
 }
 
 TORCH_IMPL_FUNC(mm_out_cuda)(const Tensor& self, const Tensor& mat2, const Tensor& result) {
