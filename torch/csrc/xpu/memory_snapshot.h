@@ -7,7 +7,7 @@
 
 namespace torch::xpu {
 
-TORCH_XPU_API void _record_memory_history(
+TORCH_PYTHON_API void _record_memory_history(
     bool enabled,
     bool record_context = true,
     int64_t trace_alloc_max_entries = 1,
@@ -17,7 +17,7 @@ TORCH_XPU_API void _record_memory_history(
     bool compileContext = false,
     bool globalRecordAllocations = false);
 
-TORCH_XPU_API void _record_memory_history(
+TORCH_PYTHON_API void _record_memory_history(
     std::optional<std::string> enabled = "all",
     std::optional<std::string> context = "all",
     const std::string& stacks = "all",
@@ -26,6 +26,6 @@ TORCH_XPU_API void _record_memory_history(
     bool compileContext = false,
     bool globalRecordAllocations = false);
 
-TORCH_XPU_API std::string _memory_snapshot_pickled();
+TORCH_PYTHON_API std::string _memory_snapshot_pickled();
 
 } // namespace torch::xpu
