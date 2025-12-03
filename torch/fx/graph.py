@@ -10,6 +10,7 @@ import math
 import os
 import pprint
 import re
+import types
 import typing
 import warnings
 from collections import defaultdict
@@ -499,6 +500,10 @@ class CodeGen:
                 return "()"
 
             typename = _type_repr(o)
+            if isinstance(o, types.UnionType) and "|" in typename:
+                # str | int
+                args = [type_repr(arg) for arg in o.__args__]
+                return "|".join(args)
 
             if origin_type := getattr(o, "__origin__", None):
                 # list[...], typing.List[...], TensorType[...]
