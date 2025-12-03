@@ -4,9 +4,8 @@ import keyword
 
 import torch
 import torch._dynamo
-from torch._dynamo.test_case import TestCase
+from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import CompileCounter, same
-from torch.testing._internal.common_utils import run_tests
 
 
 class LazyConstantVariableTests(TestCase):

@@ -1,13 +1,19 @@
+from __future__ import annotations
+
 import collections
 import functools
 import inspect
-from collections.abc import Callable
-from typing import Any, Optional, Union
-from typing_extensions import Self
+from typing import Any, TYPE_CHECKING
 
 from ..utils import is_function_or_wrapper
 from .base import VariableTracker, VariableTrackerMeta
-from .tensor import SymNodeVariable
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing_extensions import Self
+
+    from .tensor import SymNodeVariable
 
 
 class LazyCache:
@@ -18,8 +24,8 @@ class LazyCache:
             assert source
         self.value = value
         self.source = source
-        self.name_hint: Optional[str] = None
-        self.vt: Optional[VariableTracker] = None
+        self.name_hint: str | None = None
+        self.vt: VariableTracker | None = None
 
     def realize(self) -> None:
         assert self.vt is None
@@ -66,7 +72,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
-    def create(value: Any, source: Any, **options: Any) -> "LazyVariableTracker":
+    def create(value: Any, source: Any, **options: Any) -> LazyVariableTracker:
         if type(value) in LazyConstantVariable.supported_types:
             return LazyConstantVariable.create(value, source, **options)
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
@@ -83,7 +89,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
             assert self._cache.vt is not None
         return self._cache.vt
 
-    def unwrap(self) -> Union[VariableTracker, Self]:
+    def unwrap(self) -> VariableTracker | Self:
         """Return the real VariableTracker if it already exists"""
         if self.is_realized():
             assert self._cache.vt is not None
@@ -133,7 +139,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     def realize_all(
         cls,
         value: Any,
-        cache: Optional[dict[int, tuple[Any, Any]]] = None,
+        cache: dict[int, tuple[Any, Any]] | None = None,
         *,
         allow_lazy_constant: bool = False,
     ) -> Any:
@@ -194,15 +200,9 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
         # This is used by ConstDictVariable tracker to find if the key LazyVT
         # can be hashed.
         def _helper(value: Any) -> bool:
-            # Only return True for types that are KNOWN to be safely hashable
-            # without needing the full VT machinery. For tensors and modules,
-            # we need to go through the proper VT path to get consistent hashing
-            # (e.g., using FakeTensor for TensorVariable).
-            # Note: isinstance(value, Hashable) is too broad - it includes tensors
-            # and modules which need special handling.
+            # TODO: Add support for more types
             return (
-                isinstance(value, (int, float, bool, str, type(None), frozenset))
-                or inspect.isbuiltin(value)
+                inspect.isbuiltin(value)
                 or issubclass(type(value), type)
                 or is_function_or_wrapper(value)
             )
@@ -241,7 +241,7 @@ class LazyConstantVariable(LazyVariableTracker):
         value: Any,
         source: Any,
         **options: Any,
-    ) -> "LazyConstantVariable":
+    ) -> LazyConstantVariable:
         assert type(value) in LazyConstantVariable.supported_types
         return LazyConstantVariable(LazyCache(value, source), source=source, **options)
 
