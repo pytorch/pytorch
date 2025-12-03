@@ -1,5 +1,5 @@
 JAI Hanuman
 
-JAI 
+JAI Jai
 
 jai shri ram ji 
