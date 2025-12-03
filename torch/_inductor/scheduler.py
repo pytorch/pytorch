@@ -580,7 +580,7 @@ class BaseSchedulerNode:
     def set_last_usage(
         self, future_used_buffers: OrderedSet[str], mutation_real_name: dict[str, str]
     ) -> None:
-        used_buffers = self.used_or_aliased_buffer_names_for_lifetime()
+        used_buffers = self.used_or_aliased_buffer_names()
         used_buffers = OrderedSet(mutation_real_name.get(k, k) for k in used_buffers)
         self.last_usage = used_buffers - future_used_buffers
 
@@ -595,32 +595,11 @@ class BaseSchedulerNode:
         )
 
     def used_or_aliased_buffer_names(self) -> OrderedSet[str]:
-        used_names: OrderedSet[str] = OrderedSet()
-
-        deps = [
-            dep.name
-            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
-        ]
-        while len(deps) > 0:
-            dep = deps.pop()
-            used_names.add(dep)
-            if V.graph.name_to_buffer.get(dep):
-                deps.extend(
-                    alias
-                    for alias in V.graph.name_to_buffer[
-                        dep
-                    ].get_inputs_that_alias_output()
-                    if alias not in used_names
-                )
-        return used_names
-
-    def used_or_aliased_buffer_names_for_lifetime(self) -> OrderedSet[str]:
         """
-        Like used_or_aliased_buffer_names, but excludes is_fake WeakDeps.
+        Returns buffer names used by this node, including aliases.
 
-        is_fake WeakDeps are purely for ordering constraints (e.g., control_deps)
-        and should not extend buffer lifetimes. This method is used specifically
-        for computing last_usage / buffer freeing decisions.
+        Note: is_fake WeakDeps are excluded since they are purely for ordering
+        and should not affect buffer lifetime.
         """
         used_names: OrderedSet[str] = OrderedSet()
 
@@ -1958,12 +1937,6 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def used_or_aliased_buffer_names(self) -> OrderedSet[str]:
         return OrderedSet.union(
             *[x.used_or_aliased_buffer_names() for x in self.snodes]
-        )
-
-    @cache_on_self
-    def used_or_aliased_buffer_names_for_lifetime(self) -> OrderedSet[str]:
-        return OrderedSet.union(
-            *[x.used_or_aliased_buffer_names_for_lifetime() for x in self.snodes]
         )
 
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
