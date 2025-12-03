@@ -238,15 +238,10 @@ def _collect_accelerator_rng_states() -> dict[int, torch.Tensor]:
     if not torch.accelerator.is_available():
         return {}
 
-    if torch.cuda.is_available():
-        device_idx = torch.cuda.current_device()
-        with torch.cuda.device(device_idx):
-            return {device_idx: torch.cuda.get_rng_state()}
-
-    if torch.xpu.is_available():
-        device_idx = torch.xpu.current_device()
-        with torch.xpu.device(device_idx):
-            return {device_idx: torch.xpu.get_rng_state()}
+    if torch.accelerator.is_available():
+        device_idx = torch.accelerator.current_device_index()
+        with torch.accelerator.device_index(device_idx):
+            return {device_idx: torch.get_device_module().get_rng_state()}
 
     return {}
 
@@ -261,15 +256,11 @@ def _set_accelerator_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
     if not torch.accelerator.is_available():
         return
 
-    if torch.cuda.is_available():
+    if torch.accelerator.is_available():
         for device_idx, device_rng_state in rng_states.items():
-            with torch.cuda.device(device_idx):
-                torch.cuda.set_rng_state(device_rng_state)
+            with torch.accelerator.device_index(device_idx):
+                torch.get_device_module().set_rng_state(device_rng_state)
 
-    if torch.xpu.is_available():
-        for device_idx, device_rng_state in rng_states.items():
-            with torch.xpu.device(device_idx):
-                torch.xpu.set_rng_state(device_rng_state)
 
 def _get_rng_state() -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
     """
