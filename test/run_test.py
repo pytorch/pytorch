@@ -225,7 +225,7 @@ S390X_BLOCKLIST = [
     "inductor/test_inplacing_pass",
     "inductor/test_kernel_benchmark",
     "inductor/test_max_autotune",
-    "inductor/test_move_constructors_to_cuda",
+    "inductor/test_move_constructors_to_gpu",
     "inductor/test_multi_kernel",
     "inductor/test_pattern_matcher",
     "inductor/test_perf",
@@ -798,7 +798,7 @@ def run_test_retries(
             # skip it and move on
             sc_command = f"--scs={stepcurrent_key}"
             print_to_file(
-                "Test succeeeded in new process, continuing with the rest of the tests"
+                "Test succeeded in new process, continuing with the rest of the tests"
             )
         elif num_failures[current_failure] >= 3:
             # This is for log classifier so it can prioritize consistently
@@ -884,7 +884,8 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         if TEST_CUDA or TEST_XPU:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
         if TEST_CUDA:
-            exts_to_build.append((install_cmd, "libtorch_agnostic_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agnostic_2_9_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agnostic_2_10_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
                 cmd,
@@ -912,12 +913,16 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
                 if "-packages" in directory:
                     install_directories.append(os.path.join(root, directory))
 
-        for root, directories, _ in os.walk(
-            os.path.join(cpp_extensions, "libtorch_agnostic_extension", "install")
-        ):
-            for directory in directories:
-                if "-packages" in directory:
-                    install_directories.append(os.path.join(root, directory))
+        for extension_name in [
+            "libtorch_agnostic_2_9_extension",
+            "libtorch_agnostic_2_10_extension",
+        ]:
+            for root, directories, _ in os.walk(
+                os.path.join(cpp_extensions, extension_name, "install")
+            ):
+                for directory in directories:
+                    if "-packages" in directory:
+                        install_directories.append(os.path.join(root, directory))
 
         with extend_python_path(install_directories):
             return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
@@ -2152,7 +2157,7 @@ def main():
         if IS_CI:
             for test, _ in all_failures:
                 test_stats = test_prioritizations.get_test_stats(test)
-                print_to_stderr("Emiting td_test_failure_stats_v2")
+                print_to_stderr("Emitting td_test_failure_stats_v2")
                 emit_metric(
                     "td_test_failure_stats_v2",
                     {
