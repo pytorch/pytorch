@@ -270,7 +270,7 @@ def _private_register_pytree_node(
 def _is_pytreespec_instance(
     obj: Any,
     /,
-) -> TypeIs[Union[TreeSpec, python_pytree.PyTreeSpec]]:
+) -> TypeIs[TreeSpec | python_pytree.PyTreeSpec]:
     if isinstance(obj, (TreeSpec, python_pytree.PyTreeSpec)):
         return True
     if "torch._dynamo.polyfills.pytree" in sys.modules:
