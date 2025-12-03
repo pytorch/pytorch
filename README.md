@@ -451,6 +451,15 @@ the new module, you might need to install torch [from source](#from-source).
 See [Docstring Guidelines](https://github.com/pytorch/pytorch/wiki/Docstring-Guidelines)
 for docstring conventions.
 
+> [!IMPORTANT]
+> The `docs/requirements.txt` file is incomplete and may fail on modern systems (especially macOS ARM64).
+> If `pip install -r requirements.txt` fails, install the core dependencies manually:
+> ```bash
+> pip install sphinx pytorch_sphinx_theme2 sphinxcontrib-katex \
+>     sphinxext-opengraph sphinx_sitemap matplotlib \
+>     sphinx_copybutton sphinx_design myst-nb sphinxcontrib-mermaid
+> ```
+
 ```bash
 cd docs/
 pip install -r requirements.txt
@@ -475,6 +484,13 @@ If you get a katex error run `npm install katex`.  If it persists, try
 > If you see a numpy incompatibility error, run:
 > ```
 > pip install 'numpy<2'
+> ```
+
+> [!NOTE]
+> On macOS ARM64 (Apple Silicon), the old matplotlib version in requirements.txt may fail to build.
+> If you encounter matplotlib build errors, install a newer version:
+> ```
+> pip install 'matplotlib>=3.9.0'
 > ```
 
 When you make changes to the dependencies run by CI, edit the
