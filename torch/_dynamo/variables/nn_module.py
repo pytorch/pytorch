@@ -859,7 +859,7 @@ class NNModuleVariable(VariableTracker):
             # pyrefly: ignore[missing-attribute]
             if type(module).__getitem__ not in builtin_supported:
                 if not (
-                    isinstance(args[0], variables.ConstantVariable)
+                    args[0].is_python_constant()
                     and isinstance(args[0].as_python_constant(), (str, int))
                 ):
                     unimplemented(
