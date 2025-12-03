@@ -1011,6 +1011,13 @@ class TensorVariable(VariableTracker):
     def method_backward(
         self, gradient=None, retain_graph=None, create_graph=None, inputs=None
     ):
+        if not config.trace_autograd_ops:
+            unimplemented(
+                gb_type="Unsupported Tensor.backward() call",
+                context=f"call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
+                explanation="Dynamo currently does not support tracing `Tensor.backward()`.",
+                hints=[*graph_break_hints.FUNDAMENTAL],
+            )
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()

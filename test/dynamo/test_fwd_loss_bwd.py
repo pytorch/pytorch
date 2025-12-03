@@ -3,7 +3,12 @@
 import torch
 import torch._dynamo
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_utils import run_tests, skipIfCrossRef, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import (
+    run_tests,
+    skipIfCrossRef,
+    skipIfTorchDynamo,
+    TestCase,
+)
 
 
 @skipIfTorchDynamo()
@@ -374,6 +379,7 @@ class <lambda>(torch.nn.Module):
     @skipIfCrossRef
     def test_trace_autograd_ops_config(self):
         """Test that trace_autograd_ops config controls whether autograd.grad is traced."""
+
         def fn(x):
             y = x.sin()
             (gx,) = torch.autograd.grad(y, x)
