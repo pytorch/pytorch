@@ -1016,7 +1016,7 @@ class ExceptionStack:
     # and "stack" sometimes refers to a C variable with the same name and the
     # exception stack, respectively.
     #
-    # The lifetime of an exception is (Python 3.11+):
+    # The lifetime of an exception in Python 3.11+ is:
     #  + tx._raise_exception_variable(...) := sets the current_exception variable
     #  + PUSH_EXC_INFO := pushes the current_exception to the *exception stack*
     #  + POP_EXCEPT := pops TOS from the *exception stack*

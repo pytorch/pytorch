@@ -2283,10 +2283,23 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 len(extern),
                 [node.node.get_origins() for node in extern if node.node is not None],
             )
+        grouped = [x for x in nodes if isinstance(x, GroupedSchedulerNode)]
+        if grouped:
+            log.debug(
+                "ComboKernels: %d grouped nodes are filtered",
+                len(grouped),
+            )
         filtered_nodes = [
             x
             for x in nodes
-            if not isinstance(x, (NopKernelSchedulerNode, ExternKernelSchedulerNode))
+            if not isinstance(
+                x,
+                (
+                    NopKernelSchedulerNode,
+                    ExternKernelSchedulerNode,
+                    GroupedSchedulerNode,
+                ),
+            )
         ]
         foreach_nodes = [
             x for x in filtered_nodes if isinstance(x, ForeachKernelSchedulerNode)
@@ -3060,6 +3073,10 @@ class Scheduler:
                 add_user(add_dep, node, is_weak=True)
                 node.add_fake_dep(WeakDep(add_dep, node.get_name()))
 
+            for add_dep in V.graph.additional_star_deps[node.get_name()]:
+                add_user(add_dep, node, is_weak=False)  # Strong dependency
+                node.add_fake_dep(StarDep(add_dep))
+
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
                 if not isinstance(read, WeakDep):
@@ -3291,6 +3308,7 @@ class Scheduler:
                 ExternKernelSchedulerNode,
                 NopKernelSchedulerNode,
                 FusedSchedulerNode,
+                GroupedSchedulerNode,
             ),
         ):
             for dep in snode.unmet_dependencies:
