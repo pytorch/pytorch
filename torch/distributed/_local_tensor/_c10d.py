@@ -120,6 +120,9 @@ def _local_functional_all_gather_into_tensor(
         group_ranks = [group_offset + r for r in ranks]
 
         group_tensors = []
+        if not all(rank in tensor._local_tensors for rank in group_ranks):
+            continue
+
         for rank in group_ranks:
             group_tensors.append(tensor._local_tensors[rank])
 
@@ -151,6 +154,9 @@ def _local_functional_reduce_scatter_tensor(
         group_ranks = [group_offset + r for r in ranks]
 
         group_tensors = []
+        if not all(rank in tensor._local_tensors for rank in group_ranks):
+            continue
+
         for rank in group_ranks:
             group_tensors.append(tensor._local_tensors[rank])
 
@@ -191,6 +197,9 @@ def _local_functional_shard_dim_alltoall(
         group_ranks = [group_offset + r for r in ranks]
 
         group_tensors = []
+        if not all(rank in tensor._local_tensors for rank in group_ranks):
+            continue
+
         for rank in group_ranks:
             group_tensors.append(tensor._local_tensors[rank])
 
@@ -256,6 +265,9 @@ def _local_functional_all_to_all_single(
     for group_offset in group_offsets:
         group_ranks = [group_offset + r for r in ranks]
 
+        if not all(rank in split_local_tensors for rank in group_ranks):
+            continue
+
         for i, dst in enumerate(group_ranks):
             splits = []
             for j, src in enumerate(group_ranks):
@@ -305,6 +317,9 @@ def _local_broadcast_(
         # For the tensors in this group [group_offset + r for r in ranks]
         # perform the broadcast on them
         group_ranks = [group_offset + r for r in ranks]
+        if not all(rank in tensor._local_tensors for rank in group_ranks):
+            continue
+
         source_rank = group_offset + relative_root_rank
         source_tensor = tensor._local_tensors[source_rank]
 
@@ -375,6 +390,8 @@ def _local_all_reduce_(
         # For the tensors in this group [group_offset + r for r in ranks]
         # perform the allreduce on them
         group_ranks = [group_offset + r for r in ranks]
+        if not all(rank in tensor._local_tensors for rank in group_ranks):
+            continue
 
         # Collect tensors from the specified ranks in this group
         group_tensors = []
@@ -415,6 +432,8 @@ def _local_allreduce_coalesced_(
         # For each tensor, perform the reduction operation
         for tensor in tensors:
             assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
+            if not all(rank in tensor._local_tensors for rank in group_ranks):
+                continue
             # Collect tensors from the specified ranks in this group
             group_tensors = []
             for rank in group_ranks:
@@ -463,6 +482,11 @@ def _local_reduce_scatter_tensor_coalesced_(
             assert isinstance(output_tensor, LocalTensor), (
                 "Output tensor must be a LocalTensor"
             )
+            if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+                continue
+            if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+                continue
+
             # Collect tensors from the specified ranks in this group
             group_inputs = []
             for rank in group_ranks:
@@ -503,6 +527,11 @@ def _local_allgather_base_(
     for group_offset in group_offsets:
         group_ranks = [group_offset + r for r in ranks]
 
+        if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+            continue
+        if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+            continue
+
         gathered_tensors = []
         for rank_i in group_ranks:
             gathered_tensors.append(input_tensor._local_tensors[rank_i])
@@ -539,6 +568,10 @@ def _local_reduce_scatter_base_(  # type: ignore[no-untyped-def]
 
     for group_offset in group_offsets:
         group_ranks = [group_offset + r for r in ranks]
+        if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+            continue
+        if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+            continue
 
         gathered_tensors = []
         for rank_i in group_ranks:
@@ -639,6 +672,12 @@ def _local_allgather_into_tensor_coalesced_(
             assert isinstance(output_tensor, LocalTensor), (
                 "Output tensor must be a LocalTensor"
             )
+
+            if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+                continue
+            if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+                continue
+
             # Gather input_tensor from all ranks into output_tensor
             # The output should be a concatenation of all inputs along the first dimension
             gathered_tensors = []
@@ -706,6 +745,8 @@ def _local_scatter_(
         # For the tensors in this group [group_offset + r for r in ranks]
         # perform the scatter on them
         group_ranks = [group_offset + r for r in ranks]
+        if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+            continue
 
         # Root rank scatters its input tensors to all ranks in this group
         for i, rank in enumerate(group_ranks):
@@ -753,11 +794,19 @@ def _local_alltoall_(
             assert isinstance(output_tensor, LocalTensor), (
                 "Output tensor must be a LocalTensor"
             )
+
+            if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+                continue
+
             for j, rank_j in enumerate(group_ranks):
                 input_tensor = input_tensors[j]
                 assert isinstance(input_tensor, LocalTensor), (
                     "Input tensor must be a LocalTensor"
                 )
+
+                if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+                    continue
+
                 # Rank i's j-th input tensor goes to rank j's i-th output tensor
                 source_tensor = input_tensor._local_tensors[rank_i]
                 output_tensor._local_tensors[rank_j].copy_(source_tensor)
@@ -795,6 +844,11 @@ def _local_alltoall_base_(
         # For the tensors in this group [group_offset + r for r in ranks]
         # perform the alltoall_base on them
         group_ranks = [group_offset + r for r in ranks]
+
+        if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+            continue
+        if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+            continue
 
         for i, rank_i in enumerate(group_ranks):
             # Split input tensor from rank_i according to input_split_sizes
