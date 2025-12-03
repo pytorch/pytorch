@@ -36,7 +36,8 @@ PARAM_RE = re.compile('Type of parameter "(.*)" is unknown')
 
 PUBLIC_NAMES = "__init__", "__main__"
 SUFFIXES = ".py", ".pyi"
-
+# Words that appear in the grandfather file that CODESPELL flags
+CODESPELL_CLASHES = ["lamda"]
 
 _log = partial(print, file=sys.stderr)
 
@@ -130,7 +131,7 @@ class MissingTypeLinter(FileLinter):
     def lint_all(self) -> bool:
         if self.write_grandfather:
             with self.args.grandfather.open("w") as fp:
-                fp.writelines(g + "\n" for g in self.grandfather)
+                fp.writelines(self.grandfather_lines())
             return True
         else:
             for k in self.missing_annotations_added:
@@ -143,7 +144,7 @@ class MissingTypeLinter(FileLinter):
     @cached_property
     def missing_annotations_added(self) -> dict[str, list[MissingAnnotation]]:
         with self.args.grandfather.open() as fp:
-            grandfather = {i.strip() for i in fp}
+            grandfather = {s for line in fp if (s := line.partition("#")[0].strip())}
 
         def grandfathered(lm: list[MissingAnnotation]) -> list[MissingAnnotation]:
             return [m for m in lm if m.grandfather not in grandfather]
@@ -199,6 +200,13 @@ class MissingTypeLinter(FileLinter):
 
         items = sorted(json.loads(text).items())
         return {k: v for k, v in items if k.endswith(SUFFIXES)}
+
+    def grandfather_lines(self) -> Iterator[str]:
+        for g in self.grandfather:
+            yield g
+            if any(i in g for i in CODESPELL_CLASHES):
+                yield "  # codespell:ignore"
+            yield "\n"
 
     @cached_property
     def write_grandfather(self) -> bool:
