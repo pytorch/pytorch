@@ -133,7 +133,7 @@ def get_detr(device: torch.device) -> GetterReturnType:
         weight_dict = criterion.weight_dict
         final_loss = cast(
             Tensor,
-            sum(loss[k] * weight_dict[k] for k in loss.keys() if k in weight_dict),
+            sum(loss[k] * weight_dict[k] for k in loss if k in weight_dict),
         )
         return final_loss
 
