@@ -1152,7 +1152,6 @@ class MemoryProfileTimeline:
             return
 
         from base64 import b64encode
-        from os import remove
         from tempfile import NamedTemporaryFile
 
         import matplotlib.pyplot as plt
@@ -1190,12 +1189,12 @@ class MemoryProfileTimeline:
         axes.set_title(title)
 
         # Embed the memory timeline image into the HTML file
-        tmpfile = NamedTemporaryFile("wb", suffix=".png", delete=False)
-        tmpfile.close()
-        fig.savefig(tmpfile.name, format="png")
+        with NamedTemporaryFile("wb", suffix=".png") as tmpfile:
+            fig.savefig(tmpfile, format="png")
 
-        with open(tmpfile.name, "rb") as tmp:
-            encoded = b64encode(tmp.read()).decode("utf-8")
+            tmpfile.seek(0, 0)
+            encoded = b64encode(tmpfile.read()).decode("utf-8")
+            assert encoded
             html = f"""<html>
 <head><meta charset="utf-8" /><title>GPU Memory Timeline HTML</title></head>
 <body>
@@ -1203,6 +1202,5 @@ class MemoryProfileTimeline:
 </body>
 </html>"""
 
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(html)
-        remove(tmpfile.name)
