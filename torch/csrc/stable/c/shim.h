@@ -92,6 +92,49 @@ AOTI_TORCH_EXPORT AOTITorchError torch_get_thread_idx(uint32_t* out_thread_idx);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_num_threads(uint32_t* out_num_threads);
 
+// Get a pointer to the underlying storage data
+AOTI_TORCH_EXPORT AOTITorchError torch_get_mutable_data_ptr(
+    AtenTensorHandle tensor,
+    void** ret_data_ptr // returns borrowed reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_const_data_ptr(
+    AtenTensorHandle tensor,
+    const void** ret_data_ptr // returns borrowed reference
+);
+
+struct StringOpaque;
+using StringHandle = StringOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_string_handle(const char* data, size_t length, StringHandle* handle);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_delete_string(StringHandle handle);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_length(StringHandle handle, size_t* length);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_c_str(StringHandle handle, const char** data);
+
+#ifdef USE_CUDA
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_get_current_cuda_blas_handle(void** ret_handle);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_current_cuda_stream(void* stream, int32_t device_index);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cuda_stream_from_pool(
+    bool isHighPriority,
+    int32_t device_index,
+    void** ret_stream);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cuda_stream_synchronize(void* stream, int32_t device_index);
+
+#endif // USE_CUDA
+
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 #ifdef __cplusplus

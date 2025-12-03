@@ -37,7 +37,6 @@ from torch.testing._internal.common_distributed import (
     requires_gloo,
     skip_if_lt_x_gpu,
     skip_if_no_gpu,
-    skip_if_rocm_multiprocess,
     skip_if_win32,
 )
 from torch.testing._internal.common_utils import (
@@ -56,7 +55,11 @@ except ImportError:
     HAS_TORCHVISION = False
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 
 
 @contextmanager
@@ -368,7 +371,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             )
 
     @skip_if_no_gpu
-    @skip_if_rocm_multiprocess
     def test_step(self):
         """Check that ZeroRedundancyOptimizer properly exposes the ``step()``
         interface."""
@@ -408,7 +410,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             self.assertEqual(m.bias, m_zero.bias)
 
     @skip_if_no_gpu
-    @skip_if_rocm_multiprocess
     def test_step_with_closure(self):
         """Check that ZeroRedundancyOptimizer properly exposes the
         ``step(closure)`` interface."""
@@ -627,7 +628,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
                 torch.testing.assert_close(layer1.bias, layer3.bias)
 
     @skip_if_no_gpu
-    @skip_if_rocm_multiprocess
     def test_collect_shards(self):
         """Check the state consolidation mechanism and the state dict exposed
         by ZeroRedundancyOptimizer."""
@@ -1353,7 +1353,6 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
     @skip_if_win32()
     @requires_accelerator_dist_backend()
     @skip_if_no_gpu
-    @skip_if_rocm_multiprocess
     @parametrize(
         "use_gpu",
         [True],

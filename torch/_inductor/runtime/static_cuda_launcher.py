@@ -3,6 +3,7 @@ import os
 from typing import Any
 from typing_extensions import Unpack
 
+from ..utils import is_rocm
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 from .triton_helpers import get_constexprs
 
@@ -41,12 +42,12 @@ class StaticallyLaunchedCudaKernel:
         if "hsaco" in kernel.asm:
             # pyrefly: ignore [missing-attribute]
             self.cubin_raw = kernel.asm["hsaco"]
-            self.is_rocm = True
+
         # pyrefly: ignore [missing-attribute]
         elif "cubin" in kernel.asm:
             # pyrefly: ignore [missing-attribute]
             self.cubin_raw = kernel.asm["cubin"]
-            self.is_rocm = False
+
         else:
             raise RuntimeError(
                 "Expected either 'hsaco' (ROCm) or 'cubin' (CUDA) in kernel.asm"
@@ -260,7 +261,7 @@ class StaticallyLaunchedCudaKernel:
 
         arg_tys = self.arg_tys
 
-        if self.is_rocm:
+        if is_rocm():
             # ROCm/HIP kernel ABI: The Triton HIP backend ALWAYS includes both
             # global_scratch and profile_scratch parameters in the kernel signature,
             # even when the kernel doesn't use them (i.e., when has_*_scratch is False).

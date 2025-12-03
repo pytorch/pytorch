@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import string
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
@@ -44,7 +44,7 @@ def einop_rule(
     op_schema: OpSchema,
     *,
     linearity: bool = False,
-    enforce_sharding: Optional[dict[str, int]] = None,
+    enforce_sharding: dict[str, int] | None = None,
 ) -> OutputSharding:
     """
     Propagate the sharding of inputs to output for ops whose data moves according to einsum notation.
@@ -168,7 +168,10 @@ def einop_rule(
                         assert input_spec.tensor_meta is not None
                         global_shape = input_spec.tensor_meta.shape
                         local_shape, _ = compute_local_shape_and_global_offset(
-                            global_shape, input_spec.mesh, input_spec.placements
+                            global_shape,
+                            input_spec.mesh,
+                            input_spec.placements,
+                            skip_offset=True,
                         )
                         cost += prod(local_shape) * input_spec.mesh.size(mesh_dim)
                 # pyrefly: ignore [bad-argument-type]
