@@ -256,7 +256,7 @@ def memory_snapshot(
         list[dict[str, Any]]: List of memory segments and their attributes.
     """
     if not is_initialized():
-        return {}
+        return []
     return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
 
 
