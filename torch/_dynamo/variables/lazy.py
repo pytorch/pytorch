@@ -1,13 +1,19 @@
+from __future__ import annotations
+
 import collections
 import functools
 import inspect
-from collections.abc import Callable
-from typing import Any, Optional, Union
-from typing_extensions import Self
+from typing import Any, TYPE_CHECKING
 
 from ..utils import is_function_or_wrapper
 from .base import VariableTracker, VariableTrackerMeta
-from .tensor import SymNodeVariable
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing_extensions import Self
+
+    from .tensor import SymNodeVariable
 
 
 class LazyCache:
@@ -18,8 +24,8 @@ class LazyCache:
             assert source
         self.value = value
         self.source = source
-        self.name_hint: Optional[str] = None
-        self.vt: Optional[VariableTracker] = None
+        self.name_hint: str | None = None
+        self.vt: VariableTracker | None = None
 
     def realize(self) -> None:
         assert self.vt is None
@@ -61,7 +67,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
-    def create(value: Any, source: Any, **options: Any) -> "LazyVariableTracker":
+    def create(value: Any, source: Any, **options: Any) -> LazyVariableTracker:
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
@@ -76,7 +82,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
             assert self._cache.vt is not None
         return self._cache.vt
 
-    def unwrap(self) -> Union[VariableTracker, Self]:
+    def unwrap(self) -> VariableTracker | Self:
         """Return the real VariableTracker if it already exists"""
         if self.is_realized():
             assert self._cache.vt is not None
@@ -126,7 +132,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     def realize_all(
         cls,
         value: Any,
-        cache: Optional[dict[int, tuple[Any, Any]]] = None,
+        cache: dict[int, tuple[Any, Any]] | None = None,
     ) -> Any:
         """
         Walk an object and realize all LazyVariableTrackers inside it.
