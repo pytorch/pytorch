@@ -354,6 +354,7 @@ test_python_smoke_b200() {
       nn/attention/test_fa4 \
       nn/attention/test_open_registry \
       inductor/test_flex_flash \
+      inductor/test_torchinductor \
     $PYTHON_TEST_EXTRA_OPTION \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -1715,6 +1716,7 @@ test_linux_aarch64() {
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
         test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops profiler/test_memory_profiler \
         distributed/elastic/timer/api_test distributed/elastic/timer/local_timer_example distributed/elastic/timer/local_timer_test \
+        test_linalg \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1733,6 +1735,7 @@ test_linux_aarch64() {
        inductor/test_split_cat_fx_passes inductor/test_compile inductor/test_torchinductor \
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
        inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
+       inductor/test_cpu_select_algorithm \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
@@ -1763,12 +1766,14 @@ test_operator_microbenchmark() {
   mkdir -p "$TEST_REPORTS_DIR"
   TEST_DIR=$(pwd)
 
+  test_inductor_set_cpu_affinity
+
   cd benchmarks/operator_benchmark/pt_extension
-  python -m pip install .
+  python -m pip install . -v --no-build-isolation
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
-  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv; do
+  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile

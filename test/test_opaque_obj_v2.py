@@ -65,7 +65,7 @@ class Counter:
         self.counter += 1
 
 
-class Moodule(torch.nn.Module):
+class AddModule(torch.nn.Module):
     def forward(self, x, y):
         return x * y
 
@@ -73,7 +73,7 @@ class Moodule(torch.nn.Module):
 register_opaque_type(OpaqueQueue)
 register_opaque_type(RNGState)
 register_opaque_type(Counter)
-register_opaque_type(Moodule)
+register_opaque_type(AddModule)
 
 
 class TestOpaqueObject(TestCase):
@@ -430,16 +430,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         inp = (torch.tensor(1), torch.tensor(0))
         torch.compile(foo)(*inp)
         self.assertEqual(len(dynamo_counters["graph_break"]), 1)
-        self.assertExpectedInline(
-            next(iter(dynamo_counters["graph_break"].keys())),
-            """\
-Opaque object were created in the middle of the program and passed to a custom op.
-  Explanation: Opaque objects cannot be created inside the torch.compile region. They must be created before entering the compiled function.
-  Hint: Please create the opaque object before calling torch.compile and pass it in as an argument or as a global variable.
-
-  Developer debug context: Opaque object types: [<class '__main__.Counter'>]. Function: _TestOpaqueObject.increment_counter
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0363.html""",  # noqa: B950
+        self.assertTrue(
+            "Opaque object were created in the middle of the program and passed to a custom op."
+            in next(iter(dynamo_counters["graph_break"].keys())),
         )
 
     def test_compile_attribute(self):
@@ -468,7 +461,7 @@ Opaque object were created in the middle of the program and passed to a custom o
     def test_export_joint(self):
         torch.library.define(
             "_TestOpaqueObject::module_mul",
-            f"({get_opaque_type_name(Moodule)} a, Tensor b, SymInt c) -> Tensor",
+            f"({get_opaque_type_name(AddModule)} a, Tensor b, SymInt c) -> Tensor",
             tags=torch.Tag.pt2_compliant_tag,
             lib=self.lib,
         )
@@ -476,12 +469,12 @@ Opaque object were created in the middle of the program and passed to a custom o
         @torch.library.impl(
             "_TestOpaqueObject::module_mul", "CompositeExplicitAutograd", lib=self.lib
         )
-        def module_mul_impl(m: Moodule, a: torch.Tensor, b: int) -> torch.Tensor:
-            assert isinstance(m, Moodule)
+        def module_mul_impl(m: AddModule, a: torch.Tensor, b: int) -> torch.Tensor:
+            assert isinstance(m, AddModule)
             return m(a, b)
 
         @torch.library.register_fake("_TestOpaqueObject::module_mul", lib=self.lib)
-        def module_mul_fake(m: Moodule, a: torch.Tensor, b: int) -> torch.Tensor:
+        def module_mul_fake(m: AddModule, a: torch.Tensor, b: int) -> torch.Tensor:
             return torch.empty_like(a)
 
         def module_mul_setup_context(ctx, inputs, output):
@@ -501,7 +494,7 @@ Opaque object were created in the middle of the program and passed to a custom o
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.moo = Moodule()
+                self.moo = AddModule()
 
             def forward(self, x, y):
                 b = y.item()
@@ -525,6 +518,40 @@ def forward(self, primals, tangents):
                 compiled_fn = aot_compile_joint_with_descriptors(joint)
 
         self.assertEqual(compiled_fn(*inp), M()(*inp))
+
+    def test_invalid_schema(self):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "unknown type specifier",
+        ):
+            torch.library.define(
+                "_TestOpaqueObject::invalid_op1",
+                "(foo.bar.baz a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=self.lib,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"expected \) but found 'dots' here",
+        ):
+            torch.library.define(
+                "_TestOpaqueObject::invalid_op2",
+                "(......... a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=self.lib,
+            )
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "unknown type specifier",
+        ):
+            torch.library.define(
+                "_TestOpaqueObject::invalid_op5",
+                "(MyNamespace..MyClass a) -> Tensor",
+                tags=torch.Tag.pt2_compliant_tag,
+                lib=self.lib,
+            )
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

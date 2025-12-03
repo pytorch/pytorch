@@ -2552,6 +2552,7 @@ if torch._C._has_mkldnn:
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
     @register_meta(torch.ops.onednn.qconv_pointwise.default)
+    @register_meta(torch.ops.onednn.qconv_pointwise.tensor)
     def meta_qconv_pointwise(
         x,
         x_scale,
@@ -2603,6 +2604,7 @@ if torch._C._has_mkldnn:
         return out
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.binary)
+    @register_meta(torch.ops.onednn.qconv2d_pointwise.binary_tensor)
     def meta_qconv2d_pointwise_binary(
         x,
         x_scale,
@@ -3741,6 +3743,7 @@ def kai_roundup(a: int, b: int) -> int:
 
 def get_kai_packed_weight_size(n_bits, N, K, groupsize):
     if n_bits == 4:
+        # Works for both fp32 and bf16 Kernels
         if groupsize == K:  # channelwise
             # dotprod params only [1x8x32_neon_dotprod]
             kai_nr = 8
@@ -3870,6 +3873,8 @@ def meta__dyn_quant_pack_4bit_weight(
         )
         return weights.new_empty(int(packed_weight_size), dtype=torch.uint8)
     packed_weight_size = weights.numel() + scales_zeros.numel()
+    if bias is not None:
+        packed_weight_size += bias.numel()
     return weights.new_empty(packed_weight_size, dtype=torch.float)
 
 
@@ -3883,8 +3888,12 @@ def meta__dyn_quant_matmul_4bit(
 ):
     torch._check(inp.dim() == 2, lambda: "input must be a 2D tensor")
     torch._check(
-        inp.dtype == torch.float32,
-        lambda: f"expected input to be f32, got {inp.dtype}",
+        (inp.dtype == torch.float32)
+        or (inp.dtype == torch.bfloat16 and block_size == in_features),
+        lambda: (
+            f"expected input to be f32 or bf16 (bf16 requires block_size == in_features), "
+            f"got {inp.dtype} with block_size={block_size} and in_features={in_features}"
+        ),
     )
     M = inp.size(0)
     return inp.new_empty(M, out_features, dtype=inp.dtype)
@@ -6353,7 +6362,7 @@ def _check_scaled_mm_sizes(
         lambda: f"Expected both inputs to be fp8 or fp4 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -6583,7 +6592,7 @@ def _check_scaled_mm_sizes_v2(
             SwizzleType.NO_SWIZZLE,
         ]
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -8094,7 +8103,8 @@ def meta_scaled_grouped_mm(
 @out_wrapper()
 def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
     if half_to_float:
-        assert x.dtype == torch.half
+        assert x.dtype in [torch.half, torch.bfloat16]
+
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
