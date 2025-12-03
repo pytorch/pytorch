@@ -98,6 +98,7 @@ functional_collectives: set[torch._ops.OpOverload] = {
     _c10d_functional.all_reduce.default,
     _c10d_functional.all_gather_into_tensor.default,
     _c10d_functional.reduce_scatter_tensor.default,
+    _c10d_functional.reduce_scatter_tensor_out.default,
     _c10d_functional.all_to_all_single.default,
     _c10d_functional_autograd.all_to_all_single.default,
     _c10d_functional.wait_tensor.default,
