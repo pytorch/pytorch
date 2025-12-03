@@ -1092,9 +1092,35 @@ class Source:
     def guard_source(self) -> GuardSource:
         raise NotImplementedError
 
+    @property
+    def _name_template(self) -> str:
+        """
+        A template for the name of the source. Used to prevent code duplication between
+        `name` and `get_value`.
+
+        For non-ChainedSources, `name` and `get_value` use the returned string directly.
+
+        For ChainedSources, `name` and `get_value` expect the return to be a format string
+        with `{0}` present - `name` and `get_value` will apply different values to this function's
+        returned format string.
+        """
+        raise NotImplementedError
+
     @functools.cached_property
     def name(self) -> str:
-        raise NotImplementedError
+        return self._name_template
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: weakref.WeakKeyDictionary[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        value = eval(self._name_template, globals, locals)
+        cache[self] = value
+        return value
 
     def make_guard(self, fn: Callable[..., Any]) -> Guard:
         if self.guard_source() is GuardSource.CONSTANT:
@@ -1126,6 +1152,29 @@ class ChainedSource(Source):
         while isinstance(current, ChainedSource):
             current = current.base
         return current
+
+    @functools.cached_property
+    def name(self) -> str:
+        return self._name_template.format(self.base.name)
+
+    def get_value(
+        self,
+        globals: dict[str, Any],
+        locals: dict[str, Any],
+        cache: weakref.WeakKeyDictionary[Source, Any],
+    ) -> Any:
+        if self in cache:
+            return cache[self]
+        tmpvar = "tmp"
+        counter = 0
+        while tmpvar in locals:
+            tmpvar = f"tmp{counter}"
+            counter += 1
+        locals[tmpvar] = self.base.get_value(globals, locals, cache)
+        value = eval(self._name_template.format(tmpvar), globals, locals)
+        del locals[tmpvar]
+        cache[self] = value
+        return value
 
 
 def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
