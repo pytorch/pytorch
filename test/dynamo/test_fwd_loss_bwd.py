@@ -2,7 +2,7 @@
 
 import torch
 from torch._dynamo.testing import AotEagerAndRecordGraphs, normalize_gm
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfCrossRef, TestCase
 
 
 class TestForwardLossBackward(TestCase):
@@ -35,6 +35,7 @@ class TestForwardLossBackward(TestCase):
         gm = backend.graphs[0]
         return normalize_gm(gm.print_readable(print_output=False))
 
+    @skipIfCrossRef
     def test_autograd_grad_basic(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
@@ -111,6 +112,7 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_autograd_grad_with_kwargs(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
@@ -176,6 +178,7 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_autograd_grad_single_tensor(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
@@ -246,6 +249,7 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_autograd_grad_rejects_graph_input_with_grad_fn(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4, requires_grad=True)
@@ -264,6 +268,7 @@ class <lambda>(torch.nn.Module):
         ):
             fn(external_computation)
 
+    @skipIfCrossRef
     def test_autograd_grad_manual_update_matches_eager(self):
         mod_eager = torch.nn.Linear(4, 4)
         mod_compiled = torch.nn.Linear(4, 4)
@@ -305,6 +310,7 @@ class <lambda>(torch.nn.Module):
         self.assertIsNotNone(mod_compiled.bias.grad)
         self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
 
+    @skipIfCrossRef
     def test_autograd_grad_missing_detach_errors_like_eager(self):
         mod_eager = torch.nn.Linear(4, 4)
         x_eager = torch.randn(2, 4)
@@ -341,6 +347,7 @@ class <lambda>(torch.nn.Module):
         ):
             step_compiled()
 
+    @skipIfCrossRef
     def test_tensor_backward_basic(self):
         """Test that tensor.backward(inputs=params) works in compiled code."""
         mod = torch.nn.Linear(4, 4)
@@ -380,6 +387,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_tensor_backward_without_inputs(self):
         """Test that tensor.backward() without inputs works by auto-detecting params."""
         mod = torch.nn.Linear(4, 4)
@@ -418,6 +426,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_tensor_backward_matches_eager(self):
         """Test that tensor.backward produces same results as eager mode."""
         mod_eager = torch.nn.Linear(4, 4)
@@ -453,6 +462,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(mod_eager.weight.grad, mod_compiled.weight.grad)
         self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
 
+    @skipIfCrossRef
     def test_tensor_backward_with_gradient(self):
         """Test tensor.backward with a gradient argument."""
         mod = torch.nn.Linear(4, 4)
@@ -494,6 +504,7 @@ class GraphModule(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @skipIfCrossRef
     def test_tensor_backward_accumulates_grads(self):
         """Test that tensor.backward accumulates gradients correctly."""
         mod = torch.nn.Linear(4, 4)
