@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/xpu/XPUCachingAllocator.h>
+#include <torch/csrc/Export.h>
 
 namespace torch::xpu::XPUPluggableAllocator {
 
@@ -16,15 +17,16 @@ struct _AllocationMetadata {
   sycl::queue* queue{};
 };
 
-struct TORCH_XPU_API XPUPluggableAllocator
+struct TORCH_PYTHON_API XPUPluggableAllocator
     : public c10::xpu::XPUCachingAllocator::XPUAllocator {
   XPUPluggableAllocator(
       std::function<void*(size_t, int, sycl::queue*)> alloc_fn,
-      std::function<void(void*, size_t, int, sycl::queue*)> free_fn);
+      std::function<void(void*, size_t, int, sycl::queue*)> free_fn)
+      : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
 
   C10_DISABLE_COPY_AND_ASSIGN(XPUPluggableAllocator);
 
-  ~XPUPluggableAllocator() override;
+  ~XPUPluggableAllocator() override = default;
 
   void* malloc(size_t size, c10::DeviceIndex device, sycl::queue* stream);
 
