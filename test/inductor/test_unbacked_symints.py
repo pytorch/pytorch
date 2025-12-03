@@ -674,6 +674,18 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @skipGPUIf(not HAS_GPU, "requires gpu and triton")
+    @dynamo_config.patch({"capture_dynamic_output_shape_ops": True})
+    def test_fmod_with_out_arg(self, device):
+        def fn(x):
+            nz = torch.nonzero(x).float()
+            return torch.fmod(nz, 2.0, out=nz)
+
+        example_inputs = (torch.randn(32, device=device),)
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
 

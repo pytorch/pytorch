@@ -1660,7 +1660,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                if not torch._prims_common.is_contiguous(fake_out):
+                if not torch._prims_common.is_contiguous_or_false(fake_out):
                     # It's difficult to handle strides correctly in functionalization
                     # when calling an out= op with a non-contiguous out argument
                     unimplemented(
