@@ -61,9 +61,7 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
-        with DebugMode(
-            record_torchfunction=True, record_ids=True, record_output=True
-        ) as debug_mode:
+        with DebugMode(record_torchfunction=True, record_ids=True) as debug_mode:
             torch.mm(x_dtensor, y_dtensor).sum()
 
         self.assertExpectedInline(
@@ -114,7 +112,8 @@ class TestDTensorDebugMode(TestCase):
         )
         self.assertTrue(torch.equal(sum_op.record["output"], eager_out.to_local()))
         self.assertTrue(
-            "aten::sum(t: f32[1, 32])  # {'hash': " in debug_mode.debug_string()
+            "aten::sum(t: f32[1, 32])  ->  t: f32[]  # {'hash': "
+            in debug_mode.debug_string()
         )
 
         # check tuple hash functions
@@ -162,13 +161,13 @@ class TestDTensorDebugMode(TestCase):
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
 
         with DebugMode(
-            record_torchfunction=True, record_stack_trace=True
+            record_torchfunction=True, record_stack_trace=True, record_output=False
         ) as debug_mode:
             z = x_dtensor + y_dtensor
             z.sum().backward()
 
         self.assertExpectedInline(
-            debug_mode.debug_string(),
+            debug_mode.debug_string(show_stack_trace=False),
             """\
   <method 'add' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
     aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
@@ -208,7 +207,7 @@ class TestDTensorDebugMode(TestCase):
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1), Shard(1)], run_check=False)
         x_dtensor._spec.shard_order = (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),)
         y_dtensor._spec.shard_order = (ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 1)),)
-        with DebugMode(record_torchfunction=False) as debug_mode:
+        with DebugMode(record_torchfunction=False, record_output=False) as debug_mode:
             torch.mm(x_dtensor, y_dtensor).sum()
 
         self.assertExpectedInline(
@@ -247,7 +246,7 @@ class TestDTensorDebugMode(TestCase):
         b_dt = DTensor.from_local(b, mesh, [Replicate(), Partial()], run_check=False)
 
         # Capture the operator decomposition
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(record_torchfunction=True, record_output=False) as debug_mode:
             torch.einsum("bld,dnh->blnh", a_dt, b_dt)
 
         self.assertExpectedInline(
@@ -304,7 +303,7 @@ class TestDTensorDebugMode(TestCase):
         x = torch.randn(8, 8, 8)
         linear = torch.nn.Linear(8, 8)
 
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(record_torchfunction=True, record_output=False) as debug_mode:
             linear(x).sum()
 
         self.assertExpectedInline(
@@ -324,7 +323,9 @@ class TestDTensorDebugMode(TestCase):
             x = torch.randn(8, 8)
             y = torch.randn(8, 8, 8)
 
-        with DebugMode(record_torchfunction=True, record_faketensor=True) as debug_mode:
+        with DebugMode(
+            record_torchfunction=True, record_faketensor=True, record_output=False
+        ) as debug_mode:
             torch.matmul(y, x)
 
         self.assertExpectedInline(
@@ -348,6 +349,7 @@ class TestDTensorDebugMode(TestCase):
             record_faketensor=True,
             record_tensor_attributes=["a1", "a2"],
             store_original_args=True,
+            record_output=False,
         ) as debug_mode:
             torch.matmul(y, x)
 
@@ -447,7 +449,7 @@ class TestDTensorDebugMode(TestCase):
 
         mod = Bar()
         inp = torch.randn(4, 4)
-        with DebugMode(record_nn_module=True) as debug_mode:
+        with DebugMode(record_nn_module=True, record_output=False) as debug_mode:
             _ = mod(inp)
 
         self.assertExpectedInline(
