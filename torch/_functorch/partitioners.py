@@ -999,6 +999,7 @@ def _extract_fwd_bwd_modules(
     enable_activation_quantization(
         saved_values, fwd_module, bwd_module, static_lifetime_input_nodes
     )
+    #torch.distributed.breakpoint()
     return fwd_module, bwd_module
 
 
@@ -1050,20 +1051,21 @@ def default_partition(
     )
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
     graph_has_recomputable_rng_ops = has_recomputable_rng_ops(joint_module)
+    #torch.distributed.breakpoint()
     if graph_has_recomputable_ops:
-        if _is_functional_graph(joint_module.graph)[0] is not None:
-            # Fall-back to previous behavior to avoid bc-breaking, although can
-            # eventually flip the switch to make this a hard error.
-            warnings.warn(
-                "Trying to unsafely apply AC to a non-functional graph with the "
-                "default partitioner. Falling back to min-cut partitioner."
-            )
-            return min_cut_rematerialization_partition(
-                joint_module,
-                _joint_inputs,
-                num_fwd_outputs=num_fwd_outputs,
-                static_lifetime_input_indices=static_lifetime_input_indices,
-            )
+        # if _is_functional_graph(joint_module.graph)[0] is not None:
+        #     # Fall-back to previous behavior to avoid bc-breaking, although can
+        #     # eventually flip the switch to make this a hard error.
+        #     warnings.warn(
+        #         "Trying to unsafely apply AC to a non-functional graph with the "
+        #         "default partitioner. Falling back to min-cut partitioner."
+        #     )
+        return min_cut_rematerialization_partition(
+            joint_module,
+            _joint_inputs,
+            num_fwd_outputs=num_fwd_outputs,
+            static_lifetime_input_indices=static_lifetime_input_indices,
+        )
 
         joint_module = cleanup_recompute_tags(joint_module, is_default_partition=True)
 
@@ -1193,7 +1195,6 @@ def default_partition(
     fw_module = thread_graphsafe_rng_from_hops(fw_module, is_backward=False)
     if len(node_info.required_bw_nodes) > 0:
         bw_module = thread_graphsafe_rng_from_hops(bw_module, is_backward=True)
-
     return fw_module, bw_module
 
 
@@ -2945,12 +2946,10 @@ def min_cut_rematerialization_partition(
     Returns:
         Returns the generated forward and backward Fx graph modules.
     """
-
     joint_module.graph.eliminate_dead_code()
     joint_module.recompile()
 
     fx_g = joint_module.graph
-
     #  add the CSE pass
     if config.cse:
         cse_graph = fx_graph_cse(fx_g)
@@ -3010,10 +3009,16 @@ def min_cut_rematerialization_partition(
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
 
+    new_saved_values = []
+    for n in saved_values:
+        if "grouped_mm" in n.name:
+            continue
+        new_saved_values.append(n)
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
+    #torch.distributed.breakpoint()
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module,
-        saved_values,
+        new_saved_values, #saved_values,
         # pyrefly: ignore [bad-argument-type]
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
@@ -3066,6 +3071,7 @@ def min_cut_rematerialization_partition(
             counts.items(), key=operator.itemgetter(1), reverse=True
         )
         log.info("Count of Ops Rematerialized: %s", rematerialized_ops)
+
     return fw_module, bw_module
 
 
