@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/frozen_linear_transpose.h>
 #include <torch/csrc/jit/passes/utils/optimization_utils.h>
-#include <torch/csrc/jit/runtime/graph_executor.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -12,7 +10,6 @@
 #include <ATen/ops/transpose.h>
 #endif
 
-#include <iostream>
 #include <utility>
 
 namespace torch::jit {
