@@ -16,7 +16,7 @@ else
 fi
 
 if [[ "$BRANCH" =~ .*release.* ]]; then
-    ${PIP} install --index-url ${DOWNLOAD_PYTORCH_ORG}/test/ $TRITON_VERSION
+    ${PIP} install $TRITON_VERSION --find-links ${DOWNLOAD_PYTORCH_ORG}/test/
 else
-    ${PIP} install --index-url ${DOWNLOAD_PYTORCH_ORG}/nightly/ $TRITON_VERSION+git${TRITON_COMMIT_ID}
+    ${PIP} install $TRITON_VERSION+git${TRITON_COMMIT_ID} --find-links ${DOWNLOAD_PYTORCH_ORG}/nightly/
 fi
