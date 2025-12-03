@@ -580,7 +580,7 @@ class BaseSchedulerNode:
     def set_last_usage(
         self, future_used_buffers: OrderedSet[str], mutation_real_name: dict[str, str]
     ) -> None:
-        used_buffers = self.used_or_aliased_buffer_names()
+        used_buffers = self.used_or_aliased_buffer_names_for_lifetime()
         used_buffers = OrderedSet(mutation_real_name.get(k, k) for k in used_buffers)
         self.last_usage = used_buffers - future_used_buffers
 
@@ -600,6 +600,34 @@ class BaseSchedulerNode:
         deps = [
             dep.name
             for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
+        ]
+        while len(deps) > 0:
+            dep = deps.pop()
+            used_names.add(dep)
+            if V.graph.name_to_buffer.get(dep):
+                deps.extend(
+                    alias
+                    for alias in V.graph.name_to_buffer[
+                        dep
+                    ].get_inputs_that_alias_output()
+                    if alias not in used_names
+                )
+        return used_names
+
+    def used_or_aliased_buffer_names_for_lifetime(self) -> OrderedSet[str]:
+        """
+        Like used_or_aliased_buffer_names, but excludes is_fake WeakDeps.
+
+        is_fake WeakDeps are purely for ordering constraints (e.g., control_deps)
+        and should not extend buffer lifetimes. This method is used specifically
+        for computing last_usage / buffer freeing decisions.
+        """
+        used_names: OrderedSet[str] = OrderedSet()
+
+        deps = [
+            dep.name
+            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
+            if not (isinstance(dep, WeakDep) and dep.is_fake)
         ]
         while len(deps) > 0:
             dep = deps.pop()
@@ -1932,6 +1960,12 @@ class FusedSchedulerNode(BaseSchedulerNode):
             *[x.used_or_aliased_buffer_names() for x in self.snodes]
         )
 
+    @cache_on_self
+    def used_or_aliased_buffer_names_for_lifetime(self) -> OrderedSet[str]:
+        return OrderedSet.union(
+            *[x.used_or_aliased_buffer_names_for_lifetime() for x in self.snodes]
+        )
+
     def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return self.snodes
 
@@ -3004,7 +3038,9 @@ class Scheduler:
 
             for add_dep in V.graph.additional_buffer_deps[node.get_name()]:
                 add_user(add_dep, node, is_weak=True)
-                node.add_fake_dep(WeakDep(add_dep, node.get_name()))
+                # is_fake=True because these are control dependencies for ordering only,
+                # they should not extend buffer lifetimes
+                node.add_fake_dep(WeakDep(add_dep, node.get_name(), is_fake=True))
 
             # add normal non-mutation dependencies
             for read in node.read_writes.reads:
