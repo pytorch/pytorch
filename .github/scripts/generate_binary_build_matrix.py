@@ -115,7 +115,7 @@ PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
         "nvidia-cusolver==12.0.4.66; platform_system == 'Linux' | "
         "nvidia-cusparse==12.6.3.3; platform_system == 'Linux' | "
         "nvidia-cusparselt-cu13==0.8.0; platform_system == 'Linux' | "
-        "nvidia-nccl-cu13==2.27.7; platform_system == 'Linux' | "
+        "nvidia-nccl-cu13==2.28.9; platform_system == 'Linux' | "
         "nvidia-nvshmem-cu13==3.4.5; platform_system == 'Linux' | "
         "nvidia-nvtx==13.0.85; platform_system == 'Linux' | "
         "nvidia-nvjitlink==13.0.88; platform_system == 'Linux' | "
