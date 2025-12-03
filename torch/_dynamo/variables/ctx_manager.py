@@ -1109,7 +1109,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         tx: "InstructionTranslator",
         tensors: VariableTracker,
     ) -> "PreserveVersionContextVariable":
-        if isinstance(tensors, variables.TensorVariable):
+        if tensors.is_tensor():
             versions = variables.TupleVariable(
                 [x.var_getattr(tx, "_version") for x in [tensors]]
             )
@@ -1141,11 +1141,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         self.tensors = tensors
         self.prev_versions = prev_versions
         # The context manager accepts Union[Tensor, Tuple[Tensor]]
-        if isinstance(self.tensors, variables.TensorVariable):
+        if self.tensors.is_tensor():
             self.tensors = variables.TupleVariable([self.tensors])
-        if isinstance(
-            self.prev_versions, (variables.ConstantVariable, variables.SymNodeVariable)
-        ):
+        if self.prev_versions.is_symnode_like():
             self.prev_versions = variables.TupleVariable([self.prev_versions])
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
