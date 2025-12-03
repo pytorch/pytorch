@@ -14,11 +14,10 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, Generic, NamedTuple, TYPE_CHECKING, TypeVar
 
 import torch
 from torch.utils import _pytree as pytree
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._traceback import CapturedTraceback, format_frame
 from torch.utils.weak import WeakTensorKeyDictionary
@@ -488,16 +487,16 @@ class GuardsCheckpointState:
     The GuardCheckpointState - it is the T of Checkpointable[T] for GuardsContext
     """
 
-    dynamo_guards: OrderedSet[Guard]
+    dynamo_guards: set[Guard] = set()
 
-    def __init__(self, dynamo_guards: OrderedSet[Guard]) -> None:
+    def __init__(self, dynamo_guards: set[Guard]) -> None:
         self.dynamo_guards = dynamo_guards
 
-    def diff(self, other: GuardsCheckpointState) -> Optional[OrderedSet[Guard]]:
+    def diff(self, other: GuardsCheckpointState) -> set[Guard] | None:
         """
         Produces a delta against another GuardsCheckpointState.
 
-        Returns None if no delta is found, otherwise, return an OrderedSet() of mismatched
+        Returns None if no delta is found, otherwise, return a set() of mismatched
         Guard type objects.
         """
         r = self.dynamo_guards.difference(other.dynamo_guards)
@@ -606,11 +605,10 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner: Optional[OrderedSet[Guard]] = None) -> None:
+    def __init__(self, inner: set[Guard] | None = None) -> None:
         if inner is None:
-            self.inner: OrderedSet[Guard] = OrderedSet()
-        else:
-            self.inner = inner
+            inner = set()
+        self.inner = inner
 
     def __iter__(self) -> Iterator[Guard]:
         return iter(self.inner)
@@ -647,9 +645,9 @@ class GuardsSet:
         """Delete all guards that contains a given source"""
         from ._dynamo.source import is_from_source
 
-        self.inner = OrderedSet(
+        self.inner = {
             g for g in self.inner if not is_from_source(g.originating_source, source)
-        )
+        }
 
 
 """
@@ -666,7 +664,7 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
         self.aotautograd_guards: list[GuardEnvExpr] = []
 
     def copy_graphstate(self) -> GuardsCheckpointState:
-        return GuardsCheckpointState(OrderedSet(self.dynamo_guards.inner))
+        return GuardsCheckpointState(set(self.dynamo_guards.inner))
 
     def restore_graphstate(self, state: GuardsCheckpointState) -> None:
         # NB: "steals" the passed in state
