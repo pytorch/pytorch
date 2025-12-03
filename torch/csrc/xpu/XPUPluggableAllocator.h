@@ -22,8 +22,7 @@ struct TORCH_XPU_API XPUPluggableAllocator
       std::function<void*(size_t, int, sycl::queue*)> alloc_fn,
       std::function<void(void*, size_t, int, sycl::queue*)> free_fn);
 
-  XPUPluggableAllocator(XPUPluggableAllocator& other) = delete;
-  XPUPluggableAllocator& operator=(const XPUPluggableAllocator& other) = delete;
+  C10_DISABLE_COPY_AND_ASSIGN(XPUPluggableAllocator);
 
   ~XPUPluggableAllocator() override;
 
