@@ -7569,6 +7569,65 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     def test_addmm_gelu(self, device, dtype):
         self._test_addmm_impl(torch._addmm_activation, "gelu", device, dtype)
 
+        if torch.device(device).type == "cuda":
+            fwd_called = [False]
+
+            def addmm_gelu(x, m1, m2, *, beta=1, alpha=1, use_gelu=True, out=None):
+                fwd_called[0] = True
+
+                if out is not None:
+                    out = (out, torch.empty_like(out))
+
+                res, pre_activation = torch._addmm_gelu(
+                    x, m1, m2,
+                    beta=beta, alpha=alpha, materialize_pre_activation=True, out=out
+                )
+                pre_activation_ref = torch.addmm(x, m1, m2, beta=beta, alpha=alpha)
+                self.assertEqual(pre_activation, pre_activation_ref)
+
+                return res
+
+            self._test_addmm_impl(addmm_gelu, "gelu", device, dtype)
+            self.assertTrue(fwd_called[0])
+
+
+    @slowTest
+    @onlyCUDA
+    @dtypes(torch.double)
+    def test_addmm_gelu_gradcheck(self, device, dtype):
+        fwd_called = [False]
+        gradcheck_called = [False]
+
+        def addmm_gelu(x, m1, m2, *, beta=1, alpha=1, use_gelu=True, out=None):
+            fwd_called[0] = True
+
+            if out is not None:
+                out = (out, torch.empty_like(out))
+
+            res, pre_activation = torch._addmm_gelu(
+                x, m1, m2,
+                beta=beta, alpha=alpha, materialize_pre_activation=True, out=out
+            )
+            pre_activation_ref = torch.addmm(x, m1, m2, beta=beta, alpha=alpha)
+            self.assertEqual(pre_activation, pre_activation_ref)
+
+            if out is not None:
+                args = tuple(t.detach().clone().requires_grad_(True) for t in (x, m1, m2))
+                kwargs = {
+                    "beta": beta,
+                    "alpha": alpha,
+                    "materialize_pre_activation": True,
+                }
+                torch.autograd.gradcheck(lambda *args: torch._addmm_gelu(*args, **kwargs), args)
+                gradcheck_called[0] = True
+
+            return res
+
+        self._test_addmm_impl(addmm_gelu, "gelu", device, dtype)
+        self.assertTrue(fwd_called[0])
+        self.assertTrue(gradcheck_called[0])
+
+
     @skipIfRocmArch(MI300_ARCH)
     @dtypes(torch.float, torch.double)
     @dtypesIfCUDA(*floating_and_complex_types())
