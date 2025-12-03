@@ -642,9 +642,6 @@ if __name__ == "__main__":
         )
         return allocator, dummy_allocator
 
-    @unittest.skipIf(
-        IS_WINDOWS, "cpp extension does not currently support XPU on Windows."
-    )
     def test_xpu_pluggable_allocator(self):
         torch.xpu.init()
         allocator, dummy_allocator = self.get_dummy_allocator(True)
