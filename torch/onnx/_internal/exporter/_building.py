@@ -246,7 +246,13 @@ def _allowed_types_are_sequence_types(allowed_types: Iterable[ir.TypeProtocol]) 
 def _get_or_create_constant(
     constant_farm: dict[
         tuple[
-            bool | int | float | str | tuple[int, ...] | tuple[float, ...],
+            bool
+            | int
+            | float
+            | str
+            | tuple[int, ...]
+            | tuple[float, ...]
+            | tuple[bool, ...],
             ir.DataType,
         ],
         ir.Value,
@@ -274,7 +280,7 @@ def _get_or_create_constant(
         # Make the arg hashable
         arg = tuple(arg)
 
-    constant_value = constant_farm.get((arg, dtype))
+    constant_value = constant_farm.get((arg, dtype))  # type: ignore[arg-type]
     if constant_value is None:
         constant_tensor = ir.tensor(value=arg, dtype=dtype)
         constant_value = opset.Constant(value=constant_tensor)
