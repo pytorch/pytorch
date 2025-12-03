@@ -2461,6 +2461,45 @@ class AOTInductorTestsTemplate:
                 dynamic_shapes=dynamic_shapes,
             )
 
+    @common_utils.parametrize("max_autotune", [False, True])
+    def test_cond_cpu_predicate_cuda_operands(self, max_autotune):
+        """
+        Test torch.cond with CPU predicate and CUDA operands.
+        This is a regression test for the bug where inductor incorrectly
+        determined device from [predicate] + operands, causing CPU predicates
+        to force CUDA outputs onto CPU during autotuning.
+        """
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self, input_dim=4, hidden_dim=8):
+                super().__init__()
+                self.true_linear = torch.nn.Linear(input_dim, hidden_dim, bias=True)
+                self.false_linear = torch.nn.Linear(input_dim, hidden_dim, bias=True)
+                self.another_linear = torch.nn.Linear(hidden_dim, hidden_dim, bias=True)
+
+            def forward(self, predicate: torch.Tensor, x: torch.Tensor):
+                def true_fn(x):
+                    return self.true_linear(x) * 2.0
+
+                def false_fn(x):
+                    return self.false_linear(x) + 1.0
+
+                res = torch.cond(predicate, true_fn, false_fn, (x,))
+                return self.another_linear(res)
+
+        # Predicate on CPU, data on CUDA
+        predicate = torch.tensor(True, dtype=torch.bool, device="cpu")
+        x = torch.randn(4, 4, device=self.device)
+        example_inputs = (predicate, x)
+
+        with config.patch({"max_autotune": max_autotune}):
+            self.check_model(
+                Model().to(self.device),
+                example_inputs=example_inputs,
+            )
+
     def test_while_loop_simple(self):
         inputs = (
             torch.randn((10, 20), device=self.device),

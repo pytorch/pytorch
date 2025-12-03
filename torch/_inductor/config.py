@@ -608,6 +608,16 @@ max_autotune_subproc_terminate_timeout_seconds = 0.0
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
 
+# Number of benchmark runs for collective operations
+collective_benchmark_nruns = int(
+    os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_NRUNS", "50")
+)
+
+# Timeout in seconds for collective benchmarking
+collective_benchmark_timeout = float(
+    os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_TIMEOUT", "30")
+)
+
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
 )
