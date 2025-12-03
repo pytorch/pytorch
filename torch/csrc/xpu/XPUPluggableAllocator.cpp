@@ -6,13 +6,6 @@ void custom_raw_deleter(void* ptr);
 
 static c10::DeviceIndex device_count_ = 0;
 
-XPUPluggableAllocator::XPUPluggableAllocator(
-    std::function<void*(size_t, int, sycl::queue*)> alloc_fn,
-    std::function<void(void*, size_t, int, sycl::queue*)> free_fn)
-    : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
-
-XPUPluggableAllocator::~XPUPluggableAllocator() = default;
-
 void* XPUPluggableAllocator::malloc(
     size_t size,
     c10::DeviceIndex device,
