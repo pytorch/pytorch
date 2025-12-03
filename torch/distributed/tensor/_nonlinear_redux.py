@@ -5,6 +5,7 @@ from typing import cast, Optional
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
+from torch.distributed.tensor._op_schema import OutputSharding
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
 from torch.distributed.tensor.placement_types import Partial, Replicate, Shard
 
@@ -17,7 +18,6 @@ class NonLinearReductionsBase:
         self._device_mesh: Optional[dtensor.DeviceMesh] = None
         self._placements: Optional[tuple[dtensor.Placement, ...]] = None
         self._keepdim: bool = False
-        self._expected_shape: torch.Size = torch.Size([])
         self._shard_mesh_dims: list[int] = []
 
     def __call__(
@@ -33,7 +33,7 @@ class NonLinearReductionsBase:
 
     def _gather_tensors(
         self, gather_dim: int, gathered_idxs: torch.Tensor, local_redux: torch.Tensor
-    ):
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         assert self._device_mesh is not None
         gathered_redux = local_redux
         for mesh_dim in self._shard_mesh_dims:
@@ -49,7 +49,9 @@ class NonLinearReductionsBase:
             )
         return gathered_redux, gathered_idxs
 
-    def _convert_to_global_idxs(self, local_idx: torch.Tensor):
+    def _convert_to_global_idxs(
+        self, local_idx: torch.Tensor
+    ) -> tuple[int, torch.Tensor]:
         assert self._input_dtensor is not None
         assert self._device_mesh is not None
         assert self._local_tensor is not None
@@ -77,23 +79,28 @@ class NonLinearReductionsBase:
             gathered_idxs = local_idx + global_offset[self._dim]
         return gather_dim, gathered_idxs
 
-    def _set_arguments(self, args: tuple[object, ...]):
+    def _set_arguments(
+        self, args: tuple[object, ...], kwargs: dict[str, object] | None
+    ) -> None:
         self._input_dtensor = cast(dtensor.DTensor, args[0])
-        self._local_tensor = self._input_dtensor.to_local()
+        self._dim = None
+        self._keepdim = False
+        self._shard_mesh_dims = []
+        self._expected_shape = torch.Size([])
         if not isinstance(self._input_dtensor, dtensor.DTensor):
             raise NotImplementedError
         if len(args) > 1:
             self._dim = cast(int, args[1])
         if len(args) > 2:
             self._keepdim = cast(bool, args[2])
+        if kwargs:
+            if "dim" in kwargs:
+                self._dim = cast(int, kwargs["dim"])
+            if "keepdim" in kwargs:
+                self._keepdim = cast(bool, kwargs["keepdim"])
         self._device_mesh = self._input_dtensor.device_mesh
         self._placements = self._input_dtensor.placements
-        return
 
-    def _check_placements(self):
-        assert self._input_dtensor is not None
-        assert self._device_mesh is not None
-        assert self._placements is not None
         # check for partial placements and handle it as a replicate.
         if any(isinstance(p, Partial) for p in self._placements):
             target_placements = [
@@ -103,26 +110,29 @@ class NonLinearReductionsBase:
                 device_mesh=self._device_mesh, placements=target_placements
             )
             self._placements = self._input_dtensor.placements
+        self._local_tensor = self._input_dtensor.to_local()
+
         return
 
-    def _get_expected_shape(self):
+    def _get_expected_shape(self) -> torch.Size:
         assert self._local_tensor is not None
         input_shape = list(self._local_tensor.shape)
         if self._dim is None:
-            self._expected_shape = (
+            expected_shape = (
                 torch.Size([1] * len(input_shape)) if self._keepdim else torch.Size([])
             )
         elif self._keepdim:
             if input_shape:
                 input_shape[self._dim] = 1
-            self._expected_shape = torch.Size(input_shape)
+            expected_shape = torch.Size(input_shape)
         else:
             if input_shape:
                 input_shape.pop(self._dim)
-            self._expected_shape = torch.Size(input_shape)
-        return
+            expected_shape = torch.Size(input_shape)
 
-    def _collect_shard_mesh_dims(self):
+        return expected_shape
+
+    def _collect_shard_mesh_dims(self) -> None:
         assert self._placements is not None
         assert self._local_tensor is not None
         for mesh_dim, p in enumerate(self._placements):
@@ -132,6 +142,20 @@ class NonLinearReductionsBase:
                 ):
                     self._shard_mesh_dims.append(mesh_dim)
         return
+
+    @staticmethod
+    def _get_output_sharding(
+        op_call: torch._ops.OpOverload,
+        args: tuple[object, ...],
+        kwargs: dict[str, object],
+    ) -> OutputSharding:
+        op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(
+            op_call, args, kwargs
+        )
+        dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
+        output_sharding = op_info.output_sharding
+        assert output_sharding is not None, "output sharding should not be None"
+        return output_sharding
 
 
 class ArgMinMaxHandler(NonLinearReductionsBase):
@@ -146,24 +170,19 @@ class ArgMinMaxHandler(NonLinearReductionsBase):
         args: tuple["dtensor.DTensor", int] | tuple["dtensor.DTensor", int, bool],
         kwargs: dict[str, object],
     ):
-        self._set_arguments(args)
-        self._check_placements()
-        op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(
-            op_call, args, kwargs
-        )
-        dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
-        output_sharding = op_info.output_sharding
-        assert output_sharding is not None, "output sharding should not be None"
         if op_call not in self._REDUCTION_OPS:
             raise NotImplementedError(f"Unsupported reduction op: {op_call}")
 
-        self._get_expected_shape()
+        self._set_arguments(args, kwargs)
+        output_sharding = self._get_output_sharding(op_call, args, kwargs)
+
+        expected_shape = self._get_expected_shape()
         self._collect_shard_mesh_dims()
         local_redux, local_idx = self._compute_local_reduction(op_call)
 
         if not self._shard_mesh_dims:
             return dtensor.DTensor._op_dispatcher.wrap(
-                local_idx.reshape(self._expected_shape), output_sharding.output_spec
+                local_idx.reshape(expected_shape), output_sharding.output_spec
             )
 
         gather_dim, gathered_idxs = self._convert_to_global_idxs(local_idx)
@@ -175,7 +194,7 @@ class ArgMinMaxHandler(NonLinearReductionsBase):
         final_idx = torch.gather(gather_idxs, dim=gather_dim, index=rank_winner)
 
         return dtensor.DTensor._op_dispatcher.wrap(
-            final_idx.reshape(self._expected_shape), output_sharding.output_spec
+            final_idx.reshape(expected_shape), output_sharding.output_spec
         )
 
     def _compute_local_reduction(self, op_call: torch._ops.OpOverload):
@@ -200,24 +219,18 @@ class MinMaxDimHandler(NonLinearReductionsBase):
         args: tuple["dtensor.DTensor", int] | tuple["dtensor.DTensor", int, bool],
         kwargs: dict[str, object],
     ):
-        self._set_arguments(args)
-        self._check_placements()
-        op_info = dtensor.DTensor._op_dispatcher.unwrap_to_op_info(
-            op_call, args, kwargs
-        )
-        dtensor.DTensor._op_dispatcher.sharding_propagator.propagate(op_info)
-        output_sharding = op_info.output_sharding
-        assert output_sharding is not None, "output sharding should not be None"
+        self._set_arguments(args, kwargs)
+        output_sharding = self._get_output_sharding(op_call, args, kwargs)
 
-        self._get_expected_shape()
+        expected_shape = self._get_expected_shape()
         self._collect_shard_mesh_dims()
         local_redux, local_idx = self._compute_local_reduction(op_call)
 
         if not self._shard_mesh_dims:
             return dtensor.DTensor._op_dispatcher.wrap(
                 (
-                    local_redux.reshape(self._expected_shape),
-                    local_idx.reshape(self._expected_shape),
+                    local_redux.reshape(expected_shape),
+                    local_idx.reshape(expected_shape),
                 ),
                 output_sharding.output_spec,
             )
@@ -232,8 +245,8 @@ class MinMaxDimHandler(NonLinearReductionsBase):
 
         return dtensor.DTensor._op_dispatcher.wrap(
             (
-                final_redux.reshape(self._expected_shape),
-                final_idx.reshape(self._expected_shape),
+                final_redux.reshape(expected_shape),
+                final_idx.reshape(expected_shape),
             ),
             output_sharding.output_spec,
         )
