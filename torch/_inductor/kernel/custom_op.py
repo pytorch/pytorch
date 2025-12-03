@@ -6,7 +6,6 @@ from collections.abc import Callable
 from typing import Any, Optional, Union
 
 import torch
-from torch._inductor import config
 from torch._inductor.codegen.subgraph import SubgraphTemplate
 from torch._inductor.ir import Buffer, FixedLayout, ir_node_to_tensor, TensorBox
 from torch._inductor.lowering import lowerings, validate_ir
@@ -19,6 +18,28 @@ from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
+
+
+def _detect_collective_ops(choices: list) -> bool:
+    """
+    Detect if choices contain collective operations.
+    """
+    from torch._inductor.utils import is_collective_op
+
+    for choice in choices:
+        if not hasattr(choice, "gm") or choice.gm is None:
+            continue
+
+        for node in choice.gm.graph.nodes:
+            if node.op == "call_function" and node.target is not None:
+                op_name = str(node.target)
+
+                if is_collective_op(op_name) or is_collective_op(
+                    f"torch.ops.{op_name}"
+                ):
+                    return True
+
+    return False
 
 
 class CustomOpConfig:
@@ -180,14 +201,8 @@ def _adapt_user_input_gen_fns(
         """Create internal input generator that converts IR buffer to user's fake tensor."""
 
         def internal_input_gen_fn(ir_buffer: Any) -> torch.Tensor:
-            raw_shape = ir_buffer.get_size()
-            concrete_shape = V.graph.sizevars.size_hints(
-                raw_shape, fallback=config.unbacked_symint_fallback
-            )
-
-            fake_tensor = torch.empty(
-                concrete_shape, dtype=ir_buffer.get_dtype(), device="meta"
-            )
+            fake_tensor = ir_node_to_tensor(ir_buffer)
+            assert fake_tensor is not None, "ir_node_to_tensor returned None"
             return user_function(fake_tensor)
 
         return internal_input_gen_fn
@@ -321,6 +336,8 @@ def autotune_custom_op(
         )
         input_gen_fns = _adapt_user_input_gen_fns(inputs, arg_names, user_input_gen_fns)
 
+    is_collective = _detect_collective_ops(choices)
+
     # Run autotuning and get both result and winning choice
     selected_result, winning_choice = autotune_select_algorithm(
         name=name,
@@ -329,6 +346,7 @@ def autotune_custom_op(
         layout=choices[0].layout,
         input_gen_fns=input_gen_fns,
         return_choice=True,
+        is_collective=is_collective,
     )
 
     # Apply inlining for fusion if winning_choice has graph; otherwise return result as-is(default fallback impl)
@@ -363,16 +381,7 @@ def _generate_dynamic_configs(
     param_names = list(sig.parameters.keys())
 
     with V.fake_mode:
-        fake_tensors = []
-        for inp in tensor_inputs:
-            raw_shape = inp.get_size()
-            concrete_shape = V.graph.sizevars.size_hints(
-                raw_shape, fallback=config.unbacked_symint_fallback
-            )
-            fake_tensor = torch.empty(
-                concrete_shape, dtype=inp.get_dtype(), device=inp.get_device()
-            )
-            fake_tensors.append(fake_tensor)
+        fake_tensors = [ir_node_to_tensor(inp) for inp in tensor_inputs]
 
     fake_tensors_dict = dict(zip(param_names, fake_tensors))
 
