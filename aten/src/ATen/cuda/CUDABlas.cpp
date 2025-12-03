@@ -1582,7 +1582,16 @@ bool gemm_and_bias(
     const Dtype* bias,
     C_Dtype* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation) {
+    GEMMAndBiasActivationEpilogue activation,
+    C_Dtype* pre_activation_ptr,
+    int64_t pre_activation_ld) {
+
+  if (pre_activation_ptr) {
+    TORCH_CHECK(
+      activation == GEMMAndBiasActivationEpilogue::GELU,
+      "gemm pre_activation_ptr is only supported with GELU activation epilogue"
+    );
+  }
 
   if (std::is_same_v<C_Dtype, float> && std::is_same_v<Dtype, at::BFloat16>) {
     #ifdef USE_ROCM
@@ -1687,14 +1696,21 @@ bool gemm_and_bias(
   }
 #endif
   const auto epilogue = [&]() -> cublasLtEpilogue_t {
-    // The cuBLAS documentation indicates that
-    // *_<ACTIVATION>_BIAS = *_<ACTIVATION>,
-    // but we keep it verbose here for clarity.
     switch (activation) {
       case GEMMAndBiasActivationEpilogue::RELU:
         return bias ? CUBLASLT_EPILOGUE_RELU_BIAS : CUBLASLT_EPILOGUE_RELU;
-      case GEMMAndBiasActivationEpilogue::GELU:
-        return bias ? CUBLASLT_EPILOGUE_GELU_BIAS : CUBLASLT_EPILOGUE_GELU;
+      case GEMMAndBiasActivationEpilogue::GELU: {
+        // Handle bias
+        auto gelu_epilogue = static_cast<uint32_t>(bias
+            ? CUBLASLT_EPILOGUE_GELU_BIAS
+            : CUBLASLT_EPILOGUE_GELU
+        );
+        // Handle pre_activation_ptr, or aux ptr
+        if (pre_activation_ptr) {
+          gelu_epilogue |= 128;
+        }
+        return static_cast<cublasLtEpilogue_t>(gelu_epilogue);
+      }
       default:
         return bias ? CUBLASLT_EPILOGUE_BIAS : CUBLASLT_EPILOGUE_DEFAULT;
     }
@@ -1722,6 +1738,20 @@ bool gemm_and_bias(
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_C_BYTES, c_alignment);
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MIN_ALIGNMENT_D_BYTES, d_alignment);
 #endif
+
+  if (pre_activation_ptr) {
+    // cublasLtMatmulAlgoGetHeuristic does not dereference pre_activation_ptr,
+    // but uses its value to determine proper alignment.
+    computeDesc.setAttribute(
+      CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER,
+      pre_activation_ptr
+    );
+    // CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD has to be set.
+    computeDesc.setAttribute(
+      CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD,
+      pre_activation_ld
+    );
+  }
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
@@ -1813,7 +1843,9 @@ template bool gemm_and_bias(
     const double* bias,
     double* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    double* pre_activation_ptr,
+    int64_t pre_activation_ld);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1829,7 +1861,9 @@ template bool gemm_and_bias(
     const float* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    float* pre_activation_ptr,
+    int64_t pre_activation_ld);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1845,7 +1879,9 @@ template bool gemm_and_bias(
     const at::Half* bias,
     at::Half* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    at::Half* pre_activation_ptr,
+    int64_t pre_activation_ld);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1861,7 +1897,9 @@ template bool gemm_and_bias(
     const at::Half* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    float* pre_activation_ptr,
+    int64_t pre_activation_ld);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1877,7 +1915,9 @@ template bool gemm_and_bias(
     const at::BFloat16* bias,
     at::BFloat16* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    at::BFloat16* pre_activation_ptr,
+    int64_t pre_activation_ld);
 
 template bool gemm_and_bias(
     bool transpose_mat1,
@@ -1893,7 +1933,9 @@ template bool gemm_and_bias(
     const at::BFloat16* bias,
     float* result_ptr,
     int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation);
+    GEMMAndBiasActivationEpilogue activation,
+    float* pre_activation_ptr,
+    int64_t pre_activation_ld);
 
 using at::blas::ScalingType;
 
