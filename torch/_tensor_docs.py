@@ -3233,7 +3233,7 @@ See :func:`torch.max`
 add_docstr_all(
     "amax",
     r"""
-amax(dim=None, keepdim=False) -> Tensor
+amax(dim=None, keepdim=False, *, exclude_dim=None, out=None) -> Tensor
 
 See :func:`torch.amax`
 """,
@@ -3323,7 +3323,7 @@ See :func:`torch.min`
 add_docstr_all(
     "amin",
     r"""
-amin(dim=None, keepdim=False) -> Tensor
+amin(dim=None, keepdim=False, *, exclude_dim=None, out=None) -> Tensor
 
 See :func:`torch.amin`
 """,
