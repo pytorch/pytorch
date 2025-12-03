@@ -12,20 +12,16 @@
 namespace torch::utils {
 namespace {
 
-bool is_initialized_flag = false;
-bool is_in_bad_fork_flag = false;
-
-c10::once_flag at_fork_global_once_flag;
-at::DeviceType at_fork_device_type_global;
+std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_initialized{};
+std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> is_in_bad_fork{};
+std::array<bool, at::COMPILE_TIME_MAX_DEVICE_TYPES> at_fork_registered{};
+c10::once_flag at_fork_register_once{};
 
 } // anonymous namespace
 
 bool is_device_initialized(at::DeviceType device_type) {
   pybind11::gil_scoped_acquire g;
-  if (device_type != at_fork_device_type_global) {
-    return false;
-  }
-  return is_initialized_flag;
+  return is_initialized[static_cast<int>(device_type)];
 }
 
 void device_lazy_init(at::DeviceType device_type) {
@@ -63,47 +59,39 @@ void device_lazy_init(at::DeviceType device_type) {
     throw python_error();
   }
 
-  is_initialized_flag = true;
+  is_initialized[static_cast<int>(device_type)] = true;
 }
 
 void set_requires_device_init(at::DeviceType device_type, bool value) {
-  if (device_type == at_fork_device_type_global) {
-    is_initialized_flag = !value;
-  }
+  is_initialized[static_cast<int>(device_type)] = !value;
 }
 
 bool is_device_in_bad_fork(at::DeviceType device_type) {
-  if (device_type != at_fork_device_type_global) {
-    return false;
-  }
-  return is_in_bad_fork_flag;
+  return is_in_bad_fork[static_cast<int>(device_type)];
 }
 
 void set_device_in_bad_fork(at::DeviceType device_type, bool value) {
-  if (device_type == at_fork_device_type_global) {
-    is_in_bad_fork_flag = value;
-  }
+  is_in_bad_fork[static_cast<int>(device_type)] = value;
 }
 
 // Should be called before the first device runtime call.
 void register_fork_handler_for_device_init(at::DeviceType device_type) {
 #ifndef WIN32
-  c10::call_once(at_fork_global_once_flag, [device_type]() {
-    at_fork_device_type_global = device_type;
+  at_fork_registered[static_cast<int>(device_type)] = true;
+  c10::call_once(at_fork_register_once, []() {
     pthread_atfork(nullptr, nullptr, []() {
-      set_device_in_bad_fork(at_fork_device_type_global, true);
-      if (is_device_lazy_init_supported(at_fork_device_type_global)) {
-        set_requires_device_init(at_fork_device_type_global, true);
+      for (int i = 0; i < static_cast<int>(at::COMPILE_TIME_MAX_DEVICE_TYPES); ++i) {
+        if (!at_fork_registered[i]) {
+          continue;
+        }
+        auto dt = static_cast<at::DeviceType>(i);
+        set_device_in_bad_fork(dt, true);
+        if (is_device_lazy_init_supported(dt)) {
+          set_requires_device_init(dt, true);
+        }
       }
     });
   });
-  TORCH_CHECK(
-      device_type == at_fork_device_type_global,
-      "register_fork_handler_for_device_init only supports a single accelerator type per process. ",
-      "First registered device type: ",
-      at::DeviceTypeName(at_fork_device_type_global, /*lower_case=*/true),
-      ", got: ",
-      at::DeviceTypeName(device_type, /*lower_case=*/true));
 #endif
 }
 
