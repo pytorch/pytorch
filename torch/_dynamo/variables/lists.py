@@ -898,10 +898,9 @@ class ListVariable(CommonListMethodsVariable):
                         args=list(map(ConstantVariable.create, exc.args)),
                     )
             else:
-                if isinstance(key, SymNodeVariable):
-                    key = key.evaluate_expr()
-                else:
-                    key = key.as_python_constant()
+                # Use guard_if_dyn to handle SymNodeVariable and LazyVariableTracker
+                # that may realize to SymNodeVariable
+                key = guard_if_dyn(key)
 
                 try:
                     self.items[key] = value

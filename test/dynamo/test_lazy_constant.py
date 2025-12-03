@@ -271,6 +271,111 @@ class LazyConstantVariableTests(TestCase):
         result3 = opt_fn3(tensor_input)
         self.assertEqual(result3[1], GLOBAL_INT_1)
 
+    def test_type_change_triggers_recompile(self):
+        """Test that changing the type of a constant triggers recompilation,
+        but changing the value within the same type does not."""
+        tensor_input = torch.randn(3)
+
+        def fn(t, val):
+            # Just pass through - should not guard on value, only type
+            return t + 1, val
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call with int
+        eager1 = fn(tensor_input, 42)
+        compiled1 = opt_fn(tensor_input, 42)
+        self.assertTrue(same(eager1[0], compiled1[0]))
+        self.assertEqual(eager1[1], compiled1[1])
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with different int value - should NOT recompile
+        eager2 = fn(tensor_input, 100)
+        compiled2 = opt_fn(tensor_input, 100)
+        self.assertTrue(same(eager2[0], compiled2[0]))
+        self.assertEqual(eager2[1], compiled2[1])
+        self.assertEqual(counter.frame_count, 1)  # Still 1, no recompile
+
+        # Third call with string - SHOULD recompile due to type change
+        eager3 = fn(tensor_input, "hello")
+        compiled3 = opt_fn(tensor_input, "hello")
+        self.assertTrue(same(eager3[0], compiled3[0]))
+        self.assertEqual(eager3[1], compiled3[1])
+        self.assertEqual(counter.frame_count, 2)  # Now 2, recompiled
+
+        # Fourth call with different string - should NOT recompile
+        eager4 = fn(tensor_input, "world")
+        compiled4 = opt_fn(tensor_input, "world")
+        self.assertTrue(same(eager4[0], compiled4[0]))
+        self.assertEqual(eager4[1], compiled4[1])
+        self.assertEqual(counter.frame_count, 2)  # Still 2
+
+    def test_python_type_does_not_realize(self):
+        """Test that python_type() on a lazy constant does not trigger realization.
+        This verifies that type-based queries can be answered without full guarding."""
+        from torch._dynamo.source import LocalSource
+        from torch._dynamo.variables.constant import ConstantVariable
+        from torch._dynamo.variables.lazy import LazyCache, LazyConstantVariable
+        from torch._dynamo.variables.tensor import TensorVariable
+
+        # Create a LazyConstantVariable directly (outside of tracing)
+        # to test that python_type() doesn't trigger realization
+        source = LocalSource("test")
+        cache = LazyCache(42, source)
+        lc = LazyConstantVariable(cache, source=source)
+
+        # python_type() should not trigger realization
+        self.assertFalse(lc.is_realized())
+        self.assertEqual(lc.python_type(), int)
+        self.assertFalse(lc.is_realized())  # Still not realized
+
+        # is_tensor() should not trigger realization
+        self.assertEqual(lc.is_tensor(), False)
+        self.assertFalse(lc.is_realized())
+
+        # lazy_isinstance() checks if cls is a subclass of ConstantVariable
+        # (i.e., whether this would realize to a ConstantVariable-like type)
+        self.assertTrue(lc.lazy_isinstance(ConstantVariable))
+        self.assertFalse(lc.lazy_isinstance(TensorVariable))
+        self.assertFalse(lc.is_realized())
+
+    def test_isinstance_recompiles_on_value_change(self):
+        """Test that isinstance checks currently trigger recompilation on value change.
+
+        This documents the current behavior: when isinstance() is called on a
+        LazyConstantVariable, it triggers realization which installs a CONSTANT_MATCH
+        guard. This means different values will cause recompilation, even if they
+        have the same type.
+
+        Future optimization: we could make isinstance only install a TYPE_MATCH guard
+        instead of triggering full realization, which would avoid recompilation when
+        only the value changes but the type stays the same.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn(t, val):
+            if isinstance(val, int):
+                return t + 1
+            return t - 1
+
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
+
+        # First call with int
+        eager1 = fn(tensor_input, 10)
+        compiled1 = opt_fn(tensor_input, 10)
+        self.assertTrue(same(eager1, compiled1))
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with different int - currently recompiles because
+        # isinstance triggers realization which installs CONSTANT_MATCH guard
+        eager2 = fn(tensor_input, 20)
+        compiled2 = opt_fn(tensor_input, 20)
+        self.assertTrue(same(eager2, compiled2))
+        # Document current behavior: recompilation happens
+        self.assertEqual(counter.frame_count, 2)
+
 
 if __name__ == "__main__":
     run_tests()

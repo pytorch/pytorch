@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from typing_extensions import Self
 
+    from torch._guards import Guard
+
     from .tensor import SymNodeVariable
 
 
@@ -236,18 +238,119 @@ class LazyConstantVariable(LazyVariableTracker):
     This allows constants that are just passed through (e.g., returned without
     being used in control flow or math) to avoid unnecessary recompilation when
     their values change.
+
+    Guards are installed lazily:
+    - TYPE_MATCH guard is installed when type-based methods (python_type, is_tensor,
+      lazy_isinstance) are called
+    - CONSTANT_MATCH guard is installed on full realization (e.g., used in control
+      flow or math), which subsumes any TYPE_MATCH guard
     """
 
     supported_types = (int, float, bool, str)
+    _nonvar_fields = {"_type_guard_installed", *LazyVariableTracker._nonvar_fields}
 
     @staticmethod
     def create(  # pyrefly: ignore[bad-override]
         value: Any,
         source: Any,
         **options: Any,
-    ) -> LazyConstantVariable:
+    ) -> VariableTracker:
+        from ..guards import GuardBuilder, install_guard
+        from ..source import (
+            DictGetItemSource,
+            DictSubclassGetItemSource,
+            is_constant_source,
+        )
+        from .constant import ConstantVariable
+
         assert type(value) in LazyConstantVariable.supported_types
-        return LazyConstantVariable(LazyCache(value, source), source=source, **options)
+        assert source is not None
+
+        # If the source doesn't support guards (e.g., ConstantSource), fall back
+        # to creating a regular ConstantVariable directly
+        if is_constant_source(source):
+            return ConstantVariable.create(value, source=source, **options)
+
+        result = LazyConstantVariable(
+            LazyCache(value, source), source=source, **options
+        )
+
+        # Install TYPE_MATCH guard at creation for most sources.
+        # For dict value sources, defer guard installation to enable lazy dict guarding.
+        if not isinstance(source, (DictGetItemSource, DictSubclassGetItemSource)):
+            type_guard: Guard = source.make_guard(GuardBuilder.TYPE_MATCH)
+            install_guard(type_guard)
+            result._type_guard_installed = True
+
+        return result
+
+    def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
+        super().__init__(_cache, **kwargs)
+        self._type_guard_installed = False
+
+    def _ensure_type_guard(self) -> None:
+        """Install TYPE_MATCH guard if not already installed and not realized."""
+        if self._type_guard_installed or self.is_realized():
+            return
+
+        from torch._guards import TracingContext
+
+        # Only install guard if we're in a tracing context
+        tracing_context = TracingContext.try_get()
+        if tracing_context is None:
+            return
+
+        from ..guards import GuardBuilder, install_guard
+
+        assert self.source is not None
+        type_guard: Guard = self.source.make_guard(GuardBuilder.TYPE_MATCH)
+        install_guard(type_guard)
+        self._type_guard_installed = True
+
+    def realize(self) -> VariableTracker:
+        """Force construction of the real VariableTracker."""
+        if self.is_realized():
+            return super().realize()
+
+        from torch._guards import TracingContext
+
+        from ..guards import GuardBuilder, install_guard
+        from .constant import ConstantVariable
+
+        tracing_context = TracingContext.get()
+        assert self.source is not None
+
+        # Realize first to see what we get
+        result = super().realize()
+
+        # Only remove TYPE_MATCH if we're installing CONSTANT_MATCH
+        # (which subsumes it). For SymNodeVariable, keep TYPE_MATCH.
+        if isinstance(result, ConstantVariable):
+            if self._type_guard_installed:
+                tracing_context.guards_context.dynamo_guards.remove_guards_with_source(
+                    self.source
+                )
+            constant_guard = self.source.make_guard(GuardBuilder.CONSTANT_MATCH)
+            install_guard(constant_guard)
+
+        return result
+
+    def python_type(self) -> type:
+        """Return the Python type without triggering realization."""
+        if self.is_realized():
+            return super().python_type()
+        self._ensure_type_guard()
+        return self.peek_type()
+
+    def is_tensor(self) -> bool:
+        """Primitive constants are never tensors."""
+        return False
+
+    def lazy_isinstance(self, cls: type) -> bool:
+        """Check isinstance without triggering realization when possible."""
+        from .constant import ConstantVariable
+
+        return issubclass(cls, ConstantVariable)
 
 
 class LazySymNodeFormatString:
