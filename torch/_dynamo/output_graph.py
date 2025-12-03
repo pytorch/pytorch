@@ -1183,6 +1183,7 @@ class OutputGraph(OutputGraphCommon):
                 # sourceless, so let's return a unspecializedNNModule variable
                 # tracker.
                 def wrap_name(module_key: str) -> VariableTracker:
+                    # pyrefly: ignore[bad-argument-type]
                     return variables.UnspecializedNNModuleVariable(target, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
@@ -2141,6 +2142,10 @@ class OutputGraph(OutputGraphCommon):
             self.real_value_cache.clear()
 
             gm = _make_graph_module(root, self.graph)
+
+            from .dce_extra_outputs import dce_hop_extra_outputs
+
+            dce_hop_extra_outputs(gm)
 
             # Saved tensors hooks are not used by the graph.
             # GraphModule by default only copies used in the graph submodules.
