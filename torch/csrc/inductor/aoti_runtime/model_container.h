@@ -78,7 +78,13 @@ class AOTInductorModelContainer {
     constant_blob_ = model->release_constant_blob();
     constants_internal_offset_.resize(
         model->num_constants() - model->num_folded_constants());
-    model->compute_constant_blob(blob_size_, constants_internal_offset_);
+    secondary_cpu_constants_internal_offset_.resize(
+        model->num_constants() - model->num_folded_constants());
+    model->compute_constant_blob(
+        blob_size_,
+        constants_internal_offset_,
+        secondary_cpu_blob_size_,
+        secondary_cpu_constants_internal_offset_);
     constant_folded_ = ConstantState::INITIALIZED;
 
     for (auto& model : models_) {
@@ -651,6 +657,8 @@ class AOTInductorModelContainer {
 
   size_t blob_size_;
   std::vector<size_t> constants_internal_offset_;
+  size_t secondary_cpu_blob_size_;
+  std::vector<size_t> secondary_cpu_constants_internal_offset_;
 
   // Determine which constants is being used for the model.
   // If true,
