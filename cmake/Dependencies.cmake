@@ -15,17 +15,6 @@ set(CMAKE_INSTALL_RPATH "${_rpath_portable_origin}")
 # the rpath (per library?)
 set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
 
-# pin hardware_destructive_interference_size for ABI stability with GCC,
-# but only if the compiler actually supports the corresponding --param.
-if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-  include(CheckCXXCompilerFlag)
-  check_cxx_compiler_flag("--param=hardware_destructive_interference_size=64"
-    CXX_SUPPORTS_HW_INTERFERENCE_PARAM)
-  if(CXX_SUPPORTS_HW_INTERFERENCE_PARAM)
-    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:--param=hardware_destructive_interference_size=64>)
-  endif()
-endif()
-
 # UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
 
