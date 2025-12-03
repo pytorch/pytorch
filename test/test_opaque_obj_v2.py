@@ -2,10 +2,12 @@
 
 import random
 from contextlib import ExitStack
+from dataclasses import dataclass
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import AotEagerAndRecordGraphs
+from torch._dynamo.testing import AotEagerAndRecordGraphs, CompileCounter
 from torch._dynamo.utils import counters as dynamo_counters
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
@@ -70,10 +72,43 @@ class AddModule(torch.nn.Module):
         return x * y
 
 
+class ValueConfig:
+    def __init__(self, mode: str):
+        self.mode = mode
+
+    def __eq__(self, other):
+        return isinstance(other, ValueConfig) and self.mode == other.mode
+
+    def __hash__(self):
+        return hash(self.mode)
+
+    def __repr__(self):
+        return f"ValueConfig(mode={self.mode!r})"
+
+
+class SizeStore:
+    def __init__(self, size: str):
+        self.size = size
+
+    def __eq__(self, other):
+        return isinstance(other, ValueConfig) and self.size == other.size
+
+    def __hash__(self):
+        return hash(self.size)
+
+    def __repr__(self):
+        return f"SizeStore(size={self.size!r})"
+
+    def increment_size(self):
+        return self.size + 1
+
+
 register_opaque_type(OpaqueQueue)
 register_opaque_type(RNGState)
 register_opaque_type(Counter)
 register_opaque_type(AddModule)
+register_opaque_type(ValueConfig, value_type=True)
+register_opaque_type(SizeStore, value_type=True)
 
 
 class TestOpaqueObject(TestCase):
@@ -166,6 +201,37 @@ class TestOpaqueObject(TestCase):
         @increment_counter_impl.register_fake
         def increment_counter_fake(c: Counter, prev: torch.Tensor) -> torch.Tensor:
             return torch.empty_like(prev)
+
+        torch.library.define(
+            "_TestOpaqueObject::process_with_config",
+            f"(Tensor x, {get_opaque_type_name(ValueConfig)} config) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::process_with_config",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def process_with_config_impl(
+            x: torch.Tensor, config: ValueConfig
+        ) -> torch.Tensor:
+            assert isinstance(config, ValueConfig)
+            if config.mode == "square":
+                return x * x
+            elif config.mode == "double":
+                return x + x
+            else:
+                return x
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::process_with_config", lib=self.lib
+        )
+        def process_with_config_fake(
+            x: torch.Tensor, config: ValueConfig
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
 
         super().setUp()
 
@@ -552,6 +618,157 @@ def forward(self, primals, tangents):
                 tags=torch.Tag.pt2_compliant_tag,
                 lib=self.lib,
             )
+
+    def test_invalid_opaque_obj_types(self):
+        for t in [str, bool, int, float, torch.Tensor]:
+            with self.assertRaisesRegex(ValueError, "Unable to register built-in type"):
+                register_opaque_type(t)
+
+        @dataclass
+        class Bad1:
+            x: int
+
+        pytree.register_dataclass(Bad1)
+        with self.assertRaisesRegex(
+            ValueError, "cannot be registered as an opaque object"
+        ):
+            register_opaque_type(Bad1)
+
+        @dataclass
+        class Bad2:
+            x: int
+
+        register_opaque_type(Bad2)
+        with self.assertRaisesRegex(ValueError, "cannot be registered as a pytree"):
+            pytree.register_dataclass(Bad2)
+
+    def test_value_type_recompile(self):
+        cnt = CompileCounter()
+
+        def foo(x, cfg):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+
+        opt_f = torch.compile(foo, backend=cnt, fullgraph=True)
+        res = opt_f(x, ValueConfig("square"))
+        self.assertEqual(res, x * x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        res = opt_f(x, ValueConfig("square"))
+        self.assertEqual(res, x * x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        # Recompilation!
+        res = opt_f(x, ValueConfig("double"))
+        self.assertEqual(res, x + x)
+        self.assertEqual(cnt.frame_count, 2)
+
+    def test_value_type_graph_input(self):
+        # Even though cfg is an input, it should not be an input to the dynamo
+        # graph. Instead it should directly put in the graph argument as a
+        # constant.
+
+        def foo(x, cfg):
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        backend = AotEagerAndRecordGraphs()
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        opt_f(x, ValueConfig("square"))
+
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    process_with_config = torch.ops._TestOpaqueObject.process_with_config(l_x_, ValueConfig(mode='square'));  l_x_ = None
+    return (process_with_config,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1):
+    process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(arg0_1, ValueConfig(mode='square'));  arg0_1 = None
+    return (process_with_config,)""",  # noqa: B950
+        )
+
+        opt_f(x, ValueConfig("double"))
+
+        self.assertExpectedInline(
+            backend.fw_graphs[1].code.strip(),
+            """\
+def forward(self, arg0_1):
+    process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(arg0_1, ValueConfig(mode='double'));  arg0_1 = None
+    return (process_with_config,)""",  # noqa: B950
+        )
+
+    def test_value_type_graph_intermediate(self):
+        def foo(x, config):
+            cfg = ValueConfig(config)
+            return torch.ops._TestOpaqueObject.process_with_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        backend = AotEagerAndRecordGraphs()
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        opt_f(x, "square")
+
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    process_with_config = torch.ops._TestOpaqueObject.process_with_config(l_x_, ValueConfig(mode='square'));  l_x_ = None
+    return (process_with_config,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1):
+    process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(arg0_1, ValueConfig(mode='square'));  arg0_1 = None
+    return (process_with_config,)""",  # noqa: B950
+        )
+
+        opt_f(x, "double")
+        self.assertExpectedInline(
+            backend.fw_graphs[1].code.strip(),
+            """\
+def forward(self, arg0_1):
+    process_with_config = torch.ops._TestOpaqueObject.process_with_config.default(arg0_1, ValueConfig(mode='double'));  arg0_1 = None
+    return (process_with_config,)""",  # noqa: B950
+        )
+
+        opt_f = torch.compile(foo, fullgraph=True, backend="inductor")
+        x = torch.randn(3, 3)
+        self.assertEqual(opt_f(x, "square"), foo(x, "square"))
+        self.assertEqual(opt_f(x, "double"), foo(x, "double"))
+
+    def test_value_type_attr_access(self):
+        def foo(x):
+            size = SizeStore(x.shape[0])
+            t1 = torch.ones((size.size,))
+            t2 = torch.cat([x, t1])
+            size.increment_size()
+            return t2 + size.size
+
+        x = torch.randn(
+            3,
+        )
+
+        backend = AotEagerAndRecordGraphs()
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        res = opt_f(x)
+        self.assertEqual(res, foo(x))
+
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1):
+    ones = torch.ops.aten.ones.default([3], device = device(type='cpu'), pin_memory = False)
+    cat = torch.ops.aten.cat.default([arg0_1, ones]);  arg0_1 = ones = None
+    add = torch.ops.aten.add.Tensor(cat, 3);  cat = None
+    return (add,)""",  # noqa: B950
+        )
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

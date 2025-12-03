@@ -27,6 +27,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import trace_structured
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
@@ -3121,6 +3122,10 @@ class PythonWrapperCodegen(CodeGen):
             return repr(s)
         elif isinstance(s, ir.GeneratorState):
             return s.codegen_reference()
+        elif is_opaque_value_type(type(s)):
+            opaque_type = type(s)
+            V.graph.opaque_value_type_classes[opaque_type.__name__] = opaque_type
+            return repr(s)
         else:
             return repr(s)
 
