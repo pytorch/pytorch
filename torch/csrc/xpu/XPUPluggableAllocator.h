@@ -20,8 +20,7 @@ struct TORCH_XPU_API XPUPluggableAllocator
     : public c10::xpu::XPUCachingAllocator::XPUAllocator {
   XPUPluggableAllocator(
       std::function<void*(size_t, int, sycl::queue*)> alloc_fn,
-      std::function<void(void*, size_t, int, sycl::queue*)> free_fn)
-      : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
+      std::function<void(void*, size_t, int, sycl::queue*)> free_fn);
 
   XPUPluggableAllocator(XPUPluggableAllocator& other) = default;
   XPUPluggableAllocator(XPUPluggableAllocator&& other) = delete;
