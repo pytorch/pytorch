@@ -176,6 +176,9 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
             new_target = clean_export_root_string(old_target)
             if new_target != old_target:
                 node.target = new_target
+                # Also clean the node name (becomes local variable name)
+                new_name = clean_export_root_string(node.name)
+                node.name = new_name
                 assert hasattr(graph_module, old_target)
                 # Move the parameter to the new name
                 param = torch.fx.graph_module._get_attr(graph_module, old_target)
@@ -837,6 +840,9 @@ def _dynamo_graph_capture_for_export(
                 transformed_graph, torch._dynamo.config.inline_inbuilt_nn_modules
             )
             clean_export_root(transformed_graph)
+
+            # Recompile after cleaning to update generated code with cleaned names
+            transformed_graph.recompile()
 
             transformed_graph.meta["module_call_specs"] = module_call_spec
             transformed_graph.meta["fake_mode"] = fake_mode
