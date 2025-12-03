@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 else:
     # The JIT doesn't understand Union, nor torch.dtype here
     DType = int
-    DimOrDims = Optional[tuple[int]]
+    DimOrDims = Optional[tuple[int, ...]]
 
 
 __all__ = [
