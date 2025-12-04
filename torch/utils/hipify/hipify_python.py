@@ -35,7 +35,6 @@ from . import constants
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
 
-from typing import Optional
 from collections.abc import Iterator
 from collections.abc import Mapping, Iterable
 from enum import Enum
@@ -47,12 +46,12 @@ class CurrentState(Enum):
     DONE = 2
 
 class HipifyResult:
-    def __init__(self, current_state, hipified_path):
+    def __init__(self, current_state, hipified_path) -> None:
         self.current_state = current_state
         self.hipified_path = hipified_path
         self.status = ""
 
-    def __str__(self):
+    def __str__(self) -> str:
         return (f"HipifyResult:: current_state: {self.current_state}, hipified_path : {self.hipified_path}, status: {self.status}")
 
 HipifyFinalResult = dict[str, HipifyResult]
@@ -75,11 +74,11 @@ __all__ = ['InputError', 'openf', 'bcolors', 'GeneratedFileCleaner', 'match_exte
 class InputError(Exception):
     # Exception raised for errors in the input.
 
-    def __init__(self, message):
+    def __init__(self, message) -> None:
         super().__init__(message)
         self.message = message
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"Input error: {self.message}"
 
 
@@ -109,7 +108,7 @@ class bcolors:
 # keep them (e.g. in the CI), this can be used to remove files.
 class GeneratedFileCleaner:
     """Context Manager to clean up generated files"""
-    def __init__(self, keep_intermediates=False):
+    def __init__(self, keep_intermediates=False) -> None:
         self.keep_intermediates = keep_intermediates
         self.files_to_clean = set()
         self.dirs_to_clean = []
@@ -123,7 +122,7 @@ class GeneratedFileCleaner:
         # pyrefly: ignore [not-iterable]
         return open(fn, *args, **kwargs)
 
-    def makedirs(self, dn, exist_ok=False):
+    def makedirs(self, dn, exist_ok=False) -> None:
         parent, n = os.path.split(dn)
         if not n:
             parent, n = os.path.split(parent)
@@ -222,7 +221,7 @@ def preprocess_file_and_save_result(
     HIPIFY_FINAL_RESULT[fin_path] = result
 
 
-def compute_stats(stats):
+def compute_stats(stats) -> None:
     unsupported_calls = {cuda_call for (cuda_call, _filepath) in stats["unsupported_calls"]}
 
     # Print the number of unsupported calls
@@ -616,7 +615,7 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
     return os.path.join(dirpath, root + ext)
 
 
-def is_out_of_place(rel_filepath):
+def is_out_of_place(rel_filepath) -> bool:
     if os.path.isabs(rel_filepath):
         raise AssertionError("rel_filepath must be a relative path")
     if rel_filepath.startswith("torch/"):
@@ -629,7 +628,7 @@ def is_out_of_place(rel_filepath):
 
 
 # Keep this synchronized with includes/ignores in build_amd.py
-def is_pytorch_file(rel_filepath):
+def is_pytorch_file(rel_filepath) -> bool:
     if os.path.isabs(rel_filepath):
         raise AssertionError("rel_filepath must be a relative path")
     if rel_filepath.startswith("aten/"):
@@ -653,7 +652,7 @@ def is_cusparse_file(rel_filepath):
     return False
 
 
-def is_special_file(rel_filepath):
+def is_special_file(rel_filepath) -> bool:
     if is_pytorch_file(rel_filepath):
         if "sparse" in rel_filepath.lower():
             return True
@@ -678,20 +677,20 @@ class TrieNode:
        A special char '' represents end of word
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.children = {}
 
 class Trie:
     """Creates a Trie out of a list of words. The trie can be exported to a Regex pattern.
     The corresponding Regex should match much faster than a simple Regex union."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the trie with an empty root node."""
         self.root = TrieNode()
         self._hash = hashlib.md5(usedforsecurity=False)
         self._digest = self._hash.digest()
 
-    def add(self, word):
+    def add(self, word) -> None:
         """Add a word to the Trie. """
         self._hash.update(word.encode())
         self._digest = self._hash.digest()
@@ -1011,7 +1010,7 @@ def preprocessor(
         hipify_result.current_state = CurrentState.DONE
         return hipify_result
 
-def file_specific_replacement(filepath, search_string, replace_string, strict=False):
+def file_specific_replacement(filepath, search_string, replace_string, strict=False) -> None:
     with openf(filepath, "r+") as f:
         contents = f.read()
         if strict:
@@ -1023,7 +1022,7 @@ def file_specific_replacement(filepath, search_string, replace_string, strict=Fa
         f.truncate()
 
 
-def file_add_header(filepath, header):
+def file_add_header(filepath, header) -> None:
     with openf(filepath, "r+") as f:
         contents = f.read()
         if header[0] != "<" and header[-1] != ">":
@@ -1089,7 +1088,7 @@ def extract_arguments(start, string):
     return arguments
 
 
-def str2bool(v):
+def str2bool(v : str) -> bool:
     """ArgumentParser doesn't support type=bool. Thus, this helper method will convert
     from possible string types to True / False."""
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -1115,7 +1114,7 @@ def hipify(
     hip_clang_launch: bool = False,
     is_pytorch_extension: bool = False,
     hipify_extra_files_only: bool = False,
-    clean_ctx: Optional[GeneratedFileCleaner] = None
+    clean_ctx: GeneratedFileCleaner | None = None
 ) -> HipifyFinalResult:
     if project_directory == "":
         project_directory = os.getcwd()

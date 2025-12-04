@@ -29,7 +29,7 @@ def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
     rngprim_def = torch.library.custom_op(
         "rngprims::" + name, impl_aten, mutates_args=(), schema=schema
     )
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     rngprim_def.register_fake(impl_meta)
 
     prim_packet = getattr(torch._ops.ops.rngprims, name)
@@ -330,11 +330,11 @@ def register_graphsafe_run_with_rng_state_op():
 
     @graphsafe_run_with_rng_state.py_impl(DispatchKey.CUDA)
     def impl_cuda(op, *args, rng_state=None, **kwargs):
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         device_idx = rng_state.device.index
         generator = torch.cuda.default_generators[device_idx]
         current_state = generator.graphsafe_get_state()
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         generator.graphsafe_set_state(rng_state)
         out = op(*args, **kwargs)
         generator.graphsafe_set_state(current_state)

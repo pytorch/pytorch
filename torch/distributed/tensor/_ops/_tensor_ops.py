@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Sequence, Sized
-from typing import cast, Optional
+from typing import cast
 
 import torch
 from torch._prims_common import IntLike
@@ -17,7 +17,11 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._common_rules import pointwise_rule
-from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+from torch.distributed.tensor._ops._embedding_ops import MaskPartial
+from torch.distributed.tensor._ops.registration import (
+    register_op_strategy,
+    register_prop_rule,
+)
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -25,8 +29,6 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_evenly_shardable,
     is_tensor_partial,
     normalize_dim,
-    register_op_strategy,
-    register_prop_rule,
     shift_shard_dims_after_insert,
     shift_shard_dims_after_remove,
 )
@@ -36,6 +38,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 
 
 aten = torch.ops.aten
@@ -84,6 +87,7 @@ register_op_strategy(
         aten.clone.default,
         aten.contiguous.default,
         aten.detach.default,
+        aten.alias.default,
         aten.fill_.Scalar,
         aten.view.dtype,
         aten.zero_.default,
@@ -380,7 +384,7 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
         raise AssertionError(f"Expected int, got {type(dim)}")
     if start is None:
         start = 0
-    if end is None or end > input_shape[dim]:
+    if end is None or statically_known_true(end > input_shape[dim]):
         end = input_shape[dim]
     if not isinstance(start, IntLike):
         raise AssertionError(f"Expected IntLike, got {type(start)}")
@@ -394,13 +398,20 @@ def gen_slice_strategy(op_schema: OpSchema) -> StrategyType:
     start = normalize_dim(start, input_shape[dim])  # type: ignore[arg-type]
     end = normalize_dim(end, input_shape[dim])  # type: ignore[arg-type]
 
-    redundant_slice = start == 0 and end == input_shape[dim] and step == 1
+    statically_redundant_slice = (
+        statically_known_true(start == 0)
+        and statically_known_true(end == input_shape[dim])
+        and statically_known_true(step == 1)
+    )
 
     slice_strategy = OpStrategy([])
 
     for arg_strategy in input_strategy.strategies:
         arg_spec = arg_strategy.output_spec
-        if not is_tensor_dim_sharded(arg_spec, dim=slice_dim) or redundant_slice:
+        if (
+            not is_tensor_dim_sharded(arg_spec, dim=slice_dim)
+            or statically_redundant_slice
+        ):
             # only add the strategy if the slice dim is not sharded
             out_spec = DTensorSpec(mesh, arg_spec.placements)
             slice_strategy.strategies.append(
@@ -484,7 +495,7 @@ def replicate_tensor_dim(
 def gen_slice_scatter_strategy(op_schema: OpSchema) -> StrategyType:
     # 1. number of dimensions in input and src need to match.
     # 2. number of elements on all non-dim need to match between input and src.
-    # 3. numer of elements in src in dim need to match the slice size.
+    # 3. number of elements in src in dim need to match the slice size.
     # Given the above:
     # - We suggest for src to follow the sharding of input, except on the scatter dimension,
     #   where our best bet for now is to make them replicated as a fall-back.
@@ -646,7 +657,7 @@ def gather_strategy(op_schema: OpSchema) -> StrategyType:
     # this only works when the input is sharded on the gather dimension, and
     # index has size 1 on the gather dimension
     if dim < len(index_shape) and index_shape[dim] == 1:
-        index_partial_placement = _MaskPartial(offset_shape=input_shape, offset_dim=dim)
+        index_partial_placement = MaskPartial(offset_shape=input_shape, offset_dim=dim)
         input_sharding: PlacementList = [
             index_partial_placement,
             Shard(dim),
@@ -712,7 +723,7 @@ def _derive_follow_placements_from_tuple_strategy(
             # current replicate, just follow new placement
             return new_placement
 
-    follow_placements: Optional[list[Placement]] = None
+    follow_placements: list[Placement] | None = None
     mesh = tuple_strategy.child_mesh(0)
     for arg_strategy in tuple_strategy.children:
         if not isinstance(arg_strategy, OpStrategy):
@@ -878,7 +889,7 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
     if not isinstance(indices_spec, DTensorSpec):
         raise AssertionError(f"Expected DTensorSpec, got {type(indices_spec)}")
 
-    all_indices_spec: list[Optional[DTensorSpec]] = [
+    all_indices_spec: list[DTensorSpec | None] = [
         indices_spec if dim == i else None for i in range(values_spec.ndim)
     ]
 
@@ -925,7 +936,7 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
     op_strategy = OpStrategy([])
     # 1. `indices` should all be replicated first.
     indices_redistribute_costs = []
-    new_indices_spec: list[Optional[DTensorSpec]] = []
+    new_indices_spec: list[DTensorSpec | None] = []
     for indices_spec_child in indices_spec.children:
         if not isinstance(indices_spec_child, OpStrategy):
             raise AssertionError(f"Expected OpStrategy, got {type(indices_spec_child)}")
@@ -1035,7 +1046,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         raise AssertionError(f"Expected DTensorSpec, got {type(values_spec)}")
     if not isinstance(multi_indices_spec, list):
         raise AssertionError(f"Expected list, got {type(multi_indices_spec)}")
-    multi_indices_spec = cast(list[Optional[DTensorSpec]], multi_indices_spec)
+    multi_indices_spec = cast(list[DTensorSpec | None], multi_indices_spec)
     valid_indices_spec: list[tuple[int, DTensorSpec]] = [
         (i, a) for i, a in enumerate(multi_indices_spec) if a is not None
     ]

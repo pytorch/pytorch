@@ -415,6 +415,7 @@ def create_call_function_ex(
             and not ignore_314_kwargs_push
         ):
             output.append(create_instruction("PUSH_NULL"))
+            has_kwargs = True
         if push_null:
             output.append(create_instruction("PUSH_NULL"))
             # 3.13 swapped NULL and callable

@@ -44,7 +44,7 @@ class SchemaHolder:
         return cls(pytree.tree_unflatten([], tree_spec).schema)
 
 
-# regsiter_constant allows us to get a tree_spec from pytree.tree_flatten(SchemaHolder(FunctionSchema)).
+# register_constant allows us to get a tree_spec from pytree.tree_flatten(SchemaHolder(FunctionSchema)).
 # The tree_spec is proxable in the graph and we can get back the schema via
 # schema = pytree.tree_unflatten([], tree_spec).schema
 pytree.register_constant(SchemaHolder)
@@ -610,7 +610,7 @@ def do_auto_functionalize_v2(
     normalized_kwargs = {}
 
     schema = op._schema
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     op = op._op if isinstance(op, HopInstance) else op
     assert isinstance(op, get_args(_MutableOpType))
 

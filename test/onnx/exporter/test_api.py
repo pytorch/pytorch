@@ -574,7 +574,7 @@ class TestCustomTranslationTable(common_utils.TestCase):
 
     def test_01_specialization_with_run_decomp_is_supported(self):
         # Phi3RMSNorm changes and redo shape inference after `run_decompositions` call
-        # We ned this test to make sure everything we do on fx graph is covered by
+        # We need this test to make sure everything we do on fx graph is covered by
         # backed_size_oblivious
         class Phi3RMSNorm(torch.nn.Module):
             def __init__(self, hidden_size, eps=1e-6):

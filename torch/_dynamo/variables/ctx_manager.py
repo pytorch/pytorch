@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 """
 This file contains a collection of context manager classes used by Dynamo for tracking
 and managing various PyTorch runtime states during graph compilation. These context
@@ -23,8 +21,9 @@ restoring state changes.
 import inspect
 import sys
 import warnings
-from contextlib import ExitStack
-from typing import TYPE_CHECKING, Union
+from collections.abc import Callable, Sequence, Sized
+from contextlib import AbstractContextManager, ExitStack
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch._C
 from torch._guards import Guard
@@ -35,8 +34,7 @@ from ..bytecode_transformation import (
     create_instruction,
     create_setup_with,
 )
-from ..device_interface import get_interface_for_device
-from ..exc import unimplemented_v2
+from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from ..utils import _get_error_on_graph_break, _set_error_on_graph_break
@@ -51,7 +49,6 @@ from .functions import (
     WrappedUserFunctionVariable,
     WrappedUserMethodVariable,
 )
-from .streams import StreamVariable
 from .user_defined import UserDefinedObjectVariable
 
 
@@ -69,35 +66,43 @@ class ContextWrappingVariable(VariableTracker):
         *VariableTracker._nonvar_fields,
     }
 
-    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+    def __init__(
+        self, target_values: Any, initial_values: Optional[Any] = None, **kwargs: Any
+    ) -> None:
         super().__init__(**kwargs)
         self.target_values = target_values
         self.initial_values = initial_values
 
-    def enter(self, tx):
-        self._call_func(tx, self.target_values)
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+        if hasattr(self, "_call_func"):
+            self._call_func(tx, self.target_values)
         self.set_cleanup_hook(tx)
         return variables.ConstantVariable.create(None)
 
-    def set_cleanup_hook(self, tx: "InstructionTranslator", fn=None):
+    def set_cleanup_hook(
+        self, tx: "InstructionTranslator", fn: Optional[Callable[..., Any]] = None
+    ) -> None:
         if fn is None:
 
-            def fn():
-                self._call_func(tx, self.initial_values)
+            def fn() -> None:
+                if hasattr(self, "_call_func"):
+                    self._call_func(tx, self.initial_values)
 
-        self.cleanup_fn = fn
+        self.cleanup_fn: Optional[Callable[..., Any]] = fn
         tx.output.add_cleanup_hook(self.cleanup)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup_assert()
         return variables.ConstantVariable.create(None)
 
-    def reconstruct_type(self, codegen: "PyCodegen"):
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
         codegen(
             AttrSource(codegen.tx.import_source(self.module_name()), self.fn_name())
         )
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(lambda: self.reconstruct_type(codegen))
         target_values = self.target_values
         if not target_values:
@@ -105,18 +110,18 @@ class ContextWrappingVariable(VariableTracker):
         codegen.extend_output([codegen.create_load_const(val) for val in target_values])
         codegen.extend_output(create_call_function(len(target_values), False))
 
-    def module_name(self):
+    def module_name(self) -> str:
         raise NotImplementedError("module_name called on base")
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         raise NotImplementedError("fn_name called on base")
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         assert len(args) == 1
         assert isinstance(
             args[0],
@@ -130,28 +135,27 @@ class ContextWrappingVariable(VariableTracker):
 
         if isinstance(args[0], NestedUserFunctionVariable):
             return WrappedNestedUserFunctionVariable(args[0], self)
-
-        if isinstance(args[0], SkipFunctionVariable):
+        elif isinstance(args[0], SkipFunctionVariable):
             return WrappedSkipFunctionVariable(args[0], self)
-
-        if isinstance(args[0], UserMethodVariable):
+        elif isinstance(args[0], UserMethodVariable):
             return WrappedUserMethodVariable(args[0], self)
-
-        if isinstance(args[0], UserFunctionVariable):
+        elif isinstance(args[0], UserFunctionVariable):
             return WrappedUserFunctionVariable(args[0], self)
+        else:
+            raise AssertionError("Unexpected arg type")
 
-    def supports_graph_breaks(self):
+    def supports_graph_breaks(self) -> bool:
         return True
 
-    def exit_on_graph_break(self):
+    def exit_on_graph_break(self) -> bool:
         return True
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         if self.cleanup_fn is not None:
             self.cleanup_fn()
             self.cleanup_fn = None
 
-    def cleanup_assert(self):
+    def cleanup_assert(self) -> None:
         assert self.cleanup_fn, "multiple exits?"
         self.cleanup()
 
@@ -159,7 +163,7 @@ class ContextWrappingVariable(VariableTracker):
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
     # python constants. Which might not always be the case here.
-    def __init__(self, cm_obj, **kwargs) -> None:
+    def __init__(self, cm_obj: AbstractContextManager[Any], **kwargs: Any) -> None:
         assert cm_obj is not None
         super().__init__(
             value=cm_obj,
@@ -168,44 +172,46 @@ class GenericContextWrappingVariable(UserDefinedObjectVariable):
         )
         self.cm_obj = cm_obj
 
-    def module_name(self):
+    def module_name(self) -> str:
         return self.cm_obj.__module__
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return type(self.cm_obj).__name__
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         source = None if self.source is None else AttrSource(self.source, "__enter__")
         return variables.UserMethodVariable(
-            self.cm_obj.__enter__.__func__,
+            self.cm_obj.__enter__.__func__,  # type: ignore[attr-defined]
             self,
             source=source,
         ).call_function(tx, [], {})
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         source = None if self.source is None else AttrSource(self.source, "__exit__")
         x = variables.UserMethodVariable(
-            self.cm_obj.__exit__.__func__,
+            self.cm_obj.__exit__.__func__,  # type: ignore[attr-defined]
             self,
             source=source,
-        ).call_function(tx, args, {})
+        ).call_function(tx, list(args), {})
         tx.active_generic_context_managers.pop()
         return x
 
-    def supports_graph_breaks(self):
+    def supports_graph_breaks(self) -> bool:
         return False
 
-    def exit_on_graph_break(self):
+    def exit_on_graph_break(self) -> bool:
         return True
 
 
 class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
-    def __init__(self, ctx_manager_vt, mod):
+    def __init__(self, ctx_manager_vt: ContextWrappingVariable, mod: Any) -> None:
         self.cm_vt = ctx_manager_vt
         self.mod = mod
         # We don't call super().__init__() because we're delegating most methods to cm_vt
 
-    def enter(self, tx: "InstructionTranslator"):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         # Custom enter implementation with side effects
 
         self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
@@ -214,7 +220,9 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
         return self.cm_vt.enter(tx)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         # Custom exit implementation with side effects
         x = self.cm_vt.exit(tx, *args)
         tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
@@ -222,7 +230,7 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         return x
 
     # Forward all other method calls to self.cm_vt
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         # This will be called for any attribute not explicitly defined in this class
         return getattr(self.cm_vt, name)
 
@@ -231,14 +239,16 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
     """represents torch grad requires grad"""
 
     @staticmethod
-    def create(tx: "InstructionTranslator", target_values, **kwargs):
+    def create(
+        tx: "InstructionTranslator", target_values: Any, **kwargs: Any
+    ) -> "GradInplaceRequiresGradCtxManagerVariable":
         return GradInplaceRequiresGradCtxManagerVariable(
             target_values=target_values,
             initial_values=None,
             **kwargs,
         )
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         [enabled] = self.target_values
         self.prev_state = torch._C._functorch.get_inplace_requires_grad_allowed()
         torch._C._functorch.set_inplace_requires_grad_allowed(enabled)
@@ -256,7 +266,9 @@ class GradInplaceRequiresGradCtxManagerVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup()
         tx.output.create_node(
             "call_function",
@@ -271,14 +283,16 @@ class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
     """represents torch._functorch.pyfunction.temporarily_pop_interpreter_stack()"""
 
     @staticmethod
-    def create(tx: "InstructionTranslator", target_values, **kwargs):
+    def create(
+        tx: "InstructionTranslator", target_values: Any, **kwargs: Any
+    ) -> "TemporarilyPopInterpreterStackCtxManagerVariable":
         return TemporarilyPopInterpreterStackCtxManagerVariable(
             target_values=target_values,
             initial_values=None,
             **kwargs,
         )
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         self.saved = torch._C._functorch.pop_dynamic_layer_stack()
         self.set_cleanup_hook(
             tx,
@@ -292,7 +306,9 @@ class TemporarilyPopInterpreterStackCtxManagerVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup()
         tx.output.create_node(
             "call_function",
@@ -311,10 +327,12 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a jvp
     # call from eager that calls the compiled function, as the jvp levels
     # may be different.
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)  # type: ignore[arg-type]
 
     @staticmethod
-    def create(tx: "InstructionTranslator", **kwargs):
+    def create(
+        tx: "InstructionTranslator", **kwargs: Any
+    ) -> "JvpIncrementNestingCtxManagerVariable":
         var = JvpIncrementNestingCtxManagerVariable(
             target_values=None,
             initial_values=None,
@@ -322,7 +340,7 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         )
         return var
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         install_guard(self._guards_singleton)
         jvp_level = torch._functorch.eager_transforms.enter_jvp_nesting()
         self.set_cleanup_hook(
@@ -336,7 +354,9 @@ class JvpIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(jvp_level)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup()
         tx.output.create_node(
             "call_function", torch._C._functorch._jvp_decrement_nesting, (), {}
@@ -348,14 +368,16 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
     """represents torch.autograd.forward_ad._set_fwd_grad_enabled() to enable/disable fwd grad"""
 
     @staticmethod
-    def create(tx: "InstructionTranslator", target_values, **kwargs):
+    def create(
+        tx: "InstructionTranslator", target_values: Any, **kwargs: Any
+    ) -> "SetFwdGradEnabledContextManager":
         return SetFwdGradEnabledContextManager(
             target_values=target_values,
             initial_values=None,
             **kwargs,
         )
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         [mode] = self.target_values
         self.prev_state = torch._C._is_fwd_grad_enabled()
         torch._C._set_fwd_grad_enabled(mode)
@@ -371,7 +393,9 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup()
         tx.output.create_node(
             "call_function",
@@ -385,17 +409,17 @@ class SetFwdGradEnabledContextManager(ContextWrappingVariable):
 class DualLevelContextManager(ContextWrappingVariable):
     """Represents torch.autograd.forward_ad.dual_level ctx manager"""
 
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.DUAL_LEVEL)  # type: ignore[arg-type]
 
     @staticmethod
-    def create(tx: "InstructionTranslator", **kwargs):
+    def create(tx: "InstructionTranslator", **kwargs: Any) -> "DualLevelContextManager":
         return DualLevelContextManager(
             target_values=None,
             initial_values=None,
             **kwargs,
         )
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         install_guard(self._guards_singleton)
         self.new_level = torch.autograd.forward_ad.enter_dual_level()
         self.set_cleanup_hook(
@@ -409,7 +433,9 @@ class DualLevelContextManager(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(self.new_level)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup()
         tx.output.create_node(
             "call_function",
@@ -428,10 +454,12 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a grad
     # call from eager that calls the compiled function, as the grad levels
     # may be different.
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)  # type: ignore[arg-type]
 
     @staticmethod
-    def create(tx: "InstructionTranslator", **kwargs):
+    def create(
+        tx: "InstructionTranslator", **kwargs: Any
+    ) -> "GradIncrementNestingCtxManagerVariable":
         var = GradIncrementNestingCtxManagerVariable(
             target_values=None,
             initial_values=None,
@@ -439,7 +467,7 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         )
         return var
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         install_guard(self._guards_singleton)
         grad_level = torch._C._functorch._grad_increment_nesting()
         self.set_cleanup_hook(tx, lambda: torch._C._functorch._grad_decrement_nesting())
@@ -451,7 +479,9 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(grad_level)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup()
         tx.output.create_node(
             "call_function", torch._C._functorch._grad_decrement_nesting, (), {}
@@ -463,19 +493,29 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
     """Delay a call to warnings.catch_warnings"""
 
     @staticmethod
-    def create(tx: "InstructionTranslator", catch_warnings_args):
+    def create(
+        tx: "InstructionTranslator", catch_warnings_args: dict[str, VariableTracker]
+    ) -> "CatchWarningsCtxManagerVariable":
         return CatchWarningsCtxManagerVariable(
             catch_warnings_args=catch_warnings_args,
             target_values=None,
             initial_values=None,
         )
 
-    def __init__(self, catch_warnings_args, **kwargs) -> None:
+    def __init__(
+        self,
+        catch_warnings_args: dict[str, VariableTracker],
+        target_values: Optional[Any] = None,
+        initial_values: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> None:
         assert isinstance(catch_warnings_args, dict), catch_warnings_args
-        super().__init__(**kwargs)
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
         self.catch_warnings_args = catch_warnings_args
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         kwargs = {
             k: v.as_python_constant() for k, v in self.catch_warnings_args.items()
         }
@@ -483,7 +523,7 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         self.set_cleanup_hook(tx, lambda: ctx_val.__exit__(None, None, None))
         return variables.ConstantVariable.create(ctx_val.__enter__())
 
-    def reconstruct(self, cg):
+    def reconstruct(self, cg: "PyCodegen") -> None:
         cg.add_push_null(lambda: cg.load_import_from("warnings", "catch_warnings"))
         cg.foreach(self.catch_warnings_args.values())
         keys = tuple(self.catch_warnings_args.keys())
@@ -498,10 +538,14 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
     # being compiled. But the FX graph may be invalid in the case of a vmap
     # call from eager that calls the compiled function, as the vmap levels
     # may be different.
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FUNCTORCH_STACK_MATCH)  # type: ignore[arg-type]
 
     @staticmethod
-    def create(tx: "InstructionTranslator", target_values, **kwargs):
+    def create(
+        tx: "InstructionTranslator",
+        target_values: Sequence[VariableTracker],
+        **kwargs: Any,
+    ) -> "VmapIncrementNestingCtxManagerVariable":
         var = VmapIncrementNestingCtxManagerVariable(
             target_values=target_values,
             initial_values=None,
@@ -509,7 +553,7 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         )
         return var
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         install_guard(self._guards_singleton)
         batch_size, randomness = self.target_values
         if isinstance(batch_size, variables.SymNodeVariable):
@@ -529,7 +573,9 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(vmap_level)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup()
         tx.output.create_node(
             "call_function",
@@ -543,10 +589,15 @@ class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
 class GradModeVariable(ContextWrappingVariable):
     """represents torch.{no_grad,enable_grad,set_grad_mode}()"""
 
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.GRAD_MODE)  # type: ignore[arg-type]
 
     @staticmethod
-    def create(tx: "InstructionTranslator", target_value, initialized=False, **kwargs):
+    def create(
+        tx: "InstructionTranslator",
+        target_value: Any,
+        initialized: bool = False,
+        **kwargs: Any,
+    ) -> "GradModeVariable":
         var = GradModeVariable(
             target_values=[target_value],
             initial_values=[torch.is_grad_enabled()],
@@ -557,31 +608,37 @@ class GradModeVariable(ContextWrappingVariable):
         return var
 
     def __init__(
-        self, target_values, initial_values=None, initialized=True, **kwargs
+        self,
+        target_values: Any,
+        initial_values: Optional[Sequence[bool]] = None,
+        initialized: bool = True,
+        **kwargs: Any,
     ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         install_guard(self._guards_singleton)
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         self._call_func(tx, self.target_values)
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self._call_func(tx, self.initial_values)
         return variables.ConstantVariable.create(None)
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ):
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         self._call_func(tx, self.initial_values)  # undo eager initialization
         return super().call_function(tx, args, kwargs)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx: "InstructionTranslator", values: Any) -> None:
         assert len(values) == 1
         value = values[0]
         # Coalesce grad mode mutations
@@ -591,16 +648,18 @@ class GradModeVariable(ContextWrappingVariable):
             )
             torch._C._set_grad_enabled(value)
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "set_grad_enabled"
 
 
 class InferenceModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(tx: "InstructionTranslator", target_value, **kwargs):
+    def create(
+        tx: "InstructionTranslator", target_value: Any, **kwargs: Any
+    ) -> "InferenceModeVariable":
         var = InferenceModeVariable(
             [target_value], initial_values=torch.is_inference_mode_enabled(), **kwargs
         )
@@ -608,9 +667,9 @@ class InferenceModeVariable(ContextWrappingVariable):
 
     def __init__(
         self,
-        target_values,
-        initial_values=None,
-        **kwargs,
+        target_values: Any,
+        initial_values: Optional[bool] = None,
+        **kwargs: Any,
     ) -> None:
         if initial_values is None:
             # This must be called here since function defaults are evaluated at import time
@@ -618,9 +677,10 @@ class InferenceModeVariable(ContextWrappingVariable):
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.target_values = target_values
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup_assert()
         tx.output.create_node(
             "call_function",
@@ -628,8 +688,9 @@ class InferenceModeVariable(ContextWrappingVariable):
             (self.proxy,),
             {},
         )
+        return variables.ConstantVariable.create(None)
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         disabled_inference_mode_forcibly = False
         if (
             torch._dynamo.config.fake_tensor_disable_inference_mode
@@ -644,7 +705,7 @@ class InferenceModeVariable(ContextWrappingVariable):
         else:
             ctx = torch.autograd.grad_mode._enter_inference_mode(*self.target_values)
 
-        def cleanup_hook():
+        def cleanup_hook() -> None:
             if disabled_inference_mode_forcibly:
                 torch._C._set_grad_enabled(prior)
             else:
@@ -657,11 +718,12 @@ class InferenceModeVariable(ContextWrappingVariable):
             (*self.target_values,),
             {},
         )
+        return variables.ConstantVariable.create(None)
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "inference_mode"
 
 
@@ -669,7 +731,9 @@ class CUDADeviceVariable(ContextWrappingVariable):
     """represents torch.cuda.device"""
 
     @staticmethod
-    def create(tx: "InstructionTranslator", device, **kwargs):
+    def create(
+        tx: "InstructionTranslator", device: Any, **kwargs: Any
+    ) -> "CUDADeviceVariable":
         var = CUDADeviceVariable(
             target_values=[torch.cuda._get_device_index(device, optional=True)],
             initial_values=None,
@@ -679,16 +743,17 @@ class CUDADeviceVariable(ContextWrappingVariable):
 
     def __init__(
         self,
-        target_values,
-        initial_values=None,
-        **kwargs,
+        target_values: Any,
+        initial_values: Optional[Any] = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.target_values = target_values
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup_assert()
         tx.output.create_node(
             "call_function",
@@ -698,7 +763,7 @@ class CUDADeviceVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(False)
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         prev_idx = torch.cuda._exchange_device(*self.target_values)
         self.set_cleanup_hook(tx, lambda: torch.cuda._maybe_exchange_device(prev_idx))
         self.proxy = tx.output.create_node(
@@ -707,21 +772,24 @@ class CUDADeviceVariable(ContextWrappingVariable):
             (*self.target_values,),
             {},
         )
+        return variables.ConstantVariable.create(None)
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch.cuda"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "device"
 
 
 class TorchFunctionDisableVariable(ContextWrappingVariable):
     """represents whether torch function overrides are enabled or not"""
 
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.TORCH_FUNCTION_STATE)  # type: ignore[arg-type]
 
     @staticmethod
-    def create(tx: "InstructionTranslator", **kwargs):
+    def create(
+        tx: "InstructionTranslator", **kwargs: Any
+    ) -> "TorchFunctionDisableVariable":
         var = TorchFunctionDisableVariable(
             target_values=[],
             initial_values=[],
@@ -730,10 +798,14 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         return var
 
     def __init__(
-        self, target_values, initial_values=None, only_subclass=True, **kwargs
+        self,
+        target_values: Sized,
+        initial_values: Optional[Sized] = None,
+        only_subclass: bool = True,
+        **kwargs: Any,
     ) -> None:
         assert len(target_values) == 0
-        assert len(initial_values) == 0
+        assert initial_values is not None and len(initial_values) == 0
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
@@ -750,10 +822,14 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         )
         install_guard(self._guards_singleton)
 
-    def set_cleanup_hook(self, tx: "InstructionTranslator", fn=None):
-        if fn is None:
+    def set_cleanup_hook(
+        self,
+        tx: "InstructionTranslator",
+        cleanup_fn: Optional[Callable[..., Any]] = None,
+    ) -> None:
+        if cleanup_fn is None:
 
-            def fn():
+            def cleanup_fn() -> None:
                 tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
                     self.initial_torch_function_subclass_enabled
                 )
@@ -762,19 +838,19 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
                         self.initial_torch_function_subclass_enabled
                     )
 
-        self.cleanup_fn = fn
+        self.cleanup_fn = cleanup_fn
         tx.output.add_cleanup_hook(self.cleanup)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx: "InstructionTranslator", values: Sized) -> None:
         assert len(values) == 0
         tx.symbolic_torch_function_state.torch_function_subclass_enabled = False
         if not self.only_subclass:
             tx.symbolic_torch_function_state.torch_function_mode_enabled = False
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch._C"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         if self.only_subclass:
             return "DisableTorchFunctionSubclass"
         return "DisableTorchFunction"
@@ -784,11 +860,14 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
     """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
 
     _guards_singleton = Guard(
-        GlobalStateSource(), GuardBuilder.DETERMINISTIC_ALGORITHMS
+        GlobalStateSource(),
+        GuardBuilder.DETERMINISTIC_ALGORITHMS,  # type: ignore[arg-type]
     )
 
     @staticmethod
-    def create(tx: "InstructionTranslator", target_value, **kwargs):
+    def create(
+        tx: "InstructionTranslator", target_value: bool, **kwargs: Any
+    ) -> "DeterministicAlgorithmsVariable":
         var = DeterministicAlgorithmsVariable(
             target_values=[target_value],
             initial_values=[torch.are_deterministic_algorithms_enabled()],
@@ -798,16 +877,21 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         var.set_cleanup_hook(tx)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+    def __init__(
+        self,
+        target_values: Sequence[bool],
+        initial_values: Optional[Sequence[bool]] = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
         install_guard(self._guards_singleton)
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         return variables.ConstantVariable.create(None)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx: "InstructionTranslator", values: Sequence[bool]) -> None:
         assert len(values) == 1
         value = values[0]
         tx.output.create_node(
@@ -815,10 +899,10 @@ class DeterministicAlgorithmsVariable(ContextWrappingVariable):
         )
         torch._C._set_deterministic_algorithms(value)
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "use_deterministic_algorithms"
 
 
@@ -826,7 +910,9 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
     """represents torch.autograd.graph.disable_saved_tensors_hook."""
 
     @staticmethod
-    def create(tx: "InstructionTranslator", target_value, **kwargs):
+    def create(
+        tx: "InstructionTranslator", target_value: Optional[str], **kwargs: Any
+    ) -> "DisabledSavedTensorsHooksVariable":
         var = DisabledSavedTensorsHooksVariable(
             target_values=[target_value],
             initial_values=[
@@ -838,15 +924,22 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
         var.set_cleanup_hook(tx)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+    def __init__(
+        self,
+        target_values: Sequence[Optional[str]],
+        initial_values: Optional[Sequence[Optional[str]]] = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         return variables.ConstantVariable.create(None)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(
+        self, tx: "InstructionTranslator", values: Sequence[Optional[str]]
+    ) -> None:
         assert len(values) == 1
         value = values[0]
         if value is not None:
@@ -867,16 +960,20 @@ class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
             )
             torch._C._autograd._saved_tensors_hooks_enable()
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch.autograd.graph"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "disable_saved_tensors_hooks"
 
 
 class AutocastModeVariable(ContextWrappingVariable):
     @staticmethod
-    def create(func, args, kwargs):
+    def create(
+        func: torch.amp.autocast_mode.autocast,
+        args: Sequence[Any],
+        kwargs: dict[str, Any],
+    ) -> "AutocastModeVariable":
         assert func in [
             torch.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast,
@@ -907,30 +1004,37 @@ class AutocastModeVariable(ContextWrappingVariable):
         var = AutocastModeVariable(target_values, initial_values=None, **kwargs)
         return var
 
-    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+    def __init__(
+        self,
+        target_values: Sequence[Any],
+        initial_values: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
-        self.target_values = target_values
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup_assert()
         tx.output.create_node(
             "call_function", torch.amp._exit_autocast, (self.proxy,), {}
         )
         return variables.ConstantVariable.create(None)
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         ctx = torch.amp._enter_autocast(*self.target_values)
         self.set_cleanup_hook(tx, lambda: torch.amp._exit_autocast(ctx))
         self.proxy = tx.output.create_node(
             "call_function", torch.amp._enter_autocast, (*self.target_values,), {}
         )
+        return variables.ConstantVariable.create(None)
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch.amp.autocast_mode"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "autocast"
 
 
@@ -939,20 +1043,22 @@ class NullContextVariable(ContextWrappingVariable):
     This class represents Python contextlib.nullcontext.
     """
 
-    def __init__(self, target_values=None, **kwargs) -> None:
+    def __init__(self, target_values: Optional[Any] = None, **kwargs: Any) -> None:
         super().__init__(target_values=target_values, **kwargs)
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         none = variables.ConstantVariable.create(None)
         return self.target_values if self.target_values else none
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         return variables.ConstantVariable.create(None)
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "contextlib"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "nullcontext"
 
 
@@ -965,23 +1071,25 @@ class ProfilerContextVariable(ContextWrappingVariable):
     than `None`, per implementation of the torch objects.
     """
 
-    def __init__(self, **kwargs) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(target_values=None, **kwargs)
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         return self
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         return variables.ConstantVariable.create(None)
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "contextlib"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "nullcontext"
 
-    def reconstruct(self, cg):
-        unimplemented_v2(
+    def reconstruct(self, cg: "PyCodegen") -> None:
+        unimplemented(
             gb_type="torch.profiler object escaped from compiled region",
             context=str(self),
             explanation="Dynamo doesn't support compiling a region that returns a torch.profiler context manager.",
@@ -991,97 +1099,43 @@ class ProfilerContextVariable(ContextWrappingVariable):
         )
 
 
-class StreamContextVariable(ContextWrappingVariable):
-    @staticmethod
-    def create(tx: "InstructionTranslator", target_value, **kwargs):
-        from .builder import wrap_fx_proxy_cls
-
-        current_stream_method = get_interface_for_device(
-            target_value.device
-        ).current_stream
-        current_stream = wrap_fx_proxy_cls(
-            StreamVariable,
-            tx,
-            tx.output.create_proxy(
-                "call_function",
-                current_stream_method,
-                (None,),
-                {},
-            ),
-        )
-        return StreamContextVariable(
-            target_values=[target_value],
-            initial_values=[current_stream],
-            device=target_value.device,
-            **kwargs,
-        )
-
-    def __init__(self, target_values, device, initial_values=None, **kwargs) -> None:
-        super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
-        )
-        self.device = device
-        self.set_stream = get_interface_for_device(self.device).set_stream
-        self.set_stream_id = get_interface_for_device(self.device)._set_stream_by_id
-
-    def enter(self, tx):
-        # stream generated inside the traced function
-        if self.target_values[0].as_proxy() is not None:
-            tx.output.create_proxy(
-                "call_function",
-                self.set_stream,
-                (self.target_values[0].as_proxy(),),
-                {},
-            )
-        # stream passed from outside the traced function
-        else:
-            stream = self.target_values[0].value
-            tx.output.create_proxy(
-                "call_function",
-                self.set_stream_id,
-                (stream.stream_id, stream.device_index, stream.device_type),
-                {},
-            )
-        self.set_stream(self.target_values[0].value)
-        self.set_cleanup_hook(tx, lambda: self.set_stream(self.initial_values[0].value))
-
-    def exit(self, tx: "InstructionTranslator", *args):
-        tx.output.create_proxy(
-            "call_function",
-            self.set_stream,
-            (self.initial_values[0].as_proxy(),),
-            {},
-        )
-        self.cleanup_assert()
-
-
 class PreserveVersionContextVariable(ContextWrappingVariable):
     """
     Wraps torch.autograd._unsafe_preserve_version_counter
     """
 
     @staticmethod
-    def _create_lambda_from_tensors(tx, tensors):
+    def _create_lambda_from_tensors(
+        tx: "InstructionTranslator",
+        tensors: VariableTracker,
+    ) -> "PreserveVersionContextVariable":
         if isinstance(tensors, variables.TensorVariable):
             versions = variables.TupleVariable(
                 [x.var_getattr(tx, "_version") for x in [tensors]]
             )
-            tensors = variables.TupleVariable([tensors])
+            tensors_tuple = variables.TupleVariable([tensors])
         else:
+            assert isinstance(tensors, variables.TupleVariable)
             versions = variables.TupleVariable(
                 [x.var_getattr(tx, "_version") for x in tensors.items]
             )
-        return PreserveVersionContextVariable(tensors, versions)
+            tensors_tuple = tensors
+        return PreserveVersionContextVariable(tensors_tuple, versions)
 
     @staticmethod
-    def constructor(tx):
+    def constructor(tx: "InstructionTranslator") -> VariableTracker:
         return variables.LambdaVariable(
             lambda tensors: PreserveVersionContextVariable._create_lambda_from_tensors(
                 tx, tensors
             )
         )
 
-    def __init__(self, tensors, prev_versions, **kwargs) -> None:
+    def __init__(
+        self,
+        tensors: VariableTracker,
+        prev_versions: VariableTracker,
+        **kwargs: Any,
+    ) -> None:
         kwargs.setdefault("target_values", None)
         super().__init__(**kwargs)
         self.tensors = tensors
@@ -1094,18 +1148,20 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         ):
             self.prev_versions = variables.TupleVariable([self.prev_versions])
 
-    def enter(self, tx):
-        pass
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+        return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         from ..tensor_version_op import _unsafe_set_version_counter
 
         return variables.TorchInGraphFunctionVariable(
             _unsafe_set_version_counter
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 
-    def reconstruct(self, codegen: "PyCodegen"):
-        unimplemented_v2(
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        unimplemented(
             gb_type="torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
             context=str(self),
             explanation=(
@@ -1119,10 +1175,15 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
 
 
 class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
-    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)  # type: ignore[arg-type]
 
     @staticmethod
-    def create(tx: "InstructionTranslator", param_group_var, target_value, **kwargs):
+    def create(
+        tx: "InstructionTranslator",
+        param_group_var: Any,
+        target_value: Any,
+        **kwargs: Any,
+    ) -> "FSDPParamGroupUseTrainingStateVariable":
         var = FSDPParamGroupUseTrainingStateVariable(
             param_group_var=param_group_var,
             target_values=[target_value],
@@ -1132,7 +1193,11 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         return var
 
     def __init__(
-        self, param_group_var, target_values, initial_values=None, **kwargs
+        self,
+        param_group_var: Any,
+        target_values: Sequence[Any],
+        initial_values: Optional[Sequence[Any]] = None,
+        **kwargs: Any,
     ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
@@ -1140,24 +1205,27 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         self.param_group_var = param_group_var
         install_guard(self._guards_singleton)
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         self._call_func(tx, self.target_values)
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
-        self._call_func(tx, self.initial_values)
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
+        self._call_func(tx, self.initial_values)  # type: ignore[arg-type]
         return variables.ConstantVariable.create(None)
 
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ):
-        self._call_func(tx, self.initial_values)  # undo eager initialization
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        # undo eager initialization
+        self._call_func(tx, self.initial_values)  # type: ignore[arg-type]
         return super().call_function(tx, args, kwargs)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx: "InstructionTranslator", values: Sequence[Any]) -> None:
         assert len(values) == 1
         value = values[0]
         if self.param_group_var.value._training_state != value:
@@ -1172,10 +1240,10 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
             )
             self.param_group_var.value._training_state = value
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch.distributed.fsdp._fully_shard._fsdp_param_group.FSDPParamGroup"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "use_training_state"
 
 
@@ -1183,7 +1251,12 @@ class SDPAKernelVariable(ContextWrappingVariable):
     """represents torch.nn.attention.sdpa_kernel"""
 
     @staticmethod
-    def create(tx: "InstructionTranslator", backends, set_priority=False, **kwargs):
+    def create(
+        tx: "InstructionTranslator",
+        backends: Any,
+        set_priority: bool = False,
+        **kwargs: Any,
+    ) -> "SDPAKernelVariable":
         if isinstance(backends, torch.nn.attention.SDPBackend):
             backends = [backends]
         var = SDPAKernelVariable(
@@ -1197,9 +1270,9 @@ class SDPAKernelVariable(ContextWrappingVariable):
     def __init__(
         self,
         target_values: list[torch.nn.attention.SDPBackend],
-        initial_values=None,
+        initial_values: Any = None,
         set_priority: bool = False,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
@@ -1207,7 +1280,10 @@ class SDPAKernelVariable(ContextWrappingVariable):
         self.set_priority = set_priority
 
     @staticmethod
-    def _backends_to_nodes(tx, backends):
+    def _backends_to_nodes(
+        tx: "InstructionTranslator",
+        backends: list[Any],
+    ) -> list[Any]:
         # convert to/from string in order to bake the backend into FX graph
         nodes = [
             tx.output.create_node(
@@ -1220,7 +1296,7 @@ class SDPAKernelVariable(ContextWrappingVariable):
         ]
         return nodes
 
-    def enter(self, tx):
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
         self.prev_backends = torch.nn.attention._cur_sdpa_kernel_backends(
             with_priority=self.set_priority
         )
@@ -1242,7 +1318,9 @@ class SDPAKernelVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(None)
 
-    def exit(self, tx: "InstructionTranslator", *args):
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         self.cleanup_assert()
         arg = self._backends_to_nodes(tx, self.prev_backends)
         tx.output.create_node(
@@ -1253,12 +1331,12 @@ class SDPAKernelVariable(ContextWrappingVariable):
         )
         return variables.ConstantVariable.create(None)
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch.nn.attention"
 
     # use a private version of sdpa_kernel that accepts variadic arguments
     # since dynamo reconstructs the contents of target_values one-by-one
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "_sdpa_kernel_variadic"
 
 
@@ -1272,12 +1350,16 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
     __exit__ method (instead of tracing).
     """
 
-    def __init__(self, target_values, initial_values=None, **kwargs) -> None:
+    def __init__(
+        self, target_values: Any, initial_values: Any = None, **kwargs: Any
+    ) -> None:
         super().__init__(
             target_values=target_values, initial_values=initial_values, **kwargs
         )
 
-    def enter(self, tx, *args):
+    def enter(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
         # Run the annotation ctx manager in eager. Also ensure that
         # preserve_node_meta context manager is setup. This is important to pass
         # on the metadata to the create_proxy nodes.
@@ -1287,14 +1369,14 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         self.set_cleanup_hook(tx, lambda: stack.close())
         return variables.ConstantVariable.create(None)
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch.fx.traceback"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "annotate"
 
-    def reconstruct_type(self, codegen: "PyCodegen"):
-        unimplemented_v2(
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
             explanation="Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
@@ -1309,50 +1391,52 @@ class DynamoConfigPatchVariable(ContextWrappingVariable):
 
     # NOTE: no need to guard on dynamo config because dynamo config should not affect soundness
     # (though it may affect tracing behavior)
-    def __init__(self, target_values, **kwargs) -> None:
-        target_values = tuple(target_values.items())
-        super().__init__(target_values=(target_values,), initial_values=None, **kwargs)
-        self.initial_values = {}
-        for key, _ in target_values:
-            self.initial_values[key] = torch._dynamo.config.__getattr__(key)
-        self.initial_values = (tuple(self.initial_values.items()),)
+    def __init__(self, target_values: dict[str, Any], **kwargs: Any) -> None:
+        target_values_tuple = tuple(target_values.items())
+        super().__init__(
+            target_values=(target_values_tuple,), initial_values=None, **kwargs
+        )
+        initial_values_dict = {}
+        for key, _ in target_values_tuple:
+            initial_values_dict[key] = torch._dynamo.config.__getattr__(key)  # type: ignore[attr-defined]
+        self.initial_values = (tuple(initial_values_dict.items()),)
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx: "InstructionTranslator", values: Any) -> None:
         assert len(values) == 1
         value = values[0]
         # manually patch dynamo config
         for key, val in value:
-            torch._dynamo.config.__setattr__(key, val)
+            torch._dynamo.config.__setattr__(key, val)  # type: ignore[attr-defined]
         # No need to keep track of global side effects because
         # dynamo will properly restore this context manager for
         # unsupported instructions and continuation functions.
         # Dynamo config also should not affect the semantics of the compiled graph.
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch._dynamo"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "patch_dynamo_config"
 
 
 class ErrorOnGraphBreakVariable(ContextWrappingVariable):
     """represents torch._dynamo.error_on_graph_break"""
 
-    def __init__(self, error_on_graph_break, **kwargs) -> None:
+    def __init__(self, error_on_graph_break: bool, **kwargs: Any) -> None:
         super().__init__(
             target_values=(error_on_graph_break,),
             initial_values=(_get_error_on_graph_break(),),
             **kwargs,
         )
 
-    def _call_func(self, tx: "InstructionTranslator", values):
+    def _call_func(self, tx: "InstructionTranslator", values: Sequence[bool]) -> None:
         assert len(values) == 1
         _set_error_on_graph_break(values[0])
 
-    def module_name(self):
+    def module_name(self) -> str:
         return "torch._dynamo"
 
-    def fn_name(self):
+    def fn_name(self) -> str:
         return "error_on_graph_break"
 
 
@@ -1360,7 +1444,7 @@ class WithEnterFunctionVariable(VariableTracker):
     def __init__(
         self,
         ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         self.ctx = ctx
@@ -1368,21 +1452,22 @@ class WithEnterFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         assert not args
         assert not kwargs
         # NOTE: we assume that the instruction immediately after the current CALL instruction
         # is the first instruction of the block.
+        # pyrefly: ignore [bad-argument-type]
         return tx.enter_ctx(self.ctx, tx.current_instruction)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         try:
             type_str = f"{self.ctx.module_name()}.{self.ctx.fn_name()}"
         except NotImplementedError:
             type_str = str(type(self.ctx))
-        unimplemented_v2(
+        unimplemented(
             gb_type="Attempted to reconstruct context manager's __enter__ method",
             context=str(self.ctx),
             explanation=f"Attempted to reconstruct context manager {type_str} while tracing `with ...:`",
@@ -1405,8 +1490,8 @@ class WithExitFunctionVariable(VariableTracker):
     def __init__(
         self,
         ctx: Union[ContextWrappingVariable, GenericContextWrappingVariable],
-        target,
-        **kwargs,
+        target: Any,
+        **kwargs: Any,
     ) -> None:
         super().__init__(**kwargs)
         assert isinstance(
@@ -1418,27 +1503,29 @@ class WithExitFunctionVariable(VariableTracker):
     def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         assert not kwargs
         return self.ctx.exit(tx, *args)
 
-    def reconstruct(self, codegen: "PyCodegen"):
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         # Note here we reconstruct the context manager rather than the
         # exit function.  The handler generated by BlockStackEntry
         # will re-enter the context in the resume function.
-        self.ctx.reconstruct_type(codegen)
+        self.ctx.reconstruct_type(codegen)  # type: ignore[union-attr]
         if codegen.tx.output.partial_convert:
             if sys.version_info >= (3, 11):
                 codegen.append_output(create_instruction("PUSH_NULL"))
                 if sys.version_info < (3, 13):
                     codegen.append_output(create_instruction("SWAP", arg=2))
+            # We rely on classes subtyping `GenericContextWrappingVariable`
+            # to implement these fns and have these attributes
             codegen.extend_output(
-                [codegen.create_load_const(val) for val in self.ctx.target_values]
+                [codegen.create_load_const(val) for val in self.ctx.target_values]  # type: ignore[union-attr]
             )
             codegen.extend_output(
-                create_call_function(len(self.ctx.target_values), False)
+                create_call_function(len(self.ctx.target_values), False)  # type: ignore[union-attr]
             )
             codegen.append_output(create_setup_with(self.target))
             codegen.append_output(create_instruction("POP_TOP"))

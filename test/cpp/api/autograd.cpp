@@ -584,7 +584,7 @@ TEST(CustomAutogradTest, MarkDirty) {
     }
   };
 
-  // Clone here because modifying leafs inplace is not allowed
+  // Clone here because modifying leaves inplace is not allowed
   auto x = torch::randn({5, 5}, torch::requires_grad()).clone();
   auto version_before = x._version();
   auto out = MyFunction::apply(x);

@@ -81,7 +81,7 @@ struct EHFrameHdr {
   friend std::ostream& operator<<(std::ostream& out, const EHFrameHdr& self) {
     out << "EHFrameHeader(version=" << self.version_
         << ",table_size=" << self.table_size_
-        << ",fde_count=" << self.fde_count_ << ")";
+        << ",fde_count=" << self.fde_count_ << ')';
     return out;
   }
 

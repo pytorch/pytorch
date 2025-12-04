@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Union
 
 import torch
 from torch import Tensor
@@ -15,11 +14,11 @@ class SparseAdam(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
+        lr: float | Tensor = 1e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         maximize: bool = False,
-    ):
+    ) -> None:
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 < lr:

@@ -2,6 +2,7 @@
 
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/cuda/CUDAAllocatorConfig.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/cuda/CUDAStream.h>
@@ -344,6 +345,13 @@ class CUDAAllocator : public DeviceAllocator {
       c10::DeviceIndex device,
       std::shared_ptr<AllocatorState> pps) = 0;
   virtual std::string name() = 0;
+  std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) override {
+    c10::DeviceGuard device_guard({at::kCUDA, device});
+    size_t free = 0;
+    size_t total = 0;
+    C10_CUDA_CHECK(cudaMemGetInfo(&free, &total));
+    return {free, total};
+  }
 };
 
 // Allocator object, statically initialized
@@ -554,41 +562,7 @@ inline std::string getUserMetadata() {
 } // namespace c10::cuda::CUDACachingAllocator
 
 namespace c10::cuda {
-
 // Keep BC only
 using c10::CaptureId_t;
 using c10::MempoolId_t;
-
-// MemPool represents a pool of memory in a caching allocator. Currently,
-// it's just the ID of the pool object maintained in the CUDACachingAllocator.
-//
-// An allocator pointer can be passed to the MemPool to define how the
-// allocations should be done in the pool. For example: using a different
-// system allocator such as ncclMemAlloc.
-struct C10_CUDA_API MemPool {
-  MemPool(
-      CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
-      bool is_user_created = true,
-      bool use_on_oom = false);
-  MemPool(const MemPool&) = delete;
-  MemPool(MemPool&&) = default;
-  MemPool& operator=(const MemPool&) = delete;
-  MemPool& operator=(MemPool&&) = default;
-  ~MemPool();
-
-  MempoolId_t id();
-  CUDACachingAllocator::CUDAAllocator* allocator();
-  int use_count();
-  c10::DeviceIndex device();
-  static MempoolId_t graph_pool_handle(bool is_user_created = true);
-
- private:
-  static std::atomic<CaptureId_t> uid_;
-  static std::atomic<CaptureId_t> uuid_;
-  CUDACachingAllocator::CUDAAllocator* allocator_;
-  bool is_user_created_;
-  MempoolId_t id_;
-  c10::DeviceIndex device_;
-};
-
 } // namespace c10::cuda

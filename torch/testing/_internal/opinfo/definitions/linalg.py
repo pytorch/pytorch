@@ -256,7 +256,13 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
 
     for n, batch, rhs in product(ns, batches, nrhs):
         A = make_a(*(batch + (n, n)))
-        LU, pivots = torch.linalg.lu_factor(A)
+        if torch.device(device).type == "mps":
+            # TODO: Fix lu_factor for MPS, because it does not work for all of
+            # these cases. So we resort to the CPU impl here and move the
+            # outputs back to MPS.
+            LU, pivots = (x.to(device) for x in torch.linalg.lu_factor(A.cpu()))
+        else:
+            LU, pivots = torch.linalg.lu_factor(A)
 
         B = make_b(batch + (n, rhs))
 
@@ -382,9 +388,6 @@ def sample_inputs_linalg_norm(
                 elif is_matrix_norm:
                     dims_to_check = {
                         None: (0,),
-                        np.inf: (0,),
-                        2: (0, 1),
-                        1: (1,),
                         -1: (1,),
                         -2: (0, 1),
                         -np.inf: (0,),
@@ -393,6 +396,18 @@ def sample_inputs_linalg_norm(
                     if any(test_size[d] == 0 for d in dims_to_check):
                         # IndexError: amax(): Expected reduction dim {dim} to
                         # have non-zero size.
+                        continue
+
+                    no_grad_dims_to_check = {
+                        np.inf: (0,),
+                        2: (0, 1),
+                        1: (1,),
+                    }.get(ord, ())
+
+                    if (
+                        any(test_size[d] == 0 for d in no_grad_dims_to_check)
+                        and requires_grad
+                    ):
                         continue
 
                 if variant == "subgradient_at_zero":
@@ -1062,7 +1077,7 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
         else:
             return output
 
-    batch_shapes = ((), (3,), (3, 3))
+    batch_shapes = ((), (3,), (3, 3), (0,))
     # pivot=False only supported in CUDA
     pivots = (True, False) if torch.device(device).type == "cuda" else (True,)
     deltas = (-2, -1, 0, +1, +2)

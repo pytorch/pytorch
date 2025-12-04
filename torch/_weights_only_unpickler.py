@@ -187,7 +187,7 @@ def _get_allowed_globals():
     }
 
     # dtype
-    for t in torch.storage._dtype_to_storage_type_map().keys():
+    for t in torch.storage._dtype_to_storage_type_map():
         rc[str(t)] = t
     for t in torch.storage._new_dtypes():
         rc[str(t)] = t

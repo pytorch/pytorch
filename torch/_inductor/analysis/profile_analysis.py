@@ -2,8 +2,9 @@ import json
 import logging
 import math
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch._inductor.analysis.device_info import DeviceInfo, lookup_device_info
@@ -75,7 +76,9 @@ def _slow_conv2d_adapter(
     return conv_adapter(tuple(tmp), tuple(tmp2))
 
 
-@register_adapter(["convolution", "_convolution", "cudnn_convolution"])
+@register_adapter(
+    ["convolution", "_convolution", "cudnn_convolution", "convolution_overrideable"]
+)
 def conv_adapter(
     shapes: tuple[Any, ...], concrete: tuple[Any, ...]
 ) -> tuple[tuple[Any], dict[Any, Any]]:
