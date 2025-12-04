@@ -7,7 +7,6 @@ from typing import Optional, Union
 
 import torch
 from torch import device, dtype, Tensor, types
-from torch.distributed.distributed_c10d import GroupName
 from torch.utils._exposed_in import exposed_in
 
 from .opaque_object import _OPAQUE_TYPES, is_opaque_type
@@ -264,8 +263,13 @@ def get_supported_param_types():
         (types.Number, "Scalar", True, False, False),
         (dtype, "ScalarType", False, False, False),
         (device, "Device", False, False, False),
-        (GroupName, "str", False, False, False),
     ]
+
+    if torch.distributed.is_available():
+        from torch.distributed.distributed_c10d import GroupName
+
+        data.append((GroupName, "str", False, False, False))
+
     result = []
     for line in data:
         result.extend(derived_types(*line))
