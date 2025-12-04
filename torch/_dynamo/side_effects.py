@@ -883,9 +883,14 @@ class SideEffects:
 
         return self.ca_final_callbacks_var
 
-    def codegen_update_mutated(self, cg: PyCodegen) -> None:
+    def codegen_update_mutated(
+        self, cg: PyCodegen, only_new_objs: bool = False
+    ) -> None:
         suffixes = []
         for var in self._get_modified_vars():
+            # When only_new_objs=True, skip existing object mutations
+            if only_new_objs and not isinstance(var.mutation_type, AttributeMutationNew):
+                continue
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)  # Don't codegen via source
