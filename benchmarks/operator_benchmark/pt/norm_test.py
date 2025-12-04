@@ -23,7 +23,7 @@ layernorm_configs = op_bench.cross_product_configs(
     B=[8, 32],
     M=[256, 1024],
     K=[64, 128, 512],
-    device=["cpu", "cuda"],
+    device=["cuda"],
     tags=["long"],
 )
 
@@ -62,7 +62,7 @@ batchnorm1d_configs = op_bench.cross_product_configs(
     B=[8, 32],
     C=[64, 128, 256],
     M=[256, 1024],
-    device=["cpu", "cuda"],
+    device=["cuda"],
     training=[True, False],
     tags=["long"],
 )
@@ -101,7 +101,7 @@ batchnorm2d_configs = op_bench.cross_product_configs(
     C=[64, 128, 256],
     H=[28, 56],
     W=[28, 56],
-    device=["cpu", "cuda"],
+    device=["cuda"],
     training=[True, False],
     tags=["long"],
 )
@@ -141,7 +141,7 @@ batchnorm3d_configs = op_bench.cross_product_configs(
     D=[4, 8],
     H=[14, 28],
     W=[14, 28],
-    device=["cpu", "cuda"],
+    device=["cuda"],
     training=[True, False],
     tags=["long"],
 )
@@ -181,7 +181,7 @@ groupnorm_configs = op_bench.cross_product_configs(
     H=[28, 56],
     W=[28, 56],
     num_groups=[8, 16, 32],
-    device=["cpu", "cuda"],
+    device=["cuda"],
     tags=["long"],
 )
 
