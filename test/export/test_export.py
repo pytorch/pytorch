@@ -285,6 +285,28 @@ def get_hop_schema(ep: torch.export.ExportedProgram):
     return torch._library.utils.hop_schema_from_fx_node(hop_node)
 
 
+def cleanup_dynamo_metadata(ep: torch.export.ExportedProgram) -> None:
+    for node in ep.graph.nodes:
+        if "custom" in node.meta:
+            node.meta["custom"] = {
+                k: v
+                for k, v in node.meta["custom"].items()
+                if "_torchdynamo_disable" not in k
+            }
+
+
+def cleanup_dispatch_trace_metadata(mod: torch.export.ExportedProgram) -> None:
+    for node in mod.graph.nodes:
+        if (
+            "custom" not in node.meta
+            or "_torchdynamo_disable_method" not in node.meta["custom"]
+            or node.meta["custom"]["_torchdynamo_disable_method"]
+            not in ["dispatch_trace", "trace"]
+        ):
+            continue
+        del node.meta["custom"]
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
     def test_export_inline_constraints(self):
@@ -740,19 +762,94 @@ class TestExport(TestCase):
                 dynamic_shapes={"x": {0: Dim("b")}, "y": None},
             )
 
+        # clean up _torchdynamo related meta data as it could vary depending on the caller
+        # https://github.com/pytorch/pytorch/issues/167432
+        cleanup_dynamo_metadata(ep)
+
         custom_metadata = torch.fx.traceback._get_custom_metadata(ep.module())
+
         self.assertExpectedInline(
             str(custom_metadata),
             """\
-('placeholder', 'x', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
-('placeholder', 'y', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})
-('call_function', 'cat', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', 'item', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', 'ge_1', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', '_assert_scalar_default', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('call_function', 'mul', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace', 'moo': 0})
-('output', 'output', {'_torchdynamo_disable': True, '_torchdynamo_disable_recursive': True, '_torchdynamo_disable_method': 'dispatch_trace'})""",
+('call_function', 'cat', {'moo': 0})
+('call_function', 'item', {'moo': 0})
+('call_function', 'ge_1', {'moo': 0})
+('call_function', '_assert_scalar_default', {'moo': 0})
+('call_function', 'mul', {'moo': 0})""",
         )
+
+    def test_uplift_common_custom_meta(self) -> None:
+        class N(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + 2
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.n = N()
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                with torch.fx.traceback.annotate({"moo": 1}):
+                    z = self.n(x) + 1
+                return z @ y
+
+        inp = (torch.rand(2, 2), torch.rand(2, 2))
+        with torch.fx.traceback.preserve_node_meta():
+            ep = torch.export.export(M(), inp)
+        cleanup_dynamo_metadata(ep)
+        unf = unflatten(ep)
+        unf_node_map = {node.name: node for node in unf.graph.nodes}
+        self.assertTrue("custom" in unf_node_map["n"].meta)
+        self.assertEqual(unf_node_map["n"].meta["custom"], {"moo": 1})
+        for node in unf.n.graph.nodes:
+            self.assertTrue("custom" not in node.meta or not node.meta["custom"])
+
+    def test_uplift_common_custom_meta_with_multiple_calls(self) -> None:
+        class N(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.randn(2, 2))
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x + self.buffer
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.n = N()
+
+            @torch._dynamo.disable()
+            def foo1(self, x: torch.Tensor) -> torch.Tensor:
+                return self.n(x) @ x
+
+            def foo2(self, x: torch.Tensor) -> torch.Tensor:
+                return self.n(x) * x
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return self.foo1(x) + self.foo2(x) + self.foo1(x)
+
+        m = M()
+        x = (torch.randn(2, 2),)
+        with torch.fx.traceback.preserve_node_meta():
+            ep = torch.export.export(m, x)
+        cleanup_dispatch_trace_metadata(ep)
+        unf = torch.export.unflatten(ep)
+        unf_node_map = {node.name: node for node in unf.graph.nodes}
+        self.assertTrue("custom" in unf_node_map["n"].meta)
+        self.assertFalse("custom" in unf_node_map["n_1"].meta)
+        self.assertTrue("custom" in unf_node_map["n_2"].meta)
+        self.assertTrue("_torchdynamo_disable_method", unf_node_map["n"].meta["custom"])
+        self.assertTrue(
+            "_torchdynamo_disable_method", unf_node_map["n_2"].meta["custom"]
+        )
+        self.assertEqual(
+            unf_node_map["n"].meta["custom"]["_torchdynamo_disable_method"], "foo1"
+        )
+        self.assertEqual(
+            unf_node_map["n_2"].meta["custom"]["_torchdynamo_disable_method"], "foo1"
+        )
+        for node in unf.n.graph.nodes:
+            self.assertTrue("custom" not in node.meta or not node.meta["custom"])
 
     @requires_gpu
     def test_flex_attention_export(self):
@@ -960,7 +1057,7 @@ def forward(self, x):
     view_3 = torch.ops.aten.view.default(linear_3, [2, 1, 128, 64]);  linear_3 = None
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(view_1, view_2, view_3, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  view_1 = view_2 = view_3 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
+    flex_attention = torch.ops.higher_order.flex_attention(view_1, view_2, view_3, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  view_1 = view_2 = view_3 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
     getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
@@ -1227,14 +1324,8 @@ graph():
     %p_block_linear2_bias : [num_users=1] = placeholder[target=p_block_linear2_bias]
     %x : [num_users=1] = placeholder[target=x]
     %wrap_body0 : [num_users=1] = get_attr[target=wrap_body0]
-    %tag_activation_checkpoint : [num_users=7] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
+    %tag_activation_checkpoint : [num_users=1] = call_function[target=torch.ops.higher_order.tag_activation_checkpoint](args = (%wrap_body0, %x, %p_block_linear1_weight, %p_block_linear1_bias, %p_block_linear2_weight, %p_block_linear2_bias), kwargs = {})
     %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 0), kwargs = {})
-    %getitem_1 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 1), kwargs = {})
-    %getitem_2 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 2), kwargs = {})
-    %getitem_3 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 3), kwargs = {})
-    %getitem_4 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 4), kwargs = {})
-    %getitem_5 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 5), kwargs = {})
-    %getitem_6 : [num_users=0] = call_function[target=operator.getitem](args = (%tag_activation_checkpoint, 6), kwargs = {})
     return (getitem,)""",
         )
 
@@ -1243,14 +1334,14 @@ graph():
             """\
 graph():
     %arg0_1 : [num_users=1] = placeholder[target=arg0_1]
-    %arg1_1 : [num_users=2] = placeholder[target=arg1_1]
-    %arg2_1 : [num_users=2] = placeholder[target=arg2_1]
-    %arg3_1 : [num_users=2] = placeholder[target=arg3_1]
-    %arg4_1 : [num_users=2] = placeholder[target=arg4_1]
-    %linear : [num_users=2] = call_function[target=torch.ops.aten.linear.default](args = (%arg0_1, %arg1_1, %arg2_1), kwargs = {})
-    %relu : [num_users=2] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
+    %arg1_1 : [num_users=1] = placeholder[target=arg1_1]
+    %arg2_1 : [num_users=1] = placeholder[target=arg2_1]
+    %arg3_1 : [num_users=1] = placeholder[target=arg3_1]
+    %arg4_1 : [num_users=1] = placeholder[target=arg4_1]
+    %linear : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%arg0_1, %arg1_1, %arg2_1), kwargs = {})
+    %relu : [num_users=1] = call_function[target=torch.ops.aten.relu.default](args = (%linear,), kwargs = {})
     %linear_1 : [num_users=1] = call_function[target=torch.ops.aten.linear.default](args = (%relu, %arg3_1, %arg4_1), kwargs = {})
-    return (linear_1, arg1_1, arg2_1, linear, relu, arg3_1, arg4_1)""",
+    return (linear_1,)""",
         )
 
         stack = contextlib.ExitStack()
@@ -15303,12 +15394,12 @@ graph():
             def forward(self, block):
                 return block.a + block.b
 
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError, "It looks like one of the inputs with type"
         ):
-            _dynamo_graph_capture_for_export(Foo())(
+            dynamo_graph_capture_for_export(Foo())(
                 Block(torch.randn(4, 4), torch.randn(4, 4))
             )
 
@@ -16134,8 +16225,6 @@ def forward(self, x):
                     # expected 3*..., but got 8
                     ep.module()(torch.randn(4, 2))
 
-    @testing.expectedFailureSerDer  # T195866111
-    @testing.expectedFailureSerDerNonStrict
     @testing.expectedFailureStrictV2
     def test_hints_wrapper(self):
         strict = True
@@ -16475,7 +16564,7 @@ class GraphModule(torch.nn.Module):
 
         # Expect builtin round in the export graph
         round_nodes = [
-            n for n in ep.graph.nodes if n.op == "call_function" and n.target == round
+            n for n in ep.graph.nodes if n.op == "call_function" and n.target is round
         ]
         self.assertEqual(len(round_nodes), 1)
 

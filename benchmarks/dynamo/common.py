@@ -2379,7 +2379,9 @@ class BenchmarkRunner:
                     print(
                         f"Load model outputs from {self.args.compare_model_outputs_with} to compare"
                     )
-                    saved_result = torch.load(self.args.compare_model_outputs_with)
+                    saved_result = torch.load(
+                        self.args.compare_model_outputs_with, weights_only=False
+                    )
                     is_bitwise_same = bitwise_same(saved_result, new_result)
                     if not is_bitwise_same:
                         print(
@@ -2470,7 +2472,7 @@ class BenchmarkRunner:
                     for refi, resi in zip(ref, res):
                         dump_max_mean_values(tol, refi, resi)
                 elif isinstance(ref, dict):
-                    for k in ref.keys():
+                    for k in ref:
                         dump_max_mean_values(tol, ref[k], res[k])
                 elif isinstance(ref, torch.Tensor):
                     res = res.to(base_device)

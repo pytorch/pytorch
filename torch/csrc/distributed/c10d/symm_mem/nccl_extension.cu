@@ -19,48 +19,46 @@ __device__ __forceinline__ char* get_remote_ptr(
     return base + byte_offset;
 }
 
-template <typename T>
 __global__ void lsa_put_kernel(
     void** buffer,  // buffers_dev_
     int dst_peer,
     size_t dst_byte_offset,
-    const T* src,
-    size_t nelems
+    const void* src,
+    size_t nbytes
 ) {
     // Calculate index
     const size_t tid    = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
 
     // Calculate remote dst pointer
-    T* dst = reinterpret_cast<T*>(
-        get_remote_ptr(buffer, dst_peer, dst_byte_offset));
+    auto dst = get_remote_ptr(buffer, dst_peer, dst_byte_offset);
+    const char* src_bytes = reinterpret_cast<const char*>(src);
 
     // TODO: use 16B access for efficiency
-    for (size_t i = tid; i < nelems; i += stride) {
-        dst[i] = src[i];
+    for (size_t i = tid; i < nbytes; i += stride) {
+        dst[i] = src_bytes[i];
     }
 }
 
-template <typename T>
 __global__ void lsa_put_signal_kernel(
     void**  buffer,  // buffers_dev_
     void**  signal_pad,  // signal pointer table (uint64_t-based)
     int  dst_peer,
     size_t  dst_byte_offset,  // data target offset (bytes)
-    const T*  src,  // local src
-    size_t  nelems,
+    const void*  src,  // local src
+    size_t  nbytes,
     uint64_t  signal_value     // value to write
 ) {
     const size_t tid    = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
 
     // 1) data put
-    T* dst = reinterpret_cast<T*>(
-        get_remote_ptr(buffer, dst_peer, dst_byte_offset));
+    auto dst = get_remote_ptr(buffer, dst_peer, dst_byte_offset);
+    const char* src_bytes = reinterpret_cast<const char*>(src);
 
     // TODO: use 16B access for efficiency
-    for (size_t i = tid; i < nelems; i += stride) {
-        dst[i] = src[i];
+    for (size_t i = tid; i < nbytes; i += stride) {
+        dst[i] = src_bytes[i];
     }
 
     __syncthreads();
@@ -105,15 +103,14 @@ void nccl_put(at::Tensor& tensor, const int64_t peer) {
   int threads = THREADS_PER_BLOCK;
   int blocks  = (tensor.numel() + threads - 1) / threads;
   c10::cuda::CUDAGuard guard(tensor.device());
+  size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
 
-  AT_DISPATCH_NCCL_FLOATS(tensor.scalar_type(), "nccl_put", [&]() {
-    lsa_put_kernel<scalar_t><<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
-        symm_mem->get_buffer_ptrs_dev(),
-        peer,
-        0,
-        tensor.data_ptr<scalar_t>(),
-        tensor.numel());
-  });
+  lsa_put_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+    symm_mem->get_buffer_ptrs_dev(),
+    peer,
+    0,
+    tensor.data_ptr(),
+    nbytes);
 }
 
 void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
@@ -122,12 +119,10 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
   auto symm_mem_nccl = c10::static_intrusive_pointer_cast<c10d::symmetric_memory::NCCLSymmetricMemory>(std::move(symm_mem));
   int cur_rank = symm_mem_nccl->get_nccl_dev_comm().lsaRank;
-  AT_DISPATCH_NCCL_FLOATS(sigpad.scalar_type(), "nccl_wait_for_signal", [&]() {
-    nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
-        symm_mem_nccl->get_signal_pad_ptrs_dev(),
-        cur_rank,
-        signal);
-    });
+  nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
+    symm_mem_nccl->get_signal_pad_ptrs_dev(),
+    cur_rank,
+    signal);
 }
 
 void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
@@ -139,37 +134,35 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
   int threads = THREADS_PER_BLOCK;
   int blocks  = (tensor.numel() + threads - 1) / threads;
   c10::cuda::CUDAGuard guard(tensor.device());
+  size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
 
-  AT_DISPATCH_NCCL_FLOATS(tensor.scalar_type(), "nccl_put_with_signal", [&]() {
-  lsa_put_signal_kernel<scalar_t><<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  lsa_put_signal_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     symm_mem->get_buffer_ptrs_dev(),
     symm_mem->get_signal_pad_ptrs_dev(),
     peer,
     0,
-    tensor.data_ptr<scalar_t>(),
-    tensor.numel(),
+    tensor.data_ptr(),
+    nbytes,
     signal);
-  });
 }
 
-template <typename T>
 __global__ void lsa_get_kernel(
     void**  buffer,  // buffers_dev_
     int  peer,
     size_t  src_byte_offset, // byte offset inside that peer's buffer
-    T*  dst,
-    size_t  nelems
+    void*  dst,
+    size_t  nbytes
 ) {
     const size_t tid    = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
 
     // remote src pointer
-    const T* src = reinterpret_cast<const T*>(
-        get_remote_ptr(buffer, peer, src_byte_offset));
+    auto src = get_remote_ptr(buffer, peer, src_byte_offset);
+    char* dst_bytes = reinterpret_cast<char*>(dst);
 
     // TODO: use 16B access for efficiency
-    for (size_t i = tid; i < nelems; i += stride) {
-        dst[i] = src[i];
+    for (size_t i = tid; i < nbytes; i += stride) {
+        dst_bytes[i] = src[i];
     }
 }
 
@@ -182,15 +175,14 @@ void nccl_get(at::Tensor& tensor, const int64_t peer) {
   c10::cuda::CUDAGuard guard(tensor.device());
   int threads = THREADS_PER_BLOCK;
   int blocks  = (tensor.numel() + threads - 1) / threads;
+  size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
 
-  AT_DISPATCH_NCCL_FLOATS(tensor.scalar_type(), "nccl_get", [&]() {
-  lsa_get_kernel<scalar_t><<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
+  lsa_get_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
     symm_mem->get_buffer_ptrs_dev(),
     peer,
     0,
-    tensor.data_ptr<scalar_t>(),
-    tensor.numel());
-  });
+    tensor.data_ptr(),
+    nbytes);
 }
 } // namespace c10d::nccl_extension
 

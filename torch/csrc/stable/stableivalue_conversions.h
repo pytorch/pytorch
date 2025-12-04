@@ -5,14 +5,32 @@
 #include <torch/csrc/stable/device_struct.h>
 #include <torch/csrc/stable/tensor_struct.h>
 #include <torch/headeronly/core/DeviceType.h>
+#include <torch/headeronly/core/Layout.h>
+#include <torch/headeronly/core/MemoryFormat.h>
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
+#include <torch/headeronly/util/Deprecated.h>
 #include <torch/headeronly/util/Exception.h>
 #include <torch/headeronly/util/shim_utils.h>
 
 #include <optional>
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
+
+// Helper variable templates to detect 2.10+ types for better compile-time error
+// messages
+template <typename T>
+inline constexpr bool is_header_only_array_ref_v = false;
+
+template <typename T>
+inline constexpr bool
+    is_header_only_array_ref_v<torch::headeronly::HeaderOnlyArrayRef<T>> = true;
+
+template <typename T>
+inline constexpr bool is_std_vector_v = false;
+
+template <typename T>
+inline constexpr bool is_std_vector_v<std::vector<T>> = true;
 
 // forward declare so that the from/to() implementations in the detail
 // namespace of library.h where the real work is done can compile.
@@ -35,6 +53,20 @@ struct FromImpl {
       T val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
+    // Ensure 2.10+ types don't accidentally use the base case - provide clear
+    // compile-time errors.
+    static_assert(
+        !std::is_same_v<T, torch::stable::Device>,
+        "torch::stable::Device requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_header_only_array_ref_v<T>,
+        "HeaderOnlyArrayRef<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_std_vector_v<T>,
+        "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !std::is_same_v<T, std::string>,
+        "std::string requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     static_assert(
         sizeof(T) <= sizeof(StableIValue),
         "StableLibrary stack does not support parameter types larger than 64 bits.");
@@ -126,6 +158,18 @@ struct FromImpl<ScalarType> {
   }
 };
 
+// [Note DeviceType version guard]
+// This conversion was introduced in 2.10. However, we do not gate it
+// with TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0 because this
+// conversion is not actually used to pass DeviceType between user
+// extensions and libtorch (i.e. there is no c10::TypeKind::DeviceType).
+// The purpose of gating other conversions is to ensure that user
+// extensions do not try to pass a StableIValue that libtorch is
+// unable to interpret.
+// This conversion is only used
+// (1) In the conversion for torch::stable::Device (already gated)
+// (2) Within the user extension to translate between libtorch/extension's
+//     DeviceType (no gating needed)
 // Specialization for torch::headeronly::DeviceType => StableIValue
 // Note that we call into the shim to translate between the user's
 // DeviceType and libtorch's DeviceType, which can be different!
@@ -225,6 +269,73 @@ struct FromImpl<torch::stable::Tensor> {
   }
 };
 
+// =============================================================================
+// FROM CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+// =============================================================================
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+// Specialization for c10::Layout => StableIValue
+// Note that we call into the shim to translate between the user's
+// Layout and libtorch's Layout, which can be different!
+using c10::Layout;
+template <>
+struct FromImpl<Layout> {
+  static StableIValue call(
+      Layout val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    switch (val) {
+      case Layout::Strided:
+        return from(aoti_torch_layout_strided());
+      case Layout::Sparse:
+        return from(aoti_torch_layout_sparse_coo());
+      case Layout::SparseCsr:
+        return from(aoti_torch_layout_sparse_csr());
+      case Layout::SparseCsc:
+        return from(aoti_torch_layout_sparse_csc());
+      case Layout::SparseBsr:
+        return from(aoti_torch_layout_sparse_bsr());
+      case Layout::SparseBsc:
+        return from(aoti_torch_layout_sparse_bsc());
+      case Layout::Mkldnn:
+        return from(aoti_torch_layout__mkldnn());
+      case Layout::Jagged:
+        return from(aoti_torch_layout_jagged());
+      default:
+        STD_TORCH_CHECK(
+            false,
+            "Not yet supported Layout, please file an issue describing your use case.");
+    }
+  }
+};
+
+// Specialization for c10::MemoryFormat => StableIValue
+// Note that we call into the shim to translate between the user's
+// MemoryFormat and libtorch's MemoryFormat, which can be different!
+using c10::MemoryFormat;
+template <>
+struct FromImpl<MemoryFormat> {
+  static StableIValue call(
+      MemoryFormat val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    switch (val) {
+      case MemoryFormat::Contiguous:
+        return from(aoti_torch_memory_format_contiguous_format());
+      case MemoryFormat::Preserve:
+        return from(aoti_torch_memory_format_preserve_format());
+      case MemoryFormat::ChannelsLast:
+        return from(aoti_torch_memory_format_channels_last());
+      case MemoryFormat::ChannelsLast3d:
+        return from(aoti_torch_memory_format_channels_last_3d());
+      default:
+        STD_TORCH_CHECK(
+            false,
+            "Not yet supported MemoryFormat, please file an issue describing your use case.");
+    }
+  }
+};
+
 // Specialization for torch::headeronly::HeaderOnlyArrayRef<T> => StableIValue
 // Returns a new owning reference of the underlying list.
 template <typename T>
@@ -242,7 +353,7 @@ struct FromImpl<torch::headeronly::HeaderOnlyArrayRef<T>> {
             torch_list_push_back(new_list_handle, from(elem)));
       }
       return from(new_list_handle);
-    } catch (const std::runtime_error& e) {
+    } catch (const std::runtime_error&) {
       if (new_list_handle != nullptr) {
         // clean up memory if an error was thrown
         TORCH_ERROR_CODE_CHECK(torch_delete_list(new_list_handle));
@@ -287,6 +398,23 @@ struct FromImpl<torch::stable::Device> {
   }
 };
 
+// Specialization for std::string, which should return a new owning reference of
+// the string
+template <>
+struct FromImpl<std::string> {
+  static StableIValue call(
+      const std::string& val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    StringHandle handle;
+    TORCH_ERROR_CODE_CHECK(
+        torch_new_string_handle(val.c_str(), val.length(), &handle))
+    return from(handle);
+  }
+};
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
 // =============================================================================
 // TO CONVERSIONS (StableIValue -> T)
 // =============================================================================
@@ -298,6 +426,20 @@ struct ToImpl {
       StableIValue val,
       [[maybe_unused]] uint64_t extension_build_version,
       [[maybe_unused]] bool is_internal) {
+    // Ensure 2.10+ types don't accidentally use the base case - provide clear
+    // compile-time errors.
+    static_assert(
+        !std::is_same_v<T, torch::stable::Device>,
+        "torch::stable::Device requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_header_only_array_ref_v<T>,
+        "HeaderOnlyArrayRef<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !is_std_vector_v<T>,
+        "std::vector<T> requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
+    static_assert(
+        !std::is_same_v<T, std::string>,
+        "std::string requires TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0");
     static_assert(std::is_trivially_copyable_v<T>);
     // T may not have a default constructor. (For example, it might be
     // c10::Device.) However, std::memcpy implicitly creates a T at the
@@ -387,6 +529,7 @@ struct ToImpl<ScalarType> {
   }
 };
 
+// See [Note DeviceType version guard]
 // Specialization for StableIValue => torch::headeronly::DeviceType
 template <>
 struct ToImpl<DeviceType> {
@@ -467,6 +610,73 @@ struct ToImpl<torch::stable::Tensor> {
   }
 };
 
+// =============================================================================
+// TO CONVERSIONS requiring TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+// =============================================================================
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+
+// Specialization for StableIValue => c10::Layout
+template <>
+struct ToImpl<Layout> {
+  static Layout call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    int32_t shim_layout = to<int32_t>(val);
+    if (shim_layout == aoti_torch_layout_strided()) {
+      return Layout::Strided;
+    } else if (shim_layout == aoti_torch_layout_sparse_coo()) {
+      return Layout::Sparse;
+    } else if (shim_layout == aoti_torch_layout_sparse_csr()) {
+      return Layout::SparseCsr;
+    } else if (shim_layout == aoti_torch_layout_sparse_csc()) {
+      return Layout::SparseCsc;
+    } else if (shim_layout == aoti_torch_layout_sparse_bsr()) {
+      return Layout::SparseBsr;
+    } else if (shim_layout == aoti_torch_layout_sparse_bsc()) {
+      return Layout::SparseBsc;
+    } else if (shim_layout == aoti_torch_layout__mkldnn()) {
+      return Layout::Mkldnn;
+    } else if (shim_layout == aoti_torch_layout_jagged()) {
+      return Layout::Jagged;
+    } else {
+      STD_TORCH_CHECK(
+          false,
+          "Not yet supported Layout ",
+          std::to_string(shim_layout),
+          ", please file an issue describing your use case.");
+    }
+  }
+};
+
+// Specialization for StableIValue => c10::MemoryFormat
+template <>
+struct ToImpl<MemoryFormat> {
+  static MemoryFormat call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    int32_t shim_memory_format = to<int32_t>(val);
+    if (shim_memory_format == aoti_torch_memory_format_contiguous_format()) {
+      return MemoryFormat::Contiguous;
+    } else if (
+        shim_memory_format == aoti_torch_memory_format_preserve_format()) {
+      return MemoryFormat::Preserve;
+    } else if (shim_memory_format == aoti_torch_memory_format_channels_last()) {
+      return MemoryFormat::ChannelsLast;
+    } else if (
+        shim_memory_format == aoti_torch_memory_format_channels_last_3d()) {
+      return MemoryFormat::ChannelsLast3d;
+    } else {
+      STD_TORCH_CHECK(
+          false,
+          "Not yet supported MemoryFormat ",
+          std::to_string(shim_memory_format),
+          ", please file an issue describing your use case.");
+    }
+  }
+};
+
 // Specialization for StableIValue => std::vector<T>
 // std::vector<T> should be represented as a StableListHandle
 // filled with StableIValues
@@ -491,7 +701,7 @@ struct ToImpl<std::vector<T>> {
       }
       TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       return result;
-    } catch (const std::runtime_error& e) {
+    } catch (const std::runtime_error&) {
       // clean up memory if an exception is thrown, and rethrow
       TORCH_ERROR_CODE_CHECK(torch_delete_list(list_handle));
       throw;
@@ -516,6 +726,29 @@ struct ToImpl<torch::stable::Device> {
     return torch::stable::Device(device_type, device_index);
   }
 };
+
+// Specialization for std::string
+// Returns a new std::string; the string in val is deleted.
+template <>
+struct ToImpl<std::string> {
+  static std::string call(
+      StableIValue val,
+      [[maybe_unused]] uint64_t extension_build_version,
+      [[maybe_unused]] bool is_internal) {
+    StringHandle handle = to<StringHandle>(val);
+    size_t length;
+    TORCH_ERROR_CODE_CHECK(torch_string_length(handle, &length));
+    const char* data;
+    TORCH_ERROR_CODE_CHECK(torch_string_c_str(handle, &data));
+    auto strptr = new std::string(data, length);
+
+    // delete the old string before returning new string
+    TORCH_ERROR_CODE_CHECK(torch_delete_string(handle));
+    return *strptr;
+  }
+};
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // =============================================================================
 //  end to helpers for converting between StableIValue and T
@@ -589,31 +822,11 @@ HIDDEN_NAMESPACE_END(torch, stable, detail)
 // WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
 // note]
 template <typename T>
-[[deprecated("Use torch::stable::detail::from instead.")]]
-inline StableIValue from(T val) {
-  return torch::stable::detail::from(val);
-}
+C10_DEPRECATED_MESSAGE("Use torch::stable::detail::from instead.")
+auto from = &torch::stable::detail::from<T>;
 
 // WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
 // note]
 template <typename T>
-[[deprecated("Use torch::stable::detail::from instead.")]]
-inline StableIValue from(const std::optional<T>& val) {
-  return torch::stable::detail::from(val);
-}
-
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-[[deprecated(
-    "Use torch::stable::detail::from instead.")]] [[maybe_unused]] inline StableIValue
-from(const torch::stable::Tensor& val) {
-  return torch::stable::detail::from(val);
-}
-
-// WARNING! Will be removed. Only exists for BC. See [global from/to deprecation
-// note]
-template <typename T>
-[[deprecated("Use torch::stable::detail::to instead.")]]
-inline T to(StableIValue val) {
-  return torch::stable::detail::to<T>(val);
-}
+C10_DEPRECATED_MESSAGE("Use torch::stable::detail::to instead.")
+auto to = &torch::stable::detail::to<T>;

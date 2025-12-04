@@ -266,12 +266,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         dtype = torch.float
         numel = 1024
 
-        def foo():
-            inp = symm_mem.empty(numel, dtype=dtype, device=self.device)
-            symm_mem.rendezvous(inp, group=group_name)
-
-        foo()
-
         out = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
         symm_mem.rendezvous(out, group=group_name)
         c10d.all_reduce(out)

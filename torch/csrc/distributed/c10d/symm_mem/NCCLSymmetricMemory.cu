@@ -44,7 +44,11 @@ struct NCCLAllocation {
       return;
     }
     c10::cuda::CUDAGuard guard(device_idx);
-    C10D_NCCL_CHECK(ncclMemFree(ptr), "ncclMemFree");
+    ncclResult_t res = ncclMemFree(ptr);
+    if (res != ncclSuccess) {
+        LOG(WARNING) << "ncclMemFree failed in NCCLAllocation dtor: "
+                      << ncclGetErrorString(res);
+    }
   }
 };
 
@@ -104,16 +108,15 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
     const size_t arr_size = sizeof(void*) * world_size_;
     auto& allocator = *c10::cuda::CUDACachingAllocator::get();
-    auto buffer_pads_dev_dp = allocator.allocate(arr_size);
-    buffers_dev_ = reinterpret_cast<void**>(buffer_pads_dev_dp.get());
-    auto signal_pads_dev_dp = allocator.allocate(arr_size);
-    signal_pads_dev_ = reinterpret_cast<void**>(signal_pads_dev_dp.get());
+    buffers_dev_dp_ = allocator.allocate(arr_size);
+    signal_pads_dev_dp_ = allocator.allocate(arr_size);
 
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
-    build_ptr_dev<<<1, threads, 0, stream>>>(buffer_handle, 0, buffers_dev_, world_size_);
-    build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle, 0, signal_pads_dev_, world_size_);
+    build_ptr_dev<<<1, threads, 0, stream>>>(buffer_handle, 0, reinterpret_cast<void**>(buffers_dev_dp_.get()), world_size_);
+    build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle, 0, reinterpret_cast<void**>(signal_pads_dev_dp_.get()), world_size_);
   }
+
 
   ~NCCLSymmetricMemory() override = default;
 
@@ -126,12 +129,13 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   }
 
   void** get_buffer_ptrs_dev() override {
-    return buffers_dev_;
+    return reinterpret_cast<void**>(buffers_dev_dp_.get());
   }
 
   void** get_signal_pad_ptrs_dev() override {
-    return signal_pads_dev_;
+    return reinterpret_cast<void**>(signal_pads_dev_dp_.get());
   }
+
 
   size_t get_buffer_size() override {
     return buffer_size_;
@@ -201,8 +205,8 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   int device_idx_;
   int rank_;
   int world_size_;
-  void** buffers_dev_;
-  void** signal_pads_dev_;
+  c10::DataPtr buffers_dev_dp_;
+  c10::DataPtr signal_pads_dev_dp_;
   std::string group_name_;
   ncclWindow_t buffer_handle_;
   ncclWindow_t signal_handle_;
@@ -274,7 +278,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto buffer_size_map =
         storeExchange.all_gather(group_info.store, group_info.rank, group_info.world_size, it->second->buffer_size);
 
-    LOG(INFO) << "[rank " << group_info.rank << "]"
+    LOG(INFO) << "[rank " << group_info.rank << ']'
               << "buffer_size_map: " << buffer_size_map;
     // NCCL window registration api requires all ranks to have the same buffer size
     // we have this check to make sure all ranks have the same buffer size.

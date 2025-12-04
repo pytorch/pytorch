@@ -5,7 +5,6 @@ import copyreg
 from collections.abc import Sequence
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Union
 
 import torch
 from torch import Tensor
@@ -122,7 +121,7 @@ class ParametrizationList(ModuleList):
     def __init__(
         self,
         modules: Sequence[Module],
-        original: Union[Tensor, Parameter],
+        original: Tensor | Parameter,
         unsafe: bool = False,
     ) -> None:
         # We require this because we need to treat differently the first parametrization
@@ -796,7 +795,7 @@ def transfer_parametrizations_and_params(
         assert isinstance(from_module.parametrizations, ModuleDict)  # for mypy
 
         # get list of all params or the single param to transfer
-        parameters_to_transfer: Union[list, ModuleDict] = (
+        parameters_to_transfer: list | ModuleDict = (
             from_module.parametrizations if tensor_name is None else [tensor_name]
         )
 
