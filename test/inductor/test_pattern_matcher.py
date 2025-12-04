@@ -2033,7 +2033,6 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
     @make_logging_test()
     def test_pattern_match_debug_output(self, records):
-        # Setup pattern
         def pattern(x, y):
             return x + y
 
