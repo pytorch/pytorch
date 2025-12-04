@@ -87,7 +87,7 @@ class QConv1dUnpackWeightsInt8 final {
         ctx.qEngine() == at::QEngine::X86) {
       auto result = packed_weight->unpack();
       auto& weight = std::get<0>(result);
-      weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      weight = weight.squeeze(quant_utils::kConv1dSqueezeDim + 2);
       return result;
     }
 #endif
