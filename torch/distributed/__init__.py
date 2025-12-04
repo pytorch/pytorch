@@ -5,8 +5,12 @@ import sys
 import traceback
 import typing
 from datetime import timedelta
+from typing import TypeVar
 
 import torch
+
+
+RankType = TypeVar("RankType", int, int | torch.SymInt)
 
 
 log = logging.getLogger(__name__)
