@@ -861,6 +861,69 @@ if not IS_WINDOWS:
 
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
+        def test_my_get_current_cuda_stream(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            res = libtorch_agnostic.ops.my_get_current_cuda_stream(device_index)
+            expected = torch.cuda.current_stream(device_index).cuda_stream
+            self.assertEqual(res, expected)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_set_current_cuda_stream(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            prev_stream = torch.cuda.current_stream(device_index).cuda_stream
+            new_stream = torch.cuda.streams.Stream(device_index).cuda_stream
+
+            try:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    new_stream, device_index
+                )
+                expected = torch.cuda.current_stream(device_index).cuda_stream
+                self.assertEqual(new_stream, expected)
+            finally:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    prev_stream, device_index
+                )
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_get_cuda_stream_from_pool(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            prev_stream = torch.cuda.current_stream(device_index).cuda_stream
+
+            try:
+                for high_priority in [False, True]:
+                    stream = libtorch_agnostic.ops.my_get_cuda_stream_from_pool(
+                        high_priority, device_index
+                    )
+                    libtorch_agnostic.ops.my_set_current_cuda_stream(
+                        stream, device_index
+                    )
+                    expected = torch.cuda.current_stream(device_index).cuda_stream
+                    self.assertEqual(stream, expected)
+            finally:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    prev_stream, device_index
+                )
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_cuda_stream_synchronize(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            stream = torch.cuda.current_stream(device_index).cuda_stream
+            # sanity check for torch_cuda_stream_synchronize:
+            libtorch_agnostic.ops.my_cuda_stream_synchronize(stream, device_index)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
         def test_std_cuda_check_success(self, device):
             """Test that STD_CUDA_CHECK works correctly for successful CUDA calls."""
             import libtorch_agnostic_2_10 as libtorch_agnostic
@@ -893,6 +956,8 @@ except RuntimeError as e:
 """
             env = os.environ.copy()
             env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+            # Pass the current sys.path to subprocess so it can find the locally installed extension
+            env["PYTHONPATH"] = os.pathsep.join(sys.path)
 
             result = subprocess.run(
                 [sys.executable, "-c", test_script],
@@ -903,7 +968,11 @@ except RuntimeError as e:
 
             error_message = result.stdout + result.stderr
 
-            self.assertIn("CUDA error: invalid device ordinal", error_message)
+            self.assertTrue(
+                "CUDA error: invalid device ordinal" in error_message
+                or "HIP error: invalid device ordinal" in error_message,
+                f"Expected 'CUDA/HIP error: invalid device ordinal' in error message, got: {error_message}",
+            )
             self.assertIn(
                 "GPU device may be out of range, do you have enough GPUs?",
                 error_message,
@@ -950,6 +1019,8 @@ except RuntimeError as e:
 """
             env = os.environ.copy()
             env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+            # Pass the current sys.path to subprocess so it can find the locally installed extension
+            env["PYTHONPATH"] = os.pathsep.join(sys.path)
 
             result = subprocess.run(
                 [sys.executable, "-c", test_script],
@@ -960,7 +1031,11 @@ except RuntimeError as e:
 
             error_message = result.stdout + result.stderr
 
-            self.assertIn("CUDA error: invalid configuration argument", error_message)
+            self.assertTrue(
+                "CUDA error: invalid configuration argument" in error_message
+                or "HIP error: invalid configuration argument" in error_message,
+                f"Expected 'CUDA|HIP error: invalid configuration argument' in error message, got: {error_message}",
+            )
 
             if show_cpp_stacktraces:
                 self.assertIn("C++ CapturedTraceback:", error_message)
