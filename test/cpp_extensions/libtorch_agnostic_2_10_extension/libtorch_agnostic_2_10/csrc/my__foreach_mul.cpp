@@ -5,6 +5,7 @@
 
 using torch::stable::Tensor;
 
+// This is used to test const torch::headeronly::HeaderOnlyArrayRef<Tensor>& with TORCH_BOX
 std::vector<Tensor> my__foreach_mul(const torch::headeronly::HeaderOnlyArrayRef<Tensor>& self, torch::headeronly::HeaderOnlyArrayRef<Tensor> other) {
   std::array<StableIValue, 2> stack = {torch::stable::detail::from(self), torch::stable::detail::from(other)};
   aoti_torch_call_dispatcher("aten::_foreach_mul", "List", stack.data());

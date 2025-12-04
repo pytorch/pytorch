@@ -1,4 +1,4 @@
-// This file is intended to test (const) std::string& and (const) std::string_view& arguments
+// This file is intended to test (const) std::string& and const std::string_view& arguments with TORCH_BOX
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/device.h>
 #include <torch/csrc/stable/tensor.h>
@@ -32,7 +32,6 @@ std::tuple<std::vector<std::string>, int64_t> my_string_op_const_string_ref(
 }
 
 // Test const std::string_view&
-// Note: const ref can bind to the temporary created when converting std::string -> std::string_view
 std::tuple<std::vector<std::string>, int64_t> my_string_op_const_string_view_ref(
     Tensor t,
     const std::string_view& accessor,
@@ -43,7 +42,6 @@ std::tuple<std::vector<std::string>, int64_t> my_string_op_const_string_view_ref
 }
 
 // Test std::string& (non-const)
-// This works because the tuple holds std::string by value, and std::apply passes it as lvalue ref
 std::tuple<std::vector<std::string>, int64_t> my_string_op_string_ref(
     Tensor t,
     std::string& accessor,
@@ -52,12 +50,6 @@ std::tuple<std::vector<std::string>, int64_t> my_string_op_string_ref(
   auto vec = std::vector<std::string>({accessor, std::to_string(res), passthru});
   return std::make_tuple(vec, res);
 }
-
-// NOTE: std::string_view& (non-const) is NOT supported because:
-// - The tuple holds std::string (owning type)
-// - Converting std::string -> std::string_view creates a temporary
-// - Non-const lvalue references cannot bind to temporaries
-// So we intentionally do NOT test std::string_view& here.
 
 STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_10, m) {
   m.def("my_string_op_const_string_ref(Tensor t, str accessor, str passthru) -> (str[], int)");

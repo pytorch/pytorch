@@ -5,8 +5,7 @@
 
 using torch::stable::Tensor;
 
-// Test function that takes const std::vector<Tensor>& parameters
-// to verify that TORCH_BOX properly handles const reference to std::vector
+// This is used to test const std::vector<T>& with TORCH_BOX
 std::vector<Tensor> my__foreach_mul_vec(
     const std::vector<Tensor>& self,
     const std::vector<Tensor>& other) {

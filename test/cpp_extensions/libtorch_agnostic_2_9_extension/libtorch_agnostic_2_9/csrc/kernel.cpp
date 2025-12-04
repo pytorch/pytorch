@@ -217,10 +217,12 @@ Tensor my_transpose(Tensor t, int64_t dim0, int64_t dim1) {
   return transpose(t, dim0, dim1);
 }
 
+// This is used to test const torch::stable::Tensor& with TORCH_BOX
 Tensor my_empty_like(const Tensor& t) {
   return empty_like(t);
 }
 
+// This is used to test torch::stable::Tensor& with TORCH_BOX
 bool my_is_cpu(Tensor& t) {
   return t.is_cpu();
 }
