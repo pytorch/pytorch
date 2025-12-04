@@ -8662,11 +8662,22 @@ class InvokeSubgraph(ExternKernel):
         fake_operands = None
         if eager_input_vals := current_node.meta.get("eager_input_vals"):
             # eager_input_vals is (args_values, kwargs_values). We need args for invoke_subgraph
-            fake_operands = eager_input_vals[0][2:]
+            offset = 2
+            if current_node.target is torch.ops.higher_order.with_effects:
+                # Aruguments eagerly are (token, subgraph, identifier, *operands)
+                assert current_node.args[1] is torch.ops.higher_order.invoke_subgraph
+                offset = 3
+            fake_operands = eager_input_vals[0][offset:]
         else:
+            offset = 2
+            if current_node.target is torch.ops.higher_order.with_effects:
+                # with_effects args: (token, invoke_subgraph, subgraph, identifier, *operands)
+                assert current_node.args[1] is torch.ops.higher_order.invoke_subgraph
+                offset = 4
+
             # For the partitioned backward graph, we do not have
             # eager_input_vals. Here, we rely on the recorded example values.
-            fx_operands = current_node.args[2:]
+            fx_operands = current_node.args[offset:]
             fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
 
         # Realize the inputs. Also intermediates can have different strides than
@@ -8742,70 +8753,6 @@ class InvokeSubgraph(ExternKernel):
 
     def codegen(self, wrapper: PythonWrapperCodegen) -> None:
         wrapper.codegen_invoke_subgraph(self)
-
-
-@ir_dataclass(frozen=False)
-class HopPrint(ExternKernel):
-    format_str: Optional[str] = None
-    print_kwargs: Optional[dict[str, Any]] = None
-
-    def __init__(
-        self,
-        format_str: str,
-        print_kwargs: dict[str, Any],
-        layout: NoneLayout,
-    ) -> None:
-        inputs: list[IRNode] = []
-        kwargs_for_op: dict[str, Any] = {}
-
-        # Separate IRNode inputs from constant kwargs
-        for key, value in print_kwargs.items():
-            if isinstance(value, IRNode):
-                inputs.append(value)
-                kwargs_for_op[key] = value
-            else:
-                kwargs_for_op[key] = value
-
-        super().__init__(
-            name=None,
-            layout=layout,
-            inputs=inputs,
-            constant_args=(format_str,),
-            kwargs=kwargs_for_op,
-            python_kernel_name="torch.ops.higher_order.print",
-        )
-        # self.format_str = format_str
-        # self.print_kwargs = print_kwargs
-        # self.name = V.graph.register_buffer(self)
-        # V.graph.register_operation(self)
-
-    @classmethod
-    def create(
-        cls,
-        format_str: str,
-        **kwargs: object,
-    ) -> list[NoneAsConstantBuffer]:
-        # Realize inputs that are IRNodes
-        realized_kwargs: dict[str, Any] = {}
-        for key, value in kwargs.items():
-            if isinstance(value, (TensorBox, StorageBox)):
-                realized_kwargs[key] = cls.realize_input(value)
-            else:
-                realized_kwargs[key] = value
-
-        # Create the HopPrint node with NoneLayout since print returns None
-        # hop_print = HopPrint(
-        #     format_str=format_str,
-        #     print_kwargs=realized_kwargs,
-        #     layout=NoneLayout(device=None),
-        # )
-
-        # Return a NoneAsConstantBuffer to indicate a side-effecting node with no output
-        return [NoneAsConstantBuffer()]
-
-    def codegen(self, wrapper: PythonWrapperCodegen) -> None:
-        # wrapper.writeline(f'print("{self.format_str}".format(**self.print_kwargs))')
-        return None
 
 
 @ir_dataclass(frozen=False)
@@ -8899,9 +8846,13 @@ class Conditional(ExternKernel):
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
             assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
+        # Determine device from operands and predicate
+        # The predicate can be on a different device (e.g., CPU for control flow)
+        # while the data operands and outputs should be on the compute device, so
+        # using predicate device as a fallback.
         device = next(
             o.get_device()
-            for o in [predicate] + operands
+            for o in operands + [predicate]
             if not isinstance(o, ShapeAsConstantBuffer)
         )
         unbacked_bindings = resolve_unbacked_bindings(

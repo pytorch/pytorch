@@ -199,7 +199,7 @@ Below are some useful tools for debugging AOT Inductor.
 :caption: Debugging Tools
 :maxdepth: 1
 
-logging
+../../logging
 torch.compiler_aot_inductor_minifier
 torch.compiler_aot_inductor_debugging_guide
 ```

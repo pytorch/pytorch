@@ -299,6 +299,61 @@ x = add_1, y = add_2);  getitem = None
         res = torch.compile(f, backend="inductor")(*inputs)
         self.assertEqual(True, torch.allclose(res, f(*inputs)))
 
+    def test_compile_inductor_cpp_wrapper_print(self):
+        """Test print with C++ wrapper enabled
+
+        C++ wrapper uses std::cout which writes to file descriptor 1 (stdout).
+        We need to redirect the actual file descriptor to capture the output.
+        """
+        import os
+        import tempfile
+
+        from torch._inductor import config
+
+        def f(x):
+            torch._higher_order_ops.print("C++ print test: value={x}", x=x)
+            res = x + x
+            torch._higher_order_ops.print("Result={res}", res=res)
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        # Enable C++ wrapper and capture stdout at the file descriptor level
+        with config.patch({"cpp_wrapper": True}):
+            compiled_f = torch.compile(f, backend="inductor")
+
+            # Create a temporary file to capture stdout
+            with tempfile.TemporaryFile(mode="w+") as tmp_stdout:
+                # Save the original stdout file descriptor
+                original_stdout_fd = os.dup(1)
+                try:
+                    # Redirect stdout (fd 1) to our temporary file
+                    os.dup2(tmp_stdout.fileno(), 1)
+
+                    # Run the compiled function (C++ cout will write to tmp_stdout)
+                    res = compiled_f(*inputs)
+
+                    # Flush C++ stdout
+                    os.fsync(1)
+                finally:
+                    # Restore original stdout
+                    os.dup2(original_stdout_fd, 1)
+                    os.close(original_stdout_fd)
+
+                # Read captured output
+                tmp_stdout.seek(0)
+                captured_output = tmp_stdout.read().strip()
+
+            # Verify the output contains our print messages
+            # C++ prints literal format strings (no value substitution)
+            # This is not complete yet with not kwargs printing yet.
+            self.assertEqual("C++ print test: value={x}\nResult={res}", captured_output)
+
+            # Verify computation is correct
+            expected = f(*inputs)
+            self.assertTrue(torch.allclose(res, expected))
+
 
 if __name__ == "__main__":
+    run_tests()
     run_tests()

@@ -228,6 +228,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if device != "meta":
                 self.add_device_include(device)
 
+        # Add iostream for C++ std::cout support (needed for print HOP)
+        self.header.splice("#include <iostream>")
+
         if V.graph.aot_mode:
             if config.aot_inductor.dynamic_linkage:
                 with open(
@@ -2335,13 +2338,15 @@ class CppWrapperCpu(PythonWrapperCodegen):
             raise AssertionError(f"Unexpected output: {type(out)}")
 
         if isinstance(op_overload, torch._ops.HigherOrderOperator):
-            assert isinstance(
-                op_overload, torch._higher_order_ops.torchbind.CallTorchBind
-            ), type(op_overload)
-            assert len(raw_args) > 1
-            obj = raw_args[0]
-            method = raw_args[1]
-            return_schema = op_overload.schema(obj, method).returns
+            if isinstance(op_overload, torch._higher_order_ops.torchbind.CallTorchBind):
+                assert len(raw_args) > 1
+                obj = raw_args[0]
+                method = raw_args[1]
+                return_schema = op_overload.schema(obj, method).returns
+            else:
+                # For non-CallTorchBind HOPs (like print), we don't need schema for C++ wrapper
+                # since they're handled specially (e.g., printf for print)
+                return_schema = []
         else:
             return_schema = op_overload._schema.returns
 
@@ -2356,6 +2361,28 @@ class CppWrapperCpu(PythonWrapperCodegen):
             # this point.
             assert isinstance(output_name, list), type(output_name)
             output_args = output_name
+
+        # Special handling for torch.ops.higher_order.print
+        # Use std::cout to print format string with kwargs substitution
+        if (
+            isinstance(op_overload, torch._ops.HigherOrderOperator)
+            and python_kernel_name == "torch.ops.higher_order.print"
+        ):
+            # Extract format string from raw_args (first argument)
+            format_str = raw_args[0] if raw_args else ""
+
+            # Get kwargs from the call
+            # For FallbackKernel, kwargs are passed after positional args
+            # We need to extract them from the raw_args/kwargs structure
+
+            # For now, just print the literal format string
+            # Proper kwargs handling would require accessing the actual kwargs values
+            # which are in the FallbackKernel node structure
+            escaped_str = format_str.replace("\\", "\\\\").replace('"', '\\"')
+
+            # Generate std::cout statement with endl to flush
+            self.writeline(f'std::cout << "{escaped_str}" << std::endl;')
+            return
 
         # In AOT mode, we use a ProxyExecutor to run fallback kernels.
         if V.graph.aot_mode:

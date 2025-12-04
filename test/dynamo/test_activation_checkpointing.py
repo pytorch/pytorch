@@ -67,6 +67,11 @@ def checkpoint_wrapper(fn):
     return inner
 
 
+@torch._dynamo.allow_in_graph
+def _grad(*args, **kwargs):
+    return torch.autograd.grad(*args, **kwargs)
+
+
 def count_ops(
     gm, args, freq=None, freq_ge=None, op=None, freqs=None, freqs_ge=None, ops=None
 ):
@@ -1991,6 +1996,332 @@ class GraphModule(torch.nn.Module):
         add: "f32[4, 4]" = torch.ops.aten.add.Tensor(cos, sin_2);  cos = sin_2 = None
         return (add, sin, primals_1)
 """,
+        )
+
+
+class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
+    """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
+
+    def count_op(self, gm, target):
+        return sum(1 for n in gm.graph.nodes if n.target == target)
+
+    def _compile_and_capture(self, fn, remat_using_tags_for_fwd_loss_bwd_graph, inputs):
+        captured_gm = None
+
+        def compiler(gm, example_inputs):
+            nonlocal captured_gm
+            captured_gm = gm
+            return gm.forward
+
+        backend = aot_autograd(
+            fw_compiler=compiler,
+            bw_compiler=None,
+            partition_fn=None,
+        )
+
+        with torch._functorch.config.patch(
+            remat_using_tags_for_fwd_loss_bwd_graph=remat_using_tags_for_fwd_loss_bwd_graph
+        ):
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            result = compiled_fn(*inputs)
+
+        return result, captured_gm
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_ac_rematerialize_simple_forward_backward(self):
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+
+        def simple_fwd_bwd(x, y):
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a, b: torch.sigmoid(torch.matmul(a, b)),
+                x,
+                y,
+                use_reentrant=False,
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+                dx, dy = _grad(loss, (x, y))
+
+            return dx.detach(), dy.detach()
+
+        (dx1, dy1), gm_without = self._compile_and_capture(
+            simple_fwd_bwd, False, (x, y)
+        )
+        (dx2, dy2), gm_with = self._compile_and_capture(simple_fwd_bwd, True, (x, y))
+
+        self.assertTrue(torch.allclose(dx1, dx2))
+        self.assertTrue(torch.allclose(dy1, dy2))
+
+        mm_with = self.count_op(gm_with, torch.ops.aten.mm.default)
+        mm_without = self.count_op(gm_without, torch.ops.aten.mm.default)
+        sigmoid_with = self.count_op(gm_with, torch.ops.aten.sigmoid.default)
+        sigmoid_without = self.count_op(gm_without, torch.ops.aten.sigmoid.default)
+        self.assertEqual(mm_with, 4, "mm should be recomputed in backward")
+        self.assertEqual(mm_without, 3)
+        self.assertEqual(sigmoid_with, 2, "sigmoid should be recomputed in backward")
+        self.assertEqual(sigmoid_without, 1)
+
+        self.assertExpectedInline(
+            gm_with.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sigmoid = torch.ops.aten.sigmoid.default(mm);  mm = None
+    sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sigmoid_recomputed = torch.ops.aten.sigmoid.default(mm_recomputed);  mm_recomputed = None
+    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    mm_2 = torch.ops.aten.mm.default(t, sigmoid_backward);  t = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_3 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
+    detach_3 = torch.ops.aten.detach.default(mm_3);  mm_3 = None
+    detach_4 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
+    return (detach_3, detach_4)""",
+        )
+
+    def test_ac_rematerialize_with_rng_ops_raises_error(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def fwd_bwd_with_rng(x):
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a: torch.sigmoid(a + torch.rand_like(a)), x, use_reentrant=False
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+                dx = _grad(loss, x)[0]
+
+            return dx
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops in checkpointed regions.",
+        ):
+            self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
+
+    def test_ac_rematerialize_with_no_annotations_warns_and_returns_unchanged(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def fwd_bwd(x):
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a: torch.sigmoid(a + 4), x, use_reentrant=False
+            )
+            loss = z.sum()
+            return _grad(loss, x)[0]
+
+        # Without backward annotations, the pass should warn and return unchanged
+        # We verify this by checking that remat_using_tags=True produces the same
+        # graph as remat_using_tags=False (i.e., no recomputation happens)
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
+
+            # Check warning was issued
+            self.assertTrue(
+                any("no backward region" in str(warning.message) for warning in w),
+                f"Expected warning about no backward region, got: {[str(warning.message) for warning in w]}",
+            )
+
+        # Get the graph without the pass for comparison
+        result_without, gm_without = self._compile_and_capture(fwd_bwd, False, (x,))
+
+        # Results should be correct
+        self.assertTrue(torch.allclose(result_with, result_without))
+
+        # Both graphs should have the same number of sigmoid ops (no recomputation)
+        sigmoid_with = self.count_op(gm_with, torch.ops.aten.sigmoid.default)
+        sigmoid_without = self.count_op(gm_without, torch.ops.aten.sigmoid.default)
+        self.assertEqual(sigmoid_with, sigmoid_without)
+
+    def test_ac_rematerialize_with_selective_checkpoint_policy(self):
+        x = torch.randn(4, 128, requires_grad=True)
+        w1 = torch.randn(128, 128, requires_grad=True)
+        b1 = torch.randn(128, requires_grad=True)
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.addmm.default:
+                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+            return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
+        )
+
+        def fwd_bwd_with_policy(x, w1, b1):
+            def checkpoint_fn(inp, w, b):
+                linear = torch.nn.functional.linear(inp, w, b)
+                return torch.relu(linear)
+
+            result = torch.utils.checkpoint.checkpoint(
+                checkpoint_fn, x, w1, b1, use_reentrant=False, context_fn=context_fn
+            )
+            loss = result.sum()
+
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+                dx, dw, db = _grad(loss, (x, w1, b1))
+            return dx, dw, db
+
+        result_with, gm_with = self._compile_and_capture(
+            fwd_bwd_with_policy, True, (x, w1, b1)
+        )
+        result_without, gm_without = self._compile_and_capture(
+            fwd_bwd_with_policy, False, (x, w1, b1)
+        )
+
+        torch.testing.assert_close(result_with[0], result_without[0])
+        torch.testing.assert_close(result_with[1], result_without[1])
+        torch.testing.assert_close(result_with[2], result_without[2])
+
+        addmm_without = self.count_op(gm_without, torch.ops.aten.addmm.default)
+        relu_without = self.count_op(gm_without, torch.ops.aten.relu.default)
+
+        addmm_with = self.count_op(gm_with, torch.ops.aten.addmm.default)
+        relu_with = self.count_op(gm_with, torch.ops.aten.relu.default)
+
+        self.assertEqual(addmm_without, addmm_with)
+        self.assertEqual(relu_with, relu_without + 1)
+
+        recomputed_nodes = [
+            n.name for n in gm_with.graph.nodes if "_recomputed" in n.name
+        ]
+        self.assertNotIn("addmm_recomputed", recomputed_nodes)
+
+        self.assertTrue(
+            any("relu" in name for name in recomputed_nodes),
+            f"Expected relu_recomputed but got: {recomputed_nodes}",
+        )
+
+    def _compile_with_joint_graph_pass_and_capture(self, fn, inputs):
+        from torch._inductor.fx_passes.joint_graph import joint_graph_passes
+
+        captured_gm_before = None
+        captured_gm_after = None
+
+        def custom_compiler(gm, example_inputs):
+            nonlocal captured_gm_before, captured_gm_after
+            import copy
+
+            captured_gm_before = copy.deepcopy(gm)
+            joint_graph_passes(gm)
+            captured_gm_after = gm
+            return gm.forward
+
+        backend = aot_autograd(
+            fw_compiler=custom_compiler,
+            bw_compiler=None,
+            partition_fn=None,
+        )
+
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        result = compiled_fn(*inputs)
+
+        return result, captured_gm_before, captured_gm_after
+
+    def test_joint_graph_passes_view_optimization(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def fwd_bwd_with_views(x):
+            def checkpoint_fn(a):
+                b = a.view(16)
+                c = b.view(4, 4)
+                return torch.sigmoid(c)
+
+            z = torch.utils.checkpoint.checkpoint(
+                checkpoint_fn,
+                x,
+                use_reentrant=False,
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+                dx = _grad(loss, x)[0]
+
+            return dx.detach()
+
+        result, gm_before, gm_after = self._compile_with_joint_graph_pass_and_capture(
+            fwd_bwd_with_views, (x,)
+        )
+
+        result_eager = torch.autograd.grad(torch.sigmoid(x).sum(), x)[0]
+        self.assertTrue(torch.allclose(result, result_eager, atol=1e-5))
+
+        view_count_before = self.count_op(gm_before, torch.ops.aten.view.default)
+        view_count_after = self.count_op(gm_after, torch.ops.aten.view.default)
+        self.assertTrue(view_count_after == 0)
+        self.assertTrue(view_count_before == 6)
+
+        self.assertExpectedInline(
+            gm_after.code.strip(),
+            """\
+def forward(self, arg0_1):
+    sigmoid = torch.ops.aten.sigmoid.default(arg0_1)
+    sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    sigmoid_recomputed = torch.ops.aten.sigmoid.default(arg0_1);  arg0_1 = None
+    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
+    detach_3 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
+    return (detach_3,)""",
+        )
+
+    def test_joint_graph_passes_permute_optimization(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def fwd_bwd_with_permute(x):
+            def checkpoint_fn(a):
+                b = a.permute(1, 0)
+                c = b.permute(1, 0)
+                return torch.sigmoid(c)
+
+            z = torch.utils.checkpoint.checkpoint(
+                checkpoint_fn,
+                x,
+                use_reentrant=False,
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+                dx = _grad(loss, x)[0]
+
+            return dx.detach()
+
+        result, gm_before, gm_after = self._compile_with_joint_graph_pass_and_capture(
+            fwd_bwd_with_permute, (x,)
+        )
+
+        result_eager = torch.autograd.grad(torch.sigmoid(x).sum(), x)[0]
+        self.assertTrue(torch.allclose(result, result_eager, atol=1e-5))
+
+        permute_count_before = self.count_op(gm_before, torch.ops.aten.permute.default)
+        permute_count_after = self.count_op(gm_after, torch.ops.aten.permute.default)
+        self.assertTrue(permute_count_after == 0)
+        self.assertTrue(permute_count_before == 6)
+
+        self.assertExpectedInline(
+            gm_after.code.strip(),
+            """\
+def forward(self, arg0_1):
+    sigmoid = torch.ops.aten.sigmoid.default(arg0_1)
+    sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    sigmoid_recomputed = torch.ops.aten.sigmoid.default(arg0_1);  arg0_1 = None
+    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
+    detach_3 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
+    return (detach_3,)""",
         )
 
 
