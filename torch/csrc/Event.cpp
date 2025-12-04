@@ -1,9 +1,6 @@
-#include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Event.h>
 #include <torch/csrc/Stream.h>
-#include <torch/csrc/THP.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
@@ -12,7 +9,6 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <structmember.h>
 #include <string>
 
 PyTypeObject* THPEventClass = nullptr;

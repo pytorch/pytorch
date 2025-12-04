@@ -9,9 +9,11 @@ import unittest
 
 import torch._dynamo.test_case
 from torch._dynamo.repro.after_aot import InputReader, InputWriter, save_graph_repro
+from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import IS_FBCODE
 from torch.utils._traceback import report_compile_source_on_error
+from torch.utils._triton import has_triton
 
 
 def strip_trailing_whitespace(r):
@@ -23,6 +25,31 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
     def test_save_graph_repro(self):
         # TODO: This triggers CUDA context initialization, even though
         # it is CPU only
+        saved_kernel_state = None
+        if has_triton():
+            import triton
+            import triton.language as tl
+
+            saved_kernel_state = (
+                dict(kernel_side_table.id_to_kernel),
+                dict(kernel_side_table.kernel_to_id),
+                dict(kernel_side_table.constant_args),
+            )
+            kernel_side_table.reset_table()
+
+            @triton.jit
+            def _repro_kernel(x_ptr, y_ptr, size, BLOCK: tl.constexpr):
+                pid = tl.program_id(0)
+                offsets = pid * BLOCK + tl.arange(0, BLOCK)
+                mask = offsets < size
+                tl.store(
+                    y_ptr + offsets,
+                    tl.load(x_ptr + offsets, mask=mask),
+                    mask=mask,
+                )
+
+            kernel_side_table.add_kernel(_repro_kernel)
+
         buf = io.StringIO()
         args = [torch.randn(4)]
 
@@ -41,6 +68,13 @@ class TestAfterAot(torch._dynamo.test_case.TestCase):
             # Should still work even without the save dir
             with report_compile_source_on_error():
                 exec(r, {"__compile_source__": r})
+
+        if saved_kernel_state is not None:
+            (
+                kernel_side_table.id_to_kernel,
+                kernel_side_table.kernel_to_id,
+                kernel_side_table.constant_args,
+            ) = saved_kernel_state
 
     @unittest.skipIf(sys.byteorder != "little", "checksum depends on endianness")
     def test_dump_tensor(self):

@@ -772,10 +772,7 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(len(torch._dynamo.utils.counters["resumes"]), 2)
         for name in ("resume_in_f4", "resume_in_f7"):
             self.assertTrue(
-                any(
-                    name in key
-                    for key in torch._dynamo.utils.counters["resumes"].keys()
-                )
+                any(name in key for key in torch._dynamo.utils.counters["resumes"])
             )
 
     def test_disable_nested_graph_breaks(self):
