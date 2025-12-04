@@ -2525,8 +2525,6 @@ class _XpuEventBase:
     def synchronize(self) -> None: ...
 
 # Defined in torch/csrc/xpu/MemPool.cpp
-class _xpu_XPUAllocator: ...
-
 class _XPUMemPool:
     def __init__(
         self,

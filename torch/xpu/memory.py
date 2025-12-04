@@ -568,11 +568,6 @@ __all__ = [
     "use_mem_pool",
 ]
 
-if not hasattr(torch._C, "_xpu_XPUAllocator"):
-    # Define dummy base classes
-    torch._C.__dict__["_xpu_XPUAllocator"] = _dummy_type("_xpu_XPUAllocator")
-
-
 if not hasattr(torch._C, "_XPUMemPool"):
     # Define dummy base classes
     torch._C.__dict__["_XPUMemPool"] = _dummy_type("_XPUMemPool")
