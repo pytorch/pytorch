@@ -127,6 +127,7 @@ def check_files(
             extra_env={},
             retries=0,
         )
+        assert False, pyrefly_commands
     except OSError as err:
         assert False
         return [
