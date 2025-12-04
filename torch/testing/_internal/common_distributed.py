@@ -809,7 +809,8 @@ class MultiProcessTestCase(TestCase):
 
         self.processes = []  # type: ignore[var-annotated]
         self.rank = self.MAIN_PROCESS_RANK
-        self.file_name = tempfile.NamedTemporaryFile(delete=False).name
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file_name = f.name
         # pid to pipe consisting of error message from process.
         self.pid_to_pipe = {}  # type: ignore[var-annotated]
 
@@ -1711,7 +1712,7 @@ class MultiProcContinuousTest(TestCase):
     @classmethod
     def _init_pg(cls, rank, world_size, rdvz_file):
         assert rdvz_file is not None
-        # rank should be local_rank for tests running on <= 8gpus which is how all these tests are designed
+        # rank should be local_rank for tests running on <= 8 gpus which is how all these tests are designed
         # and we expect LOCAL_RANK set by torchrun. Setting it lets init_device_mesh set the device without
         # issuing a warning
         os.environ["LOCAL_RANK"] = str(rank)
@@ -1811,7 +1812,8 @@ class MultiProcContinuousTest(TestCase):
         cls.task_queues = []
         cls.completion_queues = []
         # Need a rendezvous file for `init_process_group` purpose.
-        cls.rdvz_file = tempfile.NamedTemporaryFile(delete=False).name
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            cls.rdvz_file = f.name
 
         # CUDA multiprocessing requires spawn instead of fork, to make sure
         # child processes have their own memory space.

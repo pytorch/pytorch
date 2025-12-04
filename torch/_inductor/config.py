@@ -236,9 +236,6 @@ memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
 use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 
-# Enable bfloat16 atomic adds (fbcode only until upstreamed to triton)
-bfloat16_atomic_adds_enabled = True
-
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
@@ -424,6 +421,10 @@ bucket_reduce_scatters_fx_bucket_size_determinator: Optional[Callable[[int], int
     None
 )
 
+bucket_all_reduces_fx: Literal["none", "all"] = "none"
+# By default torch._inductor.fx_passes.bucketing.bucket_size_determinator is used
+bucket_all_reduces_fx_bucket_size_determinator: Optional[Callable[[int], int]] = None
+
 # runtime estimation function for ops
 # for built-in estimation function, pass in "default"; for user-defined estimation function, pass in the function handle
 estimate_op_runtime = "default"
@@ -550,6 +551,32 @@ max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
     "TORCHINDUCTOR_MAX_AUTOTUNE_FLEX_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
 
+
+# Fall back to ATen for all ops by default, except those nodes that users explicitly
+# annotated with regional inductor compile. Please read torch.fx.passes.regional_inductor
+# on to explicitly annotate. This is currently only used by inductor lite mode.
+# Different from default inductor mode that fuses all nodes, this config enables an
+# opt-in mode that only fuse for user-specified nodes. The motivation is to provide
+# guaranteed numeric correctness and give full control to users.
+fallback_by_default: bool = False
+
+
+# This config allows selective decomposition of certain operators in the graph.
+# Currently the only use case is to patch the same-name config in functorch, for
+# inductor lite mode. See more details in [Note: Selective Decomposition]
+selective_decompose: bool = False
+
+
+# Use dead code elimination
+use_dce: bool = True
+
+
+# Use fx graph passes
+use_pre_grad_passes: bool = True
+use_joint_graph_passes: bool = True
+use_post_grad_passes: bool = True
+
+
 cutedsl_enable_autotuning: bool = (
     os.environ.get("CUTEDSL_ENABLE_AUTOTUNING", "0") == "1"
 )
@@ -580,6 +607,16 @@ max_autotune_subproc_terminate_timeout_seconds = 0.0
 
 # If autotuning in subprocess, whether to use multiple devices
 autotune_multi_device = os.environ.get("TORCHINDUCTOR_AUTOTUNE_MULTI_DEVICE") == "1"
+
+# Number of benchmark runs for collective operations
+collective_benchmark_nruns = int(
+    os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_NRUNS", "50")
+)
+
+# Timeout in seconds for collective benchmarking
+collective_benchmark_timeout = float(
+    os.environ.get("TORCHINDUCTOR_COLLECTIVE_BENCHMARK_TIMEOUT", "30")
+)
 
 coordinate_descent_tuning = (
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_TUNING") == "1"
@@ -923,6 +960,11 @@ class aten_distributed_optimizations:
     # "benchmark": Use CUDA events with power-of-2 rounding and interpolation
     collective_estimator: Literal["analytical", "benchmark"] = "analytical"
 
+    # Maximum memory increase above baseline for prefetch operations
+    # Uses minimum of absolute cap and ratio of baseline
+    max_memory_increase_gb: Optional[float] = None  # Absolute cap in GB
+    max_memory_increase_ratio: Optional[float] = None  # Ratio of baseline peak memory
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1130,10 +1172,20 @@ freezing_discard_parameters: bool = False
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
+# Wrap compiled regions in inductor_compiled_code HOP to make them visible to
+# TorchDispatchModes like DebugMode and Selective Activation Checkpointing.
+wrap_inductor_compiled_regions: bool = False
+
 # assume_aligned_inputs means that we assume that inputs will be aligned; we generate
 # code using this assumption, and clone tensors before use if they aren't aligned.
 # In the common case, most inputs will be aligned.
 assume_aligned_inputs: bool = False
+
+# assume_32bit_indexing means that we assume 32-bit indexing is always safe; we always
+# use 32-bit indices regardless of tensor sizes. If assume_32bit_indexing contradicts
+# with example inputs we throw. This is useful when all dynamic shapes are unbacked and
+# you know you only operate with 32-bit sizes.
+assume_32bit_indexing: bool = False
 
 # For the user-written Triton kernels compiled with the model, ignore the unsupported
 # arguments passed to the @triton.autotune in the user's code; this is unsafe, as
@@ -1166,6 +1218,15 @@ enable_caching_generated_triton_templates: bool = True
 autotune_lookup_table: dict[str, dict[str, Any]] = {}
 
 file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "600"))
+
+enable_autograd_for_aot: bool = False
+
+_debug_cpu_to_tpu_pallas: bool = Config(
+    env_name_force="PALLAS_TARGET_TPU", default=False
+)
+pallas_take_first_jax_device_only: bool = Config(
+    env_name_force="PALLAS_TAKE_FIRST_JAX_DEVICE_ONLY", default=True
+)
 
 
 def get_worker_log_path() -> Optional[str]:
@@ -1373,6 +1434,10 @@ class triton:
         default=False,
     )
 
+    # reorder nodes to minimize the number of graph partitions while
+    # not incurring large memory overhead
+    reorder_for_reducing_graph_partitions: bool = True
+
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
 
@@ -1536,6 +1601,11 @@ class triton:
     # TMA descriptors are only going to be generated if the above conditions
     # can be satisfied, along with any existing requirements for index expressions
     use_tensor_descriptor = False
+
+    # (Experimental)
+    # Whether to allow reordering tensor descriptor matches with descending
+    # strides, at the expense of transposing values after load / before store.
+    transpose_discontiguous_tensor_descriptor = True
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.

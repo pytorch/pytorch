@@ -22,7 +22,7 @@ void check_all_parameters(
 
 template<class Result, class... Args>
 Result get_operator_from_registry_and_execute(const char* op_name, Args&&... args) {
-  auto& ops = torch::jit::getAllOperatorsFor(
+  auto ops = torch::jit::getAllOperatorsFor(
       torch::jit::Symbol::fromQualString(op_name));
   TORCH_INTERNAL_ASSERT(ops.size() == 1);
 

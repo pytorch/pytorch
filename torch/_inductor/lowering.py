@@ -26,6 +26,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import get_layout_constraint_tag
 from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     canonicalize_dim,
@@ -2704,6 +2705,8 @@ def require_channels_last(_, *args, **kwargs):
 
 
 def constrain_to_fake_tensor(arg, fake_arg):
+    if isinstance(fake_arg, FakeScriptObject):
+        return arg
     if isinstance(arg, ir.IRNode):
         meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
@@ -2899,6 +2902,10 @@ if torch.xpu.is_available():
         aten.embedding_dense_backward, warn=False
     )  # (XPU-only and faster than decomp)
 
+if torch.mtia._is_compiled():
+    make_fallback(
+        aten.native_layer_norm, warn=False
+    )  # (MTIA-only and faster than decomp)
 
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
@@ -3091,6 +3098,8 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 # index_reduce requires fallback when use_scatter_fallback(...) returns True
 make_fallback(aten.index_reduce)
 make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
+
+make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
 
 
 # Register with type_promotion_kind None.
@@ -3913,15 +3922,6 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
 def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
     if may_realize:
 
-        def try_get_name(x):
-            if isinstance(x, ir.TensorBox):
-                x = x.data
-            if isinstance(x, ir.BaseView):
-                x = x.unwrap_view()
-            if isinstance(x, ir.StorageBox):
-                x = x.data
-            return x.get_name() if isinstance(x, ir.Buffer) else None
-
         def indice_slice_from_randperm(indice):
             # Refer to: https://github.com/pytorch/pytorch/pull/139366#discussion_r1825424660
             # For this specific pattern, indices is unique as coming from torch.randperm.
@@ -3936,7 +3936,7 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
                 )
             return False
 
-        if try_get_name(self) in values.get_read_names() and not all(
+        if ir.try_get_name(self) in values.get_read_names() and not all(
             indice_slice_from_randperm(indice) for indice in indices
         ):
             # Fix issue: https://github.com/pytorch/pytorch/issues/138908
@@ -7099,30 +7099,19 @@ def sym_constrain_range(a, min=None, max=None):
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     val = V.graph.current_node.meta["val"]
-    # Note [Can val be an int?]
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~
-    # In principle, someone could construct an FX graph where
-    # a call to size/stride has a val that is a plain int (not
-    # SymInt).  However, we will maintain the invariant that
-    # this is not possible: if you are constructing an FX graph
-    # where there is a call to size/stride that returns an
-    # int, but you KNOW that int must always be a constant,
-    # then you do not need trace that call at all (and just
-    # constant propagate the integer as is.)
-    assert isinstance(val, torch.SymInt), (
-        f"Expect val to be torch.SymInt but got val={val}"
-    )
-    return val.node.expr
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
-    # See Note [Can val be an int?]
-    assert isinstance(val, torch.SymInt), (
-        f"Expect val to be torch.SymInt but got val={val}"
-    )
-    return val.node.expr
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
 
 
 @register_lowering(aten.sym_numel)
@@ -7460,26 +7449,90 @@ def _sink_tokens(tokens):
     return None
 
 
+@register_lowering(torch.ops.prims._make_token.default)
+def _make_token():
+    return None
+
+
 @register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
 def with_effects(token, op, *args, **kwargs):
-    result = ir.EffectfulKernel.create(op, *args, **kwargs)
+    """
+    We lower the operator directly, and then we add StarDep dependencies to all
+    the newly created nodes in the graph.
+    """
+    from torch._higher_order_ops.effects import _get_effect, _get_schema
 
-    from torch._higher_order_ops.effects import get_effect_key
+    # Get effect type
+    effect_type = _get_effect(op)
+    if effect_type is None and op is torch.ops.higher_order.invoke_subgraph:
+        from torch._guards import InvokeSubgraphCache, TracingContext
 
-    effect_type = get_effect_key(op, args, kwargs)
-    assert effect_type is not None
-    effectful_kernel = V.graph.effectful_ops[effect_type]
+        tracing_ctx = TracingContext.try_get()
+        if tracing_ctx:
+            invoke_subgraph_cache = tracing_ctx.hop_dispatch_set_cache.get_cache(
+                torch.ops.higher_order.invoke_subgraph
+            )
+            if invoke_subgraph_cache:
+                assert isinstance(invoke_subgraph_cache, InvokeSubgraphCache)
+                # args[1] is identifier
+                effects = invoke_subgraph_cache.get_effects(args[1])
+                if effects:
+                    assert len(effects) == 1, "Multiple effects NYI"
+                    effect_type = next(iter(effects))
 
-    if result is None:
-        return (effectful_kernel,)
+    # Track operations before
+    operation_len = len(V.graph.operations)
 
-    result = pytree.tree_map_only(ir.MultiOutput, TensorBox.create, result)
-    # See [NOTE: with_effects return type]
-    # Only return `result` if it is a tuple, not list.
-    if not isinstance(result, tuple):
-        return (effectful_kernel, result)
+    # Lower the op
+    if op in lowerings:
+        result = lowerings[op](*args, **kwargs)
+        # Realize so that we can get the ops to show up in V.graph.operations
+        pytree.tree_map_only(TensorBox, lambda a: a.realize(), result)
     else:
-        return (effectful_kernel, *result)
+
+        def wrap_tensors(x):
+            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
+
+        result = pytree.tree_map(
+            wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
+        )
+
+    # Get all the operations created during the lowering above, and add StarDeps
+    # to the previous node with the same effect
+    assert len(V.graph.operations[operation_len:]) > 0, (
+        f"No operation nodes were generated when lowering effectful operator {op}."
+    )
+    if effect_type:
+        prev_effect_buffer = V.graph.effectful_ops.get(effect_type)
+        for new_op in V.graph.operations[operation_len:]:
+            # Patch has_side_effects to return True
+            new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
+            if prev_effect_buffer:
+                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
+        # Update the effectful ops chain to point to the latest operation
+        V.graph.effectful_ops[effect_type] = (  # pyrefly: ignore[missing-attribute]
+            new_op  # pyrefly: ignore[unsupported-operation]
+        )
+
+    try:
+        args, kwargs = pytree.tree_map_only(
+            ir.TorchBindObject, lambda a: a.get_value(), (args, kwargs)
+        )
+        schema = _get_schema(op, args, kwargs)
+    except RuntimeError as e:
+        error_msg = str(e)
+        log.warning(
+            "Failed to get schema for %s: %s. Assuming list output", op, error_msg
+        )
+        return (token, *result)
+
+    if len(schema.returns) == 0:
+        return (token, result)
+    elif len(schema.returns) == 1:
+        return (token, result)
+    else:
+        return (token, *result)
 
 
 from .comm_lowering import register_comm_lowerings

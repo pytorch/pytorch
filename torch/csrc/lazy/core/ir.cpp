@@ -143,7 +143,7 @@ const Output& Node::nullable_operand(size_t i) const {
 
 std::string Node::ToString() const {
   std::stringstream ss;
-  ss << shapes() << " " << op();
+  ss << shapes() << ' ' << op();
   if (num_outputs() > 1) {
     ss << ", num_outputs=" << num_outputs();
   }
