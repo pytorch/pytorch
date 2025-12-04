@@ -587,7 +587,12 @@ def produce_guards_and_solve_constraints(
     )
 
     if constraint_violation_error:
-        constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
+        if constraint_violation_error.args:
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
+        else:
+            constraint_violation_error.args = (msg,)
     elif forced_specializations:
         constraint_violation_error = ConstraintViolationError(msg)
     if constraint_violation_error:

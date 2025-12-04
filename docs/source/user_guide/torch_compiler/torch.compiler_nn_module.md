@@ -1,3 +1,5 @@
+(compiler_nn_module)=
+
 # PyTorch 2.0 NNModule Support
 
 **Author**: [Will Constable](https://github.com/wconstab)
