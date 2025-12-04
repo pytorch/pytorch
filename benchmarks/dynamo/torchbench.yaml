@@ -110,6 +110,8 @@ dtype:
   force_fp16_for_bf16_models:
     - vision_maskrcnn
 
+  amp_dtype_bfloat16:
+    - modded_nanogpt
 
 # models in canary_models that we should run anyway
 canary_models:
@@ -138,6 +140,7 @@ only_training:
   - hf_Reformer
   - pytorch_struct
   - yolov3
+  - modded_nanogpt
 
 
 trt_not_yet_working:
@@ -198,6 +201,7 @@ skip:
     cpu:
       # model is CUDA only
       - cm3leon_generate
+      - modded_nanogpt
       # timeout
       - nanogpt
       # timeout
