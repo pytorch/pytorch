@@ -409,7 +409,7 @@ def _collect_intermediate_outputs(tx, subtracer, graph_output_vts):
 
 
 def _check_all_tensorvariable(args):
-    if not all(a.is_tensor() for a in args):
+    if not all(type(a.realize()) is TensorVariable for a in args):
         unimplemented(
             gb_type="HOP: non torch.Tensor leaf",
             context=f"args types: {[type(a.realize()) for a in args]}",
@@ -1880,8 +1880,10 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 return false_fn.call_function(tx, operands.unpack_var_sequence(tx), {})
 
         # predicate
-        if not (
-            pred.is_python_constant() or pred.is_tensor() or pred.is_symnode_like()
+        if type(pred.realize()) not in (
+            ConstantVariable,
+            TensorVariable,
+            SymNodeVariable,
         ):
             unimplemented(
                 gb_type="torch.cond: improper predicate",
