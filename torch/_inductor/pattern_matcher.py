@@ -1553,6 +1553,15 @@ def register_replacement(
             assert node is not None
             specific_pattern_match = specific_pattern.match(node)
 
+            if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
+                log.warning(
+                    "Specific pattern match: %s%s %s %s",
+                    node,
+                    node.args,
+                    specific_pattern_match,
+                    specific_pattern,
+                )
+
             if is_match(specific_pattern_match) and extra_check(specific_pattern_match):
                 # trace the pattern using the shapes from the user program
                 match.replacement_graph = trace_fn(replace_fn, args)
