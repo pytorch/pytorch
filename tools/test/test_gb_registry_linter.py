@@ -280,26 +280,30 @@ def test(self):
         # Parse the replacement to get the actual GB ID that was generated
         self.assertEqual(len(messages), 1)
         replacement_registry = json.loads(messages[0].replacement)
-        new_gb_id = next(k for k in replacement_registry if k != "GB0000")
 
-        expected_registry = {
-            "GB0000": [
-                {
-                    "Gb_type": "original_testing",
-                    "Context": "original_context",
-                    "Explanation": "original_explanation",
-                    "Hints": ["original_hint"],
-                }
-            ],
-            new_gb_id: [
-                {
-                    "Gb_type": "completely_new_testing",
-                    "Context": "completely_new_context",
-                    "Explanation": "completely_new_explanation",
-                    "Hints": ["completely_new_hint"],
-                }
-            ],
-        }
+        # Build expected_registry in the same order as replacement_registry
+        # since random insertion means order is not deterministic
+        expected_registry = {}
+        for gb_id in replacement_registry:
+            if gb_id == "GB0000":
+                expected_registry[gb_id] = [
+                    {
+                        "Gb_type": "original_testing",
+                        "Context": "original_context",
+                        "Explanation": "original_explanation",
+                        "Hints": ["original_hint"],
+                    }
+                ]
+            else:
+                expected_registry[gb_id] = [
+                    {
+                        "Gb_type": "completely_new_testing",
+                        "Context": "completely_new_context",
+                        "Explanation": "completely_new_explanation",
+                        "Hints": ["completely_new_hint"],
+                    }
+                ]
+
         expected_replacement = (
             json.dumps(expected_registry, indent=2, ensure_ascii=False) + "\n"
         )

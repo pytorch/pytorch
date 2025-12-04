@@ -203,7 +203,8 @@ def create_registry(dynamo_dir: str, registry_path: str) -> None:
     for info in calls:
         gb_types[info["gb_type"]] = info
 
-    GB_ID_INDEX = 0000
+    # Use sequential IDs for initial registry creation
+    GB_ID_INDEX = 0
     for i, (gb_type, info) in enumerate(sorted(gb_types.items()), GB_ID_INDEX):
         gb_id = f"GB{i:04d}"
         hints = info["hints"]
