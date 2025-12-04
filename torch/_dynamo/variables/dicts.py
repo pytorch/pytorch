@@ -70,7 +70,11 @@ def raise_unhashable(
     raise_observed_exception(
         TypeError,
         tx,
-        msg=f"Unhashable type: {arg.python_type()!r} and variable tracker = {type(arg.realize())}",
+        args=[
+            ConstantVariable.create(
+                f"Unhashable type: {arg.python_type()!r} and variable tracker = {type(arg.realize())}"
+            )
+        ],
     )
 
 
