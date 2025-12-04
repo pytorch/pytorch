@@ -2994,6 +2994,8 @@ _sink_tokens = _make_prim(
     doc="Sink all of the tokens which were previously used for keeping track of side effects.",
 )
 
+torch.fx.node.has_side_effect(_sink_tokens)
+
 
 register_rng_prims()
 register_debug_prims()
