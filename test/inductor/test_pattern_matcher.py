@@ -2092,10 +2092,8 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
         x = torch.randn(4, 4, device=GPU_TYPE)
 
-        target_node = "add"
-        # Run with debug enabled
         with unittest.mock.patch.dict(
-            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": target_node}
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "add"}
         ):
             compiled_fn = torch.compile(
                 fn, options={"post_grad_custom_post_pass": custom_pass}
