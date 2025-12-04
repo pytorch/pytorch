@@ -94,24 +94,16 @@ class PallasTestsMixin:
 
     def test_matmul(self):
         """Test matrix multiplication."""
-        import jax
-        import jax.numpy as jnp
 
         def fn(a, b):
             return torch.matmul(a, b)
 
         compiled = self._compile(fn)
 
-        key = jax.random.PRNGKey(0)
-        key, k1, k2 = jax.random.split(key, 3)
-        a_jax = jax.random.normal(k1, (128, 128), dtype=jnp.float32)
-        b_jax = jax.random.normal(k2, (128, 128), dtype=jnp.float32)
-
-        a = torch.from_dlpack(a_jax)
-        b = torch.from_dlpack(b_jax)
-
-        expected = fn(a, b)
+        a = torch.randn(1024, device=self.DEVICE)
+        b = torch.randn(1024, device=self.DEVICE)
         result = compiled(a, b)
+        expected = fn(a, b)
         self.assertEqual(result, expected, rtol=1e-1, atol=1e-1)
 
     def test_sin(self):
