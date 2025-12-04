@@ -3346,7 +3346,7 @@ def _persistent_reduction_configs(
                 x_block = min(1024 // rnumel, 8)
                 # TODO(Intel): CUDA uses num_warps = 1 to disable shared memory.
                 # XPU will get register spill if using the same condition,
-                # so we revert #168335 and set num_warps = None for now.
+                # so we apply different configurations from #168335 and set num_warps = None for now.
                 # A better cost model can help disable shared memory in Triton or inductor,
                 # i.e., #5477 in intel-xpu-backend-for-triton
                 if torch.xpu.is_available():
