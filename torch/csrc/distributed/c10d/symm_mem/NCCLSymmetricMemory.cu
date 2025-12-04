@@ -9,8 +9,8 @@
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
 #include <nccl_device.h>
 #include <vector_types.h>
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
@@ -140,10 +140,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   size_t get_buffer_size() override {
     return buffer_size_;
   }
-
-  size_t get_signal_pad_size() override {
-    return signal_pad_size;
-  };
 
   bool has_multicast_support() override {
     // TODO
@@ -300,7 +296,9 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
           comm));
 
     void* signal_pad_ptr;
-    C10D_NCCL_CHECK(ncclMemAlloc(&signal_pad_ptr, signal_pad_size), "ncclMemAlloc failed");
+    const size_t signal_pad_size = get_signal_pad_size();
+    C10D_NCCL_CHECK(
+        ncclMemAlloc(&signal_pad_ptr, signal_pad_size), "ncclMemAlloc failed");
     C10D_NCCL_CHECK(
     ncclCommWindowRegister(comm, signal_pad_ptr, signal_pad_size, (ncclWindow_t*)&signal_handle, NCCL_WIN_COLL_SYMMETRIC),
     c10::str(
