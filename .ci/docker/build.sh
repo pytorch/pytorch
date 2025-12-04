@@ -181,6 +181,11 @@ case "$tag" in
     VISION=no
     TRITON=no
     ;;
+  pytorch-linux-jammy-py3.14-clang12)
+    # NS: Workaround for https://github.com/pytorch/pytorch/issues/169586
+    # Also clang part is a lie, as clang version has not been specified here
+    ANACONDA_PYTHON_VERSION=3.14.0
+    ;;
   pytorch-linux-jammy-rocm-n-py3 | pytorch-linux-jammy-rocm-n-py3-benchmarks | pytorch-linux-noble-rocm-n-py3)
     if [[ $tag =~ "jammy" ]]; then
       ANACONDA_PYTHON_VERSION=3.10
