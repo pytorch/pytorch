@@ -3349,7 +3349,7 @@ def _persistent_reduction_configs(
                 # so we apply different configurations from #168335 and set num_warps = None for now.
                 # A better cost model can help disable shared memory in Triton or inductor,
                 # i.e., #5477 in intel-xpu-backend-for-triton
-                if torch.xpu.is_available():
+                if not torch.cuda.is_available():
                     loads_and_stores = inductor_meta.get(
                         "num_load", 0
                     ) + inductor_meta.get("num_store", 0)
