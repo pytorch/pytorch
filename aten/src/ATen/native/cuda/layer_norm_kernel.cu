@@ -1,9 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/layer_norm.h>
 
+#include <tuple>
 #include <type_traits>
-
-#include <thrust/tuple.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
@@ -86,9 +85,7 @@ __global__ void RowwiseMomentsCUDAKernel(
       val_shared_ptr);
 
   if (threadIdx.x == 0) {
-    T_ACC m1;
-    T_ACC m2;
-    thrust::tie(m2, m1) = welford_op.project(val);
+    auto [m2, m1] = welford_op.project(val);
     if constexpr (!rms_norm){
       mean[i] = m1;
       rstd[i] = c10::cuda::compat::rsqrt(m2 + eps);
@@ -1052,7 +1049,7 @@ void launch_vectorized_layer_norm_kernel(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
 #ifdef USE_ROCM
-    // the blocks.x contains the max grid x dimention without invalid configuration error
+    // the blocks.x contains the max grid x dimension without invalid configuration error
     // Fix invalid configuration https://github.com/pytorch/pytorch/issues/136291
     // Ensure all elements are processed. Prepare for next round
     int64_t remaining = M - blocks.x;
