@@ -7,7 +7,6 @@ import sympy  # noqa: TC002
 
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._pallas import has_tpu_pallas
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -427,7 +426,6 @@ class PallasKernel(SIMDKernel):
         # Determine device type once at initialization
         device = V.graph.get_current_device_or_throw()
         self.is_gpu = device.type == "cuda"
-
         self.use_masked_ops: bool | None = None
         self.tensor_masks = {}  # Map tensor name to mask variable name
 
@@ -1067,7 +1065,9 @@ class PallasKernel(SIMDKernel):
             if alias_params:
                 code.writeline("# Convert Torch -> JAX for donated outputs")
                 for alias_name in alias_params:
-                    code.writeline(f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})")
+                    code.writeline(
+                        f"{alias_name}_jax = jax.dlpack.from_dlpack({alias_name})"
+                    )
             code.writeline("# Convert Torch -> JAX for in-place tensors")
             for ptr in pointer_tail:
                 if ptr.startswith("in_out_ptr"):
@@ -1075,7 +1075,9 @@ class PallasKernel(SIMDKernel):
             code.writeline("# Convert Torch -> JAX for inputs")
             for ptr in pointer_tail:
                 if ptr.startswith("in_ptr"):
-                    code.writeline(f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous())")
+                    code.writeline(
+                        f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.contiguous())"
+                    )
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
             code.writeline(
@@ -1114,7 +1116,9 @@ class PallasKernel(SIMDKernel):
                 )
                 for idx in copy_output_indices:
                     name = output_params[idx]
-                    code.writeline(f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))")
+                    code.writeline(
+                        f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
+                    )
 
         return code.getvalue()
 

@@ -290,9 +290,7 @@ class InductorChoices:
                 if hasattr(ktc, "_choice"):
                     del ktc._choice
         # Third pass: Convert to ChoiceCaller objects
-        choices = [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
-        print(f"CHOICES in get_template_configs: {choices}")
-        return choices
+        return [ktc.choice for ktc in adjusted_choices if ktc.choice is not None]
 
     def triton_kernel_kwargs(
         self,

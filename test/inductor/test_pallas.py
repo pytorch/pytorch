@@ -5,6 +5,8 @@ import sys
 import unittest
 from unittest import mock
 
+from torch_tpu import api
+
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import make_test_cls_with_patches
@@ -15,7 +17,6 @@ from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_PALLAS
 from torch.utils._pallas import has_cuda_pallas, has_jax_tpu_backend
 from torch.utils._triton import has_triton
-from torch_tpu import api
 
 
 if IS_WINDOWS and IS_CI:

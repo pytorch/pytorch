@@ -1212,7 +1212,6 @@ file_lock_timeout: int = int(os.environ.get("TORCHINDUCTOR_FILE_LOCK_TIMEOUT", "
 enable_autograd_for_aot: bool = False
 
 
-
 def get_worker_log_path() -> Optional[str]:
     log_loc = None
     if is_fbcode():
@@ -2039,7 +2038,7 @@ cpu_backend: Literal["cpp", "triton", "halide", "pallas"] = "cpp"
 cuda_backend: Literal["triton", "halide", "pallas"] = "triton"
 
 # Backend to use for TPU codegen.
-cpu_backend: Literal["pallas"] = "pallas"
+tpu_backend: Literal["pallas"] = "pallas"
 
 # Backend to use for XPU codegen either "triton"
 xpu_backend: Literal["triton"] = "triton"
