@@ -213,12 +213,10 @@ void launch(
 }
 } // namespace sbtopk
 
+#if defined(USE_ROCM) && HAS_WARP_MERGE_SORT()
 namespace warptopk {
 
 constexpr int MAX_WARP_TOPK_SLICE = 512;
-constexpr int WARPS_PER_BLOCK = 4;
-
-#if HAS_WARP_MERGE_SORT()
 
 // Comparator for sorting with TopK semantics
 // Note: For WarpMergeSort (comparison-based sorting), we use simple comparison operators
@@ -320,8 +318,6 @@ __global__ void warpMergeSortTopK(
   StoreIndices(warp_storage.store_indices).Store(indices_iter, local_indices, k);
 }
 
-#endif // HAS_WARP_MERGE_SORT()
-
 template <typename scalar_t, typename IndexType, int Dim>
 void launch(
     at::cuda::detail::TensorInfo<const scalar_t, IndexType> input,
@@ -334,9 +330,6 @@ void launch(
     IndexType topKWithinSliceStride,
     at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
     IndexType indicesWithinSliceStride) {
-#if !HAS_WARP_MERGE_SORT()
-  TORCH_INTERNAL_ASSERT(false, "warp topk path requires WarpMergeSort (ROCm 7.0+ or CUDA 11.6+)");
-#else
   TORCH_INTERNAL_ASSERT(inputSliceSize <= MAX_WARP_TOPK_SLICE,
                         "warp topk path requires slice size <= ", MAX_WARP_TOPK_SLICE);
 
@@ -359,6 +352,9 @@ void launch(
           topK, topKWithinSliceStride, indices, indicesWithinSliceStride); \
     C10_CUDA_KERNEL_LAUNCH_CHECK()
 
+  // We have specialized launches for different sizes, as sort_size affects
+  // shared memory, registers per thread and occupancy. We can use 'LAUNCH_KERNEL(512, false);'
+  // however, that results in lower performance. 
   if (largest) {
     if (inputSliceSize <= 64) {
       LAUNCH_KERNEL(64, true);
@@ -384,10 +380,10 @@ void launch(
   }
 
   #undef LAUNCH_KERNEL
-#endif
 }
 
 } // namespace warptopk
+#endif // defined(USE_ROCM) && HAS_WARP_MERGE_SORT()
 
 namespace mbtopk { // multi_block_topk
 
@@ -1225,7 +1221,7 @@ bool should_use_multiblock(int64_t num_slices, int64_t slice_size) {
 }
 
 bool should_use_warp_topk(int64_t slice_size, int64_t k) {
-#if !HAS_WARP_MERGE_SORT()
+#if !defined(USE_ROCM) || !HAS_WARP_MERGE_SORT()
   return false;
 #else
   if (slice_size <= 0 || k <= 0 || slice_size > warptopk::MAX_WARP_TOPK_SLICE) {
