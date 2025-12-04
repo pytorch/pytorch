@@ -30,8 +30,6 @@ class TestStream(TestCase):
             self.assertEqual(torch.accelerator.current_stream(), stream)
 
     def test_stream_context_exception_restore(self):
-        prev_stream = torch.Stream(device="openreg:0")
-        torch.accelerator.set_stream(prev_stream)
         prev = torch.accelerator.current_stream()
         inner_stream = torch.Stream(device="openreg:1")
         try:
