@@ -316,3 +316,23 @@ def my_cuda_stream_synchronize(stream: int, device_index: int):
     return torch.ops.libtorch_agnostic_2_10.my_cuda_stream_synchronize(
         stream, device_index
     )
+
+
+def my_from_blob(data_ptr, sizes, strides, device, dtype) -> Tensor:
+    """
+    Creates a Tensor from existing memory using torch::stable::from_blob.
+
+    Args:
+        data_ptr: int - pointer to the data buffer
+        sizes: tuple[int] - size of the tensor
+        strides: tuple[int] - strides of the tensor
+        device: Device - device on which the tensor resides
+        dtype: ScalarType - data type of the tensor
+        storage_offset: int - offset in the storage
+        layout: Layout - layout of the tensor
+
+    Returns: Tensor - tensor wrapping the existing memory
+    """
+    return torch.ops.libtorch_agnostic_2_10.my_from_blob.default(
+        data_ptr, sizes, strides, device, dtype
+    )
