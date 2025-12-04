@@ -218,6 +218,7 @@ def check_files(
 
 
 def main() -> None:
+    assert False
     parser = argparse.ArgumentParser(
         description="pyrefly wrapper linter.",
         fromfile_prefix_chars="@",
