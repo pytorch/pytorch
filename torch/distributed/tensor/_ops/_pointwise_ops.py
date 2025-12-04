@@ -565,7 +565,7 @@ def common_pointwise_strategy(
     followed_strategy: OpStrategy,
     followed_strategy_index: int,
     linearity: int = -1,
-    scalar_tensor_idx: Optional[int] = None,
+    scalar_tensor_idx: int | None = None,
 ) -> OpStrategy:
     """
     Common strategy for pointwise operations.
@@ -787,11 +787,11 @@ def list_pointwise_strategy(
 
     def args_tuple_strategies(
         args_schema: tuple[object, ...],
-    ) -> list[Optional[TupleStrategy]]:
+    ) -> list[TupleStrategy | None]:
         first_arg = args_schema[0]
         assert isinstance(first_arg, TupleStrategy)
         strategy_len = len(first_arg.children)
-        tuple_strategies: list[Optional[TupleStrategy]] = []
+        tuple_strategies: list[TupleStrategy | None] = []
         for arg_idx, arg in enumerate(args_schema):
             if isinstance(arg, TupleStrategy):
                 # every tuple strategy should have the same length
@@ -817,7 +817,7 @@ def list_pointwise_strategy(
 
     for child_idx, child_strtgy in enumerate(follow_strategy.children):
         assert isinstance(child_strtgy, OpStrategy)
-        args_schema: list[Optional[OpStrategy]] = [
+        args_schema: list[OpStrategy | None] = [
             cast(OpStrategy, arg_strategy.children[child_idx]) if arg_strategy else None
             for arg_strategy in args_strategies
         ]

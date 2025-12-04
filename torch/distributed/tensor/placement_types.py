@@ -2,7 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass, field
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch._C
@@ -144,7 +144,7 @@ class Shard(torch._C._distributed.Shard):
         curr_local_size: int,
         num_chunks: int,
         rank: int,
-    ) -> tuple[int, Optional[int]]:
+    ) -> tuple[int, int | None]:
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
@@ -166,7 +166,7 @@ class Shard(torch._C._distributed.Shard):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         """
         shard and scatter a tensor on a mesh dimension (use coordinate
@@ -218,7 +218,7 @@ class Shard(torch._C._distributed.Shard):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         shard_placement = cls(dim)
         return shard_placement._shard_tensor(tensor, mesh, mesh_dim, src_data_rank)
@@ -581,7 +581,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
         split_factor: int = 1,
     ) -> torch.Tensor:
         strided_shard_placement = cls(dim=dim, split_factor=split_factor)
@@ -699,12 +699,49 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
     def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
         return len(sharded_indices[rank])
 
-    def _local_shard_size_and_offset(
+    # delete pyre-ignore once separating _StridedShard from Shard
+    def _local_shard_size_and_offset(  # pyre-ignore[bad-override]
         self,
         curr_local_size: int,
         num_chunks: int,
         rank: int,
-    ) -> tuple[int, Optional[int]]:
+        return_first_offset: bool = True,
+    ) -> tuple[int, list[int]]:
+        return _StridedShard.local_shard_size_and_offset(
+            self, curr_local_size, num_chunks, rank, return_first_offset
+        )
+
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def local_shard_size_and_offset(  # pyre-ignore[bad-override]
+        self,
+        curr_local_size: int,
+        num_chunks: int,
+        rank: int,
+        return_first_offset: bool = True,
+    ) -> tuple[int, list[int] | int]:
+        """
+        Compute the local shard size and offset(s) for a _StridedShard placement.
+
+        Unlike the regular Shard placement which produces contiguous offsets, _StridedShard
+        produces non-contiguous (strided) offsets due to the right-to-left sharding semantics.
+        This method computes the actual indices that belong to the local shard.
+
+        Args:
+            self (_StridedShard): The _StridedShard placement instance.
+            curr_local_size (int): The current size of the tensor dimension to be sharded.
+            num_chunks (int): Number of chunks to split the dimension into (typically the mesh dimension size).
+            rank (int): The rank index to compute the shard for.
+            return_first_offset (bool): If True, return only the first offset as an int. If False,
+                return all offsets as a list. Defaults to True.
+
+        Returns:
+            tuple: A tuple containing:
+                - local_shard_size (int): The number of elements in the local shard for this rank.
+                - offset (int | list[int]): If return_first_offset is True, returns the first offset
+                  as an int. If False or if the shard size is 0, returns a list of all offsets
+                  (which may be empty for empty shards).
+        """
         # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
         # so that we can reuse self._split_tensor which splits on self.dim
         shape = [1] * self.dim + [curr_local_size]
@@ -722,9 +759,15 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
         local_shard_size = _StridedShard._local_shard_size(sharded_indices, rank)
+        if local_shard_size > 0:
+            offsets = sharded_indices[rank].tolist()
+        else:
+            offsets = []
 
-        # offsets from _StridedShard is never used
-        return local_shard_size, None
+        if return_first_offset and len(offsets) > 0:
+            offsets = offsets[0]
+
+        return local_shard_size, offsets
 
 
 class Replicate(torch._C._distributed.Replicate):
@@ -757,7 +800,7 @@ class Replicate(torch._C._distributed.Replicate):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         """
         Replicate (broadcast) a torch.Tensor on a mesh dimension (use
@@ -780,7 +823,7 @@ class Replicate(torch._C._distributed.Replicate):
         tensor: torch.Tensor,
         mesh: DeviceMesh,
         mesh_dim: int,
-        src_data_rank: Optional[int] = 0,
+        src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         return Replicate._make_replicate_tensor(tensor, mesh, mesh_dim, src_data_rank)
 
@@ -878,7 +921,7 @@ class MaskPartial(Partial):
     mask_buffer: MaskBuffer = field(default_factory=MaskBuffer)
 
     # required fields for computing the local offset and deriving the mask
-    offset_shape: Optional[torch.Size] = None
+    offset_shape: torch.Size | None = None
     offset_dim: int = 0
 
     def __init__(
