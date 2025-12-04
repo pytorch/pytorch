@@ -5650,31 +5650,43 @@ class Scheduler:
         return signatures[::-1]
 
     def clean_removed_buffer_from_partition_signatures(
-        self, signature: GraphPartitionSignature
+        self,
+        signature: GraphPartitionSignature,
+        removed_buffers_before_codegen: OrderedSet[str],
     ) -> GraphPartitionSignature:
         """
-        Updates the partition signature by removing buffers specified in
-        V.graph.removed_buffers. See [Note: Removed Graph Partition Arguments]
+        Updates the partition signature by removing buffers that were fused into
+        kernels during partition codegen. See [Note: Removed Graph Partition Arguments]
+        
+        We only remove buffers that were added to V.graph.removed_buffers DURING
+        this partition's codegen, not buffers that were marked as globally dead
+        before partition codegen. This is because a globally-dead buffer might still
+        be needed as an input to this specific partition.
         """
+        # Only remove buffers that were added during THIS partition's codegen
+        buffers_removed_during_codegen = (
+            V.graph.removed_buffers - removed_buffers_before_codegen
+        )
+        
         input_nodes = {
             name: buffer
             for name, buffer in signature.input_nodes.items()
-            if name not in V.graph.removed_buffers
+            if name not in buffers_removed_during_codegen
         }
         input_deallocation = {
             name: val
             for name, val in signature.input_deallocation.items()
-            if name not in V.graph.removed_buffers
+            if name not in buffers_removed_during_codegen
         }
         output_nodes = [
             node
             for node in signature.output_nodes
-            if node.maybe_get_name() not in V.graph.removed_buffers
+            if node.maybe_get_name() not in buffers_removed_during_codegen
         ]
         constant_names = [
             name
             for name in signature.constant_names
-            if name not in V.graph.removed_buffers
+            if name not in buffers_removed_during_codegen
         ]
         return GraphPartitionSignature(
             signature.symbol_inputs,
@@ -5871,6 +5883,12 @@ class Scheduler:
                 parent_wrapper_code=parent_wrapper_code,
                 partition_signatures=signature,
             )
+            
+            # Snapshot removed_buffers before partition codegen to distinguish
+            # buffers removed during this partition's codegen from those marked
+            # as dead globally. See Note: [Removed Graph Partition Arguments]
+            removed_buffers_before_codegen = V.graph.removed_buffers.copy()
+            
             self._codegen(partition)
 
             # Note: [Removed Graph Partition Arguments]
@@ -5882,7 +5900,9 @@ class Scheduler:
             # prefix (i.e., generating call function and return outputs) after we have
             # codegen the partition.
             assert isinstance(V.graph.wrapper_code, SubgraphPythonWrapperCodegen)
-            signature = self.clean_removed_buffer_from_partition_signatures(signature)
+            signature = self.clean_removed_buffer_from_partition_signatures(
+                signature, removed_buffers_before_codegen
+            )
             V.graph.wrapper_code.partition_signatures = signature
             V.graph.wrapper_code.write_prefix()
 
