@@ -906,7 +906,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
     def __init__(self) -> None:
         super().__init__()
-
         self.sm_120_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 2, 4),
             (torch.float32, 128): FlexConfig(128, 32, 2, 4),
@@ -981,7 +980,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
-                default_config = FlexConfig(128, 64, 3, 4)
+                default_config = FlexConfig(64, 64, 3, 4)
             if capability >= (12, 0):
                 default_config = self.sm_120_default_flex_config.get(
                     (dtype, head_dim), default_config
@@ -1014,7 +1013,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
     ) -> list[FlexBwDConfig]:
         capability = torch.cuda.get_device_capability()
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
-
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
@@ -1023,6 +1021,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         major, minor = capability
         if dtype == torch.float32:
             capability_class = "float32"
+        elif major == 12:
+            capability_class = "sm12x"
         elif major >= 10:
             capability_class = "sm10x"
         elif capability == (9, 0):
@@ -1047,6 +1047,13 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 FlexBwDConfig(64, 64, 64, 64, 1, 4)
             ),
             "sm8x": lambda h: (
+                FlexBwDConfig(32, 128, 128, 32, 3, 4)
+                if h < 64
+                else FlexBwDConfig(
+                    64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
+                )
+            ),
+            "sm12x": lambda h: (
                 FlexBwDConfig(32, 128, 128, 32, 3, 4)
                 if h < 64
                 else FlexBwDConfig(
@@ -1271,7 +1278,16 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         configs: list[BaseConfig],
         dtype_size: int,
     ) -> list[BaseConfig]:
-        return configs
+        # these cause AMD compile to crash
+        pruned_configs = [
+            c
+            for c in configs
+            if not (
+                getattr(c, "matrix_instr_nonkdim", 0) == 2
+                and getattr(c, "kpack", 0) == 2
+            )
+        ]
+        return pruned_configs
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
@@ -1322,6 +1338,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
             # Check if gemm specific arg exists - add to key if does
             group_m = getattr(conf, "group_m", None)
+            # AMD GPU crashes if group_m = 0
+            if group_m is not None and group_m <= 0:
+                group_m = 8
             if group_m is not None:
                 key += (group_m,)
 
@@ -1777,6 +1796,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
             "tma_store": config.triton.enable_template_tma_store,
+            "transpose_discontiguous_tensor_descriptors_override": True,
         }
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
