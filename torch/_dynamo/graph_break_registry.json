@@ -3667,5 +3667,15 @@
         "Use custom operators instead of direct attribute/method access."
       ]
     }
+  ],
+  "GB0363": [
+    {
+      "Gb_type": "Attempted to call repr() method implemented in C/C++",
+      "Context": "",
+      "Explanation": "{type(arg.value)} has a C/C++ based repr method. This is not supported.",
+      "Hints": [
+        "Write the repr method in Python"
+      ]
+    }
   ]
 }
