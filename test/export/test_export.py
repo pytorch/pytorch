@@ -856,12 +856,13 @@ class TestExport(TestCase):
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
         class MixedFakeModeModel(torch.nn.Module):
-            def __init__(self, dim=64):
+            def __init__(self, dim=64, use_inductor=True):
                 super().__init__()
                 self.dim = dim
                 self.q_proj = torch.nn.Linear(64, 64)
                 self.k_proj = torch.nn.Linear(64, 64)
                 self.v_proj = torch.nn.Linear(64, 64)
+                self.use_inductor = use_inductor
 
             def forward(self, x):
                 batch_size, seq_len, _ = x.shape
@@ -897,13 +898,19 @@ class TestExport(TestCase):
                 k = self.k_proj(processed).view(batch_size, 1, seq_len, self.dim)
                 v = self.v_proj(processed).view(batch_size, 1, seq_len, self.dim)
 
-                out = flex_attention(q, k, v, block_mask=block_mask)
+                # Use flex_attention with torch.compile - during export, compile should be skipped
+                backend = "inductor" if self.use_inductor else "eager"
+                out = torch.compile(flex_attention, backend=backend)(
+                    q, k, v, block_mask=block_mask
+                )
 
                 return out
 
-        model = MixedFakeModeModel()
+        model = MixedFakeModeModel(use_inductor=False)
         x = torch.randn(2, 128, 64)
+        # Inductor doesn't work in eager mode flex attention
         eager_out = model(x)
+        model.use_inductor = True
         exported_mod = torch.export.export(model, (x,), strict=False).module()
         self.assertExpectedInline(
             str(exported_mod.code).strip(),
