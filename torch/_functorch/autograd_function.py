@@ -808,13 +808,3 @@ class DynamoAutogradFunctionTraceHelper:
             # Dynamo, where we just overwrite the variable trackers requires_grad.
 
         return inner
-
-    @staticmethod
-    def bwd_trace_helper(orig_bwd):
-        # TODO - This is not used today because it causes some expected inline
-        # tests to fail. But it will be cleaner to use this future.
-        def inner(*args, **kwargs):
-            with torch.no_grad():
-                return orig_bwd(*args, **kwargs)
-
-        return inner
