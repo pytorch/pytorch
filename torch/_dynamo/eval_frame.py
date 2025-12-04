@@ -885,6 +885,14 @@ class _TorchDynamoContext:
                         and tracing_context.fake_mode.in_kernel_invocation
                     ):
                         return fn(*args, **kwargs)
+                # Skip nested compile during export (but not HOP internal compile)
+                # Only skip if there's an active TracingContext (nested), not for top-level export
+                if torch.compiler.is_exporting():
+                    from torch._higher_order_ops.utils import _in_hop_compile
+
+                    if not _in_hop_compile():
+                        if torch._guards.TracingContext.try_get() is not None:
+                            return fn(*args, **kwargs)
                 # Skip nested compile - just inline the function
                 if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:

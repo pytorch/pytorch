@@ -898,7 +898,7 @@ class TestExport(TestCase):
                 k = self.k_proj(processed).view(batch_size, 1, seq_len, self.dim)
                 v = self.v_proj(processed).view(batch_size, 1, seq_len, self.dim)
 
-                # Use flex_attention with the problematic block_mask
+                # Use flex_attention with torch.compile - during export, compile should be skipped
                 backend = "inductor" if self.use_inductor else "eager"
                 out = torch.compile(flex_attention, backend=backend)(
                     q, k, v, block_mask=block_mask
@@ -946,7 +946,7 @@ def forward(self, x):
     remainder = torch.ops.aten.remainder.Scalar(_add_batch_dim_2, 128)
     torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = self.torch__dynamo__trace_wrapped_higher_order_op_ModIndex0
     function_const_func_spec0 = self.function_const_func_spec0
-    flat_apply = torch.ops.higher_order.flat_apply(function_const_func_spec0, torch__dynamo__trace_wrapped_higher_order_op_mod_index0, 'torch._dynamo._trace_wrapped_higher_order_op.ModIndex', detach, _add_batch_dim, remainder);  function_const_func_spec0 = torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = _add_batch_dim = remainder = None
+    flat_apply = torch.ops.higher_order.flat_apply(function_const_func_spec0, torch__dynamo__trace_wrapped_higher_order_op_mod_index0, 'torch._dynamo._trace_wrapped_higher_order_op.ModIndex', detach, _add_batch_dim, remainder);  function_const_func_spec0 = torch__dynamo__trace_wrapped_higher_order_op_mod_index0 = detach = _add_batch_dim = remainder = None
     le = torch.ops.aten.le.Tensor(_add_batch_dim_3, _add_batch_dim_2);  _add_batch_dim_3 = _add_batch_dim_2 = None
     gt = torch.ops.aten.gt.Scalar(flat_apply, 0);  flat_apply = None
     and_1 = torch.ops.aten.__and__.Tensor(le, gt);  le = gt = None
@@ -1057,7 +1057,7 @@ def forward(self, x):
     view_3 = torch.ops.aten.view.default(linear_3, [2, 1, 128, 64]);  linear_3 = None
     sdpa_score0 = self.sdpa_score0
     sdpa_mask0 = self.sdpa_mask0
-    flex_attention = torch.ops.higher_order.flex_attention(view_1, view_2, view_3, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), (detach,));  view_1 = view_2 = view_3 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = detach = None
+    flex_attention = torch.ops.higher_order.flex_attention(view_1, view_2, view_3, sdpa_score0, (128, 128, to_3, to_4, to_6, to_7, to_9, to_10, to_12, to_13, 128, 128, sdpa_mask0), 0.125, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': False, 'OUTPUT_MAX': False}, (), ());  view_1 = view_2 = view_3 = sdpa_score0 = to_3 = to_4 = to_6 = to_7 = to_9 = to_10 = to_12 = to_13 = sdpa_mask0 = None
     getitem = flex_attention[0]
     getitem_1 = flex_attention[1];  getitem_1 = None
     getitem_2 = flex_attention[2];  flex_attention = getitem_2 = None
@@ -1078,7 +1078,8 @@ def forward(self, x):
 
         foo = Foo()
         with self.assertWarnsRegex(
-            UserWarning, "You are calling torch.compile inside torch.export region"
+            UserWarning,
+            "torch.compile is ignored when called inside torch.export region",
         ):
             ep = export(foo, (torch.randn(4, 4),), strict=False).module()
         self.assertExpectedInline(

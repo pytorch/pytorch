@@ -2719,28 +2719,15 @@ def compile(
         use_aoti = options.pop("use_aoti", False)
 
     if torch.compiler.is_exporting():
-        warnings.warn(
-            "You are calling torch.compile inside torch.export region. "
-            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)",
-            stacklevel=2,
-        )
-        from torch._higher_order_ops.utils import setup_compilation_env
+        from torch._higher_order_ops.utils import _in_hop_compile
 
-        # Create wrapper that always uses eager backend during export
-        def export_wrapped_fn(*args, **kwargs):
-            with setup_compilation_env() as backend:  # type: ignore[attr-defined]
-                # Force eager backend regardless of original backend
-                backend_wrapper = _TorchCompileWrapper(backend, mode, options, dynamic)
-                return torch._dynamo.optimize(
-                    backend=backend_wrapper,
-                    nopython=fullgraph,
-                    dynamic=dynamic,
-                    disable=disable,
-                    guard_filter_fn=guard_filter_fn,
-                    # pyrefly: ignore [bad-argument-type]
-                )(model)(*args, **kwargs)
-
-        return export_wrapped_fn
+        if not _in_hop_compile():
+            warnings.warn(
+                "torch.compile is ignored when called inside torch.export region",
+                stacklevel=2,
+            )
+            # torch.compile is a no-op when inside torch.export region
+            return model
 
     if backend == "inductor":
         if use_aoti:
