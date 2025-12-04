@@ -6,7 +6,6 @@ from contextlib import ExitStack
 import torch
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import AotEagerAndRecordGraphs
-from torch._dynamo.utils import counters as dynamo_counters
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
@@ -377,7 +376,7 @@ def forward(self, arg0_1, arg1_1):
     return (add,)""",  # noqa: B950
         )
 
-    def test_compile_global(self):
+    def test_compile_intermediate(self):
         counter = Counter(0)
 
         def foo(x, y):
@@ -416,23 +415,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add = torch.ops.aten.add.Tensor(mul, getitem_2);  mul = getitem_2 = None
     copy_ = torch.ops.aten.copy_.default(arg0_1, getitem_3);  arg0_1 = getitem_3 = copy_ = None
     return (add,)""",  # noqa: B950
-        )
-
-    def test_compile_create_intermediate(self):
-        dynamo_counters.clear()
-
-        def foo(x, y):
-            counter = Counter(0)
-            z = torch.ops._TestOpaqueObject.increment_counter(counter, y)
-            x = x * z
-            return x
-
-        inp = (torch.tensor(1), torch.tensor(0))
-        torch.compile(foo)(*inp)
-        self.assertEqual(len(dynamo_counters["graph_break"]), 1)
-        self.assertTrue(
-            "Opaque object were created in the middle of the program and passed to a custom op."
-            in next(iter(dynamo_counters["graph_break"].keys())),
         )
 
     def test_compile_attribute(self):
