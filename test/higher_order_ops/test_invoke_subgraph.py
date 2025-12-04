@@ -844,6 +844,61 @@ class <lambda>(torch.nn.Module):
 """,
             )
 
+    def test_dce_recursive(self):
+        def fn1(x):
+            a = torch.sin(x)
+            _ = torch.cos(x)  # unused intermediate
+            return a
+
+        @nested_compile_region
+        def fn1_checkpoint(x):
+            return torch.utils.checkpoint.checkpoint(fn1, x, use_reentrant=False)
+
+        def fn(x):
+            return fn1_checkpoint(x).detach()
+
+        x = torch.randn(8, requires_grad=True)
+
+        with torch._dynamo.config.patch(
+            skip_fwd_side_effects_in_bwd_under_checkpoint=True
+        ):
+            backend = EagerAndRecordGraphs()
+            torch.compile(fn, backend=backend, fullgraph=True)(x)
+
+            if not TEST_WITH_CROSSREF:
+                # Verify that DCE applied recursively:
+                # - invoke_subgraph subgraph should be DCE'd
+                # - nested tag_activation_checkpoint subgraph should also be DCE'd (requires recursion)
+                self.assertExpectedInline(
+                    normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                    """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[8]"):
+        l_x_ = L_x_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_);  subgraph_0 = l_x_ = None
+        getitem: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        detach: "f32[8]" = getitem.detach();  getitem = None
+        return (detach,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_x_: "f32[8]"):
+            wrap_body_0 = self.wrap_body_0
+            tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False);  wrap_body_0 = l_x_ = None
+            getitem_2: "f32[8]" = tag_activation_checkpoint[0];  tag_activation_checkpoint = None
+            return (getitem_2,)
+
+        class wrap_body_0(torch.nn.Module):
+            def forward(self, l_x_: "f32[8]"):
+                a: "f32[8]" = torch.sin(l_x_)
+
+                _: "f32[8]" = torch.cos(l_x_);  l_x_ = _ = None
+                return (a,)
+""",
+                )
+
     def test_nonlocal_update(self):
         counter = 2
 
@@ -2597,7 +2652,7 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    # High piority - grads are wrong
+    # High priority - grads are wrong
     @unittest.expectedFailure
     def test_grad_accuracy_check(self):
         class Foo:
