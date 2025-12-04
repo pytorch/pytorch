@@ -5116,17 +5116,17 @@ class GraphModule(torch.nn.Module):
     @supported_platform
     @skip_on_cpu
     def test_autocast(self, device):
-
         q = torch.randn(1, 4, 128, 16, dtype=torch.float32, device=device)
         k = torch.randn(1, 4, 128, 16, dtype=torch.float32, device=device)
         v = torch.randn(1, 4, 128, 16, dtype=torch.float32, device=device)
 
-        with torch.autocast(device_type='cuda', dtype=torch.float16):
+        with torch.autocast(device_type="cuda", dtype=torch.float16):
             eager_out = flex_attention(q, k, v)
             self.assertEqual(eager_out.dtype, torch.float16)
 
             compiled_out = torch.compile(flex_attention)(q, k, v)
             self.assertEqual(compiled_out.dtype, torch.float16)
+
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):
