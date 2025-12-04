@@ -77,6 +77,7 @@ export ROCM_PATH="${ROCM_HOME}"
 export ROCM_HOME="${ROCM_HOME}"
 export PATH="${ROCM_BIN}:\${PATH}"
 export CMAKE_PREFIX_PATH="${ROCM_CMAKE_PREFIX}:\${CMAKE_PREFIX_PATH:-}"
+export HIP_DEVICE_LIB_PATH="${ROCM_HOME}/lib/llvm/amdgcn/bitcode"
 ROCM_ENV
 
       echo "install_rocm.sh: TheRock nightly ROCm install complete"
