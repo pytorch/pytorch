@@ -132,17 +132,19 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
   const bool has_bias = (bias_opt.has_value() && bias_opt->defined());
 
   auto memory_format = self.suggest_memory_format();
-  const bool input_is_view = self.is_view() || !self.is_contiguous(memory_format) || self.storage_offset();
-  if (input_is_view) {
+  const bool input_needs_gather = mps::needsGather(self);
+  const bool input_needs_realization =
+      self.is_view() || (input_needs_gather && (!self.is_contiguous(memory_format) || self.storage_offset()));
+  if (input_needs_realization) {
     memory_format = at::MemoryFormat::Contiguous;
   }
-  const Tensor& input_for_graph = input_is_view ? self.contiguous(memory_format) : self;
+  const Tensor& input_for_graph = input_needs_realization ? self.contiguous(memory_format) : self;
   memory_format = input_for_graph.suggest_memory_format();
   auto graph_memory_format = memory_format;
   if (memory_format == at::MemoryFormat::ChannelsLast || memory_format == at::MemoryFormat::ChannelsLast3d) {
     graph_memory_format = at::MemoryFormat::Contiguous;
   }
-  const bool placeholder_needs_gather = input_is_view ? false : mps::needsGather(input_for_graph);
+  const bool placeholder_needs_gather = input_needs_realization ? false : mps::needsGather(input_for_graph);
 
   if (output.numel() == 0) {
     return std::tuple<Tensor&, Tensor&, Tensor&>(output, save_mean, save_var);
@@ -393,7 +395,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
       runningVarInplaceUpdatePlaceholder = Placeholder(cachedGraph->runningVarInplaceUpdate_, running_var_opt.value());
     }
 
-    bool outputNeedsCopy = input_is_view || (graph_memory_format == memory_format && mps::needsGather(output));
+    bool outputNeedsCopy =
+        input_needs_realization || (graph_memory_format == memory_format && mps::needsGather(output));
     Tensor output_for_graph =
         outputNeedsCopy ? at::empty(output.sizes(), output.options().memory_format(MemoryFormat::Contiguous)) : output;
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_,
@@ -623,8 +626,10 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
   auto memory_format = input.suggest_memory_format();
   const bool is_supported_format = memory_format == at::MemoryFormat::Contiguous ||
       memory_format == at::MemoryFormat::ChannelsLast || memory_format == at::MemoryFormat::ChannelsLast3d;
-  const bool input_needs_realization =
-      input.is_view() || !input.is_contiguous(memory_format) || input.storage_offset() != 0 || !is_supported_format;
+  const bool input_needs_gather = mps::needsGather(input);
+  const bool input_needs_realization = input.is_view() ||
+      (input_needs_gather && (!input.is_contiguous(memory_format) || input.storage_offset() != 0)) ||
+      !is_supported_format;
   if (input_needs_realization) {
     memory_format = at::MemoryFormat::Contiguous;
   }
@@ -635,8 +640,9 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
     graph_memory_format = at::MemoryFormat::Contiguous;
   }
 
-  const bool grad_out_needs_realization =
-      grad_out.is_view() || !grad_out.is_contiguous(graph_memory_format) || grad_out.storage_offset() != 0;
+  const bool grad_out_needs_gather = mps::needsGather(grad_out);
+  const bool grad_out_needs_realization = grad_out.is_view() ||
+      (grad_out_needs_gather && (!grad_out.is_contiguous(graph_memory_format) || grad_out.storage_offset() != 0));
   const Tensor grad_out_for_graph = grad_out_needs_realization ? grad_out.contiguous(graph_memory_format) : grad_out;
 
   if (grad_input_mask[0]) {
