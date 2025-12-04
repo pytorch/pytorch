@@ -26,14 +26,14 @@ activation_short_configs = op_bench.config_list(
         [(8192,)],
     ],
     cross_product_configs={
-        "device": ["cpu", "cuda"],
+        "device": ["cuda"],
     },
     tags=["short"],
 )
 
 activation_long_configs = op_bench.cross_product_configs(
     shape=[(1,), (64,), (4096,), (8192,),(131072,), (262144,), (524288,), (1048576,)],
-    device=["cpu", "cuda"],
+    device=["cuda"],
     tags=["long"],
 )
 
