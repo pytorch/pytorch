@@ -1354,6 +1354,8 @@ def compute_unbacked_bindings(
     fs = shape_env.pending_fresh_unbacked_symbols
 
     pending = set(fs)
+    ignorable = set(shape_env.ignorable_fresh_unbacked_symbols)
+    shape_env.ignorable_fresh_unbacked_symbols.clear()
     if not pending:
         return None
 
@@ -1364,6 +1366,7 @@ def compute_unbacked_bindings(
     symbol_to_path = _free_unbacked_symbols_with_path(
         example_value, (), shape_env=shape_env, pending=pending, simplify=False
     )
+    pending -= ignorable
     if not peek and pending:
         extra = (
             repr((example_value.stride(), example_value.storage_offset()))
@@ -3897,6 +3900,9 @@ class ShapeEnv:
         # NB: fresh unbacked symbols NEVER get substitutions applied to them,
         # they are binding sites!
         self.pending_fresh_unbacked_symbols: list[sympy.Symbol] = []
+        # These are symbols which we'd like to process as pending, but if
+        # they're missing then it's okay too.
+        self.ignorable_fresh_unbacked_symbols: list[sympy.Symbol] = []
 
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
