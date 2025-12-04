@@ -4,7 +4,7 @@ import threading
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import chain
-from typing import cast, Optional, Union
+from typing import cast, Optional
 
 import torch
 from torch._guards import detect_fake_mode
@@ -88,9 +88,7 @@ class ShardingPropagator:
         )
         # op map to save indices of shape (and stride) args which may need to be
         # modified in sharding prop
-        self.op_to_shape_and_stride_idx: dict[
-            OpOverload, Union[int, tuple[int, int]]
-        ] = {
+        self.op_to_shape_and_stride_idx: dict[OpOverload, int | tuple[int, int]] = {
             # new factory ops
             aten.new_empty.default: 1,
             aten.new_full.default: 1,
@@ -110,7 +108,7 @@ class ShardingPropagator:
         self,
         op_overload: OpOverload,
         rule_func: Callable[[OpSchema], OutputSharding],
-        schema_info: Optional[RuntimeSchemaInfo] = None,
+        schema_info: RuntimeSchemaInfo | None = None,
     ):
         """
         Register a sharding propagation rule for an operator.
@@ -138,7 +136,7 @@ class ShardingPropagator:
         self,
         op_overload: OpOverload,
         strategy_func: Callable[[OpSchema], StrategyType],
-        schema_info: Optional[RuntimeSchemaInfo] = None,
+        schema_info: RuntimeSchemaInfo | None = None,
     ):
         """
         Register a :class:`OpStrategy` generator for an operator.
@@ -191,7 +189,7 @@ class ShardingPropagator:
 
     def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
@@ -225,7 +223,7 @@ class ShardingPropagator:
             )
 
         elif isinstance(fake_out, (tuple, list)):
-            tensor_meta_list: list[Optional[TensorMeta]] = []
+            tensor_meta_list: list[TensorMeta | None] = []
             for fake_out_item in fake_out:
                 if isinstance(fake_out_item, torch.Tensor):
                     tensor_meta_list.append(
@@ -249,7 +247,7 @@ class ShardingPropagator:
     @lru_cache  # noqa: B019
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
         """
         Cached version of _propagate_tensor_meta_non_cached
         This is a private API. Use propagate_tensor_meta instead.
@@ -258,7 +256,7 @@ class ShardingPropagator:
 
     def propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:
+    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas. This is a public API that should be
@@ -273,7 +271,7 @@ class ShardingPropagator:
         self,
         op: OpOverload,
         output_specs: OutputSpecType,
-        output_tensor_meta: Union[None, TensorMeta, Sequence[Optional[TensorMeta]]],
+        output_tensor_meta: None | TensorMeta | Sequence[TensorMeta | None],
     ) -> OutputSpecType:
         """
         Wrap the output_specs with the tensor metadata from the output.
@@ -294,7 +292,7 @@ class ShardingPropagator:
                 )
             return output_specs.shallow_copy_with_tensor_meta(output_tensor_meta)
         elif isinstance(output_specs, (tuple, list)):
-            new_specs: list[Optional[DTensorSpec]] = []
+            new_specs: list[DTensorSpec | None] = []
             if not isinstance(output_tensor_meta, (tuple, list)) or len(
                 output_specs
             ) != len(output_tensor_meta):
@@ -423,7 +421,7 @@ class ShardingPropagator:
             """
             mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
             single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
-            single_dim_expand_fully = False
+            single_dim_expand_fully = True
             if single_dim_expand_fully:
                 # TODO: this codepath was mainly for initial testing, it would be removed once the lowest-cost path
                 # is validated
@@ -703,7 +701,7 @@ class ShardingPropagator:
             )
 
     def _select_strategy(
-        self, strategy: OpStrategy, op_schema: Optional[OpSchema] = None
+        self, strategy: OpStrategy, op_schema: OpSchema | None = None
     ) -> OpSpec:
         if len(strategy.strategies) == 1:
             # short cut with only one possible OpSpec
@@ -770,7 +768,7 @@ class ShardingPropagator:
         # adjust shape to be the same as that of the _local_tensor
         # of the DTensor input arg at index 0, which is inferred
         expected_input_schema[shape_idx], _ = compute_local_shape_and_global_offset(
-            out_tensor_meta.shape, spec.mesh, spec.placements
+            out_tensor_meta.shape, spec.mesh, spec.placements, skip_offset=True
         )
 
         # adjust the stride arg for aten.new_empty_strided.default
