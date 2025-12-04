@@ -1190,9 +1190,12 @@ class OverlapScheduler:
         self.reorder_graph()
 
     def _bucket_collectives(self) -> None:
+        from torch._inductor.fx_passes.fusion_regions import build_fusion_regions
         from torch._inductor.fx_passes.overlap_preserving_bucketer import (
             OverlapPreservingBucketer,
         )
+
+        region_of = build_fusion_regions(list(self.graph.nodes))
 
         bucketer = OverlapPreservingBucketer(
             graph=self.graph,
@@ -1201,6 +1204,7 @@ class OverlapScheduler:
             max_bucket_memory_gb=2.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
+            region_of=region_of,
         )
         bucketer.bucket_collectives()
 

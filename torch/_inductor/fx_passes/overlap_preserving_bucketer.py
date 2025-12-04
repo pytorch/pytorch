@@ -136,6 +136,7 @@ class OverlapPreservingBucketer:
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
         bucket_mode: BucketMode = "custom_ops_multidtype",
+        region_of: dict[fx.Node, any] = None,
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -145,8 +146,12 @@ class OverlapPreservingBucketer:
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
         self.bucket_mode = bucket_mode
+        self.region_of = region_of or {}
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
+
+        # Build fusion region helpers
+        self._region_representatives = self._build_region_representatives()
 
         # Compute ancestors including original graph edges and hiding interval dependencies
         self.node_ancestors = self._compute_node_ancestors()
@@ -155,6 +160,66 @@ class OverlapPreservingBucketer:
         # Build timelines and add constraints to aug_graph
         self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
         self._add_hiding_interval_constraints()
+
+    def _build_region_representatives(self) -> dict[int, fx.Node]:
+        """Build a mapping from region ID to representative node (last node in region)."""
+        region_representatives = {}
+        if self.region_of:
+            for region in set(self.region_of.values()):
+                # Use the last node (anchor) as the representative
+                region_representatives[id(region)] = region.end
+        return region_representatives
+
+    def _get_region_for_node(self, node: fx.Node):
+        """Get the fusion region for a node, if any."""
+        return self.region_of.get(node)
+
+    def _get_region_cost(self, node: fx.Node) -> float:
+        """Get the cost of the fusion region containing this node, or 0 if no region."""
+        region = self._get_region_for_node(node)
+        return region.cost_ms if region else 0.0
+
+    def _nodes_in_same_region(self, node1: fx.Node, node2: fx.Node) -> bool:
+        """Check if two nodes belong to the same fusion region."""
+        region1 = self._get_region_for_node(node1)
+        region2 = self._get_region_for_node(node2)
+        return region1 is not None and region1 is region2
+
+    def _get_fusion_group_representative(self, node: fx.Node) -> fx.Node:
+        """Get the fusion group output/representative for a node, or the node itself."""
+        region = self._get_region_for_node(node)
+        if region is not None:
+            # Return the last node (output) of the fusion region
+            return region.end
+        return node
+
+    def _redirect_deps_to_fusion_outputs(self, deps_map: dict[fx.Node, OrderedSet[fx.Node]]) -> dict[fx.Node, OrderedSet[fx.Node]]:
+        """Redirect dependencies to target fusion group outputs instead of internal nodes."""
+        if not self.region_of:
+            return deps_map
+
+        redirected_deps: dict[fx.Node, OrderedSet[fx.Node]] = {}
+
+        for node, deps in deps_map.items():
+            # Get representative for the target node
+            rep_node = self._get_fusion_group_representative(node)
+
+            # Get representatives for all dependency nodes
+            rep_deps = OrderedSet()
+            for dep in deps:
+                rep_dep = self._get_fusion_group_representative(dep)
+                # Only add if not self-dependency after redirection
+                if rep_dep != rep_node:
+                    rep_deps.add(rep_dep)
+
+            # Only add if we have actual dependencies
+            if rep_deps:
+                if rep_node in redirected_deps:
+                    redirected_deps[rep_node].update(rep_deps)
+                else:
+                    redirected_deps[rep_node] = rep_deps
+
+        return redirected_deps
 
     def _compute_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """
@@ -264,6 +329,12 @@ class OverlapPreservingBucketer:
             self.all_hiding_nodes |= info.hiding_nodes
 
     def bucket_collectives(self) -> None:
+        # Build region cost map for fusion-aware bucketing
+        region_costs = {}
+        if self.region_of:
+            for region in set(self.region_of.values()):
+                region_costs[id(region)] = region.cost_ms
+
         # Group collectives by PG first
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         for start in self.collective_info:
@@ -303,6 +374,12 @@ class OverlapPreservingBucketer:
             counters["inductor"]["collective_buckets"] += 1
             self._apply_bucket(coll_bucket)
 
+        # Inline fusion region subgraphs before dependency extraction and overlap insertion
+        if self.region_of:
+            from torch._inductor.fx_passes.fusion_regions import inline_subgraphs
+            # Pass empty dep_map since we'll extract proper deps from aug_graph after inlining
+            inline_subgraphs(self.graph, self.region_of, {})
+
         # Extract all dependencies from augmented graph
         # This includes:
         # - Sequential timeline deps (added during build_timeline)
@@ -340,7 +417,9 @@ class OverlapPreservingBucketer:
                 if filtered_node_deps:
                     filtered_deps[node] = filtered_node_deps
 
-            self._preserve_dependencies_with_tokens(filtered_deps)
+            # Redirect dependencies to fusion group outputs instead of internal nodes
+            fusion_aware_deps = self._redirect_deps_to_fusion_outputs(filtered_deps)
+            self._preserve_dependencies_with_tokens(fusion_aware_deps)
 
         self.graph.lint()
 
