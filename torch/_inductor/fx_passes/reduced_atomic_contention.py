@@ -137,7 +137,9 @@ def validate_match(match: Match) -> bool:
     # Check minimum index size threshold
     min_index_size = getattr(config, "partitioned_scatter_min_index_size", 4096)
     if index_size < min_index_size:
-        log.debug("Skipping: index size %d below threshold %d", index_size, min_index_size)
+        log.debug(
+            "Skipping: index size %d below threshold %d", index_size, min_index_size
+        )
         return False
 
     # Only use if index_size is small enough and estimated contention is relevant
