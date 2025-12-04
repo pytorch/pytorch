@@ -355,7 +355,8 @@ def _for_each_rank_run_func(
     for r in sorted(ranks):
         if use_per_rank_rng:
             assert lm is not None
-            _set_rng_state(*lm._per_rank_rng_states[r])
+            if r in lm._per_rank_rng_states:
+                _set_rng_state(*lm._per_rank_rng_states[r])
         else:
             assert global_rng_state is not None
             _set_rng_state(*global_rng_state)
@@ -1164,7 +1165,7 @@ class LocalTensorMode(TorchDispatchMode):
         else:
             assert isinstance(ranks, frozenset)
             self.ranks = ranks
-        self._disable = False
+        self._disable = True
         self._old_get_coordinate = None
         self._old_torch_manual_seed: Any = None
         self._old_torch_initial_seed: Any = None
@@ -1172,10 +1173,10 @@ class LocalTensorMode(TorchDispatchMode):
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
 
+        self.enable_()
+
     def __enter__(self) -> "LocalTensorMode":
-        self._disable = False
-        self._patch_device_mesh()
-        self._patch_random_functions()
+        self.enable_()
         get_local_tensor_mode_list().append(self)
 
         # _distribute_region will compute correct per-shard offsets
@@ -1196,9 +1197,7 @@ class LocalTensorMode(TorchDispatchMode):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        self._disable = True
-        self._unpatch_device_mesh()
-        self._unpatch_random_functions()
+        self.disable_()
         get_local_tensor_mode_list().pop()
         super().__exit__(exc_type, exc_val, exc_tb)
 
@@ -1314,6 +1313,22 @@ class LocalTensorMode(TorchDispatchMode):
 
         return _for_each_rank_run_func(func, self.ranks, args, kwargs, alias=True)
 
+    def disable_(self):
+        if self._disable:
+            return
+
+        self._unpatch_device_mesh()
+        self._unpatch_random_functions()
+        self._disable = True
+
+    def enable_(self):
+        if not self._disable:
+            return
+
+        self._patch_device_mesh()
+        self._patch_random_functions()
+        self._disable = False
+
     @contextlib.contextmanager
     def disable(self) -> Generator[None, None, None]:
         """
@@ -1321,14 +1336,21 @@ class LocalTensorMode(TorchDispatchMode):
         rank specific computations and merge results back before enabling LocalTensorMode back.
         """
 
-        old = self._disable
-        self._disable = True
-        self._unpatch_device_mesh()
+        # don't unpatch again if already disabled
+        if self._disable:
+            try:
+                yield
+            finally:
+                # re-disable if the yield messed
+                # with the state
+                self.disable_()
+                return  # noqa: B012
+
+        self.disable_()
         try:
             yield
         finally:
-            self._disable = old
-            self._patch_device_mesh()
+            self.enable_()
 
     def rank_map(self, cb: Callable[[int], Tensor]) -> LocalTensor:
         """
@@ -1417,12 +1439,12 @@ class _LocalRandom:
 
             for rank in sorted(lm.ranks):
                 rank_seed = seed.node._local_ints[rank]
-                _manual_seed_impl(rank_seed, update_local_tensor_states=False)
+                _manual_seed_impl(rank_seed)
                 lm._per_rank_rng_states[rank] = _get_rng_state()
             return torch.random.default_generator
         from torch.random import _manual_seed_impl
 
-        result = _manual_seed_impl(seed, update_local_tensor_states=False)
+        result = _manual_seed_impl(seed)
 
         if lm is not None and len(lm._per_rank_rng_states) > 0:
             cpu_state, cuda_states = _get_rng_state()
@@ -1450,6 +1472,9 @@ class _LocalRandom:
             return torch.SymInt(local_int_node)
 
         return torch.random.default_generator.initial_seed()
+
+
+# Save the original get_coordinate method before any patching
 
 
 class _LocalDeviceMesh:
