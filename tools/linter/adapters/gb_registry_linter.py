@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import random
 import sys
 from enum import Enum
 from pathlib import Path
@@ -109,6 +110,9 @@ def _update_registry_with_changes(
         del latest_entry[old_gb_type]
         del gb_type_to_key[old_gb_type]
 
+    # Collect new entries separately to insert them all at once
+    new_entries: list[tuple[str, list[dict[str, Any]]]] = []
+
     for gb_type, (call, file_path) in calls.items():
         if gb_type in latest_entry:
             existing_entry = latest_entry[gb_type]
@@ -126,11 +130,34 @@ def _update_registry_with_changes(
                     registry_key
                 ]
         else:
+            # Collect new entries to add later
             new_key = next_gb_id(updated_registry)
             new_entry = _create_registry_entry(
                 gb_type, call["context"], call["explanation"], call["hints"]
             )
+            new_entries.append((new_key, [new_entry]))
+            # Temporarily add to updated_registry so next_gb_id works correctly
             updated_registry[new_key] = [new_entry]
+
+    # Insert all new entries at the same random position to reduce merge conflicts
+    if new_entries:
+        # Remove temporarily added entries
+        for new_key, _ in new_entries:
+            del updated_registry[new_key]
+
+        registry_items = list(updated_registry.items())
+        if registry_items:
+            # Pick one random position for all new entries
+            insert_pos = random.randint(0, len(registry_items))
+            # Insert all new entries at the same position
+            for new_key, new_entry in new_entries:
+                registry_items.insert(insert_pos, (new_key, new_entry))
+                insert_pos += 1  # Keep them together
+            updated_registry = dict(registry_items)
+        else:
+            # Empty registry, just add all entries
+            for new_key, new_entry in new_entries:
+                updated_registry[new_key] = new_entry
 
     return updated_registry
 
