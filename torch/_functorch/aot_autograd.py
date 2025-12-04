@@ -26,7 +26,6 @@ from torch._dynamo.utils import (
 from torch._guards import detect_fake_mode
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 from torch._inductor.utils import BoxedBool
-from torch._library.autograd import autograd_fallback_mode
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -529,9 +528,6 @@ def create_aot_state(
     stack.enter_context(
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
     )
-    # Make it an error to backprop through PT2 compliant ops that silently
-    # detach autograd
-    stack.enter_context(autograd_fallback_mode("error"))
 
     from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
     from torch._library.opaque_object import is_opaque_type

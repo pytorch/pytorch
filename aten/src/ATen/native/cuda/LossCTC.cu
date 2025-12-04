@@ -343,7 +343,7 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
   if (input_length == 0)
     return;
 
-  // "first" row, the beta initialization before eq (10) (t=target_length - differes per batch)
+  // "first" row, the beta initialization before eq (10) (t=target_length - differs per batch)
   for (int64_t block_s = 2*max_target_length - (2*max_target_length % blockDim.x); block_s >= 0; block_s -= blockDim.x) {
     int64_t s = threadIdx.x + block_s;
     scalar_t lb;
