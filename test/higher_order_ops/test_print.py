@@ -347,7 +347,7 @@ x = add_1, y = add_2);  getitem = None
             # Verify the output contains our print messages
             # C++ prints literal format strings (no value substitution)
             # This is not complete yet with not kwargs printing yet.
-            self.assertEqual("C++ print test: value={x}\nResult={res}", captured_output)
+            self.assertEqual(captured_output, f"C++ print test: value={inputs[0]}\nResult={inputs[0] * 2}")
 
             # Verify computation is correct
             expected = f(*inputs)
