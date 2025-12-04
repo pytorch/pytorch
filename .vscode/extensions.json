@@ -3,7 +3,7 @@
         "ms-python.python",
         "charliermarsh.ruff",
         "ms-python.flake8",
-        "meta.pyrefly",
+        "ms-python.mypy-type-checker",
         "ms-vscode.cmake-tools",
         "EditorConfig.EditorConfig",
         "streetsidesoftware.code-spell-checker",

@@ -204,11 +204,7 @@ def hash_tensor_fn(
     else:
         t_clean = t.to(dtype=torch.int64)
 
-    if t.numel() > 0:
-        out = torch.hash_tensor(t_clean)
-    else:
-        out = torch.zeros((), device=t_clean.device, dtype=torch.uint64)
-
+    out = torch.hash_tensor(t_clean)
     if use_scalar:
         return out.item()  # type: ignore[attribute]
     return out

@@ -68,7 +68,6 @@ from .utils import (
     orig_code_map,
     register_hook_for_recompile_user_context,
     reset_frame_count,
-    reset_recompile_user_contexts,
 )
 
 
@@ -104,7 +103,6 @@ __all__ = [
     "register_backend",
     "replay",
     "reset",
-    "reset_recompile_user_contexts",
     "run",
     "error_on_graph_break",
     "set_stance",
