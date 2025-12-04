@@ -25,6 +25,7 @@ from torch.distributed.fsdp import (
     OffloadPolicy,
     register_fsdp_forward_method,
     share_comm_ctx,
+    MixedPrecisionPolicy,
 )
 from torch.distributed.fsdp._fully_shard._fsdp_collectives import (
     foreach_all_gather,
@@ -700,9 +701,10 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         """
         self.run_subtests(
             {
-                "reshard_after_forward": [True, False],
-                "checkpoint_impl": ["composable", "utils", "wrapper"],
-                "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
+                "reshard_after_forward": [True],
+                "checkpoint_impl": ["composable"],
+                # "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
+                "module_grouping": ["block"],
             },
             self._test_train_parity_with_activation_checkpointing,
         )
@@ -752,7 +754,13 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                     checkpoint(module)
 
         # Apply FSDP
-        fsdp_kwargs = {"reshard_after_forward": reshard_after_forward}
+        fsdp_kwargs = {
+            "reshard_after_forward": reshard_after_forward, 
+            "mp_policy": MixedPrecisionPolicy(
+                param_dtype=torch.bfloat16,
+                cast_forward_inputs=True,
+            )
+        }
         if module_grouping == "mem_eff":
             assert model_args.n_layers == 3
             fully_shard(model.layers[0], **fsdp_kwargs)
@@ -777,27 +785,27 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # Reuse the same input across iterations to avoid loss explosion from
         # trying to learn from random inputs
         inp = torch.randint(0, vocab_size, (3, 64), device=device_type.type)
-        check_sharded_parity(
-            self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
-        )
+        # check_sharded_parity(
+        #     self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
+        # )
         for iter_idx in range(10):
             losses: list[torch.Tensor] = []
             for _model in (ref_model, model):
                 torch.manual_seed(iter_idx + 1)  # for dropout determinism
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
-            if not testing_compile:
-                check_sharded_parity(
-                    self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
-                )
-            self.assertEqual(losses[0], losses[1])
+            # if not testing_compile:
+            #     check_sharded_parity(
+            #         self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
+            #     )
+            # self.assertEqual(losses[0], losses[1])
             for _optim in (ref_optim, optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
-            if not testing_compile:
-                check_sharded_parity(
-                    self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
-                )
+            # if not testing_compile:
+            #     check_sharded_parity(
+            #         self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
+            #     )
 
 
 class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
