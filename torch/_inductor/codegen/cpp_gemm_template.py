@@ -207,9 +207,11 @@ GEMM_TEMPLATE = r"""
 {%- endif %}
 
 {%- if num_threads > 1 %}
-    #pragma omp parallel for num_threads({{num_threads}})
-    for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
-        {{ template.codegen_multi_threads_params()|indent(8, false) }}
+    #pragma omp parallel num_threads({{num_threads}})
+    {
+        #pragma omp for
+        for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
+            {{ template.codegen_multi_threads_params()|indent(12, false) }}
 {%- else %}
     {
         {{ template.codegen_single_thread_params(is_dynamic_M)|indent(8, false) }}
@@ -284,45 +286,54 @@ GEMM_TEMPLATE = r"""
                 }
             }
         }
+{%- if num_threads > 1 %}
+    }
 {%- if maybe_k_slicing %}
         if (num_Kt_blocks > 1) {
-            #pragma omp barrier
-            for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
-                // We slice M-dim and each thread in the k-slicing group works on a slice
-                const int64_t m_start_unsliced = mc * Mr;
-                const int64_t m_end_unsliced = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
-                const int64_t m_size_unsliced = m_end_unsliced - m_start_unsliced;
-                const int64_t m_slice_size = (m_size_unsliced + num_Kt_blocks - 1) / num_Kt_blocks;
-                const int64_t m_start = std::min(m_start_unsliced + m_slice_size * k_slice_id, m_end_unsliced);
-                const int64_t m_end = std::min(m_start_unsliced + m_slice_size * (k_slice_id + 1), m_end_unsliced);
-                const int64_t m_size = m_end - m_start;
-                const int64_t m_offset = m_start - m_start_unsliced;
-                for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
-                    const int64_t n_start = nc * Nr;
-                    const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
-                    const int64_t n_size = n_end - n_start;
-                    const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
-                    auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks].get();
-                    for (int64_t other_slice = 1; other_slice < num_Kt_blocks; other_slice++) {
-                        auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + other_slice].get();
-                        for (int64_t m = m_offset; m < m_offset + m_size; m++) {
-                            #pragma omp simd
-                            for (int64_t n = 0; n < n_size; n++) {
-                                {{acc_buf_name}}[m*Nr + n] += other_acc[m*Nr + n];
+            #pragma omp for
+            for (int64_t tid = 0; tid < {{num_threads}}; tid++) {
+                {{ template.codegen_multi_threads_params()|indent(16, false) }}
+                for (int64_t mc = m_block_start; mc < m_block_end; mc += Mc_blocks) {
+                    // We slice M-dim and each thread in the k-slicing group works on a slice
+                    const int64_t m_start_unsliced = mc * Mr;
+                    const int64_t m_end_unsliced = std::min(std::min(mc + Mc_blocks, m_block_end) * Mr, M);
+                    const int64_t m_size_unsliced = m_end_unsliced - m_start_unsliced;
+                    const int64_t m_slice_size = (m_size_unsliced + num_Kt_blocks - 1) / num_Kt_blocks;
+                    const int64_t m_start = std::min(m_start_unsliced + m_slice_size * k_slice_id, m_end_unsliced);
+                    const int64_t m_end = std::min(m_start_unsliced + m_slice_size * (k_slice_id + 1), m_end_unsliced);
+                    const int64_t m_size = m_end - m_start;
+                    const int64_t m_offset = m_start - m_start_unsliced;
+                    for (int64_t nc = n_block_start; nc < n_block_end; nc += Nc_blocks) {
+                        const int64_t n_start = nc * Nr;
+                        const int64_t n_end = std::min(std::min(nc + Nc_blocks, n_block_end) * Nr, N);
+                        const int64_t n_size = n_end - n_start;
+                        const int64_t mxn_cache_block_id = (mc / Mc_blocks) * num_Nc_blocks + nc;
+                        auto {{acc_buf_name}} = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks].get();
+                        for (int64_t other_slice = 1; other_slice < num_Kt_blocks; other_slice++) {
+                            auto other_acc = local_buf_ptrs[mxn_cache_block_id * num_Kt_blocks + other_slice].get();
+                            for (int64_t m = m_offset; m < m_offset + m_size; m++) {
+                                #pragma omp simd
+                                for (int64_t n = 0; n < n_size; n++) {
+                                    {{acc_buf_name}}[m*Nr + n] += other_acc[m*Nr + n];
+                                }
                             }
                         }
+        {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
+                        {{ kernel.store_output(
+                            tile_Y, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
+                        )|indent(20, false)
+                        }}
                     }
-    {%- set tile_acc_m_slice = kernel.slice_nd(tile_acc, [("m_offset", "m_offset + m_end - m_start"), ()]) %}
-                    {{ kernel.store_output(
-                        tile_Y, tile_acc_m_slice, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
-                    )|indent(20, false)
-                    }}
                 }
             }
         }
 {%- endif %}
         {{ micro_gemm.codegen_finalize(kernel) }}
     }
+{%- else %}
+        {{ micro_gemm.codegen_finalize(kernel) }}
+    }
+{%- endif %}
 }
 """
 
