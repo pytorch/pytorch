@@ -1768,8 +1768,8 @@ class DeviceCachingAllocator {
       if (deps == nullptr) {
         C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
       } else {
-        cudaGraphEdgeData edgeData;
-        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, &edgeData, count));
+        cudaGraphEdgeData edgeData[*count];
+        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, &edgeData[0], count));
       }
 #else
       C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, count));
