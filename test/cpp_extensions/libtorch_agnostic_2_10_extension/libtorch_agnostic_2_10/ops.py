@@ -210,7 +210,7 @@ def my_shape(t) -> tuple[int]:
     Args:
         t: Tensor - input tensor
 
-    Returns: tuple - shape of the imput tensor.
+    Returns: tuple - shape of the input tensor.
     """
     return torch.ops.libtorch_agnostic_2_10.my_shape.default(t)
 

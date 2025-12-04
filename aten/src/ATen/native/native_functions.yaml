@@ -192,11 +192,6 @@
     CompositeExplicitAutograd: _assert_tensor_metadata
     Meta: _assert_tensor_metadata_meta_symint
 
-- func: _async_error(str msg) -> ()
-  dispatch:
-    CompositeExplicitAutograd: _async_error
-    Meta: _async_error_meta
-
 - func: _print(str s) -> ()
   dispatch:
     CompositeExplicitAutograd: _print
@@ -7283,6 +7278,7 @@
   dispatch:
     CPU: _scaled_mm_cpu
     CUDA: _scaled_mm_cuda
+    XPU: _scaled_mm_xpu
   tags: needs_exact_strides
 
 
@@ -7291,17 +7287,20 @@
   dispatch:
     CPU: _scaled_mm_out_cpu
     CUDA: _scaled_mm_out_cuda
+    XPU: _scaled_mm_out_xpu
   tags: needs_exact_strides
 
 - func: _scaled_mm_v2(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False) -> Tensor
   variants: function
   dispatch:
     CUDA: _scaled_mm_cuda_v2
+    XPU: _scaled_mm_xpu_v2
 
 - func: _scaled_mm_v2.out(Tensor self, Tensor mat2, Tensor[] scale_a, int[] recipe_a, int[] swizzle_a, Tensor[] scale_b, int[] recipe_b, int[] swizzle_b, Tensor? bias, ScalarType? out_dtype, int[] contraction_dim=[], bool use_fast_accum=False, *, Tensor(a!) out) -> Tensor(a!)
   variants: function
   dispatch:
     CUDA: _scaled_mm_cuda_v2_out
+    XPU: _scaled_mm_xpu_v2_out
 
 
 - func: _scaled_grouped_mm(Tensor self, Tensor mat2, Tensor scale_a, Tensor scale_b, Tensor? offs=None, Tensor? bias=None, Tensor? scale_result=None, ScalarType? out_dtype=None, bool use_fast_accum=False) -> Tensor
