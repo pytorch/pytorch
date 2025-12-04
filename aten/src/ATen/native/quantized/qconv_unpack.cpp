@@ -96,7 +96,7 @@ class QConv1dUnpackWeightsInt8 final {
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       auto result = packed_weight->unpack();
       auto& weight = std::get<0>(result);
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      weight = weight.squeeze(quant_utils::kConv1dSqueezeDim + 2);
       return result;
     }
 #endif
@@ -105,7 +105,7 @@ class QConv1dUnpackWeightsInt8 final {
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       auto result = packed_weight->unpack();
       auto& weight = std::get<0>(result);
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      weight = weight.squeeze(quant_utils::kConv1dSqueezeDim + 2);
       return result;
     }
 #endif
