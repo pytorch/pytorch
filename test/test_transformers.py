@@ -4557,7 +4557,6 @@ class TestAttnBias(NNTestCase):
         torch.testing.assert_close(key.grad, key_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
         torch.testing.assert_close(value.grad, value_prototype.grad, rtol=grad_tolerances.rtol, atol=grad_tolerances.atol)
 
-    @decorateIf(xfailIfWindows, lambda params: params['shape'] != (1, 1, 23, 56, 15))
     @parametrize("causal_variant", [CausalVariant.UPPER_LEFT, CausalVariant.LOWER_RIGHT])
     @parametrize(
         "shape",
