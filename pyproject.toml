@@ -379,7 +379,6 @@ main.extension-pkg-allow-list = ["torch._C"]
 imports.known-standard-library = ["typing_extensions"]
 messages-control.disable = ["all"]
 messages-control.enable = ["comparison-with-callable"]
-spelling.spelling-dict = "en_US"
 spelling.spelling-private-dict-file = "tools/linter/dictionary.txt"
 
 [tool.codespell]
