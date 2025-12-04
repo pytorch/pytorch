@@ -632,17 +632,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ],
             )
 
-        @register(
-            torch.cuda.synchronize,
-            torch.xpu.synchronize,
-            torch.mps.synchronize,
-        )
-        def handle_device_synchronize(self, tx: "InstructionTranslator", device=None):
+        # Collect available synchronize functions
+        _sync_functions = [torch.cuda.synchronize]
+        if hasattr(torch, "xpu") and hasattr(torch.xpu, "synchronize"):
+            _sync_functions.append(torch.xpu.synchronize)
+        if hasattr(torch, "mps") and hasattr(torch.mps, "synchronize"):
+            _sync_functions.append(torch.mps.synchronize)
+
+        @register(*_sync_functions)
+        def handle_device_synchronize(self, tx: "InstructionTranslator", *args, **kwargs):
             """Trigger graph break for device synchronization operations."""
+            device = kwargs.get("device", args[0] if args else None)
+
+            # Determine device type from the function being called
             device_type = "cuda"
-            if self.value is torch.xpu.synchronize:
+            if hasattr(torch, "xpu") and self.value is torch.xpu.synchronize:
                 device_type = "xpu"
-            elif self.value is torch.mps.synchronize:
+            elif hasattr(torch, "mps") and self.value is torch.mps.synchronize:
                 device_type = "mps"
 
             unimplemented(
