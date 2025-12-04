@@ -15,16 +15,7 @@ from abc import abstractmethod
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import (
-    Any,
-    Generic,
-    NamedTuple,
-    Optional,
-    overload,
-    TYPE_CHECKING,
-    TypeVar,
-    Union,
-)
+from typing import Any, Generic, NamedTuple, overload, TYPE_CHECKING, TypeVar
 
 
 if sys.version_info >= (3, 11):
@@ -114,7 +105,7 @@ class CompileId:
             return f"{self.frame_id}/{self.frame_compile_id}"
 
     @classmethod
-    def from_string(cls, compile_id: Optional[str]) -> Optional[CompileId]:
+    def from_string(cls, compile_id: str | None) -> CompileId | None:
         """
         Factory method that creates a CompileId from its string representation.
         Keep this in sync with the __str__ method.
@@ -277,14 +268,14 @@ class Guard:
     create_fn: Callable[[GuardBuilderBase, Guard], None]
 
     # Export only. These values are written to at time of guard check_fn creation.
-    guard_types: Optional[list[str]] = None
-    code_list: Optional[list[str]] = None
-    obj_weakref: Optional[object] = None
-    guarded_class_weakref: Optional[weakref.ReferenceType[Any]] = None
+    guard_types: list[str] | None = None
+    code_list: list[str] | None = None
+    obj_weakref: object | None = None
+    guarded_class_weakref: weakref.ReferenceType[Any] | None = None
 
-    stack: Optional[CapturedTraceback] = None
-    user_stack: Optional[traceback.StackSummary] = None
-    _hash: Optional[int] = None
+    stack: CapturedTraceback | None = None
+    user_stack: traceback.StackSummary | None = None
+    _hash: int | None = None
     _unserializable: bool = False
 
     def __hash__(self) -> int:
@@ -401,7 +392,7 @@ class Guard:
     def set_export_info(
         self,
         guard_type: str,
-        guarded_class: Optional[weakref.ReferenceType[Any]],
+        guarded_class: weakref.ReferenceType[Any] | None,
         code_list: list[str],
         obj_weakref: object,
     ) -> None:
@@ -514,7 +505,7 @@ class GuardsCheckpointState:
     def __init__(self, dynamo_guards: set[Guard]) -> None:
         self.dynamo_guards = dynamo_guards
 
-    def diff(self, other: GuardsCheckpointState) -> Optional[set[Guard]]:
+    def diff(self, other: GuardsCheckpointState) -> set[Guard] | None:
         """
         Produces a delta against another GuardsCheckpointState.
 
@@ -538,7 +529,7 @@ class ModuleContextCheckpointState:
     def __init__(self, nn_modules: dict[str, torch.nn.Module]) -> None:
         self.nn_modules = nn_modules
 
-    def diff(self, other: ModuleContextCheckpointState) -> Optional[set[str]]:
+    def diff(self, other: ModuleContextCheckpointState) -> set[str] | None:
         """
         Produces a delta against another ModuleContextCheckpointState.
 
@@ -574,7 +565,7 @@ class GlobalContextCheckpointState:
     def __init__(self, global_states: dict[str, tuple[Callable, Any]]) -> None:
         self.global_state = global_states
 
-    def diff(self, other: GlobalContextCheckpointState) -> Optional[set[str]]:
+    def diff(self, other: GlobalContextCheckpointState) -> set[str] | None:
         """
         Produces a delta against another GlobalContextCheckpointState.
 
@@ -627,7 +618,7 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
 # Like a Set[Guard] but will record the user stack on all guards at the
 # time they were installed at their destination
 class GuardsSet:
-    def __init__(self, inner: Optional[set[Guard]] = None) -> None:
+    def __init__(self, inner: set[Guard] | None = None) -> None:
         if inner is None:
             inner = set()
         self.inner = inner
@@ -705,13 +696,13 @@ class HopSubgraphCache:
     def add_autograd_key_entry(self, identifier: str, key: Callable) -> None: ...
 
     @abstractmethod
-    def get_autograd_key_entry(self, identifier: str) -> Optional[Callable]: ...
+    def get_autograd_key_entry(self, identifier: str) -> Callable | None: ...
 
     @abstractmethod
     def add_proxy_dispatch_entry(self, identifier: str, key: Callable) -> None: ...
 
     @abstractmethod
-    def get_proxy_dispatch_entry(self, identifier: str) -> Optional[Callable]: ...
+    def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None: ...
 
     @abstractmethod
     def add_lazy_bwd_entry(
@@ -724,7 +715,7 @@ class HopSubgraphCache:
     @abstractmethod
     def get_lazy_bwd_entry(
         self, identifier: str, tangent_metadata: tuple[object]
-    ) -> tuple[Optional[torch.fx.GraphModule], Optional[int]]: ...
+    ) -> tuple[torch.fx.GraphModule | None, int | None]: ...
 
 
 class InvokeSubgraphCache(HopSubgraphCache):
@@ -748,13 +739,13 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def add_autograd_key_entry(self, identifier: str, key: Callable) -> None:
         self.autograd_cache[identifier] = key
 
-    def get_autograd_key_entry(self, identifier: str) -> Optional[Callable]:
+    def get_autograd_key_entry(self, identifier: str) -> Callable | None:
         return self.autograd_cache.get(identifier, None)
 
     def add_proxy_dispatch_entry(self, identifier: str, key: Callable) -> None:
         self.proxy_dispatch_cache[identifier] = key
 
-    def get_proxy_dispatch_entry(self, identifier: str) -> Optional[Callable]:
+    def get_proxy_dispatch_entry(self, identifier: str) -> Callable | None:
         return self.proxy_dispatch_cache.get(identifier, None)
 
     def add_lazy_bwd_entry(
@@ -770,7 +761,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
 
     def get_lazy_bwd_entry(
         self, identifier: str, tangent_metadata: tuple[object]
-    ) -> tuple[Optional[torch.fx.GraphModule], Optional[int]]:
+    ) -> tuple[torch.fx.GraphModule | None, int | None]:
         if identifier not in self.lazy_bwd_cache:
             return (None, None)
 
@@ -787,7 +778,7 @@ class InvokeSubgraphCache(HopSubgraphCache):
             )
         self.effects_cache[identifier] = effects
 
-    def get_effects(self, identifier: str) -> Optional[set]:
+    def get_effects(self, identifier: str) -> set | None:
         """Retrieve the effect types for a given invoke_subgraph identifier."""
         return self.effects_cache.get(identifier, None)
 
@@ -836,7 +827,7 @@ class CompileContext:
     def try_get() -> CompileContext | None:
         return getattr(_TLS, "compile_context", None)
 
-    def __init__(self, compile_id: Optional[CompileId]) -> None:
+    def __init__(self, compile_id: CompileId | None) -> None:
         assert compile_id is None or isinstance(compile_id, CompileId)
         self.compile_id: CompileId | None = compile_id
         self.attempt = 0
@@ -844,14 +835,14 @@ class CompileContext:
         self.shape_env_guards: list[str] = []
 
     @staticmethod
-    def current_compile_id() -> Optional[CompileId]:
+    def current_compile_id() -> CompileId | None:
         self = CompileContext.try_get()
         if self is None:
             return None
         return self.compile_id
 
     @staticmethod
-    def current_trace_id() -> Optional[TraceId]:
+    def current_trace_id() -> TraceId | None:
         self = CompileContext.try_get()
         if self is None:
             return None
@@ -880,13 +871,13 @@ class TracingContext:
             "TracingContext.get() must be called within an ongoing trace."
         )
 
-    def __init__(self, fake_mode: Optional[FakeTensorMode]) -> None:
+    def __init__(self, fake_mode: FakeTensorMode | None) -> None:
         self.guards_context = GuardsContext()
         self.module_context = ModuleContext()
         self.global_context = GlobalContext()
         self.previously_inlined_functions: dict[Any, Any] = dict()
         self.previously_cleaned_instructions: dict[Any, Any] = dict()
-        self.fake_mode: Optional[FakeTensorMode] = fake_mode
+        self.fake_mode: FakeTensorMode | None = fake_mode
         self.frame_summary_stack: list[traceback.FrameSummary] = []
         # This is morally part of frame_summary_stack, but it is kept separate
         # for clarity.  As we process a frame, this variable gets updated
@@ -894,16 +885,16 @@ class TracingContext:
         # function call, this gets cleared and the frame location is pushed
         # to frame_summary_stack (prepping this variable for the inner frame's
         # progress)
-        self.loc_in_frame: Optional[tuple[str, int, str]] = None
+        self.loc_in_frame: tuple[str, int, str] | None = None
         # this is only set after aot_autograd
-        self.fw_metadata: Optional[ViewAndMutationMeta] = None
+        self.fw_metadata: ViewAndMutationMeta | None = None
         # this is only set when the DDPOptimizer is used
-        self.ddp_optimizer_ctx: Optional[DDPOptimizerContext] = None
+        self.ddp_optimizer_ctx: DDPOptimizerContext | None = None
         # this is only set after aot_autograd
-        self.aot_graph_name: Optional[list[str]] = None
-        self.params_flat: Optional[list[Any]] = None
-        self.params_flat_unwrap_subclasses: Optional[list[Any]] = None
-        self.params_unwrapped_to_flat_index: Optional[list[Any]] = None
+        self.aot_graph_name: list[str] | None = None
+        self.params_flat: list[Any] | None = None
+        self.params_flat_unwrap_subclasses: list[Any] | None = None
+        self.params_unwrapped_to_flat_index: list[Any] | None = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
@@ -1007,7 +998,7 @@ class TracingContext:
     @staticmethod
     @contextlib.contextmanager
     def current_frame(
-        frame_summary: Optional[traceback.FrameSummary],
+        frame_summary: traceback.FrameSummary | None,
     ) -> Generator[None, None, None]:
         # frame_summary can be None to solely take advantage of real_stack
         # attachment to thrown exceptions
@@ -1030,7 +1021,7 @@ class TracingContext:
     @staticmethod
     @contextlib.contextmanager
     def report_output_strides() -> Generator[
-        Optional[list[Optional[tuple[int, ...]]]], None, None
+        list[tuple[int, ...] | None] | None, None, None
     ]:
         tc = TracingContext.try_get()
         if tc is None:
@@ -1050,7 +1041,7 @@ class TracingContext:
         TracingContext.get().loc_in_frame = (filename, lineno, frame_name)
 
     @staticmethod
-    def get_traced_code() -> Optional[list[CodeType]]:
+    def get_traced_code() -> list[CodeType] | None:
         tc = TracingContext.try_get()
         if tc is None:
             return None
@@ -1059,8 +1050,8 @@ class TracingContext:
 
 @contextmanager
 def compile_context(
-    context: Optional[CompileContext],
-) -> Generator[Optional[CompileContext], None, None]:
+    context: CompileContext | None,
+) -> Generator[CompileContext | None, None, None]:
     old_context = getattr(_TLS, "compile_context", None)
     _TLS.compile_context = context
     try:
@@ -1071,8 +1062,8 @@ def compile_context(
 
 @contextmanager
 def tracing(
-    context: Optional[TracingContext],
-) -> Generator[Optional[TracingContext], None, None]:
+    context: TracingContext | None,
+) -> Generator[TracingContext | None, None, None]:
     """
     This function installs the passed in tracing context as a dynamic scoped
     global variable.
@@ -1236,7 +1227,7 @@ class ChainedSource(Source):
         return value
 
 
-def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
+def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
     """
     Attempts to "detect" what the current fake mode is.  If there is one ambiently
     available from TracingContext, we preferentially use that.  Otherwise, we
@@ -1273,7 +1264,7 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
             # pyrefly: ignore [bad-argument-type]
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
-            out: list[Union[torch.Tensor, int, torch.SymInt]] = []
+            out: list[torch.Tensor | int | torch.SymInt] = []
             get_plain_tensors(flat_input, out=out)  # type: ignore[arg-type]
             fake_tensors: list[FakeTensor] = [
                 x for x in out if isinstance(x, FakeTensor)
@@ -1302,7 +1293,7 @@ def detect_fake_mode(inputs: Any = None) -> Optional[FakeTensorMode]:
         return None
 
 
-def active_fake_mode() -> Optional[FakeTensorMode]:
+def active_fake_mode() -> FakeTensorMode | None:
     """
     Inspects the dispatch mode stack for an active fake mode and returns it.
     Returns None if no fake mode is active.
