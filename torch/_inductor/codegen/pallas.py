@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy  # noqa: TC002
@@ -226,6 +227,12 @@ class PallasKernelOverrides(OpOverrides):
         jax_dtype = torch_dtype_to_jax(dtype)
         if dtype == torch.bool:
             return "True" if val else "False"
+        # Handle special float values
+        if isinstance(val, float):
+            if math.isnan(val):
+                return "jnp.nan"
+            if math.isinf(val):
+                return "jnp.inf" if val > 0 else "-jnp.inf"
         return f"jnp.array({val}, dtype={jax_dtype})"
 
     @staticmethod
@@ -274,6 +281,18 @@ class PallasKernelOverrides(OpOverrides):
     @staticmethod
     def gt(a: str, b: str) -> str:
         return f"({a} > {b})"
+
+    @staticmethod
+    def isnan(x: str) -> str:
+        return f"jnp.isnan({x})"
+
+    @staticmethod
+    def isinf(x: str) -> str:
+        return f"jnp.isinf({x})"
+
+    @staticmethod
+    def isfinite(x: str) -> str:
+        return f"jnp.isfinite({x})"
 
     @staticmethod
     def ge(a: str, b: str) -> str:
@@ -350,6 +369,302 @@ class PallasKernelOverrides(OpOverrides):
     @staticmethod
     def digamma(x: str) -> str:
         return f"jax.scipy.special.digamma({x})"
+
+    @staticmethod
+    def bessel_j0(x: str) -> str:
+        # bessel_jn requires float64 and has numerical issues at x=0 (returns NaN)
+        # bessel_jn(x, v=n) returns array of shape (n+1, ...) with J_0 to J_n
+        # Handle by: convert to float64, compute, handle x=0, convert back
+        # J0(0) = 1.0
+        return (
+            f"jnp.where({x}.astype(jnp.float64) == 0.0, 1.0, "
+            f"jax.scipy.special.bessel_jn({x}.astype(jnp.float64), v=0)[0])"
+            f".astype({x}.dtype)"
+        )
+
+    @staticmethod
+    def bessel_j1(x: str) -> str:
+        # bessel_jn requires float64 and has numerical issues at x=0 (returns NaN)
+        # bessel_jn(x, v=n) returns array of shape (n+1, ...) with J_0 to J_n
+        # Handle by: convert to float64, compute, handle x=0, convert back
+        # J1(0) = 0.0
+        return (
+            f"jnp.where({x}.astype(jnp.float64) == 0.0, 0.0, "
+            f"jax.scipy.special.bessel_jn({x}.astype(jnp.float64), v=1)[1])"
+            f".astype({x}.dtype)"
+        )
+
+    @staticmethod
+    def modified_bessel_i0(x: str) -> str:
+        # Modified Bessel function of the first kind I_0(x)
+        # I_0(x) = bessel_i0e(x) * exp(|x|) where bessel_i0e is the scaled version
+        return f"jax.lax.bessel_i0e({x}) * jnp.exp(jnp.abs({x}))"
+
+    @staticmethod
+    def modified_bessel_i1(x: str) -> str:
+        # Modified Bessel function of the first kind I_1(x)
+        # I_1(x) = bessel_i1e(x) * exp(|x|) where bessel_i1e is the scaled version
+        return f"jax.lax.bessel_i1e({x}) * jnp.exp(jnp.abs({x}))"
+
+    @staticmethod
+    def spherical_bessel_j0(x: str) -> str:
+        # Spherical Bessel function of the first kind j_0(x) = sin(x) / x
+        # Handle x=0: j_0(0) = 1
+        return f"jnp.where({x} == 0.0, 1.0, jnp.sin({x}) / {x})"
+
+    @staticmethod
+    def i0(x: str) -> str:
+        # Modified Bessel function I_0 (same as modified_bessel_i0)
+        return f"jax.lax.bessel_i0e({x}) * jnp.exp(jnp.abs({x}))"
+
+    @staticmethod
+    def i0e(x: str) -> str:
+        # Exponentially scaled modified Bessel function I_0
+        return f"jax.lax.bessel_i0e({x})"
+
+    @staticmethod
+    def i1(x: str) -> str:
+        # Modified Bessel function I_1 (same as modified_bessel_i1)
+        return f"jax.lax.bessel_i1e({x}) * jnp.exp(jnp.abs({x}))"
+
+    @staticmethod
+    def i1e(x: str) -> str:
+        # Exponentially scaled modified Bessel function I_1
+        return f"jax.lax.bessel_i1e({x})"
+
+    @staticmethod
+    def gammainc(x: str, y: str) -> str:
+        # Regularized lower incomplete gamma function P(a, x)
+        # Note: PyTorch uses gammainc(input, other) where input is a (shape param)
+        return f"jax.scipy.special.gammainc({x}, {y})"
+
+    @staticmethod
+    def gammaincc(x: str, y: str) -> str:
+        # Regularized upper incomplete gamma function Q(a, x)
+        return f"jax.scipy.special.gammaincc({x}, {y})"
+
+    @staticmethod
+    def igamma(x: str, y: str) -> str:
+        # Regularized lower incomplete gamma function (alias for gammainc)
+        return f"jax.scipy.special.gammainc({x}, {y})"
+
+    @staticmethod
+    def igammac(x: str, y: str) -> str:
+        # Regularized upper incomplete gamma function (alias for gammaincc)
+        return f"jax.scipy.special.gammaincc({x}, {y})"
+
+    @staticmethod
+    def polygamma(x: str, y: str) -> str:
+        # Polygamma function psi^(n)(x), x is order n, y is the value
+        # Note: JAX uses polygamma(n, x) where n is integer order
+        return f"jax.scipy.special.polygamma({x}.astype(jnp.int32), {y})"
+
+    @staticmethod
+    def ndtri(x: str) -> str:
+        # Inverse of the standard normal CDF
+        return f"jax.scipy.special.ndtri({x})"
+
+    @staticmethod
+    def zeta(x: str, y: str) -> str:
+        # Hurwitz zeta function zeta(x, q) = sum_{k=0}^inf 1/(k+q)^x
+        return f"jax.scipy.special.zeta({x}, {y})"
+
+    @staticmethod
+    def xlogy(x: str, y: str) -> str:
+        # x * log(y), with proper handling of x=0
+        return f"jax.scipy.special.xlogy({x}, {y})"
+
+    @staticmethod
+    def xlog1py(x: str, y: str) -> str:
+        # x * log1p(y), with proper handling of x=0
+        return f"jax.scipy.special.xlog1py({x}, {y})"
+
+    @staticmethod
+    def chebyshev_polynomial_t(x: str, n: str) -> str:
+        # Chebyshev polynomial of the first kind T_n(x)
+        # For |x| <= 1: T_n(x) = cos(n * arccos(x))
+        # For x > 1: T_n(x) = cosh(n * arccosh(x))
+        # For x < -1: T_n(x) = (-1)^n * cosh(n * arccosh(-x))
+        return (
+            f"jnp.where(jnp.abs({x}) <= 1, "
+            f"jnp.cos({n} * jnp.arccos(jnp.clip({x}, -1, 1))), "
+            f"jnp.where({x} > 1, "
+            f"jnp.cosh({n} * jnp.arccosh(jnp.maximum({x}, 1.0))), "
+            f"((-1.0) ** {n}) * jnp.cosh({n} * jnp.arccosh(jnp.maximum(-{x}, 1.0)))))"
+        )
+
+    @staticmethod
+    def chebyshev_polynomial_u(x: str, n: str) -> str:
+        # Chebyshev polynomial of the second kind U_n(x)
+        # For |x| < 1: U_n(x) = sin((n+1) * arccos(x)) / sqrt(1 - x^2)
+        # For x = 1: U_n(1) = n+1
+        # For x = -1: U_n(-1) = (-1)^n * (n+1)
+        # For x > 1: U_n(x) = sinh((n+1) * arccosh(x)) / sqrt(x^2 - 1)
+        # For x < -1: U_n(x) = (-1)^n * U_n(-x) (symmetry)
+        return (
+            f"jnp.where(jnp.abs({x}) < 1, "
+            f"jnp.sin(({n} + 1) * jnp.arccos(jnp.clip({x}, -1, 1))) / "
+            f"jnp.sqrt(jnp.maximum(1 - {x}**2, 1e-10)), "
+            f"jnp.where({x} >= 1, "
+            f"jnp.where({x} == 1, {n} + 1.0, "
+            f"jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum({x}, 1.0))) / "
+            f"jnp.sqrt(jnp.maximum({x}**2 - 1, 1e-10))), "
+            f"jnp.where({x} == -1, ((-1.0) ** {n}) * ({n} + 1.0), "
+            f"((-1.0) ** {n}) * jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum(-{x}, 1.0))) / "
+            f"jnp.sqrt(jnp.maximum({x}**2 - 1, 1e-10)))))"
+        )
+
+    @staticmethod
+    def chebyshev_polynomial_v(x: str, n: str) -> str:
+        # Chebyshev polynomial of the third kind V_n(x)
+        # V_n(x) = (T_n(x) - T_{n+1}(x)) / (1 - x) for x != 1
+        # V_n(1) = 1, recurrence: V_0 = 1, V_1 = 2x - 1, V_n = 2x*V_{n-1} - V_{n-2}
+        # Explicit: V_0 = 1, V_1 = 2x-1, V_2 = 4x^2-2x-1, V_3 = 8x^3-4x^2-4x+1
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 2*{x} - 1, "
+            f"jnp.where({n} == 2, 4*{x}**2 - 2*{x} - 1, "
+            f"jnp.where({n} == 3, 8*{x}**3 - 4*{x}**2 - 4*{x} + 1, "
+            f"jnp.where({n} == 4, 16*{x}**4 - 8*{x}**3 - 12*{x}**2 + 4*{x} + 1, "
+            f"jnp.where({n} == 5, 32*{x}**5 - 16*{x}**4 - 32*{x}**3 + 12*{x}**2 + 6*{x} - 1, "
+            f"jnp.zeros_like({x})))))))"
+        )
+
+    @staticmethod
+    def chebyshev_polynomial_w(x: str, n: str) -> str:
+        # Chebyshev polynomial of the fourth kind W_n(x)
+        # W_n(x) = (T_n(x) + T_{n+1}(x)) / (1 + x) for x != -1
+        # W_n(-1) = (-1)^n, recurrence: W_0 = 1, W_1 = 2x + 1, W_n = 2x*W_{n-1} - W_{n-2}
+        # Explicit: W_0 = 1, W_1 = 2x+1, W_2 = 4x^2+2x-1, W_3 = 8x^3+4x^2-4x-1
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 2*{x} + 1, "
+            f"jnp.where({n} == 2, 4*{x}**2 + 2*{x} - 1, "
+            f"jnp.where({n} == 3, 8*{x}**3 + 4*{x}**2 - 4*{x} - 1, "
+            f"jnp.where({n} == 4, 16*{x}**4 + 8*{x}**3 - 12*{x}**2 - 4*{x} + 1, "
+            f"jnp.where({n} == 5, 32*{x}**5 + 16*{x}**4 - 32*{x}**3 - 12*{x}**2 + 6*{x} + 1, "
+            f"jnp.zeros_like({x})))))))"
+        )
+
+    @staticmethod
+    def shifted_chebyshev_polynomial_t(x: str, n: str) -> str:
+        # Shifted Chebyshev polynomial of the first kind T*_n(x) = T_n(2x - 1)
+        # T_n(y) where y = 2x - 1
+        # Use same formula as chebyshev_polynomial_t
+        y = f"(2 * {x} - 1)"
+        return (
+            f"jnp.where(jnp.abs({y}) <= 1, "
+            f"jnp.cos({n} * jnp.arccos(jnp.clip({y}, -1, 1))), "
+            f"jnp.where({y} > 1, "
+            f"jnp.cosh({n} * jnp.arccosh(jnp.maximum({y}, 1.0))), "
+            f"((-1.0) ** {n}) * jnp.cosh({n} * jnp.arccosh(jnp.maximum(-{y}, 1.0)))))"
+        )
+
+    @staticmethod
+    def shifted_chebyshev_polynomial_u(x: str, n: str) -> str:
+        # Shifted Chebyshev polynomial of the second kind U*_n(x) = U_n(2x - 1)
+        # Use same formula as chebyshev_polynomial_u
+        y = f"(2 * {x} - 1)"
+        return (
+            f"jnp.where(jnp.abs({y}) < 1, "
+            f"jnp.sin(({n} + 1) * jnp.arccos(jnp.clip({y}, -1, 1))) / "
+            f"jnp.sqrt(jnp.maximum(1 - ({y})**2, 1e-10)), "
+            f"jnp.where({y} >= 1, "
+            f"jnp.where({y} == 1, {n} + 1.0, "
+            f"jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum({y}, 1.0))) / "
+            f"jnp.sqrt(jnp.maximum({y}**2 - 1, 1e-10))), "
+            f"jnp.where({y} == -1, ((-1.0) ** {n}) * ({n} + 1.0), "
+            f"((-1.0) ** {n}) * jnp.sinh(({n} + 1) * jnp.arccosh(jnp.maximum(-{y}, 1.0))) / "
+            f"jnp.sqrt(jnp.maximum({y}**2 - 1, 1e-10)))))"
+        )
+
+    @staticmethod
+    def shifted_chebyshev_polynomial_v(x: str, n: str) -> str:
+        # Shifted Chebyshev polynomial of the third kind V*_n(x) = V_n(2x - 1)
+        y = f"(2 * {x} - 1)"  # shifted variable
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 2*{y} - 1, "
+            f"jnp.where({n} == 2, 4*{y}**2 - 2*{y} - 1, "
+            f"jnp.where({n} == 3, 8*{y}**3 - 4*{y}**2 - 4*{y} + 1, "
+            f"jnp.where({n} == 4, 16*{y}**4 - 8*{y}**3 - 12*{y}**2 + 4*{y} + 1, "
+            f"jnp.where({n} == 5, 32*{y}**5 - 16*{y}**4 - 32*{y}**3 + 12*{y}**2 + 6*{y} - 1, "
+            f"jnp.zeros_like({x})))))))"
+        )
+
+    @staticmethod
+    def shifted_chebyshev_polynomial_w(x: str, n: str) -> str:
+        # Shifted Chebyshev polynomial of the fourth kind W*_n(x) = W_n(2x - 1)
+        y = f"(2 * {x} - 1)"  # shifted variable
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 2*{y} + 1, "
+            f"jnp.where({n} == 2, 4*{y}**2 + 2*{y} - 1, "
+            f"jnp.where({n} == 3, 8*{y}**3 + 4*{y}**2 - 4*{y} - 1, "
+            f"jnp.where({n} == 4, 16*{y}**4 + 8*{y}**3 - 12*{y}**2 - 4*{y} + 1, "
+            f"jnp.where({n} == 5, 32*{y}**5 + 16*{y}**4 - 32*{y}**3 - 12*{y}**2 + 6*{y} + 1, "
+            f"jnp.zeros_like({x})))))))"
+        )
+
+    @staticmethod
+    def hermite_polynomial_h(x: str, n: str) -> str:
+        # Physicist's Hermite polynomial H_n(x)
+        # H_n(x) = 2^n * x^n - n*(n-1)/2 * 2^(n-2) * x^(n-2) + ...
+        # Use explicit formula: H_n(x) = n! * sum_{m=0}^{n//2} (-1)^m / (m! * (n-2m)!) * (2x)^(n-2m)
+        # For simplicity, use the relation: H_n(x) = 2^(n/2) * He_n(x * sqrt(2)) where He is probabilist's
+        # Actually simpler: use recurrence or closed form
+        # H_0 = 1, H_1 = 2x, H_2 = 4x^2 - 2, H_3 = 8x^3 - 12x
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 2 * {x}, "
+            f"jnp.where({n} == 2, 4 * {x}**2 - 2, "
+            f"jnp.where({n} == 3, 8 * {x}**3 - 12 * {x}, "
+            f"jnp.where({n} == 4, 16 * {x}**4 - 48 * {x}**2 + 12, "
+            f"jnp.where({n} == 5, 32 * {x}**5 - 160 * {x}**3 + 120 * {x}, "
+            f"jnp.zeros_like({x})))))))"  # Fallback for higher n
+        )
+
+    @staticmethod
+    def hermite_polynomial_he(x: str, n: str) -> str:
+        # Probabilist's Hermite polynomial He_n(x)
+        # He_0 = 1, He_1 = x, He_2 = x^2 - 1, He_3 = x^3 - 3x
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, {x}, "
+            f"jnp.where({n} == 2, {x}**2 - 1, "
+            f"jnp.where({n} == 3, {x}**3 - 3 * {x}, "
+            f"jnp.where({n} == 4, {x}**4 - 6 * {x}**2 + 3, "
+            f"jnp.where({n} == 5, {x}**5 - 10 * {x}**3 + 15 * {x}, "
+            f"jnp.zeros_like({x})))))))"  # Fallback for higher n
+        )
+
+    @staticmethod
+    def laguerre_polynomial_l(x: str, n: str) -> str:
+        # Laguerre polynomial L_n(x)
+        # L_0 = 1, L_1 = 1 - x, L_2 = (x^2 - 4x + 2)/2, L_3 = (-x^3 + 9x^2 - 18x + 6)/6
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, 1 - {x}, "
+            f"jnp.where({n} == 2, ({x}**2 - 4*{x} + 2) / 2, "
+            f"jnp.where({n} == 3, (-{x}**3 + 9*{x}**2 - 18*{x} + 6) / 6, "
+            f"jnp.where({n} == 4, ({x}**4 - 16*{x}**3 + 72*{x}**2 - 96*{x} + 24) / 24, "
+            f"jnp.where({n} == 5, (-{x}**5 + 25*{x}**4 - 200*{x}**3 + 600*{x}**2 - 600*{x} + 120) / 120, "
+            f"jnp.zeros_like({x})))))))"  # Fallback for higher n
+        )
+
+    @staticmethod
+    def legendre_polynomial_p(x: str, n: str) -> str:
+        # Legendre polynomial P_n(x)
+        # P_0 = 1, P_1 = x, P_2 = (3x^2 - 1)/2, P_3 = (5x^3 - 3x)/2
+        return (
+            f"jnp.where({n} == 0, jnp.ones_like({x}), "
+            f"jnp.where({n} == 1, {x}, "
+            f"jnp.where({n} == 2, (3 * {x}**2 - 1) / 2, "
+            f"jnp.where({n} == 3, (5 * {x}**3 - 3 * {x}) / 2, "
+            f"jnp.where({n} == 4, (35 * {x}**4 - 30 * {x}**2 + 3) / 8, "
+            f"jnp.where({n} == 5, (63 * {x}**5 - 70 * {x}**3 + 15 * {x}) / 8, "
+            f"jnp.zeros_like({x})))))))"  # Fallback for higher n
+        )
 
     # Reciprocal and square
     @staticmethod

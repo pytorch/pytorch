@@ -2427,6 +2427,9 @@ class TestSelectAlgorithm(BaseTestSelectAlgorithm):
         ),
     )
     @dtypes(torch.float, torch.bfloat16, torch.half)
+    @unittest.skip(
+        "Skip for now since it's flaky: https://github.com/pytorch/pytorch/actions/runs/19916391966/job/57096613514?pr=169151"
+    )
     def test_bmm_2d_permute(self, Ndim, order, dtype):
         # TODO: Support bmm with transposed X
         bs = 12

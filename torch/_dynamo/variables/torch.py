@@ -41,6 +41,7 @@ import torch._refs
 import torch.fx
 import torch.nn
 from torch._guards import TracingContext
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -86,6 +87,7 @@ from .torch_function import (
     TensorWithTFOverrideVariable,
     TorchFunctionModeStackVariable,
 )
+from .user_defined import UserDefinedObjectVariable
 
 
 try:
@@ -932,11 +934,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # bake the result into the trace
                 if len(args) == 1:
                     # group or group name
-                    assert isinstance(args[0], (ProcessGroupVariable, ConstantVariable))
+                    assert (
+                        isinstance(args[0], ProcessGroupVariable)
+                        or args[0].is_python_constant()
+                    )
                 elif len(args) == 2:
                     # ranks + tag
-                    assert isinstance(args[0], ListVariable) and isinstance(
-                        args[1], ConstantVariable
+                    assert (
+                        isinstance(args[0], ListVariable)
+                        and args[1].is_python_constant()
                     )
                 else:
                     raise AssertionError(
@@ -955,12 +961,31 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             def handle_from_local(self, tx: "InstructionTranslator", *args, **kwargs):
                 # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
                 # and rewrite args to have only proxyable args, then insert call_function
-                args_as_value = [x.as_python_constant() for x in args[1:]]
+                placements_vt = kwargs.get("placements")
+
+                if placements_vt is None and len(args) >= 3:
+                    placements_vt = args[2]
+
+                if placements_vt is None:
+                    placements_vt = ConstantVariable.create(None)
+                elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
+                    placements_vt = variables.BuiltinVariable(tuple).call_function(
+                        tx, [placements_vt], {}
+                    )
+
+                new_args = list(args)
+                if len(new_args) >= 3:
+                    new_args[2] = placements_vt
+                elif kwargs.get("placements") is not None:
+                    kwargs["placements"] = placements_vt
+
+                args_as_value = [x.as_python_constant() for x in new_args[1:]]
                 kwargs_as_value = {
                     k: v.as_python_constant()
                     for k, v in kwargs.items()
                     if k not in ["shape", "stride"]
                 }
+
                 kwargs_to_be_proxied = {
                     k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
                 }
@@ -996,7 +1021,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         ):
             from .lists import BaseListVariable
 
-            if layout and layout.as_python_constant() == torch.strided:
+            if layout and layout.is_constant_match(torch.strided):
                 unimplemented(
                     gb_type="Attempted to use strided NestedTensor",
                     context=f"layout={layout}",
@@ -1020,9 +1045,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         @register(torch.nn.functional.one_hot)
         def handle_one_hot(self, tx: "InstructionTranslator", *args, **kwargs):
             if len(args) + len(kwargs) == 1 or (
-                len(args) == 2
-                and args[1].is_python_constant()
-                and args[1].as_python_constant() == -1
+                len(args) == 2 and args[1].is_constant_match(-1)
             ):
                 unimplemented(
                     gb_type="Attempted to use `torch.nn.functional.one_hot` with data-dependent output shape",
@@ -1044,7 +1067,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
-            elif isinstance(expr, ConstantVariable):
+            elif expr.is_python_constant():
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.guard_or_true)
@@ -1055,7 +1078,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return variables.ConstantVariable.create(
                     torch.fx.experimental.symbolic_shapes.guard_or_true(expr.sym_num)
                 )
-            elif isinstance(expr, ConstantVariable):
+            elif expr.is_python_constant():
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.guard_or_false)
@@ -1066,7 +1089,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return variables.ConstantVariable.create(
                     torch.fx.experimental.symbolic_shapes.guard_or_false(expr.sym_num)
                 )
-            elif isinstance(expr, ConstantVariable):
+            elif expr.is_python_constant():
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.statically_known_false)
@@ -1077,15 +1100,15 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
-            elif isinstance(expr, ConstantVariable):
+            elif expr.is_python_constant():
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.guard_scalar)
         def guard_scalar(self, tx: "InstructionTranslator", expr):
             if isinstance(expr, SymNodeVariable):
                 val = expr.sym_num
-            elif isinstance(expr, ConstantVariable):
-                val = expr.value
+            elif expr.is_python_constant():
+                val = expr.as_python_constant()
             else:
                 unimplemented(
                     gb_type="torch.fx.experimental.symbolic_shapes.guard_scalar branch not supported",
@@ -1106,7 +1129,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
-            elif isinstance(expr, ConstantVariable):
+            elif expr.is_python_constant():
                 return expr
 
         @register(torch.fx.experimental.symbolic_shapes.sym_and)
@@ -1135,8 +1158,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         def handle_has_static_value(self, tx: "InstructionTranslator", expr):
             if isinstance(expr, SymNodeVariable):
                 val = expr.sym_num
-            elif isinstance(expr, ConstantVariable):
-                val = expr.value
+            elif expr.is_python_constant():
+                val = expr.as_python_constant()
             else:
                 return
 
@@ -1336,7 +1359,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             # Running the graph will ensure that the DeviceContext mode is
             # at the correct position in the stack
             TorchFunctionModeStackVariable.register_mutation(tx)
-            if args[0].is_python_constant() and args[0].as_python_constant() is None:
+            if args[0].is_constant_none():
                 TorchFunctionModeStackVariable.clear_default_device(tx)
             else:
                 TorchFunctionModeStackVariable.register_device_context_insertion(tx)
@@ -1488,6 +1511,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         )
             return self.call_tensor_method(tx, args, kwargs)
 
+        intermediate_opaques = [
+            type(x.value)
+            for x in args
+            if x.source is None
+            and isinstance(x, UserDefinedObjectVariable)
+            and is_opaque_type(type(x.value))
+        ]
+        if len(intermediate_opaques) > 0:
+            unimplemented(
+                gb_type="Opaque object were created in the middle of the program and passed to a custom op.",
+                context=f"Opaque object types: {intermediate_opaques}. Function: {self.value}",
+                explanation=(
+                    "Opaque objects cannot be created inside the torch.compile region. "
+                    "They must be created before entering the compiled function."
+                ),
+                hints=[
+                    "Please create the opaque object before calling torch.compile "
+                    "and pass it in as an argument or as a global variable."
+                ],
+            )
+
         special_handler = self._get_handlers().get(self.value)
         if special_handler:
             result = special_handler(self, tx, *args, **kwargs)
@@ -1497,8 +1541,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         any_symints_or_symfloats = any(isinstance(x, SymNodeVariable) for x in args)
 
         all_ints_or_floats = all(
-            isinstance(x, (variables.ConstantVariable, variables.SymNodeVariable))
-            for x in args
+            isinstance(x, SymNodeVariable) or x.is_python_constant() for x in args
         )
         if (
             getattr(self.value, "__module__", "") == "torch"
@@ -1660,7 +1703,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                             *graph_break_hints.SUPPORTABLE,
                         ],
                     )
-                if not torch._prims_common.is_contiguous(fake_out):
+                if not torch._prims_common.is_contiguous_or_false(fake_out):
                     # It's difficult to handle strides correctly in functionalization
                     # when calling an out= op with a non-contiguous out argument
                     unimplemented(
@@ -2074,15 +2117,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 (torch._ops.OpOverload, torch._ops.OpOverloadPacket),
             )
         ) and can_dispatch_torch_function(tx, args, kwargs)
-
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.value)
-
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
 
 
 class DispatchKeySetVariable(BaseTorchVariable):

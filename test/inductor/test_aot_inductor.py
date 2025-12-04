@@ -6580,7 +6580,7 @@ class AOTInductorTestsTemplate:
         with self.assertRaises(AssertionError):
             torch.testing.assert_close(new_expected, new_output, atol=1e-3, rtol=1e-3)
 
-    def test_cond_share_predicte(self):
+    def test_cond_share_predicate(self):
         class Model(torch.nn.Module):
             def forward(self, predicate, x):
                 y = torch.cond(
@@ -6601,6 +6601,33 @@ class AOTInductorTestsTemplate:
             torch.tensor([1, 2, 3]).to(self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    def test_cond_predicate_on_cpu(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "is_cache_initialized",
+                    torch.tensor([False], dtype=torch.bool, device="cpu"),
+                    persistent=False,
+                )
+
+            def forward(self, x):
+                def true_fn(x):
+                    return x + 1.0
+
+                def false_fn(x):
+                    return x + 0.0
+
+                out = torch.cond(
+                    self.is_cache_initialized, true_fn, false_fn, operands=(x,)
+                )
+                self.is_cache_initialized.fill_(True)
+                return out
+
+        model = Model()
+        example_inputs = (torch.tensor([1.0], device=self.device),)
+        self.check_model(model, example_inputs)
 
     @unittest.skipIf(
         IS_FBCODE,

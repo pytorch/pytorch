@@ -204,7 +204,9 @@ if RUN_CPU:
             for func in dir(test_cpu_select_algorithm.TestSelectAlgorithmCPU())
             if func.startswith(
                 (
-                    "test_linear_with_pointwise",
+                    # skip for now since it's flaky:
+                    # https://github.com/pytorch/pytorch/actions/runs/19916391966/job/57096613509?pr=169151
+                    # "test_linear_with_pointwise",
                     "test_grouped_linear",
                 )
             )

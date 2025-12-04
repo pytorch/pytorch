@@ -365,7 +365,9 @@ class RangeVariable(BaseListVariable):
 
         def maybe_as_int(x: VariableTracker) -> VariableTracker:
             return (
-                ConstantVariable(int(x.value)) if isinstance(x, ConstantVariable) else x
+                ConstantVariable.create(int(x.as_python_constant()))
+                if x.is_python_constant()
+                else x
             )
 
         # cast each argument to an integer
@@ -619,25 +621,6 @@ class RangeVariable(BaseListVariable):
         if name in fields:
             return self.items[fields.index(name)]
         return super().var_getattr(tx, name)
-
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        l = self.range_length()
-        start = self.start()
-        step = self.step()
-        return hash((l, start, step))
-
-    def is_python_equal(self, other):
-        if not isinstance(other, variables.RangeVariable):
-            return False
-
-        return (
-            self.start() == other.start()
-            and self.step() == other.step()
-            and self.stop() == other.stop()
-        )
 
 
 class CommonListMethodsVariable(BaseListVariable):
@@ -922,10 +905,7 @@ class ListVariable(CommonListMethodsVariable):
             if len(kwargs) != 0:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
 
-            if (
-                key_fn_var.is_python_constant()
-                and key_fn_var.as_python_constant() is None
-            ):
+            if key_fn_var.is_constant_none():
                 keys = self.items.copy()
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
@@ -999,9 +979,6 @@ class ListVariable(CommonListMethodsVariable):
         if self.python_type() is not list:
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr([], name))
-
-    def is_python_hashable(self):
-        return False
 
 
 class DequeVariable(CommonListMethodsVariable):
@@ -1192,18 +1169,6 @@ class TupleVariable(BaseListVariable):
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr((), name))
 
-    def is_python_hashable(self):
-        return all(item.is_python_hashable() for item in self.items)
-
-    def get_python_hash(self):
-        items = tuple(x.get_python_hash() for x in self.items)
-        return hash(items)
-
-    def is_python_equal(self, other):
-        return isinstance(other, variables.TupleVariable) and all(
-            a.is_python_equal(b) for (a, b) in zip(self.items, other.items)
-        )
-
 
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
@@ -1294,8 +1259,8 @@ class SizeVariable(TupleVariable):
         sym_sizes = []
 
         for v in self.items:
-            if isinstance(v, ConstantVariable):
-                const_result *= v.value
+            if v.is_python_constant():
+                const_result *= v.as_python_constant()
             else:
                 assert isinstance(v, SymNodeVariable), type(v)
                 # Delay proxy calls  until we know it will be necessary

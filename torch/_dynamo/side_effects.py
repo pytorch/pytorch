@@ -59,7 +59,6 @@ from .variables.user_defined import FrozenDataClassVariable
 if TYPE_CHECKING:
     from torch._dynamo.output_graph import OutputGraph
     from torch._dynamo.symbolic_convert import InstructionTranslatorBase
-    from torch._dynamo.variables.functions import LocalGeneratorObjectVariable
     from torch._dynamo.variables.lists import ListVariable
 
 
@@ -135,7 +134,6 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
-        self.local_generators: list[LocalGeneratorObjectVariable] = []
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
@@ -228,24 +226,6 @@ class SideEffects:
             output_graph
             and output_graph.current_tx.output.current_tracer.allow_side_effects_in_hop
         )
-
-    def track_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
-        self.local_generators.append(gen)
-
-    def untrack_generator(self, gen: "LocalGeneratorObjectVariable") -> None:
-        self.local_generators.remove(gen)
-
-    def close_local_generators(self) -> None:
-        from .symbolic_convert import temporarely_allow_writes_to_output_graph
-
-        output_graph = self.output_graph_weakref()
-        if output_graph:
-            tx = output_graph.root_tx
-            with temporarely_allow_writes_to_output_graph(tx):
-                for gen in self.local_generators:
-                    if not gen._is_generator_exhausted():
-                        # pyrefly: ignore[bad-argument-type]
-                        gen.call_method(tx, "close", [], {})
 
     def is_reconstructing_generator(self) -> bool:
         output_graph = self.output_graph_weakref()
@@ -901,10 +881,7 @@ class SideEffects:
             elif isinstance(var, variables.lists.DequeVariable):
                 # For limited maxlen, the order of operations matter for side
                 # effect, but we currently don't track the order, so no support.
-                if not (
-                    isinstance(var.maxlen, variables.ConstantVariable)
-                    and var.maxlen.value is None
-                ):
+                if not var.maxlen.is_constant_none():
                     unimplemented(
                         gb_type="Side effect on existing deque with limited maxlen",
                         context="",
