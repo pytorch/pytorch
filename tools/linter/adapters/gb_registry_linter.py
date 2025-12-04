@@ -181,6 +181,40 @@ def check_registry_sync(dynamo_dir: Path, registry_path: Path) -> list[LintMessa
     calls = {gb_type: calls[0] for gb_type, calls in all_calls.items()}
 
     registry = load_registry(registry_path)
+
+    # Check for duplicate gb_types across different GB IDs in the registry
+    gb_type_to_ids: dict[str, list[str]] = {}
+    for gb_id, entries in registry.items():
+        gb_type = entries[0]["Gb_type"]
+        if gb_type not in gb_type_to_ids:
+            gb_type_to_ids[gb_type] = []
+        gb_type_to_ids[gb_type].append(gb_id)
+
+    duplicate_gb_types_in_registry = [
+        (gb_type, ids) for gb_type, ids in gb_type_to_ids.items() if len(ids) > 1
+    ]
+
+    if duplicate_gb_types_in_registry:
+        for gb_type, ids in duplicate_gb_types_in_registry:
+            description = (
+                f"The gb_type '{gb_type}' appears in multiple GB IDs: {', '.join(sorted(ids))}. "
+                f"Each gb_type must map to exactly one GB ID. Please manually fix the registry."
+            )
+            lint_messages.append(
+                LintMessage(
+                    path=str(registry_path),
+                    line=None,
+                    char=None,
+                    code=LINTER_CODE,
+                    severity=LintSeverity.ERROR,
+                    name="Duplicate gb_type in registry",
+                    original=None,
+                    replacement=None,
+                    description=description,
+                )
+            )
+        return lint_messages
+
     latest_entry: dict[str, Any] = {
         entries[0]["Gb_type"]: entries[0] for entries in registry.values()
     }
