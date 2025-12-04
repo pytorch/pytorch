@@ -1662,7 +1662,7 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 )
 
             binary_ext = GPU_KERNEL_BIN_EXTS.get(
-                triton_meta.get("device_type"), "cubin"
+                triton_meta.get("device_type"), ".cubin"
             )
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),

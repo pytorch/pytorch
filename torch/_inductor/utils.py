@@ -148,7 +148,7 @@ XPU_KERNEL_FORMAT = (
 GPU_KERNEL_BIN_EXTS = {
     "cuda": ".cubin",
     "hip": ".hsaco",
-    ".xpu": f".{XPU_KERNEL_FORMAT}",
+    "xpu": f".{XPU_KERNEL_FORMAT}",
 }
 
 GPU_ALIGN_BYTES = 16
