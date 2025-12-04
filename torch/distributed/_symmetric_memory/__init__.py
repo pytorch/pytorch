@@ -2012,4 +2012,56 @@ def get_mempool_allocator(device: _device):  # type: ignore[no-untyped-def]
     return _SymmetricMemory.get_mempool_allocator(torch.device(device))
 
 
-__all__ = ["empty", "rendezvous", "is_nvshmem_available", "set_backend", "get_backend"]
+def set_signal_pad_size(size: int) -> None:
+    r"""
+    Set the signal pad size for future symmetric memory allocations.
+
+    Signal pads are P2P-accessible memory regions used for synchronization in
+    symmetric memory. This function allows users to configure
+    the signal pad size to be proportional to their workload requirements.
+
+    .. warning::
+        This must be called before any symmetric memory allocations are made.
+        The size cannot be changed after allocations have been performed.
+
+    Args:
+        size (int): the signal pad size in bytes. The size should be
+            proportional to the number of blocks launched and the world size.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # Set a larger signal pad size before any allocations
+        >>> torch.distributed._symmetric_memory.set_signal_pad_size(1024 * 1024)  # 1MB
+    """
+    _SymmetricMemory.signal_pad_size = size
+
+
+def get_signal_pad_size() -> int:
+    r"""
+    Get the current signal pad size for symmetric memory allocations.
+
+    Returns the user-configured size if set via :func:`set_signal_pad_size`,
+    otherwise returns the default size.
+
+    Returns:
+        int: the signal pad size in bytes.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> size = torch.distributed._symmetric_memory.get_signal_pad_size()
+        >>> print(f"Signal pad size: {size} bytes")
+    """
+    return _SymmetricMemory.signal_pad_size
+
+
+__all__ = [
+    "empty",
+    "rendezvous",
+    "is_nvshmem_available",
+    "set_backend",
+    "get_backend",
+    "set_signal_pad_size",
+    "get_signal_pad_size",
+]
