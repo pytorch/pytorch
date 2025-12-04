@@ -578,7 +578,7 @@ def mark_unbacked(
     if isinstance(t, torch.distributed.tensor.DTensor):
         # apply on inner tensor sizes/strides
         mark_unbacked(t._local_tensor, index)
-    elif is_traceable_wrapper_subclass(t):
+    else:
         # You could have copied the mark_dynamic behavior but I'm not convinced
         # it's what you want
         assert not is_traceable_wrapper_subclass(t), "not implemented yet"

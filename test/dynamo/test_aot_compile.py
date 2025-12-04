@@ -34,6 +34,11 @@ MY_LAMBDA = lambda x: x + 1  # noqa: E731
 EPS = torch.tensor(1e-7)
 
 
+class MooType:
+    def __init__(self, x):
+        self.x = x
+
+
 class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
     def __init__(self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]):
         self.gm = gm
@@ -775,6 +780,57 @@ from user code:
             actual = compiled_fn(*test_inputs)
             self.assertEqual(compiled_fn._artifacts.backend_name, "aotinductor")
             self.assertEqual(expected, actual)
+
+    def test_aot_compile_with_checkpoint(self):
+        from torch.utils.checkpoint import checkpoint
+
+        def fn(x, y):
+            def compute(x, y):
+                return x * 2 + y * 3
+
+            return checkpoint(compute, x, y, use_reentrant=False)
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*inputs)
+            self.assertEqual(expected, actual)
+
+    def test_external_refs_validation(self):
+        """Test that external refs tracking and f_globals parameter work correctly"""
+
+        def fn(x, y):
+            return MooType(x + y)
+
+        def make_inputs():
+            return (torch.randn(3, 4), torch.randn(3, 4))
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))
+        test_inputs = make_inputs()
+        expected = fn(*test_inputs)
+        actual = compiled_fn(*test_inputs)
+        self.assertEqual(expected.x, actual.x)
+        compiled_fn.save_compiled_function(self.path())
+
+        with self.assertRaisesRegex(RuntimeError, "Missing required external ref"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(
+                f, f_globals=fn.__globals__
+            )
+        actual = compiled_fn(*test_inputs)
+        self.assertEqual(expected.x, actual.x)
 
 
 if __name__ == "__main__":
