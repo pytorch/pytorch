@@ -4650,11 +4650,15 @@ class GraphModule(torch.nn.Module):
             )
 
         # Should not raise UncapturedHigherOrderOpError
-        self._compile_check(run_logic, (torch.tensor(True), x), fullgraph=True)
-
+        # Compile once and test both branches
+        compiled_fn = torch.compile(run_logic, fullgraph=True)
+        true_pred = torch.tensor(True)
+        false_pred = torch.tensor(False)
+        
+        # Test true branch
+        self.assertTrue(torch.allclose(run_logic(true_pred, x), compiled_fn(true_pred, x)))
         # Test false branch
-        result_false = torch.compile(run_logic, fullgraph=True)(torch.tensor(False), x)
-        self.assertTrue(torch.allclose(result_false, x))
+        self.assertTrue(torch.allclose(run_logic(false_pred, x), compiled_fn(false_pred, x)))
 
     def test_functional_call_with_scan(self):
         """Test that functional_call works with torch.scan"""
