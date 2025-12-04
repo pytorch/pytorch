@@ -80,7 +80,8 @@ void register_fork_handler_for_device_init(at::DeviceType device_type) {
   at_fork_registered[static_cast<int>(device_type)] = true;
   c10::call_once(at_fork_register_once, []() {
     pthread_atfork(nullptr, nullptr, []() {
-      for (int i = 0; i < static_cast<int>(at::COMPILE_TIME_MAX_DEVICE_TYPES); ++i) {
+      for (int i = 0; i < static_cast<int>(at::COMPILE_TIME_MAX_DEVICE_TYPES);
+           ++i) {
         if (!at_fork_registered[i]) {
           continue;
         }
