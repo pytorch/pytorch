@@ -1605,7 +1605,7 @@ class VariableBuilder:
             )
             result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, (set, frozenset, OrderedSet)):
+        elif isinstance(value, (set, frozenset)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -1621,8 +1621,7 @@ class VariableBuilder:
                 set_vt_cls = SetVariable
             elif isinstance(value, frozenset):
                 set_vt_cls = FrozensetVariable
-            else:  # OrderedSet
-                set_vt_cls = OrderedSetVariable
+
             set_vt = set_vt_cls(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
