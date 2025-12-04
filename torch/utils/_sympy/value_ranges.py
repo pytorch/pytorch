@@ -772,6 +772,21 @@ class SymPyValueRangeAnalysis:
             return ValueRanges(-upper, upper)
 
     @classmethod
+    def python_mod(cls, x, y):
+        """Python-style modulo: result has same sign as divisor.
+
+        Assumes valid input where y is never 0.
+        - When y > 0: result is in [0, y - 1]
+        - When y < 0: result is in [y + 1, 0]
+        """
+        x = ValueRanges.wrap(x)
+        y = ValueRanges.wrap(y)
+
+        lower = 0 if y.lower > 0 else y.lower + 1
+        upper = 0 if y.upper < 0 else y.upper - 1
+        return ValueRanges(lower, upper)
+
+    @classmethod
     def modular_indexing(cls, a, b, c):
         return cls.mod(cls.floordiv(a, b), c)
 
