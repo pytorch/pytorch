@@ -1003,9 +1003,8 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
 
         def get_temp_uncompressed_file() -> str:
-            fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
-            fp.close()
-            return fp.name
+            with tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False) as fp:
+                return fp.name
 
         if not self._registered:
             self.output_file_path = output_file_path

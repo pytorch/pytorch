@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from collections.abc import Callable
-from typing import Optional, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.timer.api import TimerClient, TimerRequest
@@ -131,7 +131,7 @@ class FileTimerClient(TimerClient):
         self.signal = signal
 
     @_retry(max_retries=10, sleep_time=0.1)
-    def _open_non_blocking(self) -> Optional[io.TextIOWrapper]:
+    def _open_non_blocking(self) -> io.TextIOWrapper | None:
         # The server may have crashed or may haven't started yet.
         # In such case, calling open() in blocking model blocks the client.
         # To avoid such issue, open it in non-blocking mode, and an OSError will
@@ -200,7 +200,7 @@ class FileTimerServer:
         run_id: str,
         max_interval: float = 10,
         daemon: bool = True,
-        log_event: Optional[Callable[[str, Optional[FileTimerRequest]], None]] = None,
+        log_event: Callable[[str, FileTimerRequest | None], None] | None = None,
     ) -> None:
         self._file_path = file_path
         self._run_id = run_id
@@ -208,7 +208,7 @@ class FileTimerServer:
         self._daemon = daemon
         self._timers: dict[tuple[int, str], FileTimerRequest] = {}
         self._stop_signaled = False
-        self._watchdog_thread: Optional[threading.Thread] = None
+        self._watchdog_thread: threading.Thread | None = None
 
         self._is_client_started = False
         if os.path.exists(self._file_path):
@@ -281,22 +281,21 @@ class FileTimerServer:
         #  2. We are running the watchdog loop in a separate daemon
         #     thread, which will not block the process to stop.
         try:
-            fd = open(self._file_path)
+            with open(self._file_path) as fd:
+                self._is_client_started = True
+                while not self._stop_signaled:
+                    try:
+                        run_once = self._run_once
+                        self._run_watchdog(fd)
+                        if run_once:
+                            break
+                        self._last_progress_time = int(time.time())
+                    except Exception:
+                        logger.exception("Error running watchdog")
+
         except Exception:
             logger.exception("Could not open the FileTimerServer pipe")
             raise
-
-        with fd:
-            self._is_client_started = True
-            while not self._stop_signaled:
-                try:
-                    run_once = self._run_once
-                    self._run_watchdog(fd)
-                    if run_once:
-                        break
-                    self._last_progress_time = int(time.time())
-                except Exception:
-                    logger.exception("Error running watchdog")
 
     def _run_watchdog(self, fd: io.TextIOWrapper) -> None:
         timer_requests = self._get_requests(fd, self._max_interval)
