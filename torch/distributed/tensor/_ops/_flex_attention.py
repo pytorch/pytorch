@@ -10,6 +10,7 @@ from torch._higher_order_ops.flex_attention import (
     flex_attention_backward as flex_attention_backward_hop,
 )
 from torch._subclasses import FakeTensorMode
+from torch.distributed.tensor import DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -318,8 +319,6 @@ def _propagate_sharding_and_redistribute(
             redistribution schema, and flags indicating whether
             redistribution is needed.
     """
-    from torch.distributed.tensor._api import DTensor
-
     propagator = DTensor._op_dispatcher.sharding_propagator
 
     strategy_schema = propagator._wrap_with_op_strategy(op_schema)
@@ -380,10 +379,10 @@ def _propagate_sharding_and_redistribute(
 
 
 def _flex_propagate(
-    query,  # DTensor
-    key,  # DTensor
-    value,  # DTensor
-    block_mask: tuple,
+    query: DTensor,
+    key: DTensor,
+    value: DTensor,
+    block_mask: tuple[DTensor, ...],
 ) -> OpInfo:
     compute_mesh = query.device_mesh
 
@@ -436,14 +435,14 @@ def _flex_propagate(
 
 
 def _flex_backward_propagate(
-    query,
-    key,
-    value,
-    out,
-    logsumexp,
-    grad_out,
-    grad_logsumexp,
-    block_mask: tuple,
+    query: DTensor,
+    key: DTensor,
+    value: DTensor,
+    out: DTensor,
+    logsumexp: DTensor,
+    grad_out: DTensor,
+    grad_logsumexp: DTensor,
+    block_mask: tuple[DTensor, ...],
 ) -> OpInfo:
     compute_mesh = query.device_mesh
 
@@ -528,20 +527,18 @@ def _flex_backward_propagate(
     return op_info
 
 
+@flex_attention_hop.py_impl(DTensor)
 def dtensor_flex_attention(
-    query,  # DTensor
-    key,  # DTensor
-    value,  # DTensor
+    query: DTensor,
+    key: DTensor,
+    value: DTensor,
     score_mod: Callable,
-    block_mask: tuple,
+    block_mask: tuple[DTensor | torch.Tensor, ...],
     scale: float,
     kernel_options: dict[str, Any],
-    score_mod_other_buffers: tuple = (),
-    mask_mod_other_buffers: tuple = (),
-):  # -> tuple[DTensor, DTensor, DTensor]
-    # Import DTensor at runtime to avoid circular dependency
-    from torch.distributed.tensor._api import DTensor
-
+    score_mod_other_buffers: tuple[torch.Tensor, ...] = (),
+    mask_mod_other_buffers: tuple[DTensor | torch.Tensor, ...] = (),
+) -> tuple[DTensor, DTensor, DTensor]:
     if score_mod_other_buffers:
         raise ValueError(
             "FlexAttention + DTensor doesn't support score_mod_other_buffers yet."
@@ -554,16 +551,20 @@ def dtensor_flex_attention(
     )
 
     op_info = _flex_propagate(query, key, value, block_mask[2:4])
-    query, key, value, *_ = op_info.local_args
+    local_query, local_key, local_value, *_ = op_info.local_args
+    # Cast to torch.Tensor for type checker
+    assert isinstance(local_query, torch.Tensor)
+    assert isinstance(local_key, torch.Tensor)
+    assert isinstance(local_value, torch.Tensor)
 
     block_mask_local = pytree.tree_map(
         lambda x: x._local_tensor if isinstance(x, DTensor) else x,
         block_mask,
     )
     outputs = flex_attention_hop(
-        query=query,
-        key=key,
-        value=value,
+        query=local_query,
+        key=local_key,
+        value=local_value,
         score_mod=score_mod,
         block_mask=block_mask_local,
         scale=scale,
@@ -578,30 +579,28 @@ def dtensor_flex_attention(
     )
 
 
+@flex_attention_backward_hop.py_impl(DTensor)
 def dtensor_flex_attention_backward(
-    query,
-    key,
-    value,
-    out,
-    logsumexp,
-    grad_out,
-    grad_logsumexp,
+    query: DTensor,
+    key: DTensor,
+    value: DTensor,
+    out: DTensor,
+    logsumexp: DTensor,
+    grad_out: DTensor,
+    grad_logsumexp: DTensor | torch.Tensor,
     fw_graph: Callable | GraphModule,
     joint_graph: GraphModule,
-    block_mask: tuple,
+    block_mask: tuple[DTensor | torch.Tensor, ...],
     scale: float,
     kernel_options: dict[str, Any],
-    score_mod_other_buffers: tuple = (),
-    mask_mod_other_buffers: tuple = (),
-):  # -> tuple[
-    #    DTensor,
-    #    DTensor,
-    #    DTensor,
-    #    tuple[Optional[DTensor], ...],
-    # ]:
-    # Import DTensor at runtime to avoid circular dependency
-    from torch.distributed.tensor._api import DTensor
-
+    score_mod_other_buffers: tuple[torch.Tensor, ...] = (),
+    mask_mod_other_buffers: tuple[DTensor | torch.Tensor, ...] = (),
+) -> tuple[
+    DTensor,
+    DTensor,
+    DTensor,
+    tuple[DTensor | None, ...],
+]:
     if score_mod_other_buffers:
         raise ValueError(
             "FlexAttention + DTensor doesn't support score_mod_other_buffers yet."
@@ -617,7 +616,7 @@ def dtensor_flex_attention_backward(
         # TODO: Why is this not a DTensor? Is it because that logsumexp is not used
         # by the downstream ops in the forward pass?
         assert grad_logsumexp.shape == logsumexp.shape
-        # TODO: we asume the grad_logsumexp are all zeros if it is not a DTensor,
+        # TODO: we assume the grad_logsumexp are all zeros if it is not a DTensor,
         # but I'm not sure if we can safely assume this.
         for i, s in enumerate(logsumexp._local_tensor.shape):
             grad_logsumexp = grad_logsumexp.narrow(i, 0, s)
@@ -630,22 +629,37 @@ def dtensor_flex_attention_backward(
     op_info = _flex_backward_propagate(
         query, key, value, out, logsumexp, grad_out, grad_logsumexp, block_mask[6:8]
     )
-    query, key, value, out, logsumexp, grad_out, grad_logsumpexp, *_ = (
-        op_info.local_args
-    )
+    (
+        local_query,
+        local_key,
+        local_value,
+        local_out,
+        local_logsumexp,
+        local_grad_out,
+        local_grad_logsumexp,
+        *_,
+    ) = op_info.local_args
+    # Cast to torch.Tensor for type checker
+    assert isinstance(local_query, torch.Tensor)
+    assert isinstance(local_key, torch.Tensor)
+    assert isinstance(local_value, torch.Tensor)
+    assert isinstance(local_out, torch.Tensor)
+    assert isinstance(local_logsumexp, torch.Tensor)
+    assert isinstance(local_grad_out, torch.Tensor)
+    assert isinstance(local_grad_logsumexp, torch.Tensor)
 
     block_mask_local = pytree.tree_map(
         lambda x: x._local_tensor if isinstance(x, DTensor) else x,
         block_mask,
     )
     outputs = flex_attention_backward_hop(
-        query=query,
-        key=key,
-        value=value,
-        out=out,
-        logsumexp=logsumexp,
-        grad_out=grad_out,
-        grad_logsumexp=grad_logsumpexp,
+        query=local_query,
+        key=local_key,
+        value=local_value,
+        out=local_out,
+        logsumexp=local_logsumexp,
+        grad_out=local_grad_out,
+        grad_logsumexp=local_grad_logsumexp,
         fw_graph=fw_graph,
         joint_graph=joint_graph,
         block_mask=block_mask_local,
@@ -662,24 +676,3 @@ def dtensor_flex_attention_backward(
     result.append(tuple())
 
     return tuple(result)
-
-
-def _register_dtensor_flex_attention_impl():
-    """
-    Register the DTensor-aware implementation for flex_attention.
-
-    This function registers dtensor_flex_attention as the custom implementation
-    for flex_attention_hop when called with DTensor inputs. It must be called
-    after DTensor is defined, which is why it's invoked from
-    torch.distributed.tensor.__init__ rather than at module import time.
-
-    Note:
-        This registration approach avoids circular import issues but does lose
-        static type checking for DTensor. An alternative would be to import
-        this module after DTensor is defined in torch.distributed.tensor.__init__,
-        which would preserve type information.
-    """
-    from torch.distributed.tensor._api import DTensor
-
-    flex_attention_hop.py_impl(DTensor)(dtensor_flex_attention)
-    flex_attention_backward_hop.py_impl(DTensor)(dtensor_flex_attention_backward)

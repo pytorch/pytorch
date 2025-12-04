@@ -16,10 +16,8 @@ from torch.distributed.tensor._api import (
     zeros,
 )
 
-# Register DTensor impl for flex_attention after DTensor is imported
-from torch.distributed.tensor._ops._flex_attention import (
-    _register_dtensor_flex_attention_impl,
-)
+# Register DTensor impl for flex_attention AFTER DTensor is imported
+from torch.distributed.tensor._ops._flex_attention import *  # noqa: F403
 from torch.distributed.tensor.placement_types import (
     Partial,
     Placement,
@@ -32,9 +30,6 @@ from torch.optim.optimizer import (
 from torch.utils._foreach_utils import (
     _foreach_supported_types as _util_foreach_supported_types,
 )
-
-
-_register_dtensor_flex_attention_impl()
 
 
 # All public APIs from dtensor package

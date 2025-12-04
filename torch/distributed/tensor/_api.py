@@ -1523,7 +1523,10 @@ def create_distributed_block_mask(
         placements=placements,
     )
     dist_b, dist_h, dist_q_len, dist_kv_len = block_mask_sizes
-    block_mask = create_block_mask_fn(  # type: ignore[arg-type]
+    # Q_LEN and KV_LEN are always int (never None) in the function signature
+    assert isinstance(dist_q_len, int)
+    assert isinstance(dist_kv_len, int)
+    block_mask = create_block_mask_fn(
         mask_mod,
         B=dist_b,
         H=dist_h,

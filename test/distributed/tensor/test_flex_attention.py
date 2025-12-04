@@ -1,21 +1,30 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+from collections.abc import Callable
+
 import torch
 from torch.distributed.tensor import (
     create_distributed_block_mask,
     DeviceMesh,
     distribute_tensor,
     DTensor,
+    Placement,
     Replicate,
     Shard,
 )
-from torch.nn.attention.flex_attention import AuxRequest, flex_attention
+from torch.nn.attention.flex_attention import AuxRequest, BlockMask, flex_attention
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
+
+# Type alias for mask modification functions
+MaskModFunc = Callable[
+    [torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor], torch.Tensor
+]
 
 
 def _causal_mask(
@@ -28,36 +37,37 @@ def _causal_mask(
     return q_idx >= kv_idx
 
 
-def _create_block_causal_batch(
+DOC_LEN: int = 30
+
+
+def _generate_block_causal_batch(
+    global_bs: int, global_query_tokens: int, device_type: str
+) -> torch.Tensor:
+    total_elements = global_bs * global_query_tokens
+    batch = torch.arange(total_elements, device=device_type) % DOC_LEN
+    batch = batch.reshape(global_bs, global_query_tokens)
+    return batch
+
+
+def _create_block_causal_mask_mod(
     global_bs: int,
     global_query_tokens: int,
     device_type: str,
-    device_mesh: DeviceMesh | None = None,
-    data_parallelism: bool = False,
-):
-    """Helper to create a batch for block_causal_mask tests.
+) -> MaskModFunc:
+    """Helper to create a block_causal_mask function for tests.
 
-    Creates a fake batch which packs several documents together, where each
-    has DOC_LEN tokens and the last token is the EOS token (DOC_LEN - 1).
+    Creates a mask function for packed sequences where each has DOC_LEN
+    tokens and the last token is the EOS token (DOC_LEN - 1).
 
     Args:
         global_bs: Global batch size
         global_query_tokens: Global query sequence length
         device_type: Device type (e.g., 'cuda', 'cpu')
-        device_mesh: Optional DeviceMesh. If provided, seq_idx will be converted
-                     to a replicated DTensor to support distributed execution.
 
     Returns:
-        tuple: (batch, DOC_LEN, block_causal_mask)
-            - batch: Tensor of shape (global_bs, global_query_tokens)
-            - DOC_LEN: Document length
-            - block_causal_mask: Mask function that works with both local and distributed contexts
+        block_causal_mask: Mask function for block-causal attention
     """
-    DOC_LEN = 30
-    total_elements = global_bs * global_query_tokens
-    batch = torch.arange(total_elements, device=device_type) % DOC_LEN
-    batch = batch.reshape(global_bs, global_query_tokens)
-
+    batch = _generate_block_causal_batch(global_bs, global_query_tokens, device_type)
     # Pre-compute seq_idx for the entire batch
     mask = batch == (DOC_LEN - 1)
     mask[:, -1] = True
@@ -65,33 +75,126 @@ def _create_block_causal_batch(
     seq_idx = torch.zeros_like(acc_mask, dtype=torch.int32)
     seq_idx[:, 1:] = acc_mask[:, :-1]
 
-    # Convert to DTensor if device_mesh is provided for distributed execution
+    def block_causal_mask(
+        b: torch.Tensor,
+        h: torch.Tensor,
+        q_idx: torch.Tensor,
+        kv_idx: torch.Tensor,
+    ) -> torch.Tensor:
+        return (seq_idx[b, q_idx] == seq_idx[b, kv_idx]) & (q_idx >= kv_idx)
+
+    return block_causal_mask
+
+
+def _create_distributed_block_causal_mask_mod(
+    global_bs: int,
+    global_query_tokens: int,
+    device_type: str,
+    device_mesh: DeviceMesh,
+    batch_placement: list[Placement],
+) -> MaskModFunc:
+    """Helper to create a block_causal_mask function for tests.
+
+    Creates a mask function for packed sequences where each has DOC_LEN
+    tokens and the last token is the EOS token (DOC_LEN - 1).
+
+    Args:
+        global_bs: Global batch size
+        global_query_tokens: Global query sequence length
+        device_type: Device type (e.g., 'cuda', 'cpu')
+        device_mesh: DeviceMesh for distributed execution.
+        batch_placement: Placement for the batch tensor
+
+    Returns:
+        block_causal_mask: Mask function for block-causal attention
+    """
+    batch = _generate_block_causal_batch(global_bs, global_query_tokens, device_type)
+    batch = distribute_tensor(batch, device_mesh, batch_placement)
+
+    # Pre-compute seq_idx for the entire batch
+    mask = batch._local_tensor == (DOC_LEN - 1)
+    mask[:, -1] = True
+    acc_mask = torch.cumsum(torch.where(mask, 1, 0), dim=1)
+    seq_idx = torch.zeros_like(acc_mask, dtype=torch.int32)
+    seq_idx[:, 1:] = acc_mask[:, :-1]
+
+    from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
+
+    _, global_offset = compute_local_shape_and_global_offset(
+        batch.shape,
+        device_mesh,
+        batch_placement,
+    )
+    b_offset_int, *_ = global_offset
 
     def block_causal_mask(
         b: torch.Tensor,
         h: torch.Tensor,
         q_idx: torch.Tensor,
         kv_idx: torch.Tensor,
-    ):
-        seq_idx_to_use = seq_idx
-        return (seq_idx_to_use[b, q_idx] == seq_idx_to_use[b, kv_idx]) & (
-            q_idx >= kv_idx
-        )
+    ) -> torch.Tensor:
+        b_offset = torch.full_like(b, b_offset_int)
+        local_b = b - b_offset
+        return (seq_idx[local_b, q_idx] == seq_idx[local_b, kv_idx]) & (q_idx >= kv_idx)
 
-    return batch, DOC_LEN, block_causal_mask
+    return block_causal_mask
 
 
-class DistFlexAttentionTest(DTensorTestBase):
+class MyTestClass(DTensorTestBase):
     # Global dimension constants for all tests
-    GLOBAL_BS = 16  # Batch size (divisible by world_size=4)
-    GLOBAL_NHEADS = 8  # Number of attention heads (divisible by world_size=4)
-    GLOBAL_QUERY_TOKENS = 1024  # Query sequence length (divisible by world_size=4)
-    GLOBAL_CONTEXT_TOKENS = 1024  # KV sequence length (divisible by world_size=4)
-    DIM = 32  # Head dimension
+    GLOBAL_BS: int = 16  # Batch size (divisible by world_size=4)
+    GLOBAL_NHEADS: int = 8  # Number of attention heads (divisible by world_size=4)
+    GLOBAL_QUERY_TOKENS: int = 1024  # Query sequence length (divisible by world_size=4)
+    GLOBAL_CONTEXT_TOKENS: int = 1024  # KV sequence length (divisible by world_size=4)
+    DIM: int = 32  # Head dimension
 
+    def setUp(self) -> None:
+        super().setUp()
+        torch.use_deterministic_algorithms(True)
+        torch.use_deterministic_algorithms(True, warn_only=True)
+        torch.manual_seed(42)
+
+    @property
+    def device_mesh(self) -> DeviceMesh:
+        """Helper function to create a DeviceMesh for testing."""
+        if getattr(self, "my_device_mesh", None) is None:
+            self.my_device_mesh = self.build_device_mesh()
+        return self.my_device_mesh
+
+    def _create_block_causal_mask_mod(
+        self,
+        device_mesh: DeviceMesh | None = None,
+        batch_placement: list[Placement] | None = None,
+    ) -> MaskModFunc:
+        """Helper to create a mask function for block_causal_mask tests.
+
+        Returns the mask function.
+        """
+        if device_mesh is None:
+            return _create_block_causal_mask_mod(
+                self.GLOBAL_BS,
+                self.GLOBAL_QUERY_TOKENS,
+                self.device_type,
+            )
+        else:
+            return _create_distributed_block_causal_mask_mod(
+                self.GLOBAL_BS,
+                self.GLOBAL_QUERY_TOKENS,
+                self.device_type,
+                device_mesh,
+                batch_placement,
+            )
+
+
+class DistFlexAttentionTest(MyTestClass):
     def _test_flex_attention_with_placement(
-        self, placement, mask_fn=None, dtype=torch.bfloat16
-    ):
+        self,
+        device_mesh: DeviceMesh,
+        placement: list[Placement],
+        mask_fn: MaskModFunc | None = None,
+        full_mask_fn: MaskModFunc | None = None,
+        dtype: torch.dtype = torch.bfloat16,
+    ) -> None:
         """Helper function to test FlexAttention with different placements.
 
         Args:
@@ -99,11 +202,11 @@ class DistFlexAttentionTest(DTensorTestBase):
             mask_fn: Mask function to use (defaults to _causal_mask if None)
             dtype: Data type for tensors (default: torch.bfloat16)
         """
-        device_mesh = self.build_device_mesh()
-
         # Use default causal mask if none provided
         if mask_fn is None:
             mask_fn = _causal_mask
+        if full_mask_fn is None:
+            full_mask_fn = _causal_mask
 
         # Create input tensors with gradients enabled
         q = torch.rand(
@@ -182,7 +285,7 @@ class DistFlexAttentionTest(DTensorTestBase):
         # Create regular (non-DTensor) block mask for reference computation
         # Use the cached compiled version from create_distributed_block_mask
         full_mask = create_distributed_block_mask.create_block_mask(
-            mask_fn,
+            full_mask_fn,
             self.GLOBAL_BS,
             self.GLOBAL_NHEADS,
             self.GLOBAL_QUERY_TOKENS,
@@ -221,86 +324,93 @@ class DistFlexAttentionTest(DTensorTestBase):
         torch.testing.assert_close(v_dt.grad.full_tensor(), full_v.grad)
 
     @with_comms
-    def test_flex_attention_shard0(self):
-        """Test FlexAttention with batch dimension sharding (Shard(0))."""
+    def test_flex_attention_replicate(self) -> None:
+        """Test FlexAttention with replicated placement."""
+        device_mesh = self.build_device_mesh()
         self._test_flex_attention_with_placement(
-            [Shard(0)],
+            device_mesh, [Replicate()], dtype=torch.bfloat16
+        )
+
+    @with_comms
+    def test_flex_attention_shard0(self) -> None:
+        """Test FlexAttention with batch dimension sharding (Shard(0))."""
+        device_mesh = self.build_device_mesh()
+        self._test_flex_attention_with_placement(
+            device_mesh, [Shard(0)], dtype=torch.bfloat16
+        )
+
+    @with_comms
+    def test_flex_attention_shard2(self) -> None:
+        """Test FlexAttention with sequence dimension sharding (Shard(2))."""
+        device_mesh = self.build_device_mesh()
+        self._test_flex_attention_with_placement(
+            device_mesh, [Shard(2)], dtype=torch.float32
+        )
+
+    @with_comms
+    def test_flex_attention_block_causal_replicate(self) -> None:
+        """Test FlexAttention with block_causal_mask and Replicate
+        placement.
+        """
+        device_mesh = self.build_device_mesh()
+        mask_fn = self._create_block_causal_mask_mod(device_mesh, [Replicate()])
+        full_mask_fn = self._create_block_causal_mask_mod()
+        self._test_flex_attention_with_placement(
+            device_mesh,
+            [Replicate()],
+            mask_fn=mask_fn,
+            full_mask_fn=full_mask_fn,
             dtype=torch.bfloat16,
         )
 
     @with_comms
-    def test_flex_attention_replicate(self):
-        """Test FlexAttention with replicated placement."""
-        self._test_flex_attention_with_placement([Replicate()], dtype=torch.bfloat16)
-
-    @with_comms
-    def test_flex_attention_shard2(self):
-        """Test FlexAttention with sequence dimension sharding (Shard(2))."""
-        self._test_flex_attention_with_placement([Shard(2)], dtype=torch.float32)
-
-    def _create_block_causal_batch(self, data_parallelism: bool = False):
-        """Helper to create a batch for block_causal_mask tests.
-
-        Returns the batch tensor on the device, and a mask function that works
-        with both local and distributed contexts.
+    def test_flex_attention_block_causal_shard0(self) -> None:
+        """Test FlexAttention with block_causal_mask and Shard(0)
+        placement.
         """
-        return _create_block_causal_batch(
-            self.GLOBAL_BS,
-            self.GLOBAL_QUERY_TOKENS,
-            self.device_type,
-            device_mesh=self.build_device_mesh(),
-            data_parallelism=data_parallelism,
+        device_mesh = self.build_device_mesh()
+        mask_fn = self._create_block_causal_mask_mod(device_mesh, [Shard(0)])
+        full_mask_fn = self._create_block_causal_mask_mod()
+        self._test_flex_attention_with_placement(
+            device_mesh,
+            [Shard(0)],
+            mask_fn=mask_fn,
+            full_mask_fn=full_mask_fn,
+            dtype=torch.bfloat16,
         )
 
     @with_comms
-    def test_flex_attention_block_causal_shard0(self):
-        """Test FlexAttention with block_causal_mask and Shard(0) placement."""
-        batch, DOC_LEN, mask_fn = self._create_block_causal_batch(data_parallelism=True)
+    def test_flex_attention_block_causal_shard2(self) -> None:
+        """Test FlexAttention with block_causal_mask and Shard(2)
+        placement.
+        """
+        device_mesh = self.build_device_mesh()
+        # For CP/Shard2, the batch is actually sharded on dim 1, because that's
+        # the sequence dimension. The input batch doesn't have the head dimension.
+        mask_fn = self._create_block_causal_mask_mod(device_mesh, [Replicate()])
+        full_mask_fn = self._create_block_causal_mask_mod()
         self._test_flex_attention_with_placement(
-            [Shard(0)], mask_fn=mask_fn, dtype=torch.bfloat16
-        )
-
-    @with_comms
-    def test_flex_attention_block_causal_replicate(self):
-        """Test FlexAttention with block_causal_mask and Replicate placement."""
-        batch, DOC_LEN, mask_fn = self._create_block_causal_batch()
-        self._test_flex_attention_with_placement(
-            [Replicate()], mask_fn=mask_fn, dtype=torch.bfloat16
-        )
-
-    @with_comms
-    def test_flex_attention_block_causal_shard2(self):
-        """Test FlexAttention with block_causal_mask and Shard(2) placement."""
-        batch, DOC_LEN, mask_fn = self._create_block_causal_batch()
-        self._test_flex_attention_with_placement(
-            [Shard(2)], mask_fn=mask_fn, dtype=torch.float32
+            device_mesh,
+            [Shard(2)],
+            mask_fn=mask_fn,
+            full_mask_fn=full_mask_fn,
+            dtype=torch.bfloat16,
         )
 
 
-class DistBlockMaskTest(DTensorTestBase):
-    """Test suite for create_distributed_block_mask functionality.
-
-    All dimension values used in these tests (batch size, num_heads, query_tokens,
-    context_tokens) represent **global** dimensions across all ranks, not local/sharded
-    dimensions. The values are chosen to be divisible by the world_size (typically 4)
-    to ensure clean sharding without remainder.
-    """
-
-    # Global dimension constants for all tests
-    GLOBAL_BS = 16  # Batch size (divisible by world_size=4)
-    GLOBAL_NHEADS = 8  # Number of attention heads (divisible by world_size=4)
-    GLOBAL_QUERY_TOKENS = 512  # Query sequence length (divisible by world_size=4)
-    GLOBAL_CONTEXT_TOKENS = 1024  # KV sequence length (divisible by world_size=4)
+class DistBlockMaskTest(MyTestClass):
+    """Test suite for create_distributed_block_mask functionality."""
 
     def _test_create_distributed_block_mask(
         self,
-        placement,
-        mask_fn=None,
-        expected_kv_placement=None,
-        expected_q_num_blocks_placement=None,
-        expected_q_indices_placement=None,
-        verify_values=True,
-    ):
+        placement: list[Placement],
+        mask_fn: MaskModFunc | None = None,
+        full_mask_fn: MaskModFunc | None = None,
+        expected_kv_placement: Placement | None = None,
+        expected_q_num_blocks_placement: Placement | None = None,
+        expected_q_indices_placement: Placement | None = None,
+        verify_values: bool = True,
+    ) -> None:
         """Helper function to test create_distributed_block_mask with different placements.
 
         Args:
@@ -315,7 +425,9 @@ class DistBlockMaskTest(DTensorTestBase):
 
         # Use default causal mask if none provided
         if mask_fn is None:
+            assert full_mask_fn is None
             mask_fn = _causal_mask
+            full_mask_fn = _causal_mask
 
         # Create distributed block mask
         block_mask = create_distributed_block_mask(
@@ -332,7 +444,7 @@ class DistBlockMaskTest(DTensorTestBase):
         full_block_mask = None
         if verify_values:
             full_block_mask = create_distributed_block_mask.create_block_mask(
-                mask_fn,
+                full_mask_fn,
                 B=self.GLOBAL_BS,
                 H=self.GLOBAL_NHEADS,
                 Q_LEN=self.GLOBAL_QUERY_TOKENS,
@@ -355,12 +467,12 @@ class DistBlockMaskTest(DTensorTestBase):
 
     def _verify_block_mask_placements(
         self,
-        block_mask,
-        expected_kv_placement,
-        expected_q_num_blocks_placement=None,
-        expected_q_indices_placement=None,
-        full_block_mask=None,
-    ):
+        block_mask: BlockMask,
+        expected_kv_placement: Placement,
+        expected_q_num_blocks_placement: Placement | None = None,
+        expected_q_indices_placement: Placement | None = None,
+        full_block_mask: BlockMask | None = None,
+    ) -> None:
         """Verify all block mask components have expected placements.
 
         Args:
@@ -498,17 +610,17 @@ class DistBlockMaskTest(DTensorTestBase):
                 )
 
     @with_comms
-    def test_create_distributed_block_mask_shard0(self):
-        """Test create_distributed_block_mask with Shard(0) placement."""
-        self._test_create_distributed_block_mask([Shard(0)])
-
-    @with_comms
-    def test_create_distributed_block_mask_replicate(self):
+    def test_create_distributed_block_mask_replicate(self) -> None:
         """Test create_distributed_block_mask with Replicate placement."""
         self._test_create_distributed_block_mask([Replicate()])
 
     @with_comms
-    def test_create_distributed_block_mask_shard2(self):
+    def test_create_distributed_block_mask_shard0(self) -> None:
+        """Test create_distributed_block_mask with Shard(0) placement."""
+        self._test_create_distributed_block_mask([Shard(0)])
+
+    @with_comms
+    def test_create_distributed_block_mask_shard2(self) -> None:
         """Test create_distributed_block_mask with Shard(2) placement (context parallel)."""
         # Shard(2) uses a sharded mask_mod with local dimensions, so tensor values
         # will differ from a reference block mask created with unsharded mask_mod
@@ -520,40 +632,45 @@ class DistBlockMaskTest(DTensorTestBase):
             verify_values=False,
         )
 
-    def _create_block_causal_batch(self):
-        """Helper to create a batch for block_causal_mask tests.
-
-        Returns the batch tensor on the device, and a mask function that works
-        with both local and distributed contexts.
+    @with_comms
+    def test_create_distributed_block_mask_block_causal_replicate(self) -> None:
+        """Test create_distributed_block_mask with block_causal_mask
+        and Replicate placement.
         """
-        return _create_block_causal_batch(
-            self.GLOBAL_BS,
-            self.GLOBAL_QUERY_TOKENS,
-            self.device_type,
-            device_mesh=None,  # DistBlockMaskTest doesn't need DTensor version
+        mask_fn = self._create_block_causal_mask_mod(
+            self.build_device_mesh(), [Replicate()]
+        )
+        self._test_create_distributed_block_mask(
+            [Replicate()], mask_fn=mask_fn, full_mask_fn=mask_fn
         )
 
     @with_comms
-    def test_create_distributed_block_mask_block_causal_shard0(self):
-        """Test create_distributed_block_mask with block_causal_mask and Shard(0) placement."""
-        batch, DOC_LEN, mask_fn = self._create_block_causal_batch()
-        self._test_create_distributed_block_mask([Shard(0)], mask_fn=mask_fn)
+    def test_create_distributed_block_mask_block_causal_shard0(self) -> None:
+        """Test create_distributed_block_mask with block_causal_mask
+        and Shard(0) placement.
+        """
+        mask_fn = self._create_block_causal_mask_mod(
+            self.build_device_mesh(), [Shard(0)]
+        )
+        full_mask_fn = self._create_block_causal_mask_mod()
+        self._test_create_distributed_block_mask(
+            [Shard(0)], mask_fn=mask_fn, full_mask_fn=full_mask_fn
+        )
 
     @with_comms
-    def test_create_distributed_block_mask_block_causal_replicate(self):
-        """Test create_distributed_block_mask with block_causal_mask and Replicate placement."""
-        batch, DOC_LEN, mask_fn = self._create_block_causal_batch()
-        self._test_create_distributed_block_mask([Replicate()], mask_fn=mask_fn)
-
-    @with_comms
-    def test_create_distributed_block_mask_block_causal_shard2(self):
-        """Test create_distributed_block_mask with block_causal_mask and Shard(2) placement."""
-        batch, DOC_LEN, mask_fn = self._create_block_causal_batch()
+    def test_create_distributed_block_mask_block_causal_shard2(self) -> None:
+        """Test create_distributed_block_mask with block_causal_mask
+        and Shard(2) placement.
+        """
+        mask_fn = self._create_block_causal_mask_mod(
+            self.build_device_mesh(), [Replicate()]
+        )
         # Shard(2) uses a sharded mask_mod with local dimensions, so tensor values
         # will differ from a reference block mask created with unsharded mask_mod
         self._test_create_distributed_block_mask(
             [Shard(2)],
             mask_fn=mask_fn,
+            full_mask_fn=mask_fn,
             expected_kv_placement=Shard(2),
             expected_q_num_blocks_placement=Replicate(),
             expected_q_indices_placement=Shard(3),
@@ -561,7 +678,7 @@ class DistBlockMaskTest(DTensorTestBase):
         )
 
     @with_comms
-    def test_create_distributed_block_mask_invalid_sharding(self):
+    def test_create_distributed_block_mask_invalid_sharding(self) -> None:
         """Test error handling for unsupported sharding dimensions."""
         device_mesh = self.build_device_mesh()
 
