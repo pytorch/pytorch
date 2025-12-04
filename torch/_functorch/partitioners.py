@@ -174,6 +174,11 @@ class InvalidNodeBase:
         return "Invalid Node"
 
 
+# Run DCE while overriding the definition of is_impure_node
+def is_not_collective(node):
+    return getattr(node.target, "namespace", None) != "_c10d_functional"
+
+
 InvalidNode = InvalidNodeBase()
 
 
@@ -1170,9 +1175,6 @@ def default_partition(
     )
 
     # Run DCE while overriding the definition of is_impure_node
-    def is_not_collective(node):
-        return getattr(node.target, "namespace", None) != "_c10d_functional"
-
     fw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
     bw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
 
