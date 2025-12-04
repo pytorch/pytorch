@@ -1009,7 +1009,7 @@ def get_sort_argsort_assert_equal_fn(is_argsort, args, kwargs):
         rtol=None,
         equal_nan=True,
         exact_dtype=True,
-        exact_stride=False,
+        exact_stride=True,
     ):
         if is_argsort:
             assert isinstance(x, torch.Tensor)

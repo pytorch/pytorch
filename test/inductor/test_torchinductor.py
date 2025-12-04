@@ -441,7 +441,7 @@ def check_model(
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
     # TODO: enable this for all tests
-    exact_stride=False,
+    exact_stride=True,
 ):
     kwargs = kwargs or {}
     torch._dynamo.reset()
@@ -678,7 +678,7 @@ def check_model_gpu(
     check_has_compiled=True,
     output_process_fn_grad=lambda x: x,
     # TODO: enable this for all tests
-    exact_stride=False,
+    exact_stride=True,
 ):
     kwargs = kwargs or {}
     if hasattr(model, "to"):
