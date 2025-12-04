@@ -12762,6 +12762,15 @@ class TestErrorInputs(TestCase):
             y = x[:, [1]]
             torch.mps.synchronize()
 
+    def test_embedding_bag_out_of_bounds(self, device):
+        inputs = torch.tensor([0, 1, 6], device=device)  # Note: 6 is out of bounds for weight with size 4
+        weight = torch.randn(4, 2, device=device)
+        offsets = torch.tensor([0, 3], device=device)
+        with self.assertRaisesRegex(torch.AcceleratorError, "Index 2 is out of bounds: 6, range 0 to 4"):
+            torch.nn.functional.embedding_bag(inputs, weight, offsets)
+            torch.mps.synchronize()
+
+
 class TestComplex(TestCase):
     def test_tensor_scalar_binops(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/119088
