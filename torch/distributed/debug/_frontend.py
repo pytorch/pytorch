@@ -148,6 +148,7 @@ templates = {
 
     <a href="/">Home</a> <!--@lint-ignore-->
     <a href="/stacks">Python Stack Traces</a> <!--@lint-ignore-->
+    <a href="/pyspy_dump">py-spy Stacks</a> <!--@lint-ignore-->
     <a href="/fr_trace">FlightRecorder CPU</a> <!--@lint-ignore-->
     <a href="/fr_trace_json">(JSON)</a> <!--@lint-ignore-->
     <a href="/fr_trace_nccl">FlightRecorder NCCL</a> <!--@lint-ignore-->
@@ -212,7 +213,7 @@ Hi
 {% endblock %}
 
 {% block content %}
-    <form action="/profile" method="get">
+    <form action="" method="get">
         <label for="duration">Duration (seconds):</label>
         <input type="number" id="duration" name="duration" value="{{ duration }}" min="1" max="60">
         <input type="submit" value="Submit">
@@ -298,6 +299,31 @@ Hi
     {{ ncclcalls | safe }}
 {% endblock %}
     """,
+    "pyspy_dump.html": """
+{% extends "base.html" %}
+{% block header %}
+    <h1>{% block title %}py-spy Stack Traces{% endblock %}</h1>
+{% endblock %}
+{% block content %}
+    <form action="" method="get">
+        <input type="checkbox" id="native" name="native" value="1"/>
+        <label for="native">Native</label>
+        <input type="checkbox" id="subprocesses" name="subprocesses" value="1"/>
+        <label for="subprocesses">Subprocesses</label>
+        <input type="submit" value="Submit">
+    </form>
+
+    {% for i, (addr, resp) in enumerate(zip(addrs, resps)) %}
+        <h2>Rank {{ i }}: {{ addr }}</h2>
+        {% if resp.status_code != 200 %}
+            <p>Failed to fetch: status={{ resp.status_code }}</p>
+            <pre>{{ resp.text }}</pre>
+        {% else %}
+            <pre>{{ resp.text }}</pre>
+        {% endif %}
+    {% endfor %}
+{% endblock %}
+    """,
 }
 
 
@@ -323,7 +349,10 @@ class HTTPRequestHandler(BaseHTTPRequestHandler):
         return urlparse(self.path).path
 
     def get_query(self) -> dict[str, list[str]]:
-        return parse_qs(urlparse(self.path).query)
+        return parse_qs(self.get_raw_query())
+
+    def get_raw_query(self) -> str:
+        return urlparse(self.path).query
 
     def get_query_arg(
         self, name: str, default: object = None, type: type = str
@@ -349,6 +378,7 @@ class FrontendServer:
         self._routes = {
             "/": self._handle_index,
             "/stacks": self._handle_stacks,
+            "/pyspy_dump": self._handle_pyspy_dump,
             "/fr_trace": self._handle_fr_trace,
             "/fr_trace_json": self._handle_fr_trace_json,
             "/fr_trace_nccl": self._handle_fr_trace_nccl,
@@ -372,6 +402,7 @@ class FrontendServer:
             target=self._serve,
             args=(),
             daemon=True,
+            name="distributed.debug.FrontendServer",
         )
         self._thread.start()
 
@@ -417,6 +448,14 @@ class FrontendServer:
         addrs, resps = fetch_all("dump_traceback")
         return self._render_template(
             "raw_resp.html", title="Stacks", addrs=addrs, resps=resps
+        )
+
+    def _handle_pyspy_dump(self, req: HTTPRequestHandler) -> bytes:
+        addrs, resps = fetch_all("pyspy_dump", req.get_raw_query())
+        return self._render_template(
+            "pyspy_dump.html",
+            addrs=addrs,
+            resps=resps,
         )
 
     def _render_fr_trace(self, addrs: list[str], resps: list[Response]) -> bytes:
