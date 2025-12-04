@@ -3,7 +3,7 @@
 import contextlib
 import warnings
 from logging import getLogger
-from typing import Optional
+from typing import Optional, Sequence
 
 import torch
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
@@ -412,7 +412,7 @@ def _calc_first_shard_size(spec: DTensorSpec) -> list[int]:
 
 
 def _calc_shard_info(
-    mesh_coordinate: list[int], spec: DTensorSpec
+    mesh_coordinate: Sequence[int], spec: DTensorSpec
 ) -> tuple[list[int], list[int]]:
     mesh = spec.mesh
     # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
