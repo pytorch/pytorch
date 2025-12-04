@@ -102,41 +102,6 @@ CapturedTraceback* getFromContext(
 }
 } // anonymous namespace
 
-void _record_memory_history(
-    bool enabled,
-    bool record_context,
-    int64_t trace_alloc_max_entries,
-    bool trace_alloc_record_context,
-    bool record_cpp_context,
-    bool clearHistory,
-    bool compileContext,
-    bool globalRecordAnnotations) {
-  c10::xpu::XPUCachingAllocator::CreateContextFn recorder = gather;
-  if (enabled && record_cpp_context &&
-      (trace_alloc_record_context || record_context)) {
-    recorder = gather_with_cpp;
-    // warm up C++ stack unwinding
-    unwind::unwind();
-  }
-  auto when = c10::xpu::XPUCachingAllocator::RecordContext::NEVER;
-  if (trace_alloc_record_context) {
-    when = c10::xpu::XPUCachingAllocator::RecordContext::ALLOC;
-  } else if (record_context) {
-    when = c10::xpu::XPUCachingAllocator::RecordContext::STATE;
-  }
-  at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
-  if (enabled && compileContext) {
-    TORCH_WARN(
-        "The compileContext option is not supported when recording XPU memory history.");
-  }
-  if (enabled && globalRecordAnnotations) {
-    TORCH_WARN(
-        "The globalRecordAnnotations option is not supported when recording XPU memory history.");
-  }
-  c10::xpu::XPUCachingAllocator::recordHistory(
-      enabled, recorder, trace_alloc_max_entries, when, clearHistory);
-}
-
 static void checkOptionIn(
     const std::string& option,
     std::initializer_list<std::string> valid,
@@ -150,9 +115,7 @@ void _record_memory_history(
     std::optional<std::string> context,
     const std::string& stacks,
     size_t max_entries,
-    bool clearHistory,
-    bool compileContext,
-    bool globalRecordAnnotations) {
+    bool clearHistory) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -186,14 +149,7 @@ void _record_memory_history(
     }
   }
   at::globalContext().lazyInitDevice(c10::DeviceType::XPU);
-  if (enabled.has_value() && compileContext) {
-    TORCH_WARN(
-        "The compileContext option is not supported when recording XPU memory history.");
-  }
-  if (enabled.has_value() && globalRecordAnnotations) {
-    TORCH_WARN(
-        "The globalRecordAnnotations option is not supported when recording XPU memory history.");
-  }
+
   c10::xpu::XPUCachingAllocator::recordHistory(
       enabled.has_value(), recorder, max_entries, when, clearHistory);
 }
