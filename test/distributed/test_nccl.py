@@ -321,11 +321,12 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             tensor *= 2
             torch.ops.symm_mem.nccl_put(tensor, 0)
             c10d.barrier()
-        elif self.rank == 0:
+        else:
             c10d.barrier()
+        if self.rank == 0:
             torch.testing.assert_close(
                 tensor, torch.ones(numel, dtype=dtype, device=self.device) * 2
-            )      
+            )
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")

@@ -99,29 +99,36 @@ __global__ void lsa_put_signal_kernel(
     size_t  dst_byte_offset,  // data target offset (bytes)
     const void*  src,  // local src
     size_t  nbytes,
+    unsigned int* blocks_done,  // global counter of blocks done
     uint64_t  signal_value     // value to write
 ) {
     const size_t tid    = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
 
-    // 1) data put
+    // 1) data copy without signal set
     auto dst = get_remote_ptr(buffer, dst_peer, dst_byte_offset);
     const char* src_bytes = reinterpret_cast<const char*>(src);
     copy_bytes_vec16(src_bytes, dst, nbytes, tid, stride);
 
     __syncthreads();
 
-    // 2) system fence + signal
-    if (tid == 0) {
-        __threadfence_system();
+    // 2) system fence + signal set
+    if (threadIdx.x == 0) {
+        // This block is done; increment global completion counter
+        unsigned int prev = atomicAdd(blocks_done, 1);
 
-        uint64_t* signal_pad_peer =
+        // If this was the last block to finish:
+        if (prev == gridDim.x - 1) {
+            // Ensure all global writes from all SMs are visible system-wide
+            __threadfence_system();
+            uint64_t* signal_pad_peer =
             reinterpret_cast<uint64_t*>(signal_pad[dst_peer]);
 
-        // Single-writer: atomicExch is conservative but safe.
-        atomicExch(
-            reinterpret_cast<unsigned long long*>(signal_pad_peer),
-            static_cast<unsigned long long>(signal_value));
+            // Single-writer: atomicExch is conservative but safe.
+            atomicExch(
+                reinterpret_cast<unsigned long long*>(signal_pad_peer),
+                static_cast<unsigned long long>(signal_value));
+        }
     }
 }
 
@@ -180,8 +187,14 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
   // TODO: rendezvous should remember the group name
   auto symm_mem = c10d::symmetric_memory::rendezvous(tensor, "0");
   int threads = THREADS_PER_BLOCK;
-  int blocks  = (tensor.numel() + threads - 1) / threads;
+  int blocks = (tensor.numel() + threads - 1) / threads;
   c10::cuda::CUDAGuard guard(tensor.device());
+  auto opts = at::TensorOptions()
+    .dtype(at::kInt)
+    .device(tensor.device());  // e.g. at::kCUDA, specific index
+  at::Tensor blocks_done = at::zeros({1}, opts);
+  unsigned int* blocks_done_dev =
+    reinterpret_cast<unsigned int*>(blocks_done.data_ptr<int>());
   size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
 
   lsa_put_signal_kernel<<<blocks, threads, 0, at::cuda::getCurrentCUDAStream()>>>(
@@ -191,6 +204,7 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
     0,
     tensor.data_ptr(),
     nbytes,
+    blocks_done_dev,
     signal);
 }
 
