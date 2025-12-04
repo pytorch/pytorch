@@ -26,6 +26,88 @@ if __name__ == "__main__" and not is_sm100():
     raise RuntimeError("Blackwell NVIDIA GPU required")
 
 
+def compute_stage_variants(
+    BLOCK_M: int,
+    BLOCK_N: int,
+    BLOCK_K: int,
+    dtype,
+    num_store_warps: int = 4,
+    occupancy: int = 1,
+    smem_capacity: int = 228 * 1024,  # Blackwell: 228 KB
+    tmem_max_columns: int = 512,  # Blackwell: 512 columns per CTA
+):
+    dtype_bytes = torch.tensor([], dtype=dtype).element_size()
+
+    # Hardware limit: 232448 bytes (227 KB) as reported in error messages
+    # Use this exact limit - no made-up safety factors
+    smem_limit = 232448
+
+    # Calculate SMEM usage
+    a_bytes_per_stage = BLOCK_M * BLOCK_K * dtype_bytes
+    b_bytes_per_stage = BLOCK_N * BLOCK_K * dtype_bytes
+    c_bytes_per_stage = BLOCK_M * BLOCK_N * dtype_bytes
+    ab_bytes_per_stage = a_bytes_per_stage + b_bytes_per_stage
+
+    # Check if even MINIMUM config fits (1 load buffer, 1 acc buffer)
+    # Add small margin for compiler overhead
+    min_load_buffers = 1
+    min_acc_buffers = 1
+    compiler_overhead = 256
+
+    min_smem = (ab_bytes_per_stage * min_load_buffers +
+                c_bytes_per_stage +
+                8 * min_load_buffers * 2 +
+                8 * min_acc_buffers * 2 +
+                compiler_overhead)
+
+    if min_smem > smem_limit:
+        # This tile size is too large - even minimal pipelining doesn't fit
+        return []
+
+    valid_configs = []
+
+    # Try all combinations of load/acc buffers
+    for num_load_buffers in range(8, 0, -1):
+        ab_smem = ab_bytes_per_stage * num_load_buffers
+        c_smem = c_bytes_per_stage  # 1 epilogue buffer
+        load_barrier_smem = 8 * num_load_buffers * 2
+
+        base_smem = ab_smem + c_smem + load_barrier_smem + compiler_overhead
+
+        if base_smem > smem_limit:
+            continue  # Too many load buffers
+
+        # Try different acc buffer counts
+        max_acc_by_tmem = tmem_max_columns // BLOCK_N
+        remaining_smem = smem_limit - base_smem
+        max_acc_by_smem = remaining_smem // (8 * 2)  # Each acc buffer needs 2 barriers
+
+        max_acc_buffers = min(max_acc_by_tmem, max_acc_by_smem, 8)
+
+        for num_acc_buffers in range(max_acc_buffers, 0, -1):
+            acc_barrier_smem = 8 * num_acc_buffers * 2
+            total_smem = base_smem + acc_barrier_smem
+            tmem_cols = BLOCK_N * num_acc_buffers
+
+            if total_smem <= smem_limit and tmem_cols <= tmem_max_columns:
+                valid_configs.append((num_load_buffers, num_acc_buffers))
+
+    # If no configs found, return empty (will be filtered out by caller)
+    return valid_configs
+
+
+def compute_stages(
+    BLOCK_M: int,
+    BLOCK_N: int,
+    BLOCK_K: int,
+    dtype,
+    num_store_warps: int = 4,
+    **kwargs
+):
+    variants = compute_stage_variants(BLOCK_M, BLOCK_N, BLOCK_K, dtype, num_store_warps, **kwargs)
+    return variants[0] if variants else (1, 1)
+
+
 def get_grouped_mm_kernel():
     import importlib.util
     import os
@@ -93,8 +175,8 @@ def grouped_mm(
     BLOCK_M,
     BLOCK_N,
     BLOCK_K,
-    num_load_buffers,
-    num_acc_buffers,
+    num_load_buffers=None,
+    num_acc_buffers=None,
     num_load_warps=1,
     num_compute_warps=1,
     num_store_warps=4,
@@ -103,6 +185,15 @@ def grouped_mm(
     maxnreg=128,
 ):
     assert num_load_thread_registers < maxnreg and num_compute_thread_registers < maxnreg
+
+    if num_load_buffers is None or num_acc_buffers is None:
+        computed_load, computed_acc = compute_stages(
+            BLOCK_M, BLOCK_N, BLOCK_K, dtype=torch.bfloat16, num_store_warps=num_store_warps
+        )
+        if num_load_buffers is None:
+            num_load_buffers = computed_load
+        if num_acc_buffers is None:
+            num_acc_buffers = computed_acc
     
     device = C.device
     dtype = torch.int8
@@ -176,12 +267,8 @@ def grouped_mm(
 
 @pytest.mark.parametrize("G, M, N, K", [(4, 208, 416, 304), (5, 2000, 1000, 2000)])
 @pytest.mark.parametrize("BLOCK_M, BLOCK_N, BLOCK_K", [(128, 256, 64)])
-@pytest.mark.parametrize("num_load_buffers", [1, 2])
-@pytest.mark.parametrize("num_acc_buffers", [1, 2])
 @pytest.mark.skipif(not is_sm100(), reason="Requires Hopper or Blackwell")
-def test_grouped_mm(
-    G, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K, num_load_buffers, num_acc_buffers
-):
+def test_grouped_mm(G, M, N, K, BLOCK_M, BLOCK_N, BLOCK_K):
     device = "cuda"
     dtype = torch.bfloat16
     align = 16 // dtype.itemsize
@@ -197,66 +284,33 @@ def test_grouped_mm(
     offs = torch.cumsum(dist.sample(), dim=0).to(torch.int32).to(device)
 
     C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
-    grouped_mm(
-        A,
-        B,
-        C,
-        offs,
-        BLOCK_M,
-        BLOCK_N,
-        BLOCK_K,
-        num_load_buffers,
-        num_acc_buffers,
-    )
+
+    grouped_mm(A, B, C, offs, BLOCK_M, BLOCK_N, BLOCK_K)
 
     torch.testing.assert_close(C, C_ref)
 
 
 def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
-    dtype_AB_bytes = torch.tensor([], dtype=dtype_AB).element_size()
-    dtype_C_bytes = torch.tensor([], dtype=dtype_C).element_size()
-    dtype_acc_bytes = torch.tensor([], dtype=dtype_acc).element_size()
-
-    SMEM_PER_SM = 228 * 1024  # 228 KB shared memory
-    TMEM_MAX_COLUMNS = 512  # 512 columns per CTA (Blackwell)
-    REGS_PER_SM = 65536  # 64K registers
-
-    # Reserve SMEM for mbarriers, barriers, and compiler overhead
-    SMEM_OVERHEAD = 2048  # Conservative estimate
-
     configs = []
 
     if M is not None and N is not None and K is not None:
-        if M < 512:
-            BLOCK_M_vals = [64]
-        else:
-            BLOCK_M_vals = [64, 128]
+      if M < 256:
+          BLOCK_M_vals = [64]
+      else:
+          BLOCK_M_vals = [64, 128]
+      if N <= 64:
+          BLOCK_N_vals = [32, 64]
+      elif N <= 512:
+          BLOCK_N_vals = [64, 128, 256]
+      else:
+          BLOCK_N_vals = [128, 256]
+      if K < 128:
+          BLOCK_K_vals = [64]
+      elif K < 512:
+          BLOCK_K_vals = [64, 128]
+      else:
+          BLOCK_K_vals = [64, 128, 256]
 
-        if N <= 64:
-            BLOCK_N_vals = [32, 64]
-        elif N <= 512:
-            BLOCK_N_vals = [64, 128, 256]
-        else:
-            BLOCK_N_vals = [128, 256]
-
-        if K < 256:
-            BLOCK_K_vals = [64]
-        elif K < 1024:
-            BLOCK_K_vals = [64, 128]
-        else:
-            BLOCK_K_vals = [64, 128, 256]
-    else:
-        BLOCK_M_vals = [64, 128]
-        BLOCK_N_vals = [32, 64, 128, 256]
-        BLOCK_K_vals = [64, 128, 256]
-
-    # fixme: remove this!
-    BLOCK_M_vals = [64, 128]
-    BLOCK_N_vals = [32, 64, 128]
-    BLOCK_K_vals = [32, 64, 128, 256]
-
-    NUM_LOAD_BUFFER_vals = [4, 5, 6, 7]
-    NUM_ACC_BUFFER_vals = [3, 4, 5, 6]
     NUM_LOAD_WARP_vals = [1, 2]
     NUM_COMPUTE_WARP_vals = [1, 2]
     NUM_STORE_WARP_vals = [4, 8]
@@ -268,8 +322,6 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
         BLOCK_M,
         BLOCK_N,
         BLOCK_K,
-        num_load_buffers,
-        num_acc_buffers,
         num_load_warps,
         num_compute_warps,
         num_store_warps,
@@ -280,8 +332,6 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
         BLOCK_M_vals,
         BLOCK_N_vals,
         BLOCK_K_vals,
-        NUM_LOAD_BUFFER_vals,
-        NUM_ACC_BUFFER_vals,
         NUM_LOAD_WARP_vals,
         NUM_COMPUTE_WARP_vals,
         NUM_STORE_WARP_vals,
@@ -289,67 +339,35 @@ def find_configs_sm100(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
         NUM_COMPUTE_THREAD_REGISTERS_vals,
         MAXNREG_vals,
     ):
-        # SMEM Calculation
-        # A and B buffers (double-buffered for load/compute overlap)
-        a_smem_per_buffer = BLOCK_M * BLOCK_K * dtype_AB_bytes
-        b_smem_per_buffer = BLOCK_N * BLOCK_K * dtype_AB_bytes
-        load_smem = (a_smem_per_buffer + b_smem_per_buffer) * num_load_buffers
-
-        # C buffer for store (reuses space after load/compute phase)
-        c_smem = BLOCK_M * BLOCK_N * dtype_C_bytes
-
-        # Barrier arrays: 2 sets of barriers for load buffers + 2 sets for acc buffers
-        barrier_smem = 8 * (num_load_buffers + num_acc_buffers) * 2
-
-        total_smem = load_smem + c_smem + barrier_smem + SMEM_OVERHEAD
-
-        # TMEM Calculation
-        # Accumulators are stored in TMEM (fp32)
-        # TMEM is per-CTA resource measured in "columns"
-        # For TensorMemoryLayout with col_stride=1: each [BLOCK_M, BLOCK_N] buffer uses BLOCK_N columns
-        # Hardware limit: 512 columns per CTA
-        tmem_usage_columns = BLOCK_N * num_acc_buffers
-
-        # Register Estimation
-        total_regs = (
-            (num_load_warps + num_compute_warps + num_store_warps) * 32 * maxnreg
+        buffer_variants = compute_stage_variants(
+            BLOCK_M, BLOCK_N, BLOCK_K, dtype=dtype_AB, num_store_warps=num_store_warps
         )
 
-        # Occupancy Calculation
-        # TMEM is a per-CTA hard limit - either fits or doesn't
-        if tmem_usage_columns > TMEM_MAX_COLUMNS:
-            continue  # Config exceeds TMEM limit, skip it
+        for num_load_buffers, num_acc_buffers in buffer_variants:
+            total_regs = (num_load_warps + num_compute_warps + num_store_warps) * 32 * maxnreg
+            REGS_PER_SM = 65536
+            MAX_CTAS_PER_SM = 32
+            estimated_occupancy = min(REGS_PER_SM // total_regs, MAX_CTAS_PER_SM)
 
-        # Maximum CTAs per SM limited by SMEM and registers (shared resources)
-        max_ctas_by_smem = SMEM_PER_SM // total_smem if total_smem > 0 else 0
-        max_ctas_by_regs = REGS_PER_SM // total_regs if total_regs > 0 else 0
+            if estimated_occupancy < 1:
+                continue
 
-        # Also limited by max CTAs per SM (hardware limit, typically 32 on recent GPUs)
-        MAX_CTAS_PER_SM = 32
-
-        # Actual occupancy is minimum across shared resources
-        estimated_occupancy = min(max_ctas_by_smem, max_ctas_by_regs, MAX_CTAS_PER_SM)
-
-        # Filter out invalid configs (occupancy < 1 means doesn't fit)
-        if estimated_occupancy < 1:
-            continue
-
-        configs.append(
-            (
-                BLOCK_M,
-                BLOCK_N,
-                BLOCK_K,
-                num_load_buffers,
-                num_acc_buffers,
-                num_load_warps,
-                num_compute_warps,
-                num_store_warps,
-                num_load_thread_registers,
-                num_compute_thread_registers,
-                maxnreg,
-                estimated_occupancy,
+            configs.append(
+                (
+                    BLOCK_M,
+                    BLOCK_N,
+                    BLOCK_K,
+                    num_load_buffers,
+                    num_acc_buffers,
+                    num_load_warps,
+                    num_compute_warps,
+                    num_store_warps,
+                    num_load_thread_registers,
+                    num_compute_thread_registers,
+                    maxnreg,
+                    estimated_occupancy,
+                )
             )
-        )
 
     return configs
 
