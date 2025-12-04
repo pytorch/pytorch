@@ -22,7 +22,6 @@ from typing import Optional
 import torch.utils.cpp_extension
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
-    decorateIf,
     TEST_WITH_ROCM,
     skipIfRocm,
     skipIfRocmArch,
@@ -40,7 +39,6 @@ from torch.testing._internal.common_utils import (
     NOTEST_CPU,
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
-    xfailIfWindows,
 )
 from torch._dynamo.testing import CompileCounterWithBackend
 
