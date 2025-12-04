@@ -21,7 +21,6 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_utils import (
     IS_JETSON,
     run_tests,
-    skipIfMPS,
     skipIfTorchDynamo,
     TestCase,
 )
@@ -157,7 +156,6 @@ class TestTorchDlPack(TestCase):
         self.assertEqual(x, y)
 
     @skipMeta
-    @skipIfMPS  # MPS crashes with noncontiguous now
     @onlyNativeDeviceTypes
     @dtypes(
         *all_types_and_complex_and(
@@ -167,6 +165,11 @@ class TestTorchDlPack(TestCase):
             torch.uint16,
             torch.uint32,
             torch.uint64,
+        )
+    )
+    @dtypesIfMPS(
+        *all_mps_types_and(
+            torch.bool, torch.cfloat, torch.chalf, torch.uint16, torch.uint32
         )
     )
     def test_from_dlpack_noncontinguous(self, device, dtype):
