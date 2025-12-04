@@ -1782,7 +1782,7 @@ exclude_patterns = [
 command = [
     'python3',
     'tools/linter/adapters/pylint_linter.py',
-    '--config=pylintrc',
+    '--config=pyproject.toml',
     '--',
     '@{{PATHSFILE}}'
 ]

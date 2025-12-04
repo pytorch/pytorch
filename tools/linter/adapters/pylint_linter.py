@@ -137,7 +137,7 @@ def main() -> None:
     parser.add_argument(
         "--config",
         required=True,
-        help="path to a pylintrc config file",
+        help="path to a pylintrc/pyproject config file",
     )
     parser.add_argument(
         "--code",
