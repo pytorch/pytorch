@@ -840,7 +840,7 @@ def generic_jump(
 
 
 def break_graph_if_unsupported(
-    *, push: int, msg_prefix: str
+    *, push: bool, msg_prefix: str
 ) -> Callable[
     [Callable[..., None]], Callable[[InstructionTranslatorBase, Instruction], None]
 ]:
@@ -915,7 +915,7 @@ def break_graph_if_unsupported(
 
             log.debug("%s triggered compile", inst.opname)
             all_stack_locals_metadata = self.output.compile_subgraph(
-                self, reason=reason, stack_pops=push - stack_effect
+                self, reason=reason, stack_pops=int(push) - stack_effect
             )
             cg = PyCodegen(self.output.root_tx)
             cleanup: list[Instruction] = []
@@ -962,8 +962,8 @@ def break_graph_if_unsupported(
 
             self.output.add_output_instructions(cleanup)
 
-            self.popn(push - stack_effect)
-            for _ in range(push):
+            self.popn(int(push) - stack_effect)
+            if push:
                 self.push(UnknownVariable())
             self.output.add_output_instructions(
                 self.create_call_resume_at(
@@ -2489,7 +2489,7 @@ class InstructionTranslatorBase(
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
 
     @break_graph_if_unsupported(
-        push=1,
+        push=True,
         msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION: a call to a regular function, e.g. f(x, y)",
     )
     def CALL_FUNCTION(self, inst: Instruction) -> None:
@@ -2498,7 +2498,7 @@ class InstructionTranslatorBase(
         self.call_function(fn, args, {})
 
     @break_graph_if_unsupported(
-        push=1,
+        push=True,
         msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION_EX: a variadic function call, e.g. f(*args)",
     )
     def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
@@ -2566,7 +2566,7 @@ class InstructionTranslatorBase(
         self.call_function(fn, argsvars.items, kwargsvars)
 
     @break_graph_if_unsupported(
-        push=1,
+        push=True,
         msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION_KW: a function call with keyword arguments, e.g. f(x=True)",
     )
     def CALL_FUNCTION_KW(self, inst: Instruction) -> None:
@@ -2636,12 +2636,11 @@ class InstructionTranslatorBase(
         self._load_attr(inst.argval)
 
     @break_graph_if_unsupported(
-        push=0,
+        push=False,
         msg_prefix="Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y",
     )
     def STORE_ATTR(self, inst: Instruction) -> None:
         val, obj = self.popn(2)
-
         BuiltinVariable(setattr).call_function(
             self,  # type: ignore[arg-type]
             [obj, ConstantVariable.create(inst.argval), val],
@@ -3187,7 +3186,7 @@ class InstructionTranslatorBase(
         )
 
     @break_graph_if_unsupported(
-        push=0,
+        push=False,
         msg_prefix="Encountered graph break when attempting to trace STORE_SUBSCR: trying to store subscript, e.g. x[key] = y",
     )
     def STORE_SUBSCR(self, inst: Instruction) -> None:
@@ -3413,7 +3412,7 @@ class InstructionTranslatorBase(
             )
 
     @break_graph_if_unsupported(
-        push=0, msg_prefix="Encountered intentional debugging graph break"
+        push=False, msg_prefix="Encountered intentional debugging graph break"
     )
     def graph_break_on_leaf_function(self, inst: Instruction) -> None:
         if self.is_leaf_tracer:
@@ -3685,7 +3684,7 @@ class InstructionTranslatorBase(
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
     BINARY_SUBSCR = break_graph_if_unsupported(
-        push=1,
+        push=True,
         msg_prefix="Encountered graph break when attempting to trace BINARY_SUBSCR: a binary subscript, e.g. x[attr]",
     )(stack_op(operator.getitem))
     BINARY_LSHIFT = stack_op(operator.lshift)
@@ -3784,7 +3783,7 @@ class InstructionTranslatorBase(
             self.kw_names = None
 
     @break_graph_if_unsupported(
-        push=1,
+        push=True,
         msg_prefix="Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y)",
     )
     def CALL(self, inst: Instruction) -> None:
@@ -3964,7 +3963,7 @@ class InstructionTranslatorBase(
     # fused instructions LOAD_FAST_LOAD_FAST, STORE_FAST_STORE_FAST, STORE_FAST_LOAD_FAST
     # are broken down.
     @break_graph_if_unsupported(
-        push=1,
+        push=True,
         msg_prefix="Encountered graph break when attempting to trace CALL_KW: a function call with keyword arguments, e.g. f(x=True)",
     )
     def CALL_KW(self, inst: Instruction) -> None:
@@ -4144,6 +4143,33 @@ class InstructionTranslatorBase(
             self.instructions[self.instruction_pointer - 1],
         )
 
+    def _make_frame_loc(
+        self, filename: str, lineno: Optional[int], fallback_lineno: int
+    ) -> tuple[str, int]:
+        if lineno is None or lineno < 0:
+            return (filename, fallback_lineno)
+        return (filename, lineno)
+
+    def _get_frame_loc_chain(
+        self, frame_loc: tuple[str, int]
+    ) -> tuple[tuple[str, int], ...]:
+        frame_loc_chain_list: list[tuple[str, int]] = []
+
+        if config.nested_graph_breaks:
+            current_tx: Optional[InstructionTranslatorBase] = self.parent
+            while current_tx is not None:
+                parent_frame_loc = self._make_frame_loc(
+                    current_tx.f_code.co_filename,
+                    current_tx.lineno,
+                    current_tx.f_code.co_firstlineno,
+                )
+                frame_loc_chain_list.append(parent_frame_loc)
+                current_tx = current_tx.parent
+
+        frame_loc_chain_list.reverse()
+        frame_loc_chain_list.append(frame_loc)
+        return tuple(frame_loc_chain_list)
+
     def log_graph_break(
         self,
         code_options: dict[str, Any],
@@ -4154,14 +4180,25 @@ class InstructionTranslatorBase(
             user_stack = torch._guards.TracingContext.extract_stack()
 
         try:
-            frame_loc = (user_stack[-1].filename, user_stack[-1].lineno)
+            if config.nested_graph_breaks and self.parent is not None:
+                frame_loc = self._make_frame_loc(
+                    self.f_code.co_filename,
+                    self.lineno,
+                    self.f_code.co_firstlineno,
+                )
+            else:
+                frame_loc = self._make_frame_loc(
+                    user_stack[-1].filename,
+                    user_stack[-1].lineno,
+                    0,
+                )
         except IndexError:
             # first instruction
             frame_loc = (
                 code_options["co_filename"],
                 code_options["co_firstlineno"],
             )
-
+        frame_loc_chain = self._get_frame_loc_chain(frame_loc)
         stack_above_dynamo_formatted = ""
         if config.verbose:
             stack_above_dynamo = get_stack_above_dynamo()
@@ -4206,7 +4243,7 @@ class InstructionTranslatorBase(
         if (
             graph_break_log.isEnabledFor(logging.DEBUG)
             and not explain
-            and graph_break_dup_warning_checker.add(frame_loc)
+            and graph_break_dup_warning_checker.add(frame_loc_chain)  # type: ignore[arg-type]
         ):
             # This log line MUST contain the string "Graph break in user code",
             # This log line is exercised from
