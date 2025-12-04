@@ -103,6 +103,20 @@ AOTI_TORCH_EXPORT AOTITorchError torch_get_const_data_ptr(
     const void** ret_data_ptr // returns borrowed reference
 );
 
+struct StringOpaque;
+using StringHandle = StringOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_new_string_handle(const char* data, size_t length, StringHandle* handle);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_delete_string(StringHandle handle);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_length(StringHandle handle, size_t* length);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_string_c_str(StringHandle handle, const char** data);
+
 #ifdef USE_CUDA
 
 AOTI_TORCH_EXPORT AOTITorchError

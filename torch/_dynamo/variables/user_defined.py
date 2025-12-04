@@ -89,6 +89,7 @@ from ..utils import (
     object_has_getattribute,
     proxy_args_kwargs,
     raise_args_mismatch,
+    raise_on_overridden_hash,
     set_methods,
     tensortype_to_dtype,
     tuple_methods,
@@ -113,6 +114,8 @@ except ImportError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+    from .constant import ConstantVariable
 
 
 def is_standard_setattr(val):
@@ -915,7 +918,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
-    ) -> "VariableTracker":
+    ) -> "ConstantVariable":
         if self.source:
             source = AttrSource(self.source, name)
             install_guard(source.make_guard(GuardBuilder.HASATTR))
@@ -926,6 +929,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if name == "__name__":
             return self.value.__name__
         return super().const_getattr(tx, name)
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        return (
+            isinstance(other, variables.UserDefinedClassVariable)
+            and self.value is other.value
+        )
 
 
 class UserDefinedExceptionClassVariable(UserDefinedClassVariable):
@@ -1745,26 +1760,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return True
+
+    def get_python_hash(self):
+        # default hash
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        # id check
+        return self.value is other.value
+
 
 class FrozenDataClassVariable(UserDefinedObjectVariable):
-    class HashWrapper:
-        """This class is hashed if a dataclass is used as a key in a dict.
-        It's necessary to avoid side effects from calling the __init__ of the dataclass class when hashing"""
-
-        def __init__(self, c, fields):
-            self.cls = c
-            self.fields = tuple(fields.items())
-
-        def __eq__(self, other):
-            return (
-                type(self) is type(other)
-                and self.cls == other.cls
-                and self.fields == other.fields
-            )
-
-        def __hash__(self):
-            return hash((self.cls, self.fields))
-
     @staticmethod
     def create(tx, value, source):
         from dataclasses import fields
@@ -1802,6 +1811,10 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
             raise NotImplementedError(
                 "currently can't reconstruct arbitrary frozen dataclass instances"
             )
+
+        # LeafSpec is deprecated, use treespec_leaf() instead
+        if istype(self.value, pytree.LeafSpec):
+            return pytree.treespec_leaf()
 
         args = []
         kwargs = {}
@@ -1861,6 +1874,22 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
+
+    def is_python_hashable(self):
+        # TODO - Check corner cases like eq=False, hash=False etc
+        return True
+
+    def get_python_hash(self):
+        return hash(tuple(arg.get_python_hash() for arg in self.fields.values()))
+
+    def is_python_equal(self, other):
+        is_class_same = self.python_type() is other.python_type()
+        is_field_name_same = self.fields.keys() == other.fields.keys()
+        is_field_value_same = all(
+            value_a.is_python_equal(value_b)
+            for value_a, value_b in zip(self.fields.values(), other.fields.values())
+        )
+        return is_class_same and is_field_name_same and is_field_value_same
 
 
 class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
@@ -2020,8 +2049,6 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
     def __init__(self, value, dict_vt=None, **kwargs):
         super().__init__(value, **kwargs)
         self._dict_vt = dict_vt
@@ -2084,6 +2111,10 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     def install_dict_contains_guard(self):
         return self._dict_vt.install_dict_contains_guard()
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return False
+
 
 class UserDefinedSetVariable(UserDefinedObjectVariable):
     """
@@ -2093,8 +2124,6 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     variable tracker. For everything else, it falls back to
     UserDefinedObjectVariable.
     """
-
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
     def __init__(self, value, set_vt=None, **kwargs):
         super().__init__(value, **kwargs)
@@ -2159,6 +2188,18 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def install_dict_contains_guard(self):
         return self._set_vt.install_dict_contains_guard()
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return self._set_vt.is_python_hashable()
+
+    def get_python_hash(self):
+        return self._set_vt.get_python_hash()
+
+    def is_python_equal(self, other):
+        return isinstance(
+            other, UserDefinedSetVariable
+        ) and self._set_vt.is_python_equal(other._set_vt)
+
 
 class UserDefinedListVariable(UserDefinedObjectVariable):
     """
@@ -2168,8 +2209,6 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     variable tracker. For everything else, it falls back to
     UserDefinedObjectVariable.
     """
-
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
     def __init__(self, value, list_vt=None, **kwargs):
         super().__init__(value, **kwargs)
@@ -2202,6 +2241,10 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     def is_underlying_vt_modified(self, side_effects):
         return side_effects.is_modified(self._list_vt)
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return False
+
 
 class UserDefinedTupleVariable(UserDefinedObjectVariable):
     """
@@ -2211,8 +2254,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     variable tracker. For everything else, it falls back to
     UserDefinedObjectVariable.
     """
-
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
     def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
         super().__init__(value, init_args=init_args, **kwargs)
@@ -2252,10 +2293,20 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return self._tuple_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return self._tuple_vt.is_python_hashable()
+
+    def get_python_hash(self):
+        return self._tuple_vt.get_python_hash()
+
+    def is_python_equal(self, other):
+        return isinstance(
+            other, UserDefinedTupleVariable
+        ) and self._tuple_vt.is_python_equal(other._tuple_vt)
+
 
 class MutableMappingVariable(UserDefinedObjectVariable):
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
     def __init__(self, value, **kwargs):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = variables.ConstDictVariable({})
