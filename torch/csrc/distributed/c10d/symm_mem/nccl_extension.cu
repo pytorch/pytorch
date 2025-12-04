@@ -179,6 +179,7 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
     symm_mem_nccl->get_signal_pad_ptrs_dev(),
     cur_rank,
     signal);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
