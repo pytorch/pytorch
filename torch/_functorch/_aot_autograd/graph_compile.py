@@ -238,6 +238,13 @@ def aot_stage1_graph_capture(
                     fw_metadata=aot_state.fw_metadata,
                 )
             )
+            # Apply AC rematerialization to forward+loss+bwd graph
+            if torch._functorch.config.remat_using_tags_for_fwd_loss_bwd_graph:
+                from torch._functorch._activation_checkpointing.remat_using_tags_for_fwd_loss_bwd_graph_pass import (
+                    remat_using_tags_for_fwd_loss_bwd_graph,
+                )
+
+                graph = remat_using_tags_for_fwd_loss_bwd_graph(graph)
 
     if config.selective_decompose:
         from torch.fx.experimental.proxy_tensor import selective_decompose
@@ -2260,9 +2267,8 @@ def _aot_stage2b_compile_forward_or_inference(
         compiler = aot_config.fw_compiler
 
     with grad_ctx(), autocast_ctx(), track_graph_compiling(aot_config, tracking_mode):
-        fakified_out_wrapper = FakifiedOutWrapper()
         inductor_wrappers: list[InductorWrapper] = [
-            fakified_out_wrapper,
+            FakifiedOutWrapper(),
             FunctionalizedRngRuntimeWrapper(return_new_outs=is_inference),
         ]
         pre_compile_inductor_wrappers(
@@ -2286,11 +2292,15 @@ def _aot_stage2b_compile_forward_or_inference(
         if not getattr(compiled_fw_func, "_boxed_call", False):
             compiled_fw_func = make_boxed_func(compiled_fw_func)
 
-        # Set forward output strides if needed
-        if fakified_out_wrapper.needs_post_compile:
-            fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
-
         # Apply post-compile wrappers
+        compiled_fw_func = post_compile_inductor_wrappers(
+            inductor_wrappers,
+            compiled_fw_func,
+            aot_config,
+            runtime_metadata=fw_metadata,
+            fwd_output_strides=fwd_output_strides,
+        )
+
         compiled_fw_func = EffectTokensWrapper().post_compile(
             compiled_fw_func,
             aot_config,
@@ -2303,13 +2313,6 @@ def _aot_stage2b_compile_forward_or_inference(
             maybe_subclass_meta=maybe_subclass_meta,
             num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
         ).post_compile(
-            compiled_fw_func,
-            aot_config,
-            runtime_metadata=fw_metadata,
-        )
-
-        post_compile_inductor_wrappers(
-            inductor_wrappers,
             compiled_fw_func,
             aot_config,
             runtime_metadata=fw_metadata,

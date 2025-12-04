@@ -517,11 +517,12 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
 
     def post_compile(
         self,
-        compiled_fn,
+        compiled_fn: Callable,
         aot_config: AOTConfig,
         *,
         runtime_metadata: ViewAndMutationMeta,
-    ):
+        fwd_output_strides: list[tuple[int, ...] | None] | None,
+    ) -> Callable:
         @wraps(compiled_fn)
         def wrapper(runtime_args: list[Any]):
             if runtime_metadata.is_rng_op_functionalized:
@@ -565,10 +566,6 @@ class FunctionalizedRngRuntimeWrapper(InductorWrapper):
 @dataclass
 class FakifiedOutWrapper(InductorWrapper):
     out_metas: list[torch.Tensor] = field(default_factory=list)
-    # TracingContext.fwd_output_strides
-    # Generated from actually doing compile
-    # NB: an entry is None if it's not a Tensor
-    fwd_output_strides: Optional[list[Optional[list[int]]]] = None
     needs_post_compile: bool = True
 
     def pre_compile(
@@ -587,9 +584,10 @@ class FakifiedOutWrapper(InductorWrapper):
         else:
             self.needs_post_compile = False
 
-    def _compute_output_meta_with_inductor_strides(self):
+    def _compute_output_meta_with_inductor_strides(
+        self, fwd_output_strides: list[tuple[int, ...] | None]
+    ):
         out = self.out_metas
-        fwd_output_strides = self.fwd_output_strides
         if not fwd_output_strides:
             return out
 
@@ -617,20 +615,19 @@ class FakifiedOutWrapper(InductorWrapper):
             out[i] = out[i].as_strided(out[i].shape, strides)
         return out
 
-    # To be called post compile
-    def set_fwd_output_strides(self, fwd_output_strides):
-        self.fwd_output_strides = fwd_output_strides
-
     def post_compile(
         self,
-        compiled_fn,
+        compiled_fn: Callable,
         aot_config: AOTConfig,
         *,
         runtime_metadata: ViewAndMutationMeta,
-    ):
+        fwd_output_strides: list[tuple[int, ...] | None] | None,
+    ) -> Callable:
         if self.needs_post_compile:
-            assert self.fwd_output_strides is not None
-            fakified_out = self._compute_output_meta_with_inductor_strides()
+            assert fwd_output_strides is not None
+            fakified_out = self._compute_output_meta_with_inductor_strides(
+                fwd_output_strides
+            )
 
             @wraps(compiled_fn)
             def wrapper(runtime_args):
@@ -2616,6 +2613,7 @@ def post_compile_inductor_wrappers(
     aot_config: AOTConfig,
     *,
     runtime_metadata: ViewAndMutationMeta,
+    fwd_output_strides: list[tuple[int, ...] | None] | None,
 ) -> Callable:
     """
     Runs a sequence of InductorWrappers on the given function.  Should be called after
@@ -2623,7 +2621,10 @@ def post_compile_inductor_wrappers(
     """
     for wrapper in reversed(wrappers):
         compiled_fn = wrapper.post_compile(
-            compiled_fn, aot_config, runtime_metadata=runtime_metadata
+            compiled_fn,
+            aot_config,
+            runtime_metadata=runtime_metadata,
+            fwd_output_strides=fwd_output_strides,
         )
     return compiled_fn
 
