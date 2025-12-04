@@ -3,6 +3,22 @@
 # To run:
 # python test/distributed/test_nvshmem.py
 
+import os
+import sys
+
+# Reduce NVSHMEM heap size from default to 8GB to prevent NVLS multicast
+# allocation failures on H100 systems. This must be set before importing torch.
+# Note: The CI also sets this in the docker container, but we set it here as well
+# as a fallback for local testing and to ensure spawned processes inherit it.
+os.environ.setdefault("NVSHMEM_SYMMETRIC_SIZE", "8589934592")  # 8GB
+
+# Debug: Print ALL NVSHMEM-related environment variables
+print("[DEBUG] All NVSHMEM environment variables:", file=sys.stderr, flush=True)
+for key, value in os.environ.items():
+    if "NVSHMEM" in key or "SYMMETRIC" in key:
+        print(f"[DEBUG]   {key} = {value}", file=sys.stderr, flush=True)
+
+import torch
 
 import torch
 import torch.distributed as dist

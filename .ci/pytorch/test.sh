@@ -369,6 +369,11 @@ test_h100_distributed() {
 }
 
 test_h100_symm_mem() {
+  # Reduce NVSHMEM heap size from default to 8GB to prevent NVLS multicast
+  # allocation failures on H100 systems with limited GPU memory.
+  # This MUST be set before NVSHMEM initializes, which happens when torch is imported.
+  export NVSHMEM_SYMMETRIC_SIZE=8589934592
+
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
