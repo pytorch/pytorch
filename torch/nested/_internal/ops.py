@@ -28,23 +28,6 @@ def _get_padding_value(dtype, padding_type):
         return float("inf") if padding_type == "max" else float("-inf")
 
 
-def _get_padding_value(dtype, padding_type):
-    if dtype.is_floating_point:
-        return (
-            torch.finfo(dtype).max if padding_type == "max" else torch.finfo(dtype).min
-        )
-    elif dtype == torch.int64:
-        # Largest int64 value exactly representable in float64 (IEEE 754 double precision).
-        # Avoids overflow when padding_value is passed as double to _jagged_to_padded_dense_forward.
-        int64_safe_max = (1 << 53) - 1
-        int64_safe_min = -int64_safe_max
-        return int64_safe_max if padding_type == "max" else int64_safe_min
-    else:
-        return (
-            torch.iinfo(dtype).max if padding_type == "max" else torch.iinfo(dtype).min
-        )
-
-
 def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     from torch._prims_common import canonicalize_dims
 
