@@ -3793,7 +3793,7 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.float)
     def test_log_softmax_float(self, device, dtype):
-        # float16 -> float32 comparison for mps since mps doesnt have float64
+        # float16 -> float32 comparison for mps since mps doesn't have float64
         dtype = torch.float16 if device == "mps:0" else dtype
         x = (torch.rand(4, 3, dtype=dtype, device=device) - 10000000.0).to_sparse()
         out = torch.sparse.log_softmax(x, dim=1).to_dense()
