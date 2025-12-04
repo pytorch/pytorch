@@ -1946,7 +1946,7 @@ class GuardBuilder(GuardBuilderBase):
 
         obj_id = self.id_ref(t, f"type({guard.name})")
         type_repr = repr(t)
-        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})  # {type_repr}"
+        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id}), type={type_repr}"
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_type_match_guard(
@@ -2048,7 +2048,13 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         id_val = self.id_ref(val, guard.name)
-        code = f"___check_obj_id({ref}, {id_val})"
+        try:
+            type_repr = repr(val)
+        except Exception:
+            # During deepcopy reconstruction or other state transitions,
+            # objects may be in an incomplete state where repr() fails
+            type_repr = f"<{type(val).__name__}>"
+        code = f"___check_obj_id({ref}, {id_val}), type={type_repr}"
         self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
         self.get_guard_manager(guard).add_id_match_guard(
             id_val, get_verbose_code_parts(code, guard, recompile_hint)
@@ -3327,7 +3333,7 @@ class GuardsStatePickler(pickle.Pickler):
         return types.MethodType(func, base)
 
     @staticmethod
-    def _unpickle_sdp_backend(name: str):
+    def _unpickle_sdp_backend(name: str) -> torch.nn.attention.SDPBackend:
         # Reconstruct from the Python-facing enum namespace
         return getattr(torch.nn.attention.SDPBackend, name)
 
@@ -3871,7 +3877,7 @@ class CheckFunctionManager:
             },
             global_scope=global_scope_state,
             _guards=torch._guards.GuardsSet(
-                OrderedSet(
+                {
                     dataclasses.replace(
                         guard,
                         obj_weakref=None,
@@ -3879,7 +3885,7 @@ class CheckFunctionManager:
                         create_fn=normalize_create_fn(guard.create_fn),
                     )
                     for guard in sorted_guards
-                )
+                }
             ),
             input_source_to_sizes_strides=pytree.tree_map(
                 convert_int_to_concrete_values,
