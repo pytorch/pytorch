@@ -1700,7 +1700,7 @@ void recordHistory(
     size_t alloc_trace_max_entries,
     RecordContext when,
     bool clearHistory) {
-  allocator.recordHistory(
+  native_allocator.recordHistory(
       enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
 }
 
