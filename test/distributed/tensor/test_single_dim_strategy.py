@@ -45,6 +45,42 @@ def _get_mm_like_single_dim_strategies() -> list[
     ]
 
 
+def _get_mm_metas(M=64, K=32, N=64) -> tuple[TensorMeta, TensorMeta]:
+    """
+    Helper function to generate tensor metadata for matmul operation (M, K) @ (K, N) -> (M, N).
+    """
+    left_meta = TensorMeta(
+        shape=torch.Size([M, K]),
+        stride=(K, 1),
+        dtype=torch.float32,
+    )
+    right_meta = TensorMeta(
+        shape=torch.Size([K, N]),
+        stride=(N, 1),
+        dtype=torch.float32,
+    )
+    return left_meta, right_meta
+
+
+def _get_mm_specs(
+    mesh: DeviceMesh,
+    left_meta: TensorMeta,
+    right_meta: TensorMeta,
+    left_placements: tuple[Placement],
+    right_placements: tuple[Placement],
+) -> tuple[DTensorSpec, DTensorSpec]:
+    """
+    Helper function to generate DTensorSpecs for matmul operation (M, K) @ (K, N) -> (M, N).
+    """
+    left_spec = DTensorSpec(
+        mesh=mesh, placements=left_placements, tensor_meta=left_meta
+    )
+    right_spec = DTensorSpec(
+        mesh=mesh, placements=right_placements, tensor_meta=right_meta
+    )
+    return left_spec, right_spec
+
+
 class TestExpandPlaceholder(TestCase):
     def setUp(self):
         super().setUp()
@@ -70,30 +106,18 @@ class TestExpandPlaceholder(TestCase):
         # Create a fake 3D mesh of size 8 (2x2x2)
         mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
 
-        # Create fake tensor metadata for matmul: (M, K) @ (K, N) -> (M, N)
-        left_meta = TensorMeta(
-            shape=torch.Size([64, 32]),
-            stride=(32, 1),
-            dtype=torch.float32,
-        )
-        right_meta = TensorMeta(
-            shape=torch.Size([32, 64]),
-            stride=(64, 1),
-            dtype=torch.float32,
-        )
+        # Use helpers to create tensor metadata for matmul: (M, K) @ (K, N) -> (M, N)
+        left_meta, right_meta = _get_mm_metas()
 
-        # Create DTensorSpec for inputs with Shard placements
+        # Create DTensorSpec for inputs with Shard placements using helper
         # Left input sharded on dim 0 across first mesh dim, replicated on others
-        left_spec = DTensorSpec(
-            mesh=mesh,
-            placements=(Shard(0), Replicate(), Replicate()),
-            tensor_meta=left_meta,
-        )
         # Right input replicated across all mesh dims
-        right_spec = DTensorSpec(
-            mesh=mesh,
-            placements=(Replicate(), Replicate(), Replicate()),
-            tensor_meta=right_meta,
+        left_spec, right_spec = _get_mm_specs(
+            mesh,
+            left_meta,
+            right_meta,
+            left_placements=(Shard(0), Replicate(), Replicate()),
+            right_placements=(Replicate(), Replicate(), Replicate()),
         )
 
         # Create OpSchema
@@ -194,17 +218,8 @@ class TestExpandPlaceholder(TestCase):
         # Create a mesh for testing
         mesh = DeviceMesh("cpu", [0, 1, 2, 3])
 
-        # Create fake tensor metadata for matmul: (M, K) @ (K, N) -> (M, N)
-        left_meta = TensorMeta(
-            shape=torch.Size([64, 32]),
-            stride=(32, 1),
-            dtype=torch.float32,
-        )
-        right_meta = TensorMeta(
-            shape=torch.Size([32, 64]),
-            stride=(64, 1),
-            dtype=torch.float32,
-        )
+        # Use helpers to create tensor metadata for matmul: (M, K) @ (K, N) -> (M, N)
+        left_meta, right_meta = _get_mm_metas()
 
         # Use the helper function to get matmul-like single-dim strategies
         single_dim_strategies = _get_mm_like_single_dim_strategies()
