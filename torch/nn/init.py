@@ -323,6 +323,8 @@ def ones_(tensor: Tensor) -> Tensor:
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.ones_(w)
+
+    Functionality: initializes the input tensor to all ones. 
     """
     return _no_grad_fill_(tensor, 1.0)
 
@@ -336,6 +338,8 @@ def zeros_(tensor: Tensor) -> Tensor:
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.zeros_(w)
+    
+    Functionality: intializes the input tensor to all zeros. 
     """
     return _no_grad_zero_(tensor)
 

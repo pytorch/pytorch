@@ -272,6 +272,10 @@ class AlphaDropout(_DropoutNd):
 class FeatureAlphaDropout(_DropoutNd):
     r"""Randomly masks out entire channels.
 
+    Funtionality: randomely drops entire feature maps during training.
+    It replaces the droppped actions with the negative saturation value used by the SELU
+    activation function. 
+    
     A channel is a feature map,
     e.g. the :math:`j`-th channel of the :math:`i`-th sample in the batch input
     is a tensor :math:`\text{input}[i, j]` of the input tensor). Instead of
