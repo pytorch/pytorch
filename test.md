@@ -1,4 +1,5 @@
-Hanuman
-jai 
-jai sitaram
+JAI Hanuman
+
+JAI Jai
+
 jai shri ram ji 
