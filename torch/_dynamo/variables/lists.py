@@ -862,6 +862,8 @@ class ListVariable(CommonListMethodsVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .tensor import SymNodeVariable
+
         if name == "__setitem__" and self.is_mutable():
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
