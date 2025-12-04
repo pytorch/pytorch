@@ -3,6 +3,7 @@
 # Test to ensure sparsity information propagates properly into traced graph.
 #
 
+import sys
 import unittest
 
 import torch
@@ -90,6 +91,9 @@ class SparseActivationCSR(torch.nn.Module):
 
 
 @unittest.skipIf(is_fbcode(), "See torch._dynamo.config")
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestSparseProp(TestCase):
     def setUp(self):
         super().setUp()
