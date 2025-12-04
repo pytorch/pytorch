@@ -34,7 +34,7 @@ from pathlib import Path
 from tempfile import _TemporaryFileWrapper
 from time import time, time_ns
 from types import ModuleType
-from typing import Any, cast, Generic, NoReturn, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import override, Self
 
 import torch
@@ -3741,7 +3741,7 @@ def _load_triton_kernel_from_source(
     return getattr(PyCodeCache.load(source_code), kernel_name)
 
 
-def _cuda_compiler() -> str | None:
+def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(config.cuda.cuda_cxx):
         return config.cuda.cuda_cxx
     if config.is_fbcode():
@@ -3759,7 +3759,7 @@ def _cutlass_path() -> str:
 
         return parutil.get_dir_path("cutlass-4-headers")
     else:
-        return config.cuda.cutlass_dir
+        return config.cutlass.cutlass_dir
 
 
 def _cutlass_paths() -> list[str]:
@@ -3807,7 +3807,7 @@ def cutlass_key() -> bytes:
             return resource_file.read().encode()
 
     combined_hash = hashlib.sha256()
-    build_code_hash([config.cuda.cutlass_dir], "", combined_hash)
+    build_code_hash([config.cutlass.cutlass_dir], "", combined_hash)
     return combined_hash.digest()
 
 
@@ -3877,14 +3877,14 @@ def _nvcc_compiler_options() -> list[str]:
         "-DCUTE_SM90_EXTENDED_MMA_SHAPES_ENABLED",
         "-w",
         f"-gencode=arch=compute_{arch},code=[{','.join(code)}]",
-        config.cuda.compile_opt_level,
+        config.cutlass.compile_opt_level,
         "-std=c++17",
         "--expt-relaxed-constexpr",
         "-DNDEBUG",
     ]
     if config.is_fbcode():
         options.extend(["-ccbin", os.path.dirname(build_paths.gcc)])
-    if config.cuda.enable_debug_info:
+    if config.cutlass.enable_debug_info:
         options.extend(["-lineinfo", "-g", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"])
     if config.cuda.enable_ptxas_info:
         options.extend(
@@ -3896,7 +3896,7 @@ def _nvcc_compiler_options() -> list[str]:
                 "--source-in-ptx",
             ]
         )  # Annotate the ptx file with source information
-    if config.cuda.use_fast_math:
+    if config.cutlass.use_fast_math:
         options.extend(
             [
                 "--use_fast_math",
@@ -4100,7 +4100,7 @@ class CUDACodeCache:
         Returns the hash key of source code, and the path to the file.
         """
 
-        if config.cuda.cutlass_hash_with_compile_cmd:
+        if config.cutlass.cutlass_hash_with_compile_cmd:
             cuda_command = repr(
                 cuda_compile_command(["dummy_input"], "dummy_output", dst_file_ext)
             )
@@ -4151,7 +4151,7 @@ class CUDACodeCache:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 error_path = binary_error_path(output_path)
                 binary_remote_cache = cls.get_kernel_binary_remote_cache(
-                    caching_enabled=config.cuda.use_binary_remote_cache
+                    caching_enabled=config.cutlass.use_binary_remote_cache
                     and not config.force_disable_caches,
                     caching_available=config.is_fbcode(),
                 )
@@ -4166,13 +4166,13 @@ class CUDACodeCache:
                     cmd_parts, error_output = json.loads(error_json)
                     if (
                         binary_remote_cache is not None
-                        and config.cuda.upload_to_binary_remote_cache
+                        and config.cutlass.upload_to_binary_remote_cache
                     ):
                         # This ensures that a local error is uploaded to the remote cache,
                         # as we make no assumptions about the remote cache having the same
                         # information as the local cache
                         binary_remote_cache.put(
-                            error_path, config.cuda.binary_remote_cache_force_write
+                            error_path, config.cutlass.binary_remote_cache_force_write
                         )
                     cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
                         input_path, output_path, error_json
@@ -4236,11 +4236,11 @@ class CUDACodeCache:
                 # Upload to remote cache if enabled
                 if (
                     binary_remote_cache is not None
-                    and config.cuda.upload_to_binary_remote_cache
+                    and config.cutlass.upload_to_binary_remote_cache
                 ):
                     # will log on errors, but not fail out
                     binary_remote_cache.put(
-                        output_path, config.cuda.binary_remote_cache_force_write
+                        output_path, config.cutlass.binary_remote_cache_force_write
                     )
                 cls.cache[key_with_ext] = CUDACodeCache.CacheEntry(
                     input_path, output_path, None
@@ -4293,10 +4293,10 @@ class CUDACodeCache:
         # Upload to remote cache directly from memory if enabled
         if (
             binary_remote_cache is not None
-            and config.cuda.upload_to_binary_remote_cache
+            and config.cutlass.upload_to_binary_remote_cache
         ):
             binary_remote_cache.put(
-                error_path, config.cuda.binary_remote_cache_force_write
+                error_path, config.cutlass.binary_remote_cache_force_write
             )
 
 
