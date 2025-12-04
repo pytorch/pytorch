@@ -39,8 +39,8 @@ class ExplicitRedistributionContext:
     strict (bool) if True, triggers on any redistribution.  If False, only triggers on redistributions that perform
     communication.
 
-    mode (str) "raise": raises an
-
+    mode (str) Determines what happens when ExplicitRedistributionContext triggers:
+    "raise": raises an exceptoin, "warn" issues a warning
     """
 
     _local = threading.local()
