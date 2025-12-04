@@ -1071,12 +1071,24 @@ else:
                 )
             return not_none(get_rank(mesh_dim_group))
 
+        def is_part_of_mesh(self) -> bool:
+            """
+            Return True if the current rank is part of this mesh.
+            """
+            # TODO: rename is_current_rank_part_of_mesh?
+            # TODO: Do we need to patch dynamo?
+            return self._coordinate_on_dim is not None
+
         def get_coordinate(self) -> list[int] | None:
             """
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+        def sym_get_coordinate(self, index: int) -> int:
+            assert self._coordinate_on_dim is not None
+            return self._coordinate_on_dim[index]
 
         def _flatten(
             self,
