@@ -575,7 +575,9 @@ def mark_unbacked(
         specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
             If provided, Dynamo will generate specialized compiled regions for each criterion in addition to a generic trace.
     """
-    if isinstance(t, torch.distributed.tensor.DTensor):
+    if torch.distributed.is_available() and isinstance(
+        t, torch.distributed.tensor.DTensor
+    ):
         # apply on inner tensor sizes/strides
         mark_unbacked(t._local_tensor, index)
     else:
