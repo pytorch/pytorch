@@ -842,6 +842,48 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_test = fn_opt(dt)
         self.assertEqual(out_ref, out_test)
 
+    def test_dynamo_from_local_grad_placements_sequence_intermediate(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        placements = PytreeTuple(Shard(0))
+
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                placements=placements,
+                run_check=False,
+            )
+            return dt.to_local() + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+
+        out_ref = fn(x)
+        out_test = fn_opt(x)
+        self.assertEqual(out_ref, out_test)
+
+    def test_dynamo_from_local_grad_placements_sequence_intermediate_as_args(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        placements = PytreeTuple(Shard(0))
+
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                placements,
+                run_check=False,
+            )
+            return dt.to_local() + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+
+        out_ref = fn(x)
+        out_test = fn_opt(x)
+        self.assertEqual(out_ref, out_test)
+
     def test_dynamo_to_local_kwargs(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
