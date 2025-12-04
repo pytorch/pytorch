@@ -7,6 +7,8 @@ import torch
 from torch._prims_common import IntLike
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
 from torch.distributed.tensor._op_schema import (
+    ArgsType,
+    KwargsType,
     OpSchema,
     OpSpec,
     OpStrategy,
@@ -21,6 +23,7 @@ from torch.distributed.tensor._ops._embedding_ops import MaskPartial
 from torch.distributed.tensor._ops.registration import (
     register_op_strategy,
     register_prop_rule,
+    register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
@@ -33,6 +36,7 @@ from torch.distributed.tensor._ops.utils import (
     shift_shard_dims_after_remove,
 )
 from torch.distributed.tensor.placement_types import (
+    _ShardingPlaceholder,
     Partial,
     Placement,
     Replicate,
@@ -803,7 +807,35 @@ def stack_strategy(op_schema: OpSchema) -> StrategyType:
     return op_strategy
 
 
-@register_op_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
+@register_single_dim_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
+def cat_single_dim_strategy(
+    args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    input_tuple_strategy = args_schema[0]
+    assert isinstance(input_tuple_strategy, TupleStrategy)
+    input_strategies: list[OpStrategy] = []
+    for child in input_tuple_strategy.children:
+        assert isinstance(child, OpStrategy)
+        input_strategies.append(child)
+    num_inputs = len(input_strategies)
+    ndim_set = {strategy.ndim for strategy in input_strategies}
+    assert len(ndim_set) in (1, 2), (
+        "Expected all cat inputs to be the same ndim, except empty tensors"
+    )
+    if len(ndim_set) == 2:
+        assert 0 in ndim_set
+    common_ndim = max(ndim_set)
+    cat_dim = cast(int, args_schema[1]) if len(args_schema) > 1 else 0
+    cat_dim = normalize_dim(cat_dim, common_ndim)
+    single_dim_strategies = []
+    for i in range(common_ndim):
+        if i != cat_dim:
+            single_dim_strategies.append([_ShardingPlaceholder(i)] * (1 + num_inputs))
+    single_dim_strategies.append([Partial("sum")] * (1 + num_inputs))
+    return single_dim_strategies
+
+
+# @register_op_strategy(aten.cat.default, RuntimeSchemaInfo(1, needs_pytree=True))
 def cat_strategy(op_schema: OpSchema) -> StrategyType:
     args_schema = op_schema.args_schema
     input_tuple_strategy = args_schema[0]
