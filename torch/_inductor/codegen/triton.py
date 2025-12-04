@@ -4773,7 +4773,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     f"{name} = tl.full([R0_BLOCK], {default}, tl.float32)[None, :]"
                 )
                 accumname2var[name] = self.cse.namedvar(
-                    name, dtype=torch.float, shape=(1, "R0_BLOCK")
+                    name, dtype=torch.float, shape=("1", "R0_BLOCK")
                 )
             self.body.writeline("split_size = min(RSPLIT_SIZE, xnumel - xoffset)")
             self.body.writeline(
@@ -4811,6 +4811,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         self.body,
                         f"{triton_reduction_function}({var}, 0)",
                         dtype=var.dtype,
+                        shape=("R0_BLOCK",),
                     )
                     import unittest
 
