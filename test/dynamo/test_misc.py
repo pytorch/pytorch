@@ -13304,6 +13304,16 @@ fn
         self.assertRaises(Unsupported, f, [])
         self.assertRaises(Unsupported, f, "1 + j")
 
+    def test_guard_string_escaped(self):
+        d = {frozenset({0}): {frozenset({0}): 1}}
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return x + d[frozenset({0})][frozenset({0})]
+
+        x = torch.ones(3)
+        self.assertEqual(x + 1, f(x))
+
     def test_compiled_class_graph_break(self):
         counter = CompileCounter()
 
