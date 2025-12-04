@@ -1828,6 +1828,11 @@ test_attention_microbenchmark() {
     --output-json-for-dashboard "${TEST_REPORTS_DIR}/attention_microbenchmark.json"
 }
 
+test_openreg() {
+  python test/run_test.py --openreg --verbose
+  assert_git_not_dirty
+}
+
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
   (cd test && python -c "import torch; print(torch.__config__.show())")
   (cd test && python -c "import torch; print(torch.__config__.parallel_info())")
@@ -2012,6 +2017,8 @@ elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
   test_h100_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
+elif [[ "${TEST_CONFIG}" == openreg ]]; then
+  test_openreg
 else
   install_torchvision
   install_monkeytype
