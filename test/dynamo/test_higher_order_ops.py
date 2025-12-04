@@ -134,7 +134,7 @@ def default_args_generator(seed_value):
         yield new_args
 
 
-class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class HigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def _assert_wrap_fallback(self, func, args, setup=lambda: None):
         counters.clear()
         backend = EagerAndRecordGraphs()
@@ -3496,9 +3496,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(y.grad, y_eager.grad)
 
 
-class HigherOrderOpVmapGuardTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks, LoggingTestCase
-):
+class HigherOrderOpVmapGuardTests(LoggingTestCase):
     @make_logging_test(recompiles=True)
     def test_vmap_grad_guard_ok(self, records):
         vmap = torch.vmap
@@ -3767,9 +3765,7 @@ class HigherOrderOpVmapGuardTests(
         self.assertGreater(len(records), 0)
 
 
-class FuncTorchHigherOrderOpTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
     def tearDown(self):
         # Ensure that in the case of a test failure, the next test won't fail
         # because of a previous call to _vmap_increment_nesting that wasn't undone
@@ -6901,9 +6897,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(expected, actual)
 
 
-class ActivationCheckpointingTests(
-    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
-):
+class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
     def _validate(self, fn, backend, *args, skip_check=False, fullgraph=True):
         cloned_args = []
         for arg in args:
@@ -7294,7 +7288,7 @@ xfail_hops_compile = {
 }
 
 
-class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
+class TestHigherOrderOpsOpInfo(torch._dynamo.test_case.TestCase):
     @requires_cuda_and_triton
     @parametrize("backend", ("aot_eager", "inductor"))
     @ops(
