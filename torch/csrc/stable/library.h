@@ -136,6 +136,11 @@ struct UnboxType<std::string_view> {
   using type = std::string;
 };
 
+template <>
+struct UnboxType<const torch::stable::Tensor&> {
+  using type = torch::stable::Tensor;
+};
+
 template <typename T>
 using unbox_type_t = typename UnboxType<T>::type;
 

@@ -217,7 +217,7 @@ Tensor my_transpose(Tensor t, int64_t dim0, int64_t dim1) {
   return transpose(t, dim0, dim1);
 }
 
-Tensor my_empty_like(Tensor t) {
+Tensor my_empty_like(const Tensor& t) {
   return empty_like(t);
 }
 
