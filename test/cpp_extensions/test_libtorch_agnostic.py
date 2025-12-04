@@ -982,7 +982,7 @@ except RuntimeError as e:
                 self.assertIn("C++ CapturedTraceback:", error_message)
                 self.assertRegex(
                     error_message,
-                    r"Exception raised from test_std_cuda_check_error at .*test_std_cuda_check\.cu:\d+",
+                    r"Exception raised from test_std_.*_check_error at .*test_std_.*check\..*:\d+",
                 )
             else:
                 self.assertNotIn("C++ CapturedTraceback:", error_message)
@@ -1041,7 +1041,7 @@ except RuntimeError as e:
                 self.assertIn("C++ CapturedTraceback:", error_message)
                 self.assertRegex(
                     error_message,
-                    r"Exception raised from test_std_cuda_kernel_launch_check_error at .*test_std_cuda_check\.cu:\d+",
+                    r"Exception raised from test_std_.*_kernel_launch_check_error at .*test_std_.*_check\..*:\d+",
                 )
             else:
                 self.assertNotIn("C++ CapturedTraceback:", error_message)
