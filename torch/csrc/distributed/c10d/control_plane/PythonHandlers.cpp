@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 
+#include <c10/util/Exception.h>
 #include <c10/util/tempfile.h>
 #include <torch/csrc/distributed/c10d/exception.h>
 #include <torch/csrc/utils/pybind.h>
@@ -17,9 +18,7 @@ RegisterHandler tracebackHandler{
       auto tmpfile = c10::make_tempfile("torch-dump_traceback");
 
       auto cfile = ::fopen(tmpfile.name.c_str(), "w");
-      if (!cfile) {
-        throw std::runtime_error("failed to open file for writing");
-      }
+      TORCH_CHECK(cfile, "failed to open file for writing");
 
       {
         py::gil_scoped_acquire guard{};

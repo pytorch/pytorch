@@ -119,7 +119,7 @@ class LayerNorm(Module):
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     .. note::
         Unlike Batch Normalization and Instance Normalization, which applies
@@ -253,7 +253,7 @@ class GroupNorm(Module):
     per-channel affine transform parameter vectors of size :attr:`num_channels` if
     :attr:`affine` is ``True``.
     The variance is calculated via the biased estimator, equivalent to
-    `torch.var(input, unbiased=False)`.
+    `torch.var(input, correction=0)`.
 
     This layer uses statistics computed from input data in both training and
     evaluation modes.
@@ -301,7 +301,9 @@ class GroupNorm(Module):
         factory_kwargs = {"device": device, "dtype": dtype}
         super().__init__()
         if num_channels % num_groups != 0:
-            raise ValueError("num_channels must be divisible by num_groups")
+            raise ValueError(
+                f"num_channels ({num_channels}) must be divisible by num_groups ({num_groups})"
+            )
 
         self.num_groups = num_groups
         self.num_channels = num_channels

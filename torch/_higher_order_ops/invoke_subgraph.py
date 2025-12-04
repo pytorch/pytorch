@@ -3,7 +3,7 @@
 import contextlib
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -12,7 +12,6 @@ from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
     _from_fun,
     _maybe_reenter_make_fx,
-    _set_compilation_env,
     clone_outputs_aliasing_inputs,
     FunctionalizeCtxWrapper,
     get_dummy_aot_autograd_config,
@@ -26,18 +25,12 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_metadata_torch_function_mode,
-    _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 
 invoke_subgraph_counter = 0
@@ -80,13 +73,14 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         assert all(
             isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
             for o in operands
+            if o is not None
         ), (
             f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
         )
 
         return super().__call__(subgraph, identifier, *operands)
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, subgraph, identifier, *operands):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import (
@@ -124,31 +118,18 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
 
     if torch.compiler.is_compiling():
         # For non-strict export tracing, we still want to go through Dynamo
-        from torch._dynamo.backends.debugging import (
-            make_eager_backend_with_torch_function_mode,
-        )
 
         def _invoke_subgraph_placeholder_wrapper(func, args):
             return invoke_subgraph_placeholder(func, *args)
 
-        with (
-            _set_compilation_env(),
-            torch._dynamo.utils.disable_cache_limit(),
-            _temp_remove_pre_dispatch_torch_function_mode(),
-        ):
-            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-                if metadata_mode:
-                    backend: Union[str, Callable[..., Any]] = (
-                        make_eager_backend_with_torch_function_mode(metadata_mode)
-                    )
-                else:
-                    backend = "eager"
+        from torch._higher_order_ops.utils import setup_compilation_env
 
-                return torch.compile(
-                    _invoke_subgraph_placeholder_wrapper,
-                    backend=backend,
-                    fullgraph=True,
-                )(func, args)
+        with setup_compilation_env() as backend:
+            return torch.compile(
+                _invoke_subgraph_placeholder_wrapper,
+                backend=backend,
+                fullgraph=True,
+            )(func, args)
 
     return func(*args, **kwargs)
 
@@ -304,6 +285,62 @@ def create_fw_bw_graph(subgraph, operands, grad_outputs=None):
 
 
 def get_output_metadata(subgraph, *operands):
+    """
+    Extract metadata about the subgraph outputs WITHOUT executing the subgraph.
+    This avoids running side-effectful operations twice (once here, once in forward).
+    We analyze the graph structure statically to extract metadata.
+    """
+    # Unwrap FunctionalizeCtxWrapper if present
+    if isinstance(subgraph, FunctionalizeCtxWrapper):
+        subgraph = subgraph.subgraph
+
+    # If not a GraphModule, fall back to execution-based metadata extraction
+    if not isinstance(subgraph, torch.fx.GraphModule):
+        return _get_output_metadata_by_execution(subgraph, *operands)
+
+    output_metadata = OutputMetadata()
+
+    # Extract output arguments from the output node
+    # The output node has args=(output_values,) where output_values is a tuple/list
+    output_node = next(reversed(subgraph.graph.find_nodes(op="output")))
+    output_metadata.num_fw_outs = len(output_node.args[0])
+
+    for idx, output_arg in enumerate(output_node.args[0]):
+        if not isinstance(output_arg, torch.fx.Node):
+            if isinstance(output_arg, int):
+                output_metadata.indexes_with_symint.add(idx)
+            output_metadata.indexes_with_no_grad.add(idx)
+            continue
+
+        # Check node metadata for type information
+        if output_arg.meta.get("val") is None:
+            # If we don't have complete metadata for all outputs, fall back to execution
+            # This is important for correctness (e.g., detecting SymInts) even though it
+            # runs side-effectful operations
+            return _get_output_metadata_by_execution(subgraph, *operands)
+
+        val = output_arg.meta["val"]
+        if isinstance(val, torch.SymInt):
+            output_metadata.indexes_with_symint.add(idx)
+            output_metadata.indexes_with_no_grad.add(idx)
+        elif isinstance(val, torch.Tensor):
+            # Check if tensor requires grad from metadata
+            if hasattr(val, "requires_grad") and not val.requires_grad:
+                output_metadata.indexes_with_no_grad.add(idx)
+        else:
+            # Non-tensor, non-symint (shouldn't happen but be safe)
+            output_metadata.indexes_with_no_grad.add(idx)
+
+    return output_metadata
+
+
+def _get_output_metadata_by_execution(subgraph, *operands):
+    """
+    Fallback: Extract metadata by executing the subgraph.
+    This should only be used when static analysis fails.
+    WARNING: This will run side-effectful operations!
+    """
+
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
             # args are functional tensors, generate some example tensors
@@ -323,19 +360,15 @@ def get_output_metadata(subgraph, *operands):
 
             num_fw_outs = len(fw_outs)
 
-            # Collect the indexes of none in the output to check that the grad
-            # is None at the corresponding index in the backward. This check is
-            # performed in the autograd.Function - InvokeSubgraphAutogradOp.
-            # Also collect the indexes of no_grad in the output to filter out
-            # the grad_outs in the `backward` method.
             output_metadata = OutputMetadata()
-
             output_metadata.num_fw_outs = num_fw_outs
+
             for idx, fw_out in enumerate(fw_outs):
                 if isinstance(fw_out, torch.SymInt):
                     output_metadata.indexes_with_symint.add(idx)
                 elif not fw_out.requires_grad:
                     output_metadata.indexes_with_no_grad.add(idx)
+
             return output_metadata
 
 
@@ -402,7 +435,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
     """
 
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx,
         subgraph,
@@ -479,7 +512,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         for tangent in filtered_grad_outs:
             metadata = extract_tensor_metadata(tangent)
             metadata._flatten_into(tangent_metadata, fake_mode, state)
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         tangent_metadata = tuple(tangent_metadata)
 
         # bw_graph is a joint graph with signature (*primals_and_tangents) and
@@ -552,7 +585,10 @@ def _(subgraph, identifier, *operands):
 
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
-    return subgraph(*operands)
+    if getattr(subgraph, "_boxed_call", False):
+        return subgraph(list(operands))
+    else:
+        return subgraph(*operands)
 
 
 @invoke_subgraph.py_functionalize_impl
@@ -562,7 +598,34 @@ def _(ctx, subgraph, identifier, *operands):
         do_auto_functionalize_v2,
     )
 
+    # (in the functionalization metadata phase) Capture tokens before
+    tokens_before = dict(ctx.mode._tokens)
+
+    # Check if this subgraph has effects stored in the cache
+    invoke_subgraph_cache = get_invoke_subgraph_cache()
+    effects = None
+    if invoke_subgraph_cache:
+        effects = invoke_subgraph_cache.get_effects(identifier)
+
+    if effects:
+        assert len(effects) == 1, "Multiple effects within a subgraph NYI"
+        tokens = ctx.mode._tokens
+        effects = next(iter(effects))
+        token_input = tokens[effects]
+
+        operands = (token_input, *operands)
+
+        def wrap_subgraph(subgraph):
+            def wrapped_subgraph(token, *args):
+                res = subgraph(*args)
+                return ctx.unwrap_tensors(ctx.mode._tokens[effects]), *res
+
+            return wrapped_subgraph
+
+        subgraph = wrap_subgraph(subgraph)
+
     unwrapped_operands = ctx.unwrap_tensors(operands)
+
     hop_instance = HopInstance.create(invoke_subgraph, subgraph, identifier, *operands)
     if can_auto_functionalize(hop_instance):
         # NOTE: [auto_functionalize x invoke_subgraph caching]
@@ -587,6 +650,28 @@ def _(ctx, subgraph, identifier, *operands):
         # of invoke_subgraph ops if input aliasing/mutation is detected.
         functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
+
+    if effects:
+        (new_token, *out) = out
+        ctx.mode._tokens[effects] = new_token
+
+    # (in the functionalization metadata phase) Capture tokens after and see if
+    # there are any differences (there are new effects or the token value for an
+    # effect type has changed)
+    tokens_after = dict(ctx.mode._tokens)
+    discovered_effects = set()
+    for effect_type, token in tokens_after.items():
+        if effect_type not in tokens_before or tokens_before[effect_type] is not token:
+            discovered_effects.add(effect_type)
+
+    if discovered_effects:
+        assert ctx.mode._allow_token_discovery, (
+            f"Number of tokens changed by {len(discovered_effects)} when tracing subgraph {subgraph}."
+        )
+        # Store discovered effects in the cache by identifier
+        if invoke_subgraph_cache:
+            invoke_subgraph_cache.add_effects(identifier, discovered_effects)
+
     return ctx.wrap_tensors(out)
 
 

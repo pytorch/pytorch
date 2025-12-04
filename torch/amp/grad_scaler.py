@@ -422,6 +422,7 @@ class GradScaler:
                     "optimizer. In the near future GradScaler registers `grad_scale: Tensor` and "
                     "`found_inf: Tensor` to the passed optimizer and let the optimizer use them directly.",
                     FutureWarning,
+                    stacklevel=2,
                 )
                 kwargs_.update({"grad_scaler": self})
             else:

@@ -1,7 +1,7 @@
 ---
-name: DISABLE AUTOREVERT
+name: "D❌​\U0001F519​ ISABLE AUTOREVERT"
 about: Disables autorevert when open
-title: "❌​\U0001F519​ [DISABLE AUTOREVERT]"
+title: "[DISABLE AUTOREVERT]"
 labels: 'ci: disable-autorevert'
 assignees: ''
 

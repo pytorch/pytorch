@@ -222,13 +222,13 @@ class GraphModule(torch.nn.Module):
 
             matmul: "f32[3, 3]" = l_x_ @ l_y_
             sin: "f32[3, 3]" = matmul.sin();  matmul = None
-            child: "f32[3, 3]" = sin.cos();  sin = None
+            cos: "f32[3, 3]" = sin.cos();  sin = None
 
-            child_1: "f32[3, 3]" = l_x_ + l_y_
-            child_2: "f32[3, 3]" = l_x_ - l_y_
+            add: "f32[3, 3]" = l_x_ + l_y_
+            sub: "f32[3, 3]" = l_x_ - l_y_
 
-            child_3: "f32[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
-            return (child, child_1, child_2, child_3)
+            matmul_1: "f32[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+            return (cos, add, sub, matmul_1)
 """,  # noqa: B950
         )
         self.assertExpectedInline(

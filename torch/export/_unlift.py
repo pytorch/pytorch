@@ -57,11 +57,11 @@ def eq_spec(self: pytree.TreeSpec, other: pytree.TreeSpec) -> bool:
                 return False
         elif a.context != b.context:
             return False
-        if len(a.children_specs) != len(b.children_specs):
+        if a.num_children != b.num_children:
             return False
         return all(
             _match_normalized_structure(a, b)
-            for a, b in zip(a.children_specs, b.children_specs)
+            for a, b in zip(a.children(), b.children())
         )
 
     return _match_normalized_structure(self, other)
@@ -326,8 +326,7 @@ def _insert_copy_for_mutations(
             return_nodes_to_copy[return_node] = copy_node
 
     output_args = tuple(
-        return_nodes_to_copy[node] if node in return_nodes_to_copy else node
-        for node in user_output_nodes
+        return_nodes_to_copy.get(node, node) for node in user_output_nodes
     )
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
@@ -358,13 +357,13 @@ def _get_codegen(
     elif (
         in_spec.type is tuple
         and in_spec.num_children == 2
-        and in_spec.children_specs[0].type is tuple
-        and in_spec.children_specs[1].type is dict
+        and in_spec.child(0).type is tuple
+        and in_spec.child(1).type is dict
     ):
         # if in_spec contains the args (tuple) and kwargs (dict)
-        names = [f"arg_{i}" for i in range(in_spec.children_specs[0].num_children)]
+        names = [f"arg_{i}" for i in range(in_spec.child(0).num_children)]
         # add kwarg names
-        names.extend(in_spec.children_specs[1].context)
+        names.extend(in_spec.child(1).context)
     else:
         names = [f"arg_{i}" for i in range(in_spec.num_children)]
 
@@ -531,7 +530,8 @@ def _create_stateful_graph_module(
                 f"A model attribute `{constant_fqn}` requires gradient. "
                 f"but it's not properly registered as a parameter. "
                 f"torch.export will detach it and treat it as a constant tensor "
-                f"but please register it as parameter instead."
+                f"but please register it as parameter instead.",
+                stacklevel=2,
             )
             detached_buffer = buffer.detach()
             original_tensor_to_detached_tensor[buffer] = detached_buffer
@@ -550,7 +550,8 @@ def _create_stateful_graph_module(
                         f"A model attribute `{const_name}` requires gradient "
                         f"but it's not properly registered as a parameter. "
                         f"torch.export will detach it and treat it as a constant tensor "
-                        f"but please register it as parameter instead."
+                        f"but please register it as parameter instead.",
+                        stacklevel=2,
                     )
                     if value in original_tensor_to_detached_tensor:
                         value = original_tensor_to_detached_tensor[value]
@@ -747,11 +748,23 @@ def _unlift_exported_program_lifted_states(
 ) -> torch.fx.GraphModule:
     check_guards = check_guards and _ok_to_generate_guards_fn()
 
+    source_node_dict = {
+        node.name: node for node in ep.graph.nodes if node.op != "placeholder"
+    }
+    # placeholder node name might change after deepcopy
+    placeholder_source_node_dict = {
+        node.target: node for node in ep.graph.nodes if node.op == "placeholder"
+    }
+
+    new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
+    new_gm.meta.update(ep.graph_module.meta)
+    ep = copy.copy(ep)
+    ep._graph_module = new_gm
+
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
         ep = _remove_effect_tokens(ep)
 
-    new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
     forward_arg_names = (
         sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
@@ -785,19 +798,13 @@ def _unlift_exported_program_lifted_states(
         for out_spec in ep.graph_signature.output_specs
     ]
 
-    source_node_dict = {
-        node.name: node for node in ep.graph.nodes if node.op != "placeholder"
-    }
-    # placeholder node name might change after deepcopy
-    placeholder_source_node_dict = {
-        node.target: node for node in ep.graph.nodes if node.op == "placeholder"
-    }
     for node in new_gm.graph.nodes:
         source_node = None
         if node.op == "placeholder":
             source_node = placeholder_source_node_dict.get(node.target)
         else:
-            source_node = source_node_dict.get(node.name)
+            if node.name in source_node_dict:
+                source_node = source_node_dict.get(node.name)
         node.meta["from_node"] = [
             NodeSource(
                 source_node,
