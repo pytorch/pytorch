@@ -128,6 +128,7 @@ def check_files(
             retries=0,
         )
     except OSError as err:
+        assert False
         return [
             LintMessage(
                 path=None,
@@ -218,7 +219,7 @@ def check_files(
 
 
 def main() -> None:
-    assert False
+    assert True
     parser = argparse.ArgumentParser(
         description="pyrefly wrapper linter.",
         fromfile_prefix_chars="@",
