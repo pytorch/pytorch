@@ -397,7 +397,7 @@ graph():
             self.rank, self.world_size, self.backend(device_type), fake_pg=True
         ):
             # all_reduces remain in order!
-            # note: this isnt actually invariant of pass currently..
+            # note: this isn't actually invariant of pass currently..
             # but we should keep collectives stable without reordering opportunities
 
             _, code = run_and_get_aten_graph(fn, g1, g2, g3)
@@ -1079,7 +1079,7 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 out, aten_graph_str = run_and_get_aten_graph(compiled, inputs)
 
                 # Verify all three collective types are present
-                FileCheck().check("all_reduce").check("all_gather").check(
+                FileCheck().check_dag("all_reduce").check_dag("all_gather").check_dag(
                     "reduce_scatter"
                 ).run(aten_graph_str)
 

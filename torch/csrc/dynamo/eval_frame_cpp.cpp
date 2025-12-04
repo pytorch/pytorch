@@ -59,8 +59,6 @@ void dynamo_set_c_recursion_limit(int32_t limit) {
     throw std::range_error("recursion limit must be greater or equal than 1");
   }
   c_recursion_limit = limit;
-  // cannot fail
-  Py_SetRecursionLimit(limit); // also set the Python limit
 }
 
 int32_t dynamo_get_c_recursion_limit() {
@@ -81,9 +79,11 @@ struct CRecursionLimitRAII {
       return;
     }
     if (limit < remaining) {
-      PyErr_SetString(
-          PyExc_RuntimeError,
-          "new c_recursion limit is lower than thread's current c_recursion_remaining.");
+      std::stringstream ss;
+      ss << "new c_recursion limit (" << limit
+         << ") is lower than thread's current c_recursion_remaining ("
+         << remaining << ").";
+      PyErr_WarnEx(PyExc_RuntimeWarning, ss.str().c_str(), 1);
     }
     remaining = limit;
   }
