@@ -1,6 +1,7 @@
 import argparse
 import ast
 import json
+import random
 import re
 from pathlib import Path
 from typing import Any
@@ -23,8 +24,23 @@ def save_registry(reg: dict[str, Any], path: Path) -> None:
 
 
 def next_gb_id(reg: dict[str, Any]) -> str:
-    ids = [int(x[2:]) for x in reg if x.startswith("GB") and x[2:].isdigit()]
-    return f"GB{(max(ids, default=-1) + 1):04d}"
+    """Generate a random unused GB ID from GB0000-GB9999 range."""
+    used_ids = set(reg.keys())
+    max_attempts = 100
+
+    # Try random selection first
+    for _ in range(max_attempts):
+        candidate = f"GB{random.randint(0, 9999):04d}"
+        if candidate not in used_ids:
+            return candidate
+
+    # Fallback: find first available ID if random selection keeps colliding
+    for i in range(10000):
+        candidate = f"GB{i:04d}"
+        if candidate not in used_ids:
+            return candidate
+
+    raise RuntimeError("No available GB IDs in range GB0000-GB9999")
 
 
 def clean_string(s: Any) -> Any:
