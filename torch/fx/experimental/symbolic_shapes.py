@@ -1236,8 +1236,6 @@ def _free_unbacked_symbols_with_path(
                 )
             )
     elif is_traceable_wrapper_subclass(a):
-        from torch.distributed.tensor import DTensor
-
         # TODO: Determine if this is correct
         attrs, _ = a.__tensor_flatten__()
         for attr in attrs:
@@ -1245,7 +1243,9 @@ def _free_unbacked_symbols_with_path(
             r.update(go(sub, path + (InnerTensorKey(attr),)))
 
         # match DTensor outer shapes
-        if isinstance(a, DTensor):
+        if torch.distributed.is_available() and isinstance(
+            a, torch.distributed.tensor.DTensor
+        ):
             match_tensor(a)
     elif isinstance(a, torch.Tensor) and is_batchedtensor(a):
         unwrapped_tensor = get_unwrapped(a)
