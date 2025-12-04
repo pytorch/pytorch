@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["oncall: jit"]
 # ruff: noqa: F841
 
 import unittest
