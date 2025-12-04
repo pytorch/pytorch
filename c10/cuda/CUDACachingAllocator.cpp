@@ -8,6 +8,7 @@
 #include <c10/util/Gauge.h>
 #include <c10/util/Logging.h>
 #include <c10/util/ScopeExit.h>
+#include <c10/util/SmallVector.h>
 #include <c10/util/UniqueVoidPtr.h>
 #include <c10/util/env.h>
 #include <c10/util/error.h>
@@ -1768,9 +1769,10 @@ class DeviceCachingAllocator {
       if (deps == nullptr) {
         C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
       } else {
-        cudaGraphEdgeData edgeData[*count];
+        SmallVector<cudaGraphEdgeData> edgeData;
+        edgeData.reserve(count);
         C10_CUDA_CHECK(
-            cudaGraphNodeGetDependencies(n, deps, &edgeData[0], count));
+            cudaGraphNodeGetDependencies(n, deps, edgeData.data(), count));
       }
 #else
       C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, count));
