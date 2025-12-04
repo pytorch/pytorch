@@ -43,7 +43,7 @@ def _trace_fn_split_mm_a(
     return (out,)
 
 
-def _trace_fn_mm_rs_scatter(
+def _trace_fn_mm_rs_scatter_dim0(
     a: torch.Tensor,
     b: torch.Tensor,
     num_chunks: int,
@@ -54,51 +54,27 @@ def _trace_fn_mm_rs_scatter(
     scatter_dim: int,
     orig_split_num_chunks: int,  # unused
     post_mm_ops,
+    add_requires_deps: bool,  # unused
 ):
     assert isinstance(num_chunks, int)
-    mm_i_a_args = [a] * num_chunks
-    mm_i_b_args = [b] * num_chunks
-    if scatter_dim == 0:
-        b_chunks = b.chunk(num_chunks, dim=-1)
-        mm_i_b_args = b_chunks
-    else:
-        a_flat = a.flatten(0, -2)
-        a_flat_chunks = a_flat.chunk(num_chunks)
-        mm_i_a_args = a_flat_chunks
-
-    # TODO: add reduce scatter into tensor and remove last cat
-    # out = torch.empty_strided(
-    #     size=orig_out.shape,
-    #     stride=orig_out.stride(),
-    #     dtype=orig_out.dtype,
-    #     device=orig_out.device,
-    # )
-
+    assert b.size(-1) % num_chunks == 0
+    b_chunks = b.chunk(num_chunks, dim=-1)
     rs_outs = []
-    for a_i, b_i in zip(mm_i_a_args, mm_i_b_args):
-        mm_i = torch.ops.aten.mm(a_i, b_i)
+    for i in range(num_chunks):
+        mm_i = torch.ops.aten.mm(a, b_chunks[i])
         for op in post_mm_ops:
             mm_i = op.apply(mm_i, num_chunks)
-        if scatter_dim != 0:
-            mm_i_chunks = mm_i.chunk(orig_split_num_chunks, dim=scatter_dim)
-            cat = torch.cat(mm_i_chunks)
-            mm_i = cat
         w = torch.ops._c10d_functional.reduce_scatter_tensor(
             mm_i, reduce_op, group_size, group_name
         )
         rs_out_i = torch.ops._c10d_functional.wait_tensor(w)
         rs_outs.append(rs_out_i)
 
-    if scatter_dim == 0:
-        # B column wise split
-        rs_out = torch.cat(rs_outs, dim=-1)
-    else:
-        # A row wise split
-        rs_out = torch.cat(rs_outs)
-    return rs_out
+    # B column wise split
+    return torch.cat(rs_outs, dim=-1)
 
 
-def _trace_fn_mm_rs_scatter_view3d(
+def _trace_fn_mm_rs_scatter_dim_non0(
     a: torch.Tensor,
     b: torch.Tensor,
     num_chunks: int,
@@ -109,6 +85,7 @@ def _trace_fn_mm_rs_scatter_view3d(
     scatter_dim: int,
     orig_split_num_chunks: int,
     post_mm_ops,
+    add_requires_deps: bool,
 ):
     """
     Chunking replacement for pattern:
@@ -117,30 +94,82 @@ def _trace_fn_mm_rs_scatter_view3d(
     chunks matmul A argument rowwise and produces num_chunks similar patterns.
     """
     assert isinstance(num_chunks, int)
-    mm_i_a_args = [a] * num_chunks
-    mm_i_b_args = [b] * num_chunks
     a_flat = a.flatten(0, -2)
     a_flat_chunks = a_flat.chunk(num_chunks)
-    mm_i_a_args = a_flat_chunks
 
-    rs_outs = []
-    for a_i, b_i in zip(mm_i_a_args, mm_i_b_args):
-        mm_i = torch.ops.aten.mm(a_i, b_i)
+    out = torch.empty_strided(
+        size=orig_out.shape,
+        stride=orig_out.stride(),
+        dtype=orig_out.dtype,
+        device=orig_out.device,
+    )
+
+    assert out.size(0) % num_chunks == 0
+    out_chunks = out.chunk(num_chunks)
+    ws = []
+    for i in range(num_chunks):
+        mm_i = torch.ops.aten.mm(a_flat_chunks[i], b)
+        for op in post_mm_ops:
+            mm_i = op.apply(mm_i, num_chunks)
+        mm_i_chunks = mm_i.chunk(orig_split_num_chunks, dim=scatter_dim)
+        cat = torch.cat(mm_i_chunks)
+        rso = torch.ops._c10d_functional.reduce_scatter_tensor_out(
+            cat, reduce_op, group_size, group_name, out=out_chunks[i]
+        )
+        ws.append(torch.ops._c10d_functional.wait_tensor(rso))
+
+    if not add_requires_deps:
+        # Test mode
+        return out
+
+    # Waits must finish before out read
+    return torch.ops.higher_order.requires_deps(ws, out)
+
+
+def _mm_split_cat_rs_fn_view3d(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    num_chunks: int,
+    orig_out: torch.Tensor,
+    reduce_op: str,
+    group_size: int,
+    group_name: str,
+    scatter_dim: int,
+    orig_split_num_chunks: int,
+    post_mm_ops,
+    add_requires_deps: bool,
+):
+    assert isinstance(num_chunks, int)
+    a_flat = a.flatten(0, -2)
+    a_flat_chunks = a_flat.chunk(num_chunks)
+    out = torch.empty_strided(
+        size=orig_out.shape,
+        stride=orig_out.stride(),
+        dtype=orig_out.dtype,
+        device=orig_out.device,
+    )
+    assert out.size(0) % num_chunks == 0
+    out_chunks = out.chunk(num_chunks)
+    ws = []
+    for i in range(num_chunks):
+        mm_i = torch.ops.aten.mm(a_flat_chunks[i], b)
         for op in post_mm_ops:
             mm_i = op.apply(mm_i, num_chunks)
 
         mm_i_chunks = mm_i.chunk(orig_split_num_chunks, dim=scatter_dim)
         cat = torch.cat(mm_i_chunks)
-        mm_i = cat
 
-        w = torch.ops._c10d_functional.reduce_scatter_tensor(
-            mm_i, reduce_op, group_size, group_name
+        rso = torch.ops._c10d_functional.reduce_scatter_tensor_out(
+            cat, reduce_op, group_size, group_name, out=out_chunks[i]
         )
-        rs_out_i = torch.ops._c10d_functional.wait_tensor(w)
-        rs_outs.append(rs_out_i)
+        ws.append(torch.ops._c10d_functional.wait_tensor(rso))
 
-    rs_out = torch.cat(rs_outs)
-    return rs_out
+    if not add_requires_deps:
+        # Test mode
+        return out
+
+    # Waits must finish before out read
+    return torch.ops.higher_order.requires_deps(ws, out)
 
 
 def _size_hint(s: sympy.Expr) -> int:
@@ -508,11 +537,15 @@ def _process_matmul_reduce_scatter(
     arg_a_t = arg_a.meta["val"]
     arg_b_t = arg_b.meta["val"]
 
-    _fn_to_trace = _trace_fn_mm_rs_scatter
+    _fn_to_trace = (
+        _trace_fn_mm_rs_scatter_dim0
+        if orig_scatter_dim == 0
+        else _trace_fn_mm_rs_scatter_dim_non0
+    )
 
     view3d_size_to_split = None
     if orig_scatter_dim != 0 and view3d_n is not None:
-        _fn_to_trace = _trace_fn_mm_rs_scatter_view3d
+        _fn_to_trace = _mm_split_cat_rs_fn_view3d
         # dim0 of 3d reshape
         arg1 = view3d_n.args[1]
         assert arg1 is not None
@@ -564,6 +597,7 @@ def _process_matmul_reduce_scatter(
         orig_scatter_dim,
         orig_split_num_chunks,
         post_mm_ops,
+        True,
     )
     _insert_fn_trace_before_node(
         g,

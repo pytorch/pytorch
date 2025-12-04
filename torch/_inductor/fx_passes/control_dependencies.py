@@ -10,9 +10,13 @@ with control_deps to make dependencies explicit.
 
 from typing import Any
 
+import torch
 import torch.fx as fx
+import torch.utils._pytree as pytree
+from torch._C import DispatchKey
 from torch._higher_order_ops.utils import register_fake
 from torch._ops import HigherOrderOperator
+from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -60,6 +64,53 @@ control_deps = ControlDeps()
 def _(additional_deps, subgraph, *args, **kwargs):
     """Fake tensor implementation - execute the subgraph."""
     return subgraph(*args, **kwargs)
+
+
+class RequiresDeps(HigherOrderOperator):
+    """
+    Higher-order operator that enforces ordering by making dependencies explicit.
+    This is version of ControlDeps for one node, that allows to use it without subgraph.
+
+    Schema: requires_deps(additional_deps, out) -> out
+    where:
+    - additional_deps: tuple of tensors that must be computed before out
+    - out tensor that requires computation of additional_deps before its use.
+
+    This ensures all tensors in additional_deps are computed before the out used.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("requires_deps")
+
+    def __call__(self, additional_deps, out):
+        return super().__call__(additional_deps, out)
+
+
+requires_deps = RequiresDeps()
+
+
+@register_fake(requires_deps)
+def _(additional_deps, out):
+    return out
+
+
+requires_deps.fallthrough(DispatchKey.AutogradCPU)
+requires_deps.fallthrough(DispatchKey.AutogradCUDA)
+
+
+@requires_deps.py_impl(ProxyTorchDispatchMode)
+def _impl(mode, *args, **kwargs):
+    proxy_args = pytree.tree_map(mode.tracer.unwrap_proxy, args)
+    proxy_kwargs = pytree.tree_map(mode.tracer.unwrap_proxy, kwargs)
+    out_proxy = mode.tracer.create_proxy(
+        "call_function",
+        requires_deps,
+        (*proxy_args,),
+        proxy_kwargs,
+    )
+    out = args[1]
+    result = track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
+    return result
 
 
 def get_subgraph_name(gm: fx.GraphModule, name):
@@ -224,3 +275,15 @@ def _create_subgraph_for_node(graph: fx.Graph, node: fx.Node) -> fx.GraphModule:
         out.meta["val"] = result.meta["val"]
 
     return fx.GraphModule(owning_module, subgraph)
+
+
+def _requires_deps_to_control_deps_pass(gm: fx.GraphModule):
+    g = gm.graph
+    additional_deps_map = {}
+    for n in g.nodes:
+        if n.target == torch.ops.higher_order.requires_deps:
+            deps = n.args[0]
+            out = n.args[1]
+            additional_deps_map[n] = deps
+
+    preserve_node_ordering(g, additional_deps_map)

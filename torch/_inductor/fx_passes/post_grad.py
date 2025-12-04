@@ -287,6 +287,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         # user1(wait_ag1)
         stable_topological_sort(gm.graph)
 
+    requires_control_deps_pass = False
     if (
         split_mm_rs_config
         := config.aten_distributed_optimizations.split_matmul_reducescatter
@@ -302,6 +303,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 min_size_after_split,
             )
         )
+        requires_control_deps_pass = True
 
     # Apply overlap scheduling if enabled
     if config.aten_distributed_optimizations.enable_overlap_scheduling:
@@ -351,6 +353,18 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     GraphTransformObserver(gm, "decompose_map_to_while_loop").apply_gm_pass(
         decompose_map_to_while_loop
     )
+    if requires_control_deps_pass:
+        from torch._inductor.fx_passes.control_dependencies import (
+            _requires_deps_to_control_deps_pass as p,
+        )
+
+        GraphTransformObserver(
+            gm, "_requires_deps_to_control_deps_pass"
+        ).apply_graph_pass(
+            lambda graph: p(
+                graph.owning_module,
+            )
+        )
 
     gm.recompile()
     gm.graph.lint()
