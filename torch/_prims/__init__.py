@@ -2996,6 +2996,5 @@ _sink_tokens = _make_prim(
 
 torch.fx.node.has_side_effect(_sink_tokens)
 
-
 register_rng_prims()
 register_debug_prims()

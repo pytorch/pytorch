@@ -187,7 +187,7 @@ x = add_1, y = add_2);  getitem = None
             """print(str format_str) -> ()""",
         )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_reorder_print_no_graph_break(self, backend):
         def f(x):
             x1 = x + x
@@ -221,7 +221,7 @@ x = add_1, y = add_2);  getitem = None
             f"moo {x_new * 2}\nmoo {x_new * 2 * x_new * 2}",
         )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_constant_mutation(self, backend):
         def f(x):
             alist = [x]
@@ -243,6 +243,117 @@ x = add_1, y = add_2);  getitem = None
         self.assertEqual(printed_output, "moo tensor([2])\nmoo tensor([1])")
         self.assertEqual(orig_out, opt_out)
 
+    def test_hop_print_inductor(self):
+        def f(x):
+            x1 = x + x
+            torch._higher_order_ops.print("moo {x}", x=x1)
+            x2 = x1 * x1
+            torch._higher_order_ops.print("moo {x}", x=x2)
+            x3 = x2 + x2
+            return (x1, x3)
+
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(backend="inductor", fullgraph=True)(f)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            opt_f(x)
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(
+            printed_output,
+            f"moo {x * 2}\nmoo {x * 2 * x * 2}",
+        )
+
+    def test_compile_inductor(self):
+        def f(x):
+            torch.ops.aten._print("moo")
+            res = x + x
+            torch.ops.aten._print("moo")
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        res = torch.compile(f, backend="inductor")(*inputs)
+        self.assertEqual(True, torch.allclose(res, f(*inputs)))
+
+    def test_compile_inductor_hop_print(self):
+        def f(x):
+            torch._higher_order_ops.print("moo")
+            res = x + x
+            torch._higher_order_ops.print("moo")
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        res = torch.compile(f, backend="inductor")(*inputs)
+        self.assertEqual(True, torch.allclose(res, f(*inputs)))
+
+    def test_compile_inductor_hop_print_kwargs(self):
+        def f(x):
+            torch._higher_order_ops.print("moo hop{x}", x=x)
+            res = x + x
+            torch._higher_order_ops.print("moo {x}", x=res)
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        res = torch.compile(f, backend="inductor")(*inputs)
+        self.assertEqual(True, torch.allclose(res, f(*inputs)))
+
+    def test_compile_inductor_cpp_wrapper_print(self):
+        """Test print with C++ wrapper enabled
+
+        C++ wrapper uses std::cout which writes to file descriptor 1 (stdout).
+        We need to redirect the actual file descriptor to capture the output.
+        """
+        import os
+        import tempfile
+
+        from torch._inductor import config
+
+        def f(x):
+            torch._higher_order_ops.print("C++ print test: value={x}", x=x)
+            res = x + x
+            torch._higher_order_ops.print("Result={res}", res=res)
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        # Enable C++ wrapper and capture stdout at the file descriptor level
+        with config.patch({"cpp_wrapper": True}):
+            compiled_f = torch.compile(f, backend="inductor")
+
+            # Create a temporary file to capture stdout
+            with tempfile.TemporaryFile(mode="w+") as tmp_stdout:
+                # Save the original stdout file descriptor
+                original_stdout_fd = os.dup(1)
+                try:
+                    # Redirect stdout (fd 1) to our temporary file
+                    os.dup2(tmp_stdout.fileno(), 1)
+
+                    # Run the compiled function (C++ cout will write to tmp_stdout)
+                    res = compiled_f(*inputs)
+
+                    # Flush C++ stdout
+                    os.fsync(1)
+                finally:
+                    # Restore original stdout
+                    os.dup2(original_stdout_fd, 1)
+                    os.close(original_stdout_fd)
+
+                # Read captured output
+                tmp_stdout.seek(0)
+                captured_output = tmp_stdout.read().strip()
+
+            # Verify the output contains our print messages
+            # C++ prints literal format strings (no value substitution)
+            # This is not complete yet with not kwargs printing yet.
+            self.assertEqual(captured_output, f"C++ print test: value={inputs[0]}\nResult={inputs[0] * 2}")
+
+            # Verify computation is correct
+            expected = f(*inputs)
+            self.assertTrue(torch.allclose(res, expected))
+
 
 if __name__ == "__main__":
+    run_tests()
     run_tests()
