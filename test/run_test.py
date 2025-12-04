@@ -196,7 +196,6 @@ ROCM_BLOCKLIST = [
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
     "test_jit_cuda_fuser",
-    "test_openreg",
 ]
 
 S390X_BLOCKLIST = [
@@ -262,13 +261,11 @@ S390X_BLOCKLIST = [
     # depend on z3-solver
     "fx/test_z3_gradual_types",
     "test_proxy_tensor",
-    "test_openreg",
 ]
 
 XPU_BLOCKLIST = [
     "test_autograd",
     "profiler/test_memory_profiler",
-    "test_openreg",
 ]
 
 XPU_TEST = [
@@ -286,7 +283,6 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
-    "test_openreg",
     "test_overrides",
     "test_show_pickle",
     "test_tensorexpr",
@@ -1404,6 +1400,12 @@ def parse_args():
         help=("If this flag is present, we will run xpu tests except XPU_BLOCK_LIST"),
     )
     parser.add_argument(
+        "--openreg",
+        "--openreg",
+        action="store_true",
+        help=("If this flag is present, we will only run test_openreg"),
+    )
+    parser.add_argument(
         "--cpp",
         "--cpp",
         action="store_true",
@@ -1697,6 +1699,11 @@ def get_selected_tests(options) -> list[str]:
     else:
         # Exclude all xpu specific tests otherwise
         options.exclude.extend(XPU_TEST)
+
+    if options.openreg:
+        selected_tests = ["test_openreg"]
+    else:
+        options.exclude.append("test_openreg")
 
     # Filter to only run onnx tests when --onnx option is specified
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]

@@ -1,3 +1,4 @@
+import logging
 import threading
 from collections.abc import Sequence
 from typing import Any, cast, Optional
@@ -19,6 +20,9 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 class ExplicitRedistributionContext:
     """
     Within this context manager, DTensor will refuse to perform implicit redistribution,
@@ -29,22 +33,41 @@ class ExplicitRedistributionContext:
     may contain implicit redistribution calls that are not visible to the user and difficult to replace with manual
     calls.  Redistribution during backward can be made explicit by writing `autograd.Function`s that are no-op
     during forward and perform a manual redistribution during backwards.
+
+    enable (bool) if False, disables the context manager. Can be used nested inside an enabled region.
+
+    strict (bool) if True, triggers on any redistribution.  If False, only triggers on redistributions that perform
+    communication.
+
+    mode (str) Determines what happens when ExplicitRedistributionContext triggers:
+    "raise": raises an exceptoin, "warn" issues a warning
     """
 
     _local = threading.local()
 
-    def __init__(self, enable: bool = True, strict: bool = False):
+    def __init__(self, enable: bool = True, strict: bool = False, mode="raise"):
         self._enable = enable
         self._strict = strict
+        if mode not in ("raise", "warn"):
+            raise RuntimeError(f"Invalid mode {mode}")
+        self._raise_on_redistribution = mode == "raise"
 
     @classmethod
-    def is_redistribute_allowed(cls, src_spec: DTensorSpec, dst_spec: DTensorSpec):
+    def observe_redistribution(
+        cls, src_spec: DTensorSpec, dst_spec: DTensorSpec, message: str
+    ):
         if instance := getattr(cls._local, "_active", None):
+            allowed = True
             if instance._enable:
                 if instance._strict:
-                    return False
-                return redistribute_cost(src_spec, dst_spec) <= 0
-        return True
+                    allowed = False
+                else:
+                    allowed = redistribute_cost(src_spec, dst_spec) <= 0
+            if not allowed:
+                if instance._raise_on_redistribution:
+                    raise RuntimeError(message)
+                else:
+                    logger.warning(message)
 
     def __enter__(self):
         self._prev = getattr(ExplicitRedistributionContext._local, "_active", None)
