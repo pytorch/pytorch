@@ -174,6 +174,8 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     # Fixup segment_reduce mismatch
     if module == "torch" and name == "segment_reduce":
         name = "_" + name
+    if module == "torch.nn.functional" and name in ("_ScalingType", "_SwizzleType"):
+        name = name.removeprefix("_")
     return f"{module}.{name}"
 
 
