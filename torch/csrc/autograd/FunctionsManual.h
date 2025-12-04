@@ -897,8 +897,7 @@ Tensor linalg_solve_jvp(
     const Tensor& X,
     const Tensor& LU,
     const Tensor& pivots,
-    const bool left,
-    const bool use_A_T);
+    const bool left);
 Tensor lu_unpack_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,
