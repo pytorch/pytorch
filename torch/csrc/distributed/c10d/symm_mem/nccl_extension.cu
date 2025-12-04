@@ -166,6 +166,7 @@ void nccl_put(at::Tensor& tensor, const int64_t peer) {
     0,
     tensor.data_ptr(),
     nbytes);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
@@ -206,6 +207,7 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
     nbytes,
     blocks_done_dev,
     signal);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 __global__ void lsa_get_kernel(
@@ -241,6 +243,7 @@ void nccl_get(at::Tensor& tensor, const int64_t peer) {
     0,
     tensor.data_ptr(),
     nbytes);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 bool is_nccl_symmem_available() {

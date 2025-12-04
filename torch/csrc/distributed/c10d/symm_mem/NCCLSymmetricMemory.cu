@@ -114,7 +114,9 @@ class NCCLSymmetricMemory : public SymmetricMemory {
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
     build_ptr_dev<<<1, threads, 0, stream>>>(buffer_handle, 0, reinterpret_cast<void**>(buffers_dev_dp_.get()), world_size_);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
     build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle, 0, reinterpret_cast<void**>(signal_pads_dev_dp_.get()), world_size_);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 
 
