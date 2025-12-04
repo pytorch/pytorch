@@ -25,6 +25,7 @@ from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
+    skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
@@ -126,6 +127,7 @@ class TestCase(TorchTestCase):
         return super().assertExpectedInline(*args, **kwargs)
 
 
+@skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class CPythonTestCase(TestCase):
     """
     Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
