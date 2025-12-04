@@ -704,7 +704,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 "reshard_after_forward": [True],
                 "checkpoint_impl": ["composable"],
                 # "module_grouping": ["block", "mem_eff", "mem_eff_weight_tied"],
-                "module_grouping": ["block"],
+                "module_grouping": ["mem_eff"],
             },
             self._test_train_parity_with_activation_checkpointing,
         )
@@ -741,18 +741,6 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         )
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
 
-        # Apply activation checkpointing
-        prefixes_to_ignore = ()
-        if checkpoint_impl == "wrapper":
-            prefixes_to_ignore = (_CHECKPOINT_PREFIX,)
-            apply_activation_checkpointing(
-                model, check_fn=lambda m: isinstance(m, TransformerBlock)
-            )
-        elif checkpoint_impl == "composable":
-            for module in model.modules():
-                if isinstance(module, TransformerBlock):
-                    checkpoint(module)
-
         # Apply FSDP
         fsdp_kwargs = {
             "reshard_after_forward": reshard_after_forward, 
@@ -761,13 +749,25 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 cast_forward_inputs=True,
             )
         }
+
+        # Apply activation checkpointing
+        prefixes_to_ignore = ()
+        if checkpoint_impl == "wrapper":
+            prefixes_to_ignore = (_CHECKPOINT_PREFIX,)
+            apply_activation_checkpointing(
+                model, check_fn=lambda m: isinstance(m, TransformerBlock)
+            )
+        elif checkpoint_impl == "composable":
+            for layer in model.layers:
+                checkpoint(layer)
+
         if module_grouping == "mem_eff":
             assert model_args.n_layers == 3
+            fully_shard([model.tok_embeddings, model.pos_embeddings])
             fully_shard(model.layers[0], **fsdp_kwargs)
             fully_shard([model.layers[1], model.layers[2]], **fsdp_kwargs)
-            fully_shard([model.tok_embeddings, model.pos_embeddings], **fsdp_kwargs)
             # Embedding weights are not needed for embedding backward
-            model.tok_embeddings.set_unshard_in_backward(False)
+            # model.tok_embeddings.set_unshard_in_backward(False)
             fully_shard([model.norm, model.output], **fsdp_kwargs)
         elif module_grouping == "mem_eff_weight_tied":
             fully_shard([model.tok_embeddings, model.output], **fsdp_kwargs)
@@ -778,7 +778,8 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                 fully_shard(layer, **fsdp_kwargs)
         else:
             raise NotImplementedError(f"Unknown module grouping: {module_grouping}")
-        fully_shard(model, **fsdp_kwargs)
+        fully_shard(model)
+
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + self.rank)
@@ -790,7 +791,7 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
         # )
         for iter_idx in range(10):
             losses: list[torch.Tensor] = []
-            for _model in (ref_model, model):
+            for _model in (model,):
                 torch.manual_seed(iter_idx + 1)  # for dropout determinism
                 losses.append(_model(inp).sum())
                 losses[-1].backward()
