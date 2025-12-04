@@ -3858,7 +3858,6 @@ class TestFX(JitTestCase):
         finally:
             del sys.modules["__future__"]
 
-    @unittest.skipIf(sys.version_info > (3, 11), "Does not work in 3.11")
     def test_annotations_empty_tuple(self):
         class Foo(torch.nn.Module):
             def forward(self, x: typing.Tuple[()], y: typing.Tuple[str, typing.Tuple[()]]):  # noqa: UP006
@@ -3871,8 +3870,8 @@ class TestFX(JitTestCase):
 
         traced(x, y)
 
-        FileCheck().check("typing_Tuple[()]").check(
-            "typing_Tuple[str,typing_Tuple[()]]"
+        FileCheck().check("Tuple[()]").check(
+            "Tuple[str,Tuple[()]]"
         ).run(traced.code)
 
         scripted = torch.jit.script(traced)
@@ -4813,8 +4812,6 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
         self.assertTrue(hasattr(reload_gm, "dummy_parameter"))
 
 
-# This is failing on Python 3.12 : https://github.com/pytorch/pytorch/issues/119454
-@unittest.skipIf(sys.version_info >= (3, 12), "Failing on python 3.12+")
 class TestFunctionalTracing(JitTestCase):
     def setUp(self):
         super().setUp()
