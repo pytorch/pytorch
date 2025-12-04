@@ -134,7 +134,7 @@ AOTI_TORCH_EXPORT AOTITorchError
 torch_cuda_stream_synchronize(void* stream, int32_t device_index);
 
 // Wrapper around c10_cuda_check_implementation that captures the error message
-// without propagating the exception. Caller must free error_msg using
+// without propagating the exception. The caller must free error_msg using
 // torch_c10_cuda_free_error_msg if it is non-null.
 AOTI_TORCH_EXPORT AOTITorchError torch_c10_cuda_check_msg(
     int32_t err,
