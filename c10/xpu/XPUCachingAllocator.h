@@ -6,12 +6,6 @@
 
 namespace c10::xpu::XPUCachingAllocator {
 
-class XPUAllocator : public DeviceAllocator {
- public:
-  virtual void* raw_alloc(size_t nbytes) = 0;
-  virtual void raw_delete(void* ptr) = 0;
-};
-
 C10_XPU_API Allocator* get();
 
 C10_XPU_API void init(DeviceIndex device_count);
@@ -38,6 +32,8 @@ C10_XPU_API void enablePeerAccess(
 C10_XPU_API double getMemoryFraction(DeviceIndex device);
 
 C10_XPU_API void setMemoryFraction(double fraction, DeviceIndex device);
+
+class XPUAllocator;
 
 C10_XPU_API void createOrIncrefPool(
     c10::DeviceIndex device,

@@ -51,7 +51,6 @@ class ConvAdd2d(nnq.Conv2d):
         )
 
     def forward(self, input, extra_input):  # type: ignore[override]
-        r"""Applies fused quantized Conv2d and addition."""
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
@@ -70,14 +69,12 @@ class ConvAdd2d(nnq.Conv2d):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
-        r"""Creates a quantized module from a float module."""
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        r"""Creates a quantized module from a reference module."""
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
 
 
@@ -123,7 +120,6 @@ class ConvAddReLU2d(nnq.Conv2d):
         )
 
     def forward(self, input, extra_input):  # type: ignore[override]
-        r"""Applies fused quantized Conv2d, addition, and ReLU."""
         # Temporarily using len(shape) instead of ndim due to JIT issue
         # https://github.com/pytorch/pytorch/issues/23890
         if len(input.shape) != 4:
@@ -142,12 +138,10 @@ class ConvAddReLU2d(nnq.Conv2d):
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
-        r"""Creates a quantized module from a float module."""
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
-        r"""Creates a quantized module from a reference module."""
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)

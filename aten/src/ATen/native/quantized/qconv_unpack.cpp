@@ -86,8 +86,7 @@ class QConv1dUnpackWeightsInt8 final {
     if (ctx.qEngine() == at::QEngine::FBGEMM ||
         ctx.qEngine() == at::QEngine::X86) {
       auto result = packed_weight->unpack();
-      auto& weight = std::get<0>(result);
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      std::get<0>(result).squeeze_(quant_utils::kConv1dSqueezeDim + 2);
       return result;
     }
 #endif
@@ -95,8 +94,7 @@ class QConv1dUnpackWeightsInt8 final {
 #ifdef USE_PYTORCH_QNNPACK
     if (ctx.qEngine() == at::QEngine::QNNPACK) {
       auto result = packed_weight->unpack();
-      auto& weight = std::get<0>(result);
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      std::get<0>(result).squeeze_(quant_utils::kConv1dSqueezeDim + 2);
       return result;
     }
 #endif
@@ -104,8 +102,7 @@ class QConv1dUnpackWeightsInt8 final {
 #if AT_MKLDNN_ENABLED()
     if (ctx.qEngine() == at::QEngine::ONEDNN) {
       auto result = packed_weight->unpack();
-      auto& weight = std::get<0>(result);
-      weight = weight.squeeze_(quant_utils::kConv1dSqueezeDim + 2);
+      std::get<0>(result).squeeze_(quant_utils::kConv1dSqueezeDim + 2);
       return result;
     }
 #endif

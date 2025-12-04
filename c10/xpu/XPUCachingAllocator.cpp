@@ -15,6 +15,8 @@ using namespace c10::CachingDeviceAllocator;
 // newly allocated memory with 512-byte alignment.
 constexpr size_t kDeviceAlignment = 512;
 
+class XPUAllocator;
+
 namespace {
 using stream_set = ska::flat_hash_set<xpu::XPUStream>;
 
@@ -391,26 +393,6 @@ struct MempoolIdHash {
   }
 };
 
-void allocPrimitive(void** ptr, size_t size, AllocParams& p) {
-  if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
-    *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
-  } else {
-    *ptr = sycl::aligned_alloc_device(
-        kDeviceAlignment,
-        size,
-        xpu::get_raw_device(p.device()),
-        xpu::get_device_context());
-  }
-}
-
-void deletePrimitive(void* ptr, BlockPool* pool) {
-  if (pool->owner_PrivatePool && pool->owner_PrivatePool->allocator()) {
-    pool->owner_PrivatePool->allocator()->raw_delete(ptr);
-  } else {
-    sycl::free(ptr, xpu::get_device_context());
-  }
-}
-
 } // anonymous namespace
 
 class DeviceCachingAllocator {
@@ -731,8 +713,7 @@ class DeviceCachingAllocator {
 
   bool alloc_block(AllocParams& p, bool isRetry) {
     auto size = p.alloc_size;
-    void* ptr = nullptr;
-
+    auto device = p.device();
     if (isRetry) {
       stats.num_alloc_retries += 1;
     }
@@ -747,24 +728,27 @@ class DeviceCachingAllocator {
       TORCH_CHECK(
           !active_pool,
           "torch.xpu.MemPool doesn't currently support expandable_segments.");
-      p.block = try_allocate_expandable_block(
-          p.device(), p.queue(), p.pool, p.size());
+      p.block =
+          try_allocate_expandable_block(device, p.queue(), p.pool, p.size());
       if (p.block && p.pool->owner_PrivatePool) {
         // The block is used only for XPU graph's PrivatePool.
         p.pool->owner_PrivatePool->allocation_count++;
       }
       return bool(p.block);
-    } else {
-      allocPrimitive(&ptr, size, p);
-      if (!ptr) {
-        return false;
-      }
+    }
+    void* ptr = sycl::aligned_alloc_device(
+        kDeviceAlignment,
+        size,
+        xpu::get_raw_device(device),
+        xpu::get_device_context());
+    if (!ptr) {
+      return false;
     }
 
     if (p.pool->owner_PrivatePool) {
       p.pool->owner_PrivatePool->allocation_count++;
     }
-    p.block = new Block(p.device(), p.queue(), size, p.pool, ptr);
+    p.block = new Block(device, p.queue(), size, p.pool, ptr);
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
       stats.reserved_bytes[stat_type].increase(size);
     });
@@ -822,13 +806,8 @@ class DeviceCachingAllocator {
      * guarantee that all kernels can access to the blocks have finished.
      */
     TORCH_INTERNAL_ASSERT(!block->expandable_segment);
+    sycl::free(block->ptr, xpu::get_device_context());
     auto* pool = block->pool;
-    deletePrimitive(block->ptr, pool);
-
-    if (pool->owner_PrivatePool) {
-      TORCH_INTERNAL_ASSERT(pool->owner_PrivatePool->allocation_count > 0);
-      pool->owner_PrivatePool->allocation_count--;
-    }
     pool->blocks.erase(block);
 
     StatTypes stat_types = get_stat_types_for_pool(*pool);
@@ -1318,7 +1297,7 @@ class DeviceCachingAllocator {
 
 static void local_raw_delete(void* ptr);
 
-class NativeCachingAllocator : public XPUAllocator {
+class XPUAllocator : public DeviceAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
@@ -1434,7 +1413,7 @@ class NativeCachingAllocator : public XPUAllocator {
     return &local_raw_delete;
   }
 
-  void* raw_alloc(size_t size) override {
+  void* raw_alloc(size_t size) {
     if (size == 0) {
       return nullptr;
     }
@@ -1454,7 +1433,7 @@ class NativeCachingAllocator : public XPUAllocator {
     return r;
   }
 
-  void raw_delete(void* ptr) override {
+  void raw_delete(void* ptr) {
     this->free(ptr);
   }
 
@@ -1538,7 +1517,7 @@ class NativeCachingAllocator : public XPUAllocator {
   }
 };
 
-static NativeCachingAllocator allocator;
+static XPUAllocator allocator;
 
 void local_raw_delete(void* ptr) {
   allocator.free(ptr);
