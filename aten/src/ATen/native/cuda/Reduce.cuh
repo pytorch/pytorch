@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/cuda/detail/OffsetCalculator.cuh>
@@ -15,7 +16,10 @@
 #include <iosfwd>
 #include <type_traits>
 #include <utility>
-#include <thrust/pair.h>
+
+#ifndef USE_ROCM
+#include <cuda/std/utility>
+#endif
 
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/native/cuda/KernelUtils.cuh>
@@ -760,7 +764,7 @@ struct ReduceOp {
 
   //Currently implemented for max of two outputs
   template<class T1, class T2>
-  C10_DEVICE void set_results(const thrust::pair<T1, T2> x, const index_t base_offset) const {
+  C10_DEVICE void set_results(const NO_ROCM(::cuda)::std::pair<T1, T2> x, const index_t base_offset) const {
     if (noutputs >= 1) {
       auto res0 = (T1*)((char*)dst[0] + base_offset);
       *res0 = x.first;

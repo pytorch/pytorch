@@ -9,14 +9,16 @@
 #include <ATen/NumericUtils.h>
 #include <ATen/OpMathType.h>
 #if defined(__CUDACC__)
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/DeviceUtils.cuh>
 #include <ATen/native/cuda/DeviceSqrt.cuh>
 #elif defined(__HIPCC__)
+#include <ATen/hip/cub.cuh>
 #include <ATen/hip/DeviceUtils.cuh>
 #include <ATen/native/hip/DeviceSqrt.cuh>
 #endif
-#if defined(__CUDACC__) || defined(__HIPCC__)
-#include <thrust/pair.h>
+#if defined(__CUDACC__)
+#include <cuda/std/utility>
 #else
 #include <cmath>
 #define device_sqrt std::sqrt
@@ -68,7 +70,7 @@ namespace at::native {
 namespace detail {
 
 #if defined(__CUDACC__) || defined(__HIPCC__)
-template <typename T1, typename T2> using pair = thrust::pair<T1, T2>;
+template <typename T1, typename T2> using pair = NO_ROCM(::cuda)::std::pair<T1, T2>;
 #else
 template <typename T1, typename T2> using pair = std::pair<T1, T2>;
 #endif

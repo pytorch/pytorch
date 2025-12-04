@@ -3,6 +3,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/cub.cuh>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/ThrustAllocator.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
@@ -20,6 +21,10 @@
 #include <ATen/ops/_sparse_coo_tensor_unsafe_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/zeros.h>
+#endif
+
+#ifndef USE_ROCM
+#include <cuda/std/utility>
 #endif
 
 #include <thrust/device_ptr.h>
@@ -88,7 +93,7 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   );
 
   // this forces device-host synchronization!
-  thrust::pair<thrust_ptr, thrust_ptr> newEnd = thrust::unique_by_key(policy,
+  NO_ROCM(::cuda)::std::pair<thrust_ptr, thrust_ptr> newEnd = thrust::unique_by_key(policy,
     indicesIter, indicesIter + nnz,
     uniqueOffsetsIter
   );
