@@ -564,13 +564,13 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
                     self.assertExpectedInline(
                         next(iter(counters["graph_break"].keys())),
                         """\
-Unsupported Tensor.backward() call
-  Explanation: Dynamo currently does not support tracing `Tensor.backward()`.
-  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+autograd.grad with compiled autograd
+  Explanation: torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled.
+  Hint: Disable compiled autograd, or move the autograd.grad() call outside the compiled region.
 
-  Developer debug context: call_method TensorVariable() backward () {}
+  Developer debug context: 
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0369.html""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
