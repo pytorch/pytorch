@@ -644,10 +644,11 @@ class TestExecutionTrace(TestCase):
         for idx in range(10):
             if idx in iter_list:
                 # Create a temp file to save execution trace data.
-                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-                fp.close()
-                output_files.append(fp.name)
-                et = ExecutionTraceObserver().register_callback(fp.name)
+                with tempfile.NamedTemporaryFile(
+                    "w+t", suffix=".et.json", delete=False
+                ) as fp:
+                    output_files.append(fp.name)
+                    et = ExecutionTraceObserver().register_callback(fp.name)
                 et.start()
             with record_function(f"## LOOP {idx} ##"):
                 self.payload(device, use_device=use_device)
@@ -685,14 +686,13 @@ class TestExecutionTrace(TestCase):
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-
-        observer = ExecutionTraceObserver().register_callback(fp.name)
-
         def fn(nt):
             return nt.sin().cos()
 
+        filename = ""
+        with tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp:
+            observer = ExecutionTraceObserver().register_callback(fp.name)
+            filename = fp.name
         with torch.profiler.profile(execution_trace_observer=observer):
             for i in range(3):
                 values = torch.rand((8 + i, 4 + i))
@@ -700,7 +700,8 @@ class TestExecutionTrace(TestCase):
                 nt = torch.nested.nested_tensor_from_jagged(values, offsets)
                 fn(nt)
 
-        nodes = self.get_execution_trace_root(fp.name)
+        nodes = self.get_execution_trace_root(filename)
+        os.remove(filename)
         found_cos = False
         for n in nodes:
             assert "name" in n
@@ -713,26 +714,29 @@ class TestExecutionTrace(TestCase):
         "need CUDA device availability to run",
     )
     def test_execution_trace_record_integral_tensor_range(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-
         os.environ["ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE"] = "1"
         t1 = torch.tensor([[1, 2], [3, 4]]).cuda()
         t2 = torch.tensor([[0, 0], [1, 0]]).cuda()
-        with profile(
-            activities=supported_activities(),
-            schedule=torch.profiler.schedule(
-                skip_first=0, wait=0, warmup=0, active=1, repeat=1
-            ),
-            record_shapes=True,
-            execution_trace_observer=(
-                ExecutionTraceObserver().register_callback(fp.name)
-            ),
-        ) as p:
+        filename = ""
+        with (
+            tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False) as fp,
+            profile(
+                activities=supported_activities(),
+                schedule=torch.profiler.schedule(
+                    skip_first=0, wait=0, warmup=0, active=1, repeat=1
+                ),
+                record_shapes=True,
+                execution_trace_observer=(
+                    ExecutionTraceObserver().register_callback(fp.name)
+                ),
+            ) as p,
+        ):
+            filename = fp.name
             torch.gather(t1, 1, t2)
             p.step()
 
-        nodes = self.get_execution_trace_root(fp.name)
+        nodes = self.get_execution_trace_root(filename)
+        os.remove(filename)
         for n in nodes:
             assert "name" in n
             if "aten::gather" in n["name"]:

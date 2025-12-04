@@ -384,8 +384,7 @@ class SerializationMixin:
     def test_serialization_offset_gzip(self):
         a = torch.randn(5, 5)
         i = 41
-        f2 = tempfile.NamedTemporaryFile(delete=False)
-        with tempfile.NamedTemporaryFile() as f1:
+        with tempfile.NamedTemporaryFile(delete=False) as f2, tempfile.NamedTemporaryFile() as f1:
             pickle.dump(i, f1)
             torch.save(a, f1)
             f1.seek(0)
@@ -397,6 +396,7 @@ class SerializationMixin:
                 b = torch.load(f)
                 self.assertTrue(torch.equal(a, b))
                 self.assertEqual(i, j)
+            os.remove(f2.name)
 
     def _test_serialization_sparse(self, weights_only):
         def _test_serialization(conversion):
