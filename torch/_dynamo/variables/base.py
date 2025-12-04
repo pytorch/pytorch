@@ -366,6 +366,21 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
+    def is_constant_match(self, *values: Any) -> bool:
+        """
+        Check if this variable is a python constant matching one of the given values.
+
+        Examples:
+            var.is_constant_match(None)  # True if var is constant None
+            var.is_constant_match(True, False)  # True if var is constant True or False
+            var.is_constant_match(NotImplemented)  # True if var is constant NotImplemented
+        """
+        return False
+
+    def is_constant_none(self) -> bool:
+        """Check if this variable is a constant None value."""
+        return False
+
     def make_guard(self, fn: Callable[..., Any]) -> Guard:
         if self.source:
             return self.source.make_guard(fn)
@@ -377,13 +392,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError
 
+    def is_symnode_like(self) -> bool:
+        """Return True for values that can participate in SymNode operations"""
+        return False
+
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
             raise NotImplementedError
         source = self.source and AttrSource(self.source, name)
-        if source and not isinstance(self, variables.ConstantVariable):
+        if source and not self.is_python_constant():
             # The second condition is to avoid guards on const getattr objects
             # like __code__.co_argcount
             install_guard(source.make_guard(GuardBuilder.CONSTANT_MATCH))
@@ -572,10 +591,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     ) -> "VariableTracker":
         """Performance optimization to implement optree.tree_map faster than tracing it"""
         is_leaf_var = tree_map_kwargs.get("is_leaf")
-        if is_leaf_var is not None and not (
-            is_leaf_var.is_python_constant()
-            and is_leaf_var.as_python_constant() is None
-        ):
+        if is_leaf_var is not None and not is_leaf_var.is_constant_none():
             pred_result = is_leaf_var.call_function(tx, [self], {})
             try:
                 leaf_decision = pred_result.as_python_constant()
@@ -682,62 +698,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return builder.SourcelessBuilder.create(tx, value)
         else:
             return variables.LazyVariableTracker.create(value, source)
-
-    def is_python_hashable(self):
-        """
-        Unlike the variable tracker's own __hash__, this method checks whether
-        the underlying Python object referenced by this variable tracker is hashable.
-        """
-        try:
-            type_self = self.python_type()
-        except NotImplementedError:
-            type_self = type(self)
-
-        unimplemented(
-            gb_type="Dynamo cannot determine whether the underlying object is hashable",
-            context=f"is_python_hashable {self}",
-            explanation=f"Dynamo does not know whether the underlying python object for {self} is hashable",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {type_self}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
-    def get_python_hash(self):
-        """
-        Unlike the variable tracker’s own __hash__, this method is used by
-        ConstDictVariableTracker to compute the hash of the underlying key object.
-        """
-        unimplemented(
-            gb_type="Dynamo cannot determine the hash of an object",
-            context=f"get_python_hash {self}",
-            explanation=f"Dynamo does not know the hash of the underlying python object for {self}",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
-
-    def is_python_equal(self, other):
-        """
-        NB - Deliberately not overriding the __eq__ method because that can
-        disable the __hash__ for the vt itself.
-        """
-        unimplemented(
-            gb_type="Dynamo cannot determine the equality comparison of an object",
-            context=f"is_python_equal {self}",
-            explanation=f"Dynamo does not know the equality comparison of the underlying python object for {self}",
-            hints=[
-                (
-                    f"Consider using a different type of object as the dictionary key instead of {self.python_type()}."
-                ),
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )
 
     def __init__(
         self,

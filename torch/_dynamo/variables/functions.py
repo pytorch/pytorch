@@ -45,6 +45,7 @@ from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
     format_skip_frame_message,
+    get_dynamo_observed_exception,
     handle_observed_exception,
     InfiniteGeneratorError,
     ObservedException,
@@ -809,15 +810,6 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return collected
         return None
 
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.fn)
-
-    def is_python_equal(self, other):
-        return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
-
 
 class TreeMapOnlyFunctionVariable(BaseUserFunctionVariable):
     _nonvar_fields = {
@@ -907,7 +899,6 @@ class LocalGeneratorObjectVariable(VariableTracker):
         self.code = code
         self.f_globals = f_globals
         self.inline_tracer = inline_tracer
-        inline_tracer.output.side_effects.track_generator(self)
 
     def get_code(self) -> types.CodeType:
         return self.code
@@ -976,12 +967,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # created on call_function. Any exception needs to be propagated to tx
             # for Dynamo to behave correctly
             return tracer.inline_call_()
-        except ObservedUserStopIteration:
-            tracer.output.side_effects.untrack_generator(self)
-            raise
-        except ObservedException:
+        except ObservedException as e:
             tracer.generator_exhausted = True
-            raise
+            raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
             raise
@@ -1023,10 +1011,9 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def should_allow_nested_graph_breaks(self):
         return False
 
-    def _setup_and_raise_exception(
+    def _setup_exception(
         self, tx: "InstructionTranslator", exc: VariableTracker
     ) -> None:
-        # Raise an exception at the point where the generator is paused
         tracer = self.inline_tracer
         try:
             tracer._raise_exception_variable(exc)
@@ -1060,10 +1047,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             if self._is_generator_just_started() and len(args):
                 # can't send non-None value to a just-started generator
                 # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
-                if not all(
-                    isinstance(arg, ConstantVariable) and arg.value is None
-                    for arg in args
-                ):
+                if not all(arg.is_constant_none() for arg in args):
                     raise_observed_exception(TypeError, tx)
             tracer = self.inline_tracer
             tracer.push_many(args)
@@ -1090,7 +1074,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # Raise GeneratorExit to see if user code catches it. Any other exception
             # is propagated to the parent frame.
             try:
-                self._setup_and_raise_exception(
+                self._setup_exception(
                     tx, variables.ExceptionVariable(GeneratorExit, ())
                 )
                 # There's an extra block on Python 3.12+ to handle StopIteration
@@ -1139,7 +1123,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             # returns the next value yielded by the generator.
             # * If the generator exits without yielding, raise StopIteration
             # * If the generator function does not catch the passed-in exception,
-            # or raises a different exception, then that new exception propagates to the caller.
+            # or raises a different exception, then that exception propagates to the caller.
 
             # Setup the exception table and jump target in case of try...finally
             tracer = self.inline_tracer
@@ -1148,15 +1132,84 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 # In such cases, we re-raise the exception object given to avoid
                 # creating a new object, so that IS_OP works.
                 # See: https://github.com/pytorch/pytorch/pull/146496
-                self._setup_and_raise_exception(
-                    tx, args[1] if len(args) == 3 else args[0]
-                )
+                self._setup_exception(tx, args[1] if len(args) == 3 else args[0])
             except ObservedException:  # noqa: TRY203
                 # propagate the exception back to the parent caller
                 raise
 
-            # If reaches here, it means user code captured the exception
-            return self.next_variable(tx)
+            retval = self.next_variable(tx)
+
+            # The exception raised before is still active. We need to check the exception
+            # table one more time to find the next target. But why? Let's walk
+            # through an example and its generated bytecode: https://godbolt.org/z/ebdTbMv8M
+            #
+            #     z = 0
+            #     def whoo():
+            #         global z
+            #         z = 0
+            #         try:
+            #             yield 1
+            #         except ValueError:
+            #             yield 2
+            #         finally:
+            #             z += 1
+            #         z += 10
+            #
+            #     gen = whoo()
+            #     next(gen)
+            #     gen.throw(ValueError)
+            #     print('z', z)  -> z = 1
+            #
+            #              ...
+            #         >>   58 PUSH_EXC_INFO
+            #
+            #   8          60 LOAD_GLOBAL              2 (ValueError)
+            #              70 CHECK_EXC_MATCH
+            #              72 POP_JUMP_IF_FALSE        7 (to 88)
+            #              74 POP_TOP
+            #
+            #   9          76 LOAD_CONST               3 (2)
+            #              78 YIELD_VALUE              3      <------ ValueError is still active here
+            #              80 RESUME                   1
+            #              82 POP_TOP
+            #              84 POP_EXCEPT
+            #              86 jump_backward           34 (to 20)
+            #              ...
+            #
+            #     ExceptionTable:
+            #     4 to 8 -> 124 [0] lasti
+            #     12 to 18 -> 58 [0]
+            #     20 to 56 -> 124 [0] lasti
+            #     58 to 82 -> 90 [1] lasti     <------ move to 90
+            #     84 to 86 -> 96 [0]
+            #     88 to 88 -> 90 [1] lasti
+            #     90 to 94 -> 96 [0]
+            #     96 to 116 -> 118 [1] lasti
+            #     118 to 122 -> 124 [0] lasti
+            #
+            # In this scenario, a generator can yield after `throw()` is called. Even
+            # after the exception is raised a few lines above, it remains active
+            # within the `78 YIELD_VALUE` instruction. When the generator resumes
+            # after the second yield on instruction `80 RESUME`, we cannot simply
+            # return the control flow to the next instruction. Instead, one must
+            # check the exception table (or equivalent) to find the next target
+            # In this case, it says the instruction pointer must be moved to 90.
+            #
+            # Without this step, if we let the trace proceed to the next
+            # instruction, it would follow the control flow where the exception
+            # raised by `throw()` was handled and swallowed, potentially leading
+            # to incorrect behavior.
+            exc_type = type("__InternalThrowException", (Exception,), {})
+
+            try:
+                self._setup_exception(tx, variables.ExceptionVariable(exc_type, ()))
+                self.next_variable(tx)
+            except get_dynamo_observed_exception(exc_type):
+                # We should get back the exception raised before.
+                pass
+            else:
+                raise_observed_exception(RuntimeError, tracer)
+            return retval
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -1901,15 +1954,6 @@ class SkipFunctionVariable(VariableTracker):
 
         return fn_var_getattr(tx, self.value, self.source, name)
 
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.value)
-
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
-
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
     def __init__(
@@ -2296,34 +2340,6 @@ class FunctoolsPartialVariable(VariableTracker):
             **{k: v.guard_as_python_constant() for k, v in self.keywords.items()},
         )
 
-    def is_python_hashable(self) -> bool:
-        return (
-            self.func.is_python_hashable()
-            and all(arg.is_python_hashable() for arg in self.args)
-            and all(value.is_python_hashable() for value in self.keywords.values())
-        )
-
-    def get_python_hash(self):
-        func_hash = self.func.get_python_hash()
-        args_hash = (arg.get_python_hash() for arg in self.args)
-        values_hash = (value.get_python_hash() for value in self.keywords.values())
-        return hash((func_hash, *args_hash, *values_hash))
-
-    def is_python_equal(self, other):
-        return (
-            self.func.is_python_equal(other.func)
-            and all(
-                arg_a.is_python_equal(arg_b)
-                for (arg_a, arg_b) in zip(self.args, other.args)
-            )
-            and all(
-                value_a.is_python_equal(value_b)
-                for (value_a, value_b) in zip(
-                    self.keywords.values(), other.keywords.values()
-                )
-            )
-        )
-
 
 class PolyfilledFunctionVariable(VariableTracker):
     _nonvar_fields = {
@@ -2408,7 +2424,7 @@ class PolyfilledFunctionVariable(VariableTracker):
             and not kwargs
             and isinstance(args[0], (variables.ListVariable, variables.TupleVariable))
             and all(
-                (isinstance(x, variables.ConstantVariable) and isinstance(x.value, int))
+                (x.is_python_constant() and isinstance(x.as_python_constant(), int))
                 or (isinstance(x, variables.SymNodeVariable) and x.python_type() is int)
                 for x in args[0].items
             )
@@ -2424,8 +2440,8 @@ class PolyfilledFunctionVariable(VariableTracker):
                 sym_num=torch.sym_sum(
                     [
                         (
-                            x.value
-                            if isinstance(x, variables.ConstantVariable)
+                            x.as_python_constant()
+                            if x.is_python_constant()
                             else x.sym_num  # type: ignore[attr-defined]
                         )
                         for x in args[0].items
@@ -2630,7 +2646,6 @@ class DynamoTritonHOPifier(TritonHOPifier):
         combined_args_raw: dict[str, Any],
         tx: "InstructionTranslator",
     ) -> "variables.ConstantVariable":
-        from .constant import ConstantVariable
         from .dicts import ConstDictVariable
 
         # as we can only pass tensors as non-const args in fx graph,
@@ -2664,12 +2679,12 @@ class DynamoTritonHOPifier(TritonHOPifier):
         constant_args = {
             k: v.as_python_constant()
             for k, v in combined_args_raw.items()
-            if isinstance(v, ConstantVariable)
+            if isinstance(v, VariableTracker) and v.is_python_constant()
         }
         non_constant_args = {
             k: v
             for k, v in combined_args.items()
-            if not isinstance(v, ConstantVariable)
+            if not (isinstance(v, VariableTracker) and v.is_python_constant())
         }
 
         for v in non_constant_args.values():
@@ -2970,9 +2985,7 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         if len(args) == 2:
             is_leaf = args[1]
 
-        if not (
-            isinstance(is_leaf, variables.ConstantVariable) and is_leaf.value is None
-        ):
+        if not is_leaf.is_constant_none():
             return super().call_function(tx, args, kwargs)
 
         # Optimize the case where is_leaf is None

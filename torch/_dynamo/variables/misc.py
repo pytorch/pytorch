@@ -474,7 +474,7 @@ class ExceptionVariable(VariableTracker):
         if name == "__context__":
             self.set_context(val)
         elif name == "__cause__":
-            if (isinstance(val, ConstantVariable) and val.value is None) or isinstance(
+            if val.is_constant_none() or isinstance(
                 val,
                 (
                     variables.BuiltinVariable,
@@ -488,12 +488,12 @@ class ExceptionVariable(VariableTracker):
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__suppress_context__":
-            if isinstance(val, ConstantVariable) and val.value in (True, False):
+            if val.is_constant_match(True, False):
                 self.__suppress_context__ = val
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__traceback__":
-            if isinstance(val, ConstantVariable) and val.value is None:
+            if val.is_constant_none():
                 self.__traceback__ = val
             else:
                 unimplemented(
@@ -572,7 +572,7 @@ class DelayGraphBreakVariable(UnknownVariable):
             gb_type="Unsupported function call (delayed)",
             context=f"source: {self.source}",
             explanation="Dynamo determined that a graph break should occur "
-            f"when calling `{self.source.name()}`. Reason: {self.msg}",
+            f"when calling `{self.source.name}`. Reason: {self.msg}",
             hints=[],
         )
 
@@ -1306,15 +1306,6 @@ class MethodWrapperVariable(VariableTracker):
     def as_python_constant(self):
         return self.method_wrapper
 
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.as_python_constant())
-
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
-
 
 class GetSetDescriptorVariable(VariableTracker):
     def __init__(self, desc, **kwargs) -> None:
@@ -1448,15 +1439,6 @@ class TypingVariable(VariableTracker):
         # Let's skip all that noise and just emit it as a simple const.
         #
         codegen.append_output(codegen.create_load_const(self.value))
-
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.as_python_constant())
-
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
 
 
 @functools.lru_cache(maxsize=1)
@@ -1635,15 +1617,6 @@ class NumpyVariable(VariableTracker):
                 return self.value.__name__
 
         return super().as_proxy()
-
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.as_python_constant())
-
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
 
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
@@ -2124,13 +2097,3 @@ class WeakRefVariable(VariableTracker):
         codegen(self.referent_vt)
         codegen(self.callback_vt)
         codegen.extend_output(create_call_function(2, False))
-
-    def is_python_hashable(self):
-        return self.referent_vt.is_python_hashable()
-
-    def get_python_hash(self):
-        # weakref relies on the referent's hash
-        return self.referent_vt.get_python_hash()
-
-    def is_python_equal(self, other):
-        return self.referent_vt.is_python_equal(other.referent_vt)

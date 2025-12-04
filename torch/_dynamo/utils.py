@@ -2548,20 +2548,20 @@ def is_int_specialization_case(value: Any, source: Any) -> bool:
 
     return not TracingContext.get().force_unspec_int_unbacked_size_like and (
         # Assume integers from global variables want to be specialized
-        not source.guard_source().is_local()
+        not source.guard_source.is_local()
         # Assume that integers that came from NN modules want to be
         # specialized (as we don't expect users to be changing the
         # NN modules on the fly), unless explicitly disabled
         or (
-            source.guard_source().is_specialized_nn_module()
+            source.guard_source.is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or (
-            source.guard_source().is_unspecialized_builtin_nn_module()
+            source.guard_source.is_unspecialized_builtin_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or (
-            source.guard_source().is_unspecialized_nn_module()
+            source.guard_source.is_unspecialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or is_from_defaults(source)
@@ -2600,11 +2600,11 @@ def specialize_symnode(arg: Any) -> Any:
 
 
 def guard_if_dyn(arg: Any) -> Any:
-    from .variables import ConstantVariable
+    from .variables import VariableTracker
 
     arg = specialize_symnode(arg)
 
-    if isinstance(arg, ConstantVariable):
+    if isinstance(arg, VariableTracker) and arg.is_python_constant():
         return arg.as_python_constant()
 
     return arg
@@ -2615,14 +2615,14 @@ def check_constant_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
 
 
 def check_unspec_python_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
-    from .variables.constant import ConstantVariable
+    from .variables import VariableTracker
     from .variables.tensor import UnspecializedPythonVariable
 
     unspec_count = 0
     for x in itertools.chain(args, kwargs.values()):
         if isinstance(x, UnspecializedPythonVariable):
             unspec_count += 1
-        elif not isinstance(x, ConstantVariable):
+        elif not (isinstance(x, VariableTracker) and x.is_python_constant()):
             return False
     return unspec_count > 0
 
@@ -3856,8 +3856,8 @@ def tensor_always_has_static_shape(
     from .source import is_from_unspecialized_param_buffer_source
 
     if (
-        tensor_source.guard_source().is_specialized_nn_module()
-        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
+        tensor_source.guard_source.is_specialized_nn_module()
+        or tensor_source.guard_source.is_unspecialized_builtin_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -4962,21 +4962,3 @@ def get_traced_code() -> Optional[list[CodeType]]:
     from torch._guards import TracingContext
 
     return TracingContext.get_traced_code()
-
-
-def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
-    from . import graph_break_hints
-    from .exc import unimplemented
-
-    is_overridden = type(obj).__dict__.get("__hash__", False)
-
-    if is_overridden:
-        unimplemented(
-            gb_type="User-defined object with overridden __hash__",
-            context=f"hashing object of type={type(obj)} and variable tracker {vt}",
-            explanation=f"Found a user-defined object {vt} with overridden __hash__ when attempting to hash it",
-            hints=[
-                "Dynamo does not support hashing user-defined objects with overridden __hash__",
-                *graph_break_hints.SUPPORTABLE,
-            ],
-        )

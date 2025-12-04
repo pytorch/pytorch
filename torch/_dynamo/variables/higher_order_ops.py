@@ -160,7 +160,7 @@ def check_meta_consistency_vt(
             return var.proxy.node.meta["example_value"]
         elif isinstance(var, SymNodeVariable):
             return var.sym_num
-        elif isinstance(var, ConstantVariable):
+        elif var.is_python_constant():
             return var.as_python_constant()
         else:
             unimplemented(
@@ -225,11 +225,7 @@ def find_mismatched_vars(var, types, allow_none=False):
         for value in var.items.values():
             mismatched_vars.update(find_mismatched_vars(value, types, allow_none))
     else:
-
-        def _is_none(var):
-            return var.is_python_constant() and var.as_python_constant() is None
-
-        if not isinstance(var, types) and not (allow_none and _is_none(var)):
+        if not isinstance(var, types) and not (allow_none and var.is_constant_none()):
             mismatched_vars.add(var)
     return mismatched_vars
 
@@ -503,7 +499,8 @@ def _call_while_loop(
         def unspecialize_carried_inputs(tx, carry) -> VariableTracker:
             # See NOTE [unspecialize int carry with unbacked symints]
             if (
-                isinstance(carry, ConstantVariable) and carry.python_type() is int
+                carry.is_python_constant()
+                and isinstance(carry.as_python_constant(), int)
             ) or isinstance(carry, SymNodeVariable):
                 example_value = _create_unbacked_symint(
                     tx.output.fake_mode, ignore_fresh_unbacked_symbols=True
@@ -601,7 +598,7 @@ def _call_while_loop(
                     *graph_break_hints.USER_ERROR,
                 ],
             )
-    elif isinstance(cond_r, ConstantVariable):
+    elif cond_r.is_python_constant():
         # short-circuiting while_loop when cond_fn returns a constant such as 0, 1 True or False
         pred = cond_r.as_python_constant()
         if pred:
@@ -1105,7 +1102,7 @@ def check_aliasing_and_input_mutation(
             unimplemented(
                 gb_type="Encountered input mutation during higher order op tracing",
                 context=context,
-                explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
+                explanation=f"Higher order ops do not support input mutation. Found in {source_target.name}",
                 hints=[
                     "Consider using the debug context to change user code to avoid mutation.",
                     "Please open an issue.",
@@ -1119,7 +1116,7 @@ def check_aliasing_and_input_mutation(
             unimplemented(
                 gb_type="Encountered aliasing during higher order op tracing",
                 context=context,
-                explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
+                explanation=f"Higher order ops do not support aliasing. Found in {source_target.name}",
                 hints=[
                     "Replace `return input` with `return input.clone()` to avoid aliasing.",
                     "Consider using the debug context to change user code to avoid aliasing.",
@@ -1813,15 +1810,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def as_python_constant(self):
         return self.value
 
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.as_python_constant())
-
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
-
 
 class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
     """
@@ -1985,7 +1973,9 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
                     ],
                 )
             for ret in ret_val.unpack_var_sequence(tx):
-                if isinstance(ret, ConstantVariable) and ret.python_type() is not int:
+                if ret.is_python_constant() and not isinstance(
+                    ret.as_python_constant(), int
+                ):
                     unimplemented(
                         gb_type="torch.cond: unsupported branch return type (constant non-int)",
                         context=str(ret_val),
@@ -2112,7 +2102,8 @@ def validate_subgraph_output_types(output: VariableTracker):
             if (
                 isinstance(out, SymNodeVariable) and out.python_type() in (int, bool)
             ) or (
-                isinstance(out, ConstantVariable) and out.python_type() in (int, bool)
+                out.is_python_constant()
+                and isinstance(out.as_python_constant(), (int, bool))
             ):
                 continue
             unimplemented(
@@ -2728,10 +2719,7 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Check all outputs of map are tensors.
         # For map, outputting None is OK, thus ignore None values in the check
         body_r_vars = body_r.unpack_var_sequence(tx)
-        none_mask = [
-            type(x.realize()) is ConstantVariable and x.as_python_constant() is None
-            for x in body_r_vars
-        ]
+        none_mask = [x.is_constant_none() for x in body_r_vars]
         _check_all_tensorvariable(
             [br for bm, br in zip(none_mask, body_r_vars) if not bm]
         )
@@ -3020,7 +3008,7 @@ class WrapWithSetGradEnabledHigherOrderVariable(TorchHigherOrderOperatorVariable
 
         grad_enabled, fn_var, *rest_args = args
 
-        if not isinstance(grad_enabled, ConstantVariable):
+        if not grad_enabled.is_python_constant():
             unimplemented(
                 gb_type="wrap_with_set_grad_enabled: non-constant grad_enabled",
                 context=str(grad_enabled),
@@ -3108,7 +3096,7 @@ class WrapWithAutocastHigherOrderVariable(TorchHigherOrderOperatorVariable):
         device_type, dtype, enabled, cache_enabled, fn_var, *rest_args = args
 
         for arg in [device_type, dtype, enabled, cache_enabled]:
-            if not isinstance(arg, ConstantVariable):
+            if not arg.is_python_constant():
                 unimplemented(
                     gb_type="wrap_with_autocast: expected constant arg",
                     context=str(args),
@@ -3726,8 +3714,14 @@ class FlexAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
             tx, query, score_mod, "score_mod"
         )
         mask_fn = block_mask.items[-1]
-        if isinstance(mask_fn, ConstantVariable):
-            mask_fn = UserFunctionVariable(torch.nn.attention._flex_attention._no_mask)
+        if mask_fn.is_python_constant():
+            mask_callable = mask_fn.as_python_constant()
+            if mask_callable is None:
+                mask_callable = torch.nn.attention.flex_attention.noop_mask
+            mask_fn = UserFunctionVariable(
+                mask_callable,
+                source=mask_fn.source,
+            )
         mask_fn_node, mask_fn_lifted_args = self.create_wrapped_node(
             tx, query, mask_fn, "mask_fn"
         )
