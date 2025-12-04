@@ -7242,11 +7242,13 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             elif compiled_graph and code is compiled_graph.__call__.__code__:
                 found_compiled_graph = True
 
-        sys.monitoring.use_tool_id(0, "test")
+        tool_id = 0
+        sys.monitoring.use_tool_id(tool_id, "test")
+        old_events = sys.monitoring.get_events(tool_id)
         old_callback = sys.monitoring.register_callback(
-            0, sys.monitoring.events.PY_START, callback
+            tool_id, sys.monitoring.events.PY_START, callback
         )
-        sys.monitoring.set_events(0, sys.monitoring.events.PY_START)
+        sys.monitoring.set_events(tool_id, sys.monitoring.events.PY_START)
         try:
 
             @torch.compile(backend=backend, fullgraph=True)
@@ -7259,9 +7261,11 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             # sys.monitoring should still run on the compiled graph
             self.assertTrue(found_compiled_graph)
         finally:
+            sys.monitoring.set_events(tool_id, old_events)
             sys.monitoring.register_callback(
-                0, sys.monitoring.events.PY_START, old_callback
+                tool_id, sys.monitoring.events.PY_START, old_callback
             )
+            sys.monitoring.free_tool_id(tool_id)
 
     def test_312_local_cell_overlap(self):
         keys = range(10)
@@ -7463,6 +7467,68 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             "Guard fail reason: ",
             msg,
         )
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12) or sys.version_info >= (3, 14),
+        "only 3.12, 3.13 affected by c recursion limit",
+    )
+    def test_dynamo_set_recursion_limit(self):
+        old_recursion_limit = sys.getrecursionlimit()
+        old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()
+        try:
+
+            def fn(x, n):
+                if n == 0:
+                    return x
+                return fn(x, n - 1) + 1
+
+            sys.setrecursionlimit(100)
+
+            with self.assertRaises(RecursionError):
+                fn(torch.ones(3), 500)
+
+            sys.setrecursionlimit(1000)
+
+            fn(torch.ones(3), 500)
+            opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+            sys.setrecursionlimit(20000)
+            with self.assertRaises(Exception):
+                opt_fn(torch.ones(3), 500)
+
+            torch._dynamo.set_recursion_limit(20000)
+            self.assertEqual(fn(torch.ones(3), 500), opt_fn(torch.ones(3), 500))
+        finally:
+            if old_dynamo_recursion_limit > 0:
+                torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
+            sys.setrecursionlimit(old_recursion_limit)
+
+    @unittest.skipIf(
+        sys.version_info < (3, 12) or sys.version_info >= (3, 14),
+        "only 3.12, 3.13 affected by c recursion limit",
+    )
+    def test_dynamo_set_recursion_limit_usage(self):
+        old_dynamo_recursion_limit = torch._dynamo.get_recursion_limit()
+        try:
+            torch._dynamo.set_recursion_limit(500)
+            self.assertEqual(torch._dynamo.get_recursion_limit(), 500)
+
+            @torch.compile(backend="eager", dynamic=False)
+            def fn(x, n):
+                if n == 0:
+                    return x
+                return fn(x, n - 1) + 1
+
+            # a limit of 500 should be lower than the default limit
+            with self.assertWarnsRegex(RuntimeWarning, "new c_recursion limit"):
+                fn(torch.ones(3), 5)
+
+            with self.assertRaisesRegex(ValueError, "recursion limit"):
+                torch._dynamo.set_recursion_limit(0)
+
+            self.assertEqual(torch._dynamo.get_recursion_limit(), 500)
+        finally:
+            if old_dynamo_recursion_limit > 0:
+                torch._dynamo.set_recursion_limit(old_dynamo_recursion_limit)
 
     @expectedFailureDynamic
     def test_dynamo_default_lru_cache_behavior(self):
