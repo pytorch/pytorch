@@ -1208,11 +1208,10 @@ def get_default_device() -> "torch.device":
         device = device_mode.device
         return _get_device_with_index(device)
 
-    if hasattr(_GLOBAL_DEVICE_CONTEXT, "device_context"):
-        device = _GLOBAL_DEVICE_CONTEXT.device_context.device
-        return _get_device_with_index(device)
-    else:
-        return torch.device("cpu")
+    device_context = getattr(_GLOBAL_DEVICE_CONTEXT, "device_context", None)
+    if device_context is not None:
+        return _get_device_with_index(device_context.device)
+    return torch.device("cpu")
 
 
 def set_default_device(device: "Device") -> None:
