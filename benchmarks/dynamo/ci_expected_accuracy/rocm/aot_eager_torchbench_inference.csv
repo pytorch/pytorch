@@ -2,7 +2,7 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,eager_fail_to_run,0
+torchrec_dlrm,pass,0
 
 
 
