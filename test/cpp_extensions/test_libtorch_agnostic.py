@@ -1012,8 +1012,6 @@ except RuntimeError as e:
 """
             env = os.environ.copy()
             env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
-            # Pass the current sys.path to subprocess so it can find the locally installed extension
-            env["PYTHONPATH"] = os.pathsep.join(sys.path)
 
             result = subprocess.run(
                 [sys.executable, "-c", test_script],
@@ -1075,8 +1073,6 @@ except RuntimeError as e:
 """
             env = os.environ.copy()
             env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
-            # Pass the current sys.path to subprocess so it can find the locally installed extension
-            env["PYTHONPATH"] = os.pathsep.join(sys.path)
 
             result = subprocess.run(
                 [sys.executable, "-c", test_script],
