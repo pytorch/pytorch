@@ -5462,29 +5462,29 @@ def max_pool2d_with_indices_backward(
 ):
     """
     Decomposition of max_pool2d_with_indices_backward using scatter_add.
-    
+
     This replaces the native implementation with a high-level decomposition
     that uses scatter_add for gradient accumulation. The scatter-based approach
     provides automatic optimization opportunities for Inductor and handles all
     pooling configurations without requiring specialized fallback paths.
-    
+
     Algorithm:
         For each output gradient position, use the corresponding index from the
         forward pass to scatter the gradient to the input position. When multiple
         output positions select the same input position as max, scatter_add
         automatically accumulates their gradients.
-    
+
     Complexity: O(B * C * H_out * W_out)
         Independent of kernel size, unlike traditional O(B * C * H_in * W_in * K²)
         approaches that iterate over input positions and kernel windows.
-    
+
     Known Limitations:
         - FP16/BF16: Uses FP32 accumulation internally to preserve precision when
           many gradients accumulate to the same position (overlapping pooling windows).
           This adds slight overhead but ensures numerical stability.
         - Deterministic mode: Falls back to native implementation to ensure
           consistent results across runs
-    
+
     Args:
         grad_output: Gradient w.r.t. pooling output [B, C, H_out, W_out]
         self: Original input tensor (for shape) [B, C, H_in, W_in]
@@ -5494,7 +5494,7 @@ def max_pool2d_with_indices_backward(
         dilation: Pooling dilation
         ceil_mode: Whether to use ceil for output size calculation
         indices: Indices from forward pass (per-channel linear positions)
-    
+
     Returns:
         Gradient w.r.t. input [B, C, H_in, W_in]
     """
