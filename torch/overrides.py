@@ -25,6 +25,7 @@ import __future__  # noqa: F404
 import collections
 import contextlib
 import functools
+import sys
 import types
 import warnings
 from collections.abc import Callable, Iterable
@@ -119,7 +120,7 @@ def get_ignored_functions() -> set[Callable]:
     False
     """
     Tensor = torch.Tensor
-    return {
+    functions = {
         torch.typename,
         torch.is_tensor,
         torch.is_storage,
@@ -252,6 +253,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.nn.functional.has_torch_function_unary,
         torch.nn.functional.has_torch_function_variadic,
         torch.nn.functional.handle_torch_function,
+        torch.nn.functional.grouped_mm,
         torch.nn.functional.scaled_grouped_mm,
         torch.nn.functional.scaled_mm,
         torch.nn.functional.sigmoid,
@@ -382,6 +384,11 @@ def get_ignored_functions() -> set[Callable]:
         Tensor.to_padded_tensor,
         Tensor._use_count,
     }
+
+    if sys.version_info >= (3, 14):
+        functions.add(Tensor.__annotate__)
+
+    return functions
 
 
 @functools.cache
