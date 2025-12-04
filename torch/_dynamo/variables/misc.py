@@ -572,7 +572,7 @@ class DelayGraphBreakVariable(UnknownVariable):
             gb_type="Unsupported function call (delayed)",
             context=f"source: {self.source}",
             explanation="Dynamo determined that a graph break should occur "
-            f"when calling `{self.source.name()}`. Reason: {self.msg}",
+            f"when calling `{self.source.name}`. Reason: {self.msg}",
             hints=[],
         )
 
