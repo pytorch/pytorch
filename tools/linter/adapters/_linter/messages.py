@@ -73,6 +73,7 @@ class LintResult:
             or self.length is None
             or self.line is None
             or self.replacement is None
+            or self.is_recursive
         ):
             line = lines[self.line - 1]
             before = line[: self.char]
