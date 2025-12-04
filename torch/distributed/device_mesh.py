@@ -505,7 +505,7 @@ else:
                     always_return_group_name=True,
                 )
                 if pg_name is None:
-                    pg_name = dim_group.group_name
+                    pg_name = "group_" + dim_group.group_name
 
                 # only add to dim_groups if the current rank in the subgroup
                 if get_rank() in subgroup_ranks:
@@ -1010,7 +1010,7 @@ else:
                     mesh_dim_names=mesh_dim_names,
                     _init_backend=False,
                 )
-                device_mesh._dim_group_names = [group.group_name]
+                device_mesh._dim_group_names = [group._group_name_alias or group.group_name]
                 return device_mesh
 
             # nD scenario
@@ -1040,7 +1040,7 @@ else:
             device_mesh = DeviceMesh(
                 device_type, mesh, mesh_dim_names=mesh_dim_names, _init_backend=False
             )
-            device_mesh._dim_group_names = [group.group_name for group in groups]
+            device_mesh._dim_group_names = [group._group_name_alias or group.group_name for group in groups]
             return device_mesh
 
         def size(self, mesh_dim: int | None = None) -> int:
