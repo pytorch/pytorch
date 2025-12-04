@@ -958,9 +958,6 @@ class Loops(IRNode):
             + [f"origin_node={self.origin_node!r}"]
         )
 
-    def __post_init__(self) -> None:
-        super().__post_init__()
-
     def __str__(self) -> str:
         return self._to_str(("ranges",))
 
@@ -1445,7 +1442,9 @@ class Reduction(Loops):
             strides = V.graph.sizevars.stride_hints(
                 j, reduction_vars, list(ranges1.keys())
             )
-            outer = all(s > 1 for s in strides)
+            # A 0 stride does not make a reduction contiguous.
+            # This can happen when the reduction ranges contains a 1.
+            outer = all(s == 0 or s > 1 for s in strides)
             if outer:
                 num_outer += 1
             else:
@@ -8230,9 +8229,6 @@ class FallbackKernel(ExternKernelAlloc):
         # pyrefly: ignore [bad-return]
         return outputs
 
-    def apply_constraint(self) -> None:
-        return super().apply_constraint()
-
 
 @ir_dataclass(frozen=False)
 class ComplexView(FallbackKernel):
@@ -8839,9 +8835,13 @@ class Conditional(ExternKernel):
             assert t_o.get_dtype() == f_o.get_dtype(), (i, t_o, f_o)
             assert t_o.get_layout().offset == f_o.get_layout().offset, (i, t_o, f_o)
 
+        # Determine device from operands and predicate
+        # The predicate can be on a different device (e.g., CPU for control flow)
+        # while the data operands and outputs should be on the compute device, so
+        # using predicate device as a fallback.
         device = next(
             o.get_device()
-            for o in [predicate] + operands
+            for o in operands + [predicate]
             if not isinstance(o, ShapeAsConstantBuffer)
         )
         unbacked_bindings = resolve_unbacked_bindings(
