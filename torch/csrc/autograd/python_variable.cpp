@@ -1889,7 +1889,10 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
       // larger than the current stride on the shard_dim.
       for (const auto i : c10::irange(tensor_strides.size())) {
         if (static_cast<int64_t>(i) != shard_dim &&
-            tensor_strides[i] >= tensor_strides[shard_dim]) {
+            (TORCH_GUARD_OR_FALSE(
+                 tensor_strides[i].sym_ge(tensor_strides[shard_dim])) ||
+             TORCH_GUARD_OR_FALSE(
+                 (tensor_strides[i] % tensor_strides[shard_dim]).sym_eq(0)))) {
           tensor_strides[i] *= mesh_dim_size;
         }
       }
