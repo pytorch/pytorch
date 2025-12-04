@@ -25,6 +25,8 @@ import types
 from collections.abc import Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
 
+from torch.utils._ordered_set import OrderedSet
+
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
@@ -1140,7 +1142,11 @@ class SetVariable(ConstDictVariable):
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             return variables.UserFunctionVariable(
                 polyfills.set_intersection
-            ).call_function(tx, [self, *args], {})
+            ).call_function(
+                tx,
+                [self, *args],
+                {"cls": variables.UserDefinedClassVariable(self.python_type())},
+            )
         elif name == "intersection_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
@@ -1151,7 +1157,9 @@ class SetVariable(ConstDictVariable):
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
             return variables.UserFunctionVariable(polyfills.set_union).call_function(
-                tx, [self, *args], {}
+                tx,
+                [self, *args],
+                {"cls": variables.UserDefinedClassVariable(self.python_type())},
             )
         elif name == "difference":
             if kwargs:
@@ -1160,7 +1168,11 @@ class SetVariable(ConstDictVariable):
                 )
             return variables.UserFunctionVariable(
                 polyfills.set_difference
-            ).call_function(tx, [self, *args], {})
+            ).call_function(
+                tx,
+                [self, *args],
+                {"cls": variables.UserDefinedClassVariable(self.python_type())},
+            )
         elif name == "difference_update":
             if kwargs:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
@@ -1177,7 +1189,11 @@ class SetVariable(ConstDictVariable):
                 )
             return variables.UserFunctionVariable(
                 polyfills.set_symmetric_difference
-            ).call_function(tx, [self, *args], {})
+            ).call_function(
+                tx,
+                [self, *args],
+                {"cls": variables.UserDefinedClassVariable(self.python_type())},
+            )
         elif name == "symmetric_difference_update":
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
@@ -1282,6 +1298,30 @@ class SetVariable(ConstDictVariable):
     def install_dict_keys_match_guard(self) -> None:
         # Already EQUALS_MATCH guarded
         pass
+
+
+class OrderedSetVariable(SetVariable):
+    def debug_repr(self) -> str:
+        if not self.items:
+            return "OrderedSet([])"
+        else:
+            return (
+                "OrderedSet([" + ",".join(k.vt.debug_repr() for k in self.items) + "])"
+            )
+
+    def as_python_constant(self) -> Any:
+        return OrderedSet([k.vt.as_python_constant() for k in self.set_items])
+
+    def python_type(self) -> type:
+        return OrderedSet
+
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("torch.utils._ordered_set", "OrderedSet")
+        )
+        codegen.foreach([x.vt for x in self.set_items])
+        codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.set_items)))
+        codegen.extend_output(create_call_function(1, False))
 
 
 class FrozensetVariable(SetVariable):

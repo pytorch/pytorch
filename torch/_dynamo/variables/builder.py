@@ -79,6 +79,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.immutable_collections import immutable_dict, immutable_list
 from torch.nn.utils._expanded_weights import ExpandedWeight
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     is_traceable_wrapper_subclass_type,
@@ -813,7 +814,7 @@ class VariableBuilder:
             var = TorchFunctionModeVariable(value, source=self.source)
             self.tx.output.side_effects.track_object_existing(value, var)
             return var
-        elif istype(value, set):
+        elif istype(value, [set, OrderedSet]):
             if any(isinstance(x, torch.Tensor) for x in value):
                 unimplemented(
                     gb_type="Attempted to wrap a set with tensors",
@@ -831,6 +832,14 @@ class VariableBuilder:
 
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+
+            if istype(value, OrderedSet):
+                # Guard on the internal dict of OrderedSet
+                internal_dict_source = AttrSource(self.source, "_dict")
+                install_guard(
+                    internal_dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH)
+                )
+                self.tx.output.guard_on_key_order.add(internal_dict_source)
 
             # The list gives a ordering for the set items. The ordering is based
             # on the Python hash and it is not related to object ordering inside

@@ -142,8 +142,8 @@ def dict___eq__(d, other):
     return True
 
 
-def set_symmetric_difference(set1, set2):
-    symmetric_difference_set = set()
+def set_symmetric_difference(set1, set2, cls=set):
+    symmetric_difference_set = cls()
     for x in set1:
         if x not in set2:
             symmetric_difference_set.add(x)
@@ -172,7 +172,7 @@ def set_isdisjoint(set1, set2):
     return True
 
 
-def set_intersection(set1, *others):
+def set_intersection(set1, *others, cls=set):
     if len(others) == 0:
         return set1.copy()
 
@@ -184,7 +184,7 @@ def set_intersection(set1, *others):
             raise TypeError("unhashable type")
 
     # return a new set with elements common in all sets
-    intersection_set = set()
+    intersection_set = cls()
     for x in set1:
         for set2 in others:
             if not any(x == y for y in set2):
@@ -200,8 +200,11 @@ def set_intersection_update(set1, *others):
     set1.update(result)
 
 
-def set_union(set1, *others):
+def set_union(set1, *others, cls=None):
     # frozenset also uses this function
+    if cls is None:
+        cls = type(set1)
+
     if len(others) == 0:
         return set1.copy()
 
@@ -217,7 +220,7 @@ def set_union(set1, *others):
         set_update(union_set, set2)
 
     # frozenset also uses this function
-    return type(set1)(union_set)
+    return cls(union_set)
 
 
 def set_update(set1, *others):
@@ -230,7 +233,7 @@ def set_update(set1, *others):
                 set1.add(x)
 
 
-def set_difference(set1, *others):
+def set_difference(set1, *others, cls=set):
     if len(others) == 0:
         return set1.copy()
 
@@ -241,7 +244,7 @@ def set_difference(set1, *others):
         if any(not isinstance(x, Hashable) for x in s):
             raise TypeError("unhashable type")
 
-    difference_set = set()
+    difference_set = cls()
     for x in set1:
         for set2 in others:
             if x in set2:
