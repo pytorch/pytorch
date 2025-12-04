@@ -39,7 +39,7 @@ import os
 import traceback
 import weakref
 from collections.abc import Callable
-from typing import Any, TYPE_CHECKING, Union  # noqa: F401
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode

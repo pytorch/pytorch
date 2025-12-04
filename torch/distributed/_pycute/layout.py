@@ -36,8 +36,8 @@ of lexicographic instead of co-lexicographic as implemented in the original layo
 """
 
 from itertools import chain
-from typing import TypeAlias, Union
-from typing_extensions import TypeIs
+from typing import TypeAlias
+from typing_extensions import Self, TypeIs
 
 from .int_tuple import (
     crd2idx,
@@ -88,7 +88,7 @@ class Layout(LayoutBase):
             return 1
 
     # operator ()    (map coord to idx)
-    def __call__(self, *args: CoordinateType) -> Union["Layout", int]:
+    def __call__(self, *args: CoordinateType) -> Self | int:
         """
         Map a logical coordinate to a linear index (Coord has no Underscore slice operators)
         OR
@@ -108,7 +108,7 @@ class Layout(LayoutBase):
                 return crd2idx(args, self.shape, self.stride)  # type: ignore[arg-type]
 
     # operator []    (get-i like tuples)
-    def __getitem__(self, i: int) -> "Layout":
+    def __getitem__(self, i: int) -> Self:
         if is_tuple(self.shape):
             return Layout(self.shape[i], self.stride[i])  # type: ignore[index]
         else:
