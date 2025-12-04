@@ -632,6 +632,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ],
             )
 
+        @register(
+            torch.cuda.synchronize,
+            torch.xpu.synchronize,
+            torch.mps.synchronize,
+        )
+        def handle_device_synchronize(self, tx: "InstructionTranslator", device=None):
+            """Trigger graph break for device synchronization operations."""
+            device_type = "cuda"
+            if self.value is torch.xpu.synchronize:
+                device_type = "xpu"
+            elif self.value is torch.mps.synchronize:
+                device_type = "mps"
+
+            unimplemented(
+                gb_type=f"torch.{device_type}.synchronize() during tracing",
+                context=f"device={device}",
+                explanation=(
+                    f"torch.{device_type}.synchronize() creates a synchronization point "
+                    f"that forces all pending {device_type.upper()} operations to complete. "
+                    f"This cannot be safely modeled in the traced graph."
+                ),
+                hints=[
+                    f"Avoid using torch.{device_type}.synchronize() inside compiled regions.",
+                    "Consider restructuring your code to move synchronization outside the compiled region.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
+            )
+
         @register(torch.is_tensor, torch.overrides.is_tensor_like)
         def handle_is_tensor(self, tx: "InstructionTranslator", arg):
             if isinstance(arg, TensorVariable) or (
