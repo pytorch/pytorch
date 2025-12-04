@@ -2964,6 +2964,29 @@ class AlgorithmSelectorCache(PersistentCache):
             NoValidChoicesError: When all choices fail to compile or benchmark, or when all
                 timing results are non-finite.
         """
+        if log.isEnabledFor(logging.DEBUG):
+            # Log shape information for debugging timeout issues
+            sizevars = V.graph.sizevars
+            shapes = [
+                "x".join(
+                    map(
+                        str,
+                        sizevars.size_hints(
+                            node.get_size(),
+                            fallback=config.unbacked_symint_fallback,
+                            hint_override=hint_override,
+                        ),
+                    )
+                )
+                for node in input_nodes
+            ]
+            log.debug(
+                "[BENCHMARK DEBUG] Starting autotuning for '%s' with shapes: %s, device: %s",
+                name,
+                shapes,
+                layout.device.type if layout else "unknown",
+            )
+
         precompile_start_ts = time.time()
         with dynamo_timed(
             f"{name}_template_precompiling",
