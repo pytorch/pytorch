@@ -1102,6 +1102,22 @@ class TestExplicitRedistribute(LocalTensorTestBase):
             with ExplicitRedistributionContext():
                 with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
                     torch.matmul(dx, dA)
+            with ExplicitRedistributionContext(mode="warn"):
+                with self.assertLogs(
+                    torch.distributed.tensor._utils.logger, level="WARN"
+                ) as captured:
+                    torch.matmul(dx, dA)
+                    self.assertEqual(len(captured.output), 1)
+                    self.assertRegex(
+                        captured.output[0],
+                        r"WARNING:.*Implicit redistribution occurred",
+                    )
+                    # TODO enable this once fixing the issue that op_info.schema is None in some calls to
+                    # redistribute_local_tensor
+                    # self.assertRegex(
+                    #     captured.output[0],
+                    #     r".*aten\.mm\.default.*",
+                    # )
 
             # explicit redistribute allows manual redistribute
             with ExplicitRedistributionContext():
