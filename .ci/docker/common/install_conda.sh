@@ -59,6 +59,12 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # which is provided in libstdcxx 12 and up.
   conda_install libstdcxx-ng=12.3.0 python="$ANACONDA_PYTHON_VERSION" --update-deps -c conda-forge
 
+  # NS: Workaround for https://github.com/pytorch/pytorch/issues/169586
+  # Downgrad cpython to 3.14.0
+  if [ "$ANACONDA_PYTHON_VERSION" = "3.14" ]; then
+    conda_install python==3.14.0
+  fi
+
   # Miniforge installer doesn't install sqlite by default
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     conda_install sqlite
