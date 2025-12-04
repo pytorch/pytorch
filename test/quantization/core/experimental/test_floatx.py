@@ -408,9 +408,9 @@ class TestFloat4Dtype(TestCase):
         # can view uint8 as float4_e2m1fn_x2
         x2.view(torch.float4_e2m1fn_x2)
 
-        # can do comparisons
+        # can do equality comparisons
         x3 = copy.deepcopy(x1)
-        torch.testing.assert_close(x1, x3, atol=0, rtol=0)
+        self.assertEqual(x1, x3, atol=0, rtol=0)
 
     def test_f4_save_load(self, device):
         x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint8).view(
