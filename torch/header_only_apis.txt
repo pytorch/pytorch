@@ -179,6 +179,21 @@ toString
 <<
 toUnderlying
 
+# torch/headeronly/core/Layout.h
+Layout
+kStrided
+kSparse
+kSparseCsr
+kSparseCsc
+kSparseBsr
+kSparseBsc
+kMkldnn
+kJagged
+
+# torch/headeronly/core/MemoryFormat.h
+MemoryFormat
+get_contiguous_memory_format
+
 # torch/headeronly/core/Dispatch_v2.h
 THO_DISPATCH_V2_TMPL
 THO_PRIVATE_CASE_TYPE_USING_HINT_TMPL
@@ -204,3 +219,9 @@ HeaderOnlyGenericPackedTensorAccessor
 # HeaderOnlyTensorAccessorBase and
 # HeaderOnlyGenericPackedTensorAccessorBase are tested through
 # HeaderOnlyTensorAccessor and HeaderOnlyGenericPackedTensorAccessor
+
+# torch/headeronly/util/Deprecated.h
+# C10_DEPRECATED, C10_DEPRECATED_MESSAGE, and
+# C10_DEFINE_DEPRECATED_USING functionalities are expressed at compile
+# time that have no effect to runtime. Therefore, these macros are not
+# tested under test/.

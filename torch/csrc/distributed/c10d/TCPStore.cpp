@@ -270,7 +270,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
       // server successfully started
       C10D_DEBUG("The server has started on port = {}.", server_->port());
       addr_.port = server_->port();
-    } catch (const SocketError& e) {
+    } catch (const SocketError&) {
       bool useAgentStore = getCvarBool({"TORCHELASTIC_USE_AGENT_STORE"}, false);
       int masterPort = getCvarInt({"MASTER_PORT"}, 0);
       if (useAgentStore && masterPort == opts.port) {
