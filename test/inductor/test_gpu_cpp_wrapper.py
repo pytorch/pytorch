@@ -11,6 +11,8 @@ from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 try:
     try:
         from . import (
@@ -306,11 +308,11 @@ if RUN_GPU:
 
     from torch._inductor.utils import is_big_gpu
 
-    if GPU_TYPE == "cuda" and is_big_gpu():
+    if GPU_TYPE in ("cuda", "xpu") and is_big_gpu():
         skip_list = ["test_addmm", "test_linear_relu"]
         # need to skip instead of omit, otherwise fbcode ci can be flaky
         for test_name in skip_list:
-            test_failures_gpu_wrapper[f"{test_name}_cuda"] = (
+            test_failures_gpu_wrapper[f"{test_name}_{device_type}"] = (
                 test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
             )
             test_failures_gpu_wrapper[f"{test_name}_gpu_dynamic_shapes"] = (

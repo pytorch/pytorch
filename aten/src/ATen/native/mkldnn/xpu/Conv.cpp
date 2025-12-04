@@ -53,7 +53,7 @@ std::ostream& operator<<(std::ostream& out, const ConvParams& params) {
       << "  transposed = " << params.transposed
       << "  output_padding = " << IntArrayRef{params.output_padding}
       << "  groups = " << params.groups << "  benchmark = " << params.benchmark
-      << "  deterministic = " << params.deterministic << "}";
+      << "  deterministic = " << params.deterministic << '}';
   return out;
 }
 

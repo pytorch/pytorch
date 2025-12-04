@@ -64,14 +64,13 @@ function install_ubuntu() {
 
 function install_rhel() {
     . /etc/os-release
-    if [[ "${ID}" == "rhel" ]]; then
-        if [[ ! " 8.8 8.10 9.0 9.2 9.3 " =~ " ${VERSION_ID} " ]]; then
-            echo "RHEL version ${VERSION_ID} not supported"
-            exit
-        fi
-    elif [[ "${ID}" == "almalinux" ]]; then
-        # Workaround for almalinux8 which used by quay.io/pypa/manylinux_2_28_x86_64
-        VERSION_ID="8.8"
+    if [[ ! " 8.8 8.10 9.0 9.2 9.3 " =~ " ${VERSION_ID} " ]]; then
+        echo "RHEL version ${VERSION_ID} not supported"
+        exit
+    fi
+    # Using testing channel for CD build
+    if [[ "${ID}" == "almalinux" ]]; then
+        XPU_DRIVER_VERSION="/testing"
     fi
 
     dnf install -y 'dnf-command(config-manager)'
