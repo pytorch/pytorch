@@ -22,6 +22,7 @@ from torch._inductor.fx_passes.overlap_scheduling import (
     get_group_name,
     is_compute_node,
 )
+from torch._logging import trace_structured
 from torch.utils._ordered_set import OrderedSet
 
 
@@ -34,12 +35,14 @@ class WhyNoBucket:
     name2: str
     reason: str
     args: tuple[Any, ...]
+    logs: list[str] | None
 
-    def __init__(self, node1: fx.Node, node2: fx.Node) -> None:
+    def __init__(self, node1: fx.Node, node2: fx.Node, logs) -> None:
         self.name1 = node1.name
         self.name2 = node2.name
         self.reason = ""
         self.args = ()
+        self.logs = logs
 
     def __call__(self, reason: str, *args: Any) -> None:
         if bucket_log.isEnabledFor(logging.DEBUG):
@@ -48,6 +51,10 @@ class WhyNoBucket:
                 self.name1,
                 self.name2,
                 *args,
+            )
+        if self.logs is not None:
+            self.logs.append(
+                f"cannot bucket {self.name1} with {self.name2}: {reason} {args}"
             )
 
 
@@ -136,6 +143,7 @@ class OverlapPreservingBucketer:
         max_coll_distance: int = 1000,
         insert_overlap_deps: bool = False,
         bucket_mode: BucketMode = "custom_ops_multidtype",
+        verbose: bool = True,
     ):
         self.graph = graph
         self.collective_info = collective_info
@@ -145,6 +153,8 @@ class OverlapPreservingBucketer:
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
         self.bucket_mode = bucket_mode
+        self.verbose = verbose
+        self._logs = []
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
 
@@ -219,6 +229,8 @@ class OverlapPreservingBucketer:
                 wait_input = node.args[0]
                 if isinstance(wait_input, fx.Node) and get_group_name(wait_input) == pg:
                     node_type = "waits"
+                elif node in hiding_nodes:
+                    node_type = "compute"
             elif is_compute_node(node) or node in hiding_nodes:
                 node_type = "compute"
 
@@ -291,7 +303,11 @@ class OverlapPreservingBucketer:
                     key,
                     [n.name for n in collective_group],
                 )
+                if self.verbose:
+                    self._logs.append(f"collective_group {key} -> {collective_group}")
                 buckets = self._find_buckets(collective_group)
+                if self.verbose:
+                    self._logs.append(f"collective_group {key} buckets: {buckets}")
                 all_buckets.extend(buckets)
 
         # Apply bucketing transformations
@@ -341,6 +357,19 @@ class OverlapPreservingBucketer:
                     filtered_deps[node] = filtered_node_deps
 
             self._preserve_dependencies_with_tokens(filtered_deps)
+
+        if self.verbose:
+            log_strs: list[str] = []
+            log_strs.append(f"all_buckets:{all_buckets}")
+            log_strs.extend(self._logs)
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "inductor_fx_passes_overlap_bucketing",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: "\n".join(log_strs),
+            )
 
         self.graph.lint()
 
@@ -745,7 +774,9 @@ class OverlapPreservingBucketer:
         Return True if any timeline position satisfies both constraints.
         """
         existing_coll = bucket_info.collectives[0]
-        why = WhyNoBucket(existing_coll, candidate)
+        why = WhyNoBucket(
+            existing_coll, candidate, self._logs if self.verbose else None
+        )
 
         candidate_info = self.collective_info[candidate]
 

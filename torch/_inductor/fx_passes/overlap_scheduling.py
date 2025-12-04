@@ -14,6 +14,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.comm_analysis import estimate_fx_collective_memory_footprint
 from torch._inductor.fx_passes.bucketing import _schedulable_wait_node, is_wait_tensor
 from torch._inductor.fx_passes.memory_estimator import MemoryTracker
+from torch._logging import trace_structured
 from torch.fx.operator_schemas import normalize_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import _disable_current_modes
@@ -271,6 +272,7 @@ class OverlapScheduler:
         collective_estimator: Literal["analytical", "benchmark"],
         max_memory_increase_gb: float | None = 1.0,
         max_memory_increase_ratio: float | None = 0.05,
+        verbose: bool = True,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -353,6 +355,7 @@ class OverlapScheduler:
         self.in_flight_bytes = 0
         self.scheduled: OrderedSet[fx.Node] = OrderedSet()
         self.max_compute_pre_fetch = max_compute_pre_fetch
+        self.verbose = verbose
 
     def _collect_node_ancestors(self) -> dict[fx.Node, OrderedSet[fx.Node]]:
         """Collect all ancestors for each node."""
@@ -1171,21 +1174,32 @@ class OverlapScheduler:
         counters["inductor"]["overlap_original_mem"] = self.original_peak_memory
         counters["inductor"]["rescheduled_mem"] = self.memory_tracker.peak_memory
 
-        log.info(
-            "Overlap scheduling results: exposed=%d, bad_exposed=%d, potentially_hidden=%d, "
-            "original_peak_memory=%d bytes, rescheduled_peak_memory=%d bytes, "
-            "total_exposed_ms=%.2f, hideable_exposed_ms=%.2f, total_potential_exposed_ms=%.2f, "
-            "wasted_compute_ms=%.2f",
-            len(exposed),
-            len(bad_exposed),
-            len(potentially_hidden_collectives),
-            self.original_peak_memory,
-            self.memory_tracker.peak_memory,
-            total_exposed,
-            hideable_exposed_ms,
-            total_potential_exposed,
-            self.wasted_compute,
+        log_message = (
+            f"Overlap scheduling results: exposed={len(exposed)}, bad_exposed={len(bad_exposed)}, "
+            f"potentially_hidden={len(potentially_hidden_collectives)}, "
+            f"original_peak_memory={self.original_peak_memory} bytes, "
+            f"rescheduled_peak_memory={self.memory_tracker.peak_memory} bytes, "
+            f"total_exposed_ms={total_exposed:.2f}, hideable_exposed_ms={hideable_exposed_ms:.2f}, "
+            f"total_potential_exposed_ms={total_potential_exposed:.2f}, "
+            f"wasted_compute_ms={self.wasted_compute:.2f}"
         )
+        log.info(log_message)
+
+        if self.verbose:
+            log_strs = [log_message]
+            log_strs.append(
+                f"potentially_hidden_collectives:{potentially_hidden_collectives}"
+            )
+            log_strs.append(f"exposed:{exposed}")
+            log_strs.append(f"bad_exposed:{bad_exposed}")
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "inductor_fx_passes_overlap_scheduling",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: "\n".join(log_strs),
+            )
 
         self.reorder_graph()
 
@@ -1201,6 +1215,7 @@ class OverlapScheduler:
             max_bucket_memory_gb=2.0,  # Could make this configurable
             max_coll_distance=self.max_node_distance,
             insert_overlap_deps=self.insert_overlap_deps,
+            verbose=self.verbose,
         )
         bucketer.bucket_collectives()
 
