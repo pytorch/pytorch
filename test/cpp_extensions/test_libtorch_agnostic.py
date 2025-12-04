@@ -860,6 +860,69 @@ if not IS_WINDOWS:
                 libtorch_agnostic.ops.my_string_op(t, "invalid", "")
 
         @skipIfTorchVersionLessThan(2, 10)
+<<<<<<< HEAD
+        @onlyCUDA
+        def test_my_get_current_cuda_stream(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            res = libtorch_agnostic.ops.my_get_current_cuda_stream(device_index)
+            expected = torch.cuda.current_stream(device_index).cuda_stream
+            self.assertEqual(res, expected)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_set_current_cuda_stream(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            prev_stream = torch.cuda.current_stream(device_index).cuda_stream
+            new_stream = torch.cuda.streams.Stream(device_index).cuda_stream
+
+            try:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    new_stream, device_index
+                )
+                expected = torch.cuda.current_stream(device_index).cuda_stream
+                self.assertEqual(new_stream, expected)
+            finally:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    prev_stream, device_index
+                )
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_get_cuda_stream_from_pool(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            prev_stream = torch.cuda.current_stream(device_index).cuda_stream
+
+            try:
+                for high_priority in [False, True]:
+                    stream = libtorch_agnostic.ops.my_get_cuda_stream_from_pool(
+                        high_priority, device_index
+                    )
+                    libtorch_agnostic.ops.my_set_current_cuda_stream(
+                        stream, device_index
+                    )
+                    expected = torch.cuda.current_stream(device_index).cuda_stream
+                    self.assertEqual(stream, expected)
+            finally:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    prev_stream, device_index
+                )
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_cuda_stream_synchronize(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            stream = torch.cuda.current_stream(device_index).cuda_stream
+            # sanity check for torch_cuda_stream_synchronize:
+            libtorch_agnostic.ops.my_cuda_stream_synchronize(stream, device_index)
+=======
         @skipIfTorchDynamo("no data pointer defined for FakeTensor, FunctionalTensor")
         def test_my_from_blob(self, device):
             import libtorch_agnostic_2_10 as libtorch_agnostic
@@ -914,6 +977,7 @@ if not IS_WINDOWS:
 
             reference_transposed = module.reference_from_blob(transposed)
             self.assertEqual(stable_transposed, reference_transposed)
+>>>>>>> 23df333592c (Add C++ wrapper for shim from_blob in stable/csrc/ops.h)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

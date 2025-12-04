@@ -798,7 +798,7 @@ def run_test_retries(
             # skip it and move on
             sc_command = f"--scs={stepcurrent_key}"
             print_to_file(
-                "Test succeeeded in new process, continuing with the rest of the tests"
+                "Test succeeded in new process, continuing with the rest of the tests"
             )
         elif num_failures[current_failure] >= 3:
             # This is for log classifier so it can prioritize consistently
@@ -1362,6 +1362,16 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--include-inductor-core-tests",
+        "--include-inductor-core-tests",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run inductor tests. "
+            "If this flag is not present, we will run all tests "
+            "(including inductor tests)."
+        ),
+    )
+    parser.add_argument(
         "--functorch",
         "--functorch",
         action="store_true",
@@ -1631,6 +1641,12 @@ def get_selected_tests(options) -> list[str]:
     if options.include_dynamo_core_tests:
         selected_tests = list(
             filter(lambda test_name: test_name in DYNAMO_CORE_TESTS, selected_tests)
+        )
+
+    # Filter to only run dynamo tests when --include-inductor-core-tests option is specified
+    if options.include_inductor_core_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in INDUCTOR_TESTS, selected_tests)
         )
 
     # Filter to only run functorch tests when --functorch option is specified
@@ -2157,7 +2173,7 @@ def main():
         if IS_CI:
             for test, _ in all_failures:
                 test_stats = test_prioritizations.get_test_stats(test)
-                print_to_stderr("Emiting td_test_failure_stats_v2")
+                print_to_stderr("Emitting td_test_failure_stats_v2")
                 emit_metric(
                     "td_test_failure_stats_v2",
                     {
