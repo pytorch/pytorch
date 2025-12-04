@@ -140,6 +140,14 @@ ban_recompute_reductions = True
 # Generally a good idea since views are free to recompute.
 recompute_views = False
 
+# Rematerialize AC nodes for graphs with forward+loss+backward in one graph.
+# This optimization minimizes activation checkpoint node lifetimes by computing them
+# just-in-time. For AC nodes only used in backward, they are deferred to backward region
+# instead of being computed and saved in forward. This reduces peak memory usage.
+# Note: This only applies to forward+loss+backward graphs where torch.autograd.grad is allowed
+# in the graph. Joint graphs (standard AOTAutograd) use the partitioner instead.
+remat_using_tags_for_fwd_loss_bwd_graph = True
+
 # By default, the partitioner is purely trying to optimize for runtime (although
 # it should always use less memory than eager)
 # This knob controls the partitioner to make that tradeoff for you, choosing the

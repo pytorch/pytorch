@@ -1801,6 +1801,10 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
                 "currently can't reconstruct arbitrary frozen dataclass instances"
             )
 
+        # LeafSpec is deprecated, use treespec_leaf() instead
+        if istype(self.value, pytree.LeafSpec):
+            return pytree.treespec_leaf()
+
         args = []
         kwargs = {}
         for field in fields(self.value):

@@ -15,7 +15,7 @@ from functorch.compile import (
 from torch._dynamo.graph_bytecode_inputs import reset_user_object_tracking
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, serialTest, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -157,6 +157,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
     record_event_default = torch.ops.streams.record_event.default(2, 0);  record_event_default = None
     stream_in_cpu_offload_cos_1 = torch.ops.streams.fork.default(0, 1);  stream_in_cpu_offload_cos_1 = None
     wait_event_default = torch.ops.streams.wait_event.default(2, 1);  wait_event_default = None
+    record_stream_cos_1 = torch.ops.streams.record_stream.default(cos_1, 1);  record_stream_cos_1 = None
     cpu_offload_cos_1 = torch.ops.prims.device_put.default(cos_1, device(type='cpu'), non_blocking = True);  cos_1 = None
     record_event_default_1 = torch.ops.streams.record_event.default(3, 1);  record_event_default_1 = None
     stream_out_cpu_offload_cos_1 = torch.ops.streams.join.default(1, 0);  stream_out_cpu_offload_cos_1 = None
@@ -240,6 +241,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
     record_event_default = torch.ops.streams.record_event.default(2, 0);  record_event_default = None
     stream_in_cpu_offload_cos_1 = torch.ops.streams.fork.default(0, 1);  stream_in_cpu_offload_cos_1 = None
     wait_event_default = torch.ops.streams.wait_event.default(2, 1);  wait_event_default = None
+    record_stream_cos_1 = torch.ops.streams.record_stream.default(cos_1, 1);  record_stream_cos_1 = None
     cpu_offload_cos_1 = torch.ops.prims.device_put.default(cos_1, device(type='cpu'), non_blocking = True);  cos_1 = None
     record_event_default_1 = torch.ops.streams.record_event.default(3, 1);  record_event_default_1 = None
     stream_out_cpu_offload_cos_1 = torch.ops.streams.join.default(1, 0);  stream_out_cpu_offload_cos_1 = None
@@ -263,6 +265,45 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     mul_2 = torch.ops.aten.mul.Tensor(tangents_1, cos_2);  tangents_1 = cos_2 = None
     return (mul_2, mul_2, mul_1, mul_1, mul, mul)""",
         )
+
+    @torch._functorch.config.patch(
+        enable_activation_offloading=True,
+        activation_offload_separate_stream=True,
+        activation_offload_sink_wait=True,
+        activation_reload_prefetch=True,
+    )
+    @serialTest()
+    def test_partitioner_offload_sep_stream_reorder_accuracy(self):
+        # need larger dimension so that memcpy takes longer, and the code is at the risk of
+        # premature memory deallocation
+        dim = 1024 * 8
+        x_larger = [
+            torch.randn(dim, dim, requires_grad=True, device=GPU_TYPE) for _ in range(6)
+        ]
+        # Run without compilation to get reference gradients
+        x_ref = [x.detach().clone().requires_grad_(True) for x in x_larger]
+        out_ref = self.fn(x_ref)
+        out_ref.sum().backward()
+        grads_ref = [inp.grad for inp in x_ref]
+
+        # Run with aot_eager compilation and offloading enabled
+        reset_user_object_tracking()
+        torch._dynamo.reset()
+        torch._functorch.config.joint_custom_pass = self.joint_custom_pass
+        x_compile = [x.detach().clone().requires_grad_(True) for x in x_larger]
+        compiled_fn = torch.compile(self.fn, backend="aot_eager")
+        out_compiled = compiled_fn(x_compile)
+        out_compiled.sum().backward()
+        grads_compiled = [inp.grad for inp in x_compile]
+
+        # Verify gradients match between reference and compiled versions
+        for grad_ref, grad_compiled in zip(grads_ref, grads_compiled):
+            torch.testing.assert_close(
+                grad_compiled,
+                grad_ref,
+                rtol=1e-5,
+                atol=1e-5,
+            )
 
 
 if __name__ == "__main__":

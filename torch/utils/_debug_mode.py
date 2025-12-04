@@ -39,7 +39,7 @@ import os
 import traceback
 import weakref
 from collections.abc import Callable
-from typing import Any, Optional, TYPE_CHECKING, Union  # noqa: F401
+from typing import Any, TYPE_CHECKING, Union  # noqa: F401
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -204,7 +204,11 @@ def hash_tensor_fn(
     else:
         t_clean = t.to(dtype=torch.int64)
 
-    out = torch.hash_tensor(t_clean)
+    if t.numel() > 0:
+        out = torch.hash_tensor(t_clean)
+    else:
+        out = torch.zeros((), device=t_clean.device, dtype=torch.uint64)
+
     if use_scalar:
         return out.item()  # type: ignore[attribute]
     return out
@@ -595,7 +599,7 @@ class DebugMode(TorchDispatchMode):
         record_nn_module=False,
         store_original_args=False,
         record_stack_trace=False,
-        record_output=False,
+        record_output=True,
         record_ids=False,
     ) -> None:
         super().__init__()
@@ -820,12 +824,17 @@ class DebugMode(TorchDispatchMode):
         self.operators.append(call)
         return call
 
-    def debug_string(self, show_stack_trace: bool = False) -> str:
+    def debug_string(self, show_stack_trace: bool | None = None) -> str:
         """
-        show_stack_trace: If True, display one-line stack trace summaries above groups
+        show_stack_trace: option to display one-line stack trace summaries above groups
                         of operations (similar to gm.print_readable() style).
                         Requires record_stack_trace=True.
+                        if None, uses self.record_stack_trace, otherwise overrides it.
         """
+        show_stack_trace = (
+            self.record_stack_trace if show_stack_trace is None else show_stack_trace
+        )
+
         with torch._C.DisableTorchFunction():
             if not show_stack_trace:
                 result = "\n".join(
@@ -1101,7 +1110,7 @@ class DebugMode(TorchDispatchMode):
 
                 def compare_triton_hashes(hashes1, hashes2, is_input):
                     assert set(hashes1.keys()) == set(hashes2.keys())  # type: ignore[union-attr]
-                    for key in hashes1.keys():
+                    for key in hashes1:
                         if hashes1[key] != hashes2[key]:
                             difference_info.append(
                                 {
