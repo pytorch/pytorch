@@ -1162,12 +1162,17 @@ def any_is_symbolic(*args: Any) -> bool:
     return any(is_symbolic(a) for a in args)
 
 
-def get_first_incompatible_cudagraph_node(
-    gm: torch.fx.GraphModule,
-) -> Optional[torch.fx.Node]:
-    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+@functools.lru_cache
+def get_forbidden_cudagraph_ops(deterministic_enabled: bool) -> OrderedSet[str]:
+    """
+    Returns a set of operation names that are incompatible with CUDA graphs.
 
-    forbidden_set = OrderedSet(
+    Args:
+        deterministic_enabled: Whether deterministic algorithms are enabled.
+                              When True, additional operations that have
+                              non-deterministic behavior are marked as forbidden.
+    """
+    forbidden_ops = OrderedSet(
         [
             "aten._fused_moving_avg_obs_fq_helper.default",
             "aten._fused_moving_avg_obs_fq_helper_functional.default",
@@ -1183,23 +1188,38 @@ def get_first_incompatible_cudagraph_node(
             "aten._assert_scalar",
         ]
     )
-    if torch.are_deterministic_algorithms_enabled():
-        forbidden_set.update(
-            (
-                "aten._unsafe_index_put.default",
-                "aten._unsafe_masked_index_put_accumulate.default",
-                "aten.index_put.default",
-                "aten.index_put_.default",
-                "aten.scatter.src",
-                "aten.scatter.reduce",
-                "aten.scatter.value_reduce",
-                "aten.scatter_add_",
-                "aten.scatter_add.default",
-                "aten.scatter_reduce.two",
-                "aten.scatter_reduce_.two",
-                "aten.scatter_reduce.two_out",
+
+    if deterministic_enabled:
+        forbidden_ops.update(
+            OrderedSet(
+                [
+                    "aten._unsafe_index_put.default",
+                    "aten._unsafe_masked_index_put_accumulate.default",
+                    "aten.index_put.default",
+                    "aten.index_put_.default",
+                    "aten.scatter.src",
+                    "aten.scatter.reduce",
+                    "aten.scatter.value_reduce",
+                    "aten.scatter_add_",
+                    "aten.scatter_add.default",
+                    "aten.scatter_reduce.two",
+                    "aten.scatter_reduce_.two",
+                    "aten.scatter_reduce.two_out",
+                ]
             )
         )
+
+    return forbidden_ops
+
+
+def get_first_incompatible_cudagraph_node(
+    gm: torch.fx.GraphModule,
+) -> Optional[torch.fx.Node]:
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
+
+    forbidden_set = get_forbidden_cudagraph_ops(
+        torch.are_deterministic_algorithms_enabled()
+    )
 
     for node in gm.graph.nodes:
         if str(node.target) in forbidden_set:
@@ -3633,12 +3653,18 @@ def is_cudagraph_unsafe_op(node: Operation) -> bool:
     """
     from . import ir
 
-    if not isinstance(node, ir.FallbackKernel):
+    if not isinstance(node, (ir.FallbackKernel, ir.ExternKernel)):
         return False
 
-    if (
-        isinstance(node.op_overload, torch._ops.OpOverload)
-        and torch._C.Tag.cudagraph_unsafe in node.op_overload.tags  # type: ignore[attr-defined]
+    op = node.op_overload
+    if not isinstance(op, torch._ops.OpOverload):
+        return False
+
+    if torch._C.Tag.cudagraph_unsafe in node.op_overload.tags:  # type: ignore[attr-defined]
+        return True
+
+    if str(node.op_overload) in get_forbidden_cudagraph_ops(
+        torch.are_deterministic_algorithms_enabled()
     ):
         return True
 
