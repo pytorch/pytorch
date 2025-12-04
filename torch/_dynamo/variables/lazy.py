@@ -74,7 +74,7 @@ class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
-    def create(value: Any, source: Any, **options: Any) -> LazyVariableTracker:
+    def create(value: Any, source: Any, **options: Any) -> VariableTracker:
         if type(value) in LazyConstantVariable.supported_types:
             return LazyConstantVariable.create(value, source, **options)
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
