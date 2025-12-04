@@ -178,11 +178,11 @@ def _maybe_view_chunk_cat(
     """
     Helper function to rearrange all_gather output from [group_size, ...] to desired gather_dim.
 
-    Optimization: When the product of dimensions [0..gather_dim) equals group_size,
+    Optimization: When all dimensions between dim 0 and gather_dim have size 1,
     we can use a pure view instead of split + cat.
     This works because the data is already contiguous in the right layout.
     Example: shape [4, d1, d2] with group_size=4, gather_dim=1 -> [1, 4*d1, d2]
-    Example: shape [2, 2, d2] with group_size=4, gather_dim=2 -> [1, 2, 2*d2]
+    Example: shape [4, 2, d2] with group_size=4, gather_dim=2 -> [1, 2, 4*d2]
 
     Args:
         res: Tensor with gathered data in dim 0, shape [group_size, ...]
@@ -194,14 +194,24 @@ def _maybe_view_chunk_cat(
     """
     import math
 
-    numel_prefix = math.prod(res.shape[:gather_dim])
-    if numel_prefix == group_size:
-        shape = list(res.shape)
-        # All dimensions [0:gather_dim) become 1, dimension gather_dim gets multiplied
+    if gather_dim == 0:
+        # When gather_dim is 0, chunk+cat is a no-op
+        return res
+
+    shape = list(res.shape)
+
+    # Optimization: Can use view instead of split+cat when:
+    # 1. res.shape[0] == group_size (invariant after all_gather)
+    # 2. All dims between 0 and gather_dim (exclusive) have size 1
+    numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+
+    if shape[0] == group_size and numel_between == 1:
+        # View optimization: reshape to collapse dim 0 into gather_dim
         final_shape = (
-            [1] * gather_dim
-            + [numel_prefix * shape[gather_dim]]
-            + shape[gather_dim + 1 :]
+            [1]  # Dim 0 becomes 1
+            + shape[1:gather_dim]  # Dims 1 to gather_dim-1 unchanged
+            + [shape[0] * shape[gather_dim]]  # gather_dim gets multiplied by group_size
+            + shape[gather_dim + 1 :]  # Rest unchanged
         )
         return res.view(final_shape)
     else:
