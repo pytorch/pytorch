@@ -28,6 +28,21 @@ __all__ = ["Placement", "Shard", "Replicate", "Partial", "MaskPartial"]
 Placement.__module__ = "torch.distributed.tensor.placement_types"
 
 
+class _ShardingPlaceholder:
+    """
+    A placeholder for a sharding placement that has a specified tensor dim, but the other
+    metadata (e.g. split factor if it's a StridedShard) will be filled in later.
+    """
+
+    dim: int
+
+    def __init__(self, dim: int):
+        self.dim = dim
+
+    def __repr__(self) -> str:
+        return f"_ShardingPlaceholder(dim={self.dim})"
+
+
 class Shard(torch._C._distributed.Shard):
     """
     The ``Shard(dim)`` placement describes the DTensor sharding on tensor dimension

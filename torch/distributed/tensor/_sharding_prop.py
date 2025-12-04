@@ -4,15 +4,18 @@ import threading
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import chain
-from typing import cast
+from typing import cast, Optional
 
 import torch
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
+    ArgsType,
+    KwargsType,
     OpInfo,
     OpSchema,
     OpSpec,
@@ -23,10 +26,16 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops.utils import (
+    _args_schema_with_tensor_meta,
+    _expand_single_dim_strategy_to_mesh,
+)
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
+    try_find_mesh_from_args,
 )
+from torch.distributed.tensor.placement_types import _ShardingPlaceholder, Placement
 
 
 aten = torch.ops.aten
@@ -61,9 +70,18 @@ class ShardingPropagator:
             OpOverload,
             Callable[[OpSchema], StrategyType],
         ] = {}
+        self.op_single_dim_strategy_funcs: dict[
+            OpOverload,
+            Callable[
+                [ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+            ],
+        ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
         self.op_to_schema_info: dict[OpOverload, RuntimeSchemaInfo] = {}
+        self.op_to_schema_info_for_single_dim_strategy: dict[
+            OpOverload, RuntimeSchemaInfo
+        ] = {}
         self.propagate_op_sharding = LocalLRUCache(
             self.propagate_op_sharding_non_cached
         )
@@ -97,6 +115,21 @@ class ShardingPropagator:
         self.op_to_rules[op_overload] = rule_func
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
+
+    def register_single_dim_op_strategy(
+        self,
+        op_overload: OpOverload,
+        strategy_func: Callable[
+            [ArgsType, KwargsType], list[list[Placement | _ShardingPlaceholder]]
+        ],
+        schema_info: Optional[RuntimeSchemaInfo] = None,
+    ):
+        """
+        Register a strategy over a single mesh-dim, relying on infra to automatically expand to the full mesh.
+        """
+        self.op_single_dim_strategy_funcs[op_overload] = strategy_func
+        if schema_info is not None:
+            self.op_to_schema_info_for_single_dim_strategy[op_overload] = schema_info
 
     def register_op_strategy(
         self,
@@ -373,7 +406,81 @@ class ShardingPropagator:
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
-        if op_schema.op in self.op_strategy_funcs:
+        if op_schema.op in self.op_single_dim_strategy_funcs:
+            """
+            Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications for the
+            operator over a single mesh dimension,
+
+            And the OpSchema, which includes information about the runtime input tensor placements, and the mesh,
+
+            Combine single_dim_strategies across mesh dims, also expanding placeholders (ShardPlaceholder) to any real sharding
+            types in op_schema, and find the lowest cost redistribution of inputs to match a valid strategy combination.
+
+            TODO: show example
+            """
+            mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
+            single_dim_strategy = self.op_single_dim_strategy_funcs[op_schema.op]
+            single_dim_expand_fully = True
+            if single_dim_expand_fully:
+                # TODO: this codepath was mainly for initial testing, it would be removed once the lowest-cost path
+                # is validated
+
+                # expand to generate the full set of strategy combinations, each one
+                # with a redistribute cost, and then find the min strategy over those costs.
+                # Later, replace this with a min-cost guided graph search, starting from the current input placements and taking
+                # steps in the lowest-redistribution-cost direction until finding a valid strategy combination.
+                mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
+                assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
+                _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                    mesh, op_schema, single_dim_strategy
+                )
+
+                args_schema, kwargs_schema = _args_schema_with_tensor_meta(
+                    op_schema.args_schema, op_schema.kwargs_schema
+                )
+                strategy = _expanded_strategy_fn(args_schema, kwargs_schema)
+            else:
+                raise NotImplementedError("NYI")
+            # TODO: prefer to rename vars to match typing, this is an OpSpec. But matching naming from elif block
+            # for sanity for now
+            assert isinstance(strategy, OpStrategy), "TupleStrategy for single-dim NYI"
+            output_strategy = self._select_strategy(strategy, op_schema)
+
+            # TODO: the rest of this is copypaste from the elif block for regular sharding strategies,
+            # but with a lot of special cases elided.  We'll see if this can be kept simple, or else
+            # refactor to share code.
+            assert output_strategy.input_specs is not None, (
+                "single-dim strategies always have input specs"
+            )
+            needs_redistribute = False
+            expected_input_specs: list[DTensorSpec] = []
+            for idx, input_spec in enumerate(op_schema.args_spec):
+                desired_spec = output_strategy.input_specs[idx]
+                expected_input_specs.append(
+                    desired_spec.shallow_copy_with_tensor_meta(input_spec.tensor_meta)
+                )
+                if input_spec.placements != desired_spec.placements:
+                    needs_redistribute = True
+
+            suggestion_schema = None
+            if needs_redistribute:
+                suggestion_schema = OpSchema(
+                    op_schema.op, tuple(expected_input_specs), {}
+                )
+                suggestion_schema._inplace_rewrap_schema_suggestion(op_schema)
+
+            assert op_schema.return_type_tensor(), "Other return types NYI"
+            output_specs = output_strategy.output_specs
+
+            # TODO: figure out what use_val_from_redistribute_schema is for
+            output_sharding = OutputSharding(
+                output_specs,
+                suggestion_schema,
+                needs_redistribute=needs_redistribute,
+                use_val_from_redistribute_schema=False,
+            )
+            return output_sharding
+        elif op_schema.op in self.op_strategy_funcs:
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
 
