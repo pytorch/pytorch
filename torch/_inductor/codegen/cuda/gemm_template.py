@@ -1330,19 +1330,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     including those which allow flexible fusions with epilogues.
     """
 
-    def __init__(
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        alpha: float,
-        beta: float,
-        input_reorder: Optional[list[int]] = None,
-        use_fast_accum: Optional[bool] = None,
-    ):
-        super().__init__(
-            input_nodes, layout, alpha, beta, input_reorder, use_fast_accum
-        )
-
     @staticmethod
     def add_cutlass_gemm_choices(
         choices: list[ChoiceCaller],

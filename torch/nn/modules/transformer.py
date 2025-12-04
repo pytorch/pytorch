@@ -2,7 +2,7 @@
 import copy
 import warnings
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 import torch.nn.functional as F
@@ -105,7 +105,7 @@ class Transformer(Module):
         num_decoder_layers: int = 6,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
         custom_encoder: Optional[Any] = None,
         custom_decoder: Optional[Any] = None,
         layer_norm_eps: float = 1e-5,
@@ -511,6 +511,7 @@ class TransformerEncoder(Module):
             _supported_device_type = [
                 "cpu",
                 "cuda",
+                "xpu",
                 torch.utils.backend_registration._privateuse1_backend_name,
             ]
             if torch.overrides.has_torch_function(tensor_args):
@@ -745,7 +746,7 @@ class TransformerEncoderLayer(Module):
         nhead: int,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
         layer_norm_eps: float = 1e-5,
         batch_first: bool = False,
         norm_first: bool = False,
@@ -895,6 +896,7 @@ class TransformerEncoderLayer(Module):
             _supported_device_type = [
                 "cpu",
                 "cuda",
+                "xpu",
                 torch.utils.backend_registration._privateuse1_backend_name,
             ]
             if torch.overrides.has_torch_function(tensor_args):
@@ -1031,7 +1033,7 @@ class TransformerDecoderLayer(Module):
         nhead: int,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
         layer_norm_eps: float = 1e-5,
         batch_first: bool = False,
         norm_first: bool = False,

@@ -19,7 +19,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
@@ -48,7 +48,8 @@ logger = get_logger(__name__)
 
 @dataclass
 class WorkerSpec:
-    """Blueprint information about a particular type of worker.
+    """
+    Blueprint information about a particular type of worker.
 
     For a given role, there must only exist a single worker spec.
     Worker spec is expected to be homogeneous across all nodes (machine),
@@ -79,24 +80,29 @@ class WorkerSpec:
                                  that match _any_ of the filter strings.
         duplicate_stderr_filters: If non-empty, duplicates stderr to a file containing only lines
                                  that match _any_ of the filter strings.
+        virtual_local_rank: Enable virtual local rank mode for workers (defaults to False).
+                            When enabled, LOCAL_RANK is set to 0 for all workers and
+                            CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its
+                            assigned GPU at device index 0.
     """
 
     role: str
     local_world_size: int
     rdzv_handler: rdzv.RendezvousHandler
-    fn: Optional[Callable] = None
+    fn: Callable | None = None
     # TODO @kiuk - make entrypoint a required field
-    entrypoint: Union[Callable, str, None] = None
+    entrypoint: Callable | str | None = None
     args: tuple = ()
     max_restarts: int = 3
     monitor_interval: float = 0.1
-    master_port: Optional[int] = None
-    master_addr: Optional[str] = None
-    local_addr: Optional[str] = None
+    master_port: int | None = None
+    master_addr: str | None = None
+    local_addr: str | None = None
     event_log_handler: str = "null"
-    numa_options: Optional[NumaOptions] = None
-    duplicate_stdout_filters: Optional[list[str]] = None
-    duplicate_stderr_filters: Optional[list[str]] = None
+    numa_options: NumaOptions | None = None
+    duplicate_stdout_filters: list[str] | None = None
+    duplicate_stderr_filters: list[str] | None = None
+    virtual_local_rank: bool = False
 
     def __post_init__(self):
         assert self.local_world_size > 0
@@ -801,11 +807,11 @@ class SimpleElasticAgent(ElasticAgent):
         self,
         state: str,
         source: EventSource,
-        worker: Optional[Worker] = None,
-        raw_error: Optional[str] = None,
-        duration_ms: Optional[float] = None,
-        exit_code: Optional[int] = None,
-        worker_pid: Optional[int] = None,
+        worker: Worker | None = None,
+        raw_error: str | None = None,
+        duration_ms: float | None = None,
+        exit_code: int | None = None,
+        worker_pid: int | None = None,
     ) -> Event:
         wg = self._worker_group
         spec = wg.spec

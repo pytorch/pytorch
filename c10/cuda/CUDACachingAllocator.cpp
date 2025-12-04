@@ -1012,12 +1012,6 @@ PrivatePoolState::PrivatePoolState(
   }
 }
 
-struct MempoolIdHash {
-  std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
-    return mempool_id.first != 0 ? mempool_id.first : mempool_id.second;
-  }
-};
-
 cudaError_t allocPrimitive(void** ptr, size_t size, AllocParams& p) {
   if (p.pool->owner_PrivatePool && p.pool->owner_PrivatePool->allocator()) {
     *ptr = p.pool->owner_PrivatePool->allocator()->raw_alloc(size);
@@ -1771,7 +1765,12 @@ class DeviceCachingAllocator {
     auto node_get_dependencies =
         [](cudaGraphNode_t n, cudaGraphNode_t* deps, size_t* count) -> void {
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
-      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
+      if (deps == nullptr) {
+        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
+      } else {
+        cudaGraphEdgeData edgeData;
+        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, &edgeData, count));
+      }
 #else
       C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, count));
 #endif
@@ -1839,9 +1838,11 @@ class DeviceCachingAllocator {
     if (graph_reuse_context.find(info.capture_id) ==
         graph_reuse_context.end()) {
       bool found = false;
-      for (auto& entry : captures_underway) {
-        if (entry.second(stream)) {
-          auto graph_pool = graph_pools.find(entry.first);
+      // Use the reverse iterator to search captures_underway in LIFO order.
+      for (auto it = captures_underway.rbegin(); it != captures_underway.rend();
+           ++it) {
+        if (it->second(stream)) {
+          auto graph_pool = graph_pools.find(it->first);
           TORCH_INTERNAL_ASSERT(
               graph_pool != graph_pools.end(),
               "Could not find graph pool for capture.");
@@ -2531,10 +2532,10 @@ class DeviceCachingAllocator {
       std::function<bool(cudaStream_t)> filter) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
-    for (auto it2 = captures_underway.begin(); it2 != captures_underway.end();
-         ++it2) {
+    for (auto it = captures_underway.begin(); it != captures_underway.end();
+         ++it) {
       TORCH_CHECK(
-          it2->first != mempool_id,
+          it->first != mempool_id,
           "beginAllocateToPool: already recording to mempool_id");
     }
     captures_underway.emplace_back(mempool_id, std::move(filter));
@@ -2963,9 +2964,11 @@ class DeviceCachingAllocator {
     // a capture, so it's usually 0, and we can short-circuit
     // cudaStreamCaptureStatus (which does a TLS lookup).
     if (C10_UNLIKELY(!captures_underway.empty())) {
-      for (auto& entry : captures_underway) {
-        if (entry.second(stream)) {
-          auto it1 = graph_pools.find(entry.first);
+      // Use the reverse iterator to search captures_underway in LIFO order.
+      for (auto it = captures_underway.rbegin(); it != captures_underway.rend();
+           ++it) {
+        if (it->second(stream)) {
+          auto it1 = graph_pools.find(it->first);
           TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
           if (size <= kSmallSize) {
             return it1->second->small_blocks;
@@ -4510,66 +4513,3 @@ std::atomic<CUDAAllocator*> allocator;
 static BackendStaticInitializer backend_static_initializer;
 } // namespace cuda::CUDACachingAllocator
 } // namespace c10
-
-namespace c10::cuda {
-
-// uid_ is incremented when a user creates a MemPool,
-// for example: using graph_pool_handle() or c10::cuda::MemPool().
-//
-// uuid_ is incremented when CUDAGraph creates a MemPool
-// as a result of a user not providing a pool.
-//
-// MempoolId_t of {0, 0} is used to denote when no MemPool has been
-// passed to a function, either by user or CUDAGraphs. For example,
-// default value of MempoolId_t for capture_begin function is {0, 0}.
-// That's why uid_ and uuid_ start at 1.
-std::atomic<CaptureId_t> MemPool::uid_{1};
-std::atomic<CaptureId_t> MemPool::uuid_{1};
-
-MemPool::MemPool(
-    CUDACachingAllocator::CUDAAllocator* allocator,
-    bool is_user_created,
-    bool use_on_oom)
-    : allocator_(allocator), is_user_created_(is_user_created) {
-  if (is_user_created_) {
-    id_ = {0, uid_++};
-  } else {
-    id_ = {uuid_++, 0};
-  }
-  device_ = c10::cuda::current_device();
-  CUDACachingAllocator::createOrIncrefPool(device_, id_, allocator);
-  if (use_on_oom) {
-    CUDACachingAllocator::setUseOnOOM(device_, id_);
-  }
-}
-
-MemPool::~MemPool() {
-  TORCH_INTERNAL_ASSERT(use_count() == 1);
-  CUDACachingAllocator::releasePool(device_, id_);
-  c10::cuda::CUDACachingAllocator::emptyCache(id_);
-}
-
-MempoolId_t MemPool::id() {
-  return id_;
-}
-
-CUDACachingAllocator::CUDAAllocator* MemPool::allocator() {
-  return allocator_;
-}
-
-int MemPool::use_count() {
-  return CUDACachingAllocator::getPoolUseCount(device_, id_);
-}
-
-c10::DeviceIndex MemPool::device() {
-  return device_;
-}
-
-MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
-  if (is_user_created) {
-    return {0, uid_++};
-  }
-  return {uuid_++, 0};
-}
-
-} // namespace c10::cuda

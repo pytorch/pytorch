@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import tempfile
 import unittest
 from typing import Any
@@ -32,6 +33,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfHpu,
     skipIfTorchDynamo,
+    TemporaryFileName,
     TEST_HPU,
     TEST_XPU,
     TestCase,
@@ -365,6 +367,9 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @unittest.skipIf(
         (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
         "need triton and device(CUDA or XPU) availability to run",
     )
@@ -419,6 +424,9 @@ class TestExecutionTrace(TestCase):
         assert found_call_compiled_fx_graph
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     @unittest.skipIf(
         (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
         "need triton and device(CUDA or XPU) availability to run",
@@ -482,8 +490,8 @@ class TestExecutionTrace(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile does not support WINDOWS")
     @unittest.skipIf(
-        (not has_triton()) or (not TEST_CUDA and not TEST_XPU),
-        "need triton and device(CUDA or XPU) availability to run",
+        (not has_triton()) or (not TEST_CUDA),
+        "need triton and device CUDA availability to run",
     )
     @skipCPUIf(True, "skip CPU device for testing profiling triton")
     def test_triton_fx_graph_with_et(self, device):
@@ -662,18 +670,18 @@ class TestExecutionTrace(TestCase):
         assert event_count == expected_loop_events
 
     def test_execution_trace_no_capture(self):
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-        fp.close()
-        et = ExecutionTraceObserver().register_callback(fp.name)
+        with TemporaryFileName("w+t", suffix=".et.json") as file_name:
+            et = ExecutionTraceObserver().register_callback(file_name)
 
-        assert fp.name == et.get_output_file_path()
-        et.unregister_callback()
-        nodes = self.get_execution_trace_root(fp.name)
-        for n in nodes:
-            assert "name" in n
-            if "[pytorch|profiler|execution_trace|process]" in n["name"]:
-                found_root_node = True
-        assert found_root_node
+            assert file_name == et.get_output_file_path()
+            et.unregister_callback()
+            nodes = self.get_execution_trace_root(file_name)
+            found_root_node = False
+            for n in nodes:
+                assert "name" in n
+                if "[pytorch|profiler|execution_trace|process]" in n["name"]:
+                    found_root_node = True
+            assert found_root_node
 
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):

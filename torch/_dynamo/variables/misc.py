@@ -18,6 +18,7 @@ Key classes include:
 """
 
 import dataclasses
+import enum
 import functools
 import inspect
 import itertools
@@ -571,7 +572,7 @@ class DelayGraphBreakVariable(UnknownVariable):
             gb_type="Unsupported function call (delayed)",
             context=f"source: {self.source}",
             explanation="Dynamo determined that a graph break should occur "
-            f"when calling `{self.source.name()}`. Reason: {self.msg}",
+            f"when calling `{self.source.name}`. Reason: {self.msg}",
             hints=[],
         )
 
@@ -1604,11 +1605,16 @@ class NumpyVariable(VariableTracker):
         return self.value
 
     def as_proxy(self):
-        if config.trace_numpy and isinstance(self.value, type):
-            # This handles numpy dtype attributes such as np.float32
-            # We return a string as we don't want to serialize non-PyTorch objects in the output FX graph
-            # In torch/_numpy we normalize strings to their dtypes when the input is a dtype, as NumPy does
-            return self.value.__name__
+        if config.trace_numpy:
+            # Can replace with EnumType once we drop 3.10 support
+            if isinstance(self.value, enum.EnumMeta):
+                # This is mostly for np._CopyMode
+                return self.value
+            if isinstance(self.value, type):
+                # This handles numpy dtype attributes such as np.float32
+                # We return a string as we don't want to serialize non-PyTorch objects in the output FX graph
+                # In torch/_numpy we normalize strings to their dtypes when the input is a dtype, as NumPy does
+                return self.value.__name__
 
         return super().as_proxy()
 

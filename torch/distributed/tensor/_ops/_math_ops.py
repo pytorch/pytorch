@@ -4,7 +4,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, Optional, Union
+from typing import cast, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -17,6 +17,7 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -25,7 +26,6 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_evenly_shardable_on_dim,
     normalize_dim,
     normalize_dims,
-    register_op_strategy,
 )
 from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
@@ -47,7 +47,7 @@ class Reduction(Enum):
 
 @dataclass(frozen=True)
 class NormReduction:
-    norm_type: Union[int, float, str]
+    norm_type: int | float | str
 
 
 ReductionOpType = Union[NormReduction, str]
@@ -71,9 +71,9 @@ class _NormPartial(Partial):
     similarly for inf and -inf norm. For 0-norm, the reduction op is sum.
     """
 
-    norm_type: Union[int, float, str] = 2
+    norm_type: int | float | str = 2
 
-    def __init__(self, norm_type: Union[int, float, str] = 2):
+    def __init__(self, norm_type: int | float | str = 2):
         reduce_op = None
         if norm_type in (float("inf"), "inf"):
             reduce_op = "max"
@@ -163,8 +163,18 @@ class _NormPartial(Partial):
     def __hash__(self) -> int:
         return 1 + hash(self.norm_type)
 
+    def __repr__(self) -> str:
+        """
+        machine readable representation of the _NormPartial placement
+        """
+        return f"_NormPartial(reduce_op={self.reduce_op}, norm_type={self.norm_type})"
 
-def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[list[int]]:
+    def __str__(self) -> str:
+        """human readable representation of the _NormPartial placement"""
+        return f"_NormP({self.reduce_op}, {self.norm_type})"
+
+
+def _infer_reduction_dims(dims_arg: object, ndim: int) -> list[int] | None:
     if dims_arg is None:
         return None
     dims = cast(list[int], as_list(dims_arg))
@@ -405,10 +415,15 @@ def cumsum_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [aten.var.correction, aten.var.correction_out],
+    [
+        aten.std.correction,
+        aten.std.correction_out,
+        aten.var.correction,
+        aten.var.correction_out,
+    ],
     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
 )
-def var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
+def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     if not isinstance(input_strategy, OpStrategy):
@@ -1081,7 +1096,7 @@ def _common_norm_backward_strategy(
     out_tuple_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         # args for OpSpec
-        output_specs_list: list[Optional[DTensorSpec]] = []
+        output_specs_list: list[DTensorSpec | None] = []
         input_specs_list: list[DTensorSpec] = []
         redistribute_costs = []
 

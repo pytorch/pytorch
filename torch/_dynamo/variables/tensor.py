@@ -83,6 +83,8 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
 
+    from .functions import UserFunctionVariable
+
 
 log = logging.getLogger(__name__)
 
@@ -314,7 +316,7 @@ class TensorVariable(VariableTracker):
             # eval("super(L['mod'].model.model.encoder.embed_positions.forward__class__,
             # L['mod'].model.model.encoder.embed_positions)", scope)
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
-            _input_associated_real_value = eval(self.source.name(), scope)
+            _input_associated_real_value = eval(self.source.name, scope)
         except Exception as exc:
             raise NotImplementedError from exc
 
@@ -551,7 +553,7 @@ class TensorVariable(VariableTracker):
         # For local source, we associate the real value. We use this real value
         scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
         try:
-            _input_associated_real_value = eval(self.source.name(), scope)
+            _input_associated_real_value = eval(self.source.name, scope)
         except Exception as exc:
             unimplemented(
                 gb_type="Error getting associated real value",
@@ -611,6 +613,16 @@ class TensorVariable(VariableTracker):
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
         ]
+
+    def call_tree_map(
+        self,
+        tx,
+        tree_map_fn: "UserFunctionVariable",
+        map_fn,
+        rest,
+        tree_map_kwargs,
+    ) -> "VariableTracker":
+        return map_fn.call_function(tx, [self, *rest], {})
 
     def valid_size(self):
         return self._size is not None
@@ -1266,6 +1278,19 @@ class TensorVariable(VariableTracker):
         tx = InstructionTranslator.current_tx()
         # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
         # and rewrite args to have only proxyable args, then insert call_function
+
+        grad_placements_vt = kwargs.get(
+            "grad_placements", ConstantVariable.create(None)
+        )
+        if isinstance(grad_placements_vt, variables.UserDefinedObjectVariable):
+            # grad_placement is a sequence-like structure, iterate over the value
+            grad_placements_vt = variables.BuiltinVariable(tuple).call_function(
+                tx, [grad_placements_vt], {}
+            )
+
+        if kwargs.get("grad_placements") is not None:
+            kwargs["grad_placements"] = grad_placements_vt
+
         args_as_value = [x.as_python_constant() for x in args]
         kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
 
