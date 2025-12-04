@@ -317,104 +317,273 @@ def _sort_subgroups_topologically(sorted_subgroups: list[list[fx.Node]], node_se
     return sum(ordered_subgroups, [])
 
 
-def inline_subgraphs(
+def _create_fusion_subgraph(
     graph: fx.Graph,
-    region_of: dict[fx.Node, any],
-    dep_map: dict[fx.Node, OrderedSet[fx.Node]],
-) -> dict[fx.Node, OrderedSet[fx.Node]]:
+    region: "FusionRegion",
+) -> fx.GraphModule:
     """
-    Inline subgraph nodes back into the main graph and transfer dependencies.
+    Create a subgraph GraphModule for a fusion region.
 
-    If subgraph nodes were created for fusion regions, this function:
-    1. Re-inserts the original region nodes back into the graph
-    2. Maps dependencies to/from subgraph nodes to the last node in the region
-    3. Preserves metadata during the inlining process
+    Args:
+        graph: The parent graph
+        region: The fusion region to wrap
+
+    Returns:
+        A GraphModule containing the subgraph
+    """
+    owning_module = graph.owning_module
+    subgraph = fx.Graph(owning_module)
+
+    # Map from parent graph nodes to subgraph nodes
+    node_map: dict[fx.Node, fx.Node] = {}
+
+    # Create placeholders for external inputs
+    for i, ext_input in enumerate(region.external_inputs):
+        placeholder = subgraph.placeholder(f"input_{i}")
+        if "val" in ext_input.meta:
+            placeholder.meta.update(ext_input.meta)
+        node_map[ext_input] = placeholder
+
+    # Copy region nodes into subgraph
+    for node in region.nodes:
+        # Map args through node_map
+        def map_arg(arg, nm=node_map):
+            if isinstance(arg, fx.Node):
+                return nm.get(arg, arg)
+            elif isinstance(arg, (list, tuple)):
+                return type(arg)(map_arg(a, nm) for a in arg)
+            elif isinstance(arg, dict):
+                return {k: map_arg(v, nm) for k, v in arg.items()}
+            return arg
+
+        new_args = tuple(map_arg(a) for a in node.args)
+        new_kwargs = {k: map_arg(v) for k, v in node.kwargs.items()}
+
+        new_node = subgraph.call_function(
+            node.target,
+            new_args,
+            new_kwargs,
+        )
+        new_node.meta.update(node.meta)
+        node_map[node] = new_node
+
+    # Output the last node (or multiple outputs if needed)
+    nodes_list = list(region.nodes)
+    output_node = node_map[nodes_list[-1]]
+    subgraph.output(output_node)
+
+    return fx.GraphModule(owning_module, subgraph)
+
+
+def collapse_fusion_regions(
+    graph: fx.Graph,
+    region_of: dict[fx.Node, "FusionRegion"],
+) -> tuple[dict[fx.Node, "FusionRegion"], dict[fx.Node, fx.Node]]:
+    """
+    Collapse fusion regions into subgraph HOP nodes.
+
+    Each fusion region is replaced with a single call_function node that
+    invokes a subgraph. The original nodes are stored in the region
+    for later inlining.
+
+    Args:
+        graph: The FX graph to modify
+        region_of: Mapping of nodes to their fusion regions
+
+    Returns:
+        (new_region_of, replaced) where:
+        - new_region_of: Mapping from subgraph nodes to their regions
+        - replaced: Mapping from original nodes to subgraph node
+    """
+    replaced: dict[fx.Node, fx.Node] = {}
+
+    if not region_of:
+        return region_of, replaced
+
+    # Get unique regions
+    unique_regions: list[FusionRegion] = []
+    seen_region_ids: set[int] = set()
+    for region in region_of.values():
+        region_id = id(region)
+        if region_id not in seen_region_ids:
+            seen_region_ids.add(region_id)
+            unique_regions.append(region)
+
+    new_region_of: dict[fx.Node, FusionRegion] = {}
+    owning_module = graph.owning_module
+
+    for region_idx, region in enumerate(unique_regions):
+        nodes_list = list(region.nodes)
+        if len(nodes_list) < 2:
+            # Single node region - keep as is
+            if nodes_list:
+                new_region_of[nodes_list[0]] = region
+            continue
+
+        last_node = nodes_list[-1]
+
+        # Create subgraph GraphModule
+        subgraph_module = _create_fusion_subgraph(graph, region)
+
+        # Register subgraph on owning module
+        subgraph_name = f"_fusion_region_{region_idx}"
+        setattr(owning_module, subgraph_name, subgraph_module)
+
+        # Create get_attr node for the subgraph
+        with graph.inserting_after(last_node):
+            get_subgraph = graph.get_attr(subgraph_name)
+
+            # Create invoke_subgraph node
+            subgraph_node = graph.call_function(
+                torch.ops.higher_order.invoke_subgraph,
+                args=(get_subgraph, subgraph_name, *tuple(region.external_inputs)),
+            )
+            # Copy metadata from the last node
+            subgraph_node.meta.update(last_node.meta)
+
+        # Replace all external uses of region nodes with subgraph node
+        for node in nodes_list:
+            for user in list(node.users.keys()):
+                if user not in region.nodes and user not in (subgraph_node, get_subgraph):
+                    user.replace_input_with(node, subgraph_node)
+            replaced[node] = subgraph_node
+
+        # Erase all region nodes (reverse order)
+        for node in reversed(nodes_list):
+            graph.erase_node(node)
+
+        # Store subgraph info in region for later inlining
+        region.subgraph_node = subgraph_node
+        new_region_of[subgraph_node] = region
+
+    return new_region_of, replaced
+
+
+def expand_fusion_regions(
+    graph: fx.Graph,
+    region_of: dict[fx.Node, "FusionRegion"],
+    replaced: dict[fx.Node, fx.Node],
+) -> dict[fx.Node, fx.Node]:
+    """
+    Expand invoke_subgraph HOP nodes back to their original nodes.
 
     Args:
         graph: The FX graph
-        region_of: Mapping of nodes to their fusion regions (with subgraph_node field)
-        dep_map: Dependencies between nodes
+        region_of: Mapping from subgraph nodes to their fusion regions
+        replaced: Mapping from original nodes to subgraph nodes (will be updated)
 
     Returns:
-        Updated dep_map with subgraph nodes replaced by their last internal node
+        Updated replaced mapping (original_node -> new_node)
     """
-    # Early exit if no regions
     if not region_of:
-        return dep_map
+        return replaced
 
-    # Get unique regions that have subgraph nodes
-    regions_with_subgraphs = []
-    seen_region_ids = OrderedSet()
+    owning_module = graph.owning_module
 
-    for region in region_of.values():
-        region_id = id(region)
-        if (
-            region_id not in seen_region_ids
-            and hasattr(region, "subgraph_node")
-            and region.subgraph_node is not None
-        ):
-            seen_region_ids.add(region_id)
-            regions_with_subgraphs.append(region)
-
-    # Early exit if no subgraphs to inline
-    if not regions_with_subgraphs:
-        return dep_map
-
-    # Inline each subgraph
-    for region in regions_with_subgraphs:
-        subgraph_node = region.subgraph_node
+    for subgraph_node, region in region_of.items():
         if subgraph_node not in graph.nodes:
             continue
 
-        # Re-insert all nodes from the region back into the graph
+        nodes_list = list(region.nodes)
+        if len(nodes_list) < 2:
+            continue
+
+        # Get the subgraph from the invoke_subgraph args
+        # args = (get_attr_node, subgraph_name, *inputs)
+        if len(subgraph_node.args) < 2:
+            continue
+
+        get_attr_node = subgraph_node.args[0]
+        subgraph_name = subgraph_node.args[1]
+        subgraph_inputs = subgraph_node.args[2:]
+
+        # Get the subgraph module
+        subgraph_module = getattr(owning_module, subgraph_name, None)
+        if subgraph_module is None:
+            continue
+
+        # Map from subgraph nodes to main graph nodes
+        node_map: dict[fx.Node, fx.Node] = {}
+
+        # Map subgraph placeholders to actual inputs
+        subgraph_graph = subgraph_module.graph
+        placeholder_idx = 0
+        for sg_node in subgraph_graph.nodes:
+            if sg_node.op == "placeholder":
+                if placeholder_idx < len(subgraph_inputs):
+                    node_map[sg_node] = subgraph_inputs[placeholder_idx]
+                placeholder_idx += 1
+
+        # Map old region nodes to external inputs for replaced tracking
+        for i, ext_input in enumerate(region.external_inputs):
+            if i < len(subgraph_inputs):
+                # The external input is what's passed to the subgraph
+                pass  # external inputs don't need mapping in replaced
+
+        # Inline subgraph nodes into main graph
+        last_inlined_node = None
         with graph.inserting_before(subgraph_node):
-            node_map: dict[fx.Node, fx.Node] = {}
+            for sg_node in subgraph_graph.nodes:
+                if sg_node.op == "placeholder":
+                    continue
+                if sg_node.op == "output":
+                    continue
 
-            # Map external inputs (they're already in the graph)
-            for ext_input in region.external_inputs:
-                node_map[ext_input] = ext_input
+                # Map args through node_map
+                def map_arg(arg, nm=node_map):
+                    if isinstance(arg, fx.Node):
+                        return nm.get(arg, arg)
+                    elif isinstance(arg, (list, tuple)):
+                        return type(arg)(map_arg(a, nm) for a in arg)
+                    elif isinstance(arg, dict):
+                        return {k: map_arg(v, nm) for k, v in arg.items()}
+                    return arg
 
-            # Clone each node in the region back into the graph
-            for old_node in region.nodes:
-                # Create the new node using node_copy
-                new_node = graph.node_copy(old_node, lambda n: node_map.get(n, n))
-                node_map[old_node] = new_node
-                # Transfer metadata (following control_dependencies.py pattern)
-                new_node.meta.update(old_node.meta)
+                new_args = tuple(map_arg(a) for a in sg_node.args)
+                new_kwargs = {k: map_arg(v) for k, v in sg_node.kwargs.items()}
 
-        # Get the last node (output of the region)
-        last_node = node_map[list(region.nodes)[-1]]
+                new_node = graph.create_node(
+                    op=sg_node.op,
+                    target=sg_node.target,
+                    args=new_args,
+                    kwargs=new_kwargs,
+                )
+                new_node.meta.update(sg_node.meta)
+                node_map[sg_node] = new_node
+                last_inlined_node = new_node
 
-        # Replace uses of subgraph_node with the appropriate output
-        if len(region.external_outputs) == 1:
-            output_node = node_map[next(iter(region.external_outputs))]
-            subgraph_node.replace_all_uses_with(output_node)
-        else:
-            # Multiple outputs - find getitem nodes and replace them
-            for user in list(subgraph_node.users.keys()):
-                if user.target == torch.ops.aten.getitem:
-                    idx = user.args[1]
-                    output_node = node_map[list(region.external_outputs)[idx]]
-                    user.replace_all_uses_with(output_node)
-                    graph.erase_node(user)
+        # Update replaced mapping: map original region nodes to new inlined nodes
+        # We need to match by position in the region
+        sg_call_nodes = [n for n in subgraph_graph.nodes if n.op == "call_function"]
+        for i, old_node in enumerate(nodes_list):
+            if i < len(sg_call_nodes):
+                sg_node = sg_call_nodes[i]
+                if sg_node in node_map:
+                    replaced[old_node] = node_map[sg_node]
 
-        # Erase the subgraph node
+        # Replace uses of subgraph node with the last inlined node
+        if last_inlined_node is not None:
+            subgraph_node.replace_all_uses_with(last_inlined_node)
+
+        # Erase the subgraph node and get_attr
         graph.erase_node(subgraph_node)
+        if get_attr_node.users == {}:
+            graph.erase_node(get_attr_node)
 
-        # Update dep_map: replace subgraph_node references with last_node
-        new_dep_map: dict[fx.Node, OrderedSet[fx.Node]] = {}
-        for node, deps in dep_map.items():
-            new_node = last_node if node == subgraph_node else node
-            new_deps = OrderedSet()
-            for dep in deps:
-                new_dep = last_node if dep == subgraph_node else dep
-                new_deps.add(new_dep)
+        # Clean up the subgraph attribute
+        if hasattr(owning_module, subgraph_name):
+            delattr(owning_module, subgraph_name)
 
-            if new_node in new_dep_map:
-                new_dep_map[new_node].update(new_deps)
-            else:
-                new_dep_map[new_node] = new_deps
+    return replaced
 
-        dep_map = new_dep_map
 
-    return dep_map
+def resolve_replacement_chain(
+    node: fx.Node,
+    replaced: dict[fx.Node, fx.Node],
+) -> fx.Node:
+    """Follow replacement chain to get the final node."""
+    visited = set()
+    while node in replaced and node not in visited:
+        visited.add(node)
+        node = replaced[node]
+    return node

@@ -137,18 +137,23 @@ class OverlapPreservingBucketer:
         insert_overlap_deps: bool = False,
         bucket_mode: BucketMode = "custom_ops_multidtype",
         region_of: dict[fx.Node, any] = None,
+        replaced: dict[fx.Node, fx.Node] = None,
     ):
         self.graph = graph
         self.collective_info = collective_info
-        self.scheduled = scheduled
         self.max_bucket_memory_gb = max_bucket_memory_gb
-        self.node_idx = {n: i for i, n in enumerate(scheduled)}
         self.max_coll_distance = max_coll_distance
         self.insert_overlap_deps = insert_overlap_deps
         self.bucket_mode = bucket_mode
         self.region_of = region_of or {}
+        self.replaced = replaced or {}  # Tracks collapsed nodes for later expansion
         self.node_to_event: dict[fx.Node, PGEvent] = {}
         self.all_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
+
+        # Update scheduled to reflect collapsed nodes
+        # Nodes that were collapsed are replaced by their subgraph representatives
+        self.scheduled = self._update_scheduled_for_collapsed(scheduled)
+        self.node_idx = {n: i for i, n in enumerate(self.scheduled)}
 
         # Build fusion region helpers
         self._region_representatives = self._build_region_representatives()
@@ -161,13 +166,73 @@ class OverlapPreservingBucketer:
         self.pg_to_timeline_head: dict[str, Optional[PGEvent]] = self.build_timelines()
         self._add_hiding_interval_constraints()
 
+    def _update_scheduled_for_collapsed(
+        self, scheduled: OrderedSet[fx.Node]
+    ) -> OrderedSet[fx.Node]:
+        """
+        Update scheduled to reflect collapsed fusion regions.
+
+        Nodes that were collapsed into subgraphs are removed and replaced
+        by the subgraph node at their first occurrence position.
+        """
+        if not self.replaced:
+            return scheduled
+
+        # Build set of valid graph nodes for quick lookup
+        valid_nodes = set(self.graph.nodes)
+
+        # Track which replacement nodes we've already added
+        added_replacements: set[fx.Node] = set()
+
+        new_scheduled: OrderedSet[fx.Node] = OrderedSet()
+        for node in scheduled:
+            if node in valid_nodes:
+                # Node is still valid in the graph
+                new_scheduled.add(node)
+            elif node in self.replaced:
+                # Node was collapsed - add its replacement if not already added
+                replacement = self.replaced[node]
+                if replacement not in added_replacements:
+                    added_replacements.add(replacement)
+                    new_scheduled.add(replacement)
+            # else: node was erased (e.g., internal fusion region node), skip it
+
+        # Also update hiding_nodes in collective_info to use replacement nodes
+        self._update_collective_info_for_collapsed(valid_nodes)
+
+        return new_scheduled
+
+    def _update_collective_info_for_collapsed(
+        self, valid_nodes: set[fx.Node]
+    ) -> None:
+        """
+        Update hiding_nodes in collective_info to use replacement nodes.
+
+        Nodes that were collapsed into subgraphs need to be replaced with
+        their subgraph representative.
+        """
+        for info in self.collective_info.values():
+            updated_hiding_nodes: OrderedSet[fx.Node] = OrderedSet()
+            for hn in info.hiding_nodes:
+                if hn in valid_nodes:
+                    updated_hiding_nodes.add(hn)
+                elif hn in self.replaced:
+                    updated_hiding_nodes.add(self.replaced[hn])
+                # else: node was erased and not in replaced, skip
+            info.hiding_nodes = updated_hiding_nodes
+
     def _build_region_representatives(self) -> dict[int, fx.Node]:
         """Build a mapping from region ID to representative node (last node in region)."""
         region_representatives = {}
         if self.region_of:
-            for region in set(self.region_of.values()):
-                # Use the last node (anchor) as the representative
-                region_representatives[id(region)] = region.end
+            # Use id() to get unique regions since FusionRegion is not hashable
+            seen_region_ids: set[int] = set()
+            for region in self.region_of.values():
+                region_id = id(region)
+                if region_id not in seen_region_ids:
+                    seen_region_ids.add(region_id)
+                    # Use the last node (anchor) as the representative
+                    region_representatives[region_id] = region.end
         return region_representatives
 
     def _get_region_for_node(self, node: fx.Node):
@@ -332,8 +397,13 @@ class OverlapPreservingBucketer:
         # Build region cost map for fusion-aware bucketing
         region_costs = {}
         if self.region_of:
-            for region in set(self.region_of.values()):
-                region_costs[id(region)] = region.cost_ms
+            # Use id() to get unique regions since FusionRegion is not hashable
+            seen_region_ids: set[int] = set()
+            for region in self.region_of.values():
+                region_id = id(region)
+                if region_id not in seen_region_ids:
+                    seen_region_ids.add(region_id)
+                    region_costs[region_id] = region.cost_ms
 
         # Group collectives by PG first
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
@@ -374,11 +444,15 @@ class OverlapPreservingBucketer:
             counters["inductor"]["collective_buckets"] += 1
             self._apply_bucket(coll_bucket)
 
-        # Inline fusion region subgraphs before dependency extraction and overlap insertion
-        if self.region_of:
-            from torch._inductor.fx_passes.fusion_regions import inline_subgraphs
-            # Pass empty dep_map since we'll extract proper deps from aug_graph after inlining
-            inline_subgraphs(self.graph, self.region_of, {})
+        # Expand collapsed fusion regions back to original nodes
+        if self.region_of and self.replaced:
+            from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
+
+            self.replaced = expand_fusion_regions(
+                self.graph, self.region_of, self.replaced
+            )
+            # Fixup aug_graph deps to use the new node identities
+            self.aug_graph.fixup_replaced_nodes(self.replaced)
 
         # Extract all dependencies from augmented graph
         # This includes:
@@ -387,7 +461,23 @@ class OverlapPreservingBucketer:
         # - All transferred deps from bucketing (transferred during _apply_bucket)
         additional_deps = self.aug_graph.get_all_extra_deps()
 
-        # Apply topological sort with all dependencies
+        # Filter to only include valid graph nodes
+        valid_nodes = set(self.graph.nodes)
+        filtered_additional_deps: dict[fx.Node, OrderedSet[fx.Node]] = {}
+        for n, deps in additional_deps.items():
+            if n not in valid_nodes:
+                continue
+            valid_deps = OrderedSet(d for d in deps if d in valid_nodes)
+            if valid_deps:
+                filtered_additional_deps[n] = valid_deps
+        additional_deps = filtered_additional_deps
+
+        # Redirect dependencies to fusion region outputs BEFORE topological sort
+        # This ensures the sort and effect tokens use consistent node references
+        if self.region_of:
+            additional_deps = self._redirect_deps_to_fusion_outputs(additional_deps)
+
+        # Apply topological sort with all dependencies (now fusion-aware)
         from torch._dynamo.graph_deduplication import _stable_topological_sort
 
         for n, deps in additional_deps.items():
@@ -408,7 +498,7 @@ class OverlapPreservingBucketer:
             for node, deps in additional_deps.items():
                 filtered_node_deps: OrderedSet[fx.Node] = OrderedSet()
 
-                # only preserve comm-comptue overlap for now, although we could more
+                # only preserve comm-compute overlap for now, although we could more
                 # generally constrain
                 for dep in deps:
                     if not (is_collective_or_wait(node) and is_collective_or_wait(dep)):
@@ -417,9 +507,8 @@ class OverlapPreservingBucketer:
                 if filtered_node_deps:
                     filtered_deps[node] = filtered_node_deps
 
-            # Redirect dependencies to fusion group outputs instead of internal nodes
-            fusion_aware_deps = self._redirect_deps_to_fusion_outputs(filtered_deps)
-            self._preserve_dependencies_with_tokens(fusion_aware_deps)
+            # filtered_deps is already fusion-aware since additional_deps was redirected
+            self._preserve_dependencies_with_tokens(filtered_deps)
 
         self.graph.lint()
 
@@ -522,12 +611,13 @@ class OverlapPreservingBucketer:
         hiding_intervals = []
         if info.hiding_nodes:
             for hiding_node in info.hiding_nodes:
-                hiding_intervals.append(
-                    (
-                        start_event.position,
-                        self.node_to_event[hiding_node].position,
+                if hiding_node in self.node_to_event:
+                    hiding_intervals.append(
+                        (
+                            start_event.position,
+                            self.node_to_event[hiding_node].position,
+                        )
                     )
-                )
 
         return execution_interval, hiding_intervals
 
@@ -558,9 +648,10 @@ class OverlapPreservingBucketer:
         bucket_hiding_compute_positions = []
         for coll in all_bucketed_colls:
             for coll_hiding_node in self.collective_info[coll].hiding_nodes:
-                bucket_hiding_compute_positions.append(
-                    self.node_to_event[coll_hiding_node].position
-                )
+                if coll_hiding_node in self.node_to_event:
+                    bucket_hiding_compute_positions.append(
+                        self.node_to_event[coll_hiding_node].position
+                    )
 
         # Get new positions
         new_start_event = self.node_to_event[start_pos]
