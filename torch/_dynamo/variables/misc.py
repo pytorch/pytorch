@@ -424,10 +424,10 @@ class ExceptionVariable(VariableTracker):
         # When raising a new exception while another exception is already being
         # handled, the new exception's __context__ attribute is automatically
         # set to the handled exception.
-        self.__context__ = ConstantVariable(None)
+        self.__context__ = None
         # Set when user raised an exception from another:
         # raise ... from ...
-        self.__cause__ = ConstantVariable(None)
+        self.__cause__ = None
         # Boolean flag that controls whether the __context__ attribute is set
         self.__suppress_context__ = ConstantVariable(False)
         # Contains the call stack where the exception was raised. Dynamo does
