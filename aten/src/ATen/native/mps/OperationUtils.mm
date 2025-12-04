@@ -1133,6 +1133,97 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   });
 }
 
+void MetalShaderLibrary::exec_ternary_kernel(TensorIteratorBase& iter, const std::string& name) {
+  // TODO: Figure a better place to downcast double scalars (probably in tensor iterator itself?)
+  // Right now running something like 1.0-torch.rand(5, device='mps') will create iterator with
+  // double as common dtype (because Python floating point are always 64-bit values)
+  TORCH_CHECK(iter.output().scalar_type() != at::kDouble, "float64 is not supported on MPS");
+
+  // Skip for empty iterators
+  if (iter.numel() == 0) {
+    return;
+  }
+
+  // Decompose 64-bit tensor into 32-bit ones
+  if (!iter.can_use_32bit_indexing()) {
+    for (auto&& sub_iter : iter.with_32bit_indexing()) {
+      exec_binary_kernel(sub_iter, name);
+    }
+    return;
+  }
+
+  auto convert_double_scalar = [](Tensor& t) {
+    if (t.dim() != 0) {
+      return;
+    }
+    if (t.scalar_type() == kDouble) {
+      t = t.to(kFloat);
+    } else if (t.scalar_type() == kComplexDouble) {
+      t = t.to(kComplexFloat);
+    }
+  };
+
+  Tensor input = iter.input(0);
+  Tensor other1 = iter.input(1);
+  Tensor other2 = iter.input(2);
+  Tensor out = iter.output();
+
+  convert_double_scalar(input);
+  convert_double_scalar(other1);
+  convert_double_scalar(other2);
+
+  MPSStream* mpsStream = getCurrentMPSStream();
+  const auto cast_needed =
+      (input.scalar_type() != other1.scalar_type()) || (input.scalar_type() != other2.scalar_type());
+  const auto suffix = iter.is_contiguous() ? "dense" : "strided";
+  // TODO: Implicitly pass both input and output types to non-cast kernels
+  const auto kernel_name = cast_needed
+      ? fmt::format("{}_{}_cast_{}", name, suffix, scalarToMetalTypeString(out))
+      : fmt::format("{}_{}_{}_{}", name, suffix, scalarToMetalTypeString(out), scalarToMetalTypeString(input));
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      auto computeEncoder = mpsStream->commandEncoder();
+      auto binaryPSO = getPipelineStateForFunc(kernel_name);
+      // this function call is a no-op if MPS Profiler is not enabled
+      getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other1, other2});
+      [computeEncoder setComputePipelineState:binaryPSO];
+      // Set input and output tensors
+      bind_iter_tensors(computeEncoder, iter);
+      // Iterator is contiguous if all of its elements are dense in storage,
+      // i.e. it's true for both row-first and column-first tensors
+      if (iter.is_contiguous()) {
+        if (cast_needed) {
+          std::array<int, 3> sizes = {static_cast<int>(c10::elementSize(input.scalar_type())),
+                                      static_cast<int>(c10::elementSize(other1.scalar_type())),
+                                      static_cast<int>(c10::elementSize(other2.scalar_type()))};
+          std::array<int, 3> types = {static_cast<int>(input.scalar_type()),
+                                      static_cast<int>(other1.scalar_type()),
+                                      static_cast<int>(other2.scalar_type())};
+          mtl_setArgs<4>(computeEncoder, sizes, types);
+        }
+      } else {
+        // Please note that shapes and strides of the iterator might be
+        // different than that of its operands, for example binary op
+        // between 4x4 tensor and scalar will result in 1D 16 element iterator
+        std::array<int, 4> types = {static_cast<int>(input.scalar_type()),
+                                    static_cast<int>(other1.scalar_type()),
+                                    static_cast<int>(other2.scalar_type()),
+                                    static_cast<int>(out.scalar_type())};
+        mtl_setArgs<4>(computeEncoder,
+                       iter.shape(),
+                       iter.strides(0),
+                       iter.strides(1),
+                       iter.strides(2),
+                       iter.strides(3),
+                       iter.ndim(),
+                       types);
+      }
+      mtl_dispatch1DJob(computeEncoder, binaryPSO, iter.numel());
+      getMPSProfiler().endProfileKernel(binaryPSO);
+    }
+  });
+}
+
 MetalShaderLibrary& MetalShaderLibrary::getBundledLibrary() {
   static BundledShaderLibary l;
   return l;

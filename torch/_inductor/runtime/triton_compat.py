@@ -76,11 +76,8 @@ if triton is not None:
             return False
         return param_name in inspect.signature(triton.Config.__init__).parameters
 
-    HAS_WARP_SPEC = (
-        hasattr(tl, "async_task")
-        and _triton_config_has("num_consumer_groups")
-        and _triton_config_has("num_buffers_warp_spec")
-    )
+    # Drop the legacy support of autoWS
+    HAS_WARP_SPEC = False
 
     try:
         from triton import knobs

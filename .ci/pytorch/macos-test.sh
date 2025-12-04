@@ -46,6 +46,14 @@ test_python_mps() {
   assert_git_not_dirty
 }
 
+test_python_openreg() {
+  setup_test_python
+
+  time python test/run_test.py --openreg --verbose
+
+  assert_git_not_dirty
+}
+
 
 test_python_shard() {
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
@@ -393,6 +401,8 @@ elif [[ $TEST_CONFIG == *"perf_smoketest"* ]]; then
   test_torchbench_smoketest "${SHARD_NUMBER}"
 elif [[ $TEST_CONFIG == *"aot_inductor_perf_smoketest"* ]]; then
   test_aoti_torchbench_smoketest "${SHARD_NUMBER}"
+elif [[ $TEST_CONFIG == *"openreg"* ]]; then
+  test_python_openreg
 elif [[ $TEST_CONFIG == *"mps"* ]]; then
   test_python_mps
 elif [[ $NUM_TEST_SHARDS -gt 1 ]]; then

@@ -122,6 +122,17 @@ torch_string_c_str(StringHandle handle, const char** data);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_current_cuda_blas_handle(void** ret_handle);
 
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_current_cuda_stream(void* stream, int32_t device_index);
+
+AOTI_TORCH_EXPORT AOTITorchError torch_get_cuda_stream_from_pool(
+    bool isHighPriority,
+    int32_t device_index,
+    void** ret_stream);
+
+AOTI_TORCH_EXPORT AOTITorchError
+torch_cuda_stream_synchronize(void* stream, int32_t device_index);
+
 #endif // USE_CUDA
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0

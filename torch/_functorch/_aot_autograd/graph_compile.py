@@ -236,6 +236,13 @@ def aot_stage1_graph_capture(
                     fw_metadata=aot_state.fw_metadata,
                 )
             )
+            # Apply AC rematerialization to forward+loss+bwd graph
+            if torch._functorch.config.remat_using_tags_for_fwd_loss_bwd_graph:
+                from torch._functorch._activation_checkpointing.remat_using_tags_for_fwd_loss_bwd_graph_pass import (
+                    remat_using_tags_for_fwd_loss_bwd_graph,
+                )
+
+                graph = remat_using_tags_for_fwd_loss_bwd_graph(graph)
 
     if config.selective_decompose:
         from torch.fx.experimental.proxy_tensor import selective_decompose

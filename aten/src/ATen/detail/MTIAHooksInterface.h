@@ -183,6 +183,10 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   virtual MempoolId_t mtiagraphPool(int64_t handle) const {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
+
+  virtual MempoolId_t graphPoolHandle() const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
 };
 
 struct TORCH_API MTIAHooksArgs {};

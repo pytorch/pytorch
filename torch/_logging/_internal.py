@@ -1177,7 +1177,7 @@ class LazyTraceHandler(logging.StreamHandler):
                 ranksuffix = ""
                 if dist.is_available() and dist.is_initialized():
                     ranksuffix = f"rank_{dist.get_rank()}_"
-                self.stream = tempfile.NamedTemporaryFile(
+                self.stream = tempfile.NamedTemporaryFile(  # noqa: SIM115
                     mode="w+",
                     suffix=".log",
                     prefix=f"dedicated_log_torch_trace_{ranksuffix}",

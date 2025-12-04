@@ -53,9 +53,10 @@ def post_process_error_msg(
 
     orig_sig = inspect.signature(func)
     flat_input_paths = _get_input_paths((args, kwargs), orig_sig)
-    constraint_violation_error.args = (
-        _replace_sources(constraint_violation_error.args[0], flat_input_paths),
-    )
+    if constraint_violation_error.args:
+        constraint_violation_error.args = (
+            _replace_sources(constraint_violation_error.args[0], flat_input_paths),
+        )
     return constraint_violation_error
 
 
@@ -423,9 +424,12 @@ def _suggest_or_raise_constraint_violation(
             forced_specializations,
         )
         if constraint_violation_error:
-            constraint_violation_error.args = (
-                constraint_violation_error.args[0] + msg,
-            )
+            if constraint_violation_error.args:
+                constraint_violation_error.args = (
+                    constraint_violation_error.args[0] + msg,
+                )
+            else:
+                constraint_violation_error.args = (msg,)
         else:
             if forced_specializations:
                 constraint_violation_error = ConstraintViolationError(msg)

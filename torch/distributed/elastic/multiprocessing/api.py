@@ -498,7 +498,7 @@ class PContext(abc.ABC):
         ]
 
         if duplicate_stdout_filters:
-            self.filtered_stdout = open(
+            self.filtered_stdout = open(  # noqa: SIM115
                 logs_dest.filtered_stdout, mode="w", errors="replace", buffering=1
             )
             self._tail_logs.append(
@@ -514,7 +514,7 @@ class PContext(abc.ABC):
             )
 
         if duplicate_stderr_filters:
-            self.filtered_stderr = open(
+            self.filtered_stderr = open(  # noqa: SIM115
                 logs_dest.filtered_stderr, mode="w", errors="replace", buffering=1
             )
             self._tail_logs.append(

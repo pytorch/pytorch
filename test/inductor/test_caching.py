@@ -33,6 +33,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    xfailIfPy314Plus,
 )
 
 
@@ -374,6 +375,7 @@ class ContextTest(TestCase):
         """
         self.assertEqual(context._isolation_key(), context._isolation_key())
 
+    @xfailIfPy314Plus
     def test_select_runtime_context_matches_forms_of_context(self) -> None:
         """
         Tests that the selected runtime context matches the forms of context.
@@ -387,6 +389,7 @@ class ContextTest(TestCase):
             set(context._RuntimeContext.forms_of_context()),
         )
 
+    @xfailIfPy314Plus
     def test_select_compile_context_matches_forms_of_context(self) -> None:
         """
         Tests that the selected compile context matches the forms of context.

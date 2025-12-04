@@ -459,14 +459,13 @@ class OpDispatcher:
                         if debug_mode is not None
                         else contextlib.nullcontext()
                     )
-                    if not ExplicitRedistributionContext.is_redistribute_allowed(
+                    ExplicitRedistributionContext.observe_redistribution(
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
                         reshard_arg_spec,
-                    ):
-                        raise RuntimeError(
-                            f"Implicit redistribution occurred for {op_info.schema} while ExplicitRedistributionContext was active"
-                        )
+                        message=f"Implicit redistribution occurred for {op_info.schema} "
+                        "while ExplicitRedistributionContext was active",
+                    )
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
                             local_tensor,

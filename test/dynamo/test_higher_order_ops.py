@@ -1149,6 +1149,18 @@ class GraphModule(torch.nn.Module):
         a = torch.tensor([1.0, 0.0, 1.0])
         b = torch.randn(3)
         t = TwoTensor(a, b)
+
+        prev_impl = cond_op.python_key_table.pop(TwoTensor, None)
+        cond_op._dispatch_cache.clear()
+
+        def restore_twotensor_impl():
+            cond_op.python_key_table.pop(TwoTensor, None)
+            if prev_impl is not None:
+                cond_op.python_key_table[TwoTensor] = prev_impl
+            cond_op._dispatch_cache.clear()
+
+        self.addCleanup(restore_twotensor_impl)
+
         with self.assertRaisesRegex(
             NotImplementedError,
             "no rule registered for HOP cond and subclass .*TwoTensor'>",
@@ -3763,23 +3775,38 @@ class FuncTorchHigherOrderOpTests(
         # because of a previous call to _vmap_increment_nesting that wasn't undone
         # i.e. test_vmap_free_tensor fails when PYTORCH_TEST_WITH_DYNAMO=1
         # and the call to increment nesting is not undone
-        if not TEST_WITH_TORCHDYNAMO:
-            return
+        try:
+            if TEST_WITH_TORCHDYNAMO:
+                warn = False
+                while ci := torch._C._functorch.peek_interpreter_stack():
+                    if ci.key() == torch._C._functorch.TransformType.Vmap:
+                        warn = True
+                        torch._C._functorch._vmap_decrement_nesting()
+                    else:
+                        break
 
-        warn = False
-        while ci := torch._C._functorch.peek_interpreter_stack():
-            if ci.key() == torch._C._functorch.TransformType.Vmap:
-                warn = True
-                torch._C._functorch._vmap_decrement_nesting()
-            else:
-                break
+                if warn:
+                    msg = (
+                        "Interpreter stack is not empty. Test should have called "
+                        "'torch._C._functorch._vmap_decrement_nesting()'"
+                    )
+                    warnings.warn(msg)
+        finally:
+            super().tearDown()
 
-        if warn:
-            msg = (
-                "Interpreter stack is not empty. Test should have called "
-                "'torch._C._functorch._vmap_decrement_nesting()'"
+    def test_teardown_resets_nested_graph_breaks(self):
+        expected_nested_state = getattr(
+            self, "prev_nested_graph_breaks", torch._dynamo.config.nested_graph_breaks
+        )
+
+        def _check_flag():
+            self.assertEqual(
+                torch._dynamo.config.nested_graph_breaks, expected_nested_state
             )
-            warnings.warn(msg)
+
+        self.addCleanup(_check_flag)
+        # Sanity check: these tests always run with nested graph breaks enabled.
+        self.assertTrue(torch._dynamo.config.nested_graph_breaks)
 
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
