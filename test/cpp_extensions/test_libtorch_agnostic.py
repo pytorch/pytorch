@@ -860,6 +860,82 @@ if not IS_WINDOWS:
                 libtorch_agnostic.ops.my_string_op(t, "invalid", "")
 
         @skipIfTorchVersionLessThan(2, 10)
+        def test_my__foreach_mul_vec(self, device):
+            """Test my__foreach_mul_vec which uses const std::vector<Tensor>& parameters."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            N = 5
+            tensors = [torch.rand(32, 16, device=device) for _ in range(N)]
+            others = [torch.rand(32, 16, device=device) for _ in range(N)]
+
+            result = libtorch_agnostic.ops.my__foreach_mul_vec(tensors, others)
+            expected = torch._foreach_mul(tensors, others)
+
+            for result_t, expected_t in zip(result, expected):
+                self.assertEqual(result_t, expected_t)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_string_op_const_string_ref(self, device):
+            """Test my_string_op_const_string_ref which uses const std::string& parameters."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.empty(3, 4, 5, device=device)
+
+            dim_vec, result_dim = libtorch_agnostic.ops.my_string_op_const_string_ref(
+                t, "dim", "test1"
+            )
+            self.assertEqual(dim_vec, ["dim", str(t.dim()), "test1"])
+            self.assertEqual(result_dim, t.dim())
+
+            size_vec, result_size = libtorch_agnostic.ops.my_string_op_const_string_ref(
+                t, "size", "test2"
+            )
+            self.assertEqual(size_vec, ["size", str(t.size(0)), "test2"])
+            self.assertEqual(result_size, t.size(0))
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_string_op_const_string_view_ref(self, device):
+            """Test my_string_op_const_string_view_ref which uses const std::string_view& parameters."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.empty(3, 4, 5, device=device)
+
+            dim_vec, result_dim = (
+                libtorch_agnostic.ops.my_string_op_const_string_view_ref(
+                    t, "dim", "view1"
+                )
+            )
+            self.assertEqual(dim_vec, ["dim", str(t.dim()), "view1"])
+            self.assertEqual(result_dim, t.dim())
+
+            stride_vec, result_stride = (
+                libtorch_agnostic.ops.my_string_op_const_string_view_ref(
+                    t, "stride", "view2"
+                )
+            )
+            self.assertEqual(stride_vec, ["stride", str(t.stride(0)), "view2"])
+            self.assertEqual(result_stride, t.stride(0))
+
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_string_op_string_ref(self, device):
+            """Test my_string_op_string_ref which uses std::string& (non-const) parameters."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.empty(3, 4, 5, device=device)
+
+            dim_vec, result_dim = libtorch_agnostic.ops.my_string_op_string_ref(
+                t, "dim", "ref1"
+            )
+            self.assertEqual(dim_vec, ["dim", str(t.dim()), "ref1"])
+            self.assertEqual(result_dim, t.dim())
+
+            size_vec, result_size = libtorch_agnostic.ops.my_string_op_string_ref(
+                t, "size", "ref2"
+            )
+            self.assertEqual(size_vec, ["size", str(t.size(0)), "ref2"])
+            self.assertEqual(result_size, t.size(0))
+
+        @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         def test_my_get_current_cuda_stream(self, device):
             import libtorch_agnostic_2_10 as libtorch_agnostic
@@ -1012,8 +1088,6 @@ except RuntimeError as e:
 """
             env = os.environ.copy()
             env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
-            # Pass the current sys.path to subprocess so it can find the locally installed extension
-            env["PYTHONPATH"] = os.pathsep.join(sys.path)
 
             result = subprocess.run(
                 [sys.executable, "-c", test_script],
@@ -1075,8 +1149,6 @@ except RuntimeError as e:
 """
             env = os.environ.copy()
             env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
-            # Pass the current sys.path to subprocess so it can find the locally installed extension
-            env["PYTHONPATH"] = os.pathsep.join(sys.path)
 
             result = subprocess.run(
                 [sys.executable, "-c", test_script],

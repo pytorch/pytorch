@@ -136,25 +136,18 @@ struct UnboxType<std::string_view> {
   using type = std::string;
 };
 
-// Remove lvalue references
-template <typename T>
-struct UnboxType<T&> {
-  using type = typename UnboxType<T>::type;
-};
+// template <typename T>
+// struct UnboxType<T&> {
+//   using type = T;
+// };
 
-// Remove rvalue references
+// template <typename T>
+// struct UnboxType<const T&> {
+//   using type = T;
+// };
 template <typename T>
-struct UnboxType<T&&> {
-  using type = typename UnboxType<T>::type;
-};
-
-template <typename T>
-struct UnboxType<const T> {
-  using type = typename UnboxType<T>::type;
-};
-
-template <typename T>
-using unbox_type_t = typename UnboxType<T>::type;
+using unbox_type_t =
+    typename UnboxType<std::remove_cv_t<std::remove_reference_t<T>>>::type;
 
 template <class... T, std::size_t... I>
 std::tuple<T...> unbox_to_tuple_impl(

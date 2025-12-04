@@ -1,5 +1,5 @@
-#include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/device.h>
+#include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/tensor.h>
 
 #include <string>
@@ -7,7 +7,10 @@
 
 using torch::stable::Tensor;
 
-std::tuple<std::vector<std::string>, int64_t> my_string_op(Tensor t, std::string_view accessor, std::string passthru) {
+std::tuple<std::vector<std::string>, int64_t> my_string_op(
+    Tensor t,
+    std::string_view accessor,
+    std::string passthru) {
   int64_t res;
   if (accessor == "dim") {
     res = t.dim();
@@ -16,10 +19,12 @@ std::tuple<std::vector<std::string>, int64_t> my_string_op(Tensor t, std::string
   } else if (accessor == "stride") {
     res = t.stride(0);
   } else {
-    STD_TORCH_CHECK(false, "Unsupported accessor value: ", std::string(accessor).c_str())
+    STD_TORCH_CHECK(
+        false, "Unsupported accessor value: ", std::string(accessor).c_str())
   }
 
-  auto vec = std::vector<std::string>({std::string(accessor), std::to_string(res), passthru});
+  auto vec = std::vector<std::string>(
+      {std::string(accessor), std::to_string(res), passthru});
   return std::make_tuple(vec, res);
 }
 
@@ -27,6 +32,9 @@ STABLE_TORCH_LIBRARY_FRAGMENT(libtorch_agnostic_2_10, m) {
   m.def("my_string_op(Tensor t, str accessor, str passthru) -> (str[], int)");
 }
 
-STABLE_TORCH_LIBRARY_IMPL(libtorch_agnostic_2_10, CompositeExplicitAutograd, m) {
+STABLE_TORCH_LIBRARY_IMPL(
+    libtorch_agnostic_2_10,
+    CompositeExplicitAutograd,
+    m) {
   m.impl("my_string_op", TORCH_BOX(&my_string_op));
 }

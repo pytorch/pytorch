@@ -1,7 +1,7 @@
 #include <torch/csrc/stable/library.h>
 #include <torch/csrc/stable/device.h>
 
-bool test_device_is_cuda(torch::stable::Device device) {
+bool test_device_is_cuda(const torch::stable::Device& device) {
   return device.is_cuda();
 }
 

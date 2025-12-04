@@ -37,8 +37,8 @@ void inline sgd_math(
 using torch::stable::Tensor;
 
 Tensor sgd_out_of_place(
-    const Tensor& param,
-    const Tensor& grad,
+    const Tensor param,
+    const Tensor grad,
     const double weight_decay,
     const double lr,
     const bool maximize) {
@@ -217,11 +217,11 @@ Tensor my_transpose(Tensor t, int64_t dim0, int64_t dim1) {
   return transpose(t, dim0, dim1);
 }
 
-Tensor my_empty_like(Tensor t) {
+Tensor my_empty_like(const Tensor& t) {
   return empty_like(t);
 }
 
-bool my_is_cpu(Tensor t) {
+bool my_is_cpu(Tensor& t) {
   return t.is_cpu();
 }
 
