@@ -15,10 +15,10 @@ The yellow highlighting shows the provenance of the nodes/kernels.
 
 
 Example screenshot of the provenance tracking tool for TorchInductor:
- .. image:: _static/img/inductor_provenance/provenance_jit_inductor.png
+ .. image:: ../../_static/img/inductor_provenance/provenance_jit_inductor.png
 
 Example screenshot of the provenance tracking tool for AOTInductor:
- .. image:: _static/img/inductor_provenance/provenance_aot_inductor.png
+ .. image:: ../../_static/img/inductor_provenance/provenance_aot_inductor.png
 
 
 Using the Provenance Tracking Highlighter
@@ -53,7 +53,7 @@ Follow these steps to enable and use provenance tracking in your PyTorch project
 After running ``tlparse <file_name> --inductor-provenance``, you should see an additional "Provenance Tracking" section in the tlparse output. Clicking into the link(s) to access the provenance tracking tool.
 For a demo, see: https://github.com/pytorch/tlparse/pull/93
 
- .. image:: _static/img/inductor_provenance/index.png
+ .. image:: ../../_static/img/inductor_provenance/index.png
 
 
 Source code corresponding to each Inductor kernel
@@ -61,17 +61,17 @@ Source code corresponding to each Inductor kernel
 
 With ``INDUCTOR_PROVENANCE=1``, you can also view the source code corresponding to each Inductor kernel in tlparse. To access it, click the "readable_html" link next to "inductor_provenance_tracking_kernel_stack_traces.json" in the tlparse output.
 
- .. image:: _static/img/inductor_provenance/index_2.png
+ .. image:: ../../_static/img/inductor_provenance/index_2.png
 
 
 Below are some example screenshots. The ``:1`` and ``:467`` suffixes at the end of the kernel names are used to distinguish different calls to the same kernel. We refer to these suffixes as debug handles.
 
- .. image:: _static/img/inductor_provenance/kernel_source_1.png
- .. image:: _static/img/inductor_provenance/kernel_source_2.png
+ .. image:: ../../_static/img/inductor_provenance/kernel_source_1.png
+ .. image:: ../../_static/img/inductor_provenance/kernel_source_2.png
 
 You can also find the debug handle in the comments within the kernel source code.
 
- .. image:: _static/img/inductor_provenance/kernel_source_3.png
+ .. image:: ../../_static/img/inductor_provenance/kernel_source_3.png
 
 
 See Also
