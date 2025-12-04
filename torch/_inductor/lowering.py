@@ -7379,6 +7379,14 @@ def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
     return output
 
 
+from torch._inductor.fx_passes.control_dependencies import requires_deps
+
+
+@register_lowering(requires_deps, type_promotion_kind=None)
+def requires_deps_op_lowering(additional_deps, out):
+    return out
+
+
 @register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)
 def invoke_quant_tracer(subgraph_fn: ir.Subgraph, *operands, scheme=None):
     output = None

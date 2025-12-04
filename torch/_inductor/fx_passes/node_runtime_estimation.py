@@ -152,8 +152,6 @@ def benchmark_collective_with_cuda_events_impl(
                 total_elems *= dim
 
             actual_bytes = total_elems * t.dtype.itemsize
-        else:
-            raise RuntimeError(f"should only be one input tensor to collective {n}")
         return t
 
     torch.utils._pytree.tree_map_only(torch.Tensor, extract_tensor_info, (args, kwargs))

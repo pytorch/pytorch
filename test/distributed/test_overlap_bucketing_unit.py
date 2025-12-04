@@ -13,8 +13,8 @@ import torch.fx as fx
 from torch._C import FileCheck
 from torch._dynamo.utils import counters, same
 from torch._inductor.fx_passes.decompose_mm import (
-    _trace_fn_mm_rs_scatter,
-    _trace_fn_mm_rs_scatter_view3d,
+    _trace_fn_mm_rs_scatter_dim0,
+    _trace_fn_mm_rs_scatter_dim_non0,
     _ViewOp,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -66,12 +66,24 @@ class _TestReduceScatterMode(TorchDispatchMode):
             chunk_size = input_tensor.shape[scatter_dim] // self.group_size
             output = input_tensor.narrow(scatter_dim, 0, chunk_size).clone()
             return output
-        # Check for wait_tensor (used after async collectives)
-        if func in (
+        elif func in (
+            torch.ops._c10d_functional.reduce_scatter_tensor_out.default,
+            torch.ops._c10d_functional.reduce_scatter_tensor_out,
+        ):
+            # args[0] is the input tensor
+            # kwargs['out'] is the output tensor
+            input_tensor = args[0]
+            out_tensor = kwargs.get("out")
+            # Simulate reduce_scatter by taking first chunk (rank 0's portion)
+            scatter_dim = 0  # reduce_scatter on dim 0
+            chunk_size = input_tensor.shape[scatter_dim] // self.group_size
+            output_data = input_tensor.narrow(scatter_dim, 0, chunk_size)
+            out_tensor.copy_(output_data)
+            return out_tensor
+        elif func in (
             torch.ops._c10d_functional.wait_tensor.default,
             torch.ops._c10d_functional.wait_tensor,
         ):
-            # Just return the input tensor as-is
             return args[0]
 
         return func(*args, **kwargs)
@@ -950,7 +962,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         ).run(graph_str)
 
         FileCheck().check_count(
-            "torch.ops._c10d_functional.reduce_scatter_tensor.default",
+            "torch.ops._c10d_functional.reduce_scatter_tensor_out.default",
             num_chunks,
             exactly=True,
         ).run(graph_str)
@@ -975,8 +987,18 @@ class TestOverlapPreservingBucketing(InductorTestCase):
         b = torch.randn(K, N, device=self.device)
         with _TestReduceScatterMode(group_size=group_size):
             expected = _original_mm_rs_pattern(a, b, group_size=group_size)
-            result = _trace_fn_mm_rs_scatter(
-                a, b, num_chunks, expected, "sum", group_size, "", 0, group_size, []
+            result = _trace_fn_mm_rs_scatter_dim0(
+                a,
+                b,
+                num_chunks,
+                expected,
+                "sum",
+                group_size,
+                "",
+                0,
+                group_size,
+                [],
+                add_requires_deps=True,
             )
         torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
 
@@ -1025,7 +1047,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
                 (None, (M1, M2, -1)),
                 {},
             )
-            result = _trace_fn_mm_rs_scatter_view3d(
+            result = _trace_fn_mm_rs_scatter_dim_non0(
                 a,
                 b,
                 num_chunks,
@@ -1036,6 +1058,7 @@ class TestOverlapPreservingBucketing(InductorTestCase):
                 scatter_dim,
                 group_size,
                 [_ViewOp(view_node, chunk_dim=0)],
+                add_requires_deps=False,
             )
         torch.testing.assert_close(result, expected, atol=1e-4, rtol=1e-4)
 
