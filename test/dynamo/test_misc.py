@@ -10155,7 +10155,9 @@ def ___make_guard_fn():
             )
 
             @torch.library.impl("mylib::foo_validate_outputs_unbacked", "cpu", lib=lib)
-            @torch.library.register_fake("mylib::foo_validate_outputs_unbacked")
+            @torch.library.register_fake(
+                "mylib::foo_validate_outputs_unbacked", lib=lib
+            )
             def foo_impl(x, y):
                 return torch.cat([x, y])
 
@@ -13301,6 +13303,16 @@ fn
         self.assertRaises(Unsupported, f, fake_arg=1)
         self.assertRaises(Unsupported, f, [])
         self.assertRaises(Unsupported, f, "1 + j")
+
+    def test_guard_string_escaped(self):
+        d = {frozenset({0}): {frozenset({0}): 1}}
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return x + d[frozenset({0})][frozenset({0})]
+
+        x = torch.ones(3)
+        self.assertEqual(x + 1, f(x))
 
     def test_compiled_class_graph_break(self):
         counter = CompileCounter()
