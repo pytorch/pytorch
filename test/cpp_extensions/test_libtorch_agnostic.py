@@ -834,6 +834,94 @@ if not IS_WINDOWS:
             expected = torch.cuda.current_blas_handle()
             self.assertEqual(res, expected)
 
+        @skipIfTorchVersionLessThan(2, 10)
+        def test_my_string_op(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            t = torch.empty(3, 4, 5, device=device)
+
+            dim_vec, result_dim = libtorch_agnostic.ops.my_string_op(t, "dim", "ice")
+            self.assertEqual(dim_vec, ["dim", str(t.dim()), "ice"])
+            self.assertEqual(result_dim, t.dim())
+
+            size_vec, result_size = libtorch_agnostic.ops.my_string_op(
+                t, "size", "cream"
+            )
+            self.assertEqual(size_vec, ["size", str(t.size(0)), "cream"])
+            self.assertEqual(result_size, t.size(0))
+
+            stride_vec, result_stride = libtorch_agnostic.ops.my_string_op(
+                t, "stride", "cake"
+            )
+            self.assertEqual(stride_vec, ["stride", str(t.stride(0)), "cake"])
+            self.assertEqual(result_stride, t.stride(0))
+
+            with self.assertRaisesRegex(RuntimeError, "Unsupported accessor value: "):
+                libtorch_agnostic.ops.my_string_op(t, "invalid", "")
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_get_current_cuda_stream(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            res = libtorch_agnostic.ops.my_get_current_cuda_stream(device_index)
+            expected = torch.cuda.current_stream(device_index).cuda_stream
+            self.assertEqual(res, expected)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_set_current_cuda_stream(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            prev_stream = torch.cuda.current_stream(device_index).cuda_stream
+            new_stream = torch.cuda.streams.Stream(device_index).cuda_stream
+
+            try:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    new_stream, device_index
+                )
+                expected = torch.cuda.current_stream(device_index).cuda_stream
+                self.assertEqual(new_stream, expected)
+            finally:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    prev_stream, device_index
+                )
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_get_cuda_stream_from_pool(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            prev_stream = torch.cuda.current_stream(device_index).cuda_stream
+
+            try:
+                for high_priority in [False, True]:
+                    stream = libtorch_agnostic.ops.my_get_cuda_stream_from_pool(
+                        high_priority, device_index
+                    )
+                    libtorch_agnostic.ops.my_set_current_cuda_stream(
+                        stream, device_index
+                    )
+                    expected = torch.cuda.current_stream(device_index).cuda_stream
+                    self.assertEqual(stream, expected)
+            finally:
+                libtorch_agnostic.ops.my_set_current_cuda_stream(
+                    prev_stream, device_index
+                )
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_my_cuda_stream_synchronize(self, device):
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            device_index = torch.device(device).index
+            stream = torch.cuda.current_stream(device_index).cuda_stream
+            # sanity check for torch_cuda_stream_synchronize:
+            libtorch_agnostic.ops.my_cuda_stream_synchronize(stream, device_index)
+
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 
 if __name__ == "__main__":
