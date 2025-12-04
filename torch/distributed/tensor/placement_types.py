@@ -218,14 +218,12 @@ class Shard(torch._C._distributed.Shard):
         """
         reduce and scatter a tensor on a mesh dimension
         """
-        my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
-
-        if my_coordinate is None:
+        if not mesh.is_part_of_mesh():
             # if rank is not part of mesh, we simply return local_tensor,
             # which should be an empty tensor
             return tensor
 
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
         is_padded = tensor.size(self.dim) % num_chunks != 0
         pad_sizes = None
         if is_padded:
@@ -242,6 +240,8 @@ class Shard(torch._C._distributed.Shard):
 
         if is_padded:
             assert pad_sizes is not None
+            my_coordinate = mesh.get_coordinate()
+            assert my_coordinate is not None
             output = Shard._maybe_unpad_tensor_with_sizes(
                 self.dim, output, pad_sizes, my_coordinate[mesh_dim], False
             )
@@ -691,7 +691,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         num_chunks: int,
         rank: int,
         return_first_offset: bool = True,
-    ) -> tuple[int, list[int]]:
+    ) -> tuple[int, int | list[int]]:
         return _StridedShard.local_shard_size_and_offset(
             self, curr_local_size, num_chunks, rank, return_first_offset
         )
@@ -944,18 +944,18 @@ class MaskPartial(Partial):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        my_coordinate = mesh.get_coordinate()
-        assert my_coordinate is not None, "my_coordinate should not be None"
+        assert mesh.is_part_of_mesh(), "rank is not part of mesh"
         # override parent logic to perform partial mask for embedding
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
         assert self.offset_shape is not None, (
             "offset_shape needs to be set for MaskPartial"
         )
+        my_coordinate = mesh.sym_get_coordinate(mesh_dim)
         local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
-            my_coordinate[mesh_dim],
+            my_coordinate,
         )
         mask, masked_tensor = MaskPartial._mask_tensor(
             tensor, local_offset_on_dim, local_shard_size

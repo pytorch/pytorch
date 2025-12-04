@@ -237,7 +237,7 @@ class OpDispatcher:
         assert output_sharding is not None, "output sharding should not be None"
 
         mesh = op_info.compute_mesh
-        participating = mesh.get_coordinate() is not None
+        participating = mesh.is_part_of_mesh()
         local_results = None
         if participating:
             # computation that happens in the current rank of the mesh, normal case
