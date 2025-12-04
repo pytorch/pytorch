@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
     xfailIfTorchDynamo,
@@ -990,6 +991,7 @@ if not IS_WINDOWS:
 
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
+        @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
         @parametrize("show_cpp_stacktraces", [False, True])
         def test_std_cuda_check_error(self, device, show_cpp_stacktraces):
             """Test that STD_CUDA_CHECK throws std::runtime_error with CUDA error message.
@@ -1012,6 +1014,8 @@ except RuntimeError as e:
 """
             env = os.environ.copy()
             env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+            # Pass the current sys.path to subprocess so it can find the locally installed extension
+            env["PYTHONPATH"] = os.pathsep.join(sys.path)
 
             result = subprocess.run(
                 [sys.executable, "-c", test_script],
@@ -1052,6 +1056,7 @@ except RuntimeError as e:
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         @parametrize("show_cpp_stacktraces", [False, True])
+        @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
         def test_std_cuda_kernel_launch_check_error(self, device, show_cpp_stacktraces):
             """Test that STD_CUDA_KERNEL_LAUNCH_CHECK throws std::runtime_error for invalid kernel launches.
 
@@ -1073,6 +1078,8 @@ except RuntimeError as e:
 """
             env = os.environ.copy()
             env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+            # Pass the current sys.path to subprocess so it can find the locally installed extension
+            env["PYTHONPATH"] = os.pathsep.join(sys.path)
 
             result = subprocess.run(
                 [sys.executable, "-c", test_script],
