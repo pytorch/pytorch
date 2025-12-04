@@ -2070,6 +2070,45 @@ class TestPatternMatcherLogging(LoggingTestCase):
         )
         self.assertIn("add(arg0_1, arg1_1)", specific_record.getMessage())
 
+    @make_logging_test()
+    def test_failed_match_constant_args_format_string(self, records):
+        def pattern(x):
+            return x + 1
+
+        def replacement(x):
+            return x * 2
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph):
+            return my_patterns.apply(graph)
+
+        def fn(x):
+            return x + 2
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+
+        target_node = "add"
+        # Run with debug enabled
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": target_node}
+        ):
+            compiled_fn = torch.compile(
+                fn, options={"post_grad_custom_post_pass": custom_pass}
+            )
+            result = compiled_fn(x)
+            self.assertEqual(result, x + 2)
+
+        specific_record = self.getRecord(records, "Specific pattern match")
+        self.assertIn(
+            "add(arg0_1, 2) constant_args: add 2!=1 CallFunction(aten.add.Tensor, KeywordArg('x'), 1, _users=0)",
+            specific_record.getMessage(),
+        )
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:
