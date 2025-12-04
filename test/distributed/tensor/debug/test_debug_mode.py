@@ -435,6 +435,44 @@ class TestDTensorDebugMode(TestCase):
             cnt.frame_count, 1
         )  # check DebugMode doesn't trigger additional recompilations
 
+    def test_annotate(self):
+        x = torch.randn(8, 8)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                DebugMode.annotate("Foo")
+                return self.l1(x)
+
+        mod = Foo()
+        with DebugMode(record_nn_module=True) as debug_mode:
+            DebugMode.annotate("forward")
+            mod(x)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [annotate] forward
+  [nn.Mod] Foo
+    [annotate] Foo
+    [nn.Mod] Foo.l1
+        aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
+        aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
+        )
+
+        with DebugMode() as debug_mode:
+            torch.compile(mod, backend="eager", fullgraph=True)(x)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
+    aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
+        )
+
     def test_nn_module(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -452,7 +490,6 @@ class TestDTensorDebugMode(TestCase):
                 self.xyz = torch.nn.Linear(4, 4)
 
             def forward(self, x):
-                DebugMode.annotate("Bar.forward")
                 return self.xyz(self.abc(x))
 
         mod = Bar()
@@ -463,16 +500,15 @@ class TestDTensorDebugMode(TestCase):
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-    [nn.Mod] Bar
-    [annotate] Bar.forward
-      [nn.Mod] Bar.abc
-        [nn.Mod] Bar.abc.l1
+  [nn.Mod] Bar
+    [nn.Mod] Bar.abc
+      [nn.Mod] Bar.abc.l1
           aten::t(t: f32[4, 4])
           aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
-        [nn.Mod] Bar.abc.l2
+      [nn.Mod] Bar.abc.l2
           aten::t(t: f32[4, 4])
           aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])
-      [nn.Mod] Bar.xyz
+    [nn.Mod] Bar.xyz
         aten::t(t: f32[4, 4])
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])""",
         )

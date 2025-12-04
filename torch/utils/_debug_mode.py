@@ -35,6 +35,7 @@ Usage::
 import contextlib
 import functools
 import inspect
+import logging
 import os
 import traceback
 import weakref
@@ -61,6 +62,8 @@ if TYPE_CHECKING:
 
 
 __all__ = ["DebugMode", "get_active_debug_mode"]
+
+log = logging.getLogger(__name__)
 
 
 REDISTRIBUTE_FUNC = "redistribute_input"
@@ -252,6 +255,20 @@ def _get_op_name(op) -> str:
     else:
         op_name = str(op)
     return op_name
+
+
+_annotate_decorated = False
+
+
+def _ensure_annotate_decorated():
+    """
+    Lazily apply dont_skip_tracing decorator to DebugMode.annotate, to avoid circular import/initialization issues.
+    DebugMode.annotate is a no-op in compiled regions.
+    """
+    global _annotate_decorated
+    if not _annotate_decorated:
+        DebugMode.annotate = torch._dynamo.dont_skip_tracing(DebugMode.annotate)  # type: ignore[has-type]
+        _annotate_decorated = True
 
 
 class _DebugCall:
@@ -624,6 +641,8 @@ class DebugMode(TorchDispatchMode):
         super().__init__()
         import torch.distributed.tensor  # noqa: F401
 
+        _ensure_annotate_decorated()  # Ensure annotate is decorated
+
         self.supports_higher_order_operators = True
 
         # Pushes DebugMode onto the torchfunction stack, and records __torch_function__ calls as well.
@@ -802,7 +821,7 @@ class DebugMode(TorchDispatchMode):
         # module pre-fw hook: record module call
         def pre_fw_hook(module, input) -> None:
             fqn = self.module_tracker._get_mod_name(module)  # type: ignore[attribute, union-attr]
-            self.operators.append(_NNModuleCall(fqn, self.call_depth + 1))
+            self.operators.append(_NNModuleCall(fqn, self.call_depth))
             self.call_depth += 1
 
         # module post-fw hook: decrement call depth
@@ -1039,7 +1058,15 @@ class DebugMode(TorchDispatchMode):
     def annotate(tag: Any) -> None:
         """
         If an active DebugMode exists, adds an "[annotate] <tag>" entry to the logs. Useful for contextualizing logs.
+        A no-op inside compiled regions.
         """
+        if torch.compiler.is_compiling():
+            from torch._logging import warning_once
+
+            warning_once(
+                log, "DebugMode.annotate() is ignored inside compiled regions."
+            )
+            return
         if (debug_mode := get_active_debug_mode()) is None:
             return
         call = _AnnotateCall(tag, debug_mode.call_depth, debug_mode.record_stack_trace)
