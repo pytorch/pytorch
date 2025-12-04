@@ -184,9 +184,7 @@ inline variable_list CopySlices::apply_impl(
   // see Note [Thread Safety on Autograd Node]
   std::lock_guard<std::mutex> lock(mutex_);
 
-  if (!fn) {
-    throw std::runtime_error(ERR_BACKWARD_TWICE);
-  }
+  TORCH_CHECK(fn, ERR_BACKWARD_TWICE);
 
   auto result =
       grad.new_empty_strided_symint(base.sym_sizes(), base.sym_strides());
@@ -252,9 +250,7 @@ variable_list CopySlices::apply_with_saved(
 
   auto results = variable_list(num_outputs());
   if (grads[0].defined()) {
-    if (!fn) {
-      throw std::runtime_error(ERR_BACKWARD_TWICE);
-    }
+    TORCH_CHECK(fn, ERR_BACKWARD_TWICE);
     update_exec_info();
 
     std::vector<bool> needs_input_grad;

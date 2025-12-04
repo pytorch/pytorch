@@ -15,7 +15,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 
 from tools.dynamo.gb_id_mapping import (
-    find_unimplemented_v2_calls,
+    find_unimplemented_calls,
     load_registry,
     next_gb_id,
 )
@@ -50,7 +50,7 @@ def _collect_all_calls(
     gb_type_calls: dict[str, list[tuple[dict[str, Any], Path]]] = {}
 
     for py_file in dynamo_dir.rglob("*.py"):
-        for call in find_unimplemented_v2_calls(py_file, dynamo_dir):
+        for call in find_unimplemented_calls(py_file, dynamo_dir):
             gb_type = call["gb_type"]
             if gb_type not in gb_type_calls:
                 gb_type_calls[gb_type] = []

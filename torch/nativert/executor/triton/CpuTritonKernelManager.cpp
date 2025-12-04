@@ -1,5 +1,6 @@
 #include <torch/nativert/executor/triton/TritonKernelManager.h>
 
+#include <c10/util/Exception.h>
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/Logging.h>
 
@@ -28,7 +29,7 @@ void* _dlsym(void* handle, const char* name) {
 
 char* _dlerror() {
 #if defined(_WIN32)
-  throw std::runtime_error("dlerror not supported on Windows");
+  TORCH_CHECK(false, "dlerror not supported on Windows");
 #else
   return dlerror();
 #endif
@@ -38,7 +39,7 @@ char* _dlerror() {
 
 typedef void* kernel_ptr_t;
 typedef void (
-    *launcher_ptr_t)(uint32_t, uint32_t, uint32_t, void**, kernel_ptr_t);
+    *launcher_ptr_t)(uint32_t, uint32_t, uint32_t, int, void**, kernel_ptr_t);
 
 struct DlcloseDeleter {
   void operator()(void* p) const {
@@ -109,8 +110,8 @@ void CpuTritonKernelManager::load() {
       ": ",
       _dlerror());
 
-  launcher_fn_ =
-      reinterpret_cast<launcher_ptr_t>(_dlsym(launcher_handle_.get(), "run"));
+  launcher_fn_ = reinterpret_cast<launcher_ptr_t>(
+      _dlsym(launcher_handle_.get(), "run_from_nativert"));
   TORCH_CHECK(launcher_fn_ != nullptr, "could not dlsym run: ", _dlerror());
 }
 
@@ -122,6 +123,7 @@ void CpuTritonKernelManager::launch(
       launch_params.grid_dims.x,
       launch_params.grid_dims.y,
       launch_params.grid_dims.z,
+      launch_params.num_cpu_threads,
       args,
       kernel_fn_);
 }

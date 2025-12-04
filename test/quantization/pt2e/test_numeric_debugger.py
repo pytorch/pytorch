@@ -82,7 +82,7 @@ class TestNumericDebugger(TestCase):
                         prev_decomp_op_to_debug_handle_map[prev_decomp_op]
                         == debug_handle
                     ), f"Node {node} has different debug handle {debug_handle}"
-                    "than previous node sharing the same decomp op {prev_decomp_op}"
+                    f"than previous node sharing the same decomp op {prev_decomp_op}"
 
         bfs_trace_with_node_process(
             model, _extract_debug_handles_with_prev_decomp_op_from_node

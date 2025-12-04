@@ -83,6 +83,7 @@ def _prepare_convolution_fusion_create(
         output_size.append(input_size[0])
         output_size.append(weight_size[0])
         for d in range(2, dim):
+            # pyrefly: ignore [unsupported-operation]
             dilation_ = dilation[d - 2] if has_dilation else 1
             kernel = dilation_ * (weight_size[d] - 1) + 1
             output_size_d = (input_size[d] + (2 * padding[d - 2]) - kernel) // stride[
@@ -409,6 +410,7 @@ class ConvolutionBinary(ExternKernelAlloc):
         ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
+        # pyrefly: ignore [bad-assignment]
         other = cls.require_stride_order(other, req_stride_order)
         inputs.insert(1, other)
         constant_args = constant_args + [
@@ -486,6 +488,7 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         ) = _prepare_convolution_fusion_create(
             cls, x, weight, bias, padding_, stride_, dilation_, groups
         )
+        # pyrefly: ignore [bad-assignment]
         other = cls.require_stride_order(other, req_stride_order)
         inputs.insert(1, other)
         constant_args = constant_args + [
@@ -600,7 +603,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qconv_pointwise.default,
+            op_overload=torch.ops.onednn.qconv_pointwise.tensor,
             cpp_kernel_name=f"aoti_torch_{self.device_type}__qconv_pointwise_tensor",
         )
 
@@ -620,7 +623,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         x_zero_point: Union["ShapeAsConstantBuffer", "TensorBox"],
         qw: "TensorBox",  # qw
         w_scale: "TensorBox",
-        w_zero_point: "TensorBox",
+        w_zero_point,
         bias: "TensorBox",
         stride: list[int],
         padding: list[int],
@@ -708,7 +711,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qconv2d_pointwise.binary,
+            op_overload=torch.ops.onednn.qconv2d_pointwise.binary_tensor,
             cpp_kernel_name=(
                 f"aoti_torch_{self.device_type}__qconv2d_pointwise_binary_tensor"
             ),
@@ -1216,16 +1219,23 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         batch_first: bool,
         train: bool,
     ):
+        # pyrefly: ignore [bad-assignment]
         x = cls.require_stride1(cls.realize_input(x))
         # If batch_first, x has been permuted in lstm before entering the mkldnn_rnn_layer.
         # Make sure x is contiguous in batch_first case.
         x.freeze_layout()
+        # pyrefly: ignore [bad-assignment]
         w0 = cls.require_stride1(cls.realize_input(w0))
+        # pyrefly: ignore [bad-assignment]
         w1 = cls.require_stride1(cls.realize_input(w1))
+        # pyrefly: ignore [bad-assignment]
         w2 = cls.require_stride1(cls.realize_input(w2))
+        # pyrefly: ignore [bad-assignment]
         w3 = cls.require_stride1(cls.realize_input(w3))
+        # pyrefly: ignore [bad-assignment]
         hx = cls.require_stride1(cls.realize_input(hx))
         hx.freeze_layout()
+        # pyrefly: ignore [bad-assignment]
         cx = cls.require_stride1(cls.realize_input(cx))
         cx.freeze_layout()
 

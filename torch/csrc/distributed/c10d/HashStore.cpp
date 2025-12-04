@@ -1,5 +1,6 @@
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 
+#include <unistd.h>
 #include <cstdint>
 
 #include <chrono>
@@ -214,6 +215,16 @@ int64_t HashStore::queueLen(const std::string& key) {
     return 0;
   }
   return static_cast<int64_t>(it->second.size());
+}
+
+std::vector<std::string> HashStore::listKeys() {
+  std::unique_lock<std::mutex> lock(m_);
+  std::vector<std::string> keys;
+  keys.reserve(map_.size());
+  for (const auto& kv : map_) {
+    keys.push_back(kv.first);
+  }
+  return keys;
 }
 
 } // namespace c10d

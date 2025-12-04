@@ -17,7 +17,7 @@ from ..virtualized import V
 
 
 log = logging.getLogger(__name__)
-patterns = PatternMatcherPass()
+patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
 
 
@@ -27,7 +27,7 @@ def replace_random_passes(gm: torch.fx.GraphModule):
         return 0
 
     count = patterns.apply(gm)
-    with GraphTransformObserver(gm, "fuse_seed_creation_pass"):
+    with GraphTransformObserver(gm, "fuse_seed_creation_pass", "joint_graph_passes"):
         count += fuse_seed_creation_pass(gm.graph)
 
     return count
@@ -88,9 +88,13 @@ def get_device(device):
     return torch.empty([]).device  # default device
 
 
+# pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.rand.default), pass_dict=patterns)
+# pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.rand.generator), pass_dict=patterns)
+# pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.randn.default), pass_dict=patterns)
+# pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.randn.generator), pass_dict=patterns)
 def replace_random(
     match: Match,
@@ -120,9 +124,11 @@ def replace_random(
         match.output_node().target.overloadpacket  # type: ignore[union-attr]
     ]  # type: ignore[union-attr]
     device = get_device(device)
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(replacement, [size])
 
 
+# pyrefly: ignore [bad-argument-type]
 @register_graph_pattern(CallFunctionVarArgs(aten.randint.low), pass_dict=patterns)
 def replace_randint(
     match: Match,
@@ -140,4 +146,5 @@ def replace_randint(
         return result.to(dtype)
 
     device = get_device(device)
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(replacement, [low, high, size])

@@ -59,7 +59,7 @@ static GridSamplerOffsets find_grid_sampler_offsets(
   return offsets;
 }
 
-// Mod function which gives postive output when `a` is negative
+// Mod function which gives positive output when `a` is negative
 static int32_t mod(int32_t a, int32_t b) {
   auto r = a % b;
   return r + (r < 0 ? b : 0);
@@ -191,9 +191,9 @@ void grid_sampler_single_element(
   int32_t right_indices[3];
   opmath_t<T> scales[3];
 
-  // For each dimension, find the pair of indices in the cooresponding dimension
+  // For each dimension, find the pair of indices in the corresponding dimension
   // of `input` which surround the grid coordinate in that dimension. We'll do
-  // this by mapping different coordiante spaces onto each other. There are
+  // this by mapping different coordinate spaces onto each other. There are
   // basically three different coordinate spaces to keep in mind:
   //
   //  * aligned grid space
@@ -222,9 +222,6 @@ void grid_sampler_single_element(
     auto input_dim = dims - coord_dim - 1;
     auto input_size = input_sizes[input_dim];
     auto coord = static_cast<opmath_t<T>>(coords[coord_dim]);
-
-    // Interpret nan as -1
-    coord = isnan(coord) ? -1 : coord;
 
     if (!align_corners) {
       // Map unaligned grid space to aligned grid space

@@ -11,15 +11,15 @@ from dataclasses import is_dataclass
 from enum import auto, Enum
 from pathlib import Path
 from pprint import pformat
-from typing import Any, Callable, Generic, Literal, NoReturn, TYPE_CHECKING, TypeVar
-from typing_extensions import assert_never, deprecated, Self
+from typing import Any, Generic, TYPE_CHECKING, TypeVar
+from typing_extensions import assert_never, Self
 
 from torchgen.code_template import CodeTemplate
 
 
 if TYPE_CHECKING:
     from argparse import Namespace
-    from collections.abc import Iterable, Iterator, Sequence
+    from collections.abc import Callable, Iterable, Iterator, Sequence
 
 
 TORCHGEN_ROOT = Path(__file__).absolute().parent
@@ -96,15 +96,6 @@ def context(msg_fn: Callable[[], str]) -> Iterator[None]:
         msg = f"{e.args[0]}\n{msg}" if e.args else msg
         e.args = (msg,) + e.args[1:]
         raise
-
-
-if TYPE_CHECKING:
-    # A little trick from https://github.com/python/mypy/issues/6366
-    # for getting mypy to do exhaustiveness checking
-    # TODO: put this somewhere else, maybe
-    @deprecated("Use typing_extensions.assert_never instead")
-    def assert_never(x: NoReturn) -> NoReturn:  # type: ignore[misc] # noqa: F811
-        raise AssertionError(f"Unhandled type: {type(x).__name__}")
 
 
 @functools.cache
@@ -482,7 +473,7 @@ class NamespaceHelper:
 
 
 class OrderedSet(Generic[T]):
-    storage: dict[T, Literal[None]]
+    storage: dict[T, None]
 
     def __init__(self, iterable: Iterable[T] | None = None) -> None:
         if iterable is None:

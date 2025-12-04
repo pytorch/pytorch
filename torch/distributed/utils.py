@@ -2,8 +2,8 @@
 import dataclasses
 import traceback
 from collections import OrderedDict
-from collections.abc import Container
-from typing import Any, Callable, Optional, overload, TypeVar
+from collections.abc import Callable, Container
+from typing import Any, Optional, overload, TypeVar
 
 import torch
 import torch.distributed as dist
@@ -44,7 +44,7 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> tuple[tuple[Any, ...], tuple[str,
 
 
 def _cast_forward_inputs(
-    dtype: Optional[torch.dtype],
+    dtype: torch.dtype | None,
     *args: Any,
     **kwargs: Any,
 ) -> tuple[Any, Any]:
@@ -59,6 +59,7 @@ def _cast_forward_inputs(
     def cast_fn(x: torch.Tensor) -> torch.Tensor:
         if not torch.is_floating_point(x) or x.dtype == dtype:
             return x
+
         return x.to(dtype)
 
     return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
@@ -68,9 +69,8 @@ def _unpack_kwargs(
     flat_args: tuple[Any, ...], kwarg_keys: tuple[str, ...]
 ) -> tuple[tuple[Any, ...], dict[str, Any]]:
     """See _pack_kwargs."""
-    assert len(kwarg_keys) <= len(flat_args), (
-        f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}"
-    )
+    if len(kwarg_keys) > len(flat_args):
+        raise AssertionError(f"too many keys {len(kwarg_keys)} vs. {len(flat_args)}")
     if len(kwarg_keys) == 0:
         return flat_args, {}
     args = flat_args[: -len(kwarg_keys)]
@@ -126,19 +126,24 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
                     if isinstance(obj, PackedSequence):
                         output.data.record_stream(current_stream)  # type: ignore[arg-type]
                     else:
-                        assert isinstance(output, torch.Tensor)
+                        if not isinstance(output, torch.Tensor):
+                            raise AssertionError("output must be a torch.Tensor")
                         output.record_stream(current_stream)  # type: ignore[arg-type]
                 return (output,)
 
         from torch.nn.parallel.scatter_gather import _is_namedtuple
 
         if _is_namedtuple(obj):
+            # pyrefly: ignore [no-matching-overload]
             return [type(obj)(*args) for args in zip(*map(to_map, obj))]
         if isinstance(obj, tuple) and len(obj) > 0:
+            # pyrefly: ignore [no-matching-overload]
             return list(zip(*map(to_map, obj)))
         if isinstance(obj, list) and len(obj) > 0:
+            # pyrefly: ignore [no-matching-overload]
             return [list(i) for i in zip(*map(to_map, obj))]
         if isinstance(obj, dict) and len(obj) > 0:
+            # pyrefly: ignore [no-matching-overload]
             return [type(obj)(i) for i in zip(*map(to_map, obj.items()))]
         return [obj]
 
@@ -252,7 +257,7 @@ def _apply_to_tensors(fn, container):
 
 def _to_kwargs(
     inputs: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]],
+    kwargs: dict[str, Any] | None,
     target_device: torch.device,
     use_side_stream_for_tensor_copies: bool,
 ) -> tuple[tuple[Any, ...], tuple[dict[str, Any], ...]]:

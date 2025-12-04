@@ -714,8 +714,10 @@ def broadcast_to(array: ArrayLike, shape, subok: NotImplementedType = False):
     return torch.broadcast_to(array, size=shape)
 
 
-# This is a function from tuples to tuples, so we just reuse it
-from torch import broadcast_shapes
+# This is a function from tuples to tuples, so we just reuse it.  However,
+# dynamo expects its __module__ to be torch._numpy
+def broadcast_shapes(*args):
+    return torch.broadcast_shapes(*args)
 
 
 def broadcast_arrays(*args: ArrayLike, subok: NotImplementedType = False):
@@ -1449,7 +1451,7 @@ def rollaxis(a: ArrayLike, axis, start=0):
         # numpy returns a view, here we try returning the tensor itself
         # return tensor[...]
         return a
-    axes = list(range(0, n))
+    axes = list(range(n))
     axes.remove(axis)
     axes.insert(start, axis)
     return a.view(axes)
@@ -1867,7 +1869,7 @@ def common_type(*tensors: ArrayLike):
         if not (t.is_floating_point or t.is_complex):
             p = 2  # array_precision[_nx.double]
         else:
-            p = array_precision.get(t, None)
+            p = array_precision.get(t)
             if p is None:
                 raise TypeError("can't get common type for non-numeric array")
         precision = builtins.max(precision, p)

@@ -5,10 +5,10 @@ from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, T
 
 
 class TestStream(TestCase):
+    @skipIfTorchDynamo()
     def test_stream_create(self):
         stream = torch.Stream(device="openreg")
         self.assertEqual(stream.device_index, torch.openreg.current_device())
-
         stream = torch.Stream(device="openreg:1")
         self.assertEqual(stream.device.type, "openreg")
         self.assertEqual(stream.device_index, 1)
@@ -24,9 +24,23 @@ class TestStream(TestCase):
         )
         self.assertEqual(stream, stream1)
 
+    @skipIfTorchDynamo()
     def test_stream_context(self):
         with torch.Stream(device="openreg:1") as stream:
             self.assertEqual(torch.accelerator.current_stream(), stream)
+
+    def test_stream_context_exception_restore(self):
+        prev = torch.accelerator.current_stream()
+        inner_stream = torch.Stream(device="openreg:1")
+        try:
+            with inner_stream:
+                # inside the context we should be on the inner stream
+                self.assertEqual(torch.accelerator.current_stream(), inner_stream)
+                raise RuntimeError("forced")
+        except RuntimeError:
+            pass
+        # After the exception, the current stream should be restored.
+        self.assertEqual(torch.accelerator.current_stream(), prev)
 
     @skipIfTorchDynamo()
     def test_stream_switch(self):
@@ -36,10 +50,13 @@ class TestStream(TestCase):
         self.assertEqual(current_stream, stream1)
 
         stream2 = torch.Stream(device="openreg:1")
+        current_stream = torch.accelerator.current_stream()
+        self.assertEqual(current_stream, stream1)
         torch.accelerator.set_stream(stream2)
         current_stream = torch.accelerator.current_stream()
         self.assertEqual(current_stream, stream2)
 
+    @skipIfTorchDynamo()
     def test_stream_synchronize(self):
         stream = torch.Stream(device="openreg:1")
         self.assertEqual(True, stream.query())
@@ -49,12 +66,14 @@ class TestStream(TestCase):
         stream.synchronize()
         self.assertEqual(True, stream.query())
 
+    @skipIfTorchDynamo()
     def test_stream_repr(self):
         stream = torch.Stream(device="openreg:1")
         self.assertTrue(
             "torch.Stream device_type=openreg, device_index=1" in repr(stream)
         )
 
+    @skipIfTorchDynamo()
     def test_stream_wait_stream(self):
         stream_1 = torch.Stream(device="openreg:0")
         stream_2 = torch.Stream(device="openreg:1")

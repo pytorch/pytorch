@@ -81,7 +81,7 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   ProcessGroup::BackendType backendType{ProcessGroup::BackendType::UNDEFINED};
   try {
     backendType = deviceTypeToBackendType_.at(deviceType);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     TORCH_CHECK(
         false, "No backend type associated with device type ", deviceType);
   }
@@ -165,7 +165,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     const std::optional<std::string>& name,
     const std::optional<std::string>& desc) {
   TORCH_CHECK(
-      ranks.size() > 0,
+      !ranks.empty(),
       "Split ranks cannot be empty. Please provide a non-empty list of ranks to split the group.");
   TORCH_CHECK(
       ranks.size() <= static_cast<size_t>(size_),

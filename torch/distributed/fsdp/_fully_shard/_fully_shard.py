@@ -4,16 +4,8 @@
 from __future__ import annotations
 
 import functools
-from typing import (
-    Any,
-    Callable,
-    cast,
-    NoReturn,
-    Optional,
-    overload,
-    TYPE_CHECKING,
-    Union,
-)
+from contextlib import contextmanager
+from typing import Any, cast, NoReturn, Optional, overload, TYPE_CHECKING, Union
 from typing_extensions import deprecated
 
 import torch
@@ -36,7 +28,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable, Iterator
 
     from torch.distributed.tensor import DeviceMesh, Shard
 
@@ -46,6 +38,8 @@ __all__ = [
     "UnshardHandle",
     "register_fsdp_forward_method",
     "get_cls_to_fsdp_cls",
+    "disable_fsdp_module_new_init",
+    "share_comm_ctx",
 ]
 
 
@@ -57,6 +51,7 @@ def get_cls_to_fsdp_cls() -> dict[type, type]:
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def fully_shard(
     module: nn.Module,
     *,
@@ -70,6 +65,7 @@ def fully_shard(
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def fully_shard(
     module: list[nn.Module],
     *,
@@ -246,7 +242,7 @@ def fully_shard(
     # Place FSDP leftmost for highest priority in the method resolution order
     for module in modules:
         cls = module.__class__
-        new_cls = cls_to_fsdp_cls.get(cls, None)
+        new_cls = cls_to_fsdp_cls.get(cls)
         if not new_cls:
             dct = {"__deepcopy__": _unimplemented_deepcopy}
             new_cls = type(f"FSDP{cls.__name__}", (FSDPModule, cls), dct)
@@ -261,6 +257,19 @@ def _unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     )
 
 
+_enable_fsdp_module_new_init: bool = True
+
+
+@contextmanager
+def disable_fsdp_module_new_init() -> Iterator[None]:
+    global _enable_fsdp_module_new_init
+    prev, _enable_fsdp_module_new_init = _enable_fsdp_module_new_init, False
+    try:
+        yield
+    finally:
+        _enable_fsdp_module_new_init = prev
+
+
 class FSDPModule:
     def __new__(cls, *args, **kwargs):
         """
@@ -271,7 +280,8 @@ class FSDPModule:
         # and index 1 is the `FSDPModule` class itself
         orig_cls = cls.__mro__[2]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
-        self.__init__(*args, **kwargs)
+        if _enable_fsdp_module_new_init:
+            self.__init__(*args, **kwargs)
         return self
 
     def reshard(self) -> None:
@@ -700,6 +710,34 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
         method_name,
         wrapped_method.__get__(module, type(module)),  # type:ignore[attr-defined]
     )
+
+
+def share_comm_ctx(modules: list[FSDPModule]) -> None:
+    """
+    Share cuda streams for multiple FSDPModules
+
+    Example usage:
+        from torch.distributed.fsdp import share_comm_ctx
+        share_comm_ctx([fsdp_model_1, fsdp_model_2, ...])
+
+    For Pipeline Parallelism (PP), each model chunk is a FSDP root. We want
+    to share cuda streams for all-gather, reduce-scatter, and all-reduce.
+    This avoids allocating inter-stream memory framgmentation
+
+    Args:
+        modules (List[FSDPModule]): modules to share cuda streams
+    """
+    if len(modules) == 0:
+        return
+    for module in modules:
+        if not isinstance(module, FSDPModule):
+            raise ValueError(f"Expects list of FSDPModules but got {module}")
+    fsdp_states = [module._get_fsdp_state() for module in modules]
+    comm_ctx = fsdp_states[0]._comm_ctx
+    for fsdp_state in fsdp_states[1:]:
+        fsdp_state._comm_ctx = comm_ctx
+        if fsdp_param_group := fsdp_state._fsdp_param_group:
+            fsdp_param_group.comm_ctx = comm_ctx
 
 
 def _assert_all_fsdp_modules(modules: Iterable[Any]) -> None:

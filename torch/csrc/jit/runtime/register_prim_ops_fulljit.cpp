@@ -4,25 +4,14 @@
 #include <ATen/core/ivalue.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/jit/frontend/tracer.h>
 
 #include <algorithm>
-#include <bitset>
-#include <cctype>
 #include <cmath>
-#include <exception>
 #include <fstream>
 #include <iostream>
-#include <limits>
-#include <memory>
-#include <mutex>
-#include <ostream>
 #include <stdexcept>
 #include <string>
-#include <typeinfo>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
