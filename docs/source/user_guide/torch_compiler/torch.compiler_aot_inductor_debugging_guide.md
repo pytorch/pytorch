@@ -34,7 +34,7 @@ CUDA_LAUNCH_BLOCKING=1
 These flags take effect at runtime:
 
 - `PYTORCH_NO_CUDA_MEMORY_CACHING=1` disables PyTorch's Caching Allocator, which allocates a bigger buffer than needed immediately to reduce the number of buffer allocations. This is usually the reason why CUDA illegal memory access errors are non-deterministic.
-![How PyTorch's caching allocator can mask CUDA illegal memory access errors](./_static/img/aoti_debugging_guide/cuda_ima_cca.png)
+![How PyTorch's caching allocator can mask CUDA illegal memory access errors](../../_static/img/aoti_debugging_guide/cuda_ima_cca.png)
 *Figure: How PyTorch's caching allocator can mask CUDA illegal memory access errors*
 
 - `CUDA_LAUNCH_BLOCKING=1` forces the kernels to launch one at a time. Without this, we would get the famous "CUDA kernel errors might be asynchronously reported at some other API call" warning since kernels are launched asynchronously.
