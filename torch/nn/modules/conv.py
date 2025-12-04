@@ -67,7 +67,7 @@ class _ConvNd(Module):
     __annotations__ = {"bias": Optional[torch.Tensor]}
 
     def _conv_forward(  # type: ignore[empty-body]
-        self, input: Tensor, weight: Tensor, bias: Optional[Tensor]
+        self, input: Tensor, weight: Tensor, bias: Tensor | None
     ) -> Tensor: ...
 
     in_channels: int
@@ -82,7 +82,7 @@ class _ConvNd(Module):
     groups: int
     padding_mode: Literal["zeros", "reflect", "replicate", "circular"]
     weight: Tensor
-    bias: Optional[Tensor]
+    bias: Tensor | None
 
     def __init__(
         self,
@@ -353,7 +353,7 @@ class Conv1d(_ConvNd):
             **factory_kwargs,
         )
 
-    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Tensor | None):
         if self.padding_mode != "zeros":
             return F.conv1d(
                 F.pad(
@@ -531,7 +531,7 @@ class Conv2d(_ConvNd):
             **factory_kwargs,
         )
 
-    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Tensor | None):
         if self.padding_mode != "zeros":
             return F.conv2d(
                 F.pad(
@@ -701,7 +701,7 @@ class Conv3d(_ConvNd):
             **factory_kwargs,
         )
 
-    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Optional[Tensor]):
+    def _conv_forward(self, input: Tensor, weight: Tensor, bias: Tensor | None):
         if self.padding_mode != "zeros":
             return F.conv3d(
                 F.pad(
@@ -766,12 +766,12 @@ class _ConvTransposeNd(_ConvNd):
     def _output_padding(
         self,
         input: Tensor,
-        output_size: Optional[list[int]],
+        output_size: list[int] | None,
         stride: list[int],
         padding: list[int],
         kernel_size: list[int],
         num_spatial_dims: int,
-        dilation: Optional[list[int]] = None,
+        dilation: list[int] | None = None,
     ) -> list[int]:
         if output_size is None:
             ret = _single(self.output_padding)  # converting to list if was not already
@@ -965,7 +965,7 @@ class ConvTranspose1d(_ConvTransposeNd):
             **factory_kwargs,
         )
 
-    def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
+    def forward(self, input: Tensor, output_size: list[int] | None = None) -> Tensor:
         if self.padding_mode != "zeros":
             raise ValueError(
                 "Only `zeros` padding mode is supported for ConvTranspose1d"
@@ -1153,7 +1153,7 @@ class ConvTranspose2d(_ConvTransposeNd):
             **factory_kwargs,
         )
 
-    def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
+    def forward(self, input: Tensor, output_size: list[int] | None = None) -> Tensor:
         """
         Performs the forward pass.
 
@@ -1344,7 +1344,7 @@ class ConvTranspose3d(_ConvTransposeNd):
             **factory_kwargs,
         )
 
-    def forward(self, input: Tensor, output_size: Optional[list[int]] = None) -> Tensor:
+    def forward(self, input: Tensor, output_size: list[int] | None = None) -> Tensor:
         if self.padding_mode != "zeros":
             raise ValueError(
                 "Only `zeros` padding mode is supported for ConvTranspose3d"

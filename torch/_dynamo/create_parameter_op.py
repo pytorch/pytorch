@@ -22,8 +22,7 @@ class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
     # pyrefly: ignore [bad-override]
     def forward(ctx: Any, tensor: Any, placeholder: Any) -> torch.nn.Parameter:
-        if tensor.requires_grad:
-            tensor = tensor.detach()
+        assert not tensor.requires_grad
         return placeholder.set_(tensor)
 
     @staticmethod

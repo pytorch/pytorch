@@ -7,7 +7,12 @@ from torch.fx._compatibility import compatibility
 from torch.fx.graph import Graph
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
-from torch.fx.passes.tools_common import NodeList, NodeSet
+from torch.fx.passes.tools_common import (  # noqa: F401
+    legalize_graph,
+    NodeList,
+    NodeSet,
+    stable_topological_sort,
+)
 from torch.fx.passes.utils import lift_subgraph_as_module  # type: ignore[attr-defined]
 
 
@@ -283,7 +288,7 @@ def fuse_by_partitions(
 
         erase_nodes(gm, sorted_nodes)
 
-    torch.fx.passes.tools_common.stable_topological_sort(gm)
+    stable_topological_sort(gm)
     gm.graph.lint()
 
     return gm
