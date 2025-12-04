@@ -3843,7 +3843,6 @@ def error_inputs_max_pool3d(op_info, device, **kwargs):
                                  kwargs={'kernel_size': 2}),
                      error_regex='Output size is too small')
 
-
 def sample_inputs_normalize(self, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, low=-1, high=1, device=device, dtype=dtype, requires_grad=requires_grad)
 
