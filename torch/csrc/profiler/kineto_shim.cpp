@@ -179,15 +179,17 @@ class ExperimentalConfigWrapper {
   }
 
   void prepareTraceWithExperimentalOptions(
-      std::set<libkineto::ActivityType>&& enabled_activities,
-      bool hasActivityTypeXPU) {
+      std::set<libkineto::ActivityType>&& enabled_activities) {
     std::set<libkineto::ActivityType> k_activities =
         std::move(enabled_activities);
 #ifdef USE_KINETO
+#if not defined(USE_CUDA) and defined(USE_XPU)
+    k_activities.insert(libkineto::ActivityType::XPU_SCOPE_PROFILER);
+    constexpr const char PTI[] = "XPUPTI";
+#else
     k_activities.insert(libkineto::ActivityType::CUDA_PROFILER_RANGE);
-    if (hasActivityTypeXPU) {
-      k_activities.insert(libkineto::ActivityType::XPU_SCOPE_PROFILER);
-    }
+    constexpr const char PTI[] = "CUPTI";
+#endif
 
     // Add CPU activities if we are measuring per kernel ranges
     if (config_.profiler_measure_per_kernel) {
@@ -195,31 +197,23 @@ class ExperimentalConfigWrapper {
     }
 
     const size_t num_metrics = config_.profiler_metrics.size();
-
-    LOG(INFO) << "CUPTI profiler metrics size = " << num_metrics;
-
-    std::string metrics;
-    for (size_t i = 0; i < num_metrics; i++) {
-      if (i > 0) {
-        metrics += ',';
-      }
-      metrics += config_.profiler_metrics[i];
-    }
-
     std::stringstream configss;
+
+    LOG(INFO) << PTI << " profiler metrics size = " << num_metrics;
+
     configss << "ACTIVITIES_WARMUP_PERIOD_SECS=0\n"
-             << "CUPTI_PROFILER_METRICS=" << metrics << '\n';
-    if (hasActivityTypeXPU && !metrics.empty()) {
-      configss << "XPUPTI_PROFILER_METRICS=" << metrics << '\n';
-    }
+             << PTI << "_PROFILER_METRICS=";
 
-    std::string perKernel =
-        config_.profiler_measure_per_kernel ? "true" : "false";
-
-    configss << "CUPTI_PROFILER_ENABLE_PER_KERNEL=" << perKernel << '\n';
-    if (hasActivityTypeXPU) {
-      configss << "XPUPTI_PROFILER_ENABLE_PER_KERNEL=" << perKernel << '\n';
+    for (size_t i = 0; i < num_metrics; i++) {
+      configss << config_.profiler_metrics[i];
+      if (num_metrics > 1 && i < (num_metrics - 1)) {
+        configss << ',';
+      }
     }
+    configss << "\n"
+             << PTI << "_PROFILER_ENABLE_PER_KERNEL="
+             << (config_.profiler_measure_per_kernel ? "true" : "false")
+             << '\n';
     configss << "CUSTOM_CONFIG=" << config_.custom_profiler_config << '\n';
     LOG(INFO) << "Generated config = " << configss.str();
 
@@ -317,9 +311,7 @@ void prepareTrace(
 
   // Experimental Configuration options are present
   if (config && configWrap.assertValid()) {
-    configWrap.prepareTraceWithExperimentalOptions(
-        std::move(k_activities),
-        activities.count(torch::autograd::profiler::ActivityType::XPU));
+    configWrap.prepareTraceWithExperimentalOptions(std::move(k_activities));
     return;
   }
 
