@@ -3,12 +3,6 @@
 namespace c10d::nccl_extension {
 
 #define THREADS_PER_BLOCK 512
-#define WARP_SIZE 32
-
-#define AT_DISPATCH_NCCL_FLOATS(scalar_type, name, ...)                  \
-  AT_DISPATCH_SWITCH(                                                  \
-      scalar_type, name, AT_DISPATCH_CASE(at::kBFloat16, __VA_ARGS__); \
-      AT_DISPATCH_CASE(at::kFloat, __VA_ARGS__));
 
 __device__ __forceinline__ char* get_remote_ptr(
     void** buffer,  // buffers_dev_
@@ -17,6 +11,68 @@ __device__ __forceinline__ char* get_remote_ptr(
 ) {
     char* base = reinterpret_cast<char*>(buffer[peer]);
     return base + byte_offset;
+}
+
+__device__ inline void copy_bytes_vec16(
+    const char* src_base,
+    char* dst_base,
+    size_t nbytes,
+    size_t tid,
+    size_t stride)
+{
+    if (nbytes == 0) return;
+
+    uintptr_t src_addr = reinterpret_cast<uintptr_t>(src_base);
+    uintptr_t dst_addr = reinterpret_cast<uintptr_t>(dst_base);
+
+    // head: try to align both to 16B
+    // We can only align both with a small head copy if they share the
+    // same offset modulo 16.
+    size_t head = 0;
+    if ((src_addr & 0xF) == (dst_addr & 0xF)) {
+        size_t misalign = src_addr & 0xF;
+        if (misalign != 0) {
+            size_t to_align = min(nbytes, 16 - misalign);
+            if (tid == 0) {
+                for (size_t i = 0; i < to_align; ++i) {
+                    dst_base[i] = src_base[i];
+                }
+            }
+            head = to_align;
+            src_addr += head;
+            dst_addr += head;
+            src_base += head;
+            dst_base += head;
+            nbytes -= head;
+        }
+    }
+    if (nbytes == 0) return;
+
+    // If either pointer is still not 16B aligned, we *must not* issue
+    // 16B vector loads/stores. Fall back to scalar grid-stride copy.
+    if ((src_addr & 0xF) != 0 || (dst_addr & 0xF) != 0) {
+        for (size_t i = tid; i < nbytes; i += stride) {
+            dst_base[i] = src_base[i];
+        }
+        return;
+    }
+
+    // middle: 16B vectorized copy
+    size_t n_vec = nbytes / 16;
+
+    for (size_t vec_idx = tid; vec_idx < n_vec; vec_idx += stride) {
+        const char* src_ptr = src_base + vec_idx * 16;
+        char* dst_ptr = dst_base + vec_idx * 16;
+        auto v = at::native::memory::ld_vec<16>(src_ptr);   // load 16 bytes
+        at::native::memory::st_vec<16>(dst_ptr, v);         // store 16 bytes
+    }
+
+    // tail: leftover bytes (< 16)
+    size_t copied = n_vec * 16;
+    size_t tail   = nbytes - copied;
+    for (size_t i = tid; i < tail; i += stride) {
+        dst_base[copied + i] = src_base[copied + i];
+    }
 }
 
 __global__ void lsa_put_kernel(
@@ -33,11 +89,7 @@ __global__ void lsa_put_kernel(
     // Calculate remote dst pointer
     auto dst = get_remote_ptr(buffer, dst_peer, dst_byte_offset);
     const char* src_bytes = reinterpret_cast<const char*>(src);
-
-    // TODO: use 16B access for efficiency
-    for (size_t i = tid; i < nbytes; i += stride) {
-        dst[i] = src_bytes[i];
-    }
+    copy_bytes_vec16(src_bytes, dst, nbytes, tid, stride);
 }
 
 __global__ void lsa_put_signal_kernel(
@@ -55,11 +107,7 @@ __global__ void lsa_put_signal_kernel(
     // 1) data put
     auto dst = get_remote_ptr(buffer, dst_peer, dst_byte_offset);
     const char* src_bytes = reinterpret_cast<const char*>(src);
-
-    // TODO: use 16B access for efficiency
-    for (size_t i = tid; i < nbytes; i += stride) {
-        dst[i] = src_bytes[i];
-    }
+    copy_bytes_vec16(src_bytes, dst, nbytes, tid, stride);
 
     __syncthreads();
 
@@ -159,11 +207,7 @@ __global__ void lsa_get_kernel(
     // remote src pointer
     auto src = get_remote_ptr(buffer, peer, src_byte_offset);
     char* dst_bytes = reinterpret_cast<char*>(dst);
-
-    // TODO: use 16B access for efficiency
-    for (size_t i = tid; i < nbytes; i += stride) {
-        dst_bytes[i] = src[i];
-    }
+    copy_bytes_vec16(src, dst_bytes, nbytes, tid, stride);
 }
 
 void nccl_get(at::Tensor& tensor, const int64_t peer) {
