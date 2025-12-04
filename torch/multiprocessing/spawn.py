@@ -265,7 +265,7 @@ def start_processes(
         # used a multiprocessing.Queue but that can be prone to
         # deadlocks, so we went with a simpler solution for a one-shot
         # message between processes.
-        tf = tempfile.NamedTemporaryFile(
+        tf = tempfile.NamedTemporaryFile(  # noqa: SIM115
             prefix="pytorch-errorfile-", suffix=".pickle", delete=False
         )
         tf.close()

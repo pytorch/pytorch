@@ -356,7 +356,17 @@ ScalarType toScalarType(const DLDataType& dtype) {
   return stype;
 }
 
+
 namespace {
+
+int64_t toStorageOffset(int64_t byte_offset, ScalarType stype) {
+  if (byte_offset == 0) {
+    return 0;
+  }
+  const auto element_size = c10::elementSize(stype);
+  TORCH_CHECK_VALUE(byte_offset % element_size == 0, "byte offset must be multiple of element size");
+  return byte_offset / element_size;
+}
 
 // The templated classes below are needed for supporting both:
 //   - DLManagedTensor
@@ -393,13 +403,18 @@ T* toDLPackImpl(const Tensor& src) {
   atDLMTensor->handle = src;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
   atDLMTensor->tensor.deleter = &deleter<T>;
-  atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
+  if (src.device().type()  == kMPS) {
+      atDLMTensor->tensor.dl_tensor.data = src.storage().mutable_data();
+      atDLMTensor->tensor.dl_tensor.byte_offset = src.storage_offset() * c10::elementSize(src.scalar_type());
+  } else {
+      atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
+      atDLMTensor->tensor.dl_tensor.byte_offset = 0;
+  }
   atDLMTensor->tensor.dl_tensor.device = torchDeviceToDLDevice(src.device());
   atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(src.sizes().data());
   atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(src.strides().data());
-  atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   fillVersion(&atDLMTensor->tensor);
 
   return &(atDLMTensor->tensor);
@@ -426,6 +441,7 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
   ScalarType stype = toScalarType(dl_tensor.dtype);
 
   if (!dl_tensor.strides) {
+    TORCH_CHECK_VALUE(dl_tensor.byte_offset == 0, "Expected zero byte_offset");
     return at::from_blob(
         dl_tensor.data,
         IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
@@ -437,6 +453,7 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
       dl_tensor.data,
       IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
       IntArrayRef(dl_tensor.strides, dl_tensor.ndim),
+      toStorageOffset(dl_tensor.byte_offset, stype),
       deleter,
       at::device(device).dtype(stype),
       {device});
