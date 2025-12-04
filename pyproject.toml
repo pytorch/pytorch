@@ -177,7 +177,6 @@ ignore = [
     "SIM115", # Checks for cases where files are opened without using a context manager.
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
-    "SIM118",
     "SIM300", # Yoda condition detected
     "UP007", # keep-runtime-typing
     "UP045", # keep-runtime-typing
