@@ -283,7 +283,7 @@ struct CachingHostAllocatorImpl {
       return {nullptr, nullptr};
     }
 
-    auto&& [mempool_id, pool] = get_allocation_pool(get_current_stream());
+    auto&& [mempool_id, pool] = get_allocation_pool_for_current_stream();
 
     // If we are using background threads, we can process events in the
     // background.
@@ -298,7 +298,7 @@ struct CachingHostAllocatorImpl {
     // First, try to allocate from the free list of the chosen pool
     auto* block = get_free_block(roundSize, pool);
     if (block) {
-      block->was_allocated_during_stream_capture_ = stream_is_capturing(get_current_stream());
+      block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
       return {block->ptr_, reinterpret_cast<void*>(block)};
     }
 
@@ -328,7 +328,7 @@ struct CachingHostAllocatorImpl {
     block = new B(roundSize, ptr);
     block->allocated_ = true;
     block->owning_pool_ = mempool_id;
-    block->was_allocated_during_stream_capture_ = stream_is_capturing(get_current_stream());
+    block->was_allocated_during_stream_capture_ = current_stream_is_capturing_fast_path();
     add_allocated_block(block, pool);
     return {block->ptr_, reinterpret_cast<void*>(block)};
   }
@@ -441,14 +441,11 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  // TODO: Rethink how this is implemented. Should it take a pool id
-  // like in CUDACachingAllocator?
+  // TODO: Make this take a pool id like in CUDACachingAllocator
   virtual void empty_cache() {
-    // Flush available blocks in all pools into their free_lists.
     process_events(default_pool_);
-
     free_from_pool(default_pool_);
-    // Also flush and free from private pools that are marked freeable
+
     {
       std::unique_lock<std::shared_mutex> lg(instance_mutex_);
       for (auto it = graph_pools_freeable_.begin(); it != graph_pools_freeable_.end();) {
@@ -593,7 +590,8 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  void add_allocated_block(B* block, BlockPool& pool) {
+ private:
+  virtual void add_allocated_block(B* block, BlockPool& pool) {
     std::lock_guard<std::mutex> g(pool.blocks_mutex_);
     pool.blocks_.insert(block);
     stats_.allocations.increase(1);
@@ -614,7 +612,7 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  B* get_free_block(size_t size, BlockPool& pool) {
+  virtual B* get_free_block(size_t size, BlockPool& pool) {
     auto index = size_index(size);
     std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
     if (!pool.free_list_[index].list_.empty()) {
@@ -628,9 +626,7 @@ struct CachingHostAllocatorImpl {
     return nullptr;
   }
 
- private:
-
-  void process_events(BlockPool& pool) {
+  virtual void process_events(BlockPool& pool) {
     // process all events in the given pool until the last unready event.
     process_events_for_specific_size(-1, pool);
   }
@@ -647,6 +643,9 @@ struct CachingHostAllocatorImpl {
     }
 
     while (true) {
+      // Avoid calling cudaEventDestroy while holding a mutex, so move
+      // intermediate events out of the lock into this object.
+      // process the last event
       std::optional<std::pair<E, B*>> processed;
       {
         std::lock_guard<std::mutex> g(pool.events_mutex_);
@@ -698,6 +697,7 @@ struct CachingHostAllocatorImpl {
         }
       }
 
+      // Process the events.
       TORCH_INTERNAL_ASSERT(processed);
       auto* block = processed->second;
       bool available = false;
@@ -741,6 +741,7 @@ struct CachingHostAllocatorImpl {
           "beginAllocateToPool: already recording to mempool_id");
     }
     captures_underway_.emplace_back(pool_id, std::move(filter));
+    captures_underway_size_.fetch_add(1, std::memory_order_relaxed);
   }
 
   void end_allocate_to_pool(c10::MempoolId_t pool_id) {
@@ -749,6 +750,7 @@ struct CachingHostAllocatorImpl {
          ++it) {
       if (it->first == pool_id) {
         captures_underway_.erase(it);
+        captures_underway_size_.fetch_sub(1, std::memory_order_relaxed);
         return;
       }
     }
@@ -765,11 +767,6 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-  void create_or_incref_pool(c10::MempoolId_t pool_id) {
-    std::unique_lock<std::shared_mutex> lg(instance_mutex_);
-    create_or_incref_pool_under_lock(pool_id);
-  }
-
   void release_pool(c10::MempoolId_t pool_id) {
     std::unique_lock<std::shared_mutex> lg(instance_mutex_);
     auto* pp = graph_pools_.at(pool_id).get();
@@ -783,24 +780,26 @@ struct CachingHostAllocatorImpl {
   }
 
  private:
-  // Helper: returns the correct pool for a newly allocated block.
-  std::tuple<c10::MempoolId_t, BlockPool&> get_allocation_pool(c10::Stream stream) {
+  std::tuple<c10::MempoolId_t, BlockPool&> get_allocation_pool_for_current_stream() {
+    if (C10_LIKELY(captures_underway_size_.load(std::memory_order_relaxed) == 0)) {
+      return {c10::MempoolId_t{0, 0}, default_pool_};
+    }
+
     std::shared_lock<std::shared_mutex> lg(instance_mutex_);
-    if (C10_UNLIKELY(!captures_underway_.empty())) {
-      for (auto& entry : captures_underway_) {
-        if (entry.second(stream)) {
-          auto it = graph_pools_.find(entry.first);
-          TORCH_INTERNAL_ASSERT(it != graph_pools_.end());
-          auto id = entry.first;
-          if (C10_UNLIKELY(!stream_is_capturing(S(S::UNCHECKED, stream)))) {
-            TORCH_WARN_ONCE("CachingHostAllocator is allocating to private pool (",
-                            id.first, ",", id.second,
-                            ") but the current stream is not capturing. Private "
-                            "pools have been tested only during graph capture. "
-                            "See https://github.com/pytorch/pytorch/pull/167507#discussion_r2561698011");
-          }
-          return {id, it->second->blocks};
+    S stream = get_current_stream();
+    for (auto& entry : captures_underway_) {
+      if (entry.second(stream)) {
+        auto it = graph_pools_.find(entry.first);
+        TORCH_INTERNAL_ASSERT(it != graph_pools_.end());
+        auto id = entry.first;
+        if (C10_UNLIKELY(!stream_is_capturing(stream))) {
+          TORCH_WARN_ONCE("CachingHostAllocator is allocating to private pool (",
+                          id.first, ",", id.second,
+                          ") but the current stream is not capturing. Private "
+                          "pools have been tested only during graph capture. "
+                          "See https://github.com/pytorch/pytorch/pull/167507#discussion_r2561698011");
         }
+        return {id, it->second->blocks};
       }
     }
     return {c10::MempoolId_t{0, 0}, default_pool_};
@@ -816,6 +815,22 @@ struct CachingHostAllocatorImpl {
     auto it = graph_pools_.find(id);
     TORCH_INTERNAL_ASSERT(it != graph_pools_.end());
     return it->second->blocks;
+  }
+
+  // We want to keep the non stream capture case as fast as possible,
+  // since memory allocation is often in the critical path in non
+  // stream capture code. This function will skip the overhead of
+  // locking on instance_mutex_, two virtual function calls, and a
+  // call into the CUDA API in order to prevent overheads whenever
+  // possible.
+  bool current_stream_is_capturing_fast_path() const {
+    // Stream capture can allocate only to private pools. If there
+    // are no private pools for which capture is currently underway,
+    // then by modus tollens the current stream is not capturing.
+    if (C10_LIKELY(captures_underway_size_.load(std::memory_order_relaxed) == 0)) {
+      return false;
+    }
+    return stream_is_capturing(get_current_stream());
   }
 
   B* get_block_from_ptr(void *ptr) {
@@ -863,7 +878,6 @@ struct CachingHostAllocatorImpl {
     }
   }
 
-private:
   /* These following functions are runtime-related. */
 
   // Allocate page-locked memory on the host.
@@ -896,11 +910,23 @@ private:
   }
 
   // instance variables
-protected:
-  alignas(hardware_destructive_interference_size) std::shared_mutex instance_mutex_;
 
-  // corresponds to c10::MempoolId_t{0,0}
-  BlockPool default_pool_;
+  // instance_mutex_ protects graphs_pools_, graph_pools_freeable_,
+  // and captures_underway_, as well as the use_count field of
+  // PrivatePools in graph_pools_ and graph_pools_freeable_.  We use a
+  // shared mutex because we want to allow for multiple private pools
+  // to be alloated to concurently.  Does not protect default_pool_,
+  // which has its own mutex.
+  alignas(hardware_destructive_interference_size) mutable std::shared_mutex instance_mutex_;
+
+  // we manually maintain the invariant that captures_underway_size_
+  // == captures_underway_.size(). This trick allows for us to check
+  // whether any captures are currently underway without ever taking a
+  // lock on instance_mutex_ (which guards captures_underway_), which
+  // is much more expensive than a relaxed memory load on this
+  // atomic. Read more here:
+  // https://github.com/pytorch/pytorch/pull/167507#discussion_r2586418965
+  std::atomic<size_t> captures_underway_size_;
 
   // Private pools for captures
   ska::flat_hash_map<c10::MempoolId_t, std::unique_ptr<PrivatePool>, c10::MempoolIdHash>
@@ -913,10 +939,13 @@ protected:
   std::vector<
       std::pair<c10::MempoolId_t, std::function<bool(c10::Stream)>>> captures_underway_;
 
+  // corresponds to c10::MempoolId_t{0,0}
+  BlockPool default_pool_;
+
   // Indicates whether the event-processing thread pool is active.
   // Set to false in the destructor to signal background threads to stop.
   std::atomic<bool> active_{false};
-
+protected:
   alignas(hardware_destructive_interference_size) HostStatsStaged stats_;
 };
 
@@ -948,11 +977,6 @@ struct TORCH_API HostAllocator : public at::Allocator {
 
   virtual void end_allocate_to_pool(c10::MempoolId_t pool_id) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for end_allocate_to_pool");
-  }
-
-  virtual void create_or_incref_pool(
-      c10::MempoolId_t pool_id) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for create_or_incref_pool");
   }
 
   virtual void release_pool(c10::MempoolId_t pool_id) {
@@ -1010,11 +1034,6 @@ struct CachingHostAllocatorInterface : public HostAllocator {
 
   void end_allocate_to_pool(c10::MempoolId_t pool_id) override {
     impl_->end_allocate_to_pool(pool_id);
-  }
-
-  void create_or_incref_pool(
-      c10::MempoolId_t pool_id) override {
-    impl_->create_or_incref_pool(pool_id);
   }
 
   void release_pool(c10::MempoolId_t pool_id) override {
