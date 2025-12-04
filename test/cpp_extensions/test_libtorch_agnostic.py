@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
     xfailIfTorchDynamo,
@@ -977,6 +978,132 @@ if not IS_WINDOWS:
 
             reference_transposed = module.reference_from_blob(transposed)
             self.assertEqual(stable_transposed, reference_transposed)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_std_cuda_check_success(self, device):
+            """Test that STD_CUDA_CHECK works correctly for successful CUDA calls."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            result = libtorch_agnostic.ops.test_std_cuda_check_success()
+            expected_device = torch.cuda.current_device()
+            self.assertEqual(result, expected_device)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
+        @parametrize("show_cpp_stacktraces", [False, True])
+        def test_std_cuda_check_error(self, device, show_cpp_stacktraces):
+            """Test that STD_CUDA_CHECK throws std::runtime_error with CUDA error message.
+
+            When TORCH_SHOW_CPP_STACKTRACES=1, the error should include a C++ stack trace.
+            Since this env var is cached on first use, we use subprocess to test both cases.
+            """
+            import os
+            import subprocess
+            import sys
+
+            test_script = """
+import torch
+import libtorch_agnostic_2_10 as libtorch_agnostic
+
+try:
+    libtorch_agnostic.ops.test_std_cuda_check_error()
+except RuntimeError as e:
+    print(str(e))
+"""
+            env = os.environ.copy()
+            env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+            # Pass the current sys.path to subprocess so it can find the locally installed extension
+            env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+            result = subprocess.run(
+                [sys.executable, "-c", test_script],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            error_message = result.stdout + result.stderr
+
+            self.assertTrue(
+                "CUDA error: invalid device ordinal" in error_message
+                or "HIP error: invalid device ordinal" in error_message,
+                f"Expected 'CUDA/HIP error: invalid device ordinal' in error message, got: {error_message}",
+            )
+            self.assertIn(
+                "GPU device may be out of range, do you have enough GPUs?",
+                error_message,
+            )
+
+            if show_cpp_stacktraces:
+                self.assertIn("C++ CapturedTraceback:", error_message)
+                self.assertRegex(
+                    error_message,
+                    r"Exception raised from test_std_.*_check_error at .*test_std_.*check\..*:\d+",
+                )
+            else:
+                self.assertNotIn("C++ CapturedTraceback:", error_message)
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        def test_std_cuda_kernel_launch_check_success(self, device):
+            """Test that STD_CUDA_KERNEL_LAUNCH_CHECK works correctly for successful kernel launches."""
+            import libtorch_agnostic_2_10 as libtorch_agnostic
+
+            libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_success()
+
+        @skipIfTorchVersionLessThan(2, 10)
+        @onlyCUDA
+        @parametrize("show_cpp_stacktraces", [False, True])
+        @skipIfRocm(msg="TODO: @mikaylagawarecki fix after branch cut")
+        def test_std_cuda_kernel_launch_check_error(self, device, show_cpp_stacktraces):
+            """Test that STD_CUDA_KERNEL_LAUNCH_CHECK throws std::runtime_error for invalid kernel launches.
+
+            When TORCH_SHOW_CPP_STACKTRACES=1, the error should include a C++ stack trace.
+            Since this env var is cached on first use, we use subprocess to test both cases.
+            """
+            import os
+            import subprocess
+            import sys
+
+            test_script = """
+import torch
+import libtorch_agnostic_2_10 as libtorch_agnostic
+
+try:
+    libtorch_agnostic.ops.test_std_cuda_kernel_launch_check_error()
+except RuntimeError as e:
+    print(str(e))
+"""
+            env = os.environ.copy()
+            env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+            # Pass the current sys.path to subprocess so it can find the locally installed extension
+            env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+            result = subprocess.run(
+                [sys.executable, "-c", test_script],
+                capture_output=True,
+                text=True,
+                env=env,
+            )
+
+            error_message = result.stdout + result.stderr
+
+            self.assertTrue(
+                "CUDA error: invalid configuration argument" in error_message
+                or "HIP error: invalid configuration argument" in error_message,
+                f"Expected 'CUDA|HIP error: invalid configuration argument' in error message, got: {error_message}",
+            )
+
+            if show_cpp_stacktraces:
+                self.assertIn("C++ CapturedTraceback:", error_message)
+                self.assertRegex(
+                    error_message,
+                    r"Exception raised from test_std_.*_kernel_launch_check_error at .*test_std_.*_check\..*:\d+",
+                )
+            else:
+                self.assertNotIn("C++ CapturedTraceback:", error_message)
 
     instantiate_device_type_tests(TestLibtorchAgnostic, globals(), except_for=None)
 

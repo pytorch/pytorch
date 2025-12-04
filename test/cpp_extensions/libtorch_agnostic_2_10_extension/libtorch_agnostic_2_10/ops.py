@@ -336,3 +336,35 @@ def my_from_blob(data_ptr, sizes, strides, device, dtype) -> Tensor:
     return torch.ops.libtorch_agnostic_2_10.my_from_blob.default(
         data_ptr, sizes, strides, device, dtype
     )
+
+
+def test_std_cuda_check_success() -> int:
+    """
+    Test STD_CUDA_CHECK macro with a successful CUDA operation.
+    Returns the current CUDA device index.
+    """
+    return torch.ops.libtorch_agnostic_2_10.test_std_cuda_check_success.default()
+
+
+def test_std_cuda_check_error() -> None:
+    """
+    Test STD_CUDA_CHECK macro with a failing CUDA operation.
+    This should raise a RuntimeError with the CUDA error message.
+    """
+    torch.ops.libtorch_agnostic_2_10.test_std_cuda_check_error.default()
+
+
+def test_std_cuda_kernel_launch_check_success() -> None:
+    """
+    Test STD_CUDA_KERNEL_LAUNCH_CHECK macro with a successful kernel launch.
+    Launches a simple kernel and checks for errors.
+    """
+    torch.ops.libtorch_agnostic_2_10.test_std_cuda_kernel_launch_check_success.default()
+
+
+def test_std_cuda_kernel_launch_check_error() -> None:
+    """
+    Test STD_CUDA_KERNEL_LAUNCH_CHECK macro with an invalid kernel launch.
+    This should raise a RuntimeError with the CUDA kernel launch error message.
+    """
+    torch.ops.libtorch_agnostic_2_10.test_std_cuda_kernel_launch_check_error.default()
