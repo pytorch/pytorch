@@ -1012,6 +1012,14 @@ def _reduce_scatter_tensor_native_meta(inp, reduce_op, group_size, group_name):
     return inp.new_empty(shape)
 
 
+def _reduce_scatter_tensor_out_native_meta(
+    inp, reduce_op, group_size, group_name, *, out
+):
+    shape = list(inp.size())
+    shape[0] //= group_size
+    return inp.new_empty(shape)
+
+
 def _reduce_scatter_tensor_coalesced_native_meta(
     inputs, reduce_op, group_size, group_name
 ):
@@ -1038,6 +1046,9 @@ lib_impl.impl(
     "Meta",
 )
 lib_impl.impl("reduce_scatter_tensor", _reduce_scatter_tensor_native_meta, "Meta")
+lib_impl.impl(
+    "reduce_scatter_tensor_out", _reduce_scatter_tensor_out_native_meta, "Meta"
+)
 lib_impl.impl(
     "reduce_scatter_tensor_coalesced",
     _reduce_scatter_tensor_coalesced_native_meta,

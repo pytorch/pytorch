@@ -1946,7 +1946,7 @@ class GuardBuilder(GuardBuilderBase):
 
         obj_id = self.id_ref(t, f"type({guard.name})")
         type_repr = repr(t)
-        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id})  # {type_repr}"
+        code = f"___check_type_id({self.arg_ref(guard)}, {obj_id}), type={type_repr}"
         self._set_guard_export_info(guard, [code])
 
         self.get_guard_manager(guard).add_type_match_guard(
@@ -2048,7 +2048,13 @@ class GuardBuilder(GuardBuilderBase):
         ref = self.arg_ref(guard)
         val = self.get(guard.name)
         id_val = self.id_ref(val, guard.name)
-        code = f"___check_obj_id({ref}, {id_val})"
+        try:
+            type_repr = repr(val)
+        except Exception:
+            # During deepcopy reconstruction or other state transitions,
+            # objects may be in an incomplete state where repr() fails
+            type_repr = f"<{type(val).__name__}>"
+        code = f"___check_obj_id({ref}, {id_val}), type={type_repr}"
         self._set_guard_export_info(guard, [code], provided_func_name="ID_MATCH")
         self.get_guard_manager(guard).add_id_match_guard(
             id_val, get_verbose_code_parts(code, guard, recompile_hint)
@@ -3326,6 +3332,11 @@ class GuardsStatePickler(pickle.Pickler):
     def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
         return types.MethodType(func, base)
 
+    @staticmethod
+    def _unpickle_sdp_backend(name: str) -> torch.nn.attention.SDPBackend:
+        # Reconstruct from the Python-facing enum namespace
+        return getattr(torch.nn.attention.SDPBackend, name)
+
     @classmethod
     def _unpickle_cell(cls, val: Any) -> Any:
         def _() -> Any:
@@ -3465,6 +3476,9 @@ class GuardsStatePickler(pickle.Pickler):
         ):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("distributed_c10d.Work",)
+
+        if isinstance(obj, torch.nn.attention.SDPBackend):
+            return type(self)._unpickle_sdp_backend, (obj.name,)
 
         if type(obj).__qualname__ != type(obj).__name__:
             raise torch._dynamo.exc.PackageError(
