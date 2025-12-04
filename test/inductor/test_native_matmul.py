@@ -20,10 +20,7 @@ aten = torch.ops.aten
 @inductor_config.patch({"triton.native_matmul": True})
 class TestTritonDotReduction(TestCase):
     def _check_equal(
-        self,
-        f: Callable,
-        example_inputs: tuple[torch.Tensor],
-        tol: float = 1e-4
+        self, f: Callable, example_inputs: tuple[torch.Tensor], tol: float = 1e-4
     ):
         compiled = torch.compile(f)
         actual = compiled(*example_inputs)
