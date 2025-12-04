@@ -134,6 +134,7 @@ jobs:
           { config: "default", shard: 3, num_shards: 3, runner: "macos-m1-stable" },
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m1-14" },
           { config: "mps", shard: 1, num_shards: 1, runner: "macos-m2-15" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "macos-m1-stable" },
         ]}
     secrets: inherit
 
@@ -165,6 +166,7 @@ jobs:
           { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
           { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
           { config: "default", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
         ]}
     secrets: inherit
 
