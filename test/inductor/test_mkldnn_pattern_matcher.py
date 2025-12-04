@@ -675,7 +675,7 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
         self._test_conv_binary_broadcast_shapes_base(dim=5)
 
     @skipIfNoDynamoSupport
-    @skipIfNoONEDNN 
+    @skipIfNoONEDNN
     @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
     @reduced_f32_on_and_off()
     def test_conv2d_linear_add_broadcast_shapes(self, device):

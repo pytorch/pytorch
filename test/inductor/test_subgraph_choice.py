@@ -1,5 +1,4 @@
 # Owner(s): ["module: inductor"]
-import unittest
 from unittest import mock
 from unittest.mock import MagicMock
 
@@ -8,7 +7,7 @@ from torch._inductor.ir import Buffer, FixedLayout, FlexibleLayout
 from torch._inductor.lowering import register_lowering
 from torch._inductor.select_algorithm import autotune_select_algorithm
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import skipIfXpu, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 

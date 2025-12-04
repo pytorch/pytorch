@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
-    MI350_ARCH,
     parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,

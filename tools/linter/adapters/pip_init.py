@@ -69,7 +69,7 @@ def main() -> None:
     # these cases perform a regular installation.
     in_conda = env.get("CONDA_PREFIX") is not None
     in_virtualenv = env.get("VIRTUAL_ENV") is not None
-    need_user_flag = not in_conda and not in_virtualenv
+    need_user_flag = False
 
     uv: str | None = shutil.which("uv")
     is_uv_managed_python = "uv/python" in sys.base_prefix.replace("\\", "/")
