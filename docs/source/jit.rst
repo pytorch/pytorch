@@ -1,4 +1,4 @@
-TorchScript
+:term:`TorchScript`
 ===========
 
 .. toctree::
@@ -12,12 +12,12 @@ TorchScript
     torch.jit.supported_ops <jit_builtin_functions>
 
 .. warning::
-    TorchScript is deprecated, please use
+    :term:`TorchScript` is deprecated, please use
     `torch.export <https://docs.pytorch.org/docs/stable/export.html>`__ instead.
 
 .. automodule:: torch.jit
 
-Creating TorchScript Code
+Creating :term:`TorchScript` Code
 --------------------------
 
 .. autosummary::
