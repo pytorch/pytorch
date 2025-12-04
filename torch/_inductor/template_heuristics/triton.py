@@ -292,6 +292,16 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(256, 128, 128, 3, 8),
         ]
 
+        self.int8_origami_mm_configs: list[BaseConfig] = [
+            GemmConfig(BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m)
+            for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+                [16, 32, 64, 128, 256], repeat=3
+            )
+            for num_stages in [1, 2, 3, 4, 5]
+            for num_warps in [2, 3, 4, 5, 6]
+            for group_m in [4, 8, 16, 32, 64, 128, 256, 512]
+        ]
+        
         self.mixed_mm_configs: list[BaseConfig] = [
             GemmConfig(16, 128, 256, 3, 4),
             GemmConfig(16, 128, 256, 5, 8),
@@ -756,6 +766,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     def get_exhaustive_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.exhaustive_configs)
+    
+    def get_exhaustive_origami_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
+        return partial(self.preprocess_mm_configs, configs=self.exhaustive_origami_configs)
 
     def get_conv_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(
@@ -1187,6 +1200,30 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for num_stages in [1, self.default_num_stages]
             for num_warps in [4, 8]
             for group_m in [4, 8, 16]
+            for matrix_instr_nonkdim in [0, 16]
+            for waves_per_eu in [0, 2]
+            for kpack in [2]
+        ]
+
+        # Exhaustive search for mm configs
+        self.exhaustive_origami_configs: list[BaseConfig] = [
+            ROCmGemmConfig(
+                BLOCK_M,
+                BLOCK_N,
+                BLOCK_K,
+                num_stages,
+                num_warps,
+                group_m,
+                matrix_instr_nonkdim,
+                waves_per_eu,
+                kpack,
+            )
+            for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+                [16, 32, 64, 128, 256], repeat=3
+            )
+            for num_stages in [1, self.default_num_stages]
+            for num_warps in [4, 8]
+            for group_m in [4, 8, 16, 32, 64, 128, 256, 512, 1024]
             for matrix_instr_nonkdim in [0, 16]
             for waves_per_eu in [0, 2]
             for kpack in [2]
@@ -1649,6 +1686,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         # Generate and process configs
         if config.origami:
+            origami_configs_serach_space = self.get_exhaustive_origami_mm_configs()
             import origami
             from helper import MatmulHeuristicResult
             OrigamiGemmSelector = MatmulHeuristicResult(m, n, k, dtype, dtype, dtype)
@@ -2383,6 +2421,7 @@ class ROCmMMAHTemplateConfigHeuristic(MMTemplateConfigMixin, ROCmConfigHeuristic
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.extra_mm_configs
         self.exhaustive_configs = self.extra_mm_configs
+        self.exhaustive_origami_configs = self.extra_mm_configs
 
 
 @register_template_heuristic(
@@ -2403,6 +2442,7 @@ class ROCmScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, ROCmConfigHeurist
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
         self.exhaustive_configs = self.scaled_mm_configs
+        self.exhaustive_origami_configs = self.scaled_mm_configs
 
 
 @register_template_heuristic(
@@ -2423,6 +2463,7 @@ class ROCmInt8MMTemplateConfigHeuristic(INT8MMTemplateConfigMixin, ROCmConfigHeu
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
         self.exhaustive_configs = self.int8_mm_configs
+        self.exhaustive_origami_configs = self.int8_mm_configs
 
 
 @register_template_heuristic(
@@ -2447,6 +2488,7 @@ class ROCmMMPlusMMTemplateConfigHeuristic(
         # TODO(coconutruben): remove this once we have validated exhaustive support
         # for scaled_mm
         self.exhaustive_configs = self.mm_plus_mm_configs
+        self.exhaustive_origami_configs = self.mm_plus_mm_configs
 
 
 # CPU template-specific classes
