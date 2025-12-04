@@ -24,8 +24,6 @@ def mark_varying(
 
 @torch.library.custom_op("_c10d_functional::all_reduce_sum_invariant", mutates_args=())
 def all_reduce_sum_invariant_op(input: torch.Tensor, group_name: str) -> torch.Tensor:
-    import torch.distributed._functional_collectives as fcols
-
     output = torch.ops._c10d_functional.all_reduce(input, "sum", group_name)
     return torch.ops._c10d_functional.wait_tensor(output)
 
@@ -54,7 +52,7 @@ all_reduce_sum_invariant_op.register_autograd(
 @torch.library.custom_op(
     "_c10d_functional::mark_varying",
     mutates_args=(),
-#    schema="(Tensor(a) input, str group) -> Tensor(a)" # FIXME: compilation
+    #    schema="(Tensor(a) input, str group) -> Tensor(a)" # FIXME: compilation
 )
 def mark_varying_op(input: torch.Tensor, group_name: str) -> torch.Tensor:
     # return input.view_as(input) # FIXME: compilation

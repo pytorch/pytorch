@@ -83,9 +83,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
         output.sum().backward()
 
         self.assertIsNotNone(invariant_input._local_tensor.grad)
-        expected_invariant_grad = torch.full(
-            (3, 3), fill_value=float(self.world_size)
-        )
+        expected_invariant_grad = torch.full((3, 3), fill_value=float(self.world_size))
         self.assertEqual(invariant_input._local_tensor.grad, expected_invariant_grad)
 
     def test_variant_unary(self):
@@ -106,7 +104,9 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
         from torch.distributed.tensor import DTensor
 
         mesh = DeviceMesh(
-            DEVICE, torch.arange(self.world_size).reshape(2, 2), mesh_dim_names=("dp", "tp")
+            DEVICE,
+            torch.arange(self.world_size).reshape(2, 2),
+            mesh_dim_names=("dp", "tp"),
         )
         local_tensor = torch.randn(4, 8)
 
@@ -152,7 +152,9 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
         x = LTensor(torch.randn(4, 8), {"dp"}, mesh1)
         y = LTensor(torch.randn(4, 8), {"dp"}, mesh2)
 
-        with self.assertRaisesRegex(RuntimeError, "Cannot mix LTensors from different meshes"):
+        with self.assertRaisesRegex(
+            RuntimeError, "Cannot mix LTensors from different meshes"
+        ):
             _ = x + y
 
     def test_all_reduce_removes_variant_axis(self):
@@ -168,7 +170,9 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
 
         import torch.distributed._functional_collectives as fcols
 
-        result = fcols.all_reduce(x, "sum", mesh.get_group("dp").group_name).trigger_wait()
+        result = fcols.all_reduce(
+            x, "sum", mesh.get_group("dp").group_name
+        ).trigger_wait()
 
         self.assertIsInstance(result, LTensor)
         self.assertEqual(result.variant_axes, {"tp"})

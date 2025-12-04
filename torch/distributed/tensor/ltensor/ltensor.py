@@ -1,13 +1,13 @@
 """Local Tensor with variance tracking for distributed operations."""
 
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
-from torch.utils._pytree import tree_map
-
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor.placement_types import Replicate
+from torch.utils._pytree import tree_map
 
 
 _CUSTOM_VARIANCE_STRATEGY_MAP: dict[Callable, Callable] = {}
@@ -15,10 +15,12 @@ _CUSTOM_VARIANCE_STRATEGY_MAP: dict[Callable, Callable] = {}
 
 def register_variance_strategy(ops):
     """Register custom variance handler for collective operations."""
+
     def wrapper(func):
         for op in ops:
             _CUSTOM_VARIANCE_STRATEGY_MAP[op] = func
         return func
+
     return wrapper
 
 
@@ -30,10 +32,12 @@ def _get_axis_name_from_group(mesh: DeviceMesh, group_name: str) -> Optional[str
     return None
 
 
-@register_variance_strategy([
-    torch.ops._c10d_functional.all_reduce,
-    torch.ops._c10d_functional.all_gather_into_tensor
-])
+@register_variance_strategy(
+    [
+        torch.ops._c10d_functional.all_reduce,
+        torch.ops._c10d_functional.all_gather_into_tensor,
+    ]
+)
 def _invariant_output_strategy(input_variant_axes, *args, **kwargs):
     """Collectives that make output invariant on the reduced axis (all_reduce, all_gather)."""
     input_tensor, _, group_name = args
@@ -52,7 +56,7 @@ def _invariant_output_strategy(input_variant_axes, *args, **kwargs):
     return input_variant_axes - {axis_name}
 
 
-@register_variance_strategy([]) # [FIXME]: scatter ops
+@register_variance_strategy([])  # [FIXME]: scatter ops
 def _variant_output_strategy(input_variant_axes, *args, **kwargs):
     """Collectives that make output variant on the scatter axis (reduce_scatter)."""
     return input_variant_axes
@@ -88,9 +92,7 @@ class LTensor(torch.Tensor):
         mesh: DeviceMesh,
     ):
         if not isinstance(variant_axes, set):
-            raise TypeError(
-                f"variant_axes must be a set, got {type(variant_axes)}"
-            )
+            raise TypeError(f"variant_axes must be a set, got {type(variant_axes)}")
 
         invalid_axes = variant_axes - set(mesh.mesh_dim_names)
         if invalid_axes:
@@ -100,9 +102,7 @@ class LTensor(torch.Tensor):
             )
 
         r = torch.Tensor._make_subclass(
-            cls,
-            local_tensor,
-            require_grad=local_tensor.requires_grad
+            cls, local_tensor, require_grad=local_tensor.requires_grad
         )
 
         r._variant_axes = variant_axes
@@ -160,7 +160,9 @@ class LTensor(torch.Tensor):
         mesh = meshes.pop()
 
         if func in _CUSTOM_VARIANCE_STRATEGY_MAP:
-            out_variant_axes = _CUSTOM_VARIANCE_STRATEGY_MAP[func](out_variant_axes, *args, **kwargs)
+            out_variant_axes = _CUSTOM_VARIANCE_STRATEGY_MAP[func](
+                out_variant_axes, *args, **kwargs
+            )
 
         def unwrap_and_insert_mark_varying(t):
             if not isinstance(t, LTensor):
@@ -177,9 +179,7 @@ class LTensor(torch.Tensor):
 
             for axis_name in missing_axes:
                 group_name = mesh.get_group(axis_name).group_name
-                local_tensor = vcols.mark_varying(
-                    local_tensor, group_name=group_name
-                )
+                local_tensor = vcols.mark_varying(local_tensor, group_name=group_name)
 
             return local_tensor
 

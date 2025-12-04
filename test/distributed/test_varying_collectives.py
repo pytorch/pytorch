@@ -117,6 +117,7 @@ class TestVaryingFunctionalCollectives(MultiThreadedTestCase):
         )
 
         from torch.distributed import _functional_collectives as fcols
+
         expected_grad_input = fcols.all_reduce(grad_outputs, "sum", group_name)
         self.assertEqual(grad_input, expected_grad_input)
 
