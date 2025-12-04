@@ -228,6 +228,15 @@ void nccl_get(at::Tensor& tensor, const int64_t peer) {
     tensor.data_ptr(),
     nbytes);
 }
+
+bool is_nccl_symmem_available() {
+#ifdef NCCL_HAS_SYMMEM_SUPPORT
+    return true;
+#else
+    return false;
+#endif
+}
+
 } // namespace c10d::nccl_extension
 
 

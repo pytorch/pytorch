@@ -219,6 +219,15 @@ class TestNCCL(TestCase):
             self.assertEqual(outputs[i], expected[i])
 
 
+# Decorator
+def requires_nccl_backend_for_symmem():
+    return skip_but_pass_in_sandcastle_if(
+        not symm_mem.is_nccl_symmem_available(),
+        "test_nccl requires at least NCCL 2.28, skipping tests",
+    )
+
+
+@requires_nccl_backend_for_symmem()
 @requires_cuda_p2p_access()
 class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
     @property
@@ -307,6 +316,16 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             torch.testing.assert_close(
                 tensor, torch.ones(numel, dtype=dtype, device=self.device)
             )
+        c10d.barrier()
+        if self.rank == 1:
+            tensor *= 2
+            torch.ops.symm_mem.nccl_put(tensor, 0)
+            c10d.barrier()
+        elif self.rank == 0:
+            c10d.barrier()
+            torch.testing.assert_close(
+                tensor, torch.ones(numel, dtype=dtype, device=self.device) * 2
+            )      
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
