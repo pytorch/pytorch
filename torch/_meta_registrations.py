@@ -2552,6 +2552,7 @@ if torch._C._has_mkldnn:
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.default)
     @register_meta(torch.ops.onednn.qconv_pointwise.default)
+    @register_meta(torch.ops.onednn.qconv_pointwise.tensor)
     def meta_qconv_pointwise(
         x,
         x_scale,
@@ -2603,6 +2604,7 @@ if torch._C._has_mkldnn:
         return out
 
     @register_meta(torch.ops.onednn.qconv2d_pointwise.binary)
+    @register_meta(torch.ops.onednn.qconv2d_pointwise.binary_tensor)
     def meta_qconv2d_pointwise_binary(
         x,
         x_scale,
@@ -6360,7 +6362,7 @@ def _check_scaled_mm_sizes(
         lambda: f"Expected both inputs to be fp8 or fp4 types but got self.dtype={self.dtype} and mat2.dtype={mat2.dtype}",
     )
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -6590,7 +6592,7 @@ def _check_scaled_mm_sizes_v2(
             SwizzleType.NO_SWIZZLE,
         ]
 
-    if device_hint(self) == "cuda":
+    if device_hint(self) == "cuda" or device_hint(self) == "xpu":
 
         def is_row_major(stride):
             return stride[0] > stride[1] and stride[1] == 1
@@ -8101,7 +8103,8 @@ def meta_scaled_grouped_mm(
 @out_wrapper()
 def softmax(x: Tensor, dim: int, half_to_float: bool) -> Tensor:
     if half_to_float:
-        assert x.dtype == torch.half
+        assert x.dtype in [torch.half, torch.bfloat16]
+
     computation_dtype, result_dtype = utils.elementwise_dtypes(
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
