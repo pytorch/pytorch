@@ -778,7 +778,9 @@ from user code:
             ),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
@@ -1180,7 +1182,9 @@ Reason: no content in function call empty_fn                 test_error_messages
             munge_exc(records[-1].getMessage(), skip=0),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
@@ -1245,7 +1249,9 @@ from user code:
             s,
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
@@ -1352,7 +1358,7 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
             post_munge(munge_exc(records[-1].getMessage(), skip=0)),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Encountered graph break when attempting to store an object's attribute (STORE_ATTR):
+Graph Break Reason: Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y:
 
 Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
@@ -1409,7 +1415,9 @@ Most recent bytecode instructions traced (max 20):
             munge_exc(records[-1].getMessage(), skip=0),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Call to `torch._dynamo.graph_break()`
+Graph Break Reason: Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y):
+
+Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
   Hint: Remove the `torch._dynamo.graph_break()` call.
 
@@ -1666,7 +1674,7 @@ from user code:
             munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
             """\
 Graph break in user code at test_error_messages.py:N
-Graph Break Reason: Encountered graph break when attempting to store an object's attribute (STORE_ATTR):
+Graph Break Reason: Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y:
 
 Call to `torch._dynamo.graph_break()`
   Explanation: User-inserted graph break. Message: None
