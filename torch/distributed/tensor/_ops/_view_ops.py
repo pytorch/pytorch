@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import itertools
 import math
+import copy
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from typing import cast, Optional
@@ -607,6 +608,7 @@ def propagate_shape_and_sharding(
                         )
                     tensor_dim_size = global_input_shape[shard_placement.dim]
                     mesh_dim_size = mesh_sizes[shard_mesh_dim]
+                    sharded_dims.append(dim)
                     if tensor_dim_size % mesh_dim_size != 0:
                         can_shard_dim = False
                         if strict_view:
@@ -719,25 +721,22 @@ def propagate_shape_and_sharding(
         else:
             input_tgt_placements.append(p)
 
-    def _get_split_factor(input_src_spec, input_start_idx, shard_dim):
+    def _get_split_factor(input_src_spec, input_start_idx, shard_dim, mesh_dim):
+        mesh = input_src_spec.mesh
+        local_tensor_shapes = copy.deepcopy(input_src_spec.shape)
         split_factor = 1
-        for tensor_dim, global_tensor_size in enumerate(input_src_spec.shape):
+        for tensor_dim, local_tensor_size_before_shard in enumerate(local_tensor_shapes):
             if tensor_dim < input_start_idx:
                 continue
             if tensor_dim >= shard_dim:
                 break
-            mesh_dim = input_src_spec.dim_map[tensor_dim]
-            if mesh_dim >= 0:
-                local_tensor_size = math.ceil(
-                    global_tensor_size * 1.0 / input_src_spec.mesh.shape[mesh_dim]
-                )
-            else:
-                local_tensor_size = global_tensor_size
-            split_factor = split_factor * local_tensor_size
-        assert split_factor > 1
+            local_tensor_size_after_shard = math.ceil(
+                local_tensor_size_before_shard * 1.0 / mesh.size(mesh_dim)
+            )
+            split_factor = split_factor * local_tensor_size_after_shard
         return split_factor
 
-    def _rewrite_shard_dim(p: Shard, input_src_spec, rule):
+    def _rewrite_shard_dim(p: Shard, input_src_spec, rule, mesh_dim):
         """
         Rewrite the shard dim to the corresponding tensor dim in output.
         For ``_StridedShard``, we can safely keep the placement type and
@@ -775,12 +774,13 @@ def propagate_shape_and_sharding(
             if p.dim == input_start_idx:
                 return Shard(tgt_shard_dim)
             else:
-                split_factor = _get_split_factor(input_src_spec, input_start_idx, p.dim)
+                assert False, "add global shape update logic"
+                split_factor = _get_split_factor(input_src_spec, input_start_idx, p.dim, mesh_dim)
                 return _StridedShard(tgt_shard_dim, split_factor=split_factor)
 
     output_placements = [
-        _rewrite_shard_dim(p, input_src_spec, rule) if isinstance(p, Shard) else p
-        for p in input_tgt_placements
+        _rewrite_shard_dim(p, input_src_spec, rule, mesh_dim) if isinstance(p, Shard) else p
+        for mesh_dim, p in enumerate(input_tgt_placements)
     ]
 
     return input_tgt_placements, output_placements

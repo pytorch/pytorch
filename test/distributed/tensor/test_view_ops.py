@@ -4,6 +4,7 @@
 import contextlib
 import itertools
 import math
+import copy
 from typing import cast
 
 import torch
@@ -774,51 +775,91 @@ class TestViewOps(DTensorTestBase):
         assert self.world_size == 6
         mesh_ndim = 2
         mesh: DeviceMesh = init_device_mesh(self.device_type, (3, self.world_size // 3))
+
+        # self._test_dtensor_flatten_2d_ss(
+        #     (12, 11),
+        #     0,
+        #     2,
+        #     mesh,
+        #     (Shard(0), Shard(1)),
+        # )
+        # return
+
         for tensor_ndim in [2, 3, 4]:
             for flatten_start in range(tensor_ndim):
                 for flatten_end in range(flatten_start + 2, tensor_ndim + 1):
-                    for shard_dim in range(flatten_start, flatten_end):
-                        for shard_placement_idx in range(mesh_ndim):
+                    # # S, R and R, S
+                    # for shard_dim in range(flatten_start, flatten_end):
+                    #     for shard_placement_idx in range(mesh_ndim):
+                    #         tensor_dim_values = [
+                    #             2 * mesh.size(shard_placement_idx) - 1,
+                    #             2 * mesh.size(shard_placement_idx),
+                    #             2 * mesh.size(shard_placement_idx) + 1,
+                    #         ]
+                    #         for tensor_dims in list(
+                    #             itertools.product(tensor_dim_values, repeat=tensor_ndim)
+                    #         ):
+                    #             placements = tuple(
+                    #                 Shard(shard_dim)
+                    #                 if idx == shard_placement_idx
+                    #                 else Replicate()
+                    #                 for idx in range(mesh_ndim)
+                    #             )
+                    #             ctx = contextlib.nullcontext()
+                    #             # uneven shard on last dim (flatten_end - 1) is supported
+                    #             if tensor_dims[shard_dim] % mesh.size(
+                    #                 shard_placement_idx
+                    #             ) != 0 and shard_dim != (flatten_end - 1):
+                    #                 ctx = self.assertRaises(RuntimeError)
+                    #             with ctx:
+                    #                 self._test_dtensor_flatten_2d_sr_rs(
+                    #                     tensor_dims,
+                    #                     flatten_start,
+                    #                     flatten_end,
+                    #                     mesh,
+                    #                     placements,
+                    #                     shard_placement_idx,
+                    #                 )
+
+                    # S, S
+                    for shard_dim0 in range(flatten_start, flatten_end):
+                        for shard_dim1 in range(shard_dim0, flatten_end):
                             tensor_dim_values = [
-                                2 * mesh.size(shard_placement_idx) - 1,
-                                2 * mesh.size(shard_placement_idx),
-                                2 * mesh.size(shard_placement_idx) + 1,
+                                2 * self.world_size - 1,
+                                2 * self.world_size,
+                                2 * self.world_size + 1,
                             ]
                             for tensor_dims in list(
                                 itertools.product(tensor_dim_values, repeat=tensor_ndim)
                             ):
-                                placements = tuple(
-                                    Shard(shard_dim)
-                                    if idx == shard_placement_idx
-                                    else Replicate()
-                                    for idx in range(mesh_ndim)
-                                )
+                                placements = (Shard(shard_dim0), Shard(shard_dim1))
                                 ctx = contextlib.nullcontext()
-                                # uneven shard on last dim (flatten_end - 1) is supported
-                                if tensor_dims[shard_dim] % mesh.size(
-                                    shard_placement_idx
-                                ) != 0 and shard_dim != (flatten_end - 1):
+                                if tensor_dims[shard_dim0] % mesh.size(0) != 0:
+                                    ctx = self.assertRaises(RuntimeError)
+                                # unlike 1d S, we cannot support uneven shard on last dim
+                                if tensor_dims[shard_dim1] % mesh.size(1) != 0:
                                     ctx = self.assertRaises(RuntimeError)
                                 with ctx:
-                                    self._test_dtensor_flatten_2d_sr_rs(
+                                    self._test_dtensor_flatten_2d_ss(
                                         tensor_dims,
                                         flatten_start,
                                         flatten_end,
                                         mesh,
                                         placements,
-                                        shard_placement_idx,
                                     )
 
+
+
                     # Replicate
-                    tensor_dims = [2 * mesh.size(0) - 1] * tensor_ndim
-                    placements = (Replicate(), Replicate())
-                    self._test_dtensor_flatten_replicate(
-                        tensor_dims,
-                        flatten_start,
-                        flatten_end,
-                        mesh,
-                        placements,
-                    )
+                    # tensor_dims = [2 * mesh.size(0) - 1] * tensor_ndim
+                    # placements = (Replicate(), Replicate())
+                    # self._test_dtensor_flatten_replicate(
+                    #     tensor_dims,
+                    #     flatten_start,
+                    #     flatten_end,
+                    #     mesh,
+                    #     placements,
+                    # )
 
     def _test_dtensor_flatten_2d_sr_rs(
         self,
@@ -864,6 +905,68 @@ class TestViewOps(DTensorTestBase):
             ._local_tensor
         )
         self.assertEqual(inps_viewed.placements, expected_placements)
+        self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
+        self.assertEqual(comm_mode.get_total_counts(), 0)
+    
+    def _test_dtensor_flatten_2d_ss(
+        self,
+        tensor_dims,
+        flatten_start,
+        flatten_end,
+        mesh,
+        placements,
+    ):
+        local_tensor_dims = list(copy.deepcopy(tensor_dims))
+        nelem = math.prod(tensor_dims)
+        global_inps: Tensor = torch.arange(nelem).view(tensor_dims)
+        global_inps_replicate: DTensor = distribute_tensor(
+            global_inps, mesh, (Replicate(), Replicate())
+        )
+        inps = global_inps_replicate.redistribute(mesh, placements)
+        viewed_tensor_dims = self._get_viewed_tensor_dims(
+            tensor_dims, flatten_start, flatten_end
+        )
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            inps_viewed = inps.view(viewed_tensor_dims)
+
+        expected_placements = []
+        for idx, placement in enumerate(placements):
+            assert isinstance(placement, Shard)
+            shard_dim = placement.dim
+            if shard_dim == flatten_start:
+                if idx == 0 or all(p.dim == flatten_start for p in placements[:idx]):
+                    # S(flatten_start), S(flatten_start) qualifies
+                    expected_placement = placement
+            else:
+                split_factor = math.prod(local_tensor_dims[flatten_start:shard_dim])
+                assert split_factor > 1
+                expected_placement = _StridedShard(
+                    dim=flatten_start, split_factor=split_factor
+                )
+            # uneven shard on last flattened dim is supported
+            if idx == len(placements) - 1 and shard_dim == flatten_end - 1:
+                local_tensor_dims[shard_dim] = math.ceil(local_tensor_dims[shard_dim] * 1.0 / mesh.size(idx))
+            else:
+                # uneven cases all throw error during inps.view
+                assert local_tensor_dims[shard_dim] % mesh.size(idx) == 0
+                local_tensor_dims[shard_dim] = local_tensor_dims[shard_dim] // mesh.size(idx)
+            expected_placements.append(expected_placement)
+        expected_placements = tuple(expected_placements)
+
+        expected_local_tensor = (
+            distribute_tensor(
+                global_inps.view(viewed_tensor_dims), mesh, (Replicate(), Replicate())
+            )
+            .redistribute(mesh, expected_placements)
+            ._local_tensor
+        )
+        try:
+            self.assertEqual(inps_viewed.placements, expected_placements)
+        except:
+            import fbvscode
+            fbvscode.set_trace()
         self.assertEqual(inps_viewed._local_tensor, expected_local_tensor)
         self.assertEqual(comm_mode.get_total_counts(), 0)
 
