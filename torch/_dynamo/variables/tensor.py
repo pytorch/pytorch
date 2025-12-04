@@ -316,7 +316,7 @@ class TensorVariable(VariableTracker):
             # eval("super(L['mod'].model.model.encoder.embed_positions.forward__class__,
             # L['mod'].model.model.encoder.embed_positions)", scope)
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
-            _input_associated_real_value = eval(self.source.name(), scope)
+            _input_associated_real_value = eval(self.source.name, scope)
         except Exception as exc:
             raise NotImplementedError from exc
 
@@ -553,7 +553,7 @@ class TensorVariable(VariableTracker):
         # For local source, we associate the real value. We use this real value
         scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
         try:
-            _input_associated_real_value = eval(self.source.name(), scope)
+            _input_associated_real_value = eval(self.source.name, scope)
         except Exception as exc:
             unimplemented(
                 gb_type="Error getting associated real value",

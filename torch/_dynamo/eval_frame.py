@@ -802,15 +802,14 @@ class _TorchDynamoContext:
 
             assert self._hooks is not None
 
-            with torch._functorch.config.patch(strict_autograd_cache=True):
-                return aot_compile_fullgraph(
-                    fn,
-                    example_inputs,
-                    hooks=self._hooks,
-                    backend=innermost_fn(
-                        self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
-                    ),
-                )
+            return aot_compile_fullgraph(
+                fn,
+                example_inputs,
+                hooks=self._hooks,
+                backend=innermost_fn(
+                    self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+                ),
+            )
 
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
@@ -1714,13 +1713,13 @@ def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
             stack = s
             break
         if stack is None:
-            msg = f"{source.name()}, a closed over free variable"
+            msg = f"{source.name}, a closed over free variable"
         else:
             tb = "".join(traceback.format_list(stack))
             extra = ""
             if len(user_stacks) > 1:
                 extra = f"(elided {len(user_stacks) - 1} more accesses)"
-            msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+            msg = f"{source.name}, accessed at:\n{tb}{extra}"
         # TODO: option to print ALL of the stack traces at once
         input_errors.append(msg)
 
