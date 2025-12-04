@@ -5657,7 +5657,6 @@ class Scheduler:
         """
         Updates the partition signature by removing buffers that were fused into
         kernels during partition codegen. See [Note: Removed Graph Partition Arguments]
-        
         We only remove buffers that were added to V.graph.removed_buffers DURING
         this partition's codegen, not buffers that were marked as globally dead
         before partition codegen. This is because a globally-dead buffer might still
