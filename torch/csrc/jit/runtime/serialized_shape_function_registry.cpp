@@ -6,9 +6,6 @@
  * cd ~/pytorch && python
  * torchgen/shape_functions/gen_jit_shape_functions.py
  */
-#include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/serialized_shape_function_registry.h>
 
 // clang-format off

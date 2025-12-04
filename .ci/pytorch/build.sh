@@ -36,6 +36,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+  # Disable FBGEMM for CUDA 13 builds
+  export USE_FBGEMM=0
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,

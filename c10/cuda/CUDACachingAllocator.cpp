@@ -1765,7 +1765,12 @@ class DeviceCachingAllocator {
     auto node_get_dependencies =
         [](cudaGraphNode_t n, cudaGraphNode_t* deps, size_t* count) -> void {
 #if (defined(CUDA_VERSION) && CUDA_VERSION >= 13000)
-      C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
+      if (deps == nullptr) {
+        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, nullptr, count));
+      } else {
+        cudaGraphEdgeData edgeData;
+        C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, &edgeData, count));
+      }
 #else
       C10_CUDA_CHECK(cudaGraphNodeGetDependencies(n, deps, count));
 #endif
@@ -1833,9 +1838,11 @@ class DeviceCachingAllocator {
     if (graph_reuse_context.find(info.capture_id) ==
         graph_reuse_context.end()) {
       bool found = false;
-      for (auto& entry : captures_underway) {
-        if (entry.second(stream)) {
-          auto graph_pool = graph_pools.find(entry.first);
+      // Use the reverse iterator to search captures_underway in LIFO order.
+      for (auto it = captures_underway.rbegin(); it != captures_underway.rend();
+           ++it) {
+        if (it->second(stream)) {
+          auto graph_pool = graph_pools.find(it->first);
           TORCH_INTERNAL_ASSERT(
               graph_pool != graph_pools.end(),
               "Could not find graph pool for capture.");
@@ -2525,10 +2532,10 @@ class DeviceCachingAllocator {
       std::function<bool(cudaStream_t)> filter) {
     std::lock_guard<std::recursive_mutex> lock(mutex);
     create_or_incref_pool(mempool_id);
-    for (auto it2 = captures_underway.begin(); it2 != captures_underway.end();
-         ++it2) {
+    for (auto it = captures_underway.begin(); it != captures_underway.end();
+         ++it) {
       TORCH_CHECK(
-          it2->first != mempool_id,
+          it->first != mempool_id,
           "beginAllocateToPool: already recording to mempool_id");
     }
     captures_underway.emplace_back(mempool_id, std::move(filter));
@@ -2957,9 +2964,11 @@ class DeviceCachingAllocator {
     // a capture, so it's usually 0, and we can short-circuit
     // cudaStreamCaptureStatus (which does a TLS lookup).
     if (C10_UNLIKELY(!captures_underway.empty())) {
-      for (auto& entry : captures_underway) {
-        if (entry.second(stream)) {
-          auto it1 = graph_pools.find(entry.first);
+      // Use the reverse iterator to search captures_underway in LIFO order.
+      for (auto it = captures_underway.rbegin(); it != captures_underway.rend();
+           ++it) {
+        if (it->second(stream)) {
+          auto it1 = graph_pools.find(it->first);
           TORCH_INTERNAL_ASSERT(it1 != graph_pools.end());
           if (size <= kSmallSize) {
             return it1->second->small_blocks;

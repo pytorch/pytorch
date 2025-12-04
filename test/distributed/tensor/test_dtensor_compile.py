@@ -176,18 +176,14 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
 
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
-        super(
-            type(self), self
-        ).setUp()  # use explicit params for compiled autograd test wrapping
+        super().setUp()
         fake_store = FakeStore()
         dist.init_process_group(
             "fake", store=fake_store, rank=0, world_size=self.world_size
         )
 
     def tearDown(self):
-        super(
-            type(self), self
-        ).tearDown()  # use explicit params for compiled autograd test wrapping
+        super().tearDown()
         dist.destroy_process_group()
 
     @property
@@ -844,6 +840,48 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         out_ref = fn(dt)
         out_test = fn_opt(dt)
+        self.assertEqual(out_ref, out_test)
+
+    def test_dynamo_from_local_grad_placements_sequence_intermediate(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        placements = PytreeTuple(Shard(0))
+
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                placements=placements,
+                run_check=False,
+            )
+            return dt.to_local() + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+
+        out_ref = fn(x)
+        out_test = fn_opt(x)
+        self.assertEqual(out_ref, out_test)
+
+    def test_dynamo_from_local_grad_placements_sequence_intermediate_as_args(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        placements = PytreeTuple(Shard(0))
+
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                placements,
+                run_check=False,
+            )
+            return dt.to_local() + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+
+        out_ref = fn(x)
+        out_test = fn_opt(x)
         self.assertEqual(out_ref, out_test)
 
     def test_dynamo_to_local_kwargs(self):

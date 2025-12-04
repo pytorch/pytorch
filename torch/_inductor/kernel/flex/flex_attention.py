@@ -39,6 +39,8 @@ from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
 from .flex_flash_attention import (
     _use_flex_flash_attention,
+    _use_flex_flash_attention_backward,
+    create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
 )
 
@@ -660,7 +662,7 @@ def flex_attention_backward(*args, **kwargs):
         f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
     )
 
-    kernel_options, _ = _sanitize_kernel_options_for_triton(kernel_options)
+    kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -722,6 +724,15 @@ def flex_attention_backward(*args, **kwargs):
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
     freeze_irnodes(mask_graph_buffer)
+
+    if _use_flex_flash_attention_backward(
+        fw_graph,
+        mask_graph,
+        backend=backend,
+    ):
+        return create_flex_flash_attention_backward_kernel(
+            query, key, value, out, logsumexp, grad_out, scale, kernel_options
+        )
 
     # Construct layout with stride order matching K
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]

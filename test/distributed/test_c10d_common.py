@@ -2073,16 +2073,16 @@ dist.init_process_group(rank=0, world_size=1, store=dist.HashStore())
         # ensure supported devices (cpu, cuda) succeeds during dispatch call
         tensor = torch.zeros(2, 2, device=torch.device(device))
         # multi tensor collectives
-        if collective == dist.barrier:
+        if collective is dist.barrier:
             collective()
         elif collective in (dist.all_gather, dist.gather):
             collective([tensor], tensor, *args)
-        elif collective == dist.scatter:
+        elif collective is dist.scatter:
             collective(tensor, [tensor], *args)
         elif collective in (dist.reduce_scatter, dist.all_to_all):
             # gloo does not support reduce_scatter or all_to_all
             if backend != "gloo":
-                if collective == dist.reduce_scatter:
+                if collective is dist.reduce_scatter:
                     collective(tensor, [tensor], *args)
                 else:
                     collective([tensor], [tensor], *args)

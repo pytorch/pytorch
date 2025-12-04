@@ -3,6 +3,7 @@ import functools
 import re
 import sys
 import unittest
+from unittest import mock
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -12,6 +13,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import HAS_PALLAS
+from torch.utils._pallas import has_cuda_pallas, has_jax_tpu_backend
 from torch.utils._triton import has_triton
 
 
@@ -745,8 +747,53 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    def test_arange_multi_output(self):
+        """Test arange with view and multiple outputs."""
 
-@unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
+        def fn(x):
+            rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
+            rng2 = torch.arange(10, 18, device=x.device)
+            tmp = x * rng1
+            return tmp, tmp + rng2
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(8, 8, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(len(result), len(expected))
+        for r, e in zip(result, expected):
+            self.assertEqual(r, e)
+
+    def test_dtype_bitcast(self):
+        """Test dtype bitcast (view tensor as different dtype)."""
+
+        def fn(x):
+            # View float32 tensor as int32 (same byte size)
+            return x.view(torch.int32)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE, dtype=torch.float32)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_dtype_bitcast_float16_to_int16(self):
+        """Test dtype bitcast from float16 to int16."""
+
+        def fn(x):
+            return x.view(torch.int16)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE, dtype=torch.float16)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+
+@unittest.skipUnless(has_cuda_pallas(), "requires jax and pallas")
 class PallasTestsCUDA(PallasTestsMixin, TestCase):
     DEVICE = "cuda"
 
@@ -754,6 +801,28 @@ class PallasTestsCUDA(PallasTestsMixin, TestCase):
 @unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
 class PallasTestsCPU(PallasTestsMixin, TestCase):
     DEVICE = "cpu"
+
+
+@unittest.skipUnless(has_jax_tpu_backend(), "requires JAX TPU backend")
+@config.patch({"_debug_cpu_to_tpu_pallas": True})
+class PallasTestsTPU(PallasTestsMixin, TestCase):
+    DEVICE = "cpu"
+
+    @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
+    def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
+        def fn(a, b):
+            return a + b
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            (
+                "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                "Please make sure that you have a TPU available and that JAX is configured correctly."
+            ),
+        ):
+            torch.compile(fn, backend="inductor", options={"cpu_backend": "pallas"})(
+                torch.randn(16), torch.randn(16)
+            )
 
 
 if test_torchinductor.HAS_CPU and HAS_PALLAS:

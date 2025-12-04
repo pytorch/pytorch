@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 
@@ -78,8 +77,8 @@ class SobolEngine:
     def draw(
         self,
         n: int = 1,
-        out: Optional[torch.Tensor] = None,
-        dtype: Optional[torch.dtype] = None,
+        out: torch.Tensor | None = None,
+        dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
         r"""
         Function to draw a sequence of :attr:`n` points from a Sobol sequence.
@@ -131,8 +130,8 @@ class SobolEngine:
     def draw_base2(
         self,
         m: int,
-        out: Optional[torch.Tensor] = None,
-        dtype: Optional[torch.dtype] = None,
+        out: torch.Tensor | None = None,
+        dtype: torch.dtype | None = None,
     ) -> torch.Tensor:
         r"""
         Function to draw a sequence of :attr:`2**m` points from a Sobol sequence.
@@ -187,7 +186,7 @@ class SobolEngine:
         return self
 
     def _scramble(self):
-        g: Optional[torch.Generator] = None
+        g: torch.Generator | None = None
         if self.seed is not None:
             g = torch.Generator()
             g.manual_seed(self.seed)

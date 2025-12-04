@@ -90,6 +90,15 @@ void pushPyOutToStack(
     py::object out,
     const char* msg);
 
+py::handle get_dtensor_class();
+
+py::object dispatchDTensorOp(
+    const c10::OperatorHandle& op,
+    py::handle py_op,
+    py::handle args,
+    py::handle kwargs,
+    torch::jit::Stack* stack);
+
 inline PyObject* THPVariable_WrapList(
     const torch::autograd::variable_list& inputs) {
   PyObject* pyinput = PyList_New(static_cast<Py_ssize_t>(inputs.size()));

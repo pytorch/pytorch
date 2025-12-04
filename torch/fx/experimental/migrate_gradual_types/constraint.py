@@ -138,9 +138,6 @@ class BinConstraintT(BinaryConstraint):
         )
         super().__init__(lhs, rhs, op)
 
-    def __eq__(self, other):
-        return super().__eq__(other)
-
 
 class BinConstraintD(BinaryConstraint):
     """
@@ -152,9 +149,6 @@ class BinConstraintD(BinaryConstraint):
         assert is_algebraic_expression(rhs) or is_dim(rhs) or is_bool_expr(rhs)
 
         super().__init__(lhs, rhs, op)
-
-    def __eq__(self, other):
-        return super().__eq__(other)
 
 
 class TGreatestUpperBound(Constraint):
