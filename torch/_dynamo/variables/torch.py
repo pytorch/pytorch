@@ -205,6 +205,7 @@ def tracing_state_functions() -> dict[Callable[[], Any], Optional[bool]]:
         torch._dynamo.external_utils.is_compiling: True,
         torch._utils.is_compiling: True,
         torch.compiler.is_compiling: True,
+        torch.compiler.is_in_compiled_region: True,
         torch.compiler.is_dynamo_compiling: True,
         torch.compiler.is_exporting: True,
         # Look into https://github.com/pytorch/pytorch/pull/164721 why this is
@@ -543,6 +544,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 torch._utils.is_compiling,
                 torch._dynamo.external_utils.is_compiling,
                 torch.compiler.is_compiling,
+                torch.compiler.is_in_compiled_region,
                 torch.compiler.is_dynamo_compiling,
                 torch.compiler.is_exporting,
             ):

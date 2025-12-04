@@ -178,6 +178,7 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.external_utils.is_compiling": TorchInGraphFunctionVariable,
     "torch._dynamo.utils._disable_side_effect_safety_checks_for_current_subtracer": UserFunctionVariable,
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
+    "torch.compiler.is_in_compiled_region": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,

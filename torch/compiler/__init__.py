@@ -458,6 +458,11 @@ def is_compiling() -> bool:
         return _is_compiling_flag
 
 
+def is_in_compiled_region():
+    from torch._dynamo.eval_frame import _in_compiled_region
+    return _in_compiled_region
+
+
 def is_dynamo_compiling() -> bool:
     """
     Indicates whether a graph is traced via TorchDynamo.
