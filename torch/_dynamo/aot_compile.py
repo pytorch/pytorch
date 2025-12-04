@@ -211,16 +211,15 @@ def aot_compile_fullgraph(
             hooks.guard_filter_fn = new_guard_filter_fn
 
         fn, _ = convert_frame.get_traced_fn(model)
-        check_fn = graph_capture_output.build_guards(
-            fn.__code__, hooks=hooks, save=True, strict_error=True
-        )
-
-        assert check_fn.guards_state is not None
 
         backend_input = capture_output.backend_input
         assert backend_input is not None
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         device_type = _graph_device_type(backend_input.graph_module.graph)
+        assert (
+            backend_input.fake_mode.shape_env
+            is graph_capture_output.output_graph.shape_env
+        )
         tracing_context = TracingContext(backend_input.fake_mode)
         tracing_context.tensor_to_context = backend_input.tensor_to_context
         with (
@@ -249,6 +248,12 @@ def aot_compile_fullgraph(
                 f"Compiled function type {type(compiled_fn)} (produced "
                 + f"from backend {compiler_fn}) does not implement SerializableCallable."
             )
+
+        check_fn = graph_capture_output.build_guards(
+            fn.__code__, hooks=hooks, save=True, strict_error=True
+        )
+
+        assert check_fn.guards_state is not None
 
         source_info = SourceInfo(inlined_sources=set())
         for traced_code in graph_capture_output.traced_code:
