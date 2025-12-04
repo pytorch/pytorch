@@ -91,7 +91,7 @@ __global__ void roll_cuda_kernel(
     int64_t stride,
     int64_t total_dims) {
   for (int64_t linear_index = ((int64_t) blockIdx.x) * blockDim.x + threadIdx.x;
-       linear_index<N; linear_index+=blockDim.x*gridDim.x)
+       linear_index < N; linear_index += blockDim.x*gridDim.x)
   {
     // roll dim idx is the index of linear_index along the rolling dimension.
     int64_t roll_dim_idx = linear_index % (stride * size) / stride;
