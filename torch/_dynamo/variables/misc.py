@@ -1837,7 +1837,7 @@ class ConstantLikeVariable(VariableTracker):
         t = type(self.value)
 
         # For builtins (int, str, etc.), just return the name
-        if t.__module__ == 'builtins':
+        if t.__module__ == "builtins":
             return t.__qualname__
 
         return f"{t.__module__}.{t.__qualname__}"
@@ -1906,7 +1906,6 @@ class TorchVersionVariable(ConstantLikeVariable):
 
 
 class NumpyDTypeVariable(ConstantLikeVariable):
-
     def as_proxy(self):
         """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:
 
