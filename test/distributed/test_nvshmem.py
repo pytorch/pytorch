@@ -3,6 +3,15 @@
 # To run:
 # python test/distributed/test_nvshmem.py
 
+import os
+
+
+# Reduce NVSHMEM heap size from default 128GB to 8GB to avoid NVLS multicast
+# allocation failures on H100 systems. Set before any imports that might
+# initialize NVSHMEM.
+if "NVSHMEM_SYMMETRIC_SIZE" not in os.environ:
+    # 8GB = 8 * 1024 * 1024 * 1024
+    os.environ["NVSHMEM_SYMMETRIC_SIZE"] = "8589934592"
 
 import torch
 import torch.distributed as dist
