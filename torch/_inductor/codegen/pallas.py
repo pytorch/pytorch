@@ -202,6 +202,14 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.asarray({x}).astype({jax_dtype})"
 
     @staticmethod
+    def to_dtype_bitcast(x: str, dtype: torch.dtype, src_dtype: torch.dtype) -> str:
+        """Bitcast a value from one dtype to another with the same size."""
+        jax_dtype = torch_dtype_to_jax(dtype)
+        jax_src_dtype = torch_dtype_to_jax(src_dtype)
+        # First ensure the value is the correct source dtype, then bitcast
+        return f"jax.lax.bitcast_convert_type(jnp.asarray({x}).astype({jax_src_dtype}), {jax_dtype})"
+
+    @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> str:
         """Convert a sympy expression to a JAX array indexing expression."""
         from ..utils import get_bounds_index_expr
@@ -860,13 +868,6 @@ class PallasKernel(SIMDKernel):
         Returns:
             str: Complete Python source code for the Pallas kernel
         """
-        # Ensure one (1) output for now
-        live_outs = list(self.args.live_output_buffers())
-        if len(live_outs) != 1:
-            raise Unsupported(
-                "Pallas backend currently supports single-output elementwise kernels only"
-            )
-
         code = IndentedBuffer()
 
         # Define the Pallas kernel: accepts refs, uses broadcasted expressions
@@ -985,9 +986,53 @@ class PallasKernel(SIMDKernel):
                             f"{mask_var} = jnp.arange(block_size) < {mask_var}_size"
                         )
 
+            # Generate iteration variables as jnp.arange arrays
+            # These are used by index_expr operations like torch.arange
+            if self.range_tree_nodes:
+                code.writeline("# Define iteration variables as JAX arrays")
+                # Get the first output buffer's shape for reshaping
+                first_output_shape = None
+                first_output_numel = None
+                if output_params:
+                    first_out_param = output_params[0]
+                    first_out_buf_name = output_buffer_lookup.get(first_out_param)
+                    if first_out_buf_name:
+                        try:
+                            buf = V.graph.get_buffer(first_out_buf_name)
+                            size = buf.get_size()
+                            first_output_shape = tuple(
+                                int(s) if hasattr(s, "__int__") else s for s in size
+                            )
+                            first_output_numel = 1
+                            for s in first_output_shape:
+                                first_output_numel *= s
+                        except Exception:
+                            pass
+
+                for var_sym, entry in self.range_tree_nodes.items():
+                    var_name = str(var_sym)
+                    length = entry.length
+                    length_str = self.kexpr(length)
+                    # If the iteration variable length matches the output numel,
+                    # reshape it to match the output shape for proper broadcasting
+                    try:
+                        length_val = int(length) if hasattr(length, "__int__") else None
+                    except (TypeError, ValueError):
+                        length_val = None
+
+                    if (
+                        first_output_shape
+                        and len(first_output_shape) > 1
+                        and length_val == first_output_numel
+                    ):
+                        shape_str = ", ".join(str(s) for s in first_output_shape)
+                        code.writeline(
+                            f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"
+                        )
+                    else:
+                        code.writeline(f"{var_name} = jnp.arange({length_str})")
+
             # Emit compute (CSE) and store lines; they reference *_ptr[index] directly.
-            # Iteration variables are implicitly handled by JAX vectorization, so
-            # explicit indices should be JAX-traced values.
             for line in self.compute._lines:
                 code.writeline(str(line))
             for line in self.stores._lines:
@@ -1064,7 +1109,8 @@ class PallasKernel(SIMDKernel):
                 else "    input_output_aliases={},"
             )
             code.writeline(")(")
-            code.writeline(f"    {', '.join(kernel_input_params)},")
+            if kernel_input_params:
+                code.writeline(f"    {', '.join(kernel_input_params)},")
             code.writeline(")")
 
         main_name = f"{kernel_name}_main"

@@ -801,6 +801,7 @@ class _TorchDynamoContext:
                 raise RuntimeError("aot compile requires a callable dynamo callback.")
 
             assert self._hooks is not None
+
             return aot_compile_fullgraph(
                 fn,
                 example_inputs,

@@ -746,7 +746,7 @@ class _opener(Generic[T]):
 
 class _open_file(_opener[IO[bytes]]):
     def __init__(self, name: Union[str, os.PathLike[str]], mode: str) -> None:
-        super().__init__(open(name, mode))
+        super().__init__(open(name, mode))  # noqa: SIM115
 
     def __exit__(self, *args):
         self.file_like.close()
