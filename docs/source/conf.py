@@ -66,6 +66,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
+    "hoverxref.extension",
 ]
 
 myst_enable_extensions = [
@@ -73,6 +74,17 @@ myst_enable_extensions = [
     "deflist",
     "html_image",
 ]
+
+# sphinx-hoverxref configuration
+hoverxref_auto_ref = True
+hoverxref_domains = ["py", "std"]  # Add 'std' domain for glossary terms
+hoverxref_role_types = {
+    "term": "tooltip",  # Enable tooltips for glossary terms
+    "ref": "tooltip",
+    "std:term": "tooltip",  # Explicitly enable tooltips for std domain terms
+}
+hoverxref_tooltip_maxwidth = 600
+hoverxref_tooltip_theme = ["tooltipster-shadow", "tooltipster-shadow-custom"]
 
 html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
 sitemap_locales = [None]
@@ -2499,7 +2511,10 @@ html_css_files = [
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
 
-html_js_files = ["js/runllm-widget.js"]
+html_js_files = [
+    "js/runllm-widget.js",
+    "js/glossary-tooltips.js",
+]
 
 from sphinx.ext.coverage import CoverageBuilder
 
