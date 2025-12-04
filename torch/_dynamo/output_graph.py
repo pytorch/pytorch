@@ -1935,6 +1935,9 @@ class OutputGraph(OutputGraphCommon):
         cg.restore_stack(stack_values, value_from_source=not tx.export)
         if config.replay_side_effects:
             self.side_effects.codegen_update_mutated(cg)
+        else:
+            # Still need to initialize newly created objects
+            self.side_effects.codegen_update_mutated(cg, only_new_objs=True)
 
     def cleanup_graph(self) -> None:
         """
