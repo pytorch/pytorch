@@ -5485,9 +5485,6 @@ def _new_group_with_tag(
         group_desc=group_desc,
     )
 
-    if always_return_group_name and pg == GroupMember.NON_GROUP_MEMBER:
-        return _NonGroupMember(group_name)
-
     # Create the global rank to group rank mapping
     _world.pg_group_ranks[pg] = {
         global_rank: group_rank for group_rank, global_rank in enumerate(ranks)
@@ -5517,6 +5514,9 @@ def _new_group_with_tag(
             _store_based_barrier(
                 global_rank, barrier_store, group_name, world_size, timeout
             )
+
+    if always_return_group_name and pg == GroupMember.NON_GROUP_MEMBER:
+        return _NonGroupMember(group_name)
 
     return pg
 
