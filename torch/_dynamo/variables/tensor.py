@@ -316,7 +316,7 @@ class TensorVariable(VariableTracker):
             # eval("super(L['mod'].model.model.encoder.embed_positions.forward__class__,
             # L['mod'].model.model.encoder.embed_positions)", scope)
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
-            _input_associated_real_value = eval(self.source.name(), scope)
+            _input_associated_real_value = eval(self.source.name, scope)
         except Exception as exc:
             raise NotImplementedError from exc
 
@@ -553,7 +553,7 @@ class TensorVariable(VariableTracker):
         # For local source, we associate the real value. We use this real value
         scope = {"L": tx.output.local_scope, "G": tx.output.global_scope}
         try:
-            _input_associated_real_value = eval(self.source.name(), scope)
+            _input_associated_real_value = eval(self.source.name, scope)
         except Exception as exc:
             unimplemented(
                 gb_type="Error getting associated real value",
@@ -597,11 +597,14 @@ class TensorVariable(VariableTracker):
             dyn_length = self.call_method(tx, "size", [ConstantVariable.create(0)], {})
             # SymNodeVariable for symbolic sizes, ConstantVariable for constants OR values produced through
             # symbolic_shapes, but that end up as int/sympy.Integer
-            assert isinstance(dyn_length, (SymNodeVariable, ConstantVariable))
+            assert (
+                isinstance(dyn_length, SymNodeVariable)
+                or dyn_length.is_python_constant()
+            )
             if isinstance(dyn_length, SymNodeVariable):
                 length = dyn_length.evaluate_expr(tx.output)
             else:
-                length = dyn_length.value
+                length = dyn_length.as_python_constant()
 
         if idxes is None:
             idxes = range(length)
@@ -1409,7 +1412,8 @@ class TensorVariable(VariableTracker):
         if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
             len(args) >= 1
             and all(
-                isinstance(a, ConstantVariable) and a.python_type() is int for a in args
+                a.is_python_constant() and isinstance(a.as_python_constant(), int)
+                for a in args
             )
         ):
             from ..symbolic_convert import InstructionTranslator
@@ -1474,6 +1478,9 @@ class SymNodeVariable(VariableTracker):
             return self.sym_num.node.pytype
         else:
             return type(self.sym_num)
+
+    def is_symnode_like(self) -> bool:
+        return True
 
     def as_proxy(self):
         return self.proxy
@@ -1632,9 +1639,7 @@ class NumpyNdarrayVariable(TensorVariable):
                 dtype_arg = kwargs["dtype"]
             elif len(args) > 0:
                 dtype_arg = args[0]
-            is_object_str = (
-                isinstance(dtype_arg, ConstantVariable) and dtype_arg.value == "O"
-            )
+            is_object_str = dtype_arg is not None and dtype_arg.is_constant_match("O")
             is_object_type = (
                 isinstance(dtype_arg, BuiltinVariable) and dtype_arg.fn is object
             )

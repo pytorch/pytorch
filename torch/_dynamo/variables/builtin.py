@@ -26,6 +26,7 @@ import itertools
 import logging
 import math
 import operator
+import sys
 import types
 import typing
 import unittest
@@ -689,7 +690,7 @@ class BuiltinVariable(VariableTracker):
         def expand_list_like(
             tx: "InstructionTranslator", lst: VariableTracker, const: VariableTracker
         ) -> VariableTracker:
-            if isinstance(lst, ConstantVariable):
+            if not isinstance(lst, BaseListVariable) and lst.is_python_constant():
                 lst, const = const, lst
             try:
                 assert isinstance(lst, BaseListVariable)
@@ -1030,8 +1031,7 @@ class BuiltinVariable(VariableTracker):
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
                 if fn is AssertionError and not all(
-                    isinstance(x, variables.ConstantVariable)
-                    and isinstance(x.value, str)
+                    x.is_python_constant() and isinstance(x.as_python_constant(), str)
                     for x in args
                 ):
                     unimplemented(
@@ -1503,7 +1503,7 @@ class BuiltinVariable(VariableTracker):
                 )
 
         if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
-            if isinstance(args[0], ConstantVariable):
+            if args[0].is_python_constant():
                 try:
                     fn = getattr(float, name)
                     res = fn(args[0].as_python_constant())
@@ -1549,10 +1549,12 @@ class BuiltinVariable(VariableTracker):
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in str_methods:
+                # Only delegate to ConstantVariable, not other types that happen to be constants
                 if isinstance(args[0], ConstantVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is float and len(args) >= 1:
+            # Only delegate to ConstantVariable, not other types that happen to be constants
             if isinstance(args[0], ConstantVariable):
                 return ConstantVariable.create(
                     getattr(float, name)(args[0].as_python_constant())
@@ -1801,7 +1803,7 @@ class BuiltinVariable(VariableTracker):
                 "call_function", py_fn, *proxy_args_kwargs([a, b], {})
             )
             return SymNodeVariable.create(tx, proxy, None)
-        elif isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
+        elif a.is_python_constant() and b.is_python_constant():
             value = self.fn(
                 a.as_python_constant(),
                 b.as_python_constant(),
@@ -2474,8 +2476,31 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def call_map(
-        self, tx: "InstructionTranslator", fn: VariableTracker, *seqs: VariableTracker
+        self,
+        tx: "InstructionTranslator",
+        fn: VariableTracker,
+        *seqs: VariableTracker,
+        **kwargs: VariableTracker,
     ) -> VariableTracker:
+        strict = ConstantVariable.create(False)
+        if kwargs:
+            if sys.version_info >= (3, 14):
+                if not (len(kwargs) == 1 and "strict" in kwargs):
+                    raise_args_mismatch(
+                        tx,
+                        "map",
+                        "1 kwargs (`strict`)",
+                        f"{len(kwargs)} kwargs",
+                    )
+                strict = kwargs.pop("strict", ConstantVariable.create(False))
+            else:
+                raise_args_mismatch(
+                    tx,
+                    "map",
+                    "0 kwargs",
+                    f"{len(kwargs)} kwargs",
+                )
+
         seq_list = [
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
             for seq in seqs
@@ -2483,6 +2508,7 @@ class BuiltinVariable(VariableTracker):
         return variables.MapVariable(
             fn,
             seq_list,  # type: ignore[arg-type]
+            strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
 
@@ -2562,7 +2588,7 @@ class BuiltinVariable(VariableTracker):
         if default is not None:
             hasattr_var = self.call_hasattr(tx, obj, name_var)
             if hasattr_var is not None:
-                assert hasattr_var.as_python_constant() in (True, False)
+                assert hasattr_var.is_constant_match(True, False)
                 if not hasattr_var.as_python_constant():
                     return default
             else:
@@ -3069,9 +3095,7 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3114,9 +3138,7 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3135,9 +3157,7 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3155,9 +3175,7 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3191,9 +3209,7 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
