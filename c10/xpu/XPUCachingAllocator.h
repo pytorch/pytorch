@@ -73,8 +73,6 @@ struct TraceEntry {
   trace_time_ time_{};
 };
 
-C10_XPU_API Allocator* get();
-
 inline XPUAllocator* get() {
   return allocator.load();
 }
