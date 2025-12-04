@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -124,8 +123,8 @@ class Embedding(Module):
 
     num_embeddings: int
     embedding_dim: int
-    padding_idx: Optional[int]
-    max_norm: Optional[float]
+    padding_idx: int | None
+    max_norm: float | None
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
@@ -136,12 +135,12 @@ class Embedding(Module):
         self,
         num_embeddings: int,
         embedding_dim: int,
-        padding_idx: Optional[int] = None,
-        max_norm: Optional[float] = None,
+        padding_idx: int | None = None,
+        max_norm: float | None = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         sparse: bool = False,
-        _weight: Optional[Tensor] = None,
+        _weight: Tensor | None = None,
         _freeze: bool = False,
         device=None,
         dtype=None,
@@ -362,27 +361,27 @@ class EmbeddingBag(Module):
 
     num_embeddings: int
     embedding_dim: int
-    max_norm: Optional[float]
+    max_norm: float | None
     norm_type: float
     scale_grad_by_freq: bool
     weight: Tensor
     mode: str
     sparse: bool
     include_last_offset: bool
-    padding_idx: Optional[int]
+    padding_idx: int | None
 
     def __init__(
         self,
         num_embeddings: int,
         embedding_dim: int,
-        max_norm: Optional[float] = None,
+        max_norm: float | None = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         mode: str = "mean",
         sparse: bool = False,
-        _weight: Optional[Tensor] = None,
+        _weight: Tensor | None = None,
         include_last_offset: bool = False,
-        padding_idx: Optional[int] = None,
+        padding_idx: int | None = None,
         device=None,
         dtype=None,
     ) -> None:
@@ -431,8 +430,8 @@ class EmbeddingBag(Module):
     def forward(
         self,
         input: Tensor,
-        offsets: Optional[Tensor] = None,
-        per_sample_weights: Optional[Tensor] = None,
+        offsets: Tensor | None = None,
+        per_sample_weights: Tensor | None = None,
     ) -> Tensor:
         """Forward pass of EmbeddingBag.
 
@@ -496,13 +495,13 @@ class EmbeddingBag(Module):
         cls,
         embeddings: Tensor,
         freeze: bool = True,
-        max_norm: Optional[float] = None,
+        max_norm: float | None = None,
         norm_type: float = 2.0,
         scale_grad_by_freq: bool = False,
         mode: str = "mean",
         sparse: bool = False,
         include_last_offset: bool = False,
-        padding_idx: Optional[int] = None,
+        padding_idx: int | None = None,
     ) -> "EmbeddingBag":
         r"""Create EmbeddingBag instance from given 2-dimensional FloatTensor.
 
