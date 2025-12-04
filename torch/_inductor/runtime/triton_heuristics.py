@@ -307,6 +307,11 @@ class CachingAutotuner(KernelInterface):
             "device_type": self.device_props.type,
         }
         self.inductor_meta = {} if inductor_meta is None else inductor_meta
+        # Add device properties to inductor_meta for use by coordinate descent tuner
+        self.inductor_meta["warp_size"] = self.device_props.warp_size
+        self.inductor_meta["max_threads_per_block"] = (
+            self.device_props.max_threads_per_block
+        )
         self.deterministic_mode = self.inductor_meta.get("deterministic", False)
 
         self.save_cache_hook = save_cache_hook
@@ -1624,8 +1629,8 @@ class StaticTritonCompileResult(CompileResult[_T]):
             return None
 
         def check_can_launch() -> _KernelType:
-            if triton_meta.get("device_type") not in ("cuda", "xpu"):
-                raise CannotStaticallyLaunchKernel("Non-cuda//XPU device")
+            if triton_meta.get("device_type") not in ("cuda", "hip", "xpu"):
+                raise CannotStaticallyLaunchKernel("Non-cuda/ROCmXPU device")
 
             if triton_meta.get("device_type") == "xpu" and XPU_KERNEL_FORMAT == "spv":
                 raise CannotStaticallyLaunchKernel(
@@ -1696,9 +1701,10 @@ class StaticTritonCompileResult(CompileResult[_T]):
         When loading from cache on disk, we want to reload cubin
         files from their appropriate location on disc.
         """
-        binary_ext = GPU_KERNEL_BIN_EXTS.get(
-            self.compile_meta.get("device_type", "cuda"), "cubin"
+        device_type = (
+            "hip" if torch.version.hip else self.compile_meta.get("device_type", "cuda")
         )
+        binary_ext = GPU_KERNEL_BIN_EXTS.get(device_type, "cubin")
         cubin_location = os.path.join(
             triton_cache_dir(self.compile_meta.get("device", 0)),
             triton_hash_to_path_key(self.kernel.hash),
