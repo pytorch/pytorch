@@ -726,6 +726,22 @@ if not IS_WINDOWS:
             expected_range = torch.flatten(t, 2, -1)
             self.assertEqual(result_range, expected_range)
 
+        @onlyCPU
+        def test_my_optional_tensor_ref(self, device):
+            """Test TORCH_BOX with const std::optional<Tensor>& parameter."""
+            import libtorch_agnostic_2_9 as libtorch_agnostic
+
+            # Test with a tensor provided
+            t = torch.randn(5, device=device)
+            result = libtorch_agnostic.ops.my_optional_tensor_ref(t, 10)
+            self.assertEqual(result, t)
+
+            # Test with None (should return zeros tensor of specified size)
+            result_none = libtorch_agnostic.ops.my_optional_tensor_ref(None, 7)
+            expected_zeros = torch.zeros(7)
+            self.assertEqual(result_none, expected_zeros)
+            self.assertEqual(result_none.shape, (7,))
+
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_reshape(self, device):
             import libtorch_agnostic_2_10 as libtorch_agnostic

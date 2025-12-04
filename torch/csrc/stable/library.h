@@ -136,6 +136,8 @@ struct UnboxType<std::string_view> {
   using type = std::string;
 };
 
+// const and reference are stripped before UnboxType is applied
+// in order to avoid ambiguous template matches
 template <typename T>
 using unbox_type_t =
     typename UnboxType<std::remove_cv_t<std::remove_reference_t<T>>>::type;
