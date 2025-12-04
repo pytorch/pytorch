@@ -53,7 +53,7 @@ import threading
 from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
 from types import TracebackType
-from typing import Any, Optional, Union
+from typing import Any, Optional, ParamSpec, TypeVar, Union
 
 
 try:
@@ -84,6 +84,9 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils.checkpoint import get_device_states, set_device_states
 
+
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
@@ -1568,7 +1571,7 @@ def enabled_local_tensor_mode() -> Optional[LocalTensorMode]:
     return None
 
 
-def maybe_run_for_local_tensor(func: Callable[..., Any]) -> Callable[..., Any]:
+def maybe_run_for_local_tensor(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Decorator that ensures a function is executed for each local tensor shard
     when running under LocalTensorMode. If not in LocalTensorMode, the function
@@ -1591,7 +1594,7 @@ def maybe_run_for_local_tensor(func: Callable[..., Any]) -> Callable[..., Any]:
     """
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         if not (lm := enabled_local_tensor_mode()):
             return func(*args, **kwargs)
         ret = None
