@@ -157,6 +157,7 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
     record_event_default = torch.ops.streams.record_event.default(2, 0);  record_event_default = None
     stream_in_cpu_offload_cos_1 = torch.ops.streams.fork.default(0, 1);  stream_in_cpu_offload_cos_1 = None
     wait_event_default = torch.ops.streams.wait_event.default(2, 1);  wait_event_default = None
+    record_stream_cos_1 = torch.ops.streams.record_stream.default(cos_1, 1);  record_stream_cos_1 = None
     cpu_offload_cos_1 = torch.ops.prims.device_put.default(cos_1, device(type='cpu'), non_blocking = True);  cos_1 = None
     record_event_default_1 = torch.ops.streams.record_event.default(3, 1);  record_event_default_1 = None
     stream_out_cpu_offload_cos_1 = torch.ops.streams.join.default(1, 0);  stream_out_cpu_offload_cos_1 = None

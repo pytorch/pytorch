@@ -3,6 +3,12 @@ Activation offloading for memory optimization in (more like post) partitioners.
 
 This module provides functionality to offload activations to CPU during forward pass
 and reload them during backward pass, reducing GPU memory usage.
+
+Additional TODO:
+* given the fact that PT2 stream support is in active development, testings should
+  be done once that is more finalized. A issue currently known is that with streams,
+  each iteration will have its own offload streams, but the streams should be shared
+  across the iterations.
 """
 
 import logging
@@ -22,6 +28,7 @@ log: logging.Logger = logging.getLogger(__name__)
 
 
 # Node name prefixes for offload/reload operations
+# NOTE: right now we are using these prefixes as identifiers for offload/reload
 CPU_OFFLOAD_PREFIX = "cpu_offload_"
 GPU_RELOAD_PREFIX = "gpu_reload_"
 
@@ -52,7 +59,7 @@ def offload_activation_fw(graph: fx.Graph) -> None:
         original node. If a user is a view op, recursively find users of the view.
         """
         effective_users: OrderedSet[fx.Node] = OrderedSet()
-        for user in node.users.keys():
+        for user in node.users:
             if user.op == "output":
                 continue
             effective_users.add(user)
@@ -298,12 +305,13 @@ def add_forward_offload_stream_ops(graph: fx.Graph) -> None:
     """
     Add stream operations for forward pass CPU offloading.
 
-    Pattern: record_event → fork → wait_event → device_put → record_event_2 → join → wait_event_2
+    Pattern: record_event → fork → wait_event → record_stream → device_put → record_event_2 → join → wait_event_2
 
     This ensures that:
     1. Offloading waits for the last use to complete (record_event on default stream)
     2. Offloading happens on a separate stream (fork → wait_event → device_put)
-    3. Execution returns to the default stream after offloading and
+    3. The tensor is marked as used in the offload stream (record_stream)
+    4. Execution returns to the default stream after offloading and
        waits for offload to complete (record_event_2 → join → wait_event_2)
 
     NOTE: For stream optimization and overlapping compute with communication,
@@ -323,7 +331,7 @@ def add_forward_offload_stream_ops(graph: fx.Graph) -> None:
         return
 
     # Get default stream id and offload stream id
-    default_stream_id: int = get_current_stream(
+    current_stream_id: int = get_current_stream(
         offload_nodes[0].args[0].meta["val"].device  # type: ignore[assignment]
     )
     offload_stream_id: int = new_stream()
@@ -332,22 +340,35 @@ def add_forward_offload_stream_ops(graph: fx.Graph) -> None:
         offload_ready_event_id: int = new_event()
         offload_completion_event_id: int = new_event()
 
+        # Get the tensor being offloaded
+        tensor_node: fx.Node = offload_node.args[0]  # type: ignore[assignment]
+
         with graph.inserting_before(offload_node):
             # Record event on default stream to ensure last use completes
             graph.call_function(
                 torch.ops.streams.record_event.default,
-                args=(offload_ready_event_id, default_stream_id),
+                args=(offload_ready_event_id, current_stream_id),
             )
             # Fork to offload stream
             graph.call_function(
                 torch.ops.streams.fork.default,
-                args=(default_stream_id, offload_stream_id),
+                args=(current_stream_id, offload_stream_id),
                 name=f"stream_in_{offload_node.name}",
             )
             # Wait for the event on offload stream
             graph.call_function(
                 torch.ops.streams.wait_event.default,
                 args=(offload_ready_event_id, offload_stream_id),
+            )
+            # Inform the CUDA Caching Allocator that this tensor will be accessed in the
+            # offload stream. Without this, the program may prematurely free its memory
+            # even though the async offload operation is still in progress, and this can
+            # lead to memory corruption, especially with reordering for compute and
+            # communication overlaps.
+            graph.call_function(
+                torch.ops.streams.record_stream.default,
+                args=(tensor_node, offload_stream_id),
+                name=f"record_stream_{tensor_node.name}",
             )
         with graph.inserting_after(offload_node):
             # Record event on offload stream after device_put completes
@@ -359,14 +380,14 @@ def add_forward_offload_stream_ops(graph: fx.Graph) -> None:
             # Join back to default stream
             join_node = graph.call_function(
                 torch.ops.streams.join.default,
-                args=(offload_stream_id, default_stream_id),
+                args=(offload_stream_id, current_stream_id),
                 name=f"stream_out_{offload_node.name}",
             )
         with graph.inserting_after(join_node):
             # Wait for the offload to complete on default stream
             graph.call_function(
                 torch.ops.streams.wait_event.default,
-                args=(offload_completion_event_id, default_stream_id),
+                args=(offload_completion_event_id, current_stream_id),
             )
 
 
@@ -405,7 +426,7 @@ def add_backward_reload_stream_ops(graph: fx.Graph) -> None:
         return
 
     # Get default stream id and offload stream id
-    default_stream_id: int = get_current_stream(
+    current_stream_id: int = get_current_stream(
         reload_nodes[0].args[0].meta["original_device"]  # type: ignore[assignment]
     )
     reload_stream_id: int = new_stream()
@@ -417,13 +438,13 @@ def add_backward_reload_stream_ops(graph: fx.Graph) -> None:
             # Fork to reload stream
             graph.call_function(
                 torch.ops.streams.fork.default,
-                args=(default_stream_id, reload_stream_id),
+                args=(current_stream_id, reload_stream_id),
                 name=f"stream_in_{reload_node.name}",
             )
             # Wait for default stream to prevent premature reloading
             graph.call_function(
                 torch.ops.streams.wait_stream.default,
-                args=(reload_stream_id, default_stream_id),
+                args=(reload_stream_id, current_stream_id),
             )
         with graph.inserting_after(reload_node):
             # Record event on reload stream after device_put
@@ -435,14 +456,14 @@ def add_backward_reload_stream_ops(graph: fx.Graph) -> None:
             # Join back to default stream
             join_node = graph.call_function(
                 torch.ops.streams.join.default,
-                args=(reload_stream_id, default_stream_id),
+                args=(reload_stream_id, current_stream_id),
                 name=f"stream_out_{reload_node.name}",
             )
         with graph.inserting_after(join_node):
             # Wait for the event on default stream
             graph.call_function(
                 torch.ops.streams.wait_event.default,
-                args=(event_id, default_stream_id),
+                args=(event_id, current_stream_id),
             )
 
 

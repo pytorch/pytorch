@@ -90,7 +90,6 @@ _side_effectful_need_to_be_preserved_pre_dispatch: list[Callable[..., Any]] = [
 _side_effectful_functions: set[Callable[..., Any]] = {
     torch._assert,
     torch._assert_async,
-    _ops.aten._async_error.default,
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
     _ops.aten._assert_tensor_metadata.default,
@@ -175,6 +174,8 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     # Fixup segment_reduce mismatch
     if module == "torch" and name == "segment_reduce":
         name = "_" + name
+    if module == "torch.nn.functional" and name in ("_ScalingType", "_SwizzleType"):
+        name = name.removeprefix("_")
     return f"{module}.{name}"
 
 
