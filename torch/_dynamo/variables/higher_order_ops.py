@@ -1122,7 +1122,7 @@ def check_aliasing_and_input_mutation(
             unimplemented(
                 gb_type="Encountered input mutation during higher order op tracing",
                 context=context,
-                explanation=f"Higher order ops do not support input mutation. Found in {source_target.name()}",
+                explanation=f"Higher order ops do not support input mutation. Found in {source_target.name}",
                 hints=[
                     "Consider using the debug context to change user code to avoid mutation.",
                     "Please open an issue.",
@@ -1136,7 +1136,7 @@ def check_aliasing_and_input_mutation(
             unimplemented(
                 gb_type="Encountered aliasing during higher order op tracing",
                 context=context,
-                explanation=f"Higher order ops do not support aliasing. Found in {source_target.name()}",
+                explanation=f"Higher order ops do not support aliasing. Found in {source_target.name}",
                 hints=[
                     "Replace `return input` with `return input.clone()` to avoid aliasing.",
                     "Consider using the debug context to change user code to avoid aliasing.",
@@ -1839,15 +1839,6 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.value
-
-    def is_python_hashable(self):
-        return True
-
-    def get_python_hash(self):
-        return hash(self.as_python_constant())
-
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
 
 
 class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
@@ -3890,7 +3881,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             self.trace_backward_graph(tx, ctx, fwd_tracer, fwd_out, fwd_fn)
         )
 
-        self.rewire_bwd_graph_inputs(
+        self.rewire_bwd_graph_outputs(
             fwd_freevars, bwd_out, bwd_graph, bwd_freevars, args
         )
 
@@ -4157,7 +4148,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         return bwd_args, bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts
 
-    def rewire_bwd_graph_inputs(
+    def rewire_bwd_graph_outputs(
         self,
         fwd_freevars,
         bwd_out,
@@ -4316,7 +4307,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # ---------------------------------------------------------------------
         # Rewiring Forward Outputs to Backward Inputs (and Handling Saved Tensors)
         #
-        # In `rewire_bwd_graph_inputs`, we aligned the *forward inputs* with the
+        # In `rewire_bwd_graph_outputs`, we aligned the *forward inputs* with the
         # *backward outputs*. This method performs the complementary task:
         # aligning the *forward outputs* with the *backward inputs*, while also
         # incorporating all tensors saved via ctx.save_for_backward.
