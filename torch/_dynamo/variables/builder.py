@@ -187,6 +187,8 @@ from .dicts import (
     DictKeySetVariable,
     FrozensetVariable,
     MappingProxyVariable,
+    OrderedSetClassVariable,
+    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import (
@@ -832,6 +834,7 @@ class VariableBuilder:
 
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
+            set_var_cls = SetVariable
 
             if istype(value, OrderedSet):
                 # Guard on the internal dict of OrderedSet
@@ -840,6 +843,7 @@ class VariableBuilder:
                     internal_dict_source.make_guard(GuardBuilder.DICT_KEYS_MATCH)
                 )
                 self.tx.output.guard_on_key_order.add(internal_dict_source)
+                set_var_cls = OrderedSetVariable
 
             # The list gives a ordering for the set items. The ordering is based
             # on the Python hash and it is not related to object ordering inside
@@ -852,7 +856,7 @@ class VariableBuilder:
                 )
                 for i, v in enumerate(L)
             ]
-            result = SetVariable(items, source=self.source)
+            result = set_var_cls(items, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, frozenset) and all(
             (
@@ -1141,6 +1145,9 @@ class VariableBuilder:
                 value,
                 source=self.source,
             )
+        elif value is OrderedSet:
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return OrderedSetClassVariable()
         elif (
             id(value) in ITERTOOLS_TYPE_IDS
             and id(value) not in ITERTOOLS_POLYFILLED_TYPE_IDS
@@ -1598,7 +1605,7 @@ class VariableBuilder:
             )
             result = UserDefinedListVariable(value, list_vt=list_vt, source=self.source)
             return self.tx.output.side_effects.track_object_existing(value, result)
-        elif isinstance(value, (set, frozenset)):
+        elif isinstance(value, (set, frozenset, OrderedSet)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
@@ -1610,7 +1617,12 @@ class VariableBuilder:
                 )
                 for i in range(list.__len__(L))
             ]
-            set_vt_cls = SetVariable if isinstance(value, set) else FrozensetVariable
+            if isinstance(value, set):
+                set_vt_cls = SetVariable
+            elif isinstance(value, frozenset):
+                set_vt_cls = FrozensetVariable
+            else:  # OrderedSet
+                set_vt_cls = OrderedSetVariable
             set_vt = set_vt_cls(
                 output, source=self.source, mutation_type=ValueMutationExisting()
             )
@@ -3869,6 +3881,9 @@ class SourcelessBuilder:
         for t in common_constant_types:
             handlers[t] = lambda tx, value: ConstantVariable(value)
         handlers[set] = lambda tx, value: SetVariable(
+            [create(tx, x) for x in value], mutation_type=ValueMutationNew()
+        )
+        handlers[OrderedSet] = lambda tx, value: OrderedSetVariable(
             [create(tx, x) for x in value], mutation_type=ValueMutationNew()
         )
         handlers[dict] = lambda tx, value: ConstDictVariable(
