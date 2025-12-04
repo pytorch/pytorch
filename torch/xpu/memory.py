@@ -1,11 +1,17 @@
 import collections
+import ctypes
 from typing import Any, Union
 
 import torch
+from torch._utils import _dummy_type
 from torch.types import Device
 
-from . import _get_device_index, _lazy_init, is_initialized
+from . import _get_device_index, _is_compiled, _lazy_init, is_initialized
 
+
+if not _is_compiled():
+    # Define dummy base classes
+    torch._C.__dict__["_xpu_XPUAllocator"] = _dummy_type("_xpu_XPUAllocator")
 
 _device_t = Union[Device, str, int, None]
 
@@ -227,7 +233,7 @@ def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -
     an out-of-memory error will be raised by the allocator.
 
     Arguments:
-        fraction(float): Range: 0~1. Allowed memory equals total_memory * fraction.
+        fraction (float): Range: 0~1. Allowed memory equals total_memory * fraction.
         device (torch.device or int or str, optional): selected device. It uses the current device,
             given by :func:`~torch.xpu.current_device`, if :attr:`device` is ``None`` (default).
 
@@ -241,7 +247,83 @@ def set_per_process_memory_fraction(fraction: float, device: _device_t = None) -
     torch._C._xpu_setMemoryFraction(fraction, device)
 
 
+class _XPUAllocator:
+    r"""Wrapper over internal XPU memory allocators."""
+
+    def __init__(self, allocator: torch._C._xpu_XPUAllocator):
+        self._allocator = allocator
+
+    def allocator(self):
+        return self._allocator
+
+
+class XPUPluggableAllocator(_XPUAllocator):
+    r"""XPU memory allocator loaded from a shared library."""
+
+    def __init__(self, path_to_lib_file: str, alloc_fn_name: str, free_fn_name: str):
+        r"""XPU memory allocator loaded dynamically from a shared library.
+
+        This lets users provide custom allocation and free functions implemented
+        in a separate shared library. The allocator is registered through
+        ``torch._C._xpu_customAllocator`` and becomes available for use via
+        ``torch.memory.xpu.change_current_allocator``.
+
+        Arguments:
+            path_to_lib_file (str):
+                Filesystem path to the shared library file containing the allocation
+                and free functions.
+            alloc_fn_name (str):
+                Name of the allocation function exported from the shared library.
+                The function must have the signature:
+
+                    ``void* alloc_fn(size_t size, int device, sycl::queue* queue);``
+
+            free_fn_name (str):
+                Name of the free function exported from the shared library.
+                The function must have the signature:
+
+                    ``void free_fn(void* ptr, size_t size, sycl::queue* queue);``
+        """
+        allocator_lib = ctypes.CDLL(path_to_lib_file)
+
+        alloc_fn_ptr = getattr(allocator_lib, alloc_fn_name)
+        free_fn_ptr = getattr(allocator_lib, free_fn_name)
+
+        alloc_fn_addr = ctypes.cast(alloc_fn_ptr, ctypes.c_void_p).value
+        free_fn_addr = ctypes.cast(free_fn_ptr, ctypes.c_void_p).value
+
+        if alloc_fn_addr is None or free_fn_addr is None:
+            raise RuntimeError(
+                "Failed to load allocator symbols from the shared library."
+            )
+
+        self._allocator = torch._C._xpu_customAllocator(alloc_fn_addr, free_fn_addr)
+
+
+def change_current_allocator(allocator: _XPUAllocator) -> None:
+    r"""Change the currently used memory allocator to be the one provided.
+
+    .. note::
+        If the current allocator has already been used/initialized, this function will error.
+
+    Arguments:
+        allocator (torch.xpu.memory._XPUAllocator): allocator to be set as the active one.
+    """
+    torch._C._xpu_changeCurrentAllocator(allocator.allocator())
+
+
+def _get_current_allocator() -> _XPUAllocator:
+    r"""Return the allocator being currently used.
+
+    Returns:
+        _XPUAllocator: the allocator being currently used.
+    """
+    return _XPUAllocator(torch._C._xpu_getAllocator())
+
+
 __all__ = [
+    "XPUPluggableAllocator",
+    "change_current_allocator",
     "empty_cache",
     "get_per_process_memory_fraction",
     "max_memory_allocated",
