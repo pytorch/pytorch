@@ -348,8 +348,19 @@ class AOTInductorModelContainer {
     return constant_type == ConstantType::Buffer;
   }
 
-  bool _is_tensor_constant_or_buffer_type(const size_t idx) const {
-    return _is_tensor_constant_type(idx) || _is_buffer_type(idx);
+  bool _is_empty_parameter_type(const size_t idx) const {
+    auto constant_type = models_[0]->constant_type(static_cast<int64_t>(idx));
+    auto constant_data_size =
+        models_[0]->constant_data_size(static_cast<int64_t>(idx));
+    // Empty parameters are skipped and not provided by the upstream services,
+    // it is OK to skip.
+    return constant_type == ConstantType::Parameter && constant_data_size == 0;
+  }
+
+  bool _is_tensor_constant_or_buffer_type_or_empty_parameter(
+      const size_t idx) const {
+    return _is_tensor_constant_type(idx) || _is_buffer_type(idx) ||
+        _is_empty_parameter_type(idx);
   }
 
   void assert_all_constants(
@@ -364,11 +375,11 @@ class AOTInductorModelContainer {
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end()) {
-        if (_is_tensor_constant_or_buffer_type(idx)) {
+        if (_is_tensor_constant_or_buffer_type_or_empty_parameter(idx)) {
           // tracing sometimes creates tensors that are non-existent in
           // original graph. We could skip those and do a direct copy.
-          std::cerr << "[WARNING] Found constant or module state buffer "
-                    << constant_name
+          std::cerr << "[WARNING] Found constant or module state buffer or "
+                    << "empty module state parameter " << constant_name
                     << " in model, but not provided by user!\n";
           continue;
         }
@@ -453,7 +464,8 @@ class AOTInductorModelContainer {
           std::string(models_[0]->constant_name(static_cast<int64_t>(idx)));
       auto it = constants_map.find(constant_name);
       if (it == constants_map.end() &&
-          !(use_inactive && _is_tensor_constant_or_buffer_type(idx))) {
+          !(use_inactive &&
+            _is_tensor_constant_or_buffer_type_or_empty_parameter(idx))) {
         continue;
       }
 

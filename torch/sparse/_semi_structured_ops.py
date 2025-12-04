@@ -67,7 +67,7 @@ def semi_sparse_t(func, types, args=(), kwargs=None) -> torch.Tensor:
     # Because we cannot go from the compressed representation back to the dense representation currently,
     # we just keep track of how many times we have been transposed. Depending on whether the sparse matrix
     # is the first or second argument, we expect an even / odd number of calls to transpose respectively.
-    # pyrefly: ignore  # no-matching-overload
+    # pyrefly: ignore [no-matching-overload]
     return self.__class__(
         torch.Size([self.shape[-1], self.shape[0]]),
         packed=self.packed_t,

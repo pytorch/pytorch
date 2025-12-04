@@ -456,10 +456,10 @@ def _add_mutation_dependencies(
             for user in mutated_arg.users:
                 if user is node:
                     continue
-                # pyrefly: ignore [unsupported-operation]
+                # pyrefly: ignore  # unsupported-operation
                 elif user < node:
                     node_to_additional_deps[node].add(user)
-                # pyrefly: ignore [unsupported-operation]
+                # pyrefly: ignore  # unsupported-operation
                 elif user > node:
                     node_to_additional_deps[user].add(node)
 
@@ -529,7 +529,7 @@ def _is_tuple_node(node: Node) -> bool:
 
 def _get_children_getitems(node: Node) -> Generator[Node, None, None]:
     for user in node.users:
-        if user.target == operator.getitem and isinstance(user.args[1], int):
+        if user.target is operator.getitem and isinstance(user.args[1], int):
             yield user
 
 

@@ -1,13 +1,13 @@
 import torch
 
-from typing import Optional, Union
 from collections.abc import Sequence
 from tensorboard.compat.proto.node_def_pb2 import NodeDef
 from tensorboard.compat.proto.attr_value_pb2 import AttrValue
 from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 
 
-def attr_value_proto(dtype: object, shape: Optional[Sequence[int]], s: Optional[str]) -> dict[str, AttrValue]:
+# pyrefly: ignore [not-a-type]
+def attr_value_proto(dtype: object, shape: Sequence[int] | None, s: str | None) -> dict[str, AttrValue]:
     """Create a dict of objects matching a NodeDef's attr field.
 
     Follows https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/attr_value.proto
@@ -19,27 +19,30 @@ def attr_value_proto(dtype: object, shape: Optional[Sequence[int]], s: Optional[
         attr["attr"] = AttrValue(s=s.encode(encoding="utf_8"))
     if shape is not None:
         shapeproto = tensor_shape_proto(shape)
+        # pyrefly: ignore [missing-attribute]
         attr["_output_shapes"] = AttrValue(list=AttrValue.ListValue(shape=[shapeproto]))
     return attr
 
 
+# pyrefly: ignore [not-a-type]
 def tensor_shape_proto(outputsize: Sequence[int]) -> TensorShapeProto:
     """Create an object matching a tensor_shape field.
 
     Follows https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/tensor_shape.proto .
     """
+    # pyrefly: ignore [missing-attribute]
     return TensorShapeProto(dim=[TensorShapeProto.Dim(size=d) for d in outputsize])
 
 
 def node_proto(
     name: str,
     op: str = "UnSpecified",
-    input: Optional[Union[list[str], str]] = None,
-    dtype: Optional[torch.dtype] = None,
-    shape: Optional[tuple[int, ...]] = None,
-    outputsize: Optional[Sequence[int]] = None,
+    input: list[str] | str | None = None,
+    dtype: torch.dtype | None = None,
+    shape: tuple[int, ...] | None = None,
+    outputsize: Sequence[int] | None = None,
     attributes: str = "",
-) -> NodeDef:
+) -> NodeDef:  # pyrefly: ignore [not-a-type]
     """Create an object matching a NodeDef.
 
     Follows https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/node_def.proto .

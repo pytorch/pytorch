@@ -25,6 +25,7 @@ from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
+    skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
@@ -115,6 +116,22 @@ class TestCase(TorchTestCase):
     # graph break tests
 
 
+# NB: multiple inheritance with LoggingTestCase is possible - this should be fine
+# since there is no overlap in overridden methods.
+class TestCaseWithNestedGraphBreaks(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.prev_nested_graph_breaks = torch._dynamo.config.nested_graph_breaks
+        # pyrefly: ignore [bad-assignment]
+        torch._dynamo.config.nested_graph_breaks = True
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        # pyrefly: ignore [bad-assignment]
+        torch._dynamo.config.nested_graph_breaks = self.prev_nested_graph_breaks
+
+
+@skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class CPythonTestCase(TestCase):
     """
     Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
@@ -205,7 +222,7 @@ class CPythonTestCase(TestCase):
         if m:
             test_py_ver = tuple(map(int, m.group().removeprefix(prefix).split("_")))
             py_ver = sys.version_info[:2]
-            if py_ver < test_py_ver:
+            if py_ver != test_py_ver:
                 expected = ".".join(map(str, test_py_ver))
                 got = ".".join(map(str, py_ver))
                 raise unittest.SkipTest(

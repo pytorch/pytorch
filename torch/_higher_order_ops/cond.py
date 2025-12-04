@@ -52,7 +52,7 @@ class CondOp(HigherOrderOperator):
         validate_subgraph_args_types(operands)
         return super().__call__(pred, true_fn, false_fn, operands)
 
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def gen_schema(self, pred, true_fn, false_fn, operands):
         from torch._higher_order_ops.schema import HopSchemaGenerator
         from torch._higher_order_ops.utils import materialize_as_graph
@@ -102,8 +102,8 @@ def cond(
     Conditionally applies `true_fn` or `false_fn`.
 
     .. warning::
-        `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types and
-        doesn't support training currently. Please look forward to a more stable implementation in a future version of PyTorch.
+        `torch.cond` is a prototype feature in PyTorch. It has limited support for input and output types.
+        Please look forward to a more stable implementation in a future version of PyTorch.
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     `cond` is structured control flow operator. That is, it is like a Python if-statement,
@@ -286,7 +286,7 @@ def cond_op_dense(pred, true_fn, false_fn, operands):
 
 class CondAutogradOp(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(
         ctx,
         pred,

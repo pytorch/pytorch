@@ -234,7 +234,7 @@ class Vectorized<c10::Half> : public Vectorized16<
         vshlq_u16(vandq_u16(is_zero_vec, vdupq_n_u16(1)), shift);
     return vaddvq_u16(bits_vec);
 #else // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    // use known working implmentation.
+    // use known working implementation.
     __at_align__ value_type tmp[size()];
     store(tmp);
     int mask = 0;

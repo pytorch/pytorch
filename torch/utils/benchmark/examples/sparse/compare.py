@@ -19,7 +19,7 @@ class FauxTorch:
     writing serialized measurements, but this simplifies that model to
     make the example clearer.
     """
-    def __init__(self, real_torch, extra_ns_per_element):
+    def __init__(self, real_torch, extra_ns_per_element) -> None:
         self._real_torch = real_torch
         self._extra_ns_per_element = extra_ns_per_element
 
@@ -28,7 +28,7 @@ class FauxTorch:
         return self.Sparse(self._real_torch, self._extra_ns_per_element)
 
     class Sparse:
-        def __init__(self, real_torch, extra_ns_per_element):
+        def __init__(self, real_torch, extra_ns_per_element) -> None:
             self._real_torch = real_torch
             self._extra_ns_per_element = extra_ns_per_element
 
@@ -73,7 +73,7 @@ def gen_sparse(size, density, dtype, device='cpu'):
     indices, values = generate_coo_data(size, sparse_dim, nnz, dtype, device)
     return torch.sparse_coo_tensor(indices, values, size, dtype=dtype, device=device)
 
-def main():
+def main() -> None:
     tasks = [
         ("matmul", "x @ y", "torch.sparse.mm(x, y)"),
         ("matmul", "x @ y + 0", "torch.sparse.mm(x, y) + zero"),

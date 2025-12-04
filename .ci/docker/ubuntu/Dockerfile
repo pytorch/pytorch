@@ -100,6 +100,8 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/huggingface-requirements.txt huggingface-requirements.txt
 COPY ci_commit_pins/timm.txt timm.txt
 COPY ci_commit_pins/torchbench.txt torchbench.txt
+# Only build aoti cpp tests when INDUCTOR_BENCHMARKS is set to True
+ENV BUILD_AOT_INDUCTOR_TEST ${INDUCTOR_BENCHMARKS}
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface-requirements.txt torchbench.txt
 
@@ -140,6 +142,15 @@ COPY ./common/common_utils.sh common_utils.sh
 COPY ci_commit_pins/halide.txt halide.txt
 RUN if [ -n "${HALIDE}" ]; then bash ./install_halide.sh; fi
 RUN rm install_halide.sh common_utils.sh halide.txt
+
+ARG PALLAS
+ARG CUDA_VERSION
+# Install JAX with CUDA support (for Pallas)
+COPY ./common/install_jax.sh install_jax.sh
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./ci_commit_pins/jax.txt /ci_commit_pins/jax.txt
+RUN if [ -n "${PALLAS}" ]; then bash ./install_jax.sh ${CUDA_VERSION}; fi
+RUN rm -f install_jax.sh common_utils.sh /ci_commit_pins/jax.txt
 
 ARG ONNX
 # Install ONNX dependencies

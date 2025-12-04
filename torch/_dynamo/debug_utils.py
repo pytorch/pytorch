@@ -47,7 +47,7 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
-from .utils import clone_inputs, get_debug_dir
+from .utils import clone_inputs, get_debug_dir, warn_once
 
 
 if TYPE_CHECKING:
@@ -455,7 +455,7 @@ def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule
     for node in model.graph.nodes:
         if (
             node.op == "call_function"
-            and node.target == torch.ops.prims.convert_element_type.default
+            and node.target is torch.ops.prims.convert_element_type.default
         ):
             assert len(node.args) == 2
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
@@ -617,7 +617,7 @@ class InputReader:
                     # way would be very mysterious!  Would have been better
                     # not to store device in the serialized format...
                 return storage
-        log.warning("could not load %s, generating random data instead", storage_hash)
+        warn_once(f"could not load {storage_hash}, generating random data instead")
         shape = (nbytes // dtype_hint.itemsize,)
         stride = _stride_or_default(None, shape=shape)
         return rand_strided(shape, stride, dtype_hint, device).untyped_storage()

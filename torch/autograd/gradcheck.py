@@ -10,7 +10,7 @@ from typing_extensions import deprecated
 import torch
 import torch.testing
 
-# pyrefly: ignore  # deprecated
+# pyrefly: ignore [deprecated]
 from torch._vmap_internals import _vmap, vmap
 from torch.overrides import is_tensor_like
 from torch.types import _TensorOrTensors
@@ -297,7 +297,7 @@ def _get_numerical_jacobian(
     inp_indices = [
         i for i, a in enumerate(target) if is_tensor_like(a) and a.requires_grad
     ]
-    for i, (inp, inp_idx) in enumerate(zip(_iter_tensors(target, True), inp_indices)):
+    for inp, inp_idx in zip(_iter_tensors(target, True), inp_indices):
         jacobians += [
             get_numerical_jacobian_wrt_specific_input(
                 fn,
@@ -549,7 +549,7 @@ def _get_analytical_jacobian_forward_ad(
     with fwAD.dual_level():
         fw_grads = []
         dual_inputs = []
-        for i, inp in enumerate(inputs):
+        for inp in inputs:
             if is_tensor_like(inp) and inp.requires_grad:
                 if inp.layout == torch._mkldnn:  # type: ignore[attr-defined]
                     raise ValueError(
@@ -1275,7 +1275,7 @@ def _test_undefined_forward_mode(func, outputs, inputs):
                 tensor_indices.add(i)
             dual_inputs.append(inp)
 
-        for i, (fw_grad, u) in enumerate(zip(fw_grads, all_u)):
+        for fw_grad, u in zip(fw_grads, all_u):
             fw_grad.copy_(u.view_as(fw_grad))
 
         for idx, inp in enumerate(inputs):

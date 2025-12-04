@@ -34,7 +34,6 @@ from torch._library.fake_profile import (
     TensorMetadata,
 )
 from torch._library.infer_schema import tuple_to_list
-from torch._library.opaque_object import make_opaque, OpaqueType
 from torch._utils_internal import get_file_path_2  # @manual
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -903,8 +902,6 @@ class TestCustomOp(CustomOpTestCaseBase):
             return [torch.tensor(3)]
         if typ == Optional[torch.types.Number]:
             return [None, 2.718]
-        if typ == OpaqueType:
-            return [make_opaque("moo")]
         origin = typing.get_origin(typ)
         if origin is Union:
             args = typing.get_args(typ)
@@ -1227,7 +1224,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         from torch._custom_op.impl import SUPPORTED_DEVICE_TYPE_TO_KEY
 
-        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY.keys():
+        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY:
             # Smoke test: should not raise error
             custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types=device_type)(
                 foo_impl

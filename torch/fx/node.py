@@ -174,6 +174,8 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     # Fixup segment_reduce mismatch
     if module == "torch" and name == "segment_reduce":
         name = "_" + name
+    if module == "torch.nn.functional" and name in ("_ScalingType", "_SwizzleType"):
+        name = name.removeprefix("_")
     return f"{module}.{name}"
 
 
@@ -496,7 +498,7 @@ class Node(_NodeBase):
         _new_input_nodes: dict[Node, None] = {}
         _fx_map_arg(arg, _new_input_nodes.setdefault)
 
-        for new_use in _new_input_nodes.keys():
+        for new_use in _new_input_nodes:
             if new_use not in self._input_nodes:
                 self._input_nodes.setdefault(new_use)
                 new_use.users.setdefault(self)
@@ -763,6 +765,10 @@ class Node(_NodeBase):
             assert target_mod is not None, (
                 f"Did not find expected submodule target {self.target}"
             )
+            # NOTE: here we can end up considering GraphModule submodules pure,
+            # even if they contain impure ops. It may not be safe to change
+            # because this function is used by graph.eliminate_dead_code,
+            # and some users depend on current elimination behavior.
             return getattr(target_mod, "_is_impure", False)
 
         return False
