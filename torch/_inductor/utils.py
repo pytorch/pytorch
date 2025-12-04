@@ -2357,6 +2357,9 @@ def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
         and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
     )
 
+def use_origami_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
+    return _use_autotune_backend("ROCM_ORIGAMI")
+
 
 def use_ck_conv_template(layout: Layout) -> bool:
     return _use_conv_autotune_backend("CK") and use_ck_template(layout)

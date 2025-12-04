@@ -101,6 +101,14 @@ COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
 
+WORKDIR /app
+RUN apt-get update && apt-get install -y git python3 python3-pip python3-setuptools
+RUN git clone https://github.com/ROCm/rocm-libraries.git
+RUN pip install nanobind
+WORKDIR /app/rocm-libraries/shared/origami/python
+RUN python3 setup.py build_ext --inplace
+ENV PYTHONPATH=/app/rocm-libraries/shared/origami/python:$PYTHONPATH
+
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}

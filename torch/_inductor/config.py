@@ -474,6 +474,9 @@ pipeline_max_autotune_gemm = (
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
+# enable origami on triton templates
+origami = os.environ.get("TORCHINDUCTOR_ORIGAMI") == "1"
+
 # enable slow autotuning passes to select pointwise/reductions algorithms
 max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") == "1"
 

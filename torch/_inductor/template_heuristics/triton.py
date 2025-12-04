@@ -1921,6 +1921,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 )
                 yield template_kwargs
 
+
     def _convert_config_to_template_kwargs(
         self,
         triton_config: TritonConfig,
