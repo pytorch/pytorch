@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
+import shlex
+import subprocess
 import sys
 from abc import abstractmethod
 from functools import cached_property
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Never
 
 from . import ParseError
@@ -87,6 +89,25 @@ class FileLinter:
             elif f != "--":
                 files.append(f)
         return sorted(Path(f) for f in files)
+
+    def call(self, cmd: str | Sequence[str], check: bool = True, **kwargs: Any) -> str:
+        """Run a subprocess and return stdout as a string"""
+        if self.args.verbose:
+            print("$", *([cmd] if isinstance(cmd, str) else cmd))
+
+        shell = kwargs.get("shell", False)
+        if shell and not isinstance(cmd, str):
+            cmd = shlex.join(cmd)
+        elif not shell and isinstance(cmd, str):
+            cmd = shlex.split(cmd)
+        assert shell == isinstance(cmd, str)
+        p = subprocess.run(cmd, text=True, capture_output=True, **kwargs)
+
+        if check:
+            p.check_returncode()
+
+        assert isinstance(p.stdout, str)
+        return p.stdout
 
     def _lint_file(self, p: Path) -> bool:
         if self.args.verbose:
