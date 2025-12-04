@@ -320,6 +320,8 @@ struct CachingHostAllocatorImpl {
       auto index = size_index(block->size_);
       std::lock_guard<std::mutex> g(free_list_[index].mutex_);
       free_list_[index].list_.push_back(block);
+      stats_.active_bucket_stats[index].decrease(1);
+      stats_.active_bytes_bucket_stats[index].decrease(block->size_);
     } else {
       // restore these events that record by used streams.
       std::lock_guard<std::mutex> g(events_mutex_);
@@ -630,11 +632,12 @@ struct CachingHostAllocatorImpl {
       }
 
       if (available) {
-        auto index = size_index(block->size_);
+        auto block_size = block->size_;
+        auto index = size_index(block_size);
         std::lock_guard<std::mutex> g(free_list_[index].mutex_);
         free_list_[index].list_.push_back(block);
         stats_.active_bucket_stats[index].decrease(1);
-        stats_.active_bytes_bucket_stats[index].decrease(size);
+        stats_.active_bytes_bucket_stats[index].decrease(block_size);
         if (size != -1) {
           return;
         }
