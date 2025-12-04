@@ -1648,15 +1648,35 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         configs = self._get_config_generator()
 
         # Generate and process configs
-        for c in configs(m, n, k, dtype_size=dtype.itemsize, op_name=op_name):
-            template_kwargs = self._convert_config_to_template_kwargs(
-                c,
-                m,
-                n,
-                k,
-                kernel_inputs.out_dtype(),
-            )
-            yield template_kwargs
+        if config.origami:
+            import origami
+            from helper import MatmulHeuristicResult
+            OrigamiGemmSelector = MatmulHeuristicResult(m, n, k, dtype, dtype, dtype)
+            origami_config_kwargs = {
+                                    'EVEN_K': True, 'USE_FAST_ACCUM': False,
+                                    'ACC_TYPE': 'tl.float32',
+                                    'num_stages': 2,
+                                    'num_warps': 8,
+                                    'BLOCK_M':OrigamiGemmSelector.config[0],
+                                    'BLOCK_N':OrigamiGemmSelector.config[1],
+                                    'BLOCK_K':OrigamiGemmSelector.config[2],
+                                    'GROUP_M':OrigamiGemmSelector.config[3],
+                                    'matrix_instr_nonkdim': 16,
+                                    'waves_per_eu': 8,
+                                    'kpack': 2,
+                                    }
+            yield origami_config_kwargs
+        else:
+            for c in configs(m, n, k, dtype_size=dtype.itemsize, op_name=op_name):
+                template_kwargs = self._convert_config_to_template_kwargs(
+                    c,
+                    m,
+                    n,
+                    k,
+                    kernel_inputs.out_dtype(),
+                )
+                yield template_kwargs
+
 
     def _convert_config_to_template_kwargs(
         self,
