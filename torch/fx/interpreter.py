@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
 import inspect
+import logging
 from contextlib import contextmanager
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
-from torch._logging import trace_structured
+from torch._logging import LazyString, trace_structured
 from torch.hub import tqdm
 
 from . import config
@@ -21,8 +22,33 @@ from .proxy import Proxy
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+log = logging.getLogger(__name__)
 
 __all__ = ["Interpreter", "Transformer"]
+
+
+def _format_fx_node(n):
+    """
+    Format a torch.fx.Node into a human-readable string for debug logging.
+
+    Args:
+        n (torch.fx.Node): The FX node being executed.
+
+    Returns:
+        str: A formatted string describing the node operation, including its
+        name, target, positional arguments, and keyword arguments.
+    """
+    module_prefix = getattr(n.target, "__module__", "")
+    module_prefix = f"{module_prefix}." if module_prefix else ""
+
+    # Handle positional and keyword arguments
+    args = ", ".join(map(str, n.args))
+    kwargs = ", ".join(f"{k}={v}" for k, v in n.kwargs.items())
+    joined = ", ".join(filter(None, [args, kwargs]))
+
+    return (
+        f"{n.name} = {module_prefix}{getattr(n.target, '__name__', n.target)}({joined})"
+    )
 
 
 @compatibility(is_backward_compatible=True)
@@ -55,7 +81,7 @@ class Interpreter:
                 def call_function(
                     self, target: Target, args: Tuple, kwargs: Dict
                 ) -> Any:
-                    if target == torch.sigmoid:
+                    if target is torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(target, args, kwargs)
 
@@ -220,11 +246,23 @@ class Interpreter:
         calling convention, where you pass a list of arguments, which will be cleared
         by the interpreter.  This ensures that input tensors are promptly deallocated.
         """
-        args_iter = iter(args_list)
-        env = {}
-        for n in self.graph.nodes:
-            if n.op == "placeholder":
-                env[n] = next(args_iter)
+        # Collect placeholder nodes first
+        placeholder_nodes = [n for n in self.graph.nodes if n.op == "placeholder"]
+
+        # Check argument count
+        if len(args_list) != len(placeholder_nodes):
+            detail = (
+                "extra arguments"
+                if len(args_list) > len(placeholder_nodes)
+                else "missing arguments"
+            )
+            raise RuntimeError(
+                f"Interpreter.boxed_run expected {len(placeholder_nodes)} arguments for placeholders "
+                f"but received {len(args_list)} ({detail})"
+            )
+
+        # Assign arguments to placeholders
+        env = dict(zip(placeholder_nodes, args_list))
         args_list.clear()
         return self.run(initial_env=env)
 
@@ -249,6 +287,7 @@ class Interpreter:
         Returns:
             Any: The result of executing ``n``
         """
+        log.debug("run_node %s", LazyString(lambda: _format_fx_node(n)))
         with self._set_current_node(n):
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             assert isinstance(args, tuple)
@@ -489,7 +528,7 @@ class Transformer(Interpreter):
                     args: Tuple[Argument, ...],
                     kwargs: Dict[str, Any],
                 ) -> Any:
-                    if target == torch.sigmoid:
+                    if target is torch.sigmoid:
                         return torch.neg(*args, **kwargs)
                     return super().call_function(target, args, kwargs)
 

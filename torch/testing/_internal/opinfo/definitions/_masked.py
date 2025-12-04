@@ -402,9 +402,9 @@ def sample_inputs_masked_logaddexp(op_info, device, dtype, requires_grad, **kwar
         make_tensor, dtype=dtype, device=device, requires_grad=requires_grad
     )
     for shape, input_masks, other_masks in zip(
-        shapes, input_mask_lists, other_mask_lists
+        shapes, input_mask_lists, other_mask_lists, strict=True
     ):
-        for input_mask, other_mask in zip(input_masks, other_masks):
+        for input_mask, other_mask in zip(input_masks, other_masks, strict=True):
             yield SampleInput(
                 make_arg(shape),
                 make_arg(shape),

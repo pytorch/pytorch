@@ -51,7 +51,8 @@ def _generate_inputs_for_submodules(
         model(*args, **kwargs)
     except Exception as e:
         warnings.warn(
-            f"Failed to generate submodule inputs because of the following error:\n{e}"
+            f"Failed to generate submodule inputs because of the following error:\n{e}",
+            stacklevel=2,
         )
     finally:
         for h in handles:

@@ -1069,6 +1069,16 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             del foo
 
+        # Define a named tuple for a Point with x and y coordinates
+        Point = collections.namedtuple("Point", ["x", "y"])
+        with self.assertRaisesRegex(ValueError, "unsupported type"):
+
+            @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
+            def foo(x: Tensor, y: Point) -> Tensor:
+                raise NotImplementedError
+
+            del foo
+
     def test_supported_schemas(self):
         # All of these should already be tested by PyTorch codegen
         # (we share the same mechanism), but here's a sanity check.
@@ -1217,7 +1227,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         from torch._custom_op.impl import SUPPORTED_DEVICE_TYPE_TO_KEY
 
-        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY.keys():
+        for device_type in SUPPORTED_DEVICE_TYPE_TO_KEY:
             # Smoke test: should not raise error
             custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types=device_type)(
                 foo_impl

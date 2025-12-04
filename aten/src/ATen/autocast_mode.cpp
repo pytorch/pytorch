@@ -36,7 +36,7 @@ namespace {
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
 
-static ska::flat_hash_map<TensorImpl*, val_type>& get_cached_casts() {
+ska::flat_hash_map<TensorImpl*, val_type>& get_cached_casts() {
   static ska::flat_hash_map<TensorImpl*, val_type> cached_casts;
   return cached_casts;
 }

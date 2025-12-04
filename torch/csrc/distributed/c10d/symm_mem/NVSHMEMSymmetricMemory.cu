@@ -71,7 +71,7 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
           storeExchange.all_gather(store, rank_, world_size_, global_rank);
       exchanged_n_times++;
       if (rank_ == 0) {
-        LOG(INFO) << "[rank " << rank_ << "]"
+        LOG(INFO) << "[rank " << rank_ << ']'
                   << " rank_to_global_rank: " << group_info.rank_to_global_rank
                   << ", group_name: " << group_name
                   << ", exchanged_n_times: " << exchanged_n_times;

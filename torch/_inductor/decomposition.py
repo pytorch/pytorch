@@ -5,8 +5,9 @@ import math
 import operator
 import sys
 import typing
-from typing import Any, Callable, Optional, TypeVar, Union
-from typing_extensions import ParamSpec, TypeAlias
+from collections.abc import Callable
+from typing import Any, Optional, TypeAlias, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._decomp as decomp
@@ -34,6 +35,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
+from torch._refs import native_layer_norm as decomp_native_layer_norm
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 
 from . import config, inductor_prims
@@ -117,6 +119,7 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.clamp_max,
     aten.clamp_min,
     aten.embedding_dense_backward,  # we fall back on xpu
+    aten.native_layer_norm,  # we fall back on mtia
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -156,6 +159,20 @@ def _embedding_dense_backward(
     return decomp_embedding_dense_backward(
         grad_output, indices, num_weights, padding_idx, scale_grad_by_freq
     )
+
+
+@register_decomposition(aten.native_layer_norm)
+def _native_layer_norm(
+    input: torch.Tensor,
+    normalized_shape: utils.ShapeType,
+    weight: Optional[torch.Tensor],
+    bias: Optional[torch.Tensor],
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if input.is_mtia:
+        return NotImplemented
+    # We can write a util function to update decomp table if we have more ops to fallback.
+    return decomp_native_layer_norm(input, normalized_shape, weight, bias, eps)
 
 
 @register_decomposition([aten.sym_constrain_range_for_size.default])
@@ -544,7 +561,6 @@ def amax(
     keepdim: bool = False,
 ) -> torch.Tensor:
     if self.dtype == torch.bool:
-        # pyrefly: ignore  # no-matching-overload
         return torch.any(self, dim=dim, keepdim=keepdim)
     return NotImplemented
 
@@ -556,7 +572,6 @@ def amin(
     keepdim: bool = False,
 ) -> torch.Tensor:
     if self.dtype == torch.bool:
-        # pyrefly: ignore  # no-matching-overload
         return torch.all(self, dim=dim, keepdim=keepdim)
     return NotImplemented
 
@@ -1047,13 +1062,13 @@ def _max_pool_with_indices(
     if not stride:
         stride = kernel_size
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     kernel_size = pad_listlike(kernel_size, dim)
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     dilation = pad_listlike(dilation, dim)
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     padding = pad_listlike(padding, dim)
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     stride = pad_listlike(stride, dim)
 
     window_size = functools.reduce(operator.mul, kernel_size)
@@ -1188,9 +1203,10 @@ def repeat_interleave_Tensor(
     assert repeat.ndim == 1
     cumsum = repeat.cumsum(0)
     pos = torch.arange(output_size, device=repeat.device)
-    return torch.searchsorted(
+    indices = torch.searchsorted(
         cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True
     )
+    return torch.clamp(indices, max=repeat.size(0) - 1)
 
 
 # intentionally not regiestered
@@ -1211,11 +1227,11 @@ def conv1d_to_conv2d(
         "Expect (N,C_in,L) and (C_out,C_in//groups,K)"
     )
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     stride = stride[0]
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     padding = padding[0]
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     dilation = dilation[0]
 
     # Unsqueeze to make input 2D: (N,C,L) -> (N,C,L,1)

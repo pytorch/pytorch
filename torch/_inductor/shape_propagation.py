@@ -1,6 +1,6 @@
 import functools
-from collections.abc import Sequence
-from typing import Callable, Optional, Protocol, Union
+from collections.abc import Callable, Sequence
+from typing import Optional, Protocol, Union
 
 import sympy
 
@@ -120,6 +120,13 @@ class ShapePropagationOpsHandler:
         use_compute_types: bool = True,
     ) -> BlockShapeType:
         return value.shape
+
+    @staticmethod
+    def dot(a: sympy.Expr, b: sympy.Expr) -> BlockShapeType:
+        from torch._inductor.codegen.triton import TritonKernel
+
+        assert isinstance(V.kernel, TritonKernel), "dot supports Triton only"
+        return ("YBLOCK", "XBLOCK")
 
     @staticmethod
     def index_expr(expr: sympy.Expr, dtype: torch.dtype) -> BlockShapeType:

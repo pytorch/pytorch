@@ -10,6 +10,14 @@
 #include <torch/csrc/dynamo/eval_frame_cpp.h>
 #include <torch/csrc/utils/python_compat.h>
 
+#if IS_PYTHON_3_14_PLUS && defined(_WIN32)
+#define Py_BUILD_CORE
+#include <internal/pycore_stackref.h>
+#include <internal/pycore_code.h>
+#include <internal/pycore_interpframe.h>
+#undef Py_BUILD_CORE
+#endif
+
 PyObject* guard_error_hook = NULL;
 PyObject* guard_complete_hook = NULL;
 
@@ -35,8 +43,7 @@ void eval_frame_callback_set(PyObject* obj) {
 }
 
 // 3.15 Not supported at all. See cpython_defs.c for hints
-// 3.14 currently not fully supported on Windows
-#if !(IS_PYTHON_3_15_PLUS || (IS_PYTHON_3_14_PLUS && defined(_WIN32)))
+#if !(IS_PYTHON_3_15_PLUS)
 
 #define DECLARE_PYOBJ_ATTR(name)                        \
   static PyObject* THPPyInterpreterFrame_##name(        \
@@ -726,7 +733,10 @@ static PyMethodDef _methods[] = {
     {"get_eval_frame_callback", get_eval_frame_callback_py, METH_NOARGS, NULL},
     {"reset_code", reset_code, METH_O, NULL},
     {"unsupported", unsupported, METH_VARARGS, NULL},
-    {"set_code_exec_strategy", set_code_exec_strategy, METH_VARARGS, NULL},
+    {"set_code_exec_strategy",
+     dynamo_set_code_exec_strategy,
+     METH_VARARGS,
+     NULL},
     {"set_guard_error_hook", set_guard_error_hook, METH_O, NULL},
     {"set_guard_complete_hook", set_guard_complete_hook, METH_O, NULL},
     {"raise_sigtrap", raise_sigtrap, METH_NOARGS, NULL},
