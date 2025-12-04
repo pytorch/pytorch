@@ -291,7 +291,7 @@ else:
         def _compute_coordinates_from_mesh(
             mesh_tensor: torch.Tensor,
             rank: int,
-        ) -> Optional[tuple[int, ...]]:
+        ) -> tuple[int, ...] | None:
             """
             Compute the coordinates of a rank within a mesh tensor.
 
@@ -1119,11 +1119,26 @@ else:
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
-            return self._coordinate_on_dim if self._coordinate_on_dim else None
+            return self._coordinate_on_dim
 
         def sym_get_coordinate(self, index: int) -> int:
-            assert self._coordinate_on_dim is not None
-            return self._coordinate_on_dim[index]
+            if not _in_fake_mode():
+                assert self._coordinate_on_dim is not None
+                return self._coordinate_on_dim[index]
+
+            # This will cause the ops to be registered
+            from ._ops import device_mesh  # noqa: F401
+
+            # Temporarily turn off tracing while we lift the constant
+            # rank_map to a list so it can be a constant in the graph.
+            with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                rank_map_list = self._rank_map.tolist()
+            rank_map = torch.tensor(rank_map_list, device="cpu", dtype=torch.int)
+            full_mesh = self._layout.remap_to_tensor(rank_map)
+
+            return torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
+                full_mesh, index
+            )
 
         def _flatten(
             self,
@@ -1436,3 +1451,9 @@ else:
         )
 
         return device_mesh
+
+
+def _in_fake_mode() -> bool:
+    if context := torch._guards.TracingContext.try_get():
+        return context.fake_mode is not None
+    return False
