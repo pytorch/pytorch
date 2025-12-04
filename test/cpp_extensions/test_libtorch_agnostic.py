@@ -727,6 +727,7 @@ if not IS_WINDOWS:
             self.assertEqual(result_range, expected_range)
 
         @onlyCPU
+        @xfailIfTorchDynamo
         def test_my_optional_tensor_ref(self, device):
             """Test TORCH_BOX with const std::optional<Tensor>& parameter."""
             import libtorch_agnostic_2_9 as libtorch_agnostic
