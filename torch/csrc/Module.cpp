@@ -125,8 +125,11 @@
 #endif
 #endif
 
-#if defined(USE_XPU) && !defined(_WIN32)
+#ifdef USE_XPU
+#include <ATen/native/transformers/xpu/sdp_utils.h>
+#ifndef _WIN32
 #include <torch/csrc/inductor/static_launcher/xpu/static_xpu_launcher.h>
+#endif
 #endif
 
 #ifdef USE_DISTRIBUTED
@@ -2484,7 +2487,7 @@ Call this whenever a new thread is created in order to propagate values from
       .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
   py_module.def("_is_flash_attention_available", []() {
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_XPU)
     return sdp::is_flash_attention_available();
 #else
     return false;
@@ -2493,7 +2496,7 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_can_use_flash_attention",
       [](const sdp::sdp_params& params, bool debug) {
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_XPU)
         return sdp::can_use_flash_attention(params, debug);
 #else
         return false;

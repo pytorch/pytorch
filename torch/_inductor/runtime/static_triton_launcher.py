@@ -309,6 +309,7 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
         return _StaticCudaLauncher
 
     def __init__(self, kernel: CompiledKernel) -> None:
+        # pyrefly: ignore [missing-attribute]
         if "hsaco" in kernel.asm:
             # pyrefly: ignore [missing-attribute]
             self.cubin_raw = kernel.asm["hsaco"]
