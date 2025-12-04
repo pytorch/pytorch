@@ -271,14 +271,12 @@ __global__ void warpMergeSortTopK(
                 "sort_size must be a multiple of C10_WARP_SIZE");
 
   using LoadKeys = cub::WarpLoad<scalar_t, items_per_thread, cub::WARP_LOAD_TRANSPOSE>;
-  using LoadIndices = cub::WarpLoad<int64_t, items_per_thread, cub::WARP_LOAD_TRANSPOSE>;
   using Sort = cub::WarpMergeSort<scalar_t, items_per_thread, C10_WARP_SIZE, int64_t>;
   using StoreKeys = cub::WarpStore<scalar_t, items_per_thread, cub::WARP_STORE_TRANSPOSE>;
   using StoreIndices = cub::WarpStore<int64_t, items_per_thread, cub::WARP_STORE_TRANSPOSE>;
 
   __shared__ union {
     typename LoadKeys::TempStorage load_keys;
-    typename LoadIndices::TempStorage load_indices;
     typename Sort::TempStorage sort;
     typename StoreKeys::TempStorage store_keys;
     typename StoreIndices::TempStorage store_indices;
