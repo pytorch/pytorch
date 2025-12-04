@@ -548,7 +548,6 @@ explain = False
 # There are 4 possible graph break cases that InstructionTranslatorBase handles:
 #   1. Regular graph breaks from CALL, BINARY_SUBSCR, etc. (implemented by break_graph_if_unsupported)
 #   2. Data-dependent condition graph breaks (implemented by generic_jump)
-#   3. STORE_ATTR graph breaks (implemented in InstructionTranslatorBase.STORE_ATTR)
 #   4. All other unhandled graph breaks - unsupported step graph breaks (implemented in InstructionTranslatorBase.step)
 #
 # Graph breaks are handled in the following manner:
@@ -841,7 +840,7 @@ def generic_jump(
 
 
 def break_graph_if_unsupported(
-    *, push: int
+    *, push: int, msg_prefix: str
 ) -> Callable[
     [Callable[..., None]], Callable[[InstructionTranslatorBase, Instruction], None]
 ]:
@@ -880,7 +879,7 @@ def break_graph_if_unsupported(
 
                 self.log_graph_break(
                     self.code_options,
-                    reason=str(excp),
+                    reason=f"{msg_prefix}:\n\n{str(excp)}",
                     user_stack=excp.real_stack,
                 )
 
@@ -2489,13 +2488,19 @@ class InstructionTranslatorBase(
     def GET_ITER(self, inst: Instruction) -> None:
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
 
-    @break_graph_if_unsupported(push=1)
+    @break_graph_if_unsupported(
+        push=1,
+        msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION: a call to a regular function, e.g. f(x, y)",
+    )
     def CALL_FUNCTION(self, inst: Instruction) -> None:
         args = self.popn(inst.argval)
         fn = self.pop()
         self.call_function(fn, args, {})
 
-    @break_graph_if_unsupported(push=1)
+    @break_graph_if_unsupported(
+        push=1,
+        msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION_EX: a variadic function call, e.g. f(*args)",
+    )
     def CALL_FUNCTION_EX(self, inst: Instruction) -> None:
         kwargsvars: VariableTracker
         if inst.argval == 0:
@@ -2560,7 +2565,10 @@ class InstructionTranslatorBase(
         # pyrefly: ignore [unbound-name, missing-attribute]
         self.call_function(fn, argsvars.items, kwargsvars)
 
-    @break_graph_if_unsupported(push=1)
+    @break_graph_if_unsupported(
+        push=1,
+        msg_prefix="Encountered graph break when attempting to trace CALL_FUNCTION_KW: a function call with keyword arguments, e.g. f(x=True)",
+    )
     def CALL_FUNCTION_KW(self, inst: Instruction) -> None:
         argnames = self.pop()
         args = self.popn(inst.argval)
@@ -2627,63 +2635,17 @@ class InstructionTranslatorBase(
                 return
         self._load_attr(inst.argval)
 
+    @break_graph_if_unsupported(
+        push=0,
+        msg_prefix="Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y",
+    )
     def STORE_ATTR(self, inst: Instruction) -> None:
-        speculation = self.speculate()
-        if speculation.failed(self):
-            return self.store_attr_graph_break(inst)
         val, obj = self.popn(2)
 
-        if isinstance(obj, NNModuleVariable) and not isinstance(val, ConstantVariable):
-            # We don't allow side effects during export on non-constant values
-            # https://github.com/pytorch/torchdynamo/issues/1475
-            assert not self.export, (
-                f"Mutating module attribute {inst.argval} during export."
-            )
-
-        try:
-            BuiltinVariable(setattr).call_function(
-                self,  # type: ignore[arg-type]
-                [obj, ConstantVariable.create(inst.argval), val],
-                {},
-            )
-            return
-        except Unsupported as e:
-            if not self.should_compile_partial_graph():
-                raise
-            reason = f"Encountered graph break when attempting to store an object's attribute (STORE_ATTR):\n\n{str(e)}"
-            self.log_graph_break(
-                self.code_options,
-                reason=reason,
-                user_stack=e.real_stack,
-            )
-            e.remove_from_stats()
-            e.add_to_stats("graph_break")
-        speculation.fail_and_restart_analysis(self.error_on_graph_break)
-
-    def store_attr_graph_break(self, inst: Instruction) -> None:
-        if not self.should_compile_partial_graph():
-            unimplemented(
-                gb_type="Should not compile partial graph (STORE_ATTR)",
-                context="",
-                explanation="Dynamo has determined when encountering an unsupported "
-                "STORE_ATTR instruction (i.e. `obj.attr = val`) that it should not compile the partial graph.",
-                hints=[],
-            )
-        log.debug("STORE_ATTR triggered compile")
-        all_stack_locals_metadata = self.output.compile_subgraph(
-            self,
-            reason=GraphCompileReason("store_attr", [self.frame_summary()]),
-            stack_pops=2,
-        )
-        inst_copy = copy.copy(inst)
-        inst_copy.exn_tab_entry = None
-        self.output.add_output_instructions([inst_copy])
-        self.popn(2)
-        self.output.add_output_instructions(
-            self.create_call_resume_at(
-                self.next_instruction,
-                all_stack_locals_metadata,
-            )
+        BuiltinVariable(setattr).call_function(
+            self,  # type: ignore[arg-type]
+            [obj, ConstantVariable.create(inst.argval), val],
+            {},
         )
 
     def DELETE_ATTR(self, inst: Instruction) -> None:
@@ -2886,6 +2848,7 @@ class InstructionTranslatorBase(
             tuple(meta.locals_ctx_args),
             tuple(meta.stack_null_idxes),
             tuple(resume_codes),
+            self.current_instruction.opname == "STORE_ATTR",
         )
 
         # Add original GraphModule context to the resume function to handle
@@ -3223,7 +3186,10 @@ class InstructionTranslatorBase(
             and self.output.current_tracer.parent is None
         )
 
-    @break_graph_if_unsupported(push=0)
+    @break_graph_if_unsupported(
+        push=0,
+        msg_prefix="Encountered graph break when attempting to trace STORE_SUBSCR: trying to store subscript, e.g. x[key] = y",
+    )
     def STORE_SUBSCR(self, inst: Instruction) -> None:
         val, obj, key = self.popn(3)
         obj.call_method(self, "__setitem__", [key, val], {})
@@ -3446,7 +3412,9 @@ class InstructionTranslatorBase(
                 hints=[*graph_break_hints.USER_ERROR],
             )
 
-    @break_graph_if_unsupported(push=0)
+    @break_graph_if_unsupported(
+        push=0, msg_prefix="Encountered intentional debugging graph break"
+    )
     def graph_break_on_leaf_function(self, inst: Instruction) -> None:
         if self.is_leaf_tracer:
             unimplemented(
@@ -3716,7 +3684,10 @@ class InstructionTranslatorBase(
     BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
-    BINARY_SUBSCR = break_graph_if_unsupported(push=1)(stack_op(operator.getitem))
+    BINARY_SUBSCR = break_graph_if_unsupported(
+        push=1,
+        msg_prefix="Encountered graph break when attempting to trace BINARY_SUBSCR: a binary subscript, e.g. x[attr]",
+    )(stack_op(operator.getitem))
     BINARY_LSHIFT = stack_op(operator.lshift)
     BINARY_RSHIFT = stack_op(operator.rshift)
     BINARY_AND = stack_op(operator.and_)
@@ -3812,7 +3783,10 @@ class InstructionTranslatorBase(
         finally:
             self.kw_names = None
 
-    @break_graph_if_unsupported(push=1)
+    @break_graph_if_unsupported(
+        push=1,
+        msg_prefix="Encountered graph break when attempting to trace CALL: a function call, e.g. f(x, y)",
+    )
     def CALL(self, inst: Instruction) -> None:
         self._call(inst)
 
@@ -3989,7 +3963,10 @@ class InstructionTranslatorBase(
     # 3.13 opcodes
     # fused instructions LOAD_FAST_LOAD_FAST, STORE_FAST_STORE_FAST, STORE_FAST_LOAD_FAST
     # are broken down.
-    @break_graph_if_unsupported(push=1)
+    @break_graph_if_unsupported(
+        push=1,
+        msg_prefix="Encountered graph break when attempting to trace CALL_KW: a function call with keyword arguments, e.g. f(x=True)",
+    )
     def CALL_KW(self, inst: Instruction) -> None:
         self._call(inst, call_kw=True)
 
