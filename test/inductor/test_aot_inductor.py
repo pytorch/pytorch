@@ -49,6 +49,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM80OrLater,
+    tf32_off,
     tf32_on_and_off,
 )
 from torch.testing._internal.common_device_type import (
@@ -176,6 +177,7 @@ def get_module_ext_type():
 class AOTInductorTestsTemplate:
     @common_utils.parametrize("embed_kernel_binary", [False, True])
     @common_utils.parametrize("max_autotune", [False, True])
+    @tf32_off()
     def test_simple(self, embed_kernel_binary, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -941,6 +943,7 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
+    @tf32_off()
     def test_linear_dynamic_maxautotune(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
@@ -1467,6 +1470,7 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
+    @tf32_off()
     def test_addmm_multiple_dynamic(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
@@ -1510,6 +1514,7 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
+    @tf32_off()
     def test_bmm_multiple_dynamic(self):
         if self.device == "cpu":
             raise unittest.SkipTest("using triton backend only is not supported on CPU")
@@ -5281,6 +5286,7 @@ class AOTInductorTestsTemplate:
             self.assertTrue(same(model(*example_input), actual))
 
     @common_utils.parametrize("max_autotune", [True, False])
+    @tf32_off()
     def test_misc_1(self, max_autotune):
         if self.device == "cpu" and IS_MACOS and max_autotune:
             raise unittest.SkipTest("max_autotune not supported on macos")
@@ -5995,6 +6001,7 @@ class AOTInductorTestsTemplate:
     @skipIfWindows(
         msg="OpenMP crashed application on windows"
     )  # TODO: (xuhancn) need to root cause and fix.
+    @tf32_off()
     def test_issue_140766(self):
         class Model(torch.nn.Module):
             def __init__(self):
