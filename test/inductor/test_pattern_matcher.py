@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.utils import _pytree as pytree
@@ -285,7 +284,6 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn1, args, True)
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
-    @skipIfRocm
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {

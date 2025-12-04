@@ -2488,7 +2488,6 @@ class CommonTemplate:
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
-    @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     def test__dyn_quant_pack_4bit_weight_fp32(self):
         q_group = 32
@@ -2524,7 +2523,6 @@ class CommonTemplate:
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_pack_4bit_weight implementation on CUDA")
-    @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_pack_4bit_weight implementation on XPU")
     @skip_if_halide  # bf16
     def test__dyn_quant_pack_4bit_weight_bf16(self):
@@ -2566,7 +2564,6 @@ class CommonTemplate:
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
-    @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
     def test__dyn_quant_matmul_4bit_fp32_input(self):
         q_group = 32
@@ -2612,7 +2609,6 @@ class CommonTemplate:
     @xfail_if_mps_unimplemented
     @xfail_if_triton_cpu
     @skipCUDAIf(True, "No _dyn_quant_matmul_4bit implementation on CUDA")
-    @skipIfRocm
     @skipIfXpu(msg="No _dyn_quant_matmul_4bit implementation on XPU")
     @skip_if_halide  # bf16
     def test__dyn_quant_matmul_4bit_bf16_input(self):
@@ -4700,7 +4696,6 @@ class CommonTemplate:
             check_lowp=False,  # cpu doesn't understand fp16, and there are explicit .cpu() calls
         )
 
-    @skipIfRocm
     @requires_multigpu()
     def test_multi_gpu_device(self):
         # TODO: https://github.com/pytorch/pytorch/issues/92627
@@ -11616,7 +11611,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             (torch.randn(32), torch.randn(32)),
         )
 
-    @skipIfRocm
     def test_conv_with_as_strided(self):
         class Model(nn.Module):
             def __init__(self) -> None:

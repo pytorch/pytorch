@@ -37,7 +37,6 @@ class TestSubgraphChoice(TestCase):
         )
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     def test_subgraph_decompose_k(self):
         from torch._inductor.kernel.mm import aten_mm
         from torch._inductor.kernel.mm_common import mm_args
@@ -98,7 +97,6 @@ class TestSubgraphChoice(TestCase):
         torch.testing.assert_close(res, a_in @ b_in, atol=1e-1, rtol=1e-1)
 
     @skipIfXpu
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     def test_subgraph_freeze_layout(self):
         from torch._inductor.kernel.mm_common import mm_args
 
