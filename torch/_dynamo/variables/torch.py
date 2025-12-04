@@ -1425,10 +1425,26 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.autograd.grad)
         def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
-            from .. import graph_break_hints
+            from .. import compiled_autograd, graph_break_hints
             from .lazy import LazyVariableTracker
             from .lists import BaseListVariable
             from .tensor import TensorVariable
+
+            # Graph break if compiled_autograd is enabled.
+            # Compiled autograd has limitations (e.g., view_fn in CopySlices)
+            # that would cause errors during fake tensor execution.
+            if compiled_autograd.compiled_autograd_enabled:
+                unimplemented(
+                    gb_type="autograd.grad with compiled autograd",
+                    context="",
+                    explanation=(
+                        "torch.autograd.grad() inside torch.compile is not supported when "
+                        "compiled autograd is enabled."
+                    ),
+                    hints=[
+                        "Disable compiled autograd, or move the autograd.grad() call outside the compiled region.",
+                    ],
+                )
 
             tx.output.uses_autograd_grad = True
 
@@ -1442,7 +1458,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     value = var.peek_value()
                     if isinstance(value, torch.Tensor) and value.grad_fn is not None:
                         unimplemented(
-                            gb_type="autograd.grad with external grad_fn input",
+                            gb_type="autograd.grad with external grad_fn (arg)",
                             context="",
                             explanation=(
                                 "torch.autograd.grad() cannot be used when the compiled function "
@@ -1469,7 +1485,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
                 if isinstance(var, TensorVariable) and var.has_grad_fn:
                     unimplemented(
-                        gb_type="autograd.grad with external grad_fn input",
+                        gb_type="autograd.grad with external grad_fn (input)",
                         context="",
                         explanation=(
                             "torch.autograd.grad() cannot be used when the compiled function "
