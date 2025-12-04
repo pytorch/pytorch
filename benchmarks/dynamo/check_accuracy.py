@@ -35,7 +35,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
         flaky_models.update(
             {
                 "Background_Matting",
-                "doctr_reco_predictor",
                 "mnasnet1_0",
                 "llava",
                 "repvgg_a2",
