@@ -4506,7 +4506,7 @@ class TestSerialization(TestCase, SerializationMixin):
             exc = pickle.PicklingError if sys.version_info >= (3, 14) else AttributeError
             with self.assertRaisesRegex(
                 exc,
-                "Can't (get|pickle) local object (<function |')WeakValueDictionary.__init__.<locals>.remove"
+                r"Can't (get|pickle) local object (<function |')WeakValueDictionary\.__init__\.<locals>\.remove"
             ):
                 with skip_data(), BytesIOContext() as f:
                     torch.save(ft, f)

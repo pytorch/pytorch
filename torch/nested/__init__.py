@@ -25,7 +25,7 @@ torch.serialization.add_safe_globals([_NestedTensor, _rebuild_njt])
 
 
 def as_nested_tensor(
-    ts: Union[Tensor, list[Tensor], tuple[Tensor, ...]],
+    ts: Tensor | list[Tensor] | tuple[Tensor, ...],
     dtype: DType | None = None,
     device: Device | None = None,
     layout=None,
@@ -281,8 +281,8 @@ def nested_tensor(
 def narrow(
     tensor: Tensor,
     dim: int,
-    start: Union[int, Tensor],
-    length: Union[int, Tensor],
+    start: int | Tensor,
+    length: int | Tensor,
     layout=torch.strided,
 ) -> Tensor:
     r"""

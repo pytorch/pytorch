@@ -8,6 +8,7 @@ from typing import Any, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
@@ -46,7 +47,7 @@ def process_inputs(
                         hint=x,
                         source=source,
                     )
-            if isinstance(x, torch.ScriptObject):
+            if isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
                 return torch._library.fake_class_registry.maybe_to_fake_obj(
                     fake_mode, x
                 )
@@ -172,7 +173,7 @@ def _try_get_metadata_from_dynamo(
         assert source is None or source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
-        source_name = source.name() if source else str(source)
+        source_name = source.name if source else str(source)
 
         # input[i] in dynamo is now:
         # input[i + len(extra_params)] in AOT,

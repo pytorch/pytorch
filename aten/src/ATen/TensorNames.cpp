@@ -113,7 +113,7 @@ void TensorNames::checkUnique(const char* op_name) const {
 std::ostream& operator<<(std::ostream& out, const TensorName& tensorname) {
   out << tensorname.name_ << " (index ";
   out << tensorname.origin_idx_ << " of ";
-  out << tensorname.origin_ << ")";
+  out << tensorname.origin_ << ')';
   return out;
 }
 

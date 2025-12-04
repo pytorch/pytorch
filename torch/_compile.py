@@ -5,7 +5,7 @@ circular dependencies.
 
 import functools
 from collections.abc import Callable
-from typing import Optional, overload, TypeVar, Union
+from typing import overload, TypeVar
 from typing_extensions import ParamSpec
 
 
@@ -26,8 +26,8 @@ def _disable_dynamo(
 
 
 def _disable_dynamo(
-    fn: Optional[Callable[_P, _T]] = None, recursive: bool = True
-) -> Union[Callable[_P, _T], Callable[[Callable[_P, _T]], Callable[_P, _T]]]:
+    fn: Callable[_P, _T] | None = None, recursive: bool = True
+) -> Callable[_P, _T] | Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     """
     This API should be only used inside torch, external users should still use
     torch._dynamo.disable. The main goal of this API is to avoid circular

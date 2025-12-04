@@ -114,7 +114,6 @@ class ProfilingMode(Enum):
     PROFILING = 3
 
 # Set by parse_cmd_line_args() if called
-CI_TEST_PREFIX = ""
 DISABLED_TESTS_FILE = ""
 GRAPH_EXECUTOR : Optional[ProfilingMode] = None
 LOG_SUFFIX = ""
@@ -957,7 +956,6 @@ def _get_test_report_path():
     return os.path.join('test-reports', test_source)
 
 def parse_cmd_line_args():
-    global CI_TEST_PREFIX
     global DISABLED_TESTS_FILE
     global GRAPH_EXECUTOR
     global LOG_SUFFIX
@@ -1035,8 +1033,6 @@ def parse_cmd_line_args():
 
     set_rng_seed()
 
-    # CI Prefix path used only on CI environment
-    CI_TEST_PREFIX = str(Path(os.getcwd()))
 
 def wait_for_process(p, timeout=None):
     try:
@@ -1160,9 +1156,6 @@ def chunk_list(lst, nchunks):
 
 # sanitize filename e.g., distributed/pipeline/sync/skip/test_api.py -> distributed.pipeline.sync.skip.test_api
 def sanitize_test_filename(filename):
-    # inspect.getfile returns absolute path in some CI jobs, converting it to relative path if needed
-    if filename.startswith(CI_TEST_PREFIX):
-        filename = filename[len(CI_TEST_PREFIX) + 1:]
     strip_py = re.sub(r'.py$', '', filename)
     return re.sub('/', r'.', strip_py)
 
@@ -1370,8 +1363,6 @@ def run_tests(argv=None):
             This works with unittest_xml_reporting<=3.2.0,>=2.0.0
             (3.2.0 is latest at the moment)
             """
-            def __init__(self, *args, **kwargs):
-                super().__init__(*args, **kwargs)
 
             def addSkip(self, test, reason):
                 super().addSkip(test, reason)
@@ -1427,7 +1418,7 @@ if IS_WINDOWS:
                 raise UserWarning("only TemporaryFileName with delete=False is supported on Windows.")
         else:
             kwargs['delete'] = False
-        f = tempfile.NamedTemporaryFile(*args, **kwargs)
+        f = tempfile.NamedTemporaryFile(*args, **kwargs)  # noqa:SIM115
         try:
             f.close()
             yield f.name

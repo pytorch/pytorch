@@ -273,7 +273,7 @@ __global__ void reflection_pad2d_backward_det_out_kernel(
         const int64_t dist_cols = ::abs(inp_col - (input_dim_x - 1));
 
         // we were dist_rows after, now we want to be dist_rows before
-        // we were dist_cols before, now we wnat to be dist_cols after
+        // we were dist_cols before, now we want to be dist_cols after
         const int64_t reflect_tr_out_row = (corner_tr_out_row - dist_rows);
         const int64_t reflect_tr_out_col = (corner_tr_out_col + dist_cols);
         const int64_t reflect_tr_out =

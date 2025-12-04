@@ -78,11 +78,13 @@ class TuningProcess:
 
         def workloop():
             while True:
-                job = TuningProcess.recv(read_pipe)
+                job, extra_env = TuningProcess.recv(read_pipe)
                 if job is None:
                     # None is a sentinel for the child to shut down
                     break
                 try:
+                    if extra_env:
+                        os.environ.update(extra_env)
                     result = job()
                 except Exception as e:
                     result = e
@@ -95,8 +97,10 @@ class TuningProcess:
             pass
 
     @staticmethod
-    def send(obj: Any, write_pipe: IO[bytes]) -> None:
-        pickle.dump(obj, write_pipe)
+    def send(
+        obj: Any, write_pipe: IO[bytes], extra_env: dict[str, str] | None = None
+    ) -> None:
+        pickle.dump((obj, extra_env), write_pipe)
         write_pipe.flush()
 
     @staticmethod
@@ -158,13 +162,13 @@ class TuningProcess:
         """
         return self.running and self.process.poll() is None
 
-    def put(self, req: Any) -> None:
+    def put(self, req: Any, extra_env: dict[str, str] | None = None) -> None:
         """
         Push a work item to the child process.
         """
         if not self.alive():
             self.start()
-        TuningProcess.send(req, self.write_pipe)
+        TuningProcess.send(req, self.write_pipe, extra_env=extra_env)
 
     def get(self, timeout: float = 120.0) -> Any:
         """
@@ -174,7 +178,7 @@ class TuningProcess:
         try:
             if not self.selector.select(timeout):
                 raise TimeoutError(f"Timeout in autotune subprocess {self.process.pid}")
-            result = TuningProcess.recv(self.read_pipe)
+            result, _ = TuningProcess.recv(self.read_pipe)
         except TimeoutError:
             self.kill()
             raise
@@ -305,8 +309,10 @@ class TuningProcessPool:
         """
         assert choice.bmreq is not None
 
+        env_vars = ["TORCHINDUCTOR_CACHE_DIR", "TRITON_CACHE_DIR"]
+        extra_env = {v: os.environ[v] for v in env_vars if v in os.environ}
         process = self.process_queue.get()
-        process.put(choice.bmreq.benchmark)
+        process.put(choice.bmreq.benchmark, extra_env=extra_env)
         try:
             return process.get(
                 config.max_autotune_subproc_result_timeout_seconds,

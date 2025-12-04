@@ -1154,7 +1154,7 @@ def forward(self, L_x_ : torch.Tensor, L_y_ : torch.Tensor):
             splits = [
                 n
                 for n in graph.nodes
-                if n.op == "call_function" and n.target == torch.split
+                if n.op == "call_function" and n.target is torch.split
             ]
             for split in splits:
                 tracker.node_to_duplicates.pop(split)

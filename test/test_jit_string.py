@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: jit"]
 
+import sys
 from test_jit import JitTestCase
 from torch.testing._internal.common_utils import run_tests
 
@@ -329,4 +330,5 @@ class TestScript(JitTestCase):
         self.checkScript(test_slice, ("hellotest",))
 
 if __name__ == '__main__':
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

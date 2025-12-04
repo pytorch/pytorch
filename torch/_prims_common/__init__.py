@@ -1895,8 +1895,6 @@ def set_correction(
     # NB: we don't actually support symint here, but it's harmless to accept
     if not isinstance(correction, (IntLike, FloatLike)):
         raise ValueError("correction argument should be integer or float")
-    if correction < 0:
-        raise ValueError("correction argument should be non-negative")
     return sym_float(correction)
 
 

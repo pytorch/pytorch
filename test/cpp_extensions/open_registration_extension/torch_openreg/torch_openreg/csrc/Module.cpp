@@ -17,6 +17,7 @@ static PyObject* _initExtension(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+// LITERALINCLUDE START: OPENREG GET DEFAULT GENERATOR
 static PyObject* _getDefaultGenerator(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -31,18 +32,22 @@ static PyObject* _getDefaultGenerator(PyObject* self, PyObject* arg) {
 
   END_HANDLE_TH_ERRORS
 }
+// LITERALINCLUDE END: OPENREG GET DEFAULT GENERATOR
+
+// LITERALINCLUDE START: MODULE SET DEVICE HELPER
 
 PyObject* _setDevice(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(THPUtils_checkLong(arg), "invalid argument to setDevice");
-  auto device = THPUtils_unpackLong(arg);
-
+  auto device = THPUtils_unpackDeviceIndex(arg);
   torch::utils::device_lazy_init(at::kPrivateUse1);
-  c10::openreg::set_device(static_cast<c10::DeviceIndex>(device));
+  c10::openreg::set_device(device);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
+
+// LITERALINCLUDE END: MODULE SET DEVICE HELPER
 
 PyObject* _exchangeDevice(PyObject* self, PyObject* arg) {
   HANDLE_TH_ERRORS
@@ -73,6 +78,7 @@ PyObject* _getDeviceCount(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+// LITERALINCLUDE START: OPENREG MODULE METHODS
 static PyMethodDef methods[] = {
     {"_init", _initExtension, METH_NOARGS, nullptr},
     {"_get_default_generator", _getDefaultGenerator, METH_O, nullptr},
@@ -81,7 +87,7 @@ static PyMethodDef methods[] = {
     {"_exchangeDevice", _exchangeDevice, METH_O, nullptr},
     {"_get_device_count", _getDeviceCount, METH_NOARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
-
+// LITERALINCLUDE END: OPENREG MODULE METHODS
 /*
  * When ASAN is enabled, PyTorch modifies the dlopen flag during import,
  * causing all global and weak symbols in _C.so and its dependent libraries

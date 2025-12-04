@@ -40,7 +40,7 @@ inline c10::metal::opmath_t<T> matmul_inner(
     threadgroup_barrier(mem_flags::mem_threadgroup);
 
     for (uint k = 0; k < TILE_DIM; k++) {
-      sum += A_tile[tid.y][k] * B_tile[k][tid.x];
+      sum += c10::metal::mul(A_tile[tid.y][k], B_tile[k][tid.x]);
     }
 
     threadgroup_barrier(mem_flags::mem_threadgroup);
@@ -96,7 +96,9 @@ kernel void addmm(
     auto bias =
         biasData[thread_id.y * strides[3].x + thread_id.x * strides[3].y];
     outputData[thread_id.y * strides[2].x + thread_id.x * strides[2].y] =
-        static_cast<T>(alpha_beta[0] * sum + alpha_beta[1] * bias);
+        static_cast<T>(
+            c10::metal::mul(alpha_beta[0], sum) +
+            c10::metal::mul(alpha_beta[1], bias));
   }
 }
 
@@ -799,6 +801,27 @@ kernel void orgqr(
   }
 }
 
+template <typename TO, typename TI>
+kernel void unpack_pivots(
+    device TO* perm [[buffer(0)]],
+    constant TI* pivots [[buffer(1)]],
+    constant UnpackPivotsParams& params [[buffer(2)]],
+    uint tid [[thread_position_in_grid]]) {
+  auto perm_batch_stride = params.perm_batch_stride;
+  auto pivots_batch_stride = params.pivots_batch_stride;
+  auto dim_size = params.dim_size;
+
+  perm += perm_batch_stride * tid;
+  pivots += pivots_batch_stride * tid;
+
+  for (uint32_t i = 0; i < dim_size; i++) {
+    auto j = pivots[i] - 1;
+    auto perm_j = perm[j];
+    perm[j] = perm[i];
+    perm[i] = perm_j;
+  }
+}
+
 #define INSTANTIATE_MM_OPS(DTYPE)                                           \
   template [[host_name("matmul_" #DTYPE)]] kernel void matmul<DTYPE>(       \
       constant DTYPE * mat1Data [[buffer(0)]],                              \
@@ -832,6 +855,10 @@ INSTANTIATE_MM_OPS(float);
 INSTANTIATE_MM_OPS(half);
 INSTANTIATE_MM_OPS(bfloat);
 
+// Complex MM
+INSTANTIATE_MM_OPS(float2);
+INSTANTIATE_MM_OPS(half2);
+
 // Integral MM
 INSTANTIATE_MM_OPS(long);
 INSTANTIATE_MM_OPS(int);
@@ -854,3 +881,16 @@ REGISTER_ORGQR(half);
 REGISTER_ORGQR(bfloat);
 REGISTER_ORGQR(float2);
 REGISTER_ORGQR(half2);
+
+#define REGISTER_UNPACK_PIVOTS(TO, TI)                    \
+  template [[host_name("unpack_pivots_" #TO "_" #TI)]]    \
+  kernel void unpack_pivots<TO, TI>(                      \
+      device TO * perm [[buffer(0)]],                     \
+      constant TI * pivots [[buffer(1)]],                 \
+      constant UnpackPivotsParams & params [[buffer(2)]], \
+      uint tid [[thread_position_in_grid]]);
+
+REGISTER_UNPACK_PIVOTS(int, int);
+REGISTER_UNPACK_PIVOTS(int, long);
+REGISTER_UNPACK_PIVOTS(long, int);
+REGISTER_UNPACK_PIVOTS(long, long);

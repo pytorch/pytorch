@@ -883,11 +883,12 @@ def _get_optimization_cflags(
 
     should_use_optimized_flags = not (
         config.aot_inductor.debug_compile
-        or os.environ.get("TORCHINDUCTOR_DEBUG_SYMBOL", "0") == "1"
+        or os.environ.get("TORCHINDUCTOR_DEBUG_COMPILE", "0") == "1"
     )
     should_add_debug_symbol_flags = (
         config.aot_inductor.debug_compile
         or config.aot_inductor.debug_symbols
+        or os.environ.get("TORCHINDUCTOR_DEBUG_COMPILE", "0") == "1"
         or os.environ.get("TORCHINDUCTOR_DEBUG_SYMBOL", "0") == "1"
     )
     if should_use_optimized_flags:

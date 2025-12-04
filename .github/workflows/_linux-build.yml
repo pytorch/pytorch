@@ -121,6 +121,9 @@ on:
       test-matrix:
         value: ${{ jobs.build.outputs.test-matrix }}
         description: An optional JSON description of what test configs to run later on.
+      build-environment:
+        value: ${{ jobs.build.outputs.build-environment }}
+        description: Top-level label for what's being built/tested.
 
 jobs:
   build:
@@ -132,6 +135,7 @@ jobs:
     outputs:
       docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
+      build-environment: ${{ inputs.build-environment }}
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
